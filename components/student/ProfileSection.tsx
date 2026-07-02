@@ -2,16 +2,21 @@ import type { ReactNode } from "react";
 
 export function ProfileSection({
   title,
+  action,
   children,
 }: {
   title: string;
+  action?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <div className="border border-border bg-card p-6">
-      <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
-        {title}
-      </h2>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="font-heading text-lg font-bold uppercase text-foreground">
+          {title}
+        </h2>
+        {action}
+      </div>
       {children}
     </div>
   );

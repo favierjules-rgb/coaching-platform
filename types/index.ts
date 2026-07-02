@@ -26,6 +26,8 @@ export interface NewsletterGoalOption {
 
 export type UserRole = "visitor" | "student" | "admin";
 
+export type CoachingStatus = "actif" | "pause" | "terminé";
+
 export interface StudentProfile {
   id: string;
   firstName: string;
@@ -37,6 +39,10 @@ export interface StudentProfile {
   age: number;
   heightCm: number;
   currentWeightKg: number;
+  targetWeightKg: number;
+  trainingFrequencyPerWeek: number;
+  trainingLocation: string;
+  coachingStatus: CoachingStatus;
 }
 
 export type ProgramStatus = "actif" | "terminé" | "à venir";
@@ -195,30 +201,82 @@ export interface CoachNotification {
   unread: boolean;
 }
 
-export interface BodyMeasurements {
-  waist: number;
-  hips: number;
-  chest: number;
-  arm: number;
-  thigh: number;
-  calf: number;
+export type BodyMeasurementUnit = "cm" | "kg";
+
+export type BodyMeasurementType =
+  | "poids"
+  | "cou"
+  | "epaules"
+  | "poitrine"
+  | "taille"
+  | "nombril"
+  | "hanches"
+  | "bras-droit"
+  | "bras-gauche"
+  | "avant-bras-droit"
+  | "avant-bras-gauche"
+  | "cuisse-droite"
+  | "cuisse-gauche"
+  | "mollet-droit"
+  | "mollet-gauche";
+
+/**
+ * Une mensuration suivie dans le temps. `id` correspond au futur
+ * measurementId d'une table Supabase `body_measurement` (une ligne par type
+ * de mensuration et par élève, mise à jour à chaque relevé).
+ */
+export interface BodyMeasurement {
+  id: string;
+  studentId: string;
+  type: BodyMeasurementType;
+  unit: BodyMeasurementUnit;
+  startValue: number;
+  currentValue: number;
+  note: string;
+  lastUpdatedAt: string;
+}
+
+/**
+ * Mesure personnalisée définie librement par l'élève (ex: "Tour de
+ * cheville"). Correspond à une future table Supabase `custom_measurement`,
+ * distincte de `body_measurement` car le type/l'unité ne sont pas fixés à
+ * l'avance.
+ */
+export interface CustomMeasurement {
+  id: string;
+  studentId: string;
+  name: string;
+  unit: string;
+  startValue: number;
+  currentValue: number;
+  note: string;
+  lastUpdatedAt: string;
 }
 
 export interface FoodPreferences {
+  studentId: string;
   liked: string[];
   disliked: string[];
   intolerances: string[];
+  allergies: string[];
   diet: string;
   mealsPerDay: number;
+  mealTimes: string[];
+  socialConstraints: string;
+  updatedAt: string;
 }
 
 export interface SportPreferences {
+  studentId: string;
   mainGoal: string;
   sports: string[];
-  injuries: string;
   equipment: string[];
   location: string;
   sessionsPerWeek: number;
+  preferredExercises: string[];
+  exercisesToAvoid: string[];
+  weeklyAvailability: string[];
+  updatedAt: string;
 }
 
 /* ─── Budget calorique hebdomadaire (Nutrition) ───
@@ -379,4 +437,72 @@ export interface StudentDocumentAccess {
   studentId: string;
   documentId: string;
   viewedAt: string | null;
+}
+
+/* ─── Profil élève ───
+ * Types préparés pour une future persistance Supabase : chaque enregistrement
+ * porte déjà studentId (et updatedAt le cas échéant) pour correspondre
+ * directement à de futures tables (progress_photo, body_measurement déjà
+ * défini plus haut, food_preference, sport_preference, injury_note,
+ * student_goal...).
+ */
+
+export type ProgressPhotoType = "avant" | "actuelle" | "objectif" | "mensuelle";
+
+/**
+ * Photo de progression. `imageUrl` est une URL objet locale
+ * (URL.createObjectURL) tant qu'aucun backend n'est connecté ; `storagePath`
+ * est préparé pour recevoir le chemin retourné par Supabase Storage une fois
+ * l'upload réel branché (photoId = id).
+ */
+export interface ProgressPhoto {
+  id: string;
+  studentId: string;
+  type: ProgressPhotoType;
+  date: string;
+  weightKg: number | null;
+  note: string;
+  imageUrl: string | null;
+  storagePath: string | null;
+  pending: boolean;
+}
+
+/**
+ * Notes blessures/contraintes d'un élève. Correspond à une future table
+ * Supabase `injury_note` (une ligne par élève, mise à jour par le coach
+ * et/ou l'élève).
+ */
+export interface InjuryNote {
+  studentId: string;
+  currentInjuries: string[];
+  pastInjuries: string[];
+  recurringPain: string[];
+  movementsToAvoid: string[];
+  coachRemarks: string;
+  updatedAt: string;
+}
+
+export type GoalPriority = "haute" | "moyenne" | "basse";
+
+export type GoalIndicator =
+  | "poids"
+  | "mensurations"
+  | "photos"
+  | "performance"
+  | "énergie"
+  | "digestion"
+  | "sommeil";
+
+/**
+ * Objectifs de l'élève. Correspond à une future table Supabase
+ * `student_goal` (une ligne par élève, éditable par le coach).
+ */
+export interface StudentGoal {
+  studentId: string;
+  mainGoal: string;
+  secondaryGoals: string[];
+  targetDate: string;
+  priority: GoalPriority;
+  trackedIndicators: GoalIndicator[];
+  updatedAt: string;
 }
