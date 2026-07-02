@@ -1,24 +1,24 @@
-"use client";
-
-import { useState } from "react";
-
 import { AddProgressPhotoModal } from "@/components/student/AddProgressPhotoModal";
 import { ProgressPhotos } from "@/components/student/ProgressPhotos";
 import type { ProgressPhoto } from "@/types";
 
 interface ProgressPhotoGallerySectionProps {
   studentId: string;
-  initialPhotos: ProgressPhoto[];
+  photos: ProgressPhoto[];
   defaultWeightKg: number;
+  onAdd: (photo: ProgressPhoto) => void;
 }
 
+/**
+ * Purement présentationnel : `photos` vient du hook partagé
+ * useStudentProfile, monté une seule fois plus haut sur la page.
+ */
 export function ProgressPhotoGallerySection({
   studentId,
-  initialPhotos,
+  photos,
   defaultWeightKg,
+  onAdd,
 }: ProgressPhotoGallerySectionProps) {
-  const [photos, setPhotos] = useState(initialPhotos);
-
   return (
     <div className="mb-6 border border-border bg-card p-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -28,7 +28,7 @@ export function ProgressPhotoGallerySection({
         <AddProgressPhotoModal
           studentId={studentId}
           defaultWeightKg={defaultWeightKg}
-          onAdd={(photo) => setPhotos((prev) => [...prev, photo])}
+          onAdd={onAdd}
         />
       </div>
       <ProgressPhotos photos={photos} />

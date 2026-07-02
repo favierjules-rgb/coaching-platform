@@ -122,3 +122,27 @@ export function computeWeightEvolution(
     progressPercent,
   };
 }
+
+const weightHistoryMonths = [
+  "Jan",
+  "Fév",
+  "Mar",
+  "Avr",
+  "Mai",
+  "Jun",
+  "Jul",
+  "Aoû",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Déc",
+];
+
+/**
+ * Prochain repère mensuel mocké pour l'historique de poids, à la suite
+ * d'une mise à jour du poids : poursuit la séquence Jan → Déc plutôt que
+ * de dépendre de la date réelle du test.
+ */
+export function nextWeightHistoryMonth(history: WeightEntry[]): string {
+  return weightHistoryMonths[history.length % weightHistoryMonths.length];
+}

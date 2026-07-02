@@ -1,17 +1,23 @@
 import { TrendingDown, TrendingUp } from "lucide-react";
 
-import { MockActionModal, MockField } from "@/components/student/MockActionModal";
+import { UpdateWeightModal } from "@/components/student/UpdateWeightModal";
 import { WeightChart } from "@/components/student/WeightChart";
 import { computeWeightEvolution } from "@/lib/profile";
 import type { StudentProfile, WeightEntry } from "@/types";
 
+interface WeightEvolutionCardProps {
+  profile: StudentProfile;
+  history: WeightEntry[];
+  onUpdateWeight: (weightKg: number) => void;
+  onUpdateTarget: (targetKg: number) => void;
+}
+
 export function WeightEvolutionCard({
   profile,
   history,
-}: {
-  profile: StudentProfile;
-  history: WeightEntry[];
-}) {
+  onUpdateWeight,
+  onUpdateTarget,
+}: WeightEvolutionCardProps) {
   const evolution = computeWeightEvolution(history, profile);
 
   return (
@@ -20,15 +26,12 @@ export function WeightEvolutionCard({
         <h2 className="font-heading text-lg font-bold uppercase text-foreground">
           Évolution du poids
         </h2>
-        <MockActionModal
-          triggerLabel="Mettre à jour mon poids"
-          title="Mettre à jour mon poids"
-          description="Renseigne ton poids du jour. Cette action est une démonstration : aucune donnée n'est encore enregistrée."
-          confirmLabel="Enregistrer"
-          successMessage="Poids enregistré. Ton coach pourra le consulter."
-        >
-          <MockField label="Poids (kg)" type="number" placeholder={`${profile.currentWeightKg}`} />
-        </MockActionModal>
+        <UpdateWeightModal
+          currentWeightKg={profile.currentWeightKg}
+          targetWeightKg={profile.targetWeightKg}
+          onUpdateWeight={onUpdateWeight}
+          onUpdateTarget={onUpdateTarget}
+        />
       </div>
 
       <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">

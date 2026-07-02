@@ -25,8 +25,11 @@ interface AddProgressPhotoModalProps {
 
 /**
  * Ouvre réellement la bibliothèque de fichiers de l'appareil (input file
- * natif) et prévisualise l'image choisie via URL.createObjectURL. Aucun
- * upload n'est effectué : imageUrl reste une URL locale tant que Supabase
+ * natif) et prévisualise l'image choisie. La prévisualisation est encodée
+ * en data URL (FileReader.readAsDataURL) plutôt qu'en URL.createObjectURL
+ * pour pouvoir être persistée telle quelle dans localStorage et rester
+ * valide après un rechargement de page — une URL blob: ne survivrait pas.
+ * Aucun upload n'est effectué : imageUrl reste locale tant que Supabase
  * Storage n'est pas connecté (storagePath préparé pour ça, cf. types).
  */
 export function AddProgressPhotoModal({
@@ -45,9 +48,6 @@ export function AddProgressPhotoModal({
   const fileInputId = useId();
 
   function resetForm() {
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
-    }
     setPreviewUrl(null);
     setType("mensuelle");
     setDate(today());
@@ -66,10 +66,15 @@ export function AddProgressPhotoModal({
 
   function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const selected = event.target.files?.[0] ?? null;
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
+    if (!selected) {
+      setPreviewUrl(null);
+      return;
     }
-    setPreviewUrl(selected ? URL.createObjectURL(selected) : null);
+    const reader = new FileReader();
+    reader.onload = () => {
+      setPreviewUrl(typeof reader.result === "string" ? reader.result : null);
+    };
+    reader.readAsDataURL(selected);
   }
 
   function handleSubmit() {

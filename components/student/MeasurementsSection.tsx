@@ -1,6 +1,3 @@
-"use client";
-
-import { useState } from "react";
 import { TrendingDown, TrendingUp } from "lucide-react";
 
 import { ProfileSection } from "@/components/student/ProfileSection";
@@ -8,11 +5,7 @@ import {
   UpdateMeasurementsModal,
   type CustomMeasurementInput,
 } from "@/components/student/UpdateMeasurementsModal";
-import {
-  bodyMeasurementLabels,
-  isMeasurementProgressing,
-  measurementDelta,
-} from "@/lib/profile";
+import { bodyMeasurementLabels, isMeasurementProgressing, measurementDelta } from "@/lib/profile";
 import type { BodyMeasurement, BodyMeasurementType, CustomMeasurement } from "@/types";
 
 function MeasurementTile({
@@ -65,65 +58,30 @@ function MeasurementTile({
 }
 
 interface MeasurementsSectionProps {
-  studentId: string;
-  initialMeasurements: BodyMeasurement[];
-  initialCustomMeasurements: CustomMeasurement[];
-}
-
-export function MeasurementsSection({
-  studentId,
-  initialMeasurements,
-  initialCustomMeasurements,
-}: MeasurementsSectionProps) {
-  const [measurements, setMeasurements] = useState(initialMeasurements);
-  const [customMeasurements, setCustomMeasurements] = useState(
-    initialCustomMeasurements,
-  );
-
-  function handleSave(
+  measurements: BodyMeasurement[];
+  customMeasurements: CustomMeasurement[];
+  onSave: (
     values: Partial<Record<BodyMeasurementType, number>>,
     date: string,
     note: string,
     custom: CustomMeasurementInput | null,
-  ) {
-    setMeasurements((prev) =>
-      prev.map((measurement) => {
-        const newValue = values[measurement.type];
-        if (newValue === undefined) {
-          return measurement;
-        }
-        return {
-          ...measurement,
-          currentValue: newValue,
-          note: note || measurement.note,
-          lastUpdatedAt: date,
-        };
-      }),
-    );
+  ) => void;
+}
 
-    if (custom) {
-      setCustomMeasurements((prev) => [
-        ...prev,
-        {
-          id: `custom-${Date.now()}`,
-          studentId,
-          name: custom.name,
-          unit: custom.unit,
-          startValue: custom.value,
-          currentValue: custom.value,
-          note: custom.note,
-          lastUpdatedAt: date,
-        },
-      ]);
-    }
-  }
-
+/**
+ * Purement présentationnel : l'état (measurements/customMeasurements) vient
+ * du hook partagé useStudentProfile, monté une seule fois plus haut sur la
+ * page, pour que la mise à jour reste visible sur toute la page.
+ */
+export function MeasurementsSection({
+  measurements,
+  customMeasurements,
+  onSave,
+}: MeasurementsSectionProps) {
   return (
     <ProfileSection
       title="Mensurations"
-      action={
-        <UpdateMeasurementsModal measurements={measurements} onSave={handleSave} />
-      }
+      action={<UpdateMeasurementsModal measurements={measurements} onSave={onSave} />}
     >
       <div className="flex flex-col gap-3">
         {measurements.map((measurement) => (
