@@ -33,7 +33,12 @@ export interface StudentProfile {
   level: string;
   startDate: string;
   weekNumber: number;
+  age: number;
+  heightCm: number;
+  currentWeightKg: number;
 }
+
+export type ProgramStatus = "actif" | "terminé" | "à venir";
 
 export interface TrainingProgram {
   id: string;
@@ -41,7 +46,7 @@ export interface TrainingProgram {
   goal: string;
   level: string;
   durationWeeks: number;
-  status: "actif" | "terminé" | "à venir";
+  status: ProgramStatus;
 }
 
 export interface UpcomingSession {
@@ -53,6 +58,17 @@ export interface UpcomingSession {
   exerciseCount: number;
 }
 
+export interface DayTrainingSession {
+  day: string;
+  isToday?: boolean;
+  sessionName: string | null;
+  muscleGroups?: string;
+  durationMinutes?: number;
+  exerciseCount?: number;
+}
+
+export type MealPlanStatus = "actif" | "ancien" | "prochain";
+
 export interface MealPlan {
   id: string;
   name: string;
@@ -61,13 +77,47 @@ export interface MealPlan {
   protein: number;
   carbs: number;
   fat: number;
-  status: "actif" | "ancien" | "prochain";
+  status: MealPlanStatus;
 }
+
+export type MealSlot =
+  | "Petit déjeuner"
+  | "Collation matin"
+  | "Midi"
+  | "Collation après-midi"
+  | "Dîner"
+  | "Compléments";
+
+export interface Meal {
+  slot: MealSlot;
+  name: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+}
+
+export interface DayCalorieTarget {
+  day: string;
+  isToday?: boolean;
+  calories: number;
+}
+
+export interface HydrationAndSupplements {
+  waterTarget: string;
+  supplements: string[];
+  tipOfTheDay: string;
+}
+
+export type DocumentCategory = "nutrition" | "entrainement" | "administratif";
+export type DocumentType = "pdf" | "vidéo" | "lien" | "guide";
 
 export interface DocumentItem {
   id: string;
   title: string;
-  type: "pdf" | "vidéo" | "lien" | "image";
+  description: string;
+  type: DocumentType;
+  category: DocumentCategory;
   addedAt: string;
 }
 
@@ -81,4 +131,30 @@ export interface CoachNotification {
   message: string;
   time: string;
   unread: boolean;
+}
+
+export interface BodyMeasurements {
+  waist: number;
+  hips: number;
+  chest: number;
+  arm: number;
+  thigh: number;
+  calf: number;
+}
+
+export interface FoodPreferences {
+  liked: string[];
+  disliked: string[];
+  intolerances: string[];
+  diet: string;
+  mealsPerDay: number;
+}
+
+export interface SportPreferences {
+  mainGoal: string;
+  sports: string[];
+  injuries: string;
+  equipment: string[];
+  location: string;
+  sessionsPerWeek: number;
 }
