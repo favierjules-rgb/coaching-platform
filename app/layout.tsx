@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
 import { Barlow_Condensed, DM_Sans } from "next/font/google";
 
-import { Footer } from "@/components/layout/Footer";
-import { Header } from "@/components/layout/Header";
+import { SiteChrome } from "@/components/layout/SiteChrome";
 
 import "./globals.css";
 
@@ -36,9 +35,7 @@ export default function RootLayout({
       className={`${barlowCondensed.variable} ${dmSans.variable} h-full`}
     >
       <body className="flex min-h-full flex-col bg-background font-body text-foreground antialiased">
-        <Header />
-        <main className="flex-1">{children}</main>
-        <Footer />
+        <SiteChrome>{children}</SiteChrome>
       </body>
     </html>
   );
