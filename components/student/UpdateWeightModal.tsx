@@ -20,18 +20,12 @@ export function UpdateWeightModal({
 }: UpdateWeightModalProps) {
   const [open, setOpen] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  const [weight, setWeight] = useState("");
-  const [target, setTarget] = useState("");
-
-  function resetForm() {
-    setWeight("");
-    setTarget("");
-  }
+  const [weight, setWeight] = useState(String(currentWeightKg));
+  const [target, setTarget] = useState(String(targetWeightKg));
 
   function close() {
     setOpen(false);
     setSubmitted(false);
-    resetForm();
   }
 
   const canSubmit = weight.trim() !== "" || target.trim() !== "";
@@ -40,10 +34,10 @@ export function UpdateWeightModal({
     if (!canSubmit) {
       return;
     }
-    if (weight.trim() !== "") {
+    if (weight.trim() !== "" && !Number.isNaN(Number(weight))) {
       onUpdateWeight(Number(weight));
     }
-    if (target.trim() !== "") {
+    if (target.trim() !== "" && !Number.isNaN(Number(target))) {
       onUpdateTarget(Number(target));
     }
     setSubmitted(true);
@@ -53,7 +47,14 @@ export function UpdateWeightModal({
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          // Pré-remplit avec les valeurs actuelles à chaque ouverture (et
+          // non juste au montage) : un placeholder vide se lit facilement
+          // comme "déjà rempli" et amène à valider sans rien changer.
+          setWeight(String(currentWeightKg));
+          setTarget(String(targetWeightKg));
+          setOpen(true);
+        }}
         className="border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
       >
         Mettre à jour mon poids
@@ -89,25 +90,24 @@ export function UpdateWeightModal({
             ) : (
               <div className="flex flex-col gap-4">
                 <p className="text-sm leading-relaxed text-muted-foreground">
-                  Renseigne ton poids du jour et/ou un nouvel objectif.
-                  Cette action est une démonstration : les données sont
-                  conservées en local (localStorage).
+                  Ces champs sont pré-remplis avec tes valeurs actuelles :
+                  modifie uniquement ce que tu veux changer. Cette action
+                  est une démonstration : les données sont conservées en
+                  local (localStorage).
                 </p>
                 <Field
-                  label="Nouveau poids (kg)"
+                  label="Poids actuel (kg)"
                   type="number"
                   step="0.1"
                   value={weight}
                   onChange={setWeight}
-                  placeholder={`Actuel : ${currentWeightKg}`}
                 />
                 <Field
-                  label="Nouvel objectif de poids (kg)"
+                  label="Objectif de poids (kg)"
                   type="number"
                   step="0.1"
                   value={target}
                   onChange={setTarget}
-                  placeholder={`Actuel : ${targetWeightKg}`}
                 />
                 <button
                   type="button"

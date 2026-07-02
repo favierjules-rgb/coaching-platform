@@ -11,30 +11,31 @@ interface EditPersonalInfoModalProps {
   onSave: (partial: Partial<StudentProfile>) => void;
 }
 
-const emptyForm = {
-  firstName: "",
-  lastName: "",
-  age: "",
-  heightCm: "",
-  goal: "",
-  level: "",
-  trainingFrequencyPerWeek: "",
-  trainingLocation: "",
-};
+function formFromProfile(profile: StudentProfile) {
+  return {
+    firstName: profile.firstName,
+    lastName: profile.lastName,
+    age: String(profile.age),
+    heightCm: String(profile.heightCm),
+    goal: profile.goal,
+    level: profile.level,
+    trainingFrequencyPerWeek: String(profile.trainingFrequencyPerWeek),
+    trainingLocation: profile.trainingLocation,
+  };
+}
 
 export function EditPersonalInfoModal({ profile, onSave }: EditPersonalInfoModalProps) {
   const [open, setOpen] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  const [form, setForm] = useState(emptyForm);
+  const [form, setForm] = useState(() => formFromProfile(profile));
 
-  function setField(key: keyof typeof emptyForm, value: string) {
+  function setField(key: keyof ReturnType<typeof formFromProfile>, value: string) {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
   function close() {
     setOpen(false);
     setSubmitted(false);
-    setForm(emptyForm);
   }
 
   const canSubmit = Object.values(form).some((value) => value.trim() !== "");
@@ -46,11 +47,15 @@ export function EditPersonalInfoModal({ profile, onSave }: EditPersonalInfoModal
     const partial: Partial<StudentProfile> = {};
     if (form.firstName.trim()) partial.firstName = form.firstName.trim();
     if (form.lastName.trim()) partial.lastName = form.lastName.trim();
-    if (form.age.trim()) partial.age = Number(form.age);
-    if (form.heightCm.trim()) partial.heightCm = Number(form.heightCm);
+    if (form.age.trim() && !Number.isNaN(Number(form.age))) partial.age = Number(form.age);
+    if (form.heightCm.trim() && !Number.isNaN(Number(form.heightCm)))
+      partial.heightCm = Number(form.heightCm);
     if (form.goal.trim()) partial.goal = form.goal.trim();
     if (form.level.trim()) partial.level = form.level.trim();
-    if (form.trainingFrequencyPerWeek.trim())
+    if (
+      form.trainingFrequencyPerWeek.trim() &&
+      !Number.isNaN(Number(form.trainingFrequencyPerWeek))
+    )
       partial.trainingFrequencyPerWeek = Number(form.trainingFrequencyPerWeek);
     if (form.trainingLocation.trim())
       partial.trainingLocation = form.trainingLocation.trim();
@@ -63,7 +68,13 @@ export function EditPersonalInfoModal({ profile, onSave }: EditPersonalInfoModal
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          // Pré-remplit avec les valeurs actuelles à chaque ouverture : un
+          // placeholder vide se lit facilement comme "déjà rempli" et
+          // amène à valider sans rien changer.
+          setForm(formFromProfile(profile));
+          setOpen(true);
+        }}
         className="border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700"
       >
         Modifier mes informations
@@ -99,21 +110,20 @@ export function EditPersonalInfoModal({ profile, onSave }: EditPersonalInfoModal
             ) : (
               <div className="flex flex-col gap-4">
                 <p className="text-sm leading-relaxed text-muted-foreground">
-                  Ne renseigne que les champs à modifier. Cette action est
-                  une démonstration : les données sont conservées en local
-                  (localStorage).
+                  Ces champs sont pré-remplis avec tes valeurs actuelles :
+                  modifie uniquement ce que tu veux changer. Cette action
+                  est une démonstration : les données sont conservées en
+                  local (localStorage).
                 </p>
                 <Field
                   label="Prénom"
                   value={form.firstName}
                   onChange={(v) => setField("firstName", v)}
-                  placeholder={profile.firstName}
                 />
                 <Field
                   label="Nom"
                   value={form.lastName}
                   onChange={(v) => setField("lastName", v)}
-                  placeholder={profile.lastName}
                 />
                 <div className="grid grid-cols-2 gap-4">
                   <Field
@@ -121,27 +131,23 @@ export function EditPersonalInfoModal({ profile, onSave }: EditPersonalInfoModal
                     type="number"
                     value={form.age}
                     onChange={(v) => setField("age", v)}
-                    placeholder={`${profile.age}`}
                   />
                   <Field
                     label="Taille (cm)"
                     type="number"
                     value={form.heightCm}
                     onChange={(v) => setField("heightCm", v)}
-                    placeholder={`${profile.heightCm}`}
                   />
                 </div>
                 <Field
                   label="Objectif principal"
                   value={form.goal}
                   onChange={(v) => setField("goal", v)}
-                  placeholder={profile.goal}
                 />
                 <Field
                   label="Niveau sportif"
                   value={form.level}
                   onChange={(v) => setField("level", v)}
-                  placeholder={profile.level}
                 />
                 <div className="grid grid-cols-2 gap-4">
                   <Field
@@ -149,13 +155,11 @@ export function EditPersonalInfoModal({ profile, onSave }: EditPersonalInfoModal
                     type="number"
                     value={form.trainingFrequencyPerWeek}
                     onChange={(v) => setField("trainingFrequencyPerWeek", v)}
-                    placeholder={`${profile.trainingFrequencyPerWeek}`}
                   />
                   <Field
                     label="Lieu d'entraînement"
                     value={form.trainingLocation}
                     onChange={(v) => setField("trainingLocation", v)}
-                    placeholder={profile.trainingLocation}
                   />
                 </div>
                 <button

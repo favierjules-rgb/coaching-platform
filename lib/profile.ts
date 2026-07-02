@@ -91,6 +91,27 @@ export interface WeightEvolution {
   progressPercent: number;
 }
 
+/**
+ * Progression vers l'objectif de poids. Prise de masse (objectif > départ)
+ * et perte de poids (objectif < départ) utilisent chacune leur propre sens
+ * de calcul pour que "se rapprocher de l'objectif" vaille toujours une
+ * progression positive, bornée à [0, 100].
+ */
+function computeProgressPercent(
+  startWeightKg: number,
+  currentWeightKg: number,
+  targetWeightKg: number,
+): number {
+  if (targetWeightKg === startWeightKg) {
+    return 100;
+  }
+  const raw =
+    targetWeightKg > startWeightKg
+      ? ((currentWeightKg - startWeightKg) / (targetWeightKg - startWeightKg)) * 100
+      : ((startWeightKg - currentWeightKg) / (startWeightKg - targetWeightKg)) * 100;
+  return Math.max(0, Math.min(100, Math.round(raw)));
+}
+
 export function computeWeightEvolution(
   history: WeightEntry[],
   profile: StudentProfile,
@@ -102,17 +123,11 @@ export function computeWeightEvolution(
   const deltaFromStartKg =
     Math.round((currentWeightKg - startWeightKg) * 10) / 10;
 
-  const totalNeeded = targetWeightKg - startWeightKg;
-  const progressPercent =
-    totalNeeded === 0
-      ? 100
-      : Math.max(
-          0,
-          Math.min(
-            100,
-            Math.round(((currentWeightKg - startWeightKg) / totalNeeded) * 100),
-          ),
-        );
+  const progressPercent = computeProgressPercent(
+    startWeightKg,
+    currentWeightKg,
+    targetWeightKg,
+  );
 
   return {
     startWeightKg,
