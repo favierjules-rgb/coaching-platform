@@ -27,6 +27,7 @@ export interface NewsletterGoalOption {
 export type UserRole = "visitor" | "student" | "admin";
 
 export interface StudentProfile {
+  id: string;
   firstName: string;
   lastName: string;
   goal: string;
@@ -40,6 +41,12 @@ export interface StudentProfile {
 
 export type ProgramStatus = "actif" | "terminé" | "à venir";
 
+export interface ProgramScheduleDay {
+  day: string;
+  isToday?: boolean;
+  sessionId: string | null;
+}
+
 export interface TrainingProgram {
   id: string;
   name: string;
@@ -47,6 +54,10 @@ export interface TrainingProgram {
   level: string;
   durationWeeks: number;
   status: ProgramStatus;
+  sessionsPerWeek: number;
+  currentWeek: number;
+  progressPercent: number;
+  schedule: ProgramScheduleDay[];
 }
 
 export interface UpcomingSession {
@@ -58,13 +69,70 @@ export interface UpcomingSession {
   exerciseCount: number;
 }
 
-export interface DayTrainingSession {
+export interface Exercise {
+  id: string;
+  name: string;
+  sets: number;
+  reps: string;
+  restSeconds: number;
+  tempo: string;
+  recommendedLoad: string;
+  videoUrl: string;
+}
+
+export interface WorkoutSession {
+  id: string;
+  programId: string;
   day: string;
-  isToday?: boolean;
-  sessionName: string | null;
-  muscleGroups?: string;
-  durationMinutes?: number;
-  exerciseCount?: number;
+  name: string;
+  muscleGroups: string;
+  durationMinutes: number;
+  warmup: string;
+  exercises: Exercise[];
+  coachNotes: string;
+}
+
+/**
+ * Retour élève pour une série d'un exercice. Forme prête pour une future
+ * table Supabase `exercise_set_feedback` (une ligne par série renseignée).
+ */
+export interface ExerciseSetFeedback {
+  studentId: string;
+  sessionId: string;
+  exerciseId: string;
+  setNumber: number;
+  loadUsed: string;
+  repsDone: string;
+}
+
+/**
+ * Retour élève pour un exercice complet de la séance (regroupe les séries
+ * + le ressenti sur cet exercice). Correspond à une future table Supabase
+ * `exercise_feedback`, liée à `exercise_set_feedback` par exerciseId.
+ */
+export interface ExerciseFeedback {
+  studentId: string;
+  sessionId: string;
+  exerciseId: string;
+  sets: ExerciseSetFeedback[];
+  rpe: number | null;
+  comment: string;
+}
+
+/**
+ * Retour élève global pour une séance entière. Correspond à une future
+ * table Supabase `workout_feedback`, liée à `exercise_feedback` par
+ * sessionId + studentId.
+ */
+export interface WorkoutFeedback {
+  studentId: string;
+  sessionId: string;
+  completed: boolean;
+  exercises: ExerciseFeedback[];
+  globalRpe: number | null;
+  globalComment: string;
+  pain: string;
+  submittedAt: string;
 }
 
 export type MealPlanStatus = "actif" | "ancien" | "prochain";
