@@ -1,14 +1,12 @@
 import { Droplet, Lightbulb, Pill } from "lucide-react";
 
-import { MealCard } from "@/components/student/MealCard";
-import { MealPlanCard } from "@/components/student/MealPlanCard";
-import { NutritionWeekOverview } from "@/components/student/NutritionWeekOverview";
+import { NutritionPlansListClient } from "@/components/student/NutritionPlansListClient";
+import { NutritionWeekStatusClient } from "@/components/student/NutritionWeekStatusClient";
 import {
-  activeMealPlan,
+  activeNutritionPlan,
   hydrationAndSupplements,
-  mealPlans,
-  todayMeals,
-  weeklyCalorieTargets,
+  nutritionPlans,
+  student,
 } from "@/data/student";
 
 export default function NutritionPage() {
@@ -19,28 +17,17 @@ export default function NutritionPage() {
           Nutrition
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Plan actif : {activeMealPlan.name} · {activeMealPlan.calories} kcal /
-          jour
+          Plan actif : {activeNutritionPlan.name} ·{" "}
+          {activeNutritionPlan.dailyTarget.calories} kcal/jour ·{" "}
+          {activeNutritionPlan.weeklyTargetCalories.toLocaleString("fr-FR")}{" "}
+          kcal/semaine
         </p>
       </div>
 
-      <div className="mb-6 border border-border bg-card p-6">
-        <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
-          Aperçu de la semaine
-        </h2>
-        <NutritionWeekOverview days={weeklyCalorieTargets} />
-      </div>
-
-      <div className="mb-8">
-        <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
-          Repas du jour
-        </h2>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {todayMeals.map((meal) => (
-            <MealCard key={meal.slot} meal={meal} />
-          ))}
-        </div>
-      </div>
+      <NutritionWeekStatusClient
+        studentId={student.id}
+        activePlan={activeNutritionPlan}
+      />
 
       <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="flex flex-col gap-2 border border-border bg-card p-6">
@@ -74,16 +61,7 @@ export default function NutritionPage() {
         </div>
       </div>
 
-      <div>
-        <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
-          Mes plans alimentaires
-        </h2>
-        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {mealPlans.map((plan) => (
-            <MealPlanCard key={plan.id} plan={plan} />
-          ))}
-        </div>
-      </div>
+      <NutritionPlansListClient plans={nutritionPlans} />
     </div>
   );
 }

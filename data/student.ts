@@ -1,13 +1,17 @@
 import type {
+  ActualDailyIntake,
   BodyMeasurements,
   CoachNotification,
-  DayCalorieTarget,
   DocumentItem,
   Exercise,
   FoodPreferences,
   HydrationAndSupplements,
-  Meal,
+  MacroTarget,
+  MealFoodItem,
   MealPlan,
+  NutritionDay,
+  NutritionPlan,
+  PlannedMeal,
   ProgramScheduleDay,
   SportPreferences,
   StudentProfile,
@@ -325,66 +329,280 @@ export const mealPlans: MealPlan[] = [
 export const activeMealPlan: MealPlan =
   mealPlans.find((plan) => plan.status === "actif") ?? mealPlans[0];
 
-export const weeklyCalorieTargets: DayCalorieTarget[] = [
-  { day: "Lundi", isToday: true, calories: 2800 },
-  { day: "Mardi", calories: 2800 },
-  { day: "Mercredi", calories: 2800 },
-  { day: "Jeudi", calories: 2800 },
-  { day: "Vendredi", calories: 2800 },
-  { day: "Samedi", calories: 3000 },
-  { day: "Dimanche", calories: 2600 },
+/* ─── Budget calorique hebdomadaire (Nutrition) ─── */
+
+const WEEK_START_DATE = "2026-06-29"; // lundi
+
+function macro(
+  calories: number,
+  protein: number,
+  carbs: number,
+  fat: number,
+): MacroTarget {
+  return { calories, protein, carbs, fat };
+}
+
+function foodItem(name: string, quantity: string): MealFoodItem {
+  return { name, quantity };
+}
+
+function buildDailyMeals(planId: string, dayId: string): PlannedMeal[] {
+  return [
+    {
+      id: `${dayId}-petit-dejeuner`,
+      planId,
+      dayId,
+      slot: "Petit déjeuner",
+      name: "Porridge avoine, whey, banane",
+      items: [
+        foodItem("Flocons d'avoine", "80 g"),
+        foodItem("Whey protéine", "1 dose (30 g)"),
+        foodItem("Banane", "1 pièce"),
+        foodItem("Lait demi-écrémé", "200 ml"),
+      ],
+      macros: macro(550, 35, 70, 12),
+      coachNotes: "À prendre dans l'heure suivant le réveil.",
+    },
+    {
+      id: `${dayId}-collation-matin`,
+      planId,
+      dayId,
+      slot: "Collation matin",
+      name: "Yaourt grec, amandes, miel",
+      items: [
+        foodItem("Yaourt grec", "150 g"),
+        foodItem("Amandes", "20 g"),
+        foodItem("Miel", "1 cuillère à café"),
+      ],
+      macros: macro(280, 18, 22, 12),
+      coachNotes: "Optionnelle si tu n'as pas faim en fin de matinée.",
+    },
+    {
+      id: `${dayId}-midi`,
+      planId,
+      dayId,
+      slot: "Midi",
+      name: "Poulet, riz basmati, brocolis, huile d'olive",
+      items: [
+        foodItem("Blanc de poulet", "180 g"),
+        foodItem("Riz basmati cuit", "200 g"),
+        foodItem("Brocolis", "150 g"),
+        foodItem("Huile d'olive", "1 cuillère à soupe"),
+      ],
+      macros: macro(720, 55, 80, 18),
+      coachNotes: "Priorité aux légumes verts pour la satiété.",
+    },
+    {
+      id: `${dayId}-collation-apres-midi`,
+      planId,
+      dayId,
+      slot: "Collation après-midi",
+      name: "Shaker whey, flocons d'avoine, beurre de cacahuète",
+      items: [
+        foodItem("Whey protéine", "1 dose (30 g)"),
+        foodItem("Flocons d'avoine", "40 g"),
+        foodItem("Beurre de cacahuète", "1 cuillère à café"),
+      ],
+      macros: macro(420, 30, 35, 15),
+      coachNotes: "Idéal juste avant l'entraînement.",
+    },
+    {
+      id: `${dayId}-diner`,
+      planId,
+      dayId,
+      slot: "Dîner",
+      name: "Saumon, patate douce, légumes vapeur",
+      items: [
+        foodItem("Saumon", "150 g"),
+        foodItem("Patate douce", "200 g"),
+        foodItem("Légumes vapeur", "150 g"),
+      ],
+      macros: macro(650, 45, 55, 20),
+      coachNotes: "Cuisson vapeur ou four, éviter la friture.",
+    },
+    {
+      id: `${dayId}-complements`,
+      planId,
+      dayId,
+      slot: "Compléments",
+      name: "Créatine 5g, oméga-3, multivitamines",
+      items: [
+        foodItem("Créatine monohydrate", "5 g"),
+        foodItem("Oméga-3", "1 capsule"),
+        foodItem("Multivitamines", "1 comprimé"),
+      ],
+      macros: macro(20, 0, 0, 2),
+      coachNotes: "À prendre avec un repas.",
+    },
+  ];
+}
+
+function buildWeekDays(
+  planId: string,
+  dailyTarget: MacroTarget,
+  validated: { day: string; actual: MacroActualInput }[],
+  todayDay: string,
+): NutritionDay[] {
+  const days = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"];
+
+  return days.map((day) => {
+    const dayId = `${planId}-${day.toLowerCase()}`;
+    const validatedEntry = validated.find((entry) => entry.day === day);
+    const isToday = day === todayDay;
+
+    let actual: ActualDailyIntake | null = null;
+    let status: NutritionDay["status"] = "non-commence";
+
+    if (validatedEntry) {
+      actual = {
+        studentId: student.id,
+        planId,
+        dayId,
+        macros: macro(
+          validatedEntry.actual.calories,
+          validatedEntry.actual.protein,
+          validatedEntry.actual.carbs,
+          validatedEntry.actual.fat,
+        ),
+        comment: validatedEntry.actual.comment,
+        hunger: validatedEntry.actual.hunger,
+        energy: validatedEntry.actual.energy,
+        digestion: validatedEntry.actual.digestion,
+        validatedAt: `${WEEK_START_DATE}T20:00:00.000Z`,
+      };
+      status = "valide";
+    } else if (isToday) {
+      status = "en-cours";
+    }
+
+    return {
+      id: dayId,
+      planId,
+      weekStartDate: WEEK_START_DATE,
+      day,
+      isToday,
+      status,
+      target: dailyTarget,
+      meals: buildDailyMeals(planId, dayId),
+      actual,
+    };
+  });
+}
+
+interface MacroActualInput {
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  comment: string;
+  hunger: string;
+  energy: string;
+  digestion: string;
+}
+
+const activePlanDailyTarget = macro(2800, 180, 320, 80);
+
+export const nutritionPlans: NutritionPlan[] = [
+  {
+    id: "nutri-1",
+    studentId: student.id,
+    name: "Plan Prise de Masse",
+    goalType: "prise-de-masse",
+    dailyTarget: activePlanDailyTarget,
+    weeklyTargetCalories: activePlanDailyTarget.calories * 7,
+    status: "actif",
+    shoppingList: [
+      "Blanc de poulet",
+      "Saumon",
+      "Riz basmati",
+      "Patate douce",
+      "Flocons d'avoine",
+      "Whey protéine",
+      "Yaourt grec",
+      "Amandes",
+      "Brocolis",
+      "Légumes vapeur",
+      "Huile d'olive",
+      "Bananes",
+    ],
+    days: buildWeekDays(
+      "nutri-1",
+      activePlanDailyTarget,
+      [
+        {
+          day: "Lundi",
+          actual: {
+            calories: 3300,
+            protein: 210,
+            carbs: 360,
+            fat: 100,
+            comment: "Repas de famille le soir, un peu plus copieux que prévu.",
+            hunger: "Faim élevée le soir",
+            energy: "Bonne énergie",
+            digestion: "Normale",
+          },
+        },
+        {
+          day: "Mardi",
+          actual: {
+            calories: 2500,
+            protein: 175,
+            carbs: 260,
+            fat: 70,
+            comment: "Journée chargée, moins faim le soir.",
+            hunger: "Faible en fin de journée",
+            energy: "Un peu fatigué",
+            digestion: "Normale",
+          },
+        },
+      ],
+      "Mercredi",
+    ),
+  },
+  {
+    id: "nutri-0",
+    studentId: student.id,
+    name: "Plan Rééquilibrage",
+    goalType: "maintien",
+    dailyTarget: macro(2200, 140, 230, 70),
+    weeklyTargetCalories: 2200 * 7,
+    status: "ancien",
+    shoppingList: [
+      "Œufs",
+      "Fromage blanc",
+      "Quinoa",
+      "Légumes de saison",
+      "Poisson blanc",
+      "Fruits frais",
+    ],
+    days: buildWeekDays("nutri-0", macro(2200, 140, 230, 70), [], ""),
+  },
+  {
+    id: "nutri-2",
+    studentId: student.id,
+    name: "Plan Sèche",
+    goalType: "perte-de-poids",
+    dailyTarget: macro(2300, 190, 180, 60),
+    weeklyTargetCalories: 2300 * 7,
+    status: "prochain",
+    shoppingList: [
+      "Blanc de poulet",
+      "Poisson blanc",
+      "Œufs",
+      "Légumes verts",
+      "Riz complet",
+      "Avoine",
+    ],
+    days: buildWeekDays("nutri-2", macro(2300, 190, 180, 60), [], ""),
+  },
 ];
 
-export const todayMeals: Meal[] = [
-  {
-    slot: "Petit déjeuner",
-    name: "Porridge avoine, whey, banane",
-    calories: 550,
-    protein: 35,
-    carbs: 70,
-    fat: 12,
-  },
-  {
-    slot: "Collation matin",
-    name: "Yaourt grec, amandes, miel",
-    calories: 280,
-    protein: 18,
-    carbs: 22,
-    fat: 12,
-  },
-  {
-    slot: "Midi",
-    name: "Poulet, riz basmati, brocolis, huile d'olive",
-    calories: 720,
-    protein: 55,
-    carbs: 80,
-    fat: 18,
-  },
-  {
-    slot: "Collation après-midi",
-    name: "Shaker whey, flocons d'avoine, beurre de cacahuète",
-    calories: 420,
-    protein: 30,
-    carbs: 35,
-    fat: 15,
-  },
-  {
-    slot: "Dîner",
-    name: "Saumon, patate douce, légumes vapeur",
-    calories: 650,
-    protein: 45,
-    carbs: 55,
-    fat: 20,
-  },
-  {
-    slot: "Compléments",
-    name: "Créatine 5g, oméga-3, multivitamines",
-    calories: 20,
-    protein: 0,
-    carbs: 0,
-    fat: 2,
-  },
-];
+export const activeNutritionPlan: NutritionPlan =
+  nutritionPlans.find((plan) => plan.status === "actif") ?? nutritionPlans[0];
+
+export function getNutritionPlan(id: string): NutritionPlan | undefined {
+  return nutritionPlans.find((plan) => plan.id === id);
+}
 
 export const hydrationAndSupplements: HydrationAndSupplements = {
   waterTarget: "3 L / jour",
