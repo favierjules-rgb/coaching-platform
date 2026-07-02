@@ -79,11 +79,7 @@ export default async function NutritionPlanDetailPage({
       </div>
 
       <div className="mb-8">
-        <NutritionPlanWorkspace
-          studentId={student.id}
-          plan={plan}
-          initialDays={plan.days}
-        />
+        <NutritionPlanWorkspace studentId={student.id} plan={plan} />
       </div>
 
       <div className="border border-border bg-card p-6">

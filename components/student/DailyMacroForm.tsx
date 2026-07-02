@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { CheckCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle } from "lucide-react";
 
 import type { ActualDailyIntake, NutritionDay } from "@/types";
 
@@ -33,10 +33,15 @@ export function DailyMacroForm({
   const [energy, setEnergy] = useState(day.actual?.energy ?? "");
   const [digestion, setDigestion] = useState(day.actual?.digestion ?? "");
   const [justValidated, setJustValidated] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pendingZeroConfirm, setPendingZeroConfirm] = useState(false);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function resetSubmitState() {
+    setError(null);
+    setPendingZeroConfirm(false);
+  }
 
+  function finalizeValidation() {
     const actual: ActualDailyIntake = {
       studentId,
       planId,
@@ -54,10 +59,37 @@ export function DailyMacroForm({
       validatedAt: new Date().toISOString(),
     };
 
-    // Donnée mockée pour l'instant : mise à jour de l'état local uniquement,
-    // aucun envoi réel n'est effectué.
+    // Donnée mockée pour l'instant : mise à jour de l'état local (+
+    // localStorage via le hook partagé) uniquement, aucun envoi réel n'est
+    // effectué.
     onValidate(actual);
     setJustValidated(true);
+    setPendingZeroConfirm(false);
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (
+      calories.trim() === "" ||
+      protein.trim() === "" ||
+      carbs.trim() === "" ||
+      fat.trim() === ""
+    ) {
+      setError(
+        "Renseigne tes calories, protéines, glucides et lipides avant de valider la journée.",
+      );
+      setPendingZeroConfirm(false);
+      return;
+    }
+    setError(null);
+
+    if (Number(calories) === 0) {
+      setPendingZeroConfirm(true);
+      return;
+    }
+
+    finalizeValidation();
   }
 
   return (
@@ -66,6 +98,42 @@ export function DailyMacroForm({
         <div className="mb-5 flex items-center gap-3 border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-400">
           <CheckCircle size={18} />
           Journée validée, le calcul hebdomadaire a été mis à jour.
+        </div>
+      )}
+
+      {error && (
+        <div className="mb-5 flex items-center gap-3 border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          <AlertTriangle size={18} className="flex-shrink-0" />
+          {error}
+        </div>
+      )}
+
+      {pendingZeroConfirm && (
+        <div className="mb-5 flex flex-col gap-3 border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-400">
+          <div className="flex items-start gap-3">
+            <AlertTriangle size={18} className="mt-0.5 flex-shrink-0" />
+            <span>
+              Tu as indiqué 0 kcal pour cette journée. Si c&apos;est
+              volontaire (jeûne, journée non suivie...), confirme pour
+              valider quand même.
+            </span>
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={finalizeValidation}
+              className="border border-amber-500/60 px-4 py-2 text-xs uppercase tracking-widest text-amber-400 transition-colors hover:bg-amber-500/20"
+            >
+              Confirmer 0 kcal
+            </button>
+            <button
+              type="button"
+              onClick={() => setPendingZeroConfirm(false)}
+              className="border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
+            >
+              Annuler
+            </button>
+          </div>
         </div>
       )}
 
@@ -83,7 +151,10 @@ export function DailyMacroForm({
               type="number"
               min={0}
               value={calories}
-              onChange={(event) => setCalories(event.target.value)}
+              onChange={(event) => {
+                setCalories(event.target.value);
+                resetSubmitState();
+              }}
               placeholder={`Objectif : ${day.target.calories}`}
               className="w-full border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none"
             />
@@ -100,7 +171,10 @@ export function DailyMacroForm({
               type="number"
               min={0}
               value={protein}
-              onChange={(event) => setProtein(event.target.value)}
+              onChange={(event) => {
+                setProtein(event.target.value);
+                resetSubmitState();
+              }}
               placeholder={`Objectif : ${day.target.protein}`}
               className="w-full border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none"
             />
@@ -117,7 +191,10 @@ export function DailyMacroForm({
               type="number"
               min={0}
               value={carbs}
-              onChange={(event) => setCarbs(event.target.value)}
+              onChange={(event) => {
+                setCarbs(event.target.value);
+                resetSubmitState();
+              }}
               placeholder={`Objectif : ${day.target.carbs}`}
               className="w-full border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none"
             />
@@ -134,7 +211,10 @@ export function DailyMacroForm({
               type="number"
               min={0}
               value={fat}
-              onChange={(event) => setFat(event.target.value)}
+              onChange={(event) => {
+                setFat(event.target.value);
+                resetSubmitState();
+              }}
               placeholder={`Objectif : ${day.target.fat}`}
               className="w-full border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none"
             />

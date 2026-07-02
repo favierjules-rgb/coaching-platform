@@ -1,10 +1,7 @@
-import Link from "next/link";
 import { Droplet, Lightbulb, Pill } from "lucide-react";
 
-import { DayStatusBadge } from "@/components/student/DayStatusBadge";
-import { NutritionAdjustmentCard } from "@/components/student/NutritionAdjustmentCard";
-import { NutritionPlanCard } from "@/components/student/NutritionPlanCard";
-import { computeAdjustment } from "@/lib/nutrition";
+import { NutritionPlansListClient } from "@/components/student/NutritionPlansListClient";
+import { NutritionWeekStatusClient } from "@/components/student/NutritionWeekStatusClient";
 import {
   activeNutritionPlan,
   hydrationAndSupplements,
@@ -13,12 +10,6 @@ import {
 } from "@/data/student";
 
 export default function NutritionPage() {
-  const adjustment = computeAdjustment(
-    student.id,
-    activeNutritionPlan,
-    activeNutritionPlan.days,
-  );
-
   return (
     <div>
       <div className="mb-8">
@@ -33,42 +24,10 @@ export default function NutritionPage() {
         </p>
       </div>
 
-      <div className="mb-8">
-        <NutritionAdjustmentCard adjustment={adjustment} />
-      </div>
-
-      <div className="mb-8 border border-border bg-card p-6">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-heading text-lg font-bold uppercase text-foreground">
-            Jours de la semaine
-          </h2>
-          <Link
-            href={`/nutrition/${activeNutritionPlan.id}`}
-            className="text-xs uppercase tracking-wide text-primary hover:underline"
-          >
-            Voir le plan
-          </Link>
-        </div>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
-          {activeNutritionPlan.days.map((day) => (
-            <div
-              key={day.id}
-              className={`flex flex-col gap-2 border p-4 ${
-                day.isToday ? "border-primary bg-primary/10" : "border-border"
-              }`}
-            >
-              <span
-                className={`font-heading text-xs font-semibold uppercase tracking-widest ${
-                  day.isToday ? "text-primary" : "text-muted-foreground"
-                }`}
-              >
-                {day.day}
-              </span>
-              <DayStatusBadge status={day.status} />
-            </div>
-          ))}
-        </div>
-      </div>
+      <NutritionWeekStatusClient
+        studentId={student.id}
+        activePlan={activeNutritionPlan}
+      />
 
       <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="flex flex-col gap-2 border border-border bg-card p-6">
@@ -102,16 +61,7 @@ export default function NutritionPage() {
         </div>
       </div>
 
-      <div>
-        <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
-          Mes plans alimentaires
-        </h2>
-        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {nutritionPlans.map((plan) => (
-            <NutritionPlanCard key={plan.id} plan={plan} />
-          ))}
-        </div>
-      </div>
+      <NutritionPlansListClient plans={nutritionPlans} />
     </div>
   );
 }

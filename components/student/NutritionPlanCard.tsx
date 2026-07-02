@@ -3,11 +3,17 @@ import Link from "next/link";
 import { ProgressBar } from "@/components/student/ProgressBar";
 import { StatusBadge } from "@/components/student/StatusBadge";
 import { nutritionGoalLabels } from "@/lib/nutrition";
-import type { NutritionPlan } from "@/types";
+import type { NutritionDay, NutritionPlan } from "@/types";
 
-export function NutritionPlanCard({ plan }: { plan: NutritionPlan }) {
-  const daysValidated = plan.days.filter((day) => day.status === "valide").length;
-  const progressPercent = Math.round((daysValidated / plan.days.length) * 100);
+interface NutritionPlanCardProps {
+  plan: NutritionPlan;
+  days?: NutritionDay[];
+}
+
+export function NutritionPlanCard({ plan, days }: NutritionPlanCardProps) {
+  const trackedDays = days ?? plan.days;
+  const daysValidated = trackedDays.filter((day) => day.status === "valide").length;
+  const progressPercent = Math.round((daysValidated / trackedDays.length) * 100);
 
   return (
     <div className="flex flex-col gap-4 border border-border bg-card p-6">
@@ -61,7 +67,7 @@ export function NutritionPlanCard({ plan }: { plan: NutritionPlan }) {
         <div className="flex items-center justify-between text-xs text-muted-foreground">
           <span className="uppercase tracking-wide">Semaine validée</span>
           <span>
-            {daysValidated} / {plan.days.length} jours
+            {daysValidated} / {trackedDays.length} jours
           </span>
         </div>
         <ProgressBar percent={progressPercent} />
