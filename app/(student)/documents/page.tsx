@@ -1,5 +1,5 @@
-import { DocumentsBrowser } from "@/components/student/DocumentsBrowser";
-import { documents } from "@/data/student";
+import { DocumentLibrary } from "@/components/student/DocumentLibrary";
+import { documentResources, student, studentDocumentAccess } from "@/data/student";
 
 export default function DocumentsPage() {
   return (
@@ -13,7 +13,11 @@ export default function DocumentsPage() {
         </p>
       </div>
 
-      <DocumentsBrowser documents={documents} />
+      <DocumentLibrary
+        studentId={student.id}
+        documents={documentResources}
+        accessSeed={studentDocumentAccess}
+      />
     </div>
   );
 }

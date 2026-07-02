@@ -172,7 +172,7 @@ export interface HydrationAndSupplements {
 }
 
 export type DocumentCategory = "nutrition" | "entrainement" | "administratif";
-export type DocumentType = "pdf" | "vidéo" | "lien" | "guide";
+export type DocumentType = "pdf" | "vidéo" | "lien" | "guide" | "image";
 
 export interface DocumentItem {
   id: string;
@@ -345,4 +345,38 @@ export interface NutritionAdjustment {
   tone: NutritionAdjustmentTone;
   message: string;
   summary: WeeklyNutritionSummary;
+}
+
+/* ─── Bibliothèque de documents ───
+ * Types préparés pour une future persistance Supabase : DocumentResource
+ * correspondrait à une table `document_resource`, StudentDocumentAccess à
+ * une table de liaison `student_document_access` (clé composite
+ * studentId + documentId) qui porte le viewedAt par élève — un même
+ * document assigné à plusieurs élèves peut donc être "nouveau" pour l'un
+ * et "consulté" pour l'autre.
+ */
+
+/** Dérivé de StudentDocumentAccess.viewedAt : jamais consulté vs consulté. */
+export type DocumentStatus = "nouveau" | "consulté";
+
+export interface DocumentResource {
+  id: string;
+  title: string;
+  description: string;
+  type: DocumentType;
+  category: DocumentCategory;
+  createdAt: string;
+  important: boolean;
+  assignedStudentIds: string[];
+  previewContent: string;
+  fileUrl?: string;
+  videoUrl?: string;
+  externalUrl?: string;
+  relatedDocumentIds: string[];
+}
+
+export interface StudentDocumentAccess {
+  studentId: string;
+  documentId: string;
+  viewedAt: string | null;
 }
