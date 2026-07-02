@@ -3,6 +3,7 @@ import type {
   BodyMeasurements,
   CoachNotification,
   DocumentItem,
+  DocumentResource,
   Exercise,
   FoodPreferences,
   HydrationAndSupplements,
@@ -14,6 +15,7 @@ import type {
   PlannedMeal,
   ProgramScheduleDay,
   SportPreferences,
+  StudentDocumentAccess,
   StudentProfile,
   TrainingProgram,
   UpcomingSession,
@@ -687,6 +689,225 @@ export const documents: DocumentItem[] = [
 ];
 
 export const recentDocuments: DocumentItem[] = documents.slice(0, 3);
+
+/* ─── Bibliothèque de documents (onglet Documents) ─── */
+
+export const documentResources: DocumentResource[] = [
+  {
+    id: "res-1",
+    title: "Guide nutrition prise de masse",
+    description:
+      "Les bases pour structurer ton alimentation en période de prise de masse : répartition des macros, fréquence des repas et exemples de menus.",
+    type: "guide",
+    category: "nutrition",
+    createdAt: "28/06/2026",
+    important: true,
+    assignedStudentIds: [student.id],
+    previewContent:
+      "Sommaire : 1) Calculer son besoin calorique · 2) Répartir ses macronutriments · 3) Structurer ses repas autour des séances · 4) Exemples de menus types · 5) Erreurs fréquentes à éviter.",
+    fileUrl: "https://documents.seth-coaching.mock/fichiers/res-1.pdf",
+    relatedDocumentIds: ["res-4", "res-8"],
+  },
+  {
+    id: "res-2",
+    title: "Vidéo technique squat",
+    description:
+      "Décomposition complète de la technique et des erreurs fréquentes, filmée sous plusieurs angles.",
+    type: "vidéo",
+    category: "entrainement",
+    createdAt: "25/06/2026",
+    important: false,
+    assignedStudentIds: [student.id],
+    previewContent:
+      "Durée : 8 min. Chapitres : placement des pieds, respiration, profondeur, erreurs courantes (valgus de genou, dos rond).",
+    videoUrl: "https://videos.seth-coaching.mock/documents/res-2",
+    relatedDocumentIds: ["res-6", "res-10"],
+  },
+  {
+    id: "res-3",
+    title: "Fiche étirements post-séance",
+    description: "Routine d'étirements à faire après chaque entraînement.",
+    type: "pdf",
+    category: "entrainement",
+    createdAt: "20/06/2026",
+    important: false,
+    assignedStudentIds: [student.id],
+    previewContent:
+      "8 étirements, 30 secondes chacun, dans l'ordre : ischios, quadriceps, fessiers, dos, épaules, pectoraux, mollets, hanches.",
+    fileUrl: "https://documents.seth-coaching.mock/fichiers/res-3.pdf",
+    relatedDocumentIds: ["res-2"],
+  },
+  {
+    id: "res-4",
+    title: "Guide gestion des macros",
+    description: "Comprendre et ajuster tes macronutriments au quotidien.",
+    type: "guide",
+    category: "nutrition",
+    createdAt: "15/06/2026",
+    important: false,
+    assignedStudentIds: [student.id],
+    previewContent:
+      "Comment lire une étiquette nutritionnelle, ajuster ses glucides selon l'activité du jour, et gérer les écarts occasionnels sans culpabiliser.",
+    fileUrl: "https://documents.seth-coaching.mock/fichiers/res-4.pdf",
+    relatedDocumentIds: ["res-1", "res-8"],
+  },
+  {
+    id: "res-5",
+    title: "Facture — Juin 2026",
+    description: "Facture de ton abonnement coaching du mois en cours.",
+    type: "pdf",
+    category: "administratif",
+    createdAt: "01/06/2026",
+    important: false,
+    assignedStudentIds: [student.id],
+    previewContent: "Facture n°2026-06-014 · Formule Élite · 249 € · Payée le 01/06/2026.",
+    fileUrl: "https://documents.seth-coaching.mock/fichiers/res-5.pdf",
+    relatedDocumentIds: ["res-9"],
+  },
+  {
+    id: "res-6",
+    title: "Vidéo mobilité épaules",
+    description: "Routine de mobilité à faire avant les séances haut du corps.",
+    type: "vidéo",
+    category: "entrainement",
+    createdAt: "28/05/2026",
+    important: false,
+    assignedStudentIds: [student.id],
+    previewContent:
+      "Durée : 5 min. Rotation externe/interne, décoaptation à la bande, chandelle allemande.",
+    videoUrl: "https://videos.seth-coaching.mock/documents/res-6",
+    relatedDocumentIds: ["res-2", "res-10"],
+  },
+  {
+    id: "res-7",
+    title: "Guide sommeil & récupération",
+    description: "Optimiser ton sommeil pour mieux récupérer entre les séances.",
+    type: "guide",
+    category: "administratif",
+    createdAt: "20/05/2026",
+    important: true,
+    assignedStudentIds: [student.id],
+    previewContent:
+      "Hygiène de sommeil, gestion des écrans le soir, sieste et récupération active les jours de repos.",
+    fileUrl: "https://documents.seth-coaching.mock/fichiers/res-7.pdf",
+    relatedDocumentIds: ["res-12"],
+  },
+  {
+    id: "res-8",
+    title: "Menu type — semaine",
+    description: "Exemple de semaine complète adaptée à ton plan actuel.",
+    type: "pdf",
+    category: "nutrition",
+    createdAt: "12/05/2026",
+    important: false,
+    assignedStudentIds: [student.id],
+    previewContent:
+      "7 jours de menus détaillés (petit déjeuner à dîner) calibrés sur 2800 kcal, avec liste de courses associée.",
+    fileUrl: "https://documents.seth-coaching.mock/fichiers/res-8.pdf",
+    relatedDocumentIds: ["res-1", "res-4"],
+  },
+  {
+    id: "res-9",
+    title: "Contrat de coaching",
+    description: "Ton contrat d'accompagnement et ses conditions.",
+    type: "lien",
+    category: "administratif",
+    createdAt: "12/01/2026",
+    important: true,
+    assignedStudentIds: [student.id],
+    previewContent:
+      "Contrat d'accompagnement Formule Élite, engagement mensuel sans durée minimale, conditions de résiliation incluses.",
+    externalUrl: "https://contrats.seth-coaching.mock/documents/res-9",
+    relatedDocumentIds: ["res-5"],
+  },
+  {
+    id: "res-10",
+    title: "Checklist matériel salle à domicile",
+    description:
+      "Le matériel minimal recommandé pour reproduire les séances à la maison.",
+    type: "image",
+    category: "entrainement",
+    createdAt: "05/05/2026",
+    important: false,
+    assignedStudentIds: [student.id],
+    previewContent:
+      "Infographie : barre + disques, banc réglable, élastiques (3 tensions), kettlebell 16-24 kg, corde à sauter.",
+    fileUrl: "https://documents.seth-coaching.mock/fichiers/res-10.png",
+    relatedDocumentIds: ["res-2", "res-6"],
+  },
+  {
+    id: "res-11",
+    title: "Grille de suivi des mensurations",
+    description:
+      "Un tableau simple pour noter tes mensurations chaque mois et suivre ta progression.",
+    type: "pdf",
+    category: "administratif",
+    createdAt: "03/05/2026",
+    important: false,
+    assignedStudentIds: [student.id],
+    previewContent:
+      "Colonnes : date, poids, tour de taille, hanches, poitrine, bras, cuisse, mollet. Une ligne par mois.",
+    fileUrl: "https://documents.seth-coaching.mock/fichiers/res-11.pdf",
+    relatedDocumentIds: ["res-7"],
+  },
+  {
+    id: "res-12",
+    title: "Playlist motivation entraînement",
+    description: "La sélection musicale recommandée pour tes séances les plus intenses.",
+    type: "lien",
+    category: "entrainement",
+    createdAt: "22/04/2026",
+    important: false,
+    assignedStudentIds: [student.id],
+    previewContent:
+      "Playlist de 45 titres, rythme croissant, pensée pour accompagner l'échauffement jusqu'aux séries les plus lourdes.",
+    externalUrl: "https://musique.seth-coaching.mock/playlists/res-12",
+    relatedDocumentIds: ["res-7"],
+  },
+];
+
+export function getDocumentResource(id: string): DocumentResource | undefined {
+  return documentResources.find((document) => document.id === id);
+}
+
+export const studentDocumentAccess: StudentDocumentAccess[] = [
+  { studentId: student.id, documentId: "res-1", viewedAt: null },
+  { studentId: student.id, documentId: "res-2", viewedAt: null },
+  {
+    studentId: student.id,
+    documentId: "res-3",
+    viewedAt: "2026-06-21T09:00:00.000Z",
+  },
+  {
+    studentId: student.id,
+    documentId: "res-4",
+    viewedAt: "2026-06-16T09:00:00.000Z",
+  },
+  { studentId: student.id, documentId: "res-5", viewedAt: null },
+  {
+    studentId: student.id,
+    documentId: "res-6",
+    viewedAt: "2026-05-29T09:00:00.000Z",
+  },
+  { studentId: student.id, documentId: "res-7", viewedAt: null },
+  {
+    studentId: student.id,
+    documentId: "res-8",
+    viewedAt: "2026-05-13T09:00:00.000Z",
+  },
+  {
+    studentId: student.id,
+    documentId: "res-9",
+    viewedAt: "2026-01-12T09:00:00.000Z",
+  },
+  { studentId: student.id, documentId: "res-10", viewedAt: null },
+  { studentId: student.id, documentId: "res-11", viewedAt: null },
+  {
+    studentId: student.id,
+    documentId: "res-12",
+    viewedAt: "2026-04-23T09:00:00.000Z",
+  },
+];
 
 export const weightHistory: WeightEntry[] = [
   { month: "Jan", kg: 72 },
