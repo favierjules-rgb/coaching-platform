@@ -40,6 +40,12 @@ export interface StudentProfile {
 
 export type ProgramStatus = "actif" | "terminé" | "à venir";
 
+export interface ProgramScheduleDay {
+  day: string;
+  isToday?: boolean;
+  sessionId: string | null;
+}
+
 export interface TrainingProgram {
   id: string;
   name: string;
@@ -47,6 +53,10 @@ export interface TrainingProgram {
   level: string;
   durationWeeks: number;
   status: ProgramStatus;
+  sessionsPerWeek: number;
+  currentWeek: number;
+  progressPercent: number;
+  schedule: ProgramScheduleDay[];
 }
 
 export interface UpcomingSession {
@@ -58,13 +68,27 @@ export interface UpcomingSession {
   exerciseCount: number;
 }
 
-export interface DayTrainingSession {
+export interface Exercise {
+  id: string;
+  name: string;
+  sets: number;
+  reps: string;
+  restSeconds: number;
+  tempo: string;
+  recommendedLoad: string;
+  videoUrl: string;
+}
+
+export interface WorkoutSession {
+  id: string;
+  programId: string;
   day: string;
-  isToday?: boolean;
-  sessionName: string | null;
-  muscleGroups?: string;
-  durationMinutes?: number;
-  exerciseCount?: number;
+  name: string;
+  muscleGroups: string;
+  durationMinutes: number;
+  warmup: string;
+  exercises: Exercise[];
+  coachNotes: string;
 }
 
 export type MealPlanStatus = "actif" | "ancien" | "prochain";
