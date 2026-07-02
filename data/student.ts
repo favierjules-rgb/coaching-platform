@@ -1,12 +1,13 @@
 import type {
   ActualDailyIntake,
-  BodyMeasurements,
+  BodyMeasurement,
   CoachNotification,
   DocumentItem,
   DocumentResource,
   Exercise,
   FoodPreferences,
   HydrationAndSupplements,
+  InjuryNote,
   MacroTarget,
   MealFoodItem,
   MealPlan,
@@ -14,8 +15,10 @@ import type {
   NutritionPlan,
   PlannedMeal,
   ProgramScheduleDay,
+  ProgressPhoto,
   SportPreferences,
   StudentDocumentAccess,
+  StudentGoal,
   StudentProfile,
   TrainingProgram,
   UpcomingSession,
@@ -34,6 +37,10 @@ export const student: StudentProfile = {
   age: 27,
   heightCm: 179,
   currentWeightKg: 80.1,
+  targetWeightKg: 82,
+  trainingFrequencyPerWeek: 5,
+  trainingLocation: "Salle de sport",
+  coachingStatus: "actif",
 };
 
 function exercise(
@@ -939,28 +946,179 @@ export const coachNotifications: CoachNotification[] = [
   },
 ];
 
-export const bodyMeasurements: BodyMeasurements = {
-  waist: 82,
-  hips: 96,
-  chest: 104,
-  arm: 36,
-  thigh: 58,
-  calf: 39,
-};
+export const bodyMeasurements: BodyMeasurement[] = [
+  {
+    studentId: student.id,
+    type: "taille",
+    startValueCm: 86,
+    currentValueCm: 82,
+    lastUpdatedAt: "2026-06-28",
+  },
+  {
+    studentId: student.id,
+    type: "hanches",
+    startValueCm: 98,
+    currentValueCm: 96,
+    lastUpdatedAt: "2026-06-28",
+  },
+  {
+    studentId: student.id,
+    type: "poitrine",
+    startValueCm: 98,
+    currentValueCm: 104,
+    lastUpdatedAt: "2026-06-28",
+  },
+  {
+    studentId: student.id,
+    type: "bras",
+    startValueCm: 33,
+    currentValueCm: 36,
+    lastUpdatedAt: "2026-06-28",
+  },
+  {
+    studentId: student.id,
+    type: "cuisse",
+    startValueCm: 54,
+    currentValueCm: 58,
+    lastUpdatedAt: "2026-06-28",
+  },
+  {
+    studentId: student.id,
+    type: "mollet",
+    startValueCm: 37,
+    currentValueCm: 39,
+    lastUpdatedAt: "2026-06-28",
+  },
+];
 
 export const foodPreferences: FoodPreferences = {
+  studentId: student.id,
   liked: ["Poulet", "Riz", "Patate douce", "Fruits rouges"],
   disliked: ["Poisson blanc", "Choux de Bruxelles"],
   intolerances: ["Lactose"],
+  allergies: ["Fruits à coque"],
   diet: "Omnivore",
   mealsPerDay: 5,
+  mealTimes: ["7h30", "10h30", "12h30", "16h00", "19h30"],
+  socialConstraints:
+    "Déjeuners professionnels fréquents le midi, peu de contrôle sur le menu proposé.",
+  updatedAt: "2026-06-15",
 };
 
 export const sportPreferences: SportPreferences = {
+  studentId: student.id,
   mainGoal: "Prise de masse musculaire",
   sports: ["Musculation", "Course à pied occasionnelle"],
-  injuries: "Légère gêne à l'épaule droite (surveillance)",
   equipment: ["Salle de sport équipée", "Élastiques", "Banc à domicile"],
   location: "Salle de sport",
   sessionsPerWeek: 5,
+  preferredExercises: ["Développé couché", "Squat", "Tractions"],
+  exercisesToAvoid: [
+    "Développé militaire nuque",
+    "Rowing barre buste très penché",
+  ],
+  weeklyAvailability: [
+    "Lundi soir",
+    "Mardi matin",
+    "Jeudi soir",
+    "Vendredi soir",
+    "Samedi matin",
+  ],
+  updatedAt: "2026-06-15",
 };
+
+export const injuryNote: InjuryNote = {
+  studentId: student.id,
+  currentInjuries: [
+    "Légère gêne à l'épaule droite en fin d'amplitude sur le développé militaire",
+  ],
+  pastInjuries: ["Entorse de la cheville droite (2023, guérie)"],
+  recurringPain: ["Tensions lombaires après les séances longues en position assise"],
+  movementsToAvoid: [
+    "Développé militaire nuque",
+    "Squat profond à charge maximale sans échauffement complet",
+  ],
+  coachRemarks:
+    "Bien surveiller l'épaule droite : prioriser les rotations externes en échauffement avant tout mouvement au-dessus de la tête.",
+  updatedAt: "2026-06-15",
+};
+
+export const studentGoal: StudentGoal = {
+  studentId: student.id,
+  mainGoal: "Prise de masse musculaire propre (+8 kg depuis le début du coaching)",
+  secondaryGoals: [
+    "Développé couché à 100 kg",
+    "Améliorer la mobilité de l'épaule droite",
+    "Stabiliser le sommeil à 7h30 par nuit",
+  ],
+  targetDate: "2026-12-31",
+  priority: "haute",
+  trackedIndicators: ["poids", "mensurations", "photos", "performance", "sommeil"],
+  updatedAt: "2026-06-15",
+};
+
+export const progressPhotos: ProgressPhoto[] = [
+  {
+    id: "photo-1",
+    studentId: student.id,
+    date: "2026-01-12",
+    weightKg: 72,
+    note: "Photo de départ, avant le début du programme.",
+    highlight: "avant",
+    pending: false,
+  },
+  {
+    id: "photo-2",
+    studentId: student.id,
+    date: "2026-02-12",
+    weightKg: 73.5,
+    note: "Premier mois, prise de poids régulière.",
+    highlight: null,
+    pending: false,
+  },
+  {
+    id: "photo-3",
+    studentId: student.id,
+    date: "2026-03-12",
+    weightKg: 75.2,
+    note: "Bonne progression sur les épaules et le dos.",
+    highlight: null,
+    pending: false,
+  },
+  {
+    id: "photo-4",
+    studentId: student.id,
+    date: "2026-04-12",
+    weightKg: 77,
+    note: "Léger relâchement nutrition pendant les vacances.",
+    highlight: null,
+    pending: false,
+  },
+  {
+    id: "photo-5",
+    studentId: student.id,
+    date: "2026-05-12",
+    weightKg: 78.8,
+    note: "Reprise sérieuse, silhouette plus dense.",
+    highlight: null,
+    pending: false,
+  },
+  {
+    id: "photo-6",
+    studentId: student.id,
+    date: "2026-06-28",
+    weightKg: 80.1,
+    note: "Photo la plus récente, bonne évolution générale.",
+    highlight: "actuelle",
+    pending: false,
+  },
+  {
+    id: "photo-7",
+    studentId: student.id,
+    date: "2026-12-31",
+    weightKg: null,
+    note: "Objectif visuel fixé avec le coach pour la fin d'année.",
+    highlight: "objectif",
+    pending: true,
+  },
+];
