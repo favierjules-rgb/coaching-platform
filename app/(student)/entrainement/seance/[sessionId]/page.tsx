@@ -2,9 +2,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Flame, MessageSquare } from "lucide-react";
 
-import { ExerciseRow } from "@/components/student/ExerciseRow";
-import { SessionFeedbackForm } from "@/components/student/SessionFeedbackForm";
-import { getTrainingProgram, getWorkoutSession, workoutSessions } from "@/data/student";
+import { SessionFeedbackSection } from "@/components/student/SessionFeedbackSection";
+import {
+  getTrainingProgram,
+  getWorkoutSession,
+  student,
+  workoutSessions,
+} from "@/data/student";
 
 export function generateStaticParams() {
   return workoutSessions.map((session) => ({ sessionId: session.id }));
@@ -56,17 +60,6 @@ export default async function SessionDetailPage({
         </div>
       </div>
 
-      <div className="mb-8">
-        <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
-          Exercices
-        </h2>
-        <div className="flex flex-col gap-3">
-          {session.exercises.map((exercise, index) => (
-            <ExerciseRow key={exercise.id} exercise={exercise} index={index} />
-          ))}
-        </div>
-      </div>
-
       <div className="mb-8 flex items-start gap-4 border border-border bg-card p-6">
         <MessageSquare size={20} className="mt-0.5 flex-shrink-0 text-primary" />
         <div>
@@ -79,7 +72,11 @@ export default async function SessionDetailPage({
         </div>
       </div>
 
-      <SessionFeedbackForm />
+      <SessionFeedbackSection
+        studentId={student.id}
+        sessionId={session.id}
+        exercises={session.exercises}
+      />
     </div>
   );
 }

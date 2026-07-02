@@ -18,6 +18,7 @@ import type {
 } from "@/types";
 
 export const student: StudentProfile = {
+  id: "student-alexandre-morel",
   firstName: "Alexandre",
   lastName: "Morel",
   goal: "+8 kg de masse musculaire",
