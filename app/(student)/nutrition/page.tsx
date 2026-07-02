@@ -1,17 +1,24 @@
+import Link from "next/link";
 import { Droplet, Lightbulb, Pill } from "lucide-react";
 
-import { MealCard } from "@/components/student/MealCard";
-import { MealPlanCard } from "@/components/student/MealPlanCard";
-import { NutritionWeekOverview } from "@/components/student/NutritionWeekOverview";
+import { DayStatusBadge } from "@/components/student/DayStatusBadge";
+import { NutritionAdjustmentCard } from "@/components/student/NutritionAdjustmentCard";
+import { NutritionPlanCard } from "@/components/student/NutritionPlanCard";
+import { computeAdjustment } from "@/lib/nutrition";
 import {
-  activeMealPlan,
+  activeNutritionPlan,
   hydrationAndSupplements,
-  mealPlans,
-  todayMeals,
-  weeklyCalorieTargets,
+  nutritionPlans,
+  student,
 } from "@/data/student";
 
 export default function NutritionPage() {
+  const adjustment = computeAdjustment(
+    student.id,
+    activeNutritionPlan,
+    activeNutritionPlan.days,
+  );
+
   return (
     <div>
       <div className="mb-8">
@@ -19,25 +26,46 @@ export default function NutritionPage() {
           Nutrition
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Plan actif : {activeMealPlan.name} · {activeMealPlan.calories} kcal /
-          jour
+          Plan actif : {activeNutritionPlan.name} ·{" "}
+          {activeNutritionPlan.dailyTarget.calories} kcal/jour ·{" "}
+          {activeNutritionPlan.weeklyTargetCalories.toLocaleString("fr-FR")}{" "}
+          kcal/semaine
         </p>
       </div>
 
-      <div className="mb-6 border border-border bg-card p-6">
-        <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
-          Aperçu de la semaine
-        </h2>
-        <NutritionWeekOverview days={weeklyCalorieTargets} />
+      <div className="mb-8">
+        <NutritionAdjustmentCard adjustment={adjustment} />
       </div>
 
-      <div className="mb-8">
-        <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
-          Repas du jour
-        </h2>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {todayMeals.map((meal) => (
-            <MealCard key={meal.slot} meal={meal} />
+      <div className="mb-8 border border-border bg-card p-6">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="font-heading text-lg font-bold uppercase text-foreground">
+            Jours de la semaine
+          </h2>
+          <Link
+            href={`/nutrition/${activeNutritionPlan.id}`}
+            className="text-xs uppercase tracking-wide text-primary hover:underline"
+          >
+            Voir le plan
+          </Link>
+        </div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+          {activeNutritionPlan.days.map((day) => (
+            <div
+              key={day.id}
+              className={`flex flex-col gap-2 border p-4 ${
+                day.isToday ? "border-primary bg-primary/10" : "border-border"
+              }`}
+            >
+              <span
+                className={`font-heading text-xs font-semibold uppercase tracking-widest ${
+                  day.isToday ? "text-primary" : "text-muted-foreground"
+                }`}
+              >
+                {day.day}
+              </span>
+              <DayStatusBadge status={day.status} />
+            </div>
           ))}
         </div>
       </div>
@@ -79,8 +107,8 @@ export default function NutritionPage() {
           Mes plans alimentaires
         </h2>
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {mealPlans.map((plan) => (
-            <MealPlanCard key={plan.id} plan={plan} />
+          {nutritionPlans.map((plan) => (
+            <NutritionPlanCard key={plan.id} plan={plan} />
           ))}
         </div>
       </div>
