@@ -1,70 +1,166 @@
+"use client";
+
+import { useState } from "react";
 import { TrendingDown, TrendingUp } from "lucide-react";
 
-import { MockActionModal, MockField } from "@/components/student/MockActionModal";
 import { ProfileSection } from "@/components/student/ProfileSection";
+import {
+  UpdateMeasurementsModal,
+  type CustomMeasurementInput,
+} from "@/components/student/UpdateMeasurementsModal";
 import {
   bodyMeasurementLabels,
   isMeasurementProgressing,
-  measurementDeltaCm,
+  measurementDelta,
 } from "@/lib/profile";
-import type { BodyMeasurement } from "@/types";
+import type { BodyMeasurement, BodyMeasurementType, CustomMeasurement } from "@/types";
+
+function MeasurementTile({
+  label,
+  unit,
+  startValue,
+  currentValue,
+  lastUpdatedAt,
+  note,
+  progressing,
+}: {
+  label: string;
+  unit: string;
+  startValue: number;
+  currentValue: number;
+  lastUpdatedAt: string;
+  note?: string;
+  progressing: boolean | null;
+}) {
+  const delta = measurementDelta({ startValue, currentValue });
+  const deltaColor =
+    progressing === null
+      ? "text-foreground"
+      : progressing
+        ? "text-green-400"
+        : "text-red-400";
+  return (
+    <div className="flex items-center justify-between gap-4 border border-border p-4">
+      <div>
+        <span className="block text-sm text-foreground">{label}</span>
+        <span className="text-xs text-muted-foreground">
+          {startValue} {unit} → {currentValue} {unit} · maj{" "}
+          {new Date(lastUpdatedAt).toLocaleDateString("fr-FR")}
+        </span>
+        {note && (
+          <span className="mt-1 block text-xs text-muted-foreground">{note}</span>
+        )}
+      </div>
+      <span className={`flex flex-shrink-0 items-center gap-1 text-sm font-bold ${deltaColor}`}>
+        {delta > 0 ? (
+          <TrendingUp size={16} />
+        ) : delta < 0 ? (
+          <TrendingDown size={16} />
+        ) : null}
+        {delta > 0 ? "+" : ""}
+        {delta} {unit}
+      </span>
+    </div>
+  );
+}
+
+interface MeasurementsSectionProps {
+  studentId: string;
+  initialMeasurements: BodyMeasurement[];
+  initialCustomMeasurements: CustomMeasurement[];
+}
 
 export function MeasurementsSection({
-  measurements,
-}: {
-  measurements: BodyMeasurement[];
-}) {
+  studentId,
+  initialMeasurements,
+  initialCustomMeasurements,
+}: MeasurementsSectionProps) {
+  const [measurements, setMeasurements] = useState(initialMeasurements);
+  const [customMeasurements, setCustomMeasurements] = useState(
+    initialCustomMeasurements,
+  );
+
+  function handleSave(
+    values: Partial<Record<BodyMeasurementType, number>>,
+    date: string,
+    note: string,
+    custom: CustomMeasurementInput | null,
+  ) {
+    setMeasurements((prev) =>
+      prev.map((measurement) => {
+        const newValue = values[measurement.type];
+        if (newValue === undefined) {
+          return measurement;
+        }
+        return {
+          ...measurement,
+          currentValue: newValue,
+          note: note || measurement.note,
+          lastUpdatedAt: date,
+        };
+      }),
+    );
+
+    if (custom) {
+      setCustomMeasurements((prev) => [
+        ...prev,
+        {
+          id: `custom-${Date.now()}`,
+          studentId,
+          name: custom.name,
+          unit: custom.unit,
+          startValue: custom.value,
+          currentValue: custom.value,
+          note: custom.note,
+          lastUpdatedAt: date,
+        },
+      ]);
+    }
+  }
+
   return (
     <ProfileSection
       title="Mensurations"
       action={
-        <MockActionModal
-          triggerLabel="Mettre à jour mes mensurations"
-          title="Mettre à jour mes mensurations"
-          description="Renseigne tes mensurations du jour. Cette action est une démonstration : aucune donnée n'est encore enregistrée."
-          confirmLabel="Enregistrer"
-          successMessage="Mensurations enregistrées. Ton coach pourra les consulter."
-        >
-          <MockField label="Tour de taille (cm)" type="number" />
-          <MockField label="Tour de bras (cm)" type="number" />
-        </MockActionModal>
+        <UpdateMeasurementsModal measurements={measurements} onSave={handleSave} />
       }
     >
-      <div className="flex flex-col">
-        {measurements.map((measurement) => {
-          const delta = measurementDeltaCm(measurement);
-          const progressing = isMeasurementProgressing(measurement);
-          return (
-            <div
-              key={measurement.type}
-              className="flex items-center justify-between gap-4 border-b border-border py-3 last:border-0"
-            >
-              <div>
-                <span className="block text-sm text-foreground">
-                  {bodyMeasurementLabels[measurement.type]}
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  {measurement.startValueCm} cm → {measurement.currentValueCm} cm ·
-                  maj {new Date(measurement.lastUpdatedAt).toLocaleDateString("fr-FR")}
-                </span>
-              </div>
-              <span
-                className={`flex items-center gap-1 text-sm font-bold ${
-                  progressing ? "text-green-400" : "text-red-400"
-                }`}
-              >
-                {delta > 0 ? (
-                  <TrendingUp size={16} />
-                ) : delta < 0 ? (
-                  <TrendingDown size={16} />
-                ) : null}
-                {delta > 0 ? "+" : ""}
-                {delta} cm
-              </span>
-            </div>
-          );
-        })}
+      <div className="flex flex-col gap-3">
+        {measurements.map((measurement) => (
+          <MeasurementTile
+            key={measurement.type}
+            label={bodyMeasurementLabels[measurement.type]}
+            unit={measurement.unit}
+            startValue={measurement.startValue}
+            currentValue={measurement.currentValue}
+            lastUpdatedAt={measurement.lastUpdatedAt}
+            note={measurement.note || undefined}
+            progressing={isMeasurementProgressing(measurement)}
+          />
+        ))}
       </div>
+
+      {customMeasurements.length > 0 && (
+        <div className="mt-6">
+          <span className="mb-3 block text-xs uppercase tracking-wide text-muted-foreground">
+            Mesures personnalisées
+          </span>
+          <div className="flex flex-col gap-3">
+            {customMeasurements.map((measurement) => (
+              <MeasurementTile
+                key={measurement.id}
+                label={measurement.name}
+                unit={measurement.unit}
+                startValue={measurement.startValue}
+                currentValue={measurement.currentValue}
+                lastUpdatedAt={measurement.lastUpdatedAt}
+                note={measurement.note || undefined}
+                progressing={null}
+              />
+            ))}
+          </div>
+        </div>
+      )}
     </ProfileSection>
   );
 }

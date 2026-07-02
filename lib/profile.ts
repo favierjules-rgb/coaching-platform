@@ -8,12 +8,21 @@ import type {
 } from "@/types";
 
 export const bodyMeasurementLabels: Record<BodyMeasurementType, string> = {
-  taille: "Tour de taille",
-  hanches: "Tour de hanches",
+  poids: "Poids",
+  cou: "Tour de cou",
+  epaules: "Tour d'épaules",
   poitrine: "Tour de poitrine",
-  bras: "Tour de bras",
-  cuisse: "Tour de cuisse",
-  mollet: "Tour de mollet",
+  taille: "Tour de taille",
+  nombril: "Tour de nombril",
+  hanches: "Tour de hanches",
+  "bras-droit": "Bras droit",
+  "bras-gauche": "Bras gauche",
+  "avant-bras-droit": "Avant-bras droit",
+  "avant-bras-gauche": "Avant-bras gauche",
+  "cuisse-droite": "Cuisse droite",
+  "cuisse-gauche": "Cuisse gauche",
+  "mollet-droit": "Mollet droit",
+  "mollet-gauche": "Mollet gauche",
 };
 
 /**
@@ -23,23 +32,34 @@ export const bodyMeasurementLabels: Record<BodyMeasurementType, string> = {
  * aussi.
  */
 const positiveDirection: Record<BodyMeasurementType, "up" | "down"> = {
-  taille: "down",
-  hanches: "down",
+  poids: "up",
+  cou: "up",
+  epaules: "up",
   poitrine: "up",
-  bras: "up",
-  cuisse: "up",
-  mollet: "up",
+  taille: "down",
+  nombril: "down",
+  hanches: "down",
+  "bras-droit": "up",
+  "bras-gauche": "up",
+  "avant-bras-droit": "up",
+  "avant-bras-gauche": "up",
+  "cuisse-droite": "up",
+  "cuisse-gauche": "up",
+  "mollet-droit": "up",
+  "mollet-gauche": "up",
 };
 
-export function measurementDeltaCm(measurement: BodyMeasurement): number {
+export function measurementDelta(measurement: {
+  startValue: number;
+  currentValue: number;
+}): number {
   return (
-    Math.round((measurement.currentValueCm - measurement.startValueCm) * 10) /
-    10
+    Math.round((measurement.currentValue - measurement.startValue) * 10) / 10
   );
 }
 
 export function isMeasurementProgressing(measurement: BodyMeasurement): boolean {
-  const delta = measurementDeltaCm(measurement);
+  const delta = measurementDelta(measurement);
   if (delta === 0) {
     return true;
   }

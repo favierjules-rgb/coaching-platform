@@ -4,10 +4,11 @@ import { InjurySection } from "@/components/student/InjurySection";
 import { MeasurementsSection } from "@/components/student/MeasurementsSection";
 import { MockActionModal, MockField } from "@/components/student/MockActionModal";
 import { InfoRow, ProfileSection, TagList } from "@/components/student/ProfileSection";
-import { ProgressPhotos } from "@/components/student/ProgressPhotos";
+import { ProgressPhotoGallerySection } from "@/components/student/ProgressPhotoGallerySection";
 import { WeightEvolutionCard } from "@/components/student/WeightEvolutionCard";
 import {
   bodyMeasurements,
+  customMeasurements,
   foodPreferences,
   injuryNote,
   progressPhotos,
@@ -46,28 +47,11 @@ export default function ProfilPage() {
 
       <CoachingSummaryCard profile={student} />
 
-      <div className="mb-6 border border-border bg-card p-6">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="font-heading text-lg font-bold uppercase text-foreground">
-            Photos de progression
-          </h2>
-          <MockActionModal
-            triggerLabel="Ajouter une photo"
-            title="Ajouter une photo"
-            description="Ajoute une nouvelle photo à ta galerie de progression. Cette action est une démonstration : aucune donnée n'est encore enregistrée."
-            confirmLabel="Ajouter la photo"
-            successMessage="Photo ajoutée à ta galerie de progression."
-          >
-            <MockField
-              label="Poids associé (kg)"
-              type="number"
-              placeholder={`${student.currentWeightKg}`}
-            />
-            <MockField label="Note courte" placeholder="Ex : bonne évolution ce mois-ci" />
-          </MockActionModal>
-        </div>
-        <ProgressPhotos photos={progressPhotos} />
-      </div>
+      <ProgressPhotoGallerySection
+        studentId={student.id}
+        initialPhotos={progressPhotos}
+        defaultWeightKg={student.currentWeightKg}
+      />
 
       <div className="mb-6">
         <WeightEvolutionCard profile={student} history={weightHistory} />
@@ -93,7 +77,11 @@ export default function ProfilPage() {
           <InfoRow label="Salle ou domicile" value={student.trainingLocation} />
         </ProfileSection>
 
-        <MeasurementsSection measurements={bodyMeasurements} />
+        <MeasurementsSection
+          studentId={student.id}
+          initialMeasurements={bodyMeasurements}
+          initialCustomMeasurements={customMeasurements}
+        />
       </div>
 
       <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">

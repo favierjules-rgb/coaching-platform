@@ -201,24 +201,55 @@ export interface CoachNotification {
   unread: boolean;
 }
 
+export type BodyMeasurementUnit = "cm" | "kg";
+
 export type BodyMeasurementType =
-  | "taille"
-  | "hanches"
+  | "poids"
+  | "cou"
+  | "epaules"
   | "poitrine"
-  | "bras"
-  | "cuisse"
-  | "mollet";
+  | "taille"
+  | "nombril"
+  | "hanches"
+  | "bras-droit"
+  | "bras-gauche"
+  | "avant-bras-droit"
+  | "avant-bras-gauche"
+  | "cuisse-droite"
+  | "cuisse-gauche"
+  | "mollet-droit"
+  | "mollet-gauche";
 
 /**
- * Une mensuration suivie dans le temps. Correspond à une future table
- * Supabase `body_measurement` (une ligne par type de mensuration et par
- * élève, mise à jour à chaque relevé).
+ * Une mensuration suivie dans le temps. `id` correspond au futur
+ * measurementId d'une table Supabase `body_measurement` (une ligne par type
+ * de mensuration et par élève, mise à jour à chaque relevé).
  */
 export interface BodyMeasurement {
+  id: string;
   studentId: string;
   type: BodyMeasurementType;
-  startValueCm: number;
-  currentValueCm: number;
+  unit: BodyMeasurementUnit;
+  startValue: number;
+  currentValue: number;
+  note: string;
+  lastUpdatedAt: string;
+}
+
+/**
+ * Mesure personnalisée définie librement par l'élève (ex: "Tour de
+ * cheville"). Correspond à une future table Supabase `custom_measurement`,
+ * distincte de `body_measurement` car le type/l'unité ne sont pas fixés à
+ * l'avance.
+ */
+export interface CustomMeasurement {
+  id: string;
+  studentId: string;
+  name: string;
+  unit: string;
+  startValue: number;
+  currentValue: number;
+  note: string;
   lastUpdatedAt: string;
 }
 
@@ -416,15 +447,23 @@ export interface StudentDocumentAccess {
  * student_goal...).
  */
 
-export type ProgressPhotoHighlight = "avant" | "actuelle" | "objectif";
+export type ProgressPhotoType = "avant" | "actuelle" | "objectif" | "mensuelle";
 
+/**
+ * Photo de progression. `imageUrl` est une URL objet locale
+ * (URL.createObjectURL) tant qu'aucun backend n'est connecté ; `storagePath`
+ * est préparé pour recevoir le chemin retourné par Supabase Storage une fois
+ * l'upload réel branché (photoId = id).
+ */
 export interface ProgressPhoto {
   id: string;
   studentId: string;
+  type: ProgressPhotoType;
   date: string;
   weightKg: number | null;
   note: string;
-  highlight: ProgressPhotoHighlight | null;
+  imageUrl: string | null;
+  storagePath: string | null;
   pending: boolean;
 }
 
