@@ -506,3 +506,282 @@ export interface StudentGoal {
   trackedIndicators: GoalIndicator[];
   updatedAt: string;
 }
+
+/* ─── Interface admin coach ───
+ * Types mockés pour l'espace /admin, tenus séparés du modèle élève
+ * (types/index.ts ci-dessus) car l'admin gère une liste de plusieurs
+ * élèves fictifs plutôt qu'un seul élève connecté. Chaque entité porte
+ * déjà id (+ studentId le cas échéant) et createdAt/updatedAt pour
+ * correspondre directement à de futures tables Supabase ; les relations
+ * many-to-many (contenu ↔ élèves) sont représentées des deux côtés
+ * (assignedStudentIds sur le contenu, assignedProgramIds/... sur
+ * l'élève) — pratique en mock, et prête à devenir une vraie table de
+ * liaison (`assignment`) plus tard.
+ */
+
+export type AdminContentStatus = "brouillon" | "actif" | "archivé";
+export type AdminDocumentStatus = "brouillon" | "publié" | "archivé";
+
+/**
+ * Note privée du coach sur un élève. Correspond à une future table
+ * Supabase `coach_note`.
+ */
+export interface CoachNote {
+  id: string;
+  studentId: string;
+  text: string;
+  createdAt: string;
+}
+
+export interface AdminFoodPreferences {
+  liked: string[];
+  disliked: string[];
+  intolerances: string[];
+  diet: string;
+}
+
+export interface AdminSportPreferences {
+  sports: string[];
+  equipment: string[];
+  preferredExercises: string[];
+  exercisesToAvoid: string[];
+}
+
+export interface AdminProgressPhoto {
+  id: string;
+  date: string;
+  weightKg: number | null;
+  note: string;
+}
+
+export interface AdminBodyMeasurement {
+  label: string;
+  startValueCm: number;
+  currentValueCm: number;
+}
+
+/**
+ * Fiche élève côté admin. Correspond à une future table Supabase
+ * `student` (le compte élève lui-même, distinct du profil élève détaillé
+ * qu'il édite dans /profil).
+ */
+export interface AdminStudent {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  age: number;
+  heightCm: number;
+  currentWeightKg: number;
+  startWeightKg: number;
+  targetWeightKg: number;
+  goal: string;
+  level: string;
+  trainingFrequencyPerWeek: number;
+  trainingLocation: string;
+  status: StudentAccountStatus;
+  startDate: string;
+  lastLoginAt: string | null;
+  foodPreferences: AdminFoodPreferences;
+  sportPreferences: AdminSportPreferences;
+  injuries: string;
+  measurements: AdminBodyMeasurement[];
+  progressPhotos: AdminProgressPhoto[];
+  assignedProgramIds: string[];
+  assignedNutritionPlanIds: string[];
+  assignedDocumentIds: string[];
+  coachNotes: CoachNote[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type StudentAccountStatus = "actif" | "pause" | "terminé";
+
+export type AdminRepsValue = string; // "8" | "8-10" | "12-15" | "AMRAP" ...
+
+export interface AdminExercise {
+  id: string;
+  order: number;
+  name: string;
+  sets: number;
+  reps: AdminRepsValue;
+  restSeconds: number;
+  tempo: string;
+  recommendedLoad: string;
+  videoUrl: string;
+  notes: string;
+}
+
+export interface AdminWorkoutSession {
+  id: string;
+  programId: string;
+  weekNumber: number;
+  day: string;
+  isRestDay: boolean;
+  name: string;
+  muscleGroup: string;
+  durationMinutes: number;
+  warmup: string;
+  coachNotes: string;
+  exercises: AdminExercise[];
+}
+
+/**
+ * Programme d'entraînement créé par le coach. Correspond à une future
+ * table Supabase `program`, reliée à `workout_session` par programId.
+ */
+export interface AdminProgram {
+  id: string;
+  name: string;
+  goal: string;
+  level: string;
+  durationWeeks: number;
+  description: string;
+  status: AdminContentStatus;
+  assignedStudentIds: string[];
+  sessions: AdminWorkoutSession[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminMealFoodItem {
+  name: string;
+  quantity: string;
+}
+
+export interface AdminMeal {
+  id: string;
+  slot: MealSlot;
+  name: string;
+  items: AdminMealFoodItem[];
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  coachNotes: string;
+}
+
+export interface AdminNutritionDay {
+  id: string;
+  planId: string;
+  day: string;
+  meals: AdminMeal[];
+}
+
+/**
+ * Plan alimentaire créé par le coach. Correspond à une future table
+ * Supabase `nutrition_plan_admin`, reliée à `nutrition_day` par planId.
+ * Reste compatible avec la logique élève déjà en place (objectif
+ * hebdomadaire, validation journée, calories restantes) : caloriesPerDay
+ * et weeklyTargetCalories jouent le même rôle que dailyTarget /
+ * weeklyTargetCalories côté NutritionPlan élève.
+ */
+export interface AdminNutritionPlan {
+  id: string;
+  name: string;
+  goalType: NutritionGoalType;
+  caloriesPerDay: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  weeklyTargetCalories: number;
+  status: AdminContentStatus;
+  coachNotes: string;
+  hydrationTip: string;
+  supplements: string[];
+  shoppingList: string[];
+  days: AdminNutritionDay[];
+  assignedStudentIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Document/ressource géré par le coach. Correspond à une future table
+ * Supabase `document_resource_admin` ; fileName/storagePath préparés pour
+ * Supabase Storage (fileName = nom mocké choisi dans l'input file,
+ * storagePath = chemin réel une fois l'upload branché).
+ */
+export interface AdminDocument {
+  id: string;
+  title: string;
+  type: DocumentType;
+  category: DocumentCategory;
+  shortDescription: string;
+  fullDescription: string;
+  externalUrl: string;
+  fileName: string | null;
+  storagePath: string | null;
+  status: AdminDocumentStatus;
+  important: boolean;
+  assignedStudentIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type FeedbackType = "entrainement" | "nutrition" | "profil";
+export type FeedbackStatus = "a-traiter" | "traité" | "important";
+
+export interface AdminExerciseFeedbackEntry {
+  exerciseName: string;
+  setNumber: number;
+  loadUsed: string;
+  repsDone: string;
+  rpe: number | null;
+  comment: string;
+}
+
+/**
+ * Retour élève consolidé côté admin (entraînement, nutrition ou profil).
+ * Correspond à une future table Supabase `student_feedback` ; les détails
+ * par exercice restent une sous-liste (exerciseEntries) plutôt qu'une
+ * table séparée pour rester simple en mock.
+ */
+export interface AdminStudentFeedback {
+  id: string;
+  studentId: string;
+  type: FeedbackType;
+  refLabel: string;
+  date: string;
+  rpe: number | null;
+  pain: string;
+  comment: string;
+  exerciseEntries: AdminExerciseFeedbackEntry[];
+  status: FeedbackStatus;
+  coachReply: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type AssignableContentType = "programme" | "nutrition" | "document";
+
+/**
+ * Représentation "à plat" d'une assignation contenu ↔ élève, dérivée des
+ * tableaux assignedStudentIds / assigned*Ids. Prête à devenir une vraie
+ * table de liaison Supabase `assignment` (studentId + contentType +
+ * contentId comme clé composite) le jour où les deux tableaux ne seront
+ * plus tenus manuellement en synchronisation côté client.
+ */
+export interface AdminAssignment {
+  id: string;
+  studentId: string;
+  contentType: AssignableContentType;
+  contentId: string;
+  assignedAt: string;
+}
+
+/**
+ * Paramètres du coach / de la marque, éditables sur /admin/parametres.
+ * Correspond à une future table Supabase `coach_settings` (une ligne par
+ * coach).
+ */
+export interface AdminCoachSettings {
+  coachName: string;
+  brandName: string;
+  email: string;
+  accentColor: string;
+  compactDisplay: boolean;
+  siteStatus: "en ligne" | "maintenance";
+  mockVersion: string;
+}

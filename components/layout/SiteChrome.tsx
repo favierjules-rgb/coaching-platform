@@ -12,6 +12,7 @@ const PRIVATE_PREFIXES = [
   "/nutrition",
   "/documents",
   "/profil",
+  "/admin",
 ];
 
 export function SiteChrome({ children }: { children: ReactNode }) {
