@@ -1,36 +1,31 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# coaching-platform
 
-## Getting Started
+Gestion de mon site internet — plateforme de coaching sportif premium (Seth — Préparation Physique).
 
-First, run the development server:
+Projet [Next.js](https://nextjs.org) (App Router) + TypeScript + Tailwind CSS v4.
+
+## État actuel
+
+Étape 1 : site public (page d'accueil) uniquement, avec données mockées.
+Pas encore développés : espace élève, espace admin, Supabase, Stripe, authentification réelle.
+
+## Démarrer en local
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Ouvrir [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Structure
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```
+app/              # Routes App Router (layout, page d'accueil, styles globaux)
+components/
+  layout/         # Header, Footer
+  sections/       # Sections de la page d'accueil (Hero, Method, Transformations, Newsletter)
+  ui/             # Petits composants réutilisables (Logo, SectionLabel)
+data/             # Données mockées (mock.ts)
+types/            # Types TypeScript partagés
+```
