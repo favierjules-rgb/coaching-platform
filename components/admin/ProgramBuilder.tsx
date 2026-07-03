@@ -1,13 +1,20 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowDown, ArrowUp, Copy, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, BarChart3, Copy, Plus, Trash2 } from "lucide-react";
 
 import { Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
 import { ExerciseSearchPicker } from "@/components/admin/ExerciseSearchPicker";
 import { PrimaryButton } from "@/components/admin/Modal";
+import { MuscleGroupBars, TrainingStatCards } from "@/components/shared/TrainingMetricsSummary";
 import { generateId, weekDays } from "@/lib/admin";
+import { calculateSessionMetrics, muscleGroupLabels, muscleGroupOrder } from "@/lib/training-metrics";
 import type { AdminContentStatus, AdminExercise, AdminWorkoutSession, ExerciseLibraryItem } from "@/types";
+
+const muscleGroupOptions = [
+  { value: "", label: "Hérité de la séance" },
+  ...muscleGroupOrder.map((group) => ({ value: group, label: muscleGroupLabels[group] })),
+];
 
 const statusOptions: { value: AdminContentStatus; label: string }[] = [
   { value: "brouillon", label: "Brouillon" },
@@ -122,6 +129,12 @@ function ExerciseRow({
         <Field label="Repos (s)" type="number" value={String(exercise.restSeconds)} onChange={(v) => onChange({ restSeconds: Number(v) || 0 })} />
         <Field label="Tempo" value={exercise.tempo} onChange={(v) => onChange({ tempo: v })} />
         <Field label="Lien vidéo" value={exercise.videoUrl} onChange={(v) => onChange({ videoUrl: v })} />
+        <SelectField
+          label="Groupe musculaire (analyse de charge)"
+          value={exercise.muscleGroup ?? ""}
+          onChange={(v) => onChange({ muscleGroup: v || undefined })}
+          options={muscleGroupOptions}
+        />
         <Field label="Notes" value={exercise.notes} onChange={(v) => onChange({ notes: v })} />
       </div>
     </div>
@@ -248,6 +261,30 @@ function DayCard({
               Ajouter un exercice vierge
             </button>
           </div>
+
+          {session.exercises.length > 0 && (
+            <div className="border border-border bg-background/40 p-4">
+              <h4 className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-foreground">
+                <BarChart3 size={14} className="text-primary" />
+                Analyse de la séance
+              </h4>
+              {(() => {
+                const metrics = calculateSessionMetrics(session);
+                return (
+                  <div className="flex flex-col gap-4">
+                    <TrainingStatCards
+                      totalSets={metrics.totalSets}
+                      totalVolume={metrics.totalVolume}
+                      totalTonnageKg={metrics.totalTonnageKg}
+                      hasEstimatedValues={metrics.hasEstimatedValues}
+                      hasNotCalculatedValues={metrics.hasNotCalculatedValues}
+                    />
+                    <MuscleGroupBars breakdown={metrics.muscleGroupBreakdown} />
+                  </div>
+                );
+              })()}
+            </div>
+          )}
         </div>
       )}
     </div>

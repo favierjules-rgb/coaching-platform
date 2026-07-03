@@ -8,8 +8,10 @@ import { ArrowLeft, Archive, Pencil } from "lucide-react";
 import { AssignStudentsModal } from "@/components/admin/AssignStudentsModal";
 import { ProgramBuilder, type ProgramBuilderData } from "@/components/admin/ProgramBuilder";
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
+import { MuscleGroupBars, TrainingStatCards } from "@/components/shared/TrainingMetricsSummary";
 import { useAdminData } from "@/hooks/useAdminData";
 import { contentStatusLabels, fullName, weekDays } from "@/lib/admin";
+import { calculateTrainingMetrics, calculateWeekMetrics, formatSets, formatTonnage, formatVolume, muscleGroupLabels } from "@/lib/training-metrics";
 
 export default function ProgramDetailPage() {
   const params = useParams<{ programId: string }>();
@@ -32,6 +34,8 @@ export default function ProgramDetailPage() {
 
   const weekNumbers = Array.from(new Set(program.sessions.map((s) => s.weekNumber))).sort((a, b) => a - b);
   const assignedStudents = state.students.filter((s) => program.assignedStudentIds.includes(s.id));
+  const programMetrics = calculateTrainingMetrics(program.sessions);
+  const weekMetricsList = weekNumbers.map((weekNumber) => calculateWeekMetrics(program.sessions, weekNumber));
 
   function handleSave(data: ProgramBuilderData) {
     updateProgram(program!.id, {
@@ -132,6 +136,55 @@ export default function ProgramDetailPage() {
               </div>
             </div>
             {program.description && <p className="mt-4 text-sm text-muted-foreground">{program.description}</p>}
+          </div>
+
+          <div className="mb-6 border border-border bg-card p-6">
+            <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">Analyse du programme</h2>
+            {weekNumbers.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Aucune séance planifiée pour le moment.</p>
+            ) : (
+              <div className="flex flex-col gap-6">
+                <TrainingStatCards
+                  totalSets={programMetrics.totalSets}
+                  totalVolume={programMetrics.totalVolume}
+                  totalTonnageKg={programMetrics.totalTonnageKg}
+                />
+
+                <div>
+                  <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                    Groupes musculaires les plus sollicités (programme entier)
+                  </h3>
+                  <MuscleGroupBars breakdown={programMetrics.muscleGroupBreakdown} />
+                </div>
+
+                <div>
+                  <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                    Comparaison semaine par semaine
+                  </h3>
+                  <div className="overflow-x-auto">
+                    <div className="flex gap-3">
+                      {weekMetricsList.map((week) => (
+                        <div key={week.weekNumber} className="w-44 flex-shrink-0 border border-border p-4">
+                          <span className="mb-2 block text-xs font-bold uppercase tracking-widest text-primary">
+                            Semaine {week.weekNumber}
+                          </span>
+                          <div className="flex flex-col gap-1.5 text-xs text-foreground">
+                            <span>{formatSets(week.totalSets)}</span>
+                            <span>{formatVolume(week.totalVolume)}</span>
+                            <span>{formatTonnage(week.totalTonnageKg)}</span>
+                          </div>
+                          {week.mostTrainedMuscleGroup && (
+                            <span className="mt-2 block border border-border px-2 py-1 text-center text-[10px] uppercase tracking-wide text-muted-foreground">
+                              {muscleGroupLabels[week.mostTrainedMuscleGroup]}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="mb-6 border border-border bg-card p-6">

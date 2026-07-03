@@ -84,6 +84,12 @@ export interface Exercise {
   tempo: string;
   recommendedLoad: string;
   videoUrl: string;
+  /**
+   * Groupe musculaire ciblé par cet exercice précis (voir MuscleGroup dans
+   * lib/training-metrics.ts). Optionnel : si absent, l'analyse de charge
+   * retombe sur le muscleGroups de la séance parente.
+   */
+  muscleGroup?: string;
 }
 
 export interface WorkoutSession {
@@ -615,6 +621,12 @@ export interface AdminExercise {
   recommendedLoad: string;
   videoUrl: string;
   notes: string;
+  /**
+   * Groupe musculaire ciblé par cet exercice précis (voir MuscleGroup dans
+   * lib/training-metrics.ts). Optionnel : si absent, l'analyse de charge
+   * retombe sur le muscleGroup de la séance parente.
+   */
+  muscleGroup?: string;
 }
 
 export interface AdminWorkoutSession {
@@ -933,3 +945,123 @@ export interface ProgramWeek {
  * semaine sans ses identifiants de position).
  */
 export type WorkoutSessionTemplate = Omit<AdminWorkoutSession, "id" | "programId" | "weekNumber" | "day">;
+
+/* ─── Analyse de charge d'entraînement (volume / séries / tonnage) ───
+ * Types consommés par lib/training-metrics.ts. Tout est calculé côté
+ * client à partir des programmes/séances mockés (et des retours élève
+ * déjà persistés côté admin) — rien n'est encore branché à Supabase, mais
+ * la forme est prête pour recevoir de vraies données de retour élève plus
+ * tard (voir PlannedVsActualTrainingMetrics).
+ */
+
+export type MuscleGroup =
+  | "pectoraux"
+  | "dos"
+  | "épaules"
+  | "biceps"
+  | "triceps"
+  | "quadriceps"
+  | "ischios"
+  | "fessiers"
+  | "mollets"
+  | "abdos"
+  | "lombaires"
+  | "cardio"
+  | "full-body"
+  | "autre";
+
+/**
+ * Type de charge d'un exercice, utilisé pour calculer un tonnage fiable :
+ * kg_per_dumbbell double la charge saisie (deux haltères), bodyweight /
+ * machine / assisted / other ne comptent pas de tonnage tant que le poids
+ * du corps ou la charge machine ne sont pas structurés (voir parseLoad).
+ */
+export type LoadType = "kg" | "kg_per_dumbbell" | "bodyweight" | "machine" | "assisted" | "other";
+
+/** Résultat de l'analyse d'une chaîne de charge libre (ex: "24 kg / haltère"). */
+export interface ParsedLoad {
+  loadType: LoadType;
+  /** Valeur telle que saisie (avant doublement pour kg_per_dumbbell), null si non chiffrable. */
+  valueKg: number | null;
+  isEstimate: boolean;
+}
+
+/** Métriques calculées pour un seul exercice au sein d'une séance. */
+export interface ExerciseMetrics {
+  exerciseId: string;
+  name: string;
+  muscleGroup: MuscleGroup;
+  sets: number;
+  averageReps: number;
+  /** volume = sets × averageReps, en répétitions totales. */
+  volume: number;
+  /** tonnage = sets × averageReps × charge effective (kg), 0 si notCalculated. */
+  tonnageKg: number;
+  loadType: LoadType;
+  /** true si reps/charge est une fourchette ou une estimation. */
+  isEstimate: boolean;
+  /** true si la charge n'est pas chiffrable (poids du corps, machine sans charge...). */
+  notCalculated: boolean;
+}
+
+export interface MuscleGroupVolume {
+  muscleGroup: MuscleGroup;
+  sets: number;
+  volume: number;
+  tonnageKg: number;
+}
+
+/** Métriques agrégées pour une séance entière. */
+export interface SessionMetrics {
+  sessionId: string;
+  totalSets: number;
+  totalVolume: number;
+  totalTonnageKg: number;
+  hasEstimatedValues: boolean;
+  hasNotCalculatedValues: boolean;
+  exercises: ExerciseMetrics[];
+  muscleGroupBreakdown: MuscleGroupVolume[];
+}
+
+/** Métriques agrégées pour toutes les séances d'une semaine de programme. */
+export interface WeekTrainingMetrics {
+  weekNumber: number;
+  sessionsCount: number;
+  totalSets: number;
+  totalVolume: number;
+  totalTonnageKg: number;
+  muscleGroupBreakdown: MuscleGroupVolume[];
+  mostTrainedMuscleGroup: MuscleGroup | null;
+  busiestDay: { day: string; sets: number } | null;
+}
+
+/** Métriques agrégées génériques (ex: programme entier, élève sur une période). */
+export interface TrainingMetrics {
+  totalSets: number;
+  totalVolume: number;
+  totalTonnageKg: number;
+  muscleGroupBreakdown: MuscleGroupVolume[];
+}
+
+/**
+ * Entrée de charge réellement effectuée par l'élève pour une série d'un
+ * exercice, telle qu'elle existe déjà dans AdminExerciseFeedbackEntry
+ * (retours consolidés côté admin) — réutilisée ici pour ne pas dupliquer
+ * la forme, seulement pour la lecture par lib/training-metrics.ts.
+ */
+export interface ActualSetEntry {
+  exerciseName: string;
+  setNumber: number;
+  loadUsed: string;
+  repsDone: string;
+}
+
+/** Comparaison volume/tonnage prévu (programme) vs réalisé (retour élève). */
+export interface PlannedVsActualTrainingMetrics {
+  planned: SessionMetrics;
+  /** null tant qu'aucun retour élève n'existe pour cette séance. */
+  actual: SessionMetrics | null;
+  volumeDeltaPercent: number | null;
+  tonnageDeltaKg: number | null;
+  tonnageDeltaPercent: number | null;
+}

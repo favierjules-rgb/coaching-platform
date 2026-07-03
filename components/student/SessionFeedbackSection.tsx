@@ -4,7 +4,9 @@ import { useState, type FormEvent } from "react";
 import { CheckCircle } from "lucide-react";
 
 import { ExerciseFeedbackCard } from "@/components/student/ExerciseFeedbackCard";
-import type { Exercise, ExerciseFeedback, WorkoutFeedback } from "@/types";
+import { TrainingStatCards } from "@/components/shared/TrainingMetricsSummary";
+import { calculatePlannedVsActualMetrics, formatTonnage } from "@/lib/training-metrics";
+import type { ActualSetEntry, Exercise, ExerciseFeedback, PlannedVsActualTrainingMetrics, WorkoutFeedback } from "@/types";
 
 const rpeOptions = Array.from({ length: 10 }, (_, index) => index + 1);
 
@@ -39,12 +41,14 @@ interface SessionFeedbackSectionProps {
   studentId: string;
   sessionId: string;
   exercises: Exercise[];
+  sessionMuscleGroup: string;
 }
 
 export function SessionFeedbackSection({
   studentId,
   sessionId,
   exercises,
+  sessionMuscleGroup,
 }: SessionFeedbackSectionProps) {
   const [exerciseFeedback, setExerciseFeedback] = useState(() =>
     buildInitialFeedback(exercises, studentId, sessionId),
@@ -54,6 +58,7 @@ export function SessionFeedbackSection({
   const [globalComment, setGlobalComment] = useState("");
   const [pain, setPain] = useState("");
   const [sent, setSent] = useState(false);
+  const [plannedVsActual, setPlannedVsActual] = useState<PlannedVsActualTrainingMetrics | null>(null);
 
   function handleSetChange(
     exerciseId: string,
@@ -106,20 +111,74 @@ export function SessionFeedbackSection({
     // Donnée mockée pour l'instant : aucun envoi réel n'est effectué.
     // La forme de `workoutFeedback` est prête à être envoyée à Supabase.
     console.log(workoutFeedback);
+
+    const actualEntries: ActualSetEntry[] = workoutFeedback.exercises.flatMap((exerciseFb) => {
+      const exercise = exercises.find((ex) => ex.id === exerciseFb.exerciseId);
+      if (!exercise) return [];
+      return exerciseFb.sets
+        .filter((set) => set.loadUsed.trim() || set.repsDone.trim())
+        .map((set) => ({
+          exerciseName: exercise.name,
+          setNumber: set.setNumber,
+          loadUsed: set.loadUsed,
+          repsDone: set.repsDone,
+        }));
+    });
+    setPlannedVsActual(
+      calculatePlannedVsActualMetrics({ id: sessionId, muscleGroup: sessionMuscleGroup, exercises }, actualEntries),
+    );
     setSent(true);
   }
 
   if (sent) {
     return (
-      <div className="border border-primary/30 bg-card p-8 text-center">
-        <CheckCircle size={32} className="mx-auto mb-3 text-primary" />
-        <h3 className="mb-1 font-heading text-base font-bold uppercase text-foreground">
-          Retour envoyé
-        </h3>
-        <p className="text-sm text-muted-foreground">
-          Ton coach recevra ton retour, exercice par exercice, avant la
-          prochaine séance.
-        </p>
+      <div className="flex flex-col gap-6">
+        <div className="border border-primary/30 bg-card p-8 text-center">
+          <CheckCircle size={32} className="mx-auto mb-3 text-primary" />
+          <h3 className="mb-1 font-heading text-base font-bold uppercase text-foreground">
+            Retour envoyé
+          </h3>
+          <p className="text-sm text-muted-foreground">
+            Ton coach recevra ton retour, exercice par exercice, avant la
+            prochaine séance.
+          </p>
+        </div>
+
+        {plannedVsActual?.actual && (
+          <div className="border border-border bg-card p-6">
+            <h3 className="mb-4 font-heading text-sm font-bold uppercase text-foreground">
+              Prévu vs réalisé
+            </h3>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="border border-border p-4">
+                <span className="mb-2 block text-[11px] uppercase tracking-widest text-muted-foreground">Prévu</span>
+                <TrainingStatCards
+                  totalSets={plannedVsActual.planned.totalSets}
+                  totalVolume={plannedVsActual.planned.totalVolume}
+                  totalTonnageKg={plannedVsActual.planned.totalTonnageKg}
+                />
+              </div>
+              <div className="border border-primary/40 p-4">
+                <span className="mb-2 block text-[11px] uppercase tracking-widest text-primary">Réalisé</span>
+                <TrainingStatCards
+                  totalSets={plannedVsActual.actual.totalSets}
+                  totalVolume={plannedVsActual.actual.totalVolume}
+                  totalTonnageKg={plannedVsActual.actual.totalTonnageKg}
+                />
+              </div>
+            </div>
+            {plannedVsActual.tonnageDeltaKg !== null && (
+              <p className="mt-4 text-sm text-foreground">
+                Tonnage réalisé : {formatTonnage(plannedVsActual.actual.totalTonnageKg)} / prévu :{" "}
+                {formatTonnage(plannedVsActual.planned.totalTonnageKg)}{" "}
+                <span className={plannedVsActual.tonnageDeltaKg >= 0 ? "text-green-400" : "text-red-400"}>
+                  ({plannedVsActual.tonnageDeltaKg >= 0 ? "+" : ""}
+                  {Math.round(plannedVsActual.tonnageDeltaKg).toLocaleString("fr-FR")} kg)
+                </span>
+              </p>
+            )}
+          </div>
+        )}
       </div>
     );
   }

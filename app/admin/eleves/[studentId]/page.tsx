@@ -2,7 +2,7 @@
 
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { AlertTriangle, ArrowLeft, Archive, Lock, Pause, Play, Unlock } from "lucide-react";
+import { Activity, AlertTriangle, ArrowLeft, Archive, Lock, Pause, Play, Unlock } from "lucide-react";
 
 import { AddCoachNoteModal } from "@/components/admin/AddCoachNoteModal";
 import { AdminSection, InfoRow, TagList } from "@/components/admin/AdminSection";
@@ -12,6 +12,7 @@ import { StatusBadge, feedbackStatusTone, studentStatusTone } from "@/components
 import { MeasurementsSection } from "@/components/student/MeasurementsSection";
 import { ProgressPhotoGallerySection } from "@/components/student/ProgressPhotoGallerySection";
 import { WeightEvolutionCard } from "@/components/student/WeightEvolutionCard";
+import { MuscleGroupBars, TrainingStatCards } from "@/components/shared/TrainingMetricsSummary";
 import { LINKED_STUDENT_ID } from "@/data/admin";
 import {
   bodyMeasurements as elveMeasurements,
@@ -24,6 +25,7 @@ import { useAdminData } from "@/hooks/useAdminData";
 import { useStudentProfile } from "@/hooks/useStudentProfile";
 import {
   computeDocumentAvailability,
+  daysBetween,
   feedbackStatusLabels,
   feedbackTypeLabels,
   formatDate,
@@ -33,6 +35,7 @@ import {
   studentStatusLabels,
 } from "@/lib/admin";
 import { nextWeightHistoryMonth } from "@/lib/profile";
+import { calculatePlannedVsActualMetrics, calculateWeekMetrics, formatTonnage } from "@/lib/training-metrics";
 import type { BodyMeasurementType, ProgressPhoto } from "@/types";
 import type { CustomMeasurementInput } from "@/components/student/UpdateMeasurementsModal";
 
@@ -168,6 +171,24 @@ export default function AdminStudentDetailPage() {
   const studentFeedback = feedback
     .filter((f) => f.studentId === student.id)
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  const currentWeekNumber = assignedProgram
+    ? Math.min(assignedProgram.durationWeeks, Math.max(1, Math.floor(daysBetween(student.startDate) / 7) + 1))
+    : 1;
+  const currentWeekMetrics = assignedProgram ? calculateWeekMetrics(assignedProgram.sessions, currentWeekNumber) : null;
+
+  const trainingFeedback = studentFeedback.filter((f) => f.type === "entrainement" && f.exerciseEntries.length > 0);
+  const lastCompletedSession = trainingFeedback[0];
+  const matchingPlannedSession =
+    assignedProgram && lastCompletedSession
+      ? assignedProgram.sessions.find(
+          (s) => !s.isRestDay && s.name.toLowerCase() === lastCompletedSession.refLabel.toLowerCase(),
+        )
+      : undefined;
+  const plannedVsActual =
+    matchingPlannedSession && lastCompletedSession
+      ? calculatePlannedVsActualMetrics(matchingPlannedSession, lastCompletedSession.exerciseEntries)
+      : null;
 
   return (
     <div>
@@ -425,6 +446,85 @@ export default function AdminStudentDetailPage() {
                 {f.comment && <p className="mt-2 text-sm text-foreground">{f.comment}</p>}
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      <div className="mb-6 border border-border bg-card p-6">
+        <h2 className="mb-4 flex items-center gap-2 font-heading text-lg font-bold uppercase text-foreground">
+          <Activity size={18} className="text-primary" />
+          Charge d&apos;entraînement de l&apos;élève
+        </h2>
+        {!assignedProgram || !currentWeekMetrics ? (
+          <p className="text-sm text-muted-foreground">Aucun programme attribué — pas de données de charge à afficher.</p>
+        ) : (
+          <div className="flex flex-col gap-6">
+            <div>
+              <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                Semaine {currentWeekNumber} (actuelle)
+              </h3>
+              <TrainingStatCards
+                totalSets={currentWeekMetrics.totalSets}
+                totalVolume={currentWeekMetrics.totalVolume}
+                totalTonnageKg={currentWeekMetrics.totalTonnageKg}
+              />
+            </div>
+
+            <div>
+              <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                Séries par groupe musculaire (semaine actuelle)
+              </h3>
+              <MuscleGroupBars breakdown={currentWeekMetrics.muscleGroupBreakdown} />
+            </div>
+
+            <div>
+              <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                Dernière séance réalisée
+              </h3>
+              {lastCompletedSession ? (
+                <p className="text-sm text-foreground">
+                  {lastCompletedSession.refLabel} · {formatDate(lastCompletedSession.date)}
+                </p>
+              ) : (
+                <p className="text-sm text-muted-foreground">Aucun retour d&apos;entraînement enregistré pour le moment.</p>
+              )}
+            </div>
+
+            {plannedVsActual?.actual && (
+              <div>
+                <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                  Prévu vs réalisé — {lastCompletedSession?.refLabel}
+                </h3>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="border border-border p-4">
+                    <span className="mb-2 block text-[11px] uppercase tracking-widest text-muted-foreground">Prévu</span>
+                    <TrainingStatCards
+                      totalSets={plannedVsActual.planned.totalSets}
+                      totalVolume={plannedVsActual.planned.totalVolume}
+                      totalTonnageKg={plannedVsActual.planned.totalTonnageKg}
+                    />
+                  </div>
+                  <div className="border border-primary/40 p-4">
+                    <span className="mb-2 block text-[11px] uppercase tracking-widest text-primary">Réalisé</span>
+                    <TrainingStatCards
+                      totalSets={plannedVsActual.actual.totalSets}
+                      totalVolume={plannedVsActual.actual.totalVolume}
+                      totalTonnageKg={plannedVsActual.actual.totalTonnageKg}
+                    />
+                  </div>
+                </div>
+                {plannedVsActual.tonnageDeltaKg !== null && (
+                  <p className="mt-3 text-sm text-foreground">
+                    Tonnage réalisé : {formatTonnage(plannedVsActual.actual.totalTonnageKg)} / prévu :{" "}
+                    {formatTonnage(plannedVsActual.planned.totalTonnageKg)}{" "}
+                    <span className={plannedVsActual.tonnageDeltaKg >= 0 ? "text-green-400" : "text-red-400"}>
+                      ({plannedVsActual.tonnageDeltaKg >= 0 ? "+" : ""}
+                      {Math.round(plannedVsActual.tonnageDeltaKg).toLocaleString("fr-FR")} kg)
+                    </span>
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
