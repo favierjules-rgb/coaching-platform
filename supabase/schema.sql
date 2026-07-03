@@ -47,7 +47,7 @@ $$;
 create table if not exists public.profiles (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null unique references auth.users (id) on delete cascade,
-  role text not null check (role in ('eleve', 'coach', 'admin')),
+  role text not null check (role in ('admin', 'coach', 'student')),
   first_name text not null default '',
   last_name text not null default '',
   email text not null default '',
@@ -55,6 +55,13 @@ create table if not exists public.profiles (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- Si ce schéma avait déjà été exécuté avant l'étape "supabase-auth" (avec
+-- l'ancienne contrainte role in ('eleve', 'coach', 'admin')), la met à jour
+-- pour matcher le type UserRole = "admin" | "coach" | "student" du code
+-- TypeScript — sans effet si la table vient d'être créée ci-dessus.
+alter table public.profiles drop constraint if exists profiles_role_check;
+alter table public.profiles add constraint profiles_role_check check (role in ('admin', 'coach', 'student'));
 
 -- ============================================================================
 -- 2. coaches — fiche coach (extension de profiles pour le rôle coach/admin).

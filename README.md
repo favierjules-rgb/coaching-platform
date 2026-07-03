@@ -6,8 +6,8 @@ Projet [Next.js](https://nextjs.org) (App Router) + TypeScript + Tailwind CSS v4
 
 ## État actuel
 
-Site public + espace élève + espace admin fonctionnels, entièrement en **mock/localStorage** (aucune donnée ne quitte le navigateur). La configuration Supabase (clients, schéma SQL) est présente dans le repo mais **pas encore branchée** aux pages — voir [Connexion Supabase](#connexion-supabase) ci-dessous.
-Pas encore développés : authentification réelle, Stripe, migration effective des pages vers Supabase.
+Site public + espace élève + espace admin fonctionnels, avec toutes les **données** encore en **mock/localStorage** (aucune donnée métier ne quitte le navigateur). L'**authentification** (Supabase Auth, rôles admin/coach/student, protection des routes) est en revanche réellement branchée — voir [Authentification](#authentification) ci-dessous — mais reste elle aussi optionnelle : sans configuration Supabase, l'application tourne en mode mock (accès libre, comme avant).
+Pas encore développés : Stripe, migration effective des données métier (programmes, nutrition, documents, photos, paiements, retours) vers Supabase.
 
 ## Démarrer en local
 
@@ -82,6 +82,58 @@ Une fois le schéma appliqué, régénérer `types/supabase.ts` avec le [CLI Sup
 npx supabase gen types typescript --project-id <project-id> > types/supabase.ts
 ```
 
-### Prochaine étape
+### Prochaine étape (données)
 
-Brancher progressivement chaque page mock sur ces tables, une section à la fois (en commençant probablement par `/profil` et `/admin/eleves`), en gardant le fallback localStorage tant que la migration d'une section n'est pas terminée et vérifiée.
+Brancher progressivement chaque page mock sur ces tables, une section à la fois (en commençant probablement par `/profil` et `/admin/eleves`), en gardant le fallback localStorage tant que la migration d'une section n'est pas terminée et vérifiée. Aucune des données métier (programmes, nutrition, documents, photos, paiements, retours) n'est encore migrée à ce stade — seule l'authentification l'est (voir ci-dessous).
+
+## Authentification
+
+Supabase Auth est branché pour distinguer trois rôles — `admin`, `coach`, `student` (type `UserRole`, `types/index.ts`) — avec redirections et protection de routes. **Sans configuration Supabase, tout reste en accès libre comme avant** (mode mock) : rien de ce qui suit ne bloque le développement tant que `.env.local` n'est pas renseigné.
+
+### Pages
+
+- **`/connexion`** — email + mot de passe, erreurs traduites en français, état de chargement. Redirige vers `/admin` (admin/coach) ou `/dashboard` (student) selon le rôle lu dans `profiles`. Si Supabase n'est pas configuré, affiche à la place deux boutons "mode test" (`Connexion mock élève` / `Connexion mock coach/admin`) qui naviguent directement sans session réelle.
+- **`/inscription`** — volontairement pas un vrai formulaire : un élève ne doit jamais pouvoir s'auto-créer un compte actif sans validation du coach. Affiche juste "Demander un accès" avec un renvoi vers le coach.
+- **`/acces-refuse`** — affichée quand un compte authentifié mais sans les droits nécessaires (ex : un student qui tente `/admin`) essaie d'accéder à une page protégée.
+
+### Rôles et helpers (`lib/supabase/auth.ts`)
+
+Server-only (Server Components/Actions uniquement) :
+
+- `getCurrentUser()` — utilisateur Supabase Auth connecté, ou `null`.
+- `getCurrentProfile()` / `getProfileByUserId(userId)` — ligne `profiles` correspondante, ou `null` si elle n'existe pas encore (ex : compte créé mais pas encore validé par le coach) — ne plante jamais.
+- `getCurrentUserRole()` — `UserRole | null`.
+- `isAdminOrCoach()` / `isStudent()` — booléens pratiques.
+
+### Protection des routes (`lib/supabase/guards.ts`)
+
+Appelées en tête de `app/admin/layout.tsx` et `app/(student)/layout.tsx` :
+
+- `requireAuth()` — redirige vers `/connexion` si personne n'est connecté.
+- `requireAdminOrCoach()` — utilisé par l'espace admin ; redirige un student (ou un compte sans profil) vers `/acces-refuse`.
+- `requireStudent()` — utilisé par l'espace élève ; n'exige qu'une authentification (pas un rôle "student" strict), pour que le lien "Espace élève" du menu admin continue de fonctionner pour un coach qui prévisualise.
+
+**Toutes ces guards deviennent des no-op tant que Supabase n'est pas configuré** (`isSupabaseConfigured()`, `lib/supabase/env.ts`) : le mode mock actuel (accès libre à tout) est intégralement préservé.
+
+### Déconnexion
+
+`components/auth/SignOutButton.tsx`, déjà câblé dans la sidebar élève et la sidebar admin — coupe la session Supabase (si configuré) puis redirige vers `/connexion`.
+
+### Créer les premiers utilisateurs
+
+Il n'y a pas encore d'inscription automatisée : les comptes se créent à la main pendant cette phase de transition.
+
+1. Dashboard Supabase → **Authentication → Users → Add user** (ou **Invite user**) : créer un compte avec un email + mot de passe.
+2. Copier son **User UID**.
+3. Ajouter une ligne dans `profiles` avec ce `user_id` et le rôle voulu — voir l'exemple prêt à l'emploi dans [`supabase/seed-auth-example.sql`](./supabase/seed-auth-example.sql) :
+
+```sql
+insert into public.profiles (user_id, role, first_name, last_name, email)
+values ('UUID_AUTH_USER_ICI', 'admin', 'Jules', 'Favier', 'ton-email@example.com');
+```
+
+Aucune vraie clé ni aucun vrai mot de passe ne doit être commité dans le repo — seul le `user_id` (un UUID, pas un secret) apparaît dans ce type de requête.
+
+### Prochaine étape (auth)
+
+Migrer les données métier (élèves, programmes...) vers Supabase en réutilisant `students.user_id` pour relier un compte `auth.users`/`profiles` à sa fiche élève complète ; envisager un `proxy.ts` (middleware) dédié si le rafraîchissement de session devient nécessaire en usage prolongé (actuellement géré au cas par cas par chaque guard via `getUser()`).
