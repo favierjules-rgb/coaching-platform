@@ -7,11 +7,11 @@ import {
   Dumbbell,
   FileText,
   LayoutDashboard,
-  LogOut,
   User,
   X,
 } from "lucide-react";
 
+import { SignOutButton } from "@/components/auth/SignOutButton";
 import { Logo } from "@/components/ui/Logo";
 
 const studentLinks = [
@@ -71,14 +71,10 @@ export function StudentSidebar({
       </nav>
 
       <div className="border-t border-border p-3">
-        <Link
-          href="/"
-          onClick={onNavigate}
-          className="flex items-center gap-3 px-4 py-3 text-sm text-muted-foreground transition-colors hover:text-primary"
-        >
-          <LogOut size={18} />
-          Déconnexion
-        </Link>
+        <SignOutButton
+          onBeforeNavigate={onNavigate}
+          className="flex w-full items-center gap-3 px-4 py-3 text-sm text-muted-foreground transition-colors hover:text-primary"
+        />
       </div>
     </div>
   );

@@ -14,6 +14,7 @@ import {
   X,
 } from "lucide-react";
 
+import { SignOutButton } from "@/components/auth/SignOutButton";
 import { Logo } from "@/components/ui/Logo";
 
 const adminLinks = [
@@ -84,6 +85,10 @@ export function AdminSidebar({ mobile = false, onNavigate }: AdminSidebarProps) 
           <ArrowLeft size={18} />
           Espace élève
         </Link>
+        <SignOutButton
+          onBeforeNavigate={onNavigate}
+          className="flex w-full items-center gap-3 px-4 py-3 text-sm text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"
+        />
       </div>
     </div>
   );

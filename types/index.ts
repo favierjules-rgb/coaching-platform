@@ -24,7 +24,27 @@ export interface NewsletterGoalOption {
   label: string;
 }
 
-export type UserRole = "visitor" | "student" | "admin";
+/* ─── Authentification (Supabase Auth) ───
+ * Types côté application pour l'authentification et les rôles, distincts
+ * du schéma SQL brut (voir supabase/schema.sql, table `profiles`, et
+ * types/supabase.ts pour la forme exacte des lignes retournées par le
+ * client Supabase) — lib/supabase/auth.ts fait la conversion entre les
+ * deux (snake_case DB -> camelCase ici).
+ */
+export type UserRole = "admin" | "coach" | "student";
+
+/** Correspond à une ligne de la table Supabase `profiles`. */
+export interface AuthProfile {
+  id: string;
+  userId: string;
+  role: UserRole;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  createdAt: string;
+  updatedAt: string;
+}
 
 export type CoachingStatus = "actif" | "pause" | "terminé";
 

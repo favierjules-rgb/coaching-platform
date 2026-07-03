@@ -1,17 +1,13 @@
 import type { ReactNode } from "react";
 
-import { AccessRestricted } from "@/components/student/AccessRestricted";
 import { StudentShell } from "@/components/student/StudentShell";
-import { currentUserRole } from "@/data/session";
+import { requireStudent } from "@/lib/supabase/guards";
 
-export default function StudentAreaLayout({
+export default async function StudentAreaLayout({
   children,
 }: {
   children: ReactNode;
 }) {
-  if (currentUserRole !== "student") {
-    return <AccessRestricted />;
-  }
-
+  await requireStudent();
   return <StudentShell>{children}</StudentShell>;
 }
