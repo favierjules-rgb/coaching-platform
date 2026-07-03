@@ -80,10 +80,34 @@ function readRaw(): string | null {
   }
 }
 
+/**
+ * Fusionne un état lu depuis localStorage avec les valeurs par défaut (seed)
+ * pour toute clé manquante ou partielle — migration douce pour les anciennes
+ * versions du state (avant l'ajout de exerciseLibrary/coaches/appearance-
+ * Settings/securitySettings/manualDocumentUnlocks) qui plantaient sinon en
+ * lisant des champs undefined (ex : state.appearanceSettings.accentColor).
+ * Prépare aussi le terrain pour une future migration Supabase.
+ */
+function normalizeState(parsed: Partial<AdminDataState> | null | undefined): AdminDataState {
+  return {
+    students: parsed?.students ?? seed.students,
+    programs: parsed?.programs ?? seed.programs,
+    nutritionPlans: parsed?.nutritionPlans ?? seed.nutritionPlans,
+    documents: parsed?.documents ?? seed.documents,
+    feedback: parsed?.feedback ?? seed.feedback,
+    exerciseLibrary: parsed?.exerciseLibrary ?? seed.exerciseLibrary,
+    manualDocumentUnlocks: parsed?.manualDocumentUnlocks ?? seed.manualDocumentUnlocks,
+    coaches: parsed?.coaches ?? seed.coaches,
+    coachSettings: { ...seed.coachSettings, ...parsed?.coachSettings },
+    appearanceSettings: { ...seed.appearanceSettings, ...parsed?.appearanceSettings },
+    securitySettings: { ...seed.securitySettings, ...parsed?.securitySettings },
+  };
+}
+
 function parseState(raw: string | null): AdminDataState | null {
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as AdminDataState;
+    return normalizeState(JSON.parse(raw) as Partial<AdminDataState>);
   } catch {
     return null;
   }

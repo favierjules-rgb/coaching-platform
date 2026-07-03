@@ -10,11 +10,12 @@ import { useAdminData } from "@/hooks/useAdminData";
 export function AdminShell({ children }: { children: ReactNode }) {
   const [sideOpen, setSideOpen] = useState(false);
   const { state } = useAdminData();
+  const accentColor = state.appearanceSettings?.accentColor ?? "#d62828";
 
   return (
     <div
       className="flex min-h-screen bg-background"
-      style={{ "--primary": state.appearanceSettings.accentColor } as CSSProperties}
+      style={{ "--primary": accentColor } as CSSProperties}
     >
       <div className="hidden lg:flex">
         <AdminSidebar />
