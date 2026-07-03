@@ -89,6 +89,8 @@ export interface WeightEvolution {
   targetWeightKg: number;
   deltaFromStartKg: number;
   progressPercent: number;
+  /** false si on n'a ni historique de poids ni poids actuel exploitable. */
+  hasData: boolean;
 }
 
 /**
@@ -112,13 +114,23 @@ function computeProgressPercent(
   return Math.max(0, Math.min(100, Math.round(raw)));
 }
 
+/**
+ * Calcule l'évolution de poids à partir de l'historique et du profil élève.
+ * Totalement défensif : certains profils élèves admin peuvent avoir un
+ * historique undefined/vide, ou un profil incomplet (startWeightKg,
+ * currentWeightKg, targetWeightKg absents) — cette fonction ne doit jamais
+ * planter la page détail élève, quelle que soit la forme des données.
+ */
 export function computeWeightEvolution(
-  history: WeightEntry[],
-  profile: StudentProfile,
+  history: WeightEntry[] | null | undefined,
+  profile: (StudentProfile & { startWeightKg?: number }) | null | undefined,
 ): WeightEvolution {
-  const startWeightKg = history[0]?.kg ?? profile.currentWeightKg;
-  const currentWeightKg = profile.currentWeightKg;
-  const targetWeightKg = profile.targetWeightKg;
+  const safeHistory = Array.isArray(history) ? history : [];
+  const currentWeightKg =
+    profile?.currentWeightKg ?? profile?.startWeightKg ?? safeHistory[0]?.kg ?? 0;
+  const startWeightKg =
+    safeHistory[0]?.kg ?? profile?.startWeightKg ?? profile?.currentWeightKg ?? 0;
+  const targetWeightKg = profile?.targetWeightKg ?? currentWeightKg;
 
   const deltaFromStartKg =
     Math.round((currentWeightKg - startWeightKg) * 10) / 10;
@@ -129,12 +141,15 @@ export function computeWeightEvolution(
     targetWeightKg,
   );
 
+  const hasData = safeHistory.length > 0 || Boolean(profile?.currentWeightKg);
+
   return {
     startWeightKg,
     currentWeightKg,
     targetWeightKg,
     deltaFromStartKg,
     progressPercent,
+    hasData,
   };
 }
 

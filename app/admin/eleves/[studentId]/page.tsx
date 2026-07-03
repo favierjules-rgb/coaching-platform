@@ -95,6 +95,10 @@ export default function AdminStudentDetailPage() {
         heightCm: student.heightCm,
         currentWeightKg: student.currentWeightKg,
         targetWeightKg: student.targetWeightKg,
+        // Champ additionnel (absent de StudentProfile) utilisé en repli par
+        // computeWeightEvolution quand l'élève n'a pas encore d'historique
+        // de poids valide.
+        startWeightKg: student.startWeightKg,
         trainingFrequencyPerWeek: student.trainingFrequencyPerWeek,
         trainingLocation: student.trainingLocation,
         coachingStatus: student.status,
@@ -109,7 +113,8 @@ export default function AdminStudentDetailPage() {
       linkedProfile.updateWeight(weightKg);
       return;
     }
-    const newHistory = [...student!.weightHistory, { month: nextWeightHistoryMonth(student!.weightHistory), kg: weightKg }];
+    const currentHistory = Array.isArray(student!.weightHistory) ? student!.weightHistory : [];
+    const newHistory = [...currentHistory, { month: nextWeightHistoryMonth(currentHistory), kg: weightKg }];
     updateStudent(student!.id, { currentWeightKg: weightKg, weightHistory: newHistory });
   }
 
