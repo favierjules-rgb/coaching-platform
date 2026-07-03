@@ -6,10 +6,17 @@ import { ArrowDown, ArrowUp, BarChart3, Copy, Plus, Trash2 } from "lucide-react"
 import { Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
 import { ExerciseSearchPicker } from "@/components/admin/ExerciseSearchPicker";
 import { PrimaryButton } from "@/components/admin/Modal";
-import { MuscleGroupBars, TrainingStatCards } from "@/components/shared/TrainingMetricsSummary";
+import {
+  AnalysisFilterLabel,
+  FilteredExerciseList,
+  MuscleGroupBars,
+  MuscleGroupFilterSelect,
+  TrainingStatCards,
+  UntaggedExercisesAlert,
+} from "@/components/shared/TrainingMetricsSummary";
 import { generateId, weekDays } from "@/lib/admin";
 import { calculateSessionMetrics, muscleGroupLabels, muscleGroupOrder } from "@/lib/training-metrics";
-import type { AdminContentStatus, AdminExercise, AdminWorkoutSession, ExerciseLibraryItem } from "@/types";
+import type { AdminContentStatus, AdminExercise, AdminWorkoutSession, ExerciseLibraryItem, MuscleGroupFilter } from "@/types";
 
 const muscleGroupOptions = [
   { value: "", label: "Hérité de la séance" },
@@ -154,6 +161,8 @@ function DayCard({
   onUpdate: (updated: AdminWorkoutSession) => void;
   onDuplicate: () => void;
 }) {
+  const [selectedMuscleGroup, setSelectedMuscleGroup] = useState<MuscleGroupFilter>("tous");
+
   function toggleRest() {
     if (session.isRestDay) {
       onUpdate({ ...session, isRestDay: false, name: "" });
@@ -269,9 +278,12 @@ function DayCard({
                 Analyse de la séance
               </h4>
               {(() => {
-                const metrics = calculateSessionMetrics(session);
+                const metrics = calculateSessionMetrics(session, selectedMuscleGroup);
                 return (
                   <div className="flex flex-col gap-4">
+                    <MuscleGroupFilterSelect value={selectedMuscleGroup} onChange={setSelectedMuscleGroup} />
+                    <UntaggedExercisesAlert show={metrics.hasUntaggedExercises} />
+                    <AnalysisFilterLabel selected={selectedMuscleGroup} />
                     <TrainingStatCards
                       totalSets={metrics.totalSets}
                       totalVolume={metrics.totalVolume}
@@ -279,7 +291,11 @@ function DayCard({
                       hasEstimatedValues={metrics.hasEstimatedValues}
                       hasNotCalculatedValues={metrics.hasNotCalculatedValues}
                     />
-                    <MuscleGroupBars breakdown={metrics.muscleGroupBreakdown} />
+                    {selectedMuscleGroup === "tous" ? (
+                      <MuscleGroupBars breakdown={metrics.muscleGroupBreakdown} />
+                    ) : (
+                      <FilteredExerciseList exercises={metrics.exercises} />
+                    )}
                   </div>
                 );
               })()}

@@ -26,6 +26,7 @@ import type {
   BodyMeasurement,
   BodyMeasurementType,
   ExerciseLibraryItem,
+  MuscleGroup,
   ProgressPhoto,
   StudentDocumentUnlock,
   WeightEntry,
@@ -40,6 +41,13 @@ import type {
  */
 export const LINKED_STUDENT_ID = linkedStudentSeed.id;
 
+// Compteur global : le même exercice (même order + même nom) revient
+// souvent d'une semaine à l'autre dans un programme, un id dérivé de
+// order+nom seul entrerait donc en collision entre séances (clés React
+// dupliquées dès qu'une vue agrège des exercices de plusieurs séances,
+// ex: l'analyse de programme filtrée par groupe musculaire).
+let exerciseIdCounter = 0;
+
 function exercise(
   order: number,
   name: string,
@@ -48,11 +56,13 @@ function exercise(
   restSeconds: number,
   tempo: string,
   recommendedLoad: string,
+  muscleGroup: MuscleGroup,
   notes = "",
   videoUrl = "https://videos.seth-coaching.mock/exercices/demo.mp4",
 ): AdminExercise {
+  exerciseIdCounter += 1;
   return {
-    id: `ex-${order}-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+    id: `ex-${exerciseIdCounter}-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
     order,
     name,
     sets,
@@ -60,6 +70,7 @@ function exercise(
     restSeconds,
     tempo,
     recommendedLoad,
+    muscleGroup,
     videoUrl,
     notes,
   };
@@ -117,7 +128,7 @@ export const adminExerciseLibrary: ExerciseLibraryItem[] = [
   {
     id: "lib-developpe-couche",
     name: "Développé couché barre",
-    muscleGroup: "Pectoraux",
+    muscleGroup: "pectoraux",
     category: "push",
     equipment: "barre",
     level: "intermédiaire",
@@ -131,7 +142,7 @@ export const adminExerciseLibrary: ExerciseLibraryItem[] = [
   {
     id: "lib-squat-barre",
     name: "Squat barre",
-    muscleGroup: "Quadriceps",
+    muscleGroup: "quadriceps",
     category: "legs",
     equipment: "barre",
     level: "intermédiaire",
@@ -145,7 +156,7 @@ export const adminExerciseLibrary: ExerciseLibraryItem[] = [
   {
     id: "lib-tractions",
     name: "Tractions lestées",
-    muscleGroup: "Dos",
+    muscleGroup: "dos",
     category: "pull",
     equipment: "poids du corps",
     level: "avancé",
@@ -159,7 +170,7 @@ export const adminExerciseLibrary: ExerciseLibraryItem[] = [
   {
     id: "lib-rowing-barre",
     name: "Rowing barre",
-    muscleGroup: "Dos",
+    muscleGroup: "dos",
     category: "pull",
     equipment: "barre",
     level: "intermédiaire",
@@ -173,7 +184,7 @@ export const adminExerciseLibrary: ExerciseLibraryItem[] = [
   {
     id: "lib-developpe-militaire",
     name: "Développé militaire barre",
-    muscleGroup: "Épaules",
+    muscleGroup: "épaules",
     category: "push",
     equipment: "barre",
     level: "intermédiaire",
@@ -187,7 +198,7 @@ export const adminExerciseLibrary: ExerciseLibraryItem[] = [
   {
     id: "lib-elevations-laterales",
     name: "Élévations latérales",
-    muscleGroup: "Épaules",
+    muscleGroup: "épaules",
     category: "push",
     equipment: "haltères",
     level: "débutant",
@@ -201,7 +212,7 @@ export const adminExerciseLibrary: ExerciseLibraryItem[] = [
   {
     id: "lib-fentes-marchees",
     name: "Fentes marchées haltères",
-    muscleGroup: "Jambes",
+    muscleGroup: "quadriceps",
     category: "legs",
     equipment: "haltères",
     level: "intermédiaire",
@@ -215,7 +226,7 @@ export const adminExerciseLibrary: ExerciseLibraryItem[] = [
   {
     id: "lib-gainage-planche",
     name: "Gainage planche",
-    muscleGroup: "Sangle abdominale",
+    muscleGroup: "abdos",
     category: "abdos",
     equipment: "poids du corps",
     level: "débutant",
@@ -229,7 +240,7 @@ export const adminExerciseLibrary: ExerciseLibraryItem[] = [
   {
     id: "lib-corde-a-sauter",
     name: "Corde à sauter",
-    muscleGroup: "Cardio",
+    muscleGroup: "cardio",
     category: "cardio",
     equipment: "autre",
     level: "débutant",
@@ -243,7 +254,7 @@ export const adminExerciseLibrary: ExerciseLibraryItem[] = [
   {
     id: "lib-mobilite-epaule",
     name: "Rotations d'épaules élastique",
-    muscleGroup: "Épaules",
+    muscleGroup: "épaules",
     category: "mobilité",
     equipment: "élastique",
     level: "débutant",
@@ -280,9 +291,9 @@ export const adminPrograms: AdminProgram[] = [
         "5 min vélo + mobilité épaules et poignets avec bande élastique.",
         "Concentre-toi sur l'amplitude complète au développé couché.",
         [
-          exercise(1, "Développé couché barre", 4, "8-10", 90, "2-0-1-0", "60 kg"),
-          exercise(2, "Développé incliné haltères", 4, "10-12", 75, "2-0-1-0", "24 kg / haltère"),
-          exercise(3, "Extension triceps poulie haute", 3, "12-15", 60, "2-0-1-0", "25 kg"),
+          exercise(1, "Développé couché barre", 4, "8-10", 90, "2-0-1-0", "60 kg", "pectoraux"),
+          exercise(2, "Développé incliné haltères", 4, "10-12", 75, "2-0-1-0", "24 kg / haltère", "pectoraux"),
+          exercise(3, "Extension triceps poulie haute", 3, "12-15", 60, "2-0-1-0", "25 kg", "triceps"),
         ],
       ),
       restDay("sess-masse-s1-mar", 1, "Mardi"),
@@ -296,9 +307,9 @@ export const adminPrograms: AdminProgram[] = [
         "5 min rameur + mobilité hanches.",
         "Squat prioritaire, garder le dos neutre.",
         [
-          exercise(1, "Squat barre", 4, "6-8", 120, "3-0-1-0", "80 kg"),
-          exercise(2, "Fentes marchées haltères", 3, "10-12", 75, "2-0-1-0", "16 kg / haltère"),
-          exercise(3, "Leg curl allongé", 3, "12-15", 60, "2-0-1-1", "35 kg"),
+          exercise(1, "Squat barre", 4, "6-8", 120, "3-0-1-0", "80 kg", "quadriceps"),
+          exercise(2, "Fentes marchées haltères", 3, "10-12", 75, "2-0-1-0", "16 kg / haltère", "quadriceps"),
+          exercise(3, "Leg curl allongé", 3, "12-15", 60, "2-0-1-1", "35 kg", "ischios"),
         ],
       ),
       restDay("sess-masse-s1-jeu", 1, "Jeudi"),
@@ -312,8 +323,8 @@ export const adminPrograms: AdminProgram[] = [
         "5 min vélo + rotations d'épaules.",
         "",
         [
-          exercise(1, "Développé militaire barre", 4, "8-10", 90, "2-0-1-0", "40 kg"),
-          exercise(2, "Élévations latérales", 3, "12-15", 60, "2-0-1-1", "8 kg / haltère"),
+          exercise(1, "Développé militaire barre", 4, "8-10", 90, "2-0-1-0", "40 kg", "épaules"),
+          exercise(2, "Élévations latérales", 3, "12-15", 60, "2-0-1-1", "8 kg / haltère", "épaules"),
         ],
       ),
       session(
@@ -326,9 +337,9 @@ export const adminPrograms: AdminProgram[] = [
         "5 min rameur.",
         "",
         [
-          exercise(1, "Tractions lestées", 4, "6-8", 90, "2-0-1-0", "+5 kg"),
-          exercise(2, "Rowing barre", 4, "8-10", 90, "2-0-1-0", "60 kg"),
-          exercise(3, "Curl biceps barre EZ", 3, "10-12", 60, "2-0-1-0", "25 kg"),
+          exercise(1, "Tractions lestées", 4, "6-8", 90, "2-0-1-0", "+5 kg", "dos"),
+          exercise(2, "Rowing barre", 4, "8-10", 90, "2-0-1-0", "60 kg", "dos"),
+          exercise(3, "Curl biceps barre EZ", 3, "10-12", 60, "2-0-1-0", "25 kg", "biceps"),
         ],
       ),
       restDay("sess-masse-s1-dim", 1, "Dimanche"),
@@ -342,8 +353,8 @@ export const adminPrograms: AdminProgram[] = [
         "5 min vélo + mobilité épaules.",
         "Charge +2,5 kg par rapport à la semaine 1 si RPE ≤ 8.",
         [
-          exercise(1, "Développé couché barre", 4, "8-10", 90, "2-0-1-0", "62.5 kg"),
-          exercise(2, "Développé incliné haltères", 4, "10-12", 75, "2-0-1-0", "25 kg / haltère"),
+          exercise(1, "Développé couché barre", 4, "8-10", 90, "2-0-1-0", "62.5 kg", "pectoraux"),
+          exercise(2, "Développé incliné haltères", 4, "10-12", 75, "2-0-1-0", "25 kg / haltère", "pectoraux"),
         ],
       ),
     ]),
@@ -371,8 +382,8 @@ export const adminPrograms: AdminProgram[] = [
         "5 min corde à sauter.",
         "Repos courts, garder le rythme cardiaque élevé.",
         [
-          exercise(1, "Squat gobelet", 3, "12-15", 45, "2-0-1-0", "20 kg"),
-          exercise(2, "Développé couché haltères", 3, "12-15", 45, "2-0-1-0", "16 kg / haltère"),
+          exercise(1, "Squat gobelet", 3, "12-15", 45, "2-0-1-0", "20 kg", "quadriceps"),
+          exercise(2, "Développé couché haltères", 3, "12-15", 45, "2-0-1-0", "16 kg / haltère", "pectoraux"),
         ],
       ),
       restDay("sess-seche-s1-mar", 1, "Mardi"),
@@ -385,7 +396,7 @@ export const adminPrograms: AdminProgram[] = [
         45,
         "5 min vélo.",
         "",
-        [exercise(1, "Rowing haltère unilatéral", 3, "12-15", 45, "2-0-1-0", "18 kg")],
+        [exercise(1, "Rowing haltère unilatéral", 3, "12-15", 45, "2-0-1-0", "18 kg", "dos")],
       ),
     ]),
     createdAt: "2026-02-01T09:00:00.000Z",
@@ -410,7 +421,7 @@ export const adminPrograms: AdminProgram[] = [
         35,
         "5 min marche rapide.",
         "",
-        [exercise(1, "Squat au poids du corps", 3, "12", 60, "2-0-1-0", "Poids du corps")],
+        [exercise(1, "Squat au poids du corps", 3, "12", 60, "2-0-1-0", "Poids du corps", "quadriceps")],
       ),
       restDay("sess-remise-s1-mar", 1, "Mardi"),
     ]),

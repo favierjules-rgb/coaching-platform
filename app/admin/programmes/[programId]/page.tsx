@@ -8,15 +8,24 @@ import { ArrowLeft, Archive, Pencil } from "lucide-react";
 import { AssignStudentsModal } from "@/components/admin/AssignStudentsModal";
 import { ProgramBuilder, type ProgramBuilderData } from "@/components/admin/ProgramBuilder";
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
-import { MuscleGroupBars, TrainingStatCards } from "@/components/shared/TrainingMetricsSummary";
+import {
+  AnalysisFilterLabel,
+  FilteredExerciseList,
+  MuscleGroupBars,
+  MuscleGroupFilterSelect,
+  TrainingStatCards,
+  UntaggedExercisesAlert,
+} from "@/components/shared/TrainingMetricsSummary";
 import { useAdminData } from "@/hooks/useAdminData";
 import { contentStatusLabels, fullName, weekDays } from "@/lib/admin";
 import { calculateTrainingMetrics, calculateWeekMetrics, formatSets, formatTonnage, formatVolume, muscleGroupLabels } from "@/lib/training-metrics";
+import type { MuscleGroupFilter } from "@/types";
 
 export default function ProgramDetailPage() {
   const params = useParams<{ programId: string }>();
   const { state, updateProgram, setAssignment } = useAdminData();
   const [editing, setEditing] = useState(false);
+  const [selectedMuscleGroup, setSelectedMuscleGroup] = useState<MuscleGroupFilter>("tous");
 
   const program = state.programs.find((p) => p.id === params.programId);
 
@@ -34,8 +43,10 @@ export default function ProgramDetailPage() {
 
   const weekNumbers = Array.from(new Set(program.sessions.map((s) => s.weekNumber))).sort((a, b) => a - b);
   const assignedStudents = state.students.filter((s) => program.assignedStudentIds.includes(s.id));
-  const programMetrics = calculateTrainingMetrics(program.sessions);
-  const weekMetricsList = weekNumbers.map((weekNumber) => calculateWeekMetrics(program.sessions, weekNumber));
+  const programMetrics = calculateTrainingMetrics(program.sessions, selectedMuscleGroup);
+  const weekMetricsList = weekNumbers.map((weekNumber) =>
+    calculateWeekMetrics(program.sessions, weekNumber, selectedMuscleGroup),
+  );
 
   function handleSave(data: ProgramBuilderData) {
     updateProgram(program!.id, {
@@ -144,18 +155,26 @@ export default function ProgramDetailPage() {
               <p className="text-sm text-muted-foreground">Aucune séance planifiée pour le moment.</p>
             ) : (
               <div className="flex flex-col gap-6">
+                <MuscleGroupFilterSelect value={selectedMuscleGroup} onChange={setSelectedMuscleGroup} />
+                <UntaggedExercisesAlert show={programMetrics.hasUntaggedExercises} />
+                <AnalysisFilterLabel selected={selectedMuscleGroup} />
+
                 <TrainingStatCards
                   totalSets={programMetrics.totalSets}
                   totalVolume={programMetrics.totalVolume}
                   totalTonnageKg={programMetrics.totalTonnageKg}
                 />
 
-                <div>
-                  <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-muted-foreground">
-                    Groupes musculaires les plus sollicités (programme entier)
-                  </h3>
-                  <MuscleGroupBars breakdown={programMetrics.muscleGroupBreakdown} />
-                </div>
+                {selectedMuscleGroup === "tous" ? (
+                  <div>
+                    <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                      Groupes musculaires les plus sollicités (programme entier)
+                    </h3>
+                    <MuscleGroupBars breakdown={programMetrics.muscleGroupBreakdown} />
+                  </div>
+                ) : (
+                  <FilteredExerciseList exercises={programMetrics.exercises} />
+                )}
 
                 <div>
                   <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-muted-foreground">

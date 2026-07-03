@@ -6,12 +6,12 @@ import { CheckCircle, Eye, Pencil } from "lucide-react";
 import { CheckboxField, Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
 import { Modal, PrimaryButton } from "@/components/admin/Modal";
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
+import { StudentPickerList } from "@/components/admin/StudentPickerList";
 import {
   distributionModeLabels,
   documentCategoryLabels,
   documentStatusLabels,
   documentTypeLabels,
-  fullName,
 } from "@/lib/admin";
 import type {
   AdminDocument,
@@ -216,16 +216,11 @@ export function DocumentModal({
                 <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
                   Élèves ayant accès ({document.assignedStudentIds.length})
                 </span>
-                <div className="flex max-h-40 flex-col gap-2 overflow-y-auto">
-                  {students.map((s) => (
-                    <CheckboxField
-                      key={s.id}
-                      label={fullName(s)}
-                      checked={document.assignedStudentIds.includes(s.id)}
-                      onChange={(checked) => onSetAssignment(s.id, "document", document.id, checked)}
-                    />
-                  ))}
-                </div>
+                <StudentPickerList
+                  students={students}
+                  selectedIds={document.assignedStudentIds}
+                  onToggle={(studentId, checked) => onSetAssignment(studentId, "document", document.id, checked)}
+                />
               </div>
               <button
                 type="button"

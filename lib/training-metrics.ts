@@ -3,6 +3,7 @@ import type {
   ExerciseMetrics,
   LoadType,
   MuscleGroup,
+  MuscleGroupFilter,
   MuscleGroupVolume,
   ParsedLoad,
   PlannedVsActualTrainingMetrics,
@@ -10,6 +11,8 @@ import type {
   TrainingMetrics,
   WeekTrainingMetrics,
 } from "@/types";
+
+export type { MuscleGroupFilter };
 
 /**
  * Formes minimales dont ont besoin les fonctions de ce fichier — satisfaites
@@ -131,6 +134,36 @@ export function resolveExerciseMuscleGroup(exercise: MetricsExerciseInput, sessi
 /** Tous les MuscleGroup d'un exercice (son propre tag, sinon ceux de la séance). */
 export function resolveExerciseMuscleGroups(exercise: MetricsExerciseInput, sessionMuscleGroup: string): MuscleGroup[] {
   return normalizeMuscleGroups(exercise.muscleGroup || sessionMuscleGroup);
+}
+
+/**
+ * true si l'exercice lui-même n'a pas de groupe musculaire renseigné (que
+ * la séance en ait un ou non) — sert à afficher l'alerte "certains
+ * exercices n'ont pas de groupe musculaire renseigné" plutôt que de tout
+ * classer silencieusement en "Autre".
+ */
+export function isUntaggedExercise(exercise: MetricsExerciseInput): boolean {
+  return !exercise.muscleGroup || !exercise.muscleGroup.trim();
+}
+
+/**
+ * Filtre une liste d'exercices sur un groupe musculaire précis. "tous" (ou
+ * omis) ne filtre rien. Un exercice est retenu seulement si SON PROPRE
+ * groupe musculaire (pas le repli sur la séance) correspond au groupe
+ * recherché : un exercice sans groupe renseigné ne doit jamais apparaître
+ * silencieusement dans un filtre précis (voir isUntaggedExercise) — il ne
+ * ressort que sous "tous", avec l'alerte "groupe musculaire non renseigné".
+ */
+export function filterExercisesByMuscleGroup(
+  exercises: MetricsExerciseInput[],
+  sessionMuscleGroup: string,
+  selected: MuscleGroupFilter = "tous",
+): MetricsExerciseInput[] {
+  if (selected === "tous") return exercises;
+  return exercises.filter((exercise) => {
+    if (isUntaggedExercise(exercise)) return false;
+    return normalizeMuscleGroups(exercise.muscleGroup).includes(selected);
+  });
 }
 
 /**
@@ -289,11 +322,14 @@ export function calculateMuscleGroupSets(sessions: MetricsSessionInput[]): Muscl
   return muscleGroupOrder.map((group) => totals[group]).filter((entry) => entry.sets > 0);
 }
 
-/** Métriques agrégées pour une séance entière. */
-export function calculateSessionMetrics(session: MetricsSessionInput): SessionMetrics {
-  const exercises = session.isRestDay
-    ? []
-    : session.exercises.map((exercise) => metricsForExercise(exercise, session.muscleGroup));
+/** Métriques agrégées pour une séance entière, filtrables par groupe musculaire. */
+export function calculateSessionMetrics(
+  session: MetricsSessionInput,
+  selectedMuscleGroup: MuscleGroupFilter = "tous",
+): SessionMetrics {
+  const rawExercises = session.isRestDay ? [] : session.exercises;
+  const filteredRaw = filterExercisesByMuscleGroup(rawExercises, session.muscleGroup, selectedMuscleGroup);
+  const exercises = filteredRaw.map((exercise) => metricsForExercise(exercise, session.muscleGroup));
 
   return {
     sessionId: session.id,
@@ -302,16 +338,26 @@ export function calculateSessionMetrics(session: MetricsSessionInput): SessionMe
     totalTonnageKg: exercises.reduce((sum, ex) => sum + ex.tonnageKg, 0),
     hasEstimatedValues: exercises.some((ex) => ex.isEstimate),
     hasNotCalculatedValues: exercises.some((ex) => ex.notCalculated),
+    hasUntaggedExercises: filteredRaw.some((ex) => isUntaggedExercise(ex)),
     exercises,
-    muscleGroupBreakdown: calculateMuscleGroupSets([session]),
+    muscleGroupBreakdown: calculateMuscleGroupSets([{ ...session, exercises: filteredRaw }]),
   };
 }
 
-/** Métriques agrégées pour toutes les séances d'une semaine de programme. */
-export function calculateWeekMetrics(sessions: MetricsSessionInput[], weekNumber: number): WeekTrainingMetrics {
-  const weekSessions = sessions.filter((s) => s.weekNumber === weekNumber && !s.isRestDay);
+/** Métriques agrégées pour toutes les séances d'une semaine de programme, filtrables par groupe musculaire. */
+export function calculateWeekMetrics(
+  sessions: MetricsSessionInput[],
+  weekNumber: number,
+  selectedMuscleGroup: MuscleGroupFilter = "tous",
+): WeekTrainingMetrics {
+  const unfilteredWeekSessions = sessions.filter((s) => s.weekNumber === weekNumber && !s.isRestDay);
+  const weekSessions = unfilteredWeekSessions.map((s) => ({
+    ...s,
+    exercises: filterExercisesByMuscleGroup(s.exercises, s.muscleGroup, selectedMuscleGroup),
+  }));
   const muscleGroupBreakdown = calculateMuscleGroupSets(weekSessions);
   const mostTrained = [...muscleGroupBreakdown].sort((a, b) => b.sets - a.sets)[0] ?? null;
+  const exercises = weekSessions.flatMap((s) => s.exercises.map((ex) => metricsForExercise(ex, s.muscleGroup)));
 
   const setsByDay = new Map<string, number>();
   for (const session of weekSessions) {
@@ -325,7 +371,7 @@ export function calculateWeekMetrics(sessions: MetricsSessionInput[], weekNumber
 
   return {
     weekNumber,
-    sessionsCount: weekSessions.length,
+    sessionsCount: unfilteredWeekSessions.length,
     totalSets: weekSessions.reduce((sum, s) => sum + s.exercises.reduce((esum, ex) => esum + ex.sets, 0), 0),
     totalVolume: weekSessions.reduce(
       (sum, s) => sum + s.exercises.reduce((esum, ex) => esum + calculateExerciseVolume(ex.sets, ex.reps), 0),
@@ -335,15 +381,23 @@ export function calculateWeekMetrics(sessions: MetricsSessionInput[], weekNumber
       (sum, s) => sum + s.exercises.reduce((esum, ex) => esum + calculateExerciseTonnage(ex.sets, ex.reps, ex.recommendedLoad).tonnageKg, 0),
       0,
     ),
+    hasUntaggedExercises: weekSessions.some((s) => s.exercises.some((ex) => isUntaggedExercise(ex))),
+    exercises,
     muscleGroupBreakdown,
     mostTrainedMuscleGroup: mostTrained?.muscleGroup ?? null,
     busiestDay,
   };
 }
 
-/** Métriques agrégées génériques pour une liste de séances quelconque (programme entier...). */
-export function calculateTrainingMetrics(sessions: MetricsSessionInput[]): TrainingMetrics {
-  const trainingSessions = sessions.filter((s) => !s.isRestDay);
+/** Métriques agrégées génériques pour une liste de séances quelconque (programme entier...), filtrables par groupe musculaire. */
+export function calculateTrainingMetrics(
+  sessions: MetricsSessionInput[],
+  selectedMuscleGroup: MuscleGroupFilter = "tous",
+): TrainingMetrics {
+  const trainingSessions = sessions
+    .filter((s) => !s.isRestDay)
+    .map((s) => ({ ...s, exercises: filterExercisesByMuscleGroup(s.exercises, s.muscleGroup, selectedMuscleGroup) }));
+  const exercises = trainingSessions.flatMap((s) => s.exercises.map((ex) => metricsForExercise(ex, s.muscleGroup)));
   return {
     totalSets: trainingSessions.reduce((sum, s) => sum + s.exercises.reduce((esum, ex) => esum + ex.sets, 0), 0),
     totalVolume: trainingSessions.reduce(
@@ -354,6 +408,8 @@ export function calculateTrainingMetrics(sessions: MetricsSessionInput[]): Train
       (sum, s) => sum + s.exercises.reduce((esum, ex) => esum + calculateExerciseTonnage(ex.sets, ex.reps, ex.recommendedLoad).tonnageKg, 0),
       0,
     ),
+    hasUntaggedExercises: trainingSessions.some((s) => s.exercises.some((ex) => isUntaggedExercise(ex))),
+    exercises,
     muscleGroupBreakdown: calculateMuscleGroupSets(trainingSessions),
   };
 }
@@ -424,6 +480,9 @@ export function calculatePlannedVsActualMetrics(
     totalTonnageKg: actualExercises.reduce((sum, ex) => sum + ex.tonnageKg, 0),
     hasEstimatedValues: true,
     hasNotCalculatedValues: actualExercises.some((ex) => ex.notCalculated),
+    hasUntaggedExercises: planned.exercises
+      .filter((ex) => actualExercises.some((a) => a.exerciseId === ex.id))
+      .some((ex) => isUntaggedExercise(ex)),
     exercises: actualExercises,
     muscleGroupBreakdown: calculateMuscleGroupSets([
       { ...planned, exercises: planned.exercises.filter((ex) => actualExercises.some((a) => a.exerciseId === ex.id)) },

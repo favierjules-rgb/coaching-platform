@@ -5,6 +5,10 @@ const HEIGHT = 160;
 const PADDING = 12;
 
 export function WeightChart({ data }: { data: WeightEntry[] }) {
+  if (data.length === 0) {
+    return <p className="text-sm text-muted-foreground">Aucune donnée de poids pour le moment.</p>;
+  }
+
   const values = data.map((entry) => entry.kg);
   const min = Math.min(...values);
   const max = Math.max(...values);
@@ -12,7 +16,9 @@ export function WeightChart({ data }: { data: WeightEntry[] }) {
 
   const points = data.map((entry, index) => {
     const x =
-      PADDING + (index / (data.length - 1)) * (WIDTH - PADDING * 2);
+      data.length > 1
+        ? PADDING + (index / (data.length - 1)) * (WIDTH - PADDING * 2)
+        : WIDTH / 2;
     const y =
       HEIGHT - PADDING - ((entry.kg - min) / range) * (HEIGHT - PADDING * 2);
     return { x, y };

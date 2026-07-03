@@ -242,6 +242,18 @@ export interface DocumentAvailability {
   manuallyUnlocked: boolean;
 }
 
+/** true si `date` est une Date construite avec succès (pas de Invalid Date). */
+export function isValidDate(date: Date): boolean {
+  return date instanceof Date && !Number.isNaN(date.getTime());
+}
+
+/** Parse une chaîne de date de façon sûre : renvoie null plutôt qu'une Invalid Date. */
+export function safeDate(dateIso: string | null | undefined): Date | null {
+  if (!dateIso) return null;
+  const date = new Date(dateIso);
+  return isValidDate(date) ? date : null;
+}
+
 /**
  * Calcule si un document est disponible pour un élève selon son mode de
  * distribution : immédiat (toujours dispo), déblocage manuel (dispo
@@ -249,6 +261,12 @@ export interface DocumentAvailability {
  * (dispo à partir de startDate + (level - 1) * unlockAfterWeeks
  * semaines). Ex: niveau 1/unlockAfterWeeks=2 → dispo semaine 1, niveau 2 →
  * semaine 3, niveau 3 → semaine 5.
+ *
+ * Robuste aux données mockées incomplètes : si startDate est vide/mal
+ * formée (ou si le calcul produit malgré tout une date invalide), le
+ * document est traité comme disponible plutôt que de faire planter la
+ * page — on ne peut pas bloquer un élève sur un palier qu'on ne sait pas
+ * calculer, et toISOString() n'est jamais appelé sur une Invalid Date.
  */
 export function computeDocumentAvailability(
   student: { startDate: string },
@@ -266,13 +284,27 @@ export function computeDocumentAvailability(
   if (document.distributionMode === "deblocage-manuel") {
     return { available: false, unlockDate: null, manuallyUnlocked: false };
   }
-  const unlockOffsetWeeks = Math.max(0, document.level - 1) * document.unlockAfterWeeks;
-  const unlockDate = new Date(student.startDate);
+
+  const startDate = safeDate(student.startDate);
+  if (!startDate) {
+    return { available: true, unlockDate: null, manuallyUnlocked: false };
+  }
+
+  const level = Number.isFinite(document.level) ? document.level : 1;
+  const unlockAfterWeeks = Number.isFinite(document.unlockAfterWeeks) ? document.unlockAfterWeeks : 0;
+  const unlockOffsetWeeks = Math.max(0, level - 1) * unlockAfterWeeks;
+
+  const unlockDate = new Date(startDate);
   unlockDate.setDate(unlockDate.getDate() + unlockOffsetWeeks * 7);
+
+  if (!isValidDate(unlockDate)) {
+    return { available: true, unlockDate: null, manuallyUnlocked: false };
+  }
+
   const available = reference.getTime() >= unlockDate.getTime();
   return {
     available,
-    unlockDate: available ? null : unlockDate.toISOString().slice(0, 10),
+    unlockDate: available || !isValidDate(unlockDate) ? null : unlockDate.toISOString().slice(0, 10),
     manuallyUnlocked: false,
   };
 }

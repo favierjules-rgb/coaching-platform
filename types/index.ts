@@ -1019,6 +1019,8 @@ export interface SessionMetrics {
   totalTonnageKg: number;
   hasEstimatedValues: boolean;
   hasNotCalculatedValues: boolean;
+  /** true si au moins un exercice inclus dans le calcul n'a pas de muscleGroup renseigné. */
+  hasUntaggedExercises: boolean;
   exercises: ExerciseMetrics[];
   muscleGroupBreakdown: MuscleGroupVolume[];
 }
@@ -1030,6 +1032,8 @@ export interface WeekTrainingMetrics {
   totalSets: number;
   totalVolume: number;
   totalTonnageKg: number;
+  hasUntaggedExercises: boolean;
+  exercises: ExerciseMetrics[];
   muscleGroupBreakdown: MuscleGroupVolume[];
   mostTrainedMuscleGroup: MuscleGroup | null;
   busiestDay: { day: string; sets: number } | null;
@@ -1040,8 +1044,13 @@ export interface TrainingMetrics {
   totalSets: number;
   totalVolume: number;
   totalTonnageKg: number;
+  hasUntaggedExercises: boolean;
+  exercises: ExerciseMetrics[];
   muscleGroupBreakdown: MuscleGroupVolume[];
 }
+
+/** Filtre d'analyse par groupe musculaire : "tous" = pas de filtre. */
+export type MuscleGroupFilter = MuscleGroup | "tous";
 
 /**
  * Entrée de charge réellement effectuée par l'élève pour une série d'un

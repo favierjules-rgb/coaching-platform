@@ -3,9 +3,8 @@
 import { useState } from "react";
 import { CheckCircle, UserPlus } from "lucide-react";
 
-import { CheckboxField } from "@/components/admin/AdminFormFields";
 import { Modal, PrimaryButton } from "@/components/admin/Modal";
-import { fullName } from "@/lib/admin";
+import { StudentPickerList } from "@/components/admin/StudentPickerList";
 import type { AdminStudent, AssignableContentType } from "@/types";
 
 interface AssignStudentsModalProps {
@@ -69,16 +68,11 @@ export function AssignStudentsModal({
               <p className="text-sm leading-relaxed text-muted-foreground">
                 Coche les élèves qui doivent avoir accès à ce contenu.
               </p>
-              <div className="flex max-h-64 flex-col gap-3 overflow-y-auto border border-border p-4">
-                {students.map((student) => (
-                  <CheckboxField
-                    key={student.id}
-                    label={`${fullName(student)} · ${student.email}`}
-                    checked={assignedStudentIds.includes(student.id)}
-                    onChange={(checked) => onSetAssignment(student.id, contentType, contentId, checked)}
-                  />
-                ))}
-              </div>
+              <StudentPickerList
+                students={students}
+                selectedIds={assignedStudentIds}
+                onToggle={(studentId, checked) => onSetAssignment(studentId, contentType, contentId, checked)}
+              />
               <PrimaryButton onClick={() => setConfirmed(true)}>Terminer</PrimaryButton>
             </div>
           )}

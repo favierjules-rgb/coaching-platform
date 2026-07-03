@@ -6,16 +6,18 @@ import { CheckCircle, Pencil, Plus } from "lucide-react";
 import { Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
 import { Modal, PrimaryButton } from "@/components/admin/Modal";
 import { exerciseCategoryLabels, exerciseEquipmentLabels, exerciseLevelLabels } from "@/lib/admin";
+import { muscleGroupLabels, muscleGroupOrder } from "@/lib/training-metrics";
 import type { ExerciseCategory, ExerciseEquipment, ExerciseLevel, ExerciseLibraryItem } from "@/types";
 
 const categoryOptions = Object.entries(exerciseCategoryLabels).map(([value, label]) => ({ value, label }));
 const equipmentOptions = Object.entries(exerciseEquipmentLabels).map(([value, label]) => ({ value, label }));
 const levelOptions = Object.entries(exerciseLevelLabels).map(([value, label]) => ({ value, label }));
+const muscleGroupOptions = muscleGroupOrder.map((group) => ({ value: group, label: muscleGroupLabels[group] }));
 
 function formFromItem(item: Partial<ExerciseLibraryItem>) {
   return {
     name: item.name ?? "",
-    muscleGroup: item.muscleGroup ?? "",
+    muscleGroup: item.muscleGroup ?? "autre",
     category: item.category ?? "autre",
     equipment: item.equipment ?? "autre",
     level: item.level ?? "débutant",
@@ -49,7 +51,7 @@ export function ExerciseLibraryItemModal({ item, onSave }: ExerciseLibraryItemMo
     if (!form.name.trim()) return;
     onSave({
       name: form.name.trim(),
-      muscleGroup: form.muscleGroup.trim(),
+      muscleGroup: form.muscleGroup,
       category: form.category as ExerciseCategory,
       equipment: form.equipment as ExerciseEquipment,
       level: form.level as ExerciseLevel,
@@ -89,7 +91,12 @@ export function ExerciseLibraryItemModal({ item, onSave }: ExerciseLibraryItemMo
           ) : (
             <div className="flex flex-col gap-4">
               <Field label="Nom de l'exercice" value={form.name} onChange={(v) => setField("name", v)} />
-              <Field label="Groupe musculaire" value={form.muscleGroup} onChange={(v) => setField("muscleGroup", v)} />
+              <SelectField
+                label="Groupe musculaire"
+                value={form.muscleGroup}
+                onChange={(v) => setField("muscleGroup", v)}
+                options={muscleGroupOptions}
+              />
               <div className="grid grid-cols-3 gap-4">
                 <SelectField label="Catégorie" value={form.category} onChange={(v) => setField("category", v as ExerciseCategory)} options={categoryOptions} />
                 <SelectField label="Matériel" value={form.equipment} onChange={(v) => setField("equipment", v as ExerciseEquipment)} options={equipmentOptions} />

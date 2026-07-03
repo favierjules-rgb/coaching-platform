@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Activity, AlertTriangle, ArrowLeft, Archive, Lock, Pause, Play, Unlock } from "lucide-react";
@@ -12,7 +13,14 @@ import { StatusBadge, feedbackStatusTone, studentStatusTone } from "@/components
 import { MeasurementsSection } from "@/components/student/MeasurementsSection";
 import { ProgressPhotoGallerySection } from "@/components/student/ProgressPhotoGallerySection";
 import { WeightEvolutionCard } from "@/components/student/WeightEvolutionCard";
-import { MuscleGroupBars, TrainingStatCards } from "@/components/shared/TrainingMetricsSummary";
+import {
+  AnalysisFilterLabel,
+  FilteredExerciseList,
+  MuscleGroupBars,
+  MuscleGroupFilterSelect,
+  TrainingStatCards,
+  UntaggedExercisesAlert,
+} from "@/components/shared/TrainingMetricsSummary";
 import { LINKED_STUDENT_ID } from "@/data/admin";
 import {
   bodyMeasurements as elveMeasurements,
@@ -36,7 +44,7 @@ import {
 } from "@/lib/admin";
 import { nextWeightHistoryMonth } from "@/lib/profile";
 import { calculatePlannedVsActualMetrics, calculateWeekMetrics, formatTonnage } from "@/lib/training-metrics";
-import type { BodyMeasurementType, ProgressPhoto } from "@/types";
+import type { BodyMeasurementType, MuscleGroupFilter, ProgressPhoto } from "@/types";
 import type { CustomMeasurementInput } from "@/components/student/UpdateMeasurementsModal";
 
 export default function AdminStudentDetailPage() {
@@ -45,6 +53,7 @@ export default function AdminStudentDetailPage() {
   const { state, updateStudent, addCoachNote, setAssignment, unlockDocumentForStudent, unlockAllDocumentsForStudent } =
     useAdminData();
   const { students, programs, nutritionPlans, documents, feedback, manualDocumentUnlocks } = state;
+  const [selectedMuscleGroup, setSelectedMuscleGroup] = useState<MuscleGroupFilter>("tous");
 
   // Toujours monté (règle des hooks), même si l'élève affiché n'est pas
   // l'élève relié — utilisé uniquement quand isLinked est vrai.
@@ -172,10 +181,16 @@ export default function AdminStudentDetailPage() {
     .filter((f) => f.studentId === student.id)
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
+  const daysSinceStart = daysBetween(student.startDate);
   const currentWeekNumber = assignedProgram
-    ? Math.min(assignedProgram.durationWeeks, Math.max(1, Math.floor(daysBetween(student.startDate) / 7) + 1))
+    ? Math.min(
+        assignedProgram.durationWeeks,
+        Number.isFinite(daysSinceStart) ? Math.max(1, Math.floor(daysSinceStart / 7) + 1) : 1,
+      )
     : 1;
-  const currentWeekMetrics = assignedProgram ? calculateWeekMetrics(assignedProgram.sessions, currentWeekNumber) : null;
+  const currentWeekMetrics = assignedProgram
+    ? calculateWeekMetrics(assignedProgram.sessions, currentWeekNumber, selectedMuscleGroup)
+    : null;
 
   const trainingFeedback = studentFeedback.filter((f) => f.type === "entrainement" && f.exerciseEntries.length > 0);
   const lastCompletedSession = trainingFeedback[0];
@@ -459,6 +474,10 @@ export default function AdminStudentDetailPage() {
           <p className="text-sm text-muted-foreground">Aucun programme attribué — pas de données de charge à afficher.</p>
         ) : (
           <div className="flex flex-col gap-6">
+            <MuscleGroupFilterSelect value={selectedMuscleGroup} onChange={setSelectedMuscleGroup} />
+            <UntaggedExercisesAlert show={currentWeekMetrics.hasUntaggedExercises} />
+            <AnalysisFilterLabel selected={selectedMuscleGroup} />
+
             <div>
               <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-muted-foreground">
                 Semaine {currentWeekNumber} (actuelle)
@@ -470,12 +489,16 @@ export default function AdminStudentDetailPage() {
               />
             </div>
 
-            <div>
-              <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-muted-foreground">
-                Séries par groupe musculaire (semaine actuelle)
-              </h3>
-              <MuscleGroupBars breakdown={currentWeekMetrics.muscleGroupBreakdown} />
-            </div>
+            {selectedMuscleGroup === "tous" ? (
+              <div>
+                <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                  Séries par groupe musculaire (semaine actuelle)
+                </h3>
+                <MuscleGroupBars breakdown={currentWeekMetrics.muscleGroupBreakdown} />
+              </div>
+            ) : (
+              <FilteredExerciseList exercises={currentWeekMetrics.exercises} />
+            )}
 
             <div>
               <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-muted-foreground">

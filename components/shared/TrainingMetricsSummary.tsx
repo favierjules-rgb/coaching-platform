@@ -1,7 +1,9 @@
+"use client";
+
 import { AlertTriangle } from "lucide-react";
 
-import { formatSets, formatTonnage, formatVolume, muscleGroupLabels } from "@/lib/training-metrics";
-import type { MuscleGroupVolume } from "@/types";
+import { formatSets, formatTonnage, formatVolume, muscleGroupLabels, muscleGroupOrder } from "@/lib/training-metrics";
+import type { ExerciseMetrics, MuscleGroupFilter, MuscleGroupVolume } from "@/types";
 
 export function StatCard({ label, value, tone = "default" }: { label: string; value: string; tone?: "default" | "positive" | "negative" }) {
   const toneClass = tone === "positive" ? "text-green-400" : tone === "negative" ? "text-red-400" : "text-foreground";
@@ -91,6 +93,81 @@ export function MuscleGroupBars({ breakdown, alertThreshold = 1.8 }: MuscleGroup
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+/** Sélecteur "Groupe musculaire à analyser" — réutilisé sur les 5 blocs d'analyse entraînement. */
+export function MuscleGroupFilterSelect({
+  value,
+  onChange,
+}: {
+  value: MuscleGroupFilter;
+  onChange: (value: MuscleGroupFilter) => void;
+}) {
+  return (
+    <div>
+      <label className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+        Groupe musculaire à analyser
+      </label>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value as MuscleGroupFilter)}
+        className="w-full appearance-none border border-border bg-background px-4 py-2.5 text-sm text-foreground transition-colors focus:border-primary focus:outline-none sm:w-64"
+      >
+        <option value="tous">Tous les groupes</option>
+        {muscleGroupOrder.map((group) => (
+          <option key={group} value={group}>
+            {muscleGroupLabels[group]}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+/** Alerte "certains exercices n'ont pas de groupe musculaire renseigné". */
+export function UntaggedExercisesAlert({ show }: { show: boolean }) {
+  if (!show) return null;
+  return (
+    <div className="flex items-center gap-2 border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+      <AlertTriangle size={14} className="flex-shrink-0" />
+      Certains exercices n&apos;ont pas de groupe musculaire renseigné.
+    </div>
+  );
+}
+
+/** Bandeau "Analyse filtrée : X" affiché quand un groupe précis est sélectionné. */
+export function AnalysisFilterLabel({ selected }: { selected: MuscleGroupFilter }) {
+  if (selected === "tous") return null;
+  return (
+    <p className="text-xs font-bold uppercase tracking-widest text-primary">
+      Analyse filtrée : {muscleGroupLabels[selected]}
+    </p>
+  );
+}
+
+/** Liste des exercices concernés par le groupe musculaire sélectionné. */
+export function FilteredExerciseList({ exercises }: { exercises: ExerciseMetrics[] }) {
+  if (exercises.length === 0) {
+    return <p className="text-sm text-muted-foreground">Aucun exercice pour ce groupe musculaire.</p>;
+  }
+  return (
+    <div>
+      <h3 className="mb-2 text-xs font-bold uppercase tracking-widest text-muted-foreground">Exercices concernés</h3>
+      <ul className="flex flex-col gap-1.5">
+        {exercises.map((ex) => (
+          <li
+            key={ex.exerciseId}
+            className="flex flex-wrap items-center justify-between gap-2 border border-border px-3 py-2 text-sm text-foreground"
+          >
+            <span>{ex.name}</span>
+            <span className="text-xs text-muted-foreground">
+              {ex.sets} séries × {ex.averageReps} reps{ex.notCalculated ? "" : ` · ${formatTonnage(ex.tonnageKg)}`}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

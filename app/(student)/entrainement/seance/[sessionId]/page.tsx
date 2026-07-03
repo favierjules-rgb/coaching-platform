@@ -1,16 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, BarChart3, Flame, MessageSquare } from "lucide-react";
+import { ArrowLeft, Flame, MessageSquare } from "lucide-react";
 
 import { SessionFeedbackSection } from "@/components/student/SessionFeedbackSection";
-import { MuscleGroupBars, TrainingStatCards } from "@/components/shared/TrainingMetricsSummary";
+import { SessionAnalysisSection } from "@/components/student/SessionAnalysisSection";
 import {
   getTrainingProgram,
   getWorkoutSession,
   student,
   workoutSessions,
 } from "@/data/student";
-import { calculateSessionMetrics } from "@/lib/training-metrics";
 
 export function generateStaticParams() {
   return workoutSessions.map((session) => ({ sessionId: session.id }));
@@ -29,7 +28,6 @@ export default async function SessionDetailPage({
   }
 
   const program = getTrainingProgram(session.programId);
-  const plannedMetrics = calculateSessionMetrics({ ...session, muscleGroup: session.muscleGroups });
 
   return (
     <div>
@@ -51,22 +49,7 @@ export default async function SessionDetailPage({
         </p>
       </div>
 
-      <div className="mb-8 border border-border bg-card p-6">
-        <h2 className="mb-4 flex items-center gap-2 font-heading text-sm font-bold uppercase text-foreground">
-          <BarChart3 size={16} className="text-primary" />
-          Analyse de la séance (prévu)
-        </h2>
-        <div className="flex flex-col gap-4">
-          <TrainingStatCards
-            totalSets={plannedMetrics.totalSets}
-            totalVolume={plannedMetrics.totalVolume}
-            totalTonnageKg={plannedMetrics.totalTonnageKg}
-            hasEstimatedValues={plannedMetrics.hasEstimatedValues}
-            hasNotCalculatedValues={plannedMetrics.hasNotCalculatedValues}
-          />
-          <MuscleGroupBars breakdown={plannedMetrics.muscleGroupBreakdown} />
-        </div>
-      </div>
+      <SessionAnalysisSection session={{ ...session, muscleGroup: session.muscleGroups }} />
 
       <div className="mb-8 flex items-start gap-4 border border-border bg-card p-6">
         <Flame size={20} className="mt-0.5 flex-shrink-0 text-primary" />
