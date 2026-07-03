@@ -65,6 +65,7 @@ export default function ProgramDetailPage() {
               status: program.status,
               sessions: program.sessions,
             }}
+            library={state.exerciseLibrary}
             onSave={handleSave}
             saveLabel="Enregistrer les modifications"
           />

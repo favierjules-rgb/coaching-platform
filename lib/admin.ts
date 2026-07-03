@@ -6,11 +6,19 @@ import type {
   AdminNutritionPlan,
   AdminStudent,
   AdminStudentFeedback,
+  CoachAccountStatus,
+  CoachRole,
   DocumentCategory,
+  DocumentDistributionMode,
   DocumentType,
+  ExerciseCategory,
+  ExerciseEquipment,
+  ExerciseLevel,
+  ExerciseLibraryItem,
   FeedbackStatus,
   FeedbackType,
   StudentAccountStatus,
+  StudentDocumentUnlock,
 } from "@/types";
 
 export const studentStatusLabels: Record<StudentAccountStatus, string> = {
@@ -213,3 +221,104 @@ export function studentsWithUnvalidatedNutritionDay(
 ): AdminStudent[] {
   return studentsMissingRecentFeedback(students, feedback, "nutrition", "assignedNutritionPlanIds");
 }
+
+/* ─── Documents : niveaux et déblocage progressif ─── */
+
+export const distributionModeLabels: Record<DocumentDistributionMode, string> = {
+  immediat: "Disponible immédiatement",
+  "deblocage-auto": "Déblocage automatique progressif",
+  "deblocage-manuel": "Déblocage manuel par le coach",
+};
+
+export const documentDifficultyLabels: Record<AdminDocument["difficulty"], string> = {
+  facile: "Facile",
+  "intermédiaire": "Intermédiaire",
+  "avancé": "Avancé",
+};
+
+export interface DocumentAvailability {
+  available: boolean;
+  unlockDate: string | null;
+  manuallyUnlocked: boolean;
+}
+
+/**
+ * Calcule si un document est disponible pour un élève selon son mode de
+ * distribution : immédiat (toujours dispo), déblocage manuel (dispo
+ * seulement si présent dans manualUnlocks), ou déblocage automatique
+ * (dispo à partir de startDate + (level - 1) * unlockAfterWeeks
+ * semaines). Ex: niveau 1/unlockAfterWeeks=2 → dispo semaine 1, niveau 2 →
+ * semaine 3, niveau 3 → semaine 5.
+ */
+export function computeDocumentAvailability(
+  student: { startDate: string },
+  document: AdminDocument,
+  manualUnlocks: StudentDocumentUnlock[],
+  reference = ADMIN_REFERENCE_DATE,
+): DocumentAvailability {
+  const manuallyUnlocked = manualUnlocks.some((u) => u.documentId === document.id);
+  if (manuallyUnlocked) {
+    return { available: true, unlockDate: null, manuallyUnlocked: true };
+  }
+  if (document.distributionMode === "immediat") {
+    return { available: true, unlockDate: null, manuallyUnlocked: false };
+  }
+  if (document.distributionMode === "deblocage-manuel") {
+    return { available: false, unlockDate: null, manuallyUnlocked: false };
+  }
+  const unlockOffsetWeeks = Math.max(0, document.level - 1) * document.unlockAfterWeeks;
+  const unlockDate = new Date(student.startDate);
+  unlockDate.setDate(unlockDate.getDate() + unlockOffsetWeeks * 7);
+  const available = reference.getTime() >= unlockDate.getTime();
+  return {
+    available,
+    unlockDate: available ? null : unlockDate.toISOString().slice(0, 10),
+    manuallyUnlocked: false,
+  };
+}
+
+/* ─── Banque d'exercices ─── */
+
+export const exerciseCategoryLabels: Record<ExerciseCategory, string> = {
+  push: "Push",
+  pull: "Pull",
+  legs: "Legs",
+  cardio: "Cardio",
+  mobilité: "Mobilité",
+  abdos: "Abdos",
+  autre: "Autre",
+};
+
+export const exerciseEquipmentLabels: Record<ExerciseEquipment, string> = {
+  haltères: "Haltères",
+  barre: "Barre",
+  machine: "Machine",
+  "poids du corps": "Poids du corps",
+  élastique: "Élastique",
+  autre: "Autre",
+};
+
+export const exerciseLevelLabels: Record<ExerciseLevel, string> = {
+  débutant: "Débutant",
+  intermédiaire: "Intermédiaire",
+  avancé: "Avancé",
+};
+
+export function matchesExerciseSearch(item: ExerciseLibraryItem, query: string): boolean {
+  if (!query.trim()) return true;
+  const haystack = [item.name, item.muscleGroup, item.equipment, ...item.tags].join(" ").toLowerCase();
+  return haystack.includes(query.trim().toLowerCase());
+}
+
+/* ─── Coachs ─── */
+
+export const coachRoleLabels: Record<CoachRole, string> = {
+  coach: "Coach",
+  admin: "Admin",
+  assistant: "Assistant",
+};
+
+export const coachStatusLabels: Record<CoachAccountStatus, string> = {
+  actif: "Actif",
+  inactif: "Inactif",
+};

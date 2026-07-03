@@ -710,6 +710,8 @@ export const documentResources: DocumentResource[] = [
     category: "nutrition",
     createdAt: "28/06/2026",
     important: true,
+    level: 1,
+    distributionMode: "immediat",
     assignedStudentIds: [student.id],
     previewContent:
       "Sommaire : 1) Calculer son besoin calorique · 2) Répartir ses macronutriments · 3) Structurer ses repas autour des séances · 4) Exemples de menus types · 5) Erreurs fréquentes à éviter.",
@@ -725,6 +727,8 @@ export const documentResources: DocumentResource[] = [
     category: "entrainement",
     createdAt: "25/06/2026",
     important: false,
+    level: 1,
+    distributionMode: "deblocage-auto",
     assignedStudentIds: [student.id],
     previewContent:
       "Durée : 8 min. Chapitres : placement des pieds, respiration, profondeur, erreurs courantes (valgus de genou, dos rond).",
@@ -739,6 +743,8 @@ export const documentResources: DocumentResource[] = [
     category: "entrainement",
     createdAt: "20/06/2026",
     important: false,
+    level: 1,
+    distributionMode: "deblocage-auto",
     assignedStudentIds: [student.id],
     previewContent:
       "8 étirements, 30 secondes chacun, dans l'ordre : ischios, quadriceps, fessiers, dos, épaules, pectoraux, mollets, hanches.",
@@ -753,6 +759,8 @@ export const documentResources: DocumentResource[] = [
     category: "nutrition",
     createdAt: "15/06/2026",
     important: false,
+    level: 2,
+    distributionMode: "deblocage-auto",
     assignedStudentIds: [student.id],
     previewContent:
       "Comment lire une étiquette nutritionnelle, ajuster ses glucides selon l'activité du jour, et gérer les écarts occasionnels sans culpabiliser.",
@@ -767,6 +775,8 @@ export const documentResources: DocumentResource[] = [
     category: "administratif",
     createdAt: "01/06/2026",
     important: false,
+    level: 1,
+    distributionMode: "immediat",
     assignedStudentIds: [student.id],
     previewContent: "Facture n°2026-06-014 · Formule Élite · 249 € · Payée le 01/06/2026.",
     fileUrl: "https://documents.seth-coaching.mock/fichiers/res-5.pdf",
@@ -780,6 +790,8 @@ export const documentResources: DocumentResource[] = [
     category: "entrainement",
     createdAt: "28/05/2026",
     important: false,
+    level: 2,
+    distributionMode: "deblocage-auto",
     assignedStudentIds: [student.id],
     previewContent:
       "Durée : 5 min. Rotation externe/interne, décoaptation à la bande, chandelle allemande.",
@@ -794,6 +806,8 @@ export const documentResources: DocumentResource[] = [
     category: "administratif",
     createdAt: "20/05/2026",
     important: true,
+    level: 1,
+    distributionMode: "immediat",
     assignedStudentIds: [student.id],
     previewContent:
       "Hygiène de sommeil, gestion des écrans le soir, sieste et récupération active les jours de repos.",
@@ -808,6 +822,8 @@ export const documentResources: DocumentResource[] = [
     category: "nutrition",
     createdAt: "12/05/2026",
     important: false,
+    level: 2,
+    distributionMode: "deblocage-auto",
     assignedStudentIds: [student.id],
     previewContent:
       "7 jours de menus détaillés (petit déjeuner à dîner) calibrés sur 2800 kcal, avec liste de courses associée.",
@@ -822,6 +838,8 @@ export const documentResources: DocumentResource[] = [
     category: "administratif",
     createdAt: "12/01/2026",
     important: true,
+    level: 1,
+    distributionMode: "immediat",
     assignedStudentIds: [student.id],
     previewContent:
       "Contrat d'accompagnement Formule Élite, engagement mensuel sans durée minimale, conditions de résiliation incluses.",
@@ -837,6 +855,8 @@ export const documentResources: DocumentResource[] = [
     category: "entrainement",
     createdAt: "05/05/2026",
     important: false,
+    level: 3,
+    distributionMode: "deblocage-auto",
     assignedStudentIds: [student.id],
     previewContent:
       "Infographie : barre + disques, banc réglable, élastiques (3 tensions), kettlebell 16-24 kg, corde à sauter.",
@@ -852,6 +872,8 @@ export const documentResources: DocumentResource[] = [
     category: "administratif",
     createdAt: "03/05/2026",
     important: false,
+    level: 2,
+    distributionMode: "deblocage-auto",
     assignedStudentIds: [student.id],
     previewContent:
       "Colonnes : date, poids, tour de taille, hanches, poitrine, bras, cuisse, mollet. Une ligne par mois.",
@@ -866,6 +888,8 @@ export const documentResources: DocumentResource[] = [
     category: "entrainement",
     createdAt: "22/04/2026",
     important: false,
+    level: 3,
+    distributionMode: "deblocage-auto",
     assignedStudentIds: [student.id],
     previewContent:
       "Playlist de 45 titres, rythme croissant, pensée pour accompagner l'échauffement jusqu'aux séries les plus lourdes.",

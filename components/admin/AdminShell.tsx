@@ -1,16 +1,21 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import { Menu } from "lucide-react";
 
 import { Logo } from "@/components/ui/Logo";
 import { AdminSidebar } from "@/components/admin/AdminSidebar";
+import { useAdminData } from "@/hooks/useAdminData";
 
 export function AdminShell({ children }: { children: ReactNode }) {
   const [sideOpen, setSideOpen] = useState(false);
+  const { state } = useAdminData();
 
   return (
-    <div className="flex min-h-screen bg-background">
+    <div
+      className="flex min-h-screen bg-background"
+      style={{ "--primary": state.appearanceSettings.accentColor } as CSSProperties}
+    >
       <div className="hidden lg:flex">
         <AdminSidebar />
       </div>

@@ -78,6 +78,7 @@ export default function NewProgramPage() {
             status: "brouillon",
             sessions: [],
           }}
+          library={state.exerciseLibrary}
           onSave={handleSave}
           saveLabel="Enregistrer le programme"
         />

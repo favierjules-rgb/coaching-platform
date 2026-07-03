@@ -7,12 +7,20 @@ import { CheckboxField, Field, SelectField, TextareaField } from "@/components/a
 import { Modal, PrimaryButton } from "@/components/admin/Modal";
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
 import {
+  distributionModeLabels,
   documentCategoryLabels,
   documentStatusLabels,
   documentTypeLabels,
   fullName,
 } from "@/lib/admin";
-import type { AdminDocument, AdminDocumentStatus, AdminStudent, DocumentCategory, DocumentType } from "@/types";
+import type {
+  AdminDocument,
+  AdminDocumentStatus,
+  AdminStudent,
+  DocumentCategory,
+  DocumentDistributionMode,
+  DocumentType,
+} from "@/types";
 
 const typeOptions: { value: DocumentType; label: string }[] = [
   { value: "pdf", label: "PDF" },
@@ -34,17 +42,40 @@ const statusOptions: { value: AdminDocumentStatus; label: string }[] = [
   { value: "archivé", label: "Archivé" },
 ];
 
+const levelOptions = [
+  { value: "1", label: "Niveau 1" },
+  { value: "2", label: "Niveau 2" },
+  { value: "3", label: "Niveau 3" },
+  { value: "4", label: "Niveau 4" },
+];
+
+const difficultyOptions = [
+  { value: "facile", label: "Facile" },
+  { value: "intermédiaire", label: "Intermédiaire" },
+  { value: "avancé", label: "Avancé" },
+];
+
+const distributionOptions: { value: DocumentDistributionMode; label: string }[] = [
+  { value: "immediat", label: "Tout disponible immédiatement" },
+  { value: "deblocage-auto", label: "Déblocage automatique progressif" },
+  { value: "deblocage-manuel", label: "Déblocage manuel par le coach" },
+];
+
 function formFromDoc(doc: AdminDocument) {
   return {
     title: doc.title,
     type: doc.type,
     category: doc.category,
+    level: String(doc.level),
+    difficulty: doc.difficulty,
     shortDescription: doc.shortDescription,
     fullDescription: doc.fullDescription,
     externalUrl: doc.externalUrl,
     fileName: doc.fileName ?? "",
     status: doc.status,
     important: doc.important,
+    distributionMode: doc.distributionMode,
+    unlockAfterWeeks: String(doc.unlockAfterWeeks),
   };
 }
 
@@ -83,12 +114,16 @@ export function DocumentModal({
       title: form.title,
       type: form.type,
       category: form.category,
+      level: Number(form.level) || 1,
+      difficulty: form.difficulty,
       shortDescription: form.shortDescription,
       fullDescription: form.fullDescription,
       externalUrl: form.externalUrl,
       fileName: form.fileName || null,
       status: form.status,
       important: form.important,
+      distributionMode: form.distributionMode,
+      unlockAfterWeeks: Number(form.unlockAfterWeeks) || 0,
     });
     setSaved(true);
   }
@@ -126,22 +161,46 @@ export function DocumentModal({
                 <SelectField label="Type" value={form.type} onChange={(v) => setField("type", v as DocumentType)} options={typeOptions} />
                 <SelectField label="Catégorie" value={form.category} onChange={(v) => setField("category", v as DocumentCategory)} options={categoryOptions} />
               </div>
+              <div className="grid grid-cols-2 gap-4">
+                <SelectField label="Niveau" value={form.level} onChange={(v) => setField("level", v)} options={levelOptions} />
+                <SelectField
+                  label="Difficulté"
+                  value={form.difficulty}
+                  onChange={(v) => setField("difficulty", v as typeof form.difficulty)}
+                  options={difficultyOptions}
+                />
+              </div>
               <TextareaField label="Description courte" value={form.shortDescription} onChange={(v) => setField("shortDescription", v)} rows={2} />
               <TextareaField label="Description complète" value={form.fullDescription} onChange={(v) => setField("fullDescription", v)} rows={3} />
               <Field label="Lien externe" value={form.externalUrl} onChange={(v) => setField("externalUrl", v)} />
               <Field label="Nom du fichier (mocké)" value={form.fileName} onChange={(v) => setField("fileName", v)} />
               <SelectField label="Statut" value={form.status} onChange={(v) => setField("status", v as AdminDocumentStatus)} options={statusOptions} />
               <CheckboxField label="Marquer comme important" checked={form.important} onChange={(v) => setField("important", v)} />
+              <SelectField
+                label="Mode de distribution"
+                value={form.distributionMode}
+                onChange={(v) => setField("distributionMode", v as DocumentDistributionMode)}
+                options={distributionOptions}
+              />
+              {form.distributionMode === "deblocage-auto" && (
+                <Field
+                  label="Déblocage après X semaines"
+                  type="number"
+                  value={form.unlockAfterWeeks}
+                  onChange={(v) => setField("unlockAfterWeeks", v)}
+                />
+              )}
               <PrimaryButton onClick={handleSave}>Enregistrer</PrimaryButton>
             </div>
           ) : (
             <div className="flex flex-col gap-4">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <StatusBadge label={documentStatusLabels[document.status]} tone={contentStatusTone(document.status)} />
                 {document.important && <StatusBadge label="Important" tone="red" />}
+                <StatusBadge label={`Niveau ${document.level}`} tone="muted" />
               </div>
               <div className="text-xs uppercase tracking-wide text-muted-foreground">
-                {documentTypeLabels[document.type]} · {documentCategoryLabels[document.category]}
+                {documentTypeLabels[document.type]} · {documentCategoryLabels[document.category]} · {document.difficulty}
               </div>
               <p className="text-sm text-foreground">{document.shortDescription}</p>
               <p className="text-sm text-muted-foreground">{document.fullDescription}</p>
@@ -149,6 +208,10 @@ export function DocumentModal({
                 <p className="text-xs text-muted-foreground">Lien : {document.externalUrl}</p>
               )}
               {document.fileName && <p className="text-xs text-muted-foreground">Fichier : {document.fileName}</p>}
+              <p className="text-xs text-muted-foreground">
+                Distribution : {distributionModeLabels[document.distributionMode]}
+                {document.distributionMode === "deblocage-auto" && ` (après ${document.unlockAfterWeeks} semaine(s))`}
+              </p>
               <div>
                 <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
                   Élèves ayant accès ({document.assignedStudentIds.length})

@@ -9,7 +9,12 @@ import { CheckboxField, Field, SelectField, TextareaField } from "@/components/a
 import { PrimaryButton } from "@/components/admin/Modal";
 import { useAdminData } from "@/hooks/useAdminData";
 import { fullName } from "@/lib/admin";
-import type { AdminDocumentStatus, DocumentCategory, DocumentType } from "@/types";
+import type {
+  AdminDocumentStatus,
+  DocumentCategory,
+  DocumentDistributionMode,
+  DocumentType,
+} from "@/types";
 
 const typeOptions: { value: DocumentType; label: string }[] = [
   { value: "pdf", label: "PDF" },
@@ -31,6 +36,25 @@ const statusOptions: { value: AdminDocumentStatus; label: string }[] = [
   { value: "archivé", label: "Archivé" },
 ];
 
+const levelOptions = [
+  { value: "1", label: "Niveau 1 — débutant" },
+  { value: "2", label: "Niveau 2 — intermédiaire" },
+  { value: "3", label: "Niveau 3 — avancé" },
+  { value: "4", label: "Niveau 4" },
+];
+
+const difficultyOptions = [
+  { value: "facile", label: "Facile" },
+  { value: "intermédiaire", label: "Intermédiaire" },
+  { value: "avancé", label: "Avancé" },
+];
+
+const distributionOptions: { value: DocumentDistributionMode; label: string }[] = [
+  { value: "immediat", label: "Tout disponible immédiatement" },
+  { value: "deblocage-auto", label: "Déblocage automatique progressif" },
+  { value: "deblocage-manuel", label: "Déblocage manuel par le coach" },
+];
+
 export default function NewDocumentPage() {
   const router = useRouter();
   const { state, createDocument, setAssignment } = useAdminData();
@@ -40,12 +64,16 @@ export default function NewDocumentPage() {
   const [title, setTitle] = useState("");
   const [type, setType] = useState<DocumentType>("pdf");
   const [category, setCategory] = useState<DocumentCategory>("nutrition");
+  const [level, setLevel] = useState("1");
+  const [difficulty, setDifficulty] = useState<"facile" | "intermédiaire" | "avancé">("facile");
   const [shortDescription, setShortDescription] = useState("");
   const [fullDescription, setFullDescription] = useState("");
   const [externalUrl, setExternalUrl] = useState("");
   const [fileName, setFileName] = useState<string | null>(null);
   const [status, setStatus] = useState<AdminDocumentStatus>("brouillon");
   const [important, setImportant] = useState(false);
+  const [distributionMode, setDistributionMode] = useState<DocumentDistributionMode>("immediat");
+  const [unlockAfterWeeks, setUnlockAfterWeeks] = useState("0");
   const [assignedStudentIds, setAssignedStudentIds] = useState<string[]>([]);
   const [createdId, setCreatedId] = useState<string | null>(null);
 
@@ -63,6 +91,8 @@ export default function NewDocumentPage() {
       title: title.trim() || "Document sans titre",
       type,
       category,
+      level: Number(level) || 1,
+      difficulty,
       shortDescription,
       fullDescription,
       externalUrl,
@@ -70,6 +100,8 @@ export default function NewDocumentPage() {
       storagePath: null,
       status: publish ? "publié" : status,
       important,
+      distributionMode,
+      unlockAfterWeeks: Number(unlockAfterWeeks) || 0,
       assignedStudentIds: [],
     });
     assignedStudentIds.forEach((studentId) => setAssignment(studentId, "document", id, true));
@@ -121,6 +153,15 @@ export default function NewDocumentPage() {
               <SelectField label="Type" value={type} onChange={(v) => setType(v as DocumentType)} options={typeOptions} />
               <SelectField label="Catégorie" value={category} onChange={(v) => setCategory(v as DocumentCategory)} options={categoryOptions} />
             </div>
+            <div className="grid grid-cols-2 gap-4">
+              <SelectField label="Niveau" value={level} onChange={setLevel} options={levelOptions} />
+              <SelectField
+                label="Difficulté"
+                value={difficulty}
+                onChange={(v) => setDifficulty(v as typeof difficulty)}
+                options={difficultyOptions}
+              />
+            </div>
             <TextareaField label="Description courte" value={shortDescription} onChange={setShortDescription} rows={2} />
             <TextareaField label="Description complète" value={fullDescription} onChange={setFullDescription} rows={4} />
             <Field label="Lien externe (fictif)" value={externalUrl} onChange={setExternalUrl} placeholder="https://documents.seth-coaching.mock/..." />
@@ -146,6 +187,36 @@ export default function NewDocumentPage() {
 
             <SelectField label="Statut" value={status} onChange={(v) => setStatus(v as AdminDocumentStatus)} options={statusOptions} />
             <CheckboxField label="Marquer comme important" checked={important} onChange={setImportant} />
+          </div>
+        </div>
+
+        <div className="border border-border bg-card p-6">
+          <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
+            Mode de distribution
+          </h2>
+          <div className="flex flex-col gap-4">
+            <SelectField
+              label="Mode"
+              value={distributionMode}
+              onChange={(v) => setDistributionMode(v as DocumentDistributionMode)}
+              options={distributionOptions}
+            />
+            {distributionMode === "deblocage-auto" && (
+              <Field
+                label="Déblocage après X semaines de coaching"
+                type="number"
+                value={unlockAfterWeeks}
+                onChange={setUnlockAfterWeeks}
+                placeholder="Ex : 2"
+              />
+            )}
+            {distributionMode === "deblocage-auto" && (
+              <p className="text-xs text-muted-foreground">
+                Un document de niveau {level} avec un déblocage de {unlockAfterWeeks || 0} semaine(s) devient
+                disponible à partir de la semaine {(Number(level) - 1) * (Number(unlockAfterWeeks) || 0) + 1} du
+                coaching de l&apos;élève.
+              </p>
+            )}
           </div>
         </div>
 

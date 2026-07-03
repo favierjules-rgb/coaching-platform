@@ -3,32 +3,43 @@
 import { useCallback, useSyncExternalStore } from "react";
 
 import {
+  adminAppearanceSettings,
   adminCoachSettings,
+  adminCoaches,
   adminDocuments,
+  adminExerciseLibrary,
   adminFeedback,
+  adminManualDocumentUnlocks,
   adminNutritionPlans,
   adminPrograms,
+  adminSecuritySettings,
   adminStudents,
 } from "@/data/admin";
 import { generateId } from "@/lib/admin";
 import type {
+  AdminAppearanceSettings,
   AdminAssignment,
+  AdminCoach,
   AdminCoachSettings,
   AdminDocument,
   AdminNutritionPlan,
   AdminProgram,
+  AdminSecuritySettings,
   AdminStudent,
   AdminStudentFeedback,
   AssignableContentType,
   CoachNote,
+  ExerciseLibraryItem,
   FeedbackStatus,
+  StudentDocumentUnlock,
 } from "@/types";
 
 /**
  * État complet de l'espace admin (élèves, programmes, plans, documents,
- * retours, paramètres), tenu comme un seul objet en localStorage — même
- * principe que useStudentProfile côté élève : une seule source de vérité
- * pour que toutes les pages /admin lisent et modifient les mêmes données.
+ * retours, banque d'exercices, coachs, paramètres), tenu comme un seul
+ * objet en localStorage — même principe que useStudentProfile côté élève :
+ * une seule source de vérité pour que toutes les pages /admin lisent et
+ * modifient les mêmes données.
  */
 export interface AdminDataState {
   students: AdminStudent[];
@@ -36,7 +47,12 @@ export interface AdminDataState {
   nutritionPlans: AdminNutritionPlan[];
   documents: AdminDocument[];
   feedback: AdminStudentFeedback[];
+  exerciseLibrary: ExerciseLibraryItem[];
+  manualDocumentUnlocks: StudentDocumentUnlock[];
+  coaches: AdminCoach[];
   coachSettings: AdminCoachSettings;
+  appearanceSettings: AdminAppearanceSettings;
+  securitySettings: AdminSecuritySettings;
 }
 
 const STORAGE_KEY = "seth-admin-data";
@@ -48,7 +64,12 @@ const seed: AdminDataState = {
   nutritionPlans: adminNutritionPlans,
   documents: adminDocuments,
   feedback: adminFeedback,
+  exerciseLibrary: adminExerciseLibrary,
+  manualDocumentUnlocks: adminManualDocumentUnlocks,
+  coaches: adminCoaches,
   coachSettings: adminCoachSettings,
+  appearanceSettings: adminAppearanceSettings,
+  securitySettings: adminSecuritySettings,
 };
 
 function readRaw(): string | null {
@@ -306,6 +327,114 @@ export function useAdminData() {
     writeState({ ...current, coachSettings: { ...current.coachSettings, ...partial } });
   }, []);
 
+  const updateAppearanceSettings = useCallback((partial: Partial<AdminAppearanceSettings>) => {
+    const current = getSnapshot();
+    writeState({ ...current, appearanceSettings: { ...current.appearanceSettings, ...partial } });
+  }, []);
+
+  /**
+   * AVERTISSEMENT sécurité : mot de passe admin entièrement mocké, stocké
+   * en clair dans localStorage. Aucune vérification réelle n'est faite —
+   * à remplacer intégralement par Supabase Auth avant toute mise en ligne.
+   */
+  const setMockAdminPassword = useCallback((password: string) => {
+    const current = getSnapshot();
+    try {
+      window.localStorage.setItem("seth-admin-mock-password", password);
+    } catch {
+      // localStorage indisponible.
+    }
+    writeState({
+      ...current,
+      securitySettings: {
+        mockPasswordSet: true,
+        mockPasswordHint: password.length > 0 ? `${password.length} caractères` : "",
+        updatedAt: new Date().toISOString(),
+      },
+    });
+  }, []);
+
+  const createLibraryExercise = useCallback(
+    (item: Omit<ExerciseLibraryItem, "id" | "createdAt" | "updatedAt">) => {
+      const current = getSnapshot();
+      const now = new Date().toISOString();
+      const newItem: ExerciseLibraryItem = { ...item, id: generateId("lib"), createdAt: now, updatedAt: now };
+      writeState({ ...current, exerciseLibrary: [...current.exerciseLibrary, newItem] });
+      return newItem.id;
+    },
+    [],
+  );
+
+  const updateLibraryExercise = useCallback(
+    (itemId: string, partial: Partial<ExerciseLibraryItem>) => {
+      const current = getSnapshot();
+      writeState({
+        ...current,
+        exerciseLibrary: current.exerciseLibrary.map((item) =>
+          item.id === itemId ? { ...item, ...partial, updatedAt: new Date().toISOString() } : item,
+        ),
+      });
+    },
+    [],
+  );
+
+  const deleteLibraryExercise = useCallback((itemId: string) => {
+    const current = getSnapshot();
+    writeState({
+      ...current,
+      exerciseLibrary: current.exerciseLibrary.filter((item) => item.id !== itemId),
+    });
+  }, []);
+
+  const createCoach = useCallback((coach: Omit<AdminCoach, "id" | "createdAt" | "updatedAt">) => {
+    const current = getSnapshot();
+    const now = new Date().toISOString();
+    const newCoach: AdminCoach = { ...coach, id: generateId("coach"), createdAt: now, updatedAt: now };
+    writeState({ ...current, coaches: [...current.coaches, newCoach] });
+    return newCoach.id;
+  }, []);
+
+  const updateCoach = useCallback((coachId: string, partial: Partial<AdminCoach>) => {
+    const current = getSnapshot();
+    writeState({
+      ...current,
+      coaches: current.coaches.map((c) =>
+        c.id === coachId ? { ...c, ...partial, updatedAt: new Date().toISOString() } : c,
+      ),
+    });
+  }, []);
+
+  const unlockDocumentForStudent = useCallback((studentId: string, documentId: string) => {
+    const current = getSnapshot();
+    const already = current.manualDocumentUnlocks.some(
+      (u) => u.studentId === studentId && u.documentId === documentId,
+    );
+    if (already) return;
+    writeState({
+      ...current,
+      manualDocumentUnlocks: [
+        ...current.manualDocumentUnlocks,
+        { studentId, documentId, unlockedAt: new Date().toISOString() },
+      ],
+    });
+  }, []);
+
+  const unlockAllDocumentsForStudent = useCallback((studentId: string) => {
+    const current = getSnapshot();
+    const now = new Date().toISOString();
+    const existingIds = new Set(
+      current.manualDocumentUnlocks.filter((u) => u.studentId === studentId).map((u) => u.documentId),
+    );
+    const newUnlocks: StudentDocumentUnlock[] = current.documents
+      .filter((d) => d.assignedStudentIds.includes(studentId) && !existingIds.has(d.id))
+      .map((d) => ({ studentId, documentId: d.id, unlockedAt: now }));
+    if (newUnlocks.length === 0) return;
+    writeState({
+      ...current,
+      manualDocumentUnlocks: [...current.manualDocumentUnlocks, ...newUnlocks],
+    });
+  }, []);
+
   const resetAdminData = useCallback(() => {
     try {
       window.localStorage.removeItem(STORAGE_KEY);
@@ -330,6 +459,15 @@ export function useAdminData() {
     setFeedbackStatus,
     addCoachReply,
     updateCoachSettings,
+    updateAppearanceSettings,
+    setMockAdminPassword,
+    createLibraryExercise,
+    updateLibraryExercise,
+    deleteLibraryExercise,
+    createCoach,
+    updateCoach,
+    unlockDocumentForStudent,
+    unlockAllDocumentsForStudent,
     resetAdminData,
   };
 }

@@ -4,9 +4,10 @@ import { useState } from "react";
 import { ArrowDown, ArrowUp, Copy, Plus, Trash2 } from "lucide-react";
 
 import { Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
+import { ExerciseSearchPicker } from "@/components/admin/ExerciseSearchPicker";
 import { PrimaryButton } from "@/components/admin/Modal";
 import { generateId, weekDays } from "@/lib/admin";
-import type { AdminContentStatus, AdminExercise, AdminWorkoutSession } from "@/types";
+import type { AdminContentStatus, AdminExercise, AdminWorkoutSession, ExerciseLibraryItem } from "@/types";
 
 const statusOptions: { value: AdminContentStatus; label: string }[] = [
   { value: "brouillon", label: "Brouillon" },
@@ -42,6 +43,21 @@ function blankExercise(order: number): AdminExercise {
     recommendedLoad: "",
     videoUrl: "",
     notes: "",
+  };
+}
+
+function exerciseFromLibrary(order: number, item: ExerciseLibraryItem): AdminExercise {
+  return {
+    id: generateId("ex"),
+    order,
+    name: item.name,
+    sets: 3,
+    reps: "8-10",
+    restSeconds: 60,
+    tempo: "2-0-1-0",
+    recommendedLoad: "",
+    videoUrl: item.videoUrl,
+    notes: item.technicalNote,
   };
 }
 
@@ -115,11 +131,13 @@ function ExerciseRow({
 function DayCard({
   session,
   nextWeekSession,
+  library,
   onUpdate,
   onDuplicate,
 }: {
   session: AdminWorkoutSession;
   nextWeekSession: AdminWorkoutSession | undefined;
+  library: ExerciseLibraryItem[];
   onUpdate: (updated: AdminWorkoutSession) => void;
   onDuplicate: () => void;
 }) {
@@ -155,6 +173,14 @@ function DayCard({
     onUpdate({
       ...session,
       exercises: [...session.exercises, blankExercise(session.exercises.length + 1)],
+    });
+  }
+
+  function addExerciseFromLibrary(item: ExerciseLibraryItem) {
+    onUpdate({
+      ...session,
+      muscleGroup: session.muscleGroup || item.muscleGroup,
+      exercises: [...session.exercises, exerciseFromLibrary(session.exercises.length + 1, item)],
     });
   }
 
@@ -199,6 +225,8 @@ function DayCard({
           <TextareaField label="Échauffement" value={session.warmup} onChange={(v) => onUpdate({ ...session, warmup: v })} rows={2} />
           <TextareaField label="Notes coach" value={session.coachNotes} onChange={(v) => onUpdate({ ...session, coachNotes: v })} rows={2} />
 
+          <ExerciseSearchPicker library={library} onPick={addExerciseFromLibrary} />
+
           <div className="flex flex-col gap-3">
             {session.exercises.map((ex, i) => (
               <ExerciseRow
@@ -217,7 +245,7 @@ function DayCard({
               className="flex items-center justify-center gap-2 border border-dashed border-border py-3 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
             >
               <Plus size={14} />
-              Ajouter un exercice
+              Ajouter un exercice vierge
             </button>
           </div>
         </div>
@@ -228,10 +256,12 @@ function DayCard({
 
 export function ProgramBuilder({
   initial,
+  library,
   onSave,
   saveLabel,
 }: {
   initial: ProgramBuilderData;
+  library: ExerciseLibraryItem[];
   onSave: (data: ProgramBuilderData) => void;
   saveLabel: string;
 }) {
@@ -242,13 +272,43 @@ export function ProgramBuilder({
   const [description, setDescription] = useState(initial.description);
   const [status, setStatus] = useState<AdminContentStatus>(initial.status);
   const [sessions, setSessions] = useState<AdminWorkoutSession[]>(initial.sessions);
+  const [weekMessages, setWeekMessages] = useState<Record<number, string>>({});
 
   const weekNumbers = Array.from(new Set(sessions.map((s) => s.weekNumber))).sort((a, b) => a - b);
 
-  function addWeek() {
+  function cloneWeekSessions(sourceWeek: number, targetWeek: number): AdminWorkoutSession[] {
+    return sessions
+      .filter((s) => s.weekNumber === sourceWeek)
+      .map((s) => ({
+        ...s,
+        id: generateId("sess"),
+        weekNumber: targetWeek,
+        exercises: s.exercises.map((ex) => ({ ...ex, id: generateId("ex") })),
+      }));
+  }
+
+  function addWeek(copyPrevious: boolean) {
     const nextWeek = weekNumbers.length > 0 ? Math.max(...weekNumbers) + 1 : 1;
-    const newDays = weekDays.map((day) => restDaySession(nextWeek, day));
-    setSessions((prev) => [...prev, ...newDays]);
+    if (copyPrevious && weekNumbers.length > 0) {
+      const sourceWeek = Math.max(...weekNumbers);
+      setSessions((prev) => [...prev, ...cloneWeekSessions(sourceWeek, nextWeek)]);
+      setWeekMessages((prev) => ({
+        ...prev,
+        [nextWeek]: `Semaine ${nextWeek} créée à partir de la semaine ${sourceWeek}.`,
+      }));
+    } else {
+      setSessions((prev) => [...prev, ...weekDays.map((day) => restDaySession(nextWeek, day))]);
+    }
+    setDurationWeeks((prev) => Math.max(prev, nextWeek));
+  }
+
+  function duplicateWeek(sourceWeek: number) {
+    const nextWeek = Math.max(...weekNumbers) + 1;
+    setSessions((prev) => [...prev, ...cloneWeekSessions(sourceWeek, nextWeek)]);
+    setWeekMessages((prev) => ({
+      ...prev,
+      [nextWeek]: `Semaine ${nextWeek} créée à partir de la semaine ${sourceWeek} (dupliquée).`,
+    }));
     setDurationWeeks((prev) => Math.max(prev, nextWeek));
   }
 
@@ -301,14 +361,23 @@ export function ProgramBuilder({
           <h2 className="font-heading text-lg font-bold uppercase text-foreground">
             Structure semaine par semaine
           </h2>
-          <button
-            type="button"
-            onClick={addWeek}
-            className="flex items-center gap-2 border border-primary px-4 py-2 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
-          >
-            <Plus size={14} />
-            Ajouter une semaine
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => addWeek(true)}
+              className="flex items-center gap-2 border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700"
+            >
+              <Plus size={14} />
+              Ajouter une semaine
+            </button>
+            <button
+              type="button"
+              onClick={() => addWeek(false)}
+              className="flex items-center gap-2 border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+            >
+              Créer une semaine vide
+            </button>
+          </div>
         </div>
 
         {weekNumbers.length === 0 ? (
@@ -319,9 +388,24 @@ export function ProgramBuilder({
           <div className="flex flex-col gap-8">
             {weekNumbers.map((weekNumber) => (
               <div key={weekNumber}>
-                <h3 className="mb-3 text-sm font-bold uppercase tracking-widest text-primary">
-                  Semaine {weekNumber}
-                </h3>
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-bold uppercase tracking-widest text-primary">
+                    Semaine {weekNumber}
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => duplicateWeek(weekNumber)}
+                    className="flex items-center gap-1.5 text-[11px] uppercase tracking-widest text-muted-foreground hover:text-primary"
+                  >
+                    <Copy size={12} />
+                    Dupliquer cette semaine
+                  </button>
+                </div>
+                {weekMessages[weekNumber] && (
+                  <p className="mb-3 border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-primary">
+                    {weekMessages[weekNumber]}
+                  </p>
+                )}
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                   {sessions
                     .filter((s) => s.weekNumber === weekNumber)
@@ -333,6 +417,7 @@ export function ProgramBuilder({
                         nextWeekSession={sessions.find(
                           (s) => s.weekNumber === weekNumber + 1 && s.day === session.day,
                         )}
+                        library={library}
                         onUpdate={(updated) => updateSession(session.id, updated)}
                         onDuplicate={() => duplicateSession(session)}
                       />

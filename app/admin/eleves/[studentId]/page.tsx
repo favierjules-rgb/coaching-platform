@@ -2,28 +2,56 @@
 
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { AlertTriangle, ArrowLeft, Archive, Pause, Play } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Archive, Lock, Pause, Play, Unlock } from "lucide-react";
 
 import { AddCoachNoteModal } from "@/components/admin/AddCoachNoteModal";
 import { AdminSection, InfoRow, TagList } from "@/components/admin/AdminSection";
 import { AssignContentToStudentModal } from "@/components/admin/AssignContentToStudentModal";
 import { EditStudentModal } from "@/components/admin/EditStudentModal";
 import { StatusBadge, feedbackStatusTone, studentStatusTone } from "@/components/admin/StatusBadge";
-import { useAdminData } from "@/hooks/useAdminData";
+import { MeasurementsSection } from "@/components/student/MeasurementsSection";
+import { ProgressPhotoGallerySection } from "@/components/student/ProgressPhotoGallerySection";
+import { WeightEvolutionCard } from "@/components/student/WeightEvolutionCard";
+import { LINKED_STUDENT_ID } from "@/data/admin";
 import {
+  bodyMeasurements as elveMeasurements,
+  customMeasurements as elveCustomMeasurements,
+  progressPhotos as elveProgressPhotos,
+  student as elveStudentSeed,
+  weightHistory as elveWeightHistory,
+} from "@/data/student";
+import { useAdminData } from "@/hooks/useAdminData";
+import { useStudentProfile } from "@/hooks/useStudentProfile";
+import {
+  computeDocumentAvailability,
   feedbackStatusLabels,
   feedbackTypeLabels,
   formatDate,
   formatDateTime,
   fullName,
+  generateId,
   studentStatusLabels,
 } from "@/lib/admin";
+import { nextWeightHistoryMonth } from "@/lib/profile";
+import type { BodyMeasurementType, ProgressPhoto } from "@/types";
+import type { CustomMeasurementInput } from "@/components/student/UpdateMeasurementsModal";
 
 export default function AdminStudentDetailPage() {
   const params = useParams<{ studentId: string }>();
   const router = useRouter();
-  const { state, updateStudent, addCoachNote, setAssignment } = useAdminData();
-  const { students, programs, nutritionPlans, documents, feedback } = state;
+  const { state, updateStudent, addCoachNote, setAssignment, unlockDocumentForStudent, unlockAllDocumentsForStudent } =
+    useAdminData();
+  const { students, programs, nutritionPlans, documents, feedback, manualDocumentUnlocks } = state;
+
+  // Toujours monté (règle des hooks), même si l'élève affiché n'est pas
+  // l'élève relié — utilisé uniquement quand isLinked est vrai.
+  const linkedProfile = useStudentProfile(LINKED_STUDENT_ID, {
+    profile: elveStudentSeed,
+    weightHistory: elveWeightHistory,
+    measurements: elveMeasurements,
+    customMeasurements: elveCustomMeasurements,
+    photos: elveProgressPhotos,
+  });
 
   const student = students.find((s) => s.id === params.studentId);
 
@@ -39,9 +67,104 @@ export default function AdminStudentDetailPage() {
     );
   }
 
+  const isLinked = student.id === LINKED_STUDENT_ID;
+
+  const weightProfile = isLinked
+    ? linkedProfile.state.profile
+    : {
+        id: student.id,
+        firstName: student.firstName,
+        lastName: student.lastName,
+        goal: student.goal,
+        level: student.level,
+        startDate: student.startDate,
+        weekNumber: 1,
+        age: student.age,
+        heightCm: student.heightCm,
+        currentWeightKg: student.currentWeightKg,
+        targetWeightKg: student.targetWeightKg,
+        trainingFrequencyPerWeek: student.trainingFrequencyPerWeek,
+        trainingLocation: student.trainingLocation,
+        coachingStatus: student.status,
+      };
+  const weightHistory = isLinked ? linkedProfile.state.weightHistory : student.weightHistory;
+  const measurements = isLinked ? linkedProfile.state.measurements : student.measurements;
+  const customMeasurements = isLinked ? linkedProfile.state.customMeasurements : student.customMeasurements;
+  const photos = isLinked ? linkedProfile.state.photos : student.progressPhotos;
+
+  function handleUpdateWeight(weightKg: number) {
+    if (isLinked) {
+      linkedProfile.updateWeight(weightKg);
+      return;
+    }
+    const newHistory = [...student!.weightHistory, { month: nextWeightHistoryMonth(student!.weightHistory), kg: weightKg }];
+    updateStudent(student!.id, { currentWeightKg: weightKg, weightHistory: newHistory });
+  }
+
+  function handleUpdateTarget(targetKg: number) {
+    if (isLinked) {
+      linkedProfile.updateProfile({ targetWeightKg: targetKg });
+      return;
+    }
+    updateStudent(student!.id, { targetWeightKg: targetKg });
+  }
+
+  function handleUpdateMeasurements(
+    values: Partial<Record<BodyMeasurementType, number>>,
+    date: string,
+    note: string,
+    custom: CustomMeasurementInput | null,
+  ) {
+    if (isLinked) {
+      linkedProfile.updateMeasurements(values, date, note, custom);
+      return;
+    }
+    const nextMeasurements = student!.measurements.map((m) => {
+      const newValue = values[m.type];
+      if (newValue === undefined) return m;
+      return { ...m, currentValue: newValue, note: note || m.note, lastUpdatedAt: date };
+    });
+    let nextCustom = student!.customMeasurements;
+    if (custom) {
+      nextCustom = [
+        ...nextCustom,
+        {
+          id: generateId("custom"),
+          studentId: student!.id,
+          name: custom.name,
+          unit: custom.unit,
+          startValue: custom.value,
+          currentValue: custom.value,
+          note: custom.note,
+          lastUpdatedAt: date,
+        },
+      ];
+    }
+    updateStudent(student!.id, { measurements: nextMeasurements, customMeasurements: nextCustom });
+  }
+
+  function handleAddPhoto(photo: ProgressPhoto) {
+    if (isLinked) {
+      linkedProfile.addPhoto(photo);
+      return;
+    }
+    updateStudent(student!.id, { progressPhotos: [...student!.progressPhotos, photo] });
+  }
+
   const assignedProgram = programs.find((p) => student.assignedProgramIds.includes(p.id));
   const assignedPlan = nutritionPlans.find((p) => student.assignedNutritionPlanIds.includes(p.id));
   const assignedDocuments = documents.filter((d) => student.assignedDocumentIds.includes(d.id));
+  const documentsWithAvailability = assignedDocuments.map((d) => ({
+    document: d,
+    availability: computeDocumentAvailability(
+      student,
+      d,
+      manualDocumentUnlocks.filter((u) => u.studentId === student.id),
+    ),
+  }));
+  const availableDocuments = documentsWithAvailability.filter((d) => d.availability.available);
+  const lockedDocuments = documentsWithAvailability.filter((d) => !d.availability.available);
+
   const studentFeedback = feedback
     .filter((f) => f.studentId === student.id)
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -64,6 +187,12 @@ export default function AdminStudentDetailPage() {
           <p className="text-sm text-muted-foreground">
             {student.email} · Élève depuis le {formatDate(student.startDate)}
           </p>
+          {isLinked && (
+            <p className="mt-1 text-xs text-primary">
+              Compte relié à l&apos;espace élève connecté — le poids, les mensurations et les photos ajoutés ici
+              apparaissent directement dans /profil.
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           <EditStudentModal student={student} onSave={(partial) => updateStudent(student.id, partial)} />
@@ -97,6 +226,24 @@ export default function AdminStudentDetailPage() {
         </div>
       </div>
 
+      <div className="mb-6">
+        <WeightEvolutionCard
+          profile={weightProfile}
+          history={weightHistory}
+          onUpdateWeight={handleUpdateWeight}
+          onUpdateTarget={handleUpdateTarget}
+        />
+      </div>
+
+      <div className="mb-6">
+        <ProgressPhotoGallerySection
+          studentId={student.id}
+          photos={photos}
+          defaultWeightKg={student.currentWeightKg}
+          onAdd={handleAddPhoto}
+        />
+      </div>
+
       <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
         <AdminSection title="Informations personnelles">
           <InfoRow label="Téléphone" value={student.phone} />
@@ -112,22 +259,11 @@ export default function AdminStudentDetailPage() {
           <InfoRow label="Dernière connexion" value={student.lastLoginAt ? formatDateTime(student.lastLoginAt) : "Jamais"} />
         </AdminSection>
 
-        <AdminSection title="Mensurations">
-          {student.measurements.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Aucune mensuration enregistrée.</p>
-          ) : (
-            <div className="flex flex-col gap-3">
-              {student.measurements.map((m) => (
-                <div key={m.label} className="flex items-center justify-between border-b border-border py-2 last:border-0">
-                  <span className="text-sm text-foreground">{m.label}</span>
-                  <span className="text-sm text-muted-foreground">
-                    {m.startValueCm} → {m.currentValueCm} cm
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </AdminSection>
+        <MeasurementsSection
+          measurements={measurements}
+          customMeasurements={customMeasurements}
+          onSave={handleUpdateMeasurements}
+        />
       </div>
 
       <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -183,32 +319,6 @@ export default function AdminStudentDetailPage() {
         </div>
       </div>
 
-      <div className="mb-6 border border-border bg-card p-6">
-        <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
-          Photos de progression
-        </h2>
-        {student.progressPhotos.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Aucune photo enregistrée.</p>
-        ) : (
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            {student.progressPhotos.map((photo) => (
-              <div key={photo.id} className="border border-border">
-                <div className="flex aspect-[3/4] items-center justify-center bg-gradient-to-br from-zinc-900 to-black text-xs uppercase tracking-widest text-muted-foreground">
-                  Photo
-                </div>
-                <div className="p-3 text-xs text-muted-foreground">
-                  <div className="flex justify-between">
-                    <span>{formatDate(photo.date)}</span>
-                    {photo.weightKg !== null && <span className="text-foreground">{photo.weightKg} kg</span>}
-                  </div>
-                  <p className="mt-1">{photo.note}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
       <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
         <AdminSection title="Programme actif">
           {assignedProgram ? (
@@ -234,20 +344,64 @@ export default function AdminStudentDetailPage() {
             <p className="text-sm text-muted-foreground">Aucun plan attribué.</p>
           )}
         </AdminSection>
-        <AdminSection title="Documents attribués">
-          {assignedDocuments.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Aucun document attribué.</p>
-          ) : (
-            <ul className="flex flex-col gap-2">
-              {assignedDocuments.map((d) => (
-                <li key={d.id}>
-                  <Link href="/admin/documents" className="text-sm text-primary hover:underline">
-                    {d.title}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
+        <AdminSection
+          title="Documents"
+          action={
+            lockedDocuments.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => unlockAllDocumentsForStudent(student.id)}
+                className="flex items-center gap-1.5 border border-primary px-3 py-1.5 text-[11px] uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+              >
+                <Unlock size={12} />
+                Tout débloquer
+              </button>
+            ) : undefined
+          }
+        >
+          <div className="flex flex-col gap-3">
+            <div>
+              <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                Disponibles ({availableDocuments.length})
+              </span>
+              {availableDocuments.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Aucun document disponible.</p>
+              ) : (
+                <ul className="flex flex-col gap-1.5">
+                  {availableDocuments.map(({ document }) => (
+                    <li key={document.id} className="text-sm text-foreground">
+                      {document.title}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            {lockedDocuments.length > 0 && (
+              <div>
+                <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                  Verrouillés ({lockedDocuments.length})
+                </span>
+                <ul className="flex flex-col gap-2">
+                  {lockedDocuments.map(({ document, availability }) => (
+                    <li key={document.id} className="flex items-center justify-between gap-2 text-sm text-muted-foreground">
+                      <span className="flex items-center gap-1.5">
+                        <Lock size={12} />
+                        {document.title}
+                        {availability.unlockDate && ` · dès le ${formatDate(availability.unlockDate)}`}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => unlockDocumentForStudent(student.id, document.id)}
+                        className="flex-shrink-0 text-[11px] uppercase tracking-widest text-primary hover:underline"
+                      >
+                        Débloquer
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
         </AdminSection>
       </div>
 

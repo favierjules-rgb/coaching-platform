@@ -1,4 +1,17 @@
+import {
+  bodyMeasurements as linkedMeasurements,
+  customMeasurements as linkedCustomMeasurements,
+  foodPreferences as linkedFoodPreferences,
+  injuryNote as linkedInjuryNote,
+  progressPhotos as linkedProgressPhotos,
+  sportPreferences as linkedSportPreferences,
+  student as linkedStudentSeed,
+  weightHistory as linkedWeightHistory,
+} from "@/data/student";
+import { generateId } from "@/lib/admin";
 import type {
+  AdminAppearanceSettings,
+  AdminCoach,
   AdminCoachSettings,
   AdminDocument,
   AdminExercise,
@@ -6,10 +19,26 @@ import type {
   AdminNutritionDay,
   AdminNutritionPlan,
   AdminProgram,
+  AdminSecuritySettings,
   AdminStudent,
   AdminStudentFeedback,
   AdminWorkoutSession,
+  BodyMeasurement,
+  BodyMeasurementType,
+  ExerciseLibraryItem,
+  ProgressPhoto,
+  StudentDocumentUnlock,
+  WeightEntry,
 } from "@/types";
+
+/**
+ * Identifiant de l'élève admin relié au compte élève connecté
+ * (data/student.ts). Ses photos, mensurations et poids sont lus/écrits via
+ * useStudentProfile (même localStorage que /profil) plutôt que via
+ * useAdminData, pour qu'une modification faite côté admin apparaisse
+ * immédiatement côté élève.
+ */
+export const LINKED_STUDENT_ID = linkedStudentSeed.id;
 
 function exercise(
   order: number,
@@ -20,6 +49,7 @@ function exercise(
   tempo: string,
   recommendedLoad: string,
   notes = "",
+  videoUrl = "https://videos.seth-coaching.mock/exercices/demo.mp4",
 ): AdminExercise {
   return {
     id: `ex-${order}-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
@@ -30,7 +60,7 @@ function exercise(
     restSeconds,
     tempo,
     recommendedLoad,
-    videoUrl: "https://videos.seth-coaching.mock/exercices/demo.mp4",
+    videoUrl,
     notes,
   };
 }
@@ -81,6 +111,151 @@ function withProgramId(programId: string, sessions: AdminWorkoutSession[]): Admi
   return sessions.map((s) => ({ ...s, programId }));
 }
 
+/* ─── Banque d'exercices ─── */
+
+export const adminExerciseLibrary: ExerciseLibraryItem[] = [
+  {
+    id: "lib-developpe-couche",
+    name: "Développé couché barre",
+    muscleGroup: "Pectoraux",
+    category: "push",
+    equipment: "barre",
+    level: "intermédiaire",
+    videoUrl: "https://videos.seth-coaching.mock/exercices/developpe-couche.mp4",
+    technicalNote: "Omoplates rétractées, pieds ancrés au sol, barre touche le bas de la poitrine.",
+    coachInstructions: "Contrôle la descente sur 2 secondes, pousse explosif en haut.",
+    tags: ["pectoraux", "force", "barre"],
+    createdAt: "2026-01-01T09:00:00.000Z",
+    updatedAt: "2026-01-01T09:00:00.000Z",
+  },
+  {
+    id: "lib-squat-barre",
+    name: "Squat barre",
+    muscleGroup: "Quadriceps",
+    category: "legs",
+    equipment: "barre",
+    level: "intermédiaire",
+    videoUrl: "https://videos.seth-coaching.mock/exercices/squat-barre.mp4",
+    technicalNote: "Descend jusqu'à parallèle minimum, dos neutre, genoux dans l'axe des pieds.",
+    coachInstructions: "Échauffement progressif obligatoire avant les séries lourdes.",
+    tags: ["jambes", "force", "barre"],
+    createdAt: "2026-01-01T09:00:00.000Z",
+    updatedAt: "2026-01-01T09:00:00.000Z",
+  },
+  {
+    id: "lib-tractions",
+    name: "Tractions lestées",
+    muscleGroup: "Dos",
+    category: "pull",
+    equipment: "poids du corps",
+    level: "avancé",
+    videoUrl: "https://videos.seth-coaching.mock/exercices/tractions.mp4",
+    technicalNote: "Amplitude complète, menton au-dessus de la barre, descente contrôlée.",
+    coachInstructions: "Ajoute du lest par palier de 2,5 kg quand 8 reps strictes sont atteintes.",
+    tags: ["dos", "tirage", "poids du corps"],
+    createdAt: "2026-01-01T09:00:00.000Z",
+    updatedAt: "2026-01-01T09:00:00.000Z",
+  },
+  {
+    id: "lib-rowing-barre",
+    name: "Rowing barre",
+    muscleGroup: "Dos",
+    category: "pull",
+    equipment: "barre",
+    level: "intermédiaire",
+    videoUrl: "https://videos.seth-coaching.mock/exercices/rowing-barre.mp4",
+    technicalNote: "Buste penché à 45°, tire la barre vers le nombril, serre les omoplates.",
+    coachInstructions: "Évite de cambrer le bas du dos pour tricher la charge.",
+    tags: ["dos", "tirage", "barre"],
+    createdAt: "2026-01-01T09:00:00.000Z",
+    updatedAt: "2026-01-01T09:00:00.000Z",
+  },
+  {
+    id: "lib-developpe-militaire",
+    name: "Développé militaire barre",
+    muscleGroup: "Épaules",
+    category: "push",
+    equipment: "barre",
+    level: "intermédiaire",
+    videoUrl: "https://videos.seth-coaching.mock/exercices/developpe-militaire.mp4",
+    technicalNote: "Gainage serré, barre part du haut des clavicules, trajectoire verticale.",
+    coachInstructions: "Éviter en cas de gêne d'épaule — proposer l'alternative haltères assis.",
+    tags: ["épaules", "force", "barre"],
+    createdAt: "2026-01-01T09:00:00.000Z",
+    updatedAt: "2026-01-01T09:00:00.000Z",
+  },
+  {
+    id: "lib-elevations-laterales",
+    name: "Élévations latérales",
+    muscleGroup: "Épaules",
+    category: "push",
+    equipment: "haltères",
+    level: "débutant",
+    videoUrl: "https://videos.seth-coaching.mock/exercices/elevations-laterales.mp4",
+    technicalNote: "Coudes légèrement fléchis, monte jusqu'à hauteur d'épaule, pas plus haut.",
+    coachInstructions: "Charge légère, priorité à la qualité d'exécution sur ce mouvement d'isolation.",
+    tags: ["épaules", "isolation", "haltères"],
+    createdAt: "2026-01-01T09:00:00.000Z",
+    updatedAt: "2026-01-01T09:00:00.000Z",
+  },
+  {
+    id: "lib-fentes-marchees",
+    name: "Fentes marchées haltères",
+    muscleGroup: "Jambes",
+    category: "legs",
+    equipment: "haltères",
+    level: "intermédiaire",
+    videoUrl: "https://videos.seth-coaching.mock/exercices/fentes-marchees.mp4",
+    technicalNote: "Grand pas en avant, genou arrière frôle le sol, buste droit.",
+    coachInstructions: "Bien adapté en fin de séance jambes pour finir en douceur.",
+    tags: ["jambes", "unilatéral", "haltères"],
+    createdAt: "2026-01-01T09:00:00.000Z",
+    updatedAt: "2026-01-01T09:00:00.000Z",
+  },
+  {
+    id: "lib-gainage-planche",
+    name: "Gainage planche",
+    muscleGroup: "Sangle abdominale",
+    category: "abdos",
+    equipment: "poids du corps",
+    level: "débutant",
+    videoUrl: "https://videos.seth-coaching.mock/exercices/gainage-planche.mp4",
+    technicalNote: "Corps aligné tête-bassin-talons, ne pas laisser tomber les hanches.",
+    coachInstructions: "Bon exercice de fin de séance ou d'échauffement pour l'activation du tronc.",
+    tags: ["abdos", "statique", "poids du corps"],
+    createdAt: "2026-01-01T09:00:00.000Z",
+    updatedAt: "2026-01-01T09:00:00.000Z",
+  },
+  {
+    id: "lib-corde-a-sauter",
+    name: "Corde à sauter",
+    muscleGroup: "Cardio",
+    category: "cardio",
+    equipment: "autre",
+    level: "débutant",
+    videoUrl: "https://videos.seth-coaching.mock/exercices/corde-a-sauter.mp4",
+    technicalNote: "Petits sauts, poignets qui font tourner la corde, atterrissage sur l'avant-pied.",
+    coachInstructions: "Idéal en échauffement ou en fin de séance pour la dépense calorique.",
+    tags: ["cardio", "conditionnement"],
+    createdAt: "2026-01-01T09:00:00.000Z",
+    updatedAt: "2026-01-01T09:00:00.000Z",
+  },
+  {
+    id: "lib-mobilite-epaule",
+    name: "Rotations d'épaules élastique",
+    muscleGroup: "Épaules",
+    category: "mobilité",
+    equipment: "élastique",
+    level: "débutant",
+    videoUrl: "https://videos.seth-coaching.mock/exercices/mobilite-epaule.mp4",
+    technicalNote: "Rotation externe contrôlée, coude fixe au corps, amplitude progressive.",
+    coachInstructions: "À intégrer systématiquement en échauffement avant les séances haut du corps.",
+    tags: ["mobilité", "échauffement", "élastique"],
+    createdAt: "2026-01-01T09:00:00.000Z",
+    updatedAt: "2026-01-01T09:00:00.000Z",
+  },
+];
+
 /* ─── Programmes ─── */
 
 export const adminPrograms: AdminProgram[] = [
@@ -93,7 +268,7 @@ export const adminPrograms: AdminProgram[] = [
     description:
       "Programme en split haut/bas orienté hypertrophie, 4 séances par semaine, progression linéaire de charge sur 12 semaines.",
     status: "actif",
-    assignedStudentIds: ["adm-2", "adm-4"],
+    assignedStudentIds: ["adm-2", "adm-4", LINKED_STUDENT_ID],
     sessions: withProgramId("adm-prog-masse", [
       session(
         "sess-masse-s1-lun",
@@ -368,7 +543,7 @@ export const adminNutritionPlans: AdminNutritionPlan[] = [
       "Bananes",
     ],
     days: weekDaysList.map((day) => masseMealTemplate("adm-plan-masse", day)),
-    assignedStudentIds: ["adm-2", "adm-4"],
+    assignedStudentIds: ["adm-2", "adm-4", LINKED_STUDENT_ID],
     createdAt: "2026-01-05T09:00:00.000Z",
     updatedAt: "2026-06-15T09:00:00.000Z",
   },
@@ -463,6 +638,8 @@ export const adminDocuments: AdminDocument[] = [
     title: "Contrat de coaching",
     type: "lien",
     category: "administratif",
+    level: 1,
+    difficulty: "facile",
     shortDescription: "Contrat d'accompagnement standard et ses conditions.",
     fullDescription:
       "Contrat type à faire signer à chaque nouvel élève, détaillant la durée, les modalités de paiement et les conditions d'annulation.",
@@ -471,7 +648,9 @@ export const adminDocuments: AdminDocument[] = [
     storagePath: null,
     status: "publié",
     important: true,
-    assignedStudentIds: ["adm-1", "adm-2", "adm-3", "adm-4", "adm-5", "adm-6"],
+    distributionMode: "immediat",
+    unlockAfterWeeks: 0,
+    assignedStudentIds: ["adm-1", "adm-2", "adm-3", "adm-4", "adm-5", "adm-6", LINKED_STUDENT_ID],
     createdAt: "2026-01-01T09:00:00.000Z",
     updatedAt: "2026-01-01T09:00:00.000Z",
   },
@@ -480,6 +659,8 @@ export const adminDocuments: AdminDocument[] = [
     title: "Guide nutrition prise de masse",
     type: "pdf",
     category: "nutrition",
+    level: 1,
+    difficulty: "facile",
     shortDescription: "Les bases pour structurer son alimentation en période de prise de masse.",
     fullDescription:
       "Répartition des macronutriments, fréquence des repas et exemples de menus adaptés à un objectif de prise de masse musculaire.",
@@ -488,7 +669,9 @@ export const adminDocuments: AdminDocument[] = [
     storagePath: null,
     status: "publié",
     important: true,
-    assignedStudentIds: ["adm-2", "adm-4"],
+    distributionMode: "deblocage-auto",
+    unlockAfterWeeks: 0,
+    assignedStudentIds: ["adm-2", "adm-4", LINKED_STUDENT_ID],
     createdAt: "2026-01-12T09:00:00.000Z",
     updatedAt: "2026-06-28T09:00:00.000Z",
   },
@@ -497,6 +680,8 @@ export const adminDocuments: AdminDocument[] = [
     title: "Vidéo technique squat",
     type: "vidéo",
     category: "entrainement",
+    level: 2,
+    difficulty: "intermédiaire",
     shortDescription: "Décomposition complète de la technique et des erreurs fréquentes.",
     fullDescription:
       "Vidéo filmée sous plusieurs angles montrant l'exécution correcte du squat, avec un focus sur les erreurs les plus fréquentes.",
@@ -505,7 +690,9 @@ export const adminDocuments: AdminDocument[] = [
     storagePath: null,
     status: "publié",
     important: false,
-    assignedStudentIds: ["adm-1", "adm-2", "adm-4", "adm-6"],
+    distributionMode: "deblocage-auto",
+    unlockAfterWeeks: 2,
+    assignedStudentIds: ["adm-1", "adm-2", "adm-4", "adm-6", LINKED_STUDENT_ID],
     createdAt: "2026-02-01T09:00:00.000Z",
     updatedAt: "2026-02-01T09:00:00.000Z",
   },
@@ -514,6 +701,8 @@ export const adminDocuments: AdminDocument[] = [
     title: "Grille de suivi hebdomadaire",
     type: "pdf",
     category: "administratif",
+    level: 1,
+    difficulty: "facile",
     shortDescription: "Tableau simple pour noter mensurations et poids chaque semaine.",
     fullDescription: "Document en cours de mise à jour, pas encore prêt à être publié.",
     externalUrl: "",
@@ -521,6 +710,8 @@ export const adminDocuments: AdminDocument[] = [
     storagePath: null,
     status: "brouillon",
     important: false,
+    distributionMode: "immediat",
+    unlockAfterWeeks: 0,
     assignedStudentIds: [],
     createdAt: "2026-06-20T09:00:00.000Z",
     updatedAt: "2026-06-20T09:00:00.000Z",
@@ -530,6 +721,8 @@ export const adminDocuments: AdminDocument[] = [
     title: "Guide mobilité épaule",
     type: "guide",
     category: "entrainement",
+    level: 2,
+    difficulty: "intermédiaire",
     shortDescription: "Routine de mobilité à faire avant les séances haut du corps.",
     fullDescription:
       "5 minutes d'exercices de mobilité d'épaule à intégrer systématiquement en échauffement pour les séances push/pull.",
@@ -538,6 +731,8 @@ export const adminDocuments: AdminDocument[] = [
     storagePath: null,
     status: "publié",
     important: false,
+    distributionMode: "deblocage-auto",
+    unlockAfterWeeks: 2,
     assignedStudentIds: ["adm-2"],
     createdAt: "2026-05-20T09:00:00.000Z",
     updatedAt: "2026-05-20T09:00:00.000Z",
@@ -547,6 +742,8 @@ export const adminDocuments: AdminDocument[] = [
     title: "Checklist matériel salle à domicile",
     type: "image",
     category: "entrainement",
+    level: 3,
+    difficulty: "avancé",
     shortDescription: "Le matériel minimal recommandé pour reproduire les séances à la maison.",
     fullDescription:
       "Photo-checklist du matériel de base (élastiques, banc, haltères réglables) permettant de suivre les programmes à domicile.",
@@ -555,15 +752,104 @@ export const adminDocuments: AdminDocument[] = [
     storagePath: null,
     status: "archivé",
     important: false,
+    distributionMode: "deblocage-manuel",
+    unlockAfterWeeks: 4,
     assignedStudentIds: ["adm-3"],
     createdAt: "2025-11-05T09:00:00.000Z",
     updatedAt: "2026-01-10T09:00:00.000Z",
   },
 ];
 
+export const adminManualDocumentUnlocks: StudentDocumentUnlock[] = [];
+
 /* ─── Élèves ─── */
 
+function bodyMeasurement(
+  studentId: string,
+  type: BodyMeasurementType,
+  unit: "cm" | "kg",
+  startValue: number,
+  currentValue: number,
+  lastUpdatedAt: string,
+  note = "",
+): BodyMeasurement {
+  return { id: generateId("meas"), studentId, type, unit, startValue, currentValue, note, lastUpdatedAt };
+}
+
+function progressPhoto(
+  studentId: string,
+  type: ProgressPhoto["type"],
+  date: string,
+  weightKg: number | null,
+  note: string,
+): ProgressPhoto {
+  return {
+    id: generateId("photo"),
+    studentId,
+    type,
+    date,
+    weightKg,
+    note,
+    imageUrl: null,
+    storagePath: null,
+    pending: false,
+  };
+}
+
+function weightPoint(month: string, kg: number): WeightEntry {
+  return { month, kg };
+}
+
 export const adminStudents: AdminStudent[] = [
+  {
+    id: LINKED_STUDENT_ID,
+    firstName: linkedStudentSeed.firstName,
+    lastName: linkedStudentSeed.lastName,
+    email: "alexandre.morel@mail.mock",
+    phone: "06 78 90 12 34",
+    age: linkedStudentSeed.age,
+    heightCm: linkedStudentSeed.heightCm,
+    currentWeightKg: linkedStudentSeed.currentWeightKg,
+    startWeightKg: linkedWeightHistory[0]?.kg ?? linkedStudentSeed.currentWeightKg,
+    targetWeightKg: linkedStudentSeed.targetWeightKg,
+    goal: linkedStudentSeed.goal,
+    level: linkedStudentSeed.level,
+    trainingFrequencyPerWeek: linkedStudentSeed.trainingFrequencyPerWeek,
+    trainingLocation: linkedStudentSeed.trainingLocation,
+    status: linkedStudentSeed.coachingStatus,
+    startDate: linkedStudentSeed.startDate,
+    lastLoginAt: "2026-07-02T08:00:00.000Z",
+    foodPreferences: {
+      liked: linkedFoodPreferences.liked,
+      disliked: linkedFoodPreferences.disliked,
+      intolerances: linkedFoodPreferences.intolerances,
+      diet: linkedFoodPreferences.diet,
+    },
+    sportPreferences: {
+      sports: linkedSportPreferences.sports,
+      equipment: linkedSportPreferences.equipment,
+      preferredExercises: linkedSportPreferences.preferredExercises,
+      exercisesToAvoid: linkedSportPreferences.exercisesToAvoid,
+    },
+    injuries: linkedInjuryNote.currentInjuries.join(" ") || "Aucune blessure actuelle.",
+    weightHistory: linkedWeightHistory,
+    measurements: linkedMeasurements,
+    customMeasurements: linkedCustomMeasurements,
+    progressPhotos: linkedProgressPhotos,
+    assignedProgramIds: ["adm-prog-masse"],
+    assignedNutritionPlanIds: ["adm-plan-masse"],
+    assignedDocumentIds: ["adm-doc-contrat", "adm-doc-guide-masse", "adm-doc-video-squat"],
+    coachNotes: [
+      {
+        id: "note-linked-a",
+        studentId: LINKED_STUDENT_ID,
+        text: "Compte relié à l'espace élève connecté : le poids, les mensurations et les photos ajoutés ici apparaissent directement dans /profil.",
+        createdAt: "2026-06-20T10:00:00.000Z",
+      },
+    ],
+    createdAt: `${linkedStudentSeed.startDate}T09:00:00.000Z`,
+    updatedAt: "2026-07-02T09:00:00.000Z",
+  },
   {
     id: "adm-1",
     firstName: "Camille",
@@ -595,13 +881,21 @@ export const adminStudents: AdminStudent[] = [
       exercisesToAvoid: ["Squat barre lourd"],
     },
     injuries: "Sensibilité au genou droit, éviter les fentes profondes.",
-    measurements: [
-      { label: "Tour de taille", startValueCm: 92, currentValueCm: 84 },
-      { label: "Tour de hanches", startValueCm: 108, currentValueCm: 101 },
+    weightHistory: [
+      weightPoint("Fév", 74),
+      weightPoint("Mar", 72.5),
+      weightPoint("Avr", 71),
+      weightPoint("Mai", 69.5),
+      weightPoint("Jun", 68.4),
     ],
+    measurements: [
+      bodyMeasurement("adm-1", "taille", "cm", 92, 84, "2026-06-28"),
+      bodyMeasurement("adm-1", "hanches", "cm", 108, 101, "2026-06-28"),
+    ],
+    customMeasurements: [],
     progressPhotos: [
-      { id: "adm-1-photo-1", date: "2026-02-10", weightKg: 74, note: "Photo de départ." },
-      { id: "adm-1-photo-2", date: "2026-06-01", weightKg: 69, note: "Progrès net sur la taille." },
+      progressPhoto("adm-1", "avant", "2026-02-10", 74, "Photo de départ."),
+      progressPhoto("adm-1", "actuelle", "2026-06-01", 69, "Progrès net sur la taille."),
     ],
     assignedProgramIds: ["adm-prog-seche"],
     assignedNutritionPlanIds: ["adm-plan-perte"],
@@ -648,13 +942,20 @@ export const adminStudents: AdminStudent[] = [
       exercisesToAvoid: ["Développé militaire nuque"],
     },
     injuries: "Légère gêne à l'épaule droite en fin d'amplitude.",
-    measurements: [
-      { label: "Tour de bras droit", startValueCm: 33, currentValueCm: 36.5 },
-      { label: "Tour de poitrine", startValueCm: 98, currentValueCm: 104 },
+    weightHistory: [
+      weightPoint("Jan", 72),
+      weightPoint("Mar", 75),
+      weightPoint("Mai", 78),
+      weightPoint("Jun", 80.1),
     ],
+    measurements: [
+      bodyMeasurement("adm-2", "bras-droit", "cm", 33, 36.5, "2026-06-28"),
+      bodyMeasurement("adm-2", "poitrine", "cm", 98, 104, "2026-06-28"),
+    ],
+    customMeasurements: [],
     progressPhotos: [
-      { id: "adm-2-photo-1", date: "2026-01-12", weightKg: 72, note: "Photo de départ." },
-      { id: "adm-2-photo-2", date: "2026-06-28", weightKg: 80.1, note: "Bonne évolution générale." },
+      progressPhoto("adm-2", "avant", "2026-01-12", 72, "Photo de départ."),
+      progressPhoto("adm-2", "actuelle", "2026-06-28", 80.1, "Bonne évolution générale."),
     ],
     assignedProgramIds: ["adm-prog-masse"],
     assignedNutritionPlanIds: ["adm-plan-masse"],
@@ -701,10 +1002,10 @@ export const adminStudents: AdminStudent[] = [
       exercisesToAvoid: [],
     },
     injuries: "Aucune blessure connue.",
-    measurements: [{ label: "Tour de taille", startValueCm: 74, currentValueCm: 71 }],
-    progressPhotos: [
-      { id: "adm-3-photo-1", date: "2025-11-05", weightKg: 63, note: "Photo de départ." },
-    ],
+    weightHistory: [weightPoint("Nov", 63), weightPoint("Jan", 62), weightPoint("Mar", 61)],
+    measurements: [bodyMeasurement("adm-3", "taille", "cm", 74, 71, "2026-05-10")],
+    customMeasurements: [],
+    progressPhotos: [progressPhoto("adm-3", "avant", "2025-11-05", 63, "Photo de départ.")],
     assignedProgramIds: ["adm-prog-remise"],
     assignedNutritionPlanIds: [],
     assignedDocumentIds: ["adm-doc-contrat", "adm-doc-materiel"],
@@ -750,12 +1051,10 @@ export const adminStudents: AdminStudent[] = [
       exercisesToAvoid: [],
     },
     injuries: "Ancienne entorse cheville gauche, guérie, surveillance en pliométrie.",
-    measurements: [
-      { label: "Tour de cuisse droite", startValueCm: 58, currentValueCm: 61 },
-    ],
-    progressPhotos: [
-      { id: "adm-4-photo-1", date: "2026-03-01", weightKg: 79, note: "Photo de départ." },
-    ],
+    weightHistory: [weightPoint("Mar", 79), weightPoint("Avr", 81), weightPoint("Mai", 82.5), weightPoint("Jun", 84)],
+    measurements: [bodyMeasurement("adm-4", "cuisse-droite", "cm", 58, 61, "2026-06-30")],
+    customMeasurements: [],
+    progressPhotos: [progressPhoto("adm-4", "avant", "2026-03-01", 79, "Photo de départ.")],
     assignedProgramIds: ["adm-prog-masse"],
     assignedNutritionPlanIds: ["adm-plan-masse"],
     assignedDocumentIds: ["adm-doc-contrat", "adm-doc-guide-masse", "adm-doc-video-squat"],
@@ -789,7 +1088,9 @@ export const adminStudents: AdminStudent[] = [
       exercisesToAvoid: [],
     },
     injuries: "Aucune.",
+    weightHistory: [weightPoint("Sep", 65), weightPoint("Déc", 65)],
     measurements: [],
+    customMeasurements: [],
     progressPhotos: [],
     assignedProgramIds: ["adm-prog-remise"],
     assignedNutritionPlanIds: [],
@@ -831,7 +1132,9 @@ export const adminStudents: AdminStudent[] = [
       exercisesToAvoid: [],
     },
     injuries: "Douleur lombaire occasionnelle, éviter le soulevé de terre lourd.",
+    weightHistory: [weightPoint("Jun", 90)],
     measurements: [],
+    customMeasurements: [],
     progressPhotos: [],
     assignedProgramIds: [],
     assignedNutritionPlanIds: [],
@@ -973,3 +1276,47 @@ export const adminCoachSettings: AdminCoachSettings = {
   siteStatus: "en ligne",
   mockVersion: "0.1.0-mock",
 };
+
+export const adminAppearanceSettings: AdminAppearanceSettings = {
+  accentColor: "#d62828",
+  secondaryColor: "#1f6feb",
+  darkMode: "sombre",
+  cardStyle: "angulaire",
+  density: "normale",
+  titleStyle: "Barlow Condensed — gras, majuscules",
+  brandLogoText: "SETH",
+  brandTagline: "Préparation physique",
+};
+
+export const adminSecuritySettings: AdminSecuritySettings = {
+  mockPasswordSet: false,
+  mockPasswordHint: "",
+  updatedAt: "2026-01-01T09:00:00.000Z",
+};
+
+export const adminCoaches: AdminCoach[] = [
+  {
+    id: "coach-seth",
+    firstName: "Seth",
+    lastName: "Coach",
+    email: "coach@seth-coaching.mock",
+    role: "admin",
+    status: "actif",
+    speciality: "Préparation physique générale",
+    internalNote: "Compte principal.",
+    createdAt: "2026-01-01T09:00:00.000Z",
+    updatedAt: "2026-01-01T09:00:00.000Z",
+  },
+  {
+    id: "coach-assistant-1",
+    firstName: "Manon",
+    lastName: "Roy",
+    email: "manon.roy@seth-coaching.mock",
+    role: "assistant",
+    status: "actif",
+    speciality: "Nutrition sportive",
+    internalNote: "Gère les plans alimentaires et le suivi nutrition.",
+    createdAt: "2026-03-01T09:00:00.000Z",
+    updatedAt: "2026-03-01T09:00:00.000Z",
+  },
+];

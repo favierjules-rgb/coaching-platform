@@ -431,6 +431,13 @@ export interface DocumentResource {
   videoUrl?: string;
   externalUrl?: string;
   relatedDocumentIds: string[];
+  /**
+   * Niveau de déblocage progressif (voir DocumentDistributionMode côté
+   * admin) : level 1 dispo dès le début du coaching, puis un niveau de
+   * plus tous les `unlockIntervalWeeks` (voir lib/documents.ts).
+   */
+  level: number;
+  distributionMode: DocumentDistributionMode;
 }
 
 export interface StudentDocumentAccess {
@@ -547,23 +554,18 @@ export interface AdminSportPreferences {
   exercisesToAvoid: string[];
 }
 
-export interface AdminProgressPhoto {
-  id: string;
-  date: string;
-  weightKg: number | null;
-  note: string;
-}
-
-export interface AdminBodyMeasurement {
-  label: string;
-  startValueCm: number;
-  currentValueCm: number;
-}
-
 /**
  * Fiche élève côté admin. Correspond à une future table Supabase
  * `student` (le compte élève lui-même, distinct du profil élève détaillé
  * qu'il édite dans /profil).
+ *
+ * measurements/customMeasurements/progressPhotos/weightHistory réutilisent
+ * volontairement les mêmes types que le profil élève (BodyMeasurement,
+ * CustomMeasurement, ProgressPhoto, WeightEntry) plutôt que d'en dupliquer
+ * une version admin : quand un élève admin correspond au compte élève
+ * connecté (même id que StudentProfile.id), ces données sont lues/écrites
+ * via le même hook useStudentProfile et le même localStorage, donc une
+ * modification admin apparaît immédiatement dans /profil.
  */
 export interface AdminStudent {
   id: string;
@@ -586,8 +588,10 @@ export interface AdminStudent {
   foodPreferences: AdminFoodPreferences;
   sportPreferences: AdminSportPreferences;
   injuries: string;
-  measurements: AdminBodyMeasurement[];
-  progressPhotos: AdminProgressPhoto[];
+  weightHistory: WeightEntry[];
+  measurements: BodyMeasurement[];
+  customMeasurements: CustomMeasurement[];
+  progressPhotos: ProgressPhoto[];
   assignedProgramIds: string[];
   assignedNutritionPlanIds: string[];
   assignedDocumentIds: string[];
@@ -698,16 +702,53 @@ export interface AdminNutritionPlan {
 }
 
 /**
+ * Mode de distribution d'un document aux élèves :
+ * - immediat : disponible dès l'attribution
+ * - deblocage-auto : débloqué automatiquement selon le niveau du document
+ *   et le nombre de semaines écoulées depuis le début du coaching
+ * - deblocage-manuel : le coach débloque lui-même, élève par élève
+ */
+export type DocumentDistributionMode = "immediat" | "deblocage-auto" | "deblocage-manuel";
+
+/**
+ * Règle de déblocage dérivée d'un document (niveau + délai). Prête à
+ * devenir une vraie table Supabase `document_unlock_rule` ; pour l'instant
+ * calculée directement depuis AdminDocument.level / unlockAfterWeeks.
+ */
+export interface DocumentUnlockRule {
+  documentId: string;
+  level: number;
+  unlockAfterWeeks: number;
+}
+
+/**
+ * Déblocage manuel d'un document pour un élève précis (force la
+ * disponibilité même si la règle automatique ne le permettrait pas
+ * encore). Correspond à une future table Supabase
+ * `student_document_unlock`.
+ */
+export interface StudentDocumentUnlock {
+  studentId: string;
+  documentId: string;
+  unlockedAt: string;
+}
+
+/**
  * Document/ressource géré par le coach. Correspond à une future table
  * Supabase `document_resource_admin` ; fileName/storagePath préparés pour
  * Supabase Storage (fileName = nom mocké choisi dans l'input file,
- * storagePath = chemin réel une fois l'upload branché).
+ * storagePath = chemin réel une fois l'upload branché). level +
+ * unlockAfterWeeks alimentent DocumentUnlockRule lorsque distributionMode
+ * vaut "deblocage-auto" (ex : niveau 2, unlockAfterWeeks 2 → disponible à
+ * partir de la semaine 3 du coaching).
  */
 export interface AdminDocument {
   id: string;
   title: string;
   type: DocumentType;
   category: DocumentCategory;
+  level: number;
+  difficulty: "facile" | "intermédiaire" | "avancé";
   shortDescription: string;
   fullDescription: string;
   externalUrl: string;
@@ -715,6 +756,8 @@ export interface AdminDocument {
   storagePath: string | null;
   status: AdminDocumentStatus;
   important: boolean;
+  distributionMode: DocumentDistributionMode;
+  unlockAfterWeeks: number;
   assignedStudentIds: string[];
   createdAt: string;
   updatedAt: string;
@@ -785,3 +828,108 @@ export interface AdminCoachSettings {
   siteStatus: "en ligne" | "maintenance";
   mockVersion: string;
 }
+
+export type CoachRole = "coach" | "admin" | "assistant";
+export type CoachAccountStatus = "actif" | "inactif";
+
+/**
+ * Compte coach/assistant listé sur /admin/parametres. Correspond à une
+ * future table Supabase `coach_account`.
+ */
+export interface AdminCoach {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  role: CoachRole;
+  status: CoachAccountStatus;
+  speciality: string;
+  internalNote: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CardStyle = "angulaire" | "arrondi";
+export type UiDensity = "compacte" | "normale" | "large";
+
+/**
+ * Apparence du site, éditable en mock sur /admin/parametres (appliquée en
+ * direct sur l'espace admin via des variables CSS). Correspond à une
+ * future table Supabase `appearance_settings`.
+ */
+export interface AdminAppearanceSettings {
+  accentColor: string;
+  secondaryColor: string;
+  darkMode: "sombre" | "très sombre";
+  cardStyle: CardStyle;
+  density: UiDensity;
+  titleStyle: string;
+  brandLogoText: string;
+  brandTagline: string;
+}
+
+/**
+ * Sécurité admin mockée. AVERTISSEMENT : ceci n'est PAS un mécanisme de
+ * sécurité réel — le mot de passe est stocké en clair dans localStorage
+ * uniquement pour la démo. À remplacer entièrement par une vraie
+ * authentification (Supabase Auth) avant toute mise en production.
+ */
+export interface AdminSecuritySettings {
+  mockPasswordSet: boolean;
+  mockPasswordHint: string;
+  updatedAt: string;
+}
+
+/* ─── Banque d'exercices ───
+ * Types préparés pour une future table Supabase `exercise_library`, pour
+ * réutiliser des exercices (nom, vidéo, consignes...) d'un programme à
+ * l'autre sans ressaisie.
+ */
+
+export type ExerciseCategory = "push" | "pull" | "legs" | "cardio" | "mobilité" | "abdos" | "autre";
+export type ExerciseEquipment =
+  | "haltères"
+  | "barre"
+  | "machine"
+  | "poids du corps"
+  | "élastique"
+  | "autre";
+export type ExerciseLevel = "débutant" | "intermédiaire" | "avancé";
+
+export interface ExerciseTag {
+  id: string;
+  label: string;
+}
+
+export interface ExerciseLibraryItem {
+  id: string;
+  name: string;
+  muscleGroup: string;
+  category: ExerciseCategory;
+  equipment: ExerciseEquipment;
+  level: ExerciseLevel;
+  videoUrl: string;
+  technicalNote: string;
+  coachInstructions: string;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Métadonnées d'une semaine de programme (message affiché quand elle a
+ * été créée par duplication d'une autre semaine). Les séances elles-mêmes
+ * restent stockées à plat dans AdminProgram.sessions (weekNumber + day).
+ */
+export interface ProgramWeek {
+  programId: string;
+  weekNumber: number;
+  duplicatedFromWeek: number | null;
+}
+
+/**
+ * Forme "modèle" d'une séance, réutilisable indépendamment d'une semaine
+ * ou d'un programme précis (ex: dupliquer une séance vers une nouvelle
+ * semaine sans ses identifiants de position).
+ */
+export type WorkoutSessionTemplate = Omit<AdminWorkoutSession, "id" | "programId" | "weekNumber" | "day">;

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Dumbbell, Plus } from "lucide-react";
 
 import { AssignStudentsModal } from "@/components/admin/AssignStudentsModal";
+import { ExerciseLibraryManager } from "@/components/admin/ExerciseLibraryManager";
 import { FilterButtons, SearchInput } from "@/components/admin/SearchAndFilters";
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
@@ -12,6 +13,7 @@ import { contentStatusLabels, matchesTextSearch, totalSessions, totalWeeks } fro
 import type { AdminContentStatus } from "@/types";
 
 type StatusFilter = "tous" | AdminContentStatus;
+type Tab = "programmes" | "banque";
 
 const statusFilters: { value: StatusFilter; label: string }[] = [
   { value: "tous", label: "Tous" },
@@ -21,9 +23,10 @@ const statusFilters: { value: StatusFilter; label: string }[] = [
 ];
 
 export default function AdminProgramsPage() {
-  const { state, setAssignment } = useAdminData();
-  const { programs, students } = state;
+  const { state, setAssignment, createLibraryExercise, updateLibraryExercise, deleteLibraryExercise } = useAdminData();
+  const { programs, students, exerciseLibrary } = state;
 
+  const [tab, setTab] = useState<Tab>("programmes");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("tous");
   const [levelFilter, setLevelFilter] = useState("tous");
@@ -44,17 +47,51 @@ export default function AdminProgramsPage() {
           <h1 className="font-heading text-3xl font-extrabold uppercase text-foreground md:text-4xl">
             Programmes
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">{programs.length} programmes créés.</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {tab === "programmes" ? `${programs.length} programmes créés.` : `${exerciseLibrary.length} exercices dans la banque.`}
+          </p>
         </div>
-        <Link
-          href="/admin/programmes/nouveau"
-          className="flex items-center gap-2 border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700"
-        >
-          <Plus size={14} />
-          Créer programme
-        </Link>
+        {tab === "programmes" && (
+          <Link
+            href="/admin/programmes/nouveau"
+            className="flex items-center gap-2 border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700"
+          >
+            <Plus size={14} />
+            Créer programme
+          </Link>
+        )}
       </div>
 
+      <div className="mb-6 flex gap-2 border-b border-border">
+        <button
+          type="button"
+          onClick={() => setTab("programmes")}
+          className={`border-b-2 px-4 py-2 text-xs font-bold uppercase tracking-widest transition-colors ${
+            tab === "programmes" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Programmes
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("banque")}
+          className={`border-b-2 px-4 py-2 text-xs font-bold uppercase tracking-widest transition-colors ${
+            tab === "banque" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Banque d&apos;exercices
+        </button>
+      </div>
+
+      {tab === "banque" ? (
+        <ExerciseLibraryManager
+          items={exerciseLibrary}
+          onCreate={createLibraryExercise}
+          onUpdate={updateLibraryExercise}
+          onDelete={deleteLibraryExercise}
+        />
+      ) : (
+        <>
       <div className="mb-6 flex flex-col gap-4">
         <SearchInput value={query} onChange={setQuery} placeholder="Rechercher un programme..." />
         <div className="flex flex-wrap items-center gap-4">
@@ -141,6 +178,8 @@ export default function AdminProgramsPage() {
             </div>
           ))}
         </div>
+      )}
+        </>
       )}
     </div>
   );
