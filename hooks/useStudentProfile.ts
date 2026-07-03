@@ -202,11 +202,13 @@ export function useStudentProfile(studentId: string, seed: StudentProfileState) 
       const measuredAt = date || new Date().toISOString().slice(0, 10);
       const createdAt = new Date().toISOString();
 
+      const seenTypes = new Set<BodyMeasurementType>();
       const measurements = current.measurements.map((measurement) => {
         const newValue = values[measurement.type];
         if (newValue === undefined) {
           return measurement;
         }
+        seenTypes.add(measurement.type);
         newHistoryEntries.push({
           id: localId("meas-log"),
           studentId,
@@ -225,6 +227,39 @@ export function useStudentProfile(studentId: string, seed: StudentProfileState) 
           lastUpdatedAt: date,
         };
       });
+
+      // Une mensuration préréglée saisie pour la première fois (aucun
+      // enregistrement existant pour ce type) doit créer une nouvelle ligne
+      // plutôt que d'être silencieusement ignorée — valeur de départ =
+      // valeur actuelle ("Première mesure", évolution à 0).
+      for (const type of Object.keys(values) as BodyMeasurementType[]) {
+        const newValue = values[type];
+        if (newValue === undefined || seenTypes.has(type)) {
+          continue;
+        }
+        const unit = type === "poids" ? "kg" : "cm";
+        measurements.push({
+          id: localId("meas"),
+          studentId,
+          type,
+          unit,
+          startValue: newValue,
+          currentValue: newValue,
+          note,
+          lastUpdatedAt: date,
+        });
+        newHistoryEntries.push({
+          id: localId("meas-log"),
+          studentId,
+          key: type,
+          label: bodyMeasurementLabels[type] ?? type,
+          value: newValue,
+          unit,
+          measuredAt,
+          note,
+          createdAt,
+        });
+      }
 
       // Une mesure personnalisée déjà existante (même nom, insensible à la
       // casse) doit être MISE À JOUR (valeur actuelle) plutôt que dupliquée :

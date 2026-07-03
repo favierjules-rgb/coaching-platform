@@ -56,6 +56,10 @@ function MeasurementTile({
     .filter((entry) => entry.key === measurementKey)
     .sort((a, b) => new Date(b.measuredAt).getTime() - new Date(a.measuredAt).getTime());
 
+  // Aucune évolution exploitable tant qu'un seul relevé existe (première
+  // mesure) : mieux vaut l'indiquer clairement plutôt qu'afficher "+0".
+  const isFirstMeasurement = entries.length <= 1 && delta === 0;
+
   return (
     <div className="border border-border p-4">
       <div className="flex items-center justify-between gap-4">
@@ -70,12 +74,20 @@ function MeasurementTile({
           )}
         </div>
         <span className={`flex flex-shrink-0 items-center gap-1 text-sm font-bold ${deltaColor}`}>
-          {delta !== null && delta > 0 ? (
-            <TrendingUp size={16} />
-          ) : delta !== null && delta < 0 ? (
-            <TrendingDown size={16} />
-          ) : null}
-          {delta === null ? "—" : `${delta > 0 ? "+" : ""}${delta} ${unit}`}
+          {isFirstMeasurement ? (
+            <span className="text-xs font-normal uppercase tracking-wide text-muted-foreground">
+              Première mesure
+            </span>
+          ) : (
+            <>
+              {delta !== null && delta > 0 ? (
+                <TrendingUp size={16} />
+              ) : delta !== null && delta < 0 ? (
+                <TrendingDown size={16} />
+              ) : null}
+              {delta === null ? "—" : `${delta > 0 ? "+" : ""}${delta} ${unit}`}
+            </>
+          )}
         </span>
       </div>
 
