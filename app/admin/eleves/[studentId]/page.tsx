@@ -32,6 +32,7 @@ import {
 } from "@/data/student";
 import { useAdminData } from "@/hooks/useAdminData";
 import { useStudentProfile } from "@/hooks/useStudentProfile";
+import { useSupabaseStudentDetail } from "@/hooks/useSupabaseStudentDetail";
 import {
   computeDocumentAvailability,
   daysBetween,
@@ -47,6 +48,7 @@ import {
 import { bodyMeasurementLabels, nextWeightHistoryMonth } from "@/lib/profile";
 import { calculatePlannedVsActualMetrics, calculateWeekMetrics, formatTonnage } from "@/lib/training-metrics";
 import type {
+  AdminStudent,
   BodyMeasurementType,
   MeasurementLogEntry,
   MuscleGroupFilter,
@@ -74,9 +76,18 @@ export default function AdminStudentDetailPage() {
     photos: elveProgressPhotos,
   });
 
-  const rawStudent = students.find((s) => s.id === params.studentId);
+  // Priorité à Supabase quand l'id de l'URL correspond à un élève réel
+  // (UUID) ; sinon la page retombe sur la logique mock existante
+  // (isLinked / useAdminData) — voir hooks/useSupabaseStudentDetail.ts.
+  const supabaseDetail = useSupabaseStudentDetail(params.studentId);
+  const isSupabaseStudent = supabaseDetail.student !== null;
+
+  const rawStudent = isSupabaseStudent ? supabaseDetail.student : students.find((s) => s.id === params.studentId);
 
   if (!rawStudent) {
+    if (supabaseDetail.loading) {
+      return <p className="text-sm text-muted-foreground">Chargement…</p>;
+    }
     return (
       <div>
         <Link href="/admin/eleves" className="mb-6 inline-flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground hover:text-foreground">
@@ -93,7 +104,7 @@ export default function AdminStudentDetailPage() {
   // jamais planter sur une liste undefined plus bas dans la page.
   const student = normalizeAdminStudent(rawStudent);
 
-  const isLinked = student.id === LINKED_STUDENT_ID;
+  const isLinked = !isSupabaseStudent && student.id === LINKED_STUDENT_ID;
 
   const weightProfile = isLinked
     ? linkedProfile.state.profile
@@ -124,6 +135,10 @@ export default function AdminStudentDetailPage() {
   const photos = isLinked ? linkedProfile.state.photos : student.progressPhotos;
 
   function handleUpdateWeight(weightKg: number) {
+    if (isSupabaseStudent) {
+      supabaseDetail.updateWeight(weightKg);
+      return;
+    }
     if (isLinked) {
       linkedProfile.updateWeight(weightKg);
       return;
@@ -134,6 +149,10 @@ export default function AdminStudentDetailPage() {
   }
 
   function handleUpdateTarget(targetKg: number) {
+    if (isSupabaseStudent) {
+      supabaseDetail.updateTarget(targetKg);
+      return;
+    }
     if (isLinked) {
       linkedProfile.updateProfile({ targetWeightKg: targetKg });
       return;
@@ -147,6 +166,10 @@ export default function AdminStudentDetailPage() {
     note: string,
     custom: CustomMeasurementInput | null,
   ) {
+    if (isSupabaseStudent) {
+      supabaseDetail.updateMeasurements(values, date, note, custom);
+      return;
+    }
     if (isLinked) {
       linkedProfile.updateMeasurements(values, date, note, custom);
       return;
@@ -265,6 +288,10 @@ export default function AdminStudentDetailPage() {
   }
 
   function handleAddPhoto(photo: ProgressPhoto) {
+    if (isSupabaseStudent) {
+      supabaseDetail.addPhoto(photo);
+      return;
+    }
     if (isLinked) {
       linkedProfile.addPhoto(photo);
       return;
@@ -273,6 +300,10 @@ export default function AdminStudentDetailPage() {
   }
 
   function handleDeletePhoto(photoId: string) {
+    if (isSupabaseStudent) {
+      supabaseDetail.deletePhoto(photoId);
+      return;
+    }
     if (isLinked) {
       linkedProfile.removePhoto(photoId);
       return;
@@ -283,7 +314,27 @@ export default function AdminStudentDetailPage() {
   }
 
   function handleUpdatePayment(nextPaymentProfile: StudentPaymentProfile) {
+    if (isSupabaseStudent) {
+      supabaseDetail.updatePayment(nextPaymentProfile);
+      return;
+    }
     updateStudent(student!.id, { paymentProfile: nextPaymentProfile });
+  }
+
+  function applyStudentUpdate(partial: Partial<AdminStudent>) {
+    if (isSupabaseStudent) {
+      supabaseDetail.updateStudentFields(partial);
+      return;
+    }
+    updateStudent(student!.id, partial);
+  }
+
+  function handleAddCoachNote(text: string) {
+    if (isSupabaseStudent) {
+      supabaseDetail.addCoachNote(text);
+      return;
+    }
+    addCoachNote(student!.id, text);
   }
 
   const assignedProgram = programs.find((p) => student.assignedProgramIds.includes(p.id));
@@ -354,7 +405,7 @@ export default function AdminStudentDetailPage() {
           )}
         </div>
         <div className="flex flex-wrap gap-2">
-          <EditStudentModal student={student} onSave={(partial) => updateStudent(student.id, partial)} />
+          <EditStudentModal student={student} onSave={applyStudentUpdate} />
           <AssignContentToStudentModal
             student={student}
             programs={programs}
@@ -362,10 +413,10 @@ export default function AdminStudentDetailPage() {
             documents={documents}
             onSetAssignment={setAssignment}
           />
-          <AddCoachNoteModal onAdd={(text) => addCoachNote(student.id, text)} />
+          <AddCoachNoteModal onAdd={handleAddCoachNote} />
           <button
             type="button"
-            onClick={() => updateStudent(student.id, { status: student.status === "pause" ? "actif" : "pause" })}
+            onClick={() => applyStudentUpdate({ status: student.status === "pause" ? "actif" : "pause" })}
             className="flex items-center gap-1.5 border border-amber-500/50 px-4 py-2 text-xs uppercase tracking-widest text-amber-400 transition-colors hover:bg-amber-500/10"
           >
             {student.status === "pause" ? <Play size={13} /> : <Pause size={13} />}
@@ -374,7 +425,7 @@ export default function AdminStudentDetailPage() {
           <button
             type="button"
             onClick={() => {
-              updateStudent(student.id, { status: "terminé" });
+              applyStudentUpdate({ status: "terminé" });
               router.push("/admin/eleves");
             }}
             className="flex items-center gap-1.5 border border-red-500/50 px-4 py-2 text-xs uppercase tracking-widest text-red-400 transition-colors hover:bg-red-500/10"

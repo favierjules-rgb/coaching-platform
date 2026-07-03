@@ -11,6 +11,7 @@ import { InfoRow, ProfileSection, TagList } from "@/components/student/ProfileSe
 import { ProgressPhotoGallerySection } from "@/components/student/ProgressPhotoGallerySection";
 import { WeightEvolutionCard } from "@/components/student/WeightEvolutionCard";
 import { useStudentProfile, type StudentProfileState } from "@/hooks/useStudentProfile";
+import { useSupabaseStudentProfile } from "@/hooks/useSupabaseStudentProfile";
 import type { FoodPreferences, InjuryNote, SportPreferences, StudentGoal } from "@/types";
 
 interface ProfilPageContentProps {
@@ -37,14 +38,32 @@ export function ProfilPageContent({
   injuryNote,
   studentGoal,
 }: ProfilPageContentProps) {
-  const { state, updateProfile, updateWeight, updateMeasurements, addPhoto, removePhoto, resetProfile } =
-    useStudentProfile(studentId, seed);
+  // Toujours montés tous les deux (règle des hooks) : useSupabaseStudentProfile
+  // vérifie si l'utilisateur connecté a une vraie fiche élève Supabase, et
+  // seul le résultat correspondant est réellement utilisé plus bas. Tant
+  // que Supabase n'est pas configuré, n'a pas de fiche élève pour ce compte,
+  // ou que la vérification est en cours, on continue avec le mock/localStorage
+  // existant — comportement inchangé.
+  const mockProfile = useStudentProfile(studentId, seed);
+  const supabaseProfile = useSupabaseStudentProfile();
+  const useSupabase = supabaseProfile.ready && supabaseProfile.state !== null;
+
+  const state = useSupabase ? supabaseProfile.state! : mockProfile.state;
+  const updateProfile = useSupabase ? supabaseProfile.updateProfile : mockProfile.updateProfile;
+  const updateWeight = useSupabase ? supabaseProfile.updateWeight : mockProfile.updateWeight;
+  const updateMeasurements = useSupabase ? supabaseProfile.updateMeasurements : mockProfile.updateMeasurements;
+  const addPhoto = useSupabase ? supabaseProfile.addPhoto : mockProfile.addPhoto;
+  const removePhoto = useSupabase ? supabaseProfile.removePhoto : mockProfile.removePhoto;
   const { profile, weightHistory, measurements, customMeasurements, measurementHistory, photos } = state;
 
   function handleReset() {
     if (window.confirm("Réinitialiser le profil de test ? Toutes les modifications locales seront perdues.")) {
-      resetProfile();
+      mockProfile.resetProfile();
     }
+  }
+
+  if (!supabaseProfile.ready) {
+    return <p className="text-sm text-muted-foreground">Chargement du profil…</p>;
   }
 
   return (
@@ -58,14 +77,16 @@ export function ProfilPageContent({
             {profile.firstName} {profile.lastName} · Élève depuis le{" "}
             {new Date(profile.startDate).toLocaleDateString("fr-FR")}
           </p>
-          <button
-            type="button"
-            onClick={handleReset}
-            className="mt-2 flex items-center gap-1.5 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary"
-          >
-            <RotateCcw size={12} />
-            Réinitialiser le profil de test
-          </button>
+          {!useSupabase && (
+            <button
+              type="button"
+              onClick={handleReset}
+              className="mt-2 flex items-center gap-1.5 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary"
+            >
+              <RotateCcw size={12} />
+              Réinitialiser le profil de test
+            </button>
+          )}
         </div>
         <EditPersonalInfoModal profile={profile} onSave={updateProfile} />
       </div>
