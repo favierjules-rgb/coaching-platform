@@ -17,6 +17,7 @@ export default function DocumentsPage() {
         studentId={student.id}
         documents={documentResources}
         accessSeed={studentDocumentAccess}
+        weekNumber={student.weekNumber}
       />
     </div>
   );

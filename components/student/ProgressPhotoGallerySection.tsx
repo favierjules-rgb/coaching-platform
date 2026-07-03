@@ -7,6 +7,7 @@ interface ProgressPhotoGallerySectionProps {
   photos: ProgressPhoto[];
   defaultWeightKg: number;
   onAdd: (photo: ProgressPhoto) => void;
+  onDelete?: (photoId: string) => void;
 }
 
 /**
@@ -18,6 +19,7 @@ export function ProgressPhotoGallerySection({
   photos,
   defaultWeightKg,
   onAdd,
+  onDelete,
 }: ProgressPhotoGallerySectionProps) {
   return (
     <div className="mb-6 border border-border bg-card p-6">
@@ -31,7 +33,7 @@ export function ProgressPhotoGallerySection({
           onAdd={onAdd}
         />
       </div>
-      <ProgressPhotos photos={photos} />
+      <ProgressPhotos photos={photos} onDelete={onDelete} />
     </div>
   );
 }

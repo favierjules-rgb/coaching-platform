@@ -6,6 +6,7 @@ import { NextSessionHighlight } from "@/components/student/NextSessionHighlight"
 import { ProgramWeekCalendar } from "@/components/student/ProgramWeekCalendar";
 import { ProgressBar } from "@/components/student/ProgressBar";
 import { StatusBadge } from "@/components/student/StatusBadge";
+import { WeekAnalysisSection } from "@/components/student/WeekAnalysisSection";
 import {
   getHighlightedScheduleDay,
   getTrainingProgram,
@@ -38,6 +39,8 @@ export default async function ProgramDetailPage({
   const highlightedSession = highlightedDay?.sessionId
     ? getWorkoutSession(highlightedDay.sessionId)
     : undefined;
+
+  const metricsSessions = programSessions.map((s) => ({ ...s, muscleGroup: s.muscleGroups }));
 
   return (
     <div>
@@ -95,6 +98,8 @@ export default async function ProgramDetailPage({
         </div>
         <ProgressBar percent={program.progressPercent} />
       </div>
+
+      <WeekAnalysisSection sessions={metricsSessions} />
 
       {highlightedSession && highlightedDay && (
         <div className="mb-8">

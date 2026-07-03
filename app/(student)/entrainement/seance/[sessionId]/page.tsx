@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, Flame, MessageSquare } from "lucide-react";
 
 import { SessionFeedbackSection } from "@/components/student/SessionFeedbackSection";
+import { SessionAnalysisSection } from "@/components/student/SessionAnalysisSection";
 import {
   getTrainingProgram,
   getWorkoutSession,
@@ -48,6 +49,8 @@ export default async function SessionDetailPage({
         </p>
       </div>
 
+      <SessionAnalysisSection session={{ ...session, muscleGroup: session.muscleGroups }} />
+
       <div className="mb-8 flex items-start gap-4 border border-border bg-card p-6">
         <Flame size={20} className="mt-0.5 flex-shrink-0 text-primary" />
         <div>
@@ -76,6 +79,7 @@ export default async function SessionDetailPage({
         studentId={student.id}
         sessionId={session.id}
         exercises={session.exercises}
+        sessionMuscleGroup={session.muscleGroups}
       />
     </div>
   );

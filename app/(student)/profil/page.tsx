@@ -20,6 +20,7 @@ export default function ProfilPage() {
         weightHistory,
         measurements: bodyMeasurements,
         customMeasurements,
+        measurementHistory: [],
         photos: progressPhotos,
       }}
       foodPreferences={foodPreferences}

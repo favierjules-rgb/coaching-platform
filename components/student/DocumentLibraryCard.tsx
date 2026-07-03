@@ -4,13 +4,14 @@ import {
   FileText,
   Image as ImageIcon,
   Link2,
+  Lock,
   Video,
   type LucideIcon,
 } from "lucide-react";
 
 import { DocumentStatusBadge } from "@/components/student/DocumentStatusBadge";
 import { ImportantBadge } from "@/components/student/ImportantBadge";
-import { documentCategoryLabels, documentTypeLabels } from "@/lib/documents";
+import { documentCategoryLabels, documentTypeLabels, type StudentDocumentAvailability } from "@/lib/documents";
 import type { DocumentResource, DocumentStatus, DocumentType } from "@/types";
 
 const typeIcons: Record<DocumentType, LucideIcon> = {
@@ -24,16 +25,19 @@ const typeIcons: Record<DocumentType, LucideIcon> = {
 interface DocumentLibraryCardProps {
   document: DocumentResource;
   status: DocumentStatus;
+  availability: StudentDocumentAvailability;
 }
 
 export function DocumentLibraryCard({
   document,
   status,
+  availability,
 }: DocumentLibraryCardProps) {
   const Icon = typeIcons[document.type];
+  const locked = !availability.available;
 
   return (
-    <div className="flex flex-col gap-4 border border-border bg-card p-6">
+    <div className={`flex flex-col gap-4 border border-border bg-card p-6 ${locked ? "opacity-70" : ""}`}>
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2">
           <Icon size={22} className="text-primary" />
@@ -41,7 +45,15 @@ export function DocumentLibraryCard({
             {documentTypeLabels[document.type]}
           </span>
         </div>
-        {document.important && <ImportantBadge />}
+        <div className="flex items-center gap-2">
+          {document.important && <ImportantBadge />}
+          {locked && (
+            <span className="flex items-center gap-1 border border-border px-2 py-0.5 text-[10px] uppercase tracking-widest text-muted-foreground">
+              <Lock size={10} />
+              Bientôt disponible
+            </span>
+          )}
+        </div>
       </div>
 
       <div>
@@ -52,29 +64,41 @@ export function DocumentLibraryCard({
           {document.title}
         </h3>
         <p className="text-xs leading-relaxed text-muted-foreground">
-          {document.description}
+          {locked ? "Ce contenu sera débloqué au fur et à mesure de ta progression." : document.description}
         </p>
       </div>
 
       <div className="mt-auto flex items-center justify-between gap-2 text-xs text-muted-foreground">
-        <span>Ajouté le {document.createdAt}</span>
-        <DocumentStatusBadge status={status} />
+        <span>
+          {locked && availability.unlockAtWeek
+            ? `Débloqué à la semaine ${availability.unlockAtWeek}`
+            : `Ajouté le ${document.createdAt}`}
+        </span>
+        {!locked && <DocumentStatusBadge status={status} />}
       </div>
 
       <div className="flex gap-2">
-        <Link
-          href={`/documents/${document.id}`}
-          className="flex-1 border border-primary py-2 text-center text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
-        >
-          Ouvrir
-        </Link>
-        {document.type === "pdf" && (
-          <button
-            type="button"
-            className="flex-1 border border-border py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
-          >
-            Télécharger
-          </button>
+        {locked ? (
+          <span className="flex-1 border border-border py-2 text-center text-xs uppercase tracking-widest text-muted-foreground">
+            Verrouillé
+          </span>
+        ) : (
+          <>
+            <Link
+              href={`/documents/${document.id}`}
+              className="flex-1 border border-primary py-2 text-center text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+            >
+              Ouvrir
+            </Link>
+            {document.type === "pdf" && (
+              <button
+                type="button"
+                className="flex-1 border border-border py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
+              >
+                Télécharger
+              </button>
+            )}
+          </>
         )}
       </div>
     </div>

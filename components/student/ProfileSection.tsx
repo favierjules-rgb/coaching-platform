@@ -22,21 +22,25 @@ export function ProfileSection({
   );
 }
 
-export function InfoRow({ label, value }: { label: string; value: string }) {
+export function InfoRow({ label, value }: { label: string; value?: string | null }) {
   return (
     <div className="flex items-center justify-between gap-4 border-b border-border py-3 last:border-0">
       <span className="text-xs uppercase tracking-wide text-muted-foreground">
         {label}
       </span>
-      <span className="text-right text-sm text-foreground">{value}</span>
+      <span className="text-right text-sm text-foreground">{value || "—"}</span>
     </div>
   );
 }
 
 export function TagList({ items }: { items: string[] }) {
+  const safeItems = Array.isArray(items) ? items : [];
+  if (safeItems.length === 0) {
+    return <span className="text-sm text-muted-foreground">—</span>;
+  }
   return (
     <div className="flex flex-wrap gap-2">
-      {items.map((item) => (
+      {safeItems.map((item) => (
         <span
           key={item}
           className="border border-border px-3 py-1 text-xs text-muted-foreground"

@@ -2,15 +2,22 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 
-import { nextWeightHistoryMonth } from "@/lib/profile";
+import { bodyMeasurementLabels, nextWeightHistoryMonth } from "@/lib/profile";
 import type {
   BodyMeasurement,
   BodyMeasurementType,
   CustomMeasurement,
+  MeasurementLogEntry,
   ProgressPhoto,
   StudentProfile,
   WeightEntry,
 } from "@/types";
+
+let localIdCounter = 0;
+function localId(prefix: string): string {
+  localIdCounter += 1;
+  return `${prefix}-${Date.now()}-${localIdCounter}`;
+}
 
 /**
  * État complet du profil élève (informations personnelles, historique de
@@ -25,6 +32,7 @@ export interface StudentProfileState {
   weightHistory: WeightEntry[];
   measurements: BodyMeasurement[];
   customMeasurements: CustomMeasurement[];
+  measurementHistory: MeasurementLogEntry[];
   photos: ProgressPhoto[];
 }
 
@@ -47,7 +55,18 @@ function parseState(raw: string | null): StudentProfileState | null {
     return null;
   }
   try {
-    return JSON.parse(raw) as StudentProfileState;
+    const parsed = JSON.parse(raw) as StudentProfileState;
+    // Défensif : un état persisté avant l'ajout de measurementHistory (ou
+    // dont un tableau aurait été corrompu) ne doit jamais faire planter la
+    // page — on retombe sur des tableaux vides plutôt que undefined.
+    return {
+      ...parsed,
+      weightHistory: Array.isArray(parsed.weightHistory) ? parsed.weightHistory : [],
+      measurements: Array.isArray(parsed.measurements) ? parsed.measurements : [],
+      customMeasurements: Array.isArray(parsed.customMeasurements) ? parsed.customMeasurements : [],
+      measurementHistory: Array.isArray(parsed.measurementHistory) ? parsed.measurementHistory : [],
+      photos: Array.isArray(parsed.photos) ? parsed.photos : [],
+    };
   } catch {
     return null;
   }
@@ -179,11 +198,28 @@ export function useStudentProfile(studentId: string, seed: StudentProfileState) 
       custom: CustomMeasurementInput | null,
     ) => {
       const current = getSnapshot(studentId, seed);
+      const newHistoryEntries: MeasurementLogEntry[] = [];
+      const measuredAt = date || new Date().toISOString().slice(0, 10);
+      const createdAt = new Date().toISOString();
+
+      const seenTypes = new Set<BodyMeasurementType>();
       const measurements = current.measurements.map((measurement) => {
         const newValue = values[measurement.type];
         if (newValue === undefined) {
           return measurement;
         }
+        seenTypes.add(measurement.type);
+        newHistoryEntries.push({
+          id: localId("meas-log"),
+          studentId,
+          key: measurement.type,
+          label: bodyMeasurementLabels[measurement.type] ?? measurement.type,
+          value: newValue,
+          unit: measurement.unit,
+          measuredAt,
+          note,
+          createdAt,
+        });
         return {
           ...measurement,
           currentValue: newValue,
@@ -192,24 +228,100 @@ export function useStudentProfile(studentId: string, seed: StudentProfileState) 
         };
       });
 
-      let customMeasurements = current.customMeasurements;
-      if (custom) {
-        customMeasurements = [
-          ...customMeasurements,
-          {
-            id: `custom-${Date.now()}`,
-            studentId,
-            name: custom.name,
-            unit: custom.unit,
-            startValue: custom.value,
-            currentValue: custom.value,
-            note: custom.note,
-            lastUpdatedAt: date,
-          },
-        ];
+      // Une mensuration préréglée saisie pour la première fois (aucun
+      // enregistrement existant pour ce type) doit créer une nouvelle ligne
+      // plutôt que d'être silencieusement ignorée — valeur de départ =
+      // valeur actuelle ("Première mesure", évolution à 0).
+      for (const type of Object.keys(values) as BodyMeasurementType[]) {
+        const newValue = values[type];
+        if (newValue === undefined || seenTypes.has(type)) {
+          continue;
+        }
+        const unit = type === "poids" ? "kg" : "cm";
+        measurements.push({
+          id: localId("meas"),
+          studentId,
+          type,
+          unit,
+          startValue: newValue,
+          currentValue: newValue,
+          note,
+          lastUpdatedAt: date,
+        });
+        newHistoryEntries.push({
+          id: localId("meas-log"),
+          studentId,
+          key: type,
+          label: bodyMeasurementLabels[type] ?? type,
+          value: newValue,
+          unit,
+          measuredAt,
+          note,
+          createdAt,
+        });
       }
 
-      writeState(studentId, { ...current, measurements, customMeasurements });
+      // Une mesure personnalisée déjà existante (même nom, insensible à la
+      // casse) doit être MISE À JOUR (valeur actuelle) plutôt que dupliquée :
+      // la valeur de départ reste exploitable comme historique.
+      let customMeasurements = current.customMeasurements;
+      if (custom) {
+        const normalizedName = custom.name.trim().toLowerCase();
+        const existing = customMeasurements.find(
+          (m) => m.name.trim().toLowerCase() === normalizedName,
+        );
+        if (existing) {
+          customMeasurements = customMeasurements.map((m) =>
+            m.id === existing.id
+              ? { ...m, currentValue: custom.value, note: custom.note || m.note, lastUpdatedAt: date }
+              : m,
+          );
+          newHistoryEntries.push({
+            id: localId("meas-log"),
+            studentId,
+            key: existing.id,
+            label: existing.name,
+            value: custom.value,
+            unit: custom.unit,
+            measuredAt,
+            note: custom.note,
+            createdAt,
+          });
+        } else {
+          const newCustomId = localId("custom");
+          customMeasurements = [
+            ...customMeasurements,
+            {
+              id: newCustomId,
+              studentId,
+              name: custom.name,
+              unit: custom.unit,
+              startValue: custom.value,
+              currentValue: custom.value,
+              note: custom.note,
+              lastUpdatedAt: date,
+            },
+          ];
+          newHistoryEntries.push({
+            id: localId("meas-log"),
+            studentId,
+            key: newCustomId,
+            label: custom.name,
+            value: custom.value,
+            unit: custom.unit,
+            measuredAt,
+            note: custom.note,
+            createdAt,
+          });
+        }
+      }
+
+      writeState(studentId, {
+        ...current,
+        measurements,
+        customMeasurements,
+        measurementHistory: [...current.measurementHistory, ...newHistoryEntries],
+      });
     },
     [studentId, seed],
   );
@@ -218,6 +330,17 @@ export function useStudentProfile(studentId: string, seed: StudentProfileState) 
     (photo: ProgressPhoto) => {
       const current = getSnapshot(studentId, seed);
       writeState(studentId, { ...current, photos: [...current.photos, photo] });
+    },
+    [studentId, seed],
+  );
+
+  const removePhoto = useCallback(
+    (photoId: string) => {
+      const current = getSnapshot(studentId, seed);
+      writeState(studentId, {
+        ...current,
+        photos: current.photos.filter((photo) => photo.id !== photoId),
+      });
     },
     [studentId, seed],
   );
@@ -237,6 +360,7 @@ export function useStudentProfile(studentId: string, seed: StudentProfileState) 
     updateWeight,
     updateMeasurements,
     addPhoto,
+    removePhoto,
     resetProfile,
   };
 }

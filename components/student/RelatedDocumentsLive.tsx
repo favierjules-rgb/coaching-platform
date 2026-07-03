@@ -2,18 +2,21 @@
 
 import { DocumentLibraryCard } from "@/components/student/DocumentLibraryCard";
 import { useDocumentAccess } from "@/hooks/useDocumentAccess";
+import { computeStudentDocumentAvailability } from "@/lib/documents";
 import type { DocumentResource, StudentDocumentAccess } from "@/types";
 
 interface RelatedDocumentsLiveProps {
   studentId: string;
   documents: DocumentResource[];
   accessSeed: StudentDocumentAccess[];
+  weekNumber: number;
 }
 
 export function RelatedDocumentsLive({
   studentId,
   documents,
   accessSeed,
+  weekNumber,
 }: RelatedDocumentsLiveProps) {
   const { getStatus } = useDocumentAccess(studentId, accessSeed);
 
@@ -24,6 +27,7 @@ export function RelatedDocumentsLive({
           key={document.id}
           document={document}
           status={getStatus(document.id)}
+          availability={computeStudentDocumentAvailability(document, weekNumber)}
         />
       ))}
     </div>

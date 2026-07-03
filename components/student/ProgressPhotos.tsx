@@ -1,4 +1,4 @@
-import { Camera, Target } from "lucide-react";
+import { Camera, ImageOff, Target, Trash2 } from "lucide-react";
 
 import type { ProgressPhoto, ProgressPhotoType } from "@/types";
 
@@ -14,17 +14,40 @@ const highlightTypes: Exclude<ProgressPhotoType, "mensuelle">[] = [
   "objectif",
 ];
 
+function formatPhotoDate(dateIso: string | null | undefined): string {
+  if (!dateIso) {
+    return "Date non renseignée";
+  }
+  const date = new Date(dateIso);
+  if (Number.isNaN(date.getTime())) {
+    return "Date non renseignée";
+  }
+  return date.toLocaleDateString("fr-FR");
+}
+
 function PhotoTile({
   photo,
   label,
+  onDelete,
 }: {
   photo: ProgressPhoto;
   label: string;
+  onDelete?: (photoId: string) => void;
 }) {
   return (
-    <div className="flex flex-col border border-border">
+    <div className="group relative flex flex-col border border-border">
+      {onDelete && (
+        <button
+          type="button"
+          onClick={() => onDelete(photo.id)}
+          aria-label="Supprimer cette photo"
+          className="absolute right-2 top-2 z-10 flex items-center justify-center border border-border bg-black/70 p-1.5 text-muted-foreground opacity-0 transition-opacity hover:border-red-500/50 hover:text-red-400 group-hover:opacity-100"
+        >
+          <Trash2 size={14} />
+        </button>
+      )}
       {photo.imageUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element -- image locale (blob:) non compatible avec next/image
+        // eslint-disable-next-line @next/next/no-img-element -- image locale (data URL / blob:) non compatible avec next/image
         <img
           src={photo.imageUrl}
           alt={`Photo de progression — ${label}`}
@@ -47,23 +70,31 @@ function PhotoTile({
       )}
       <div className="flex flex-col gap-1 p-3">
         <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <span>{new Date(photo.date).toLocaleDateString("fr-FR")}</span>
-          {photo.weightKg !== null && (
+          <span>{formatPhotoDate(photo.date)}</span>
+          {typeof photo.weightKg === "number" && Number.isFinite(photo.weightKg) && (
             <span className="text-foreground">{photo.weightKg} kg</span>
           )}
         </div>
         <p className="text-xs leading-relaxed text-muted-foreground">
-          {photo.note}
+          {photo.note || ""}
         </p>
       </div>
     </div>
   );
 }
 
-export function ProgressPhotos({ photos }: { photos: ProgressPhoto[] }) {
+export function ProgressPhotos({
+  photos,
+  onDelete,
+}: {
+  photos: ProgressPhoto[];
+  onDelete?: (photoId: string) => void;
+}) {
+  const safePhotos = Array.isArray(photos) ? photos : [];
+
   const highlights = highlightTypes
     .map((type) => {
-      const matches = photos.filter((photo) => photo.type === type);
+      const matches = safePhotos.filter((photo) => photo.type === type);
       if (matches.length === 0) {
         return null;
       }
@@ -74,9 +105,20 @@ export function ProgressPhotos({ photos }: { photos: ProgressPhoto[] }) {
     .filter((photo): photo is ProgressPhoto => photo !== null);
 
   const highlightIds = new Set(highlights.map((photo) => photo.id));
-  const gallery = photos
+  const gallery = safePhotos
     .filter((photo) => !highlightIds.has(photo.id))
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  if (safePhotos.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-2 border border-dashed border-border py-10 text-center">
+        <ImageOff size={22} className="text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">
+          Aucune photo de progression pour le moment.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -84,15 +126,22 @@ export function ProgressPhotos({ photos }: { photos: ProgressPhoto[] }) {
         <span className="mb-3 block text-xs uppercase tracking-wide text-muted-foreground">
           Avant / actuelle / objectif
         </span>
-        <div className="grid grid-cols-3 gap-3 sm:gap-4">
-          {highlights.map((photo) => (
-            <PhotoTile
-              key={photo.id}
-              photo={photo}
-              label={highlightLabels[photo.type as Exclude<ProgressPhotoType, "mensuelle">]}
-            />
-          ))}
-        </div>
+        {highlights.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Aucune photo Avant / Actuelle / Objectif pour le moment.
+          </p>
+        ) : (
+          <div className="grid grid-cols-3 gap-3 sm:gap-4">
+            {highlights.map((photo) => (
+              <PhotoTile
+                key={photo.id}
+                photo={photo}
+                label={highlightLabels[photo.type as Exclude<ProgressPhotoType, "mensuelle">]}
+                onDelete={onDelete}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
       {gallery.length > 0 && (
@@ -105,9 +154,10 @@ export function ProgressPhotos({ photos }: { photos: ProgressPhoto[] }) {
               <PhotoTile
                 key={photo.id}
                 photo={photo}
-                label={new Date(photo.date).toLocaleDateString("fr-FR", {
-                  month: "short",
-                })}
+                label={formatPhotoDate(photo.date) === "Date non renseignée"
+                  ? "Photo"
+                  : new Date(photo.date).toLocaleDateString("fr-FR", { month: "short" })}
+                onDelete={onDelete}
               />
             ))}
           </div>

@@ -67,7 +67,7 @@ export function UpdateMeasurementsModal({
   const [customUnit, setCustomUnit] = useState("cm");
   const [customNote, setCustomNote] = useState("");
 
-  const measurementByType = new Map(measurements.map((m) => [m.type, m]));
+  const measurementByType = new Map((Array.isArray(measurements) ? measurements : []).map((m) => [m.type, m]));
 
   function resetForm() {
     setValues({});

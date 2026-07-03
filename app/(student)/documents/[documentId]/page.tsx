@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Download, ExternalLink, PlayCircle } from "lucide-react";
+import { ArrowLeft, Download, ExternalLink, Lock, PlayCircle } from "lucide-react";
 
 import { DocumentStatusLive } from "@/components/student/DocumentStatusLive";
 import { ImportantBadge } from "@/components/student/ImportantBadge";
 import { RelatedDocumentsLive } from "@/components/student/RelatedDocumentsLive";
-import { documentCategoryLabels, documentTypeLabels } from "@/lib/documents";
+import { computeStudentDocumentAvailability, documentCategoryLabels, documentTypeLabels } from "@/lib/documents";
 import {
   documentResources,
   getDocumentResource,
@@ -29,9 +29,33 @@ export default async function DocumentDetailPage({
     notFound();
   }
 
+  const availability = computeStudentDocumentAvailability(document, student.weekNumber);
+
+  if (!availability.available) {
+    return (
+      <div>
+        <Link
+          href="/documents"
+          className="mb-6 inline-flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ArrowLeft size={14} />
+          Documents
+        </Link>
+        <div className="flex flex-col items-center gap-4 border border-border bg-card p-12 text-center">
+          <Lock size={32} className="text-muted-foreground" />
+          <h1 className="font-heading text-xl font-bold uppercase text-foreground">Bientôt disponible</h1>
+          <p className="text-sm text-muted-foreground">
+            Ce document sera débloqué à la semaine {availability.unlockAtWeek} de ton programme.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   const relatedDocuments = document.relatedDocumentIds
     .map((id) => getDocumentResource(id))
-    .filter((related): related is NonNullable<typeof related> => Boolean(related));
+    .filter((related): related is NonNullable<typeof related> => Boolean(related))
+    .filter((related) => computeStudentDocumentAvailability(related, student.weekNumber).available);
 
   return (
     <div>
@@ -138,6 +162,7 @@ export default async function DocumentDetailPage({
             studentId={student.id}
             documents={relatedDocuments}
             accessSeed={studentDocumentAccess}
+            weekNumber={student.weekNumber}
           />
         </div>
       )}

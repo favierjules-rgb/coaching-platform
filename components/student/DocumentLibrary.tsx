@@ -6,6 +6,7 @@ import { Search } from "lucide-react";
 import { DocumentLibraryCard } from "@/components/student/DocumentLibraryCard";
 import { useDocumentAccess } from "@/hooks/useDocumentAccess";
 import {
+  computeStudentDocumentAvailability,
   documentFilters,
   matchesDocumentFilter,
   matchesDocumentSearch,
@@ -17,12 +18,14 @@ interface DocumentLibraryProps {
   studentId: string;
   documents: DocumentResource[];
   accessSeed: StudentDocumentAccess[];
+  weekNumber: number;
 }
 
 export function DocumentLibrary({
   studentId,
   documents,
   accessSeed,
+  weekNumber,
 }: DocumentLibraryProps) {
   const { getStatus } = useDocumentAccess(studentId, accessSeed);
   const [activeFilter, setActiveFilter] = useState<DocumentFilterKey>("tous");
@@ -81,6 +84,7 @@ export function DocumentLibrary({
               key={document.id}
               document={document}
               status={getStatus(document.id)}
+              availability={computeStudentDocumentAvailability(document, weekNumber)}
             />
           ))}
         </div>
