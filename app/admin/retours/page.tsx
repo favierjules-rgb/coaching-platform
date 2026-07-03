@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCheck, MessageSquare } from "lucide-react";
+import { AlertTriangle, CheckCheck, MessageSquare } from "lucide-react";
 
 import { FeedbackDetailModal } from "@/components/admin/FeedbackDetailModal";
 import { FilterButtons, SearchInput } from "@/components/admin/SearchAndFilters";
@@ -118,6 +118,16 @@ export default function AdminFeedbackPage() {
                     student={student}
                     onReply={(reply) => addCoachReply(f.id, reply)}
                   />
+                  {f.status !== "important" && (
+                    <button
+                      type="button"
+                      onClick={() => setFeedbackStatus(f.id, "important")}
+                      className="flex items-center gap-1.5 border border-amber-500/50 px-4 py-2 text-xs uppercase tracking-widest text-amber-400 transition-colors hover:bg-amber-500/10"
+                    >
+                      <AlertTriangle size={13} />
+                      Marquer important
+                    </button>
+                  )}
                   {f.status !== "traité" && (
                     <button
                       type="button"

@@ -5,8 +5,15 @@ import { CheckCircle } from "lucide-react";
 
 import { ExerciseFeedbackCard } from "@/components/student/ExerciseFeedbackCard";
 import { TrainingStatCards } from "@/components/shared/TrainingMetricsSummary";
+import { useAdminData } from "@/hooks/useAdminData";
 import { calculatePlannedVsActualMetrics, formatTonnage } from "@/lib/training-metrics";
-import type { ActualSetEntry, Exercise, ExerciseFeedback, PlannedVsActualTrainingMetrics, WorkoutFeedback } from "@/types";
+import type {
+  ActualSetEntry,
+  AdminExerciseFeedbackEntry,
+  AdminStudentFeedback,
+  Exercise,
+  ExerciseFeedback,
+} from "@/types";
 
 const rpeOptions = Array.from({ length: 10 }, (_, index) => index + 1);
 
@@ -22,6 +29,7 @@ function buildInitialFeedback(
         studentId,
         sessionId,
         exerciseId: exercise.id,
+        exerciseName: exercise.name,
         sets: Array.from({ length: exercise.sets }, (_, index) => ({
           studentId,
           sessionId,
@@ -37,19 +45,103 @@ function buildInitialFeedback(
   );
 }
 
+function actualEntriesFromExerciseEntries(entries: AdminExerciseFeedbackEntry[]): ActualSetEntry[] {
+  return entries.map((entry) => ({
+    exerciseName: entry.exerciseName,
+    setNumber: entry.setNumber,
+    loadUsed: entry.loadUsed,
+    repsDone: entry.repsDone,
+  }));
+}
+
+function PlannedVsActualSummary({
+  exercises,
+  sessionId,
+  sessionMuscleGroup,
+  exerciseEntries,
+}: {
+  exercises: Exercise[];
+  sessionId: string;
+  sessionMuscleGroup: string;
+  exerciseEntries: AdminExerciseFeedbackEntry[];
+}) {
+  const plannedVsActual = calculatePlannedVsActualMetrics(
+    { id: sessionId, muscleGroup: sessionMuscleGroup, exercises },
+    actualEntriesFromExerciseEntries(exerciseEntries),
+  );
+
+  if (!plannedVsActual.actual) {
+    return null;
+  }
+
+  return (
+    <div className="border border-border bg-card p-6">
+      <h3 className="mb-4 font-heading text-sm font-bold uppercase text-foreground">
+        Prévu vs réalisé
+      </h3>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="border border-border p-4">
+          <span className="mb-2 block text-[11px] uppercase tracking-widest text-muted-foreground">Prévu</span>
+          <TrainingStatCards
+            totalSets={plannedVsActual.planned.totalSets}
+            totalVolume={plannedVsActual.planned.totalVolume}
+            totalTonnageKg={plannedVsActual.planned.totalTonnageKg}
+          />
+        </div>
+        <div className="border border-primary/40 p-4">
+          <span className="mb-2 block text-[11px] uppercase tracking-widest text-primary">Réalisé</span>
+          <TrainingStatCards
+            totalSets={plannedVsActual.actual.totalSets}
+            totalVolume={plannedVsActual.actual.totalVolume}
+            totalTonnageKg={plannedVsActual.actual.totalTonnageKg}
+          />
+        </div>
+      </div>
+      {plannedVsActual.tonnageDeltaKg !== null && (
+        <p className="mt-4 text-sm text-foreground">
+          Tonnage réalisé : {formatTonnage(plannedVsActual.actual.totalTonnageKg)} / prévu :{" "}
+          {formatTonnage(plannedVsActual.planned.totalTonnageKg)}{" "}
+          <span className={plannedVsActual.tonnageDeltaKg >= 0 ? "text-green-400" : "text-red-400"}>
+            ({plannedVsActual.tonnageDeltaKg >= 0 ? "+" : ""}
+            {Math.round(plannedVsActual.tonnageDeltaKg).toLocaleString("fr-FR")} kg)
+          </span>
+        </p>
+      )}
+    </div>
+  );
+}
+
 interface SessionFeedbackSectionProps {
   studentId: string;
   sessionId: string;
+  programId: string | null;
+  sessionRefLabel: string;
   exercises: Exercise[];
   sessionMuscleGroup: string;
 }
 
+/**
+ * Formulaire de retour élève par séance. Persisté en mock/localStorage via
+ * useAdminData (même source que /admin/retours) : un retour envoyé ici est
+ * converti en AdminStudentFeedback (type "entrainement") et apparaît
+ * immédiatement côté coach. Si un retour existe déjà pour cette séance
+ * (rechargement de page, ou déjà envoyé plus tôt), on affiche directement
+ * le récapitulatif au lieu du formulaire vierge — un élève ne peut pas
+ * envoyer deux retours pour la même séance.
+ */
 export function SessionFeedbackSection({
   studentId,
   sessionId,
+  programId,
+  sessionRefLabel,
   exercises,
   sessionMuscleGroup,
 }: SessionFeedbackSectionProps) {
+  const { state, addFeedback } = useAdminData();
+  const existingFeedback = state.feedback.find(
+    (f) => f.studentId === studentId && f.sessionId === sessionId && f.type === "entrainement",
+  );
+
   const [exerciseFeedback, setExerciseFeedback] = useState(() =>
     buildInitialFeedback(exercises, studentId, sessionId),
   );
@@ -57,8 +149,6 @@ export function SessionFeedbackSection({
   const [globalRpe, setGlobalRpe] = useState("");
   const [globalComment, setGlobalComment] = useState("");
   const [pain, setPain] = useState("");
-  const [sent, setSent] = useState(false);
-  const [plannedVsActual, setPlannedVsActual] = useState<PlannedVsActualTrainingMetrics | null>(null);
 
   function handleSetChange(
     exerciseId: string,
@@ -97,40 +187,42 @@ export function SessionFeedbackSection({
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const workoutFeedback: WorkoutFeedback = {
+    const submittedAt = new Date().toISOString();
+    const exerciseEntries: AdminExerciseFeedbackEntry[] = Object.values(exerciseFeedback).flatMap(
+      (exerciseFb) =>
+        exerciseFb.sets
+          .filter((set) => set.loadUsed.trim() || set.repsDone.trim())
+          .map((set) => ({
+            exerciseId: exerciseFb.exerciseId,
+            exerciseName: exerciseFb.exerciseName,
+            setNumber: set.setNumber,
+            loadUsed: set.loadUsed,
+            repsDone: set.repsDone,
+            rpe: exerciseFb.rpe,
+            comment: exerciseFb.comment,
+          })),
+    );
+
+    const feedback: Omit<AdminStudentFeedback, "id" | "createdAt" | "updatedAt"> = {
       studentId,
+      type: "entrainement",
       sessionId,
+      programId,
+      refLabel: sessionRefLabel,
+      date: submittedAt.slice(0, 10),
       completed,
-      exercises: Object.values(exerciseFeedback),
-      globalRpe: globalRpe === "" ? null : Number(globalRpe),
-      globalComment,
+      rpe: globalRpe === "" ? null : Number(globalRpe),
       pain,
-      submittedAt: new Date().toISOString(),
+      comment: globalComment,
+      exerciseEntries,
+      status: "a-traiter",
+      coachReply: "",
     };
 
-    // Donnée mockée pour l'instant : aucun envoi réel n'est effectué.
-    // La forme de `workoutFeedback` est prête à être envoyée à Supabase.
-    console.log(workoutFeedback);
-
-    const actualEntries: ActualSetEntry[] = workoutFeedback.exercises.flatMap((exerciseFb) => {
-      const exercise = exercises.find((ex) => ex.id === exerciseFb.exerciseId);
-      if (!exercise) return [];
-      return exerciseFb.sets
-        .filter((set) => set.loadUsed.trim() || set.repsDone.trim())
-        .map((set) => ({
-          exerciseName: exercise.name,
-          setNumber: set.setNumber,
-          loadUsed: set.loadUsed,
-          repsDone: set.repsDone,
-        }));
-    });
-    setPlannedVsActual(
-      calculatePlannedVsActualMetrics({ id: sessionId, muscleGroup: sessionMuscleGroup, exercises }, actualEntries),
-    );
-    setSent(true);
+    addFeedback(feedback);
   }
 
-  if (sent) {
+  if (existingFeedback) {
     return (
       <div className="flex flex-col gap-6">
         <div className="border border-primary/30 bg-card p-8 text-center">
@@ -144,41 +236,12 @@ export function SessionFeedbackSection({
           </p>
         </div>
 
-        {plannedVsActual?.actual && (
-          <div className="border border-border bg-card p-6">
-            <h3 className="mb-4 font-heading text-sm font-bold uppercase text-foreground">
-              Prévu vs réalisé
-            </h3>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="border border-border p-4">
-                <span className="mb-2 block text-[11px] uppercase tracking-widest text-muted-foreground">Prévu</span>
-                <TrainingStatCards
-                  totalSets={plannedVsActual.planned.totalSets}
-                  totalVolume={plannedVsActual.planned.totalVolume}
-                  totalTonnageKg={plannedVsActual.planned.totalTonnageKg}
-                />
-              </div>
-              <div className="border border-primary/40 p-4">
-                <span className="mb-2 block text-[11px] uppercase tracking-widest text-primary">Réalisé</span>
-                <TrainingStatCards
-                  totalSets={plannedVsActual.actual.totalSets}
-                  totalVolume={plannedVsActual.actual.totalVolume}
-                  totalTonnageKg={plannedVsActual.actual.totalTonnageKg}
-                />
-              </div>
-            </div>
-            {plannedVsActual.tonnageDeltaKg !== null && (
-              <p className="mt-4 text-sm text-foreground">
-                Tonnage réalisé : {formatTonnage(plannedVsActual.actual.totalTonnageKg)} / prévu :{" "}
-                {formatTonnage(plannedVsActual.planned.totalTonnageKg)}{" "}
-                <span className={plannedVsActual.tonnageDeltaKg >= 0 ? "text-green-400" : "text-red-400"}>
-                  ({plannedVsActual.tonnageDeltaKg >= 0 ? "+" : ""}
-                  {Math.round(plannedVsActual.tonnageDeltaKg).toLocaleString("fr-FR")} kg)
-                </span>
-              </p>
-            )}
-          </div>
-        )}
+        <PlannedVsActualSummary
+          exercises={exercises}
+          sessionId={sessionId}
+          sessionMuscleGroup={sessionMuscleGroup}
+          exerciseEntries={existingFeedback.exerciseEntries}
+        />
       </div>
     );
   }
