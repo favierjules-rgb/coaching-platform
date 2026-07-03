@@ -78,6 +78,8 @@ export default async function SessionDetailPage({
       <SessionFeedbackSection
         studentId={student.id}
         sessionId={session.id}
+        programId={program?.id ?? null}
+        sessionRefLabel={session.name}
         exercises={session.exercises}
         sessionMuscleGroup={session.muscleGroups}
       />

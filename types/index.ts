@@ -126,6 +126,7 @@ export interface ExerciseFeedback {
   studentId: string;
   sessionId: string;
   exerciseId: string;
+  exerciseName: string;
   sets: ExerciseSetFeedback[];
   rpe: number | null;
   comment: string;
@@ -134,11 +135,16 @@ export interface ExerciseFeedback {
 /**
  * Retour élève global pour une séance entière. Correspond à une future
  * table Supabase `workout_feedback`, liée à `exercise_feedback` par
- * sessionId + studentId.
+ * sessionId + studentId. Persisté en mock dans le même localStorage que le
+ * reste de l'espace admin (voir AdminStudentFeedback plus bas, converti
+ * depuis ce type au moment de l'envoi) pour que le retour saisi par
+ * l'élève apparaisse immédiatement dans /admin/retours.
  */
-export interface WorkoutFeedback {
+export interface StudentWorkoutFeedback {
+  id: string;
   studentId: string;
   sessionId: string;
+  programId: string | null;
   completed: boolean;
   exercises: ExerciseFeedback[];
   globalRpe: number | null;
@@ -852,6 +858,12 @@ export type FeedbackType = "entrainement" | "nutrition" | "profil";
 export type FeedbackStatus = "a-traiter" | "traité" | "important";
 
 export interface AdminExerciseFeedbackEntry {
+  /**
+   * Optionnel : absent sur les retours historiques mockés (avant l'ajout
+   * de ce champ), toujours renseigné pour un retour envoyé depuis
+   * /entrainement/seance/[sessionId] (correspond à Exercise.id).
+   */
+  exerciseId?: string;
   exerciseName: string;
   setNumber: number;
   loadUsed: string;
@@ -864,14 +876,24 @@ export interface AdminExerciseFeedbackEntry {
  * Retour élève consolidé côté admin (entraînement, nutrition ou profil).
  * Correspond à une future table Supabase `student_feedback` ; les détails
  * par exercice restent une sous-liste (exerciseEntries) plutôt qu'une
- * table séparée pour rester simple en mock.
+ * table séparée pour rester simple en mock. Un retour d'entraînement
+ * envoyé depuis /entrainement/seance/[sessionId] est converti en
+ * AdminStudentFeedback (type "entrainement") au moment de l'envoi et
+ * ajouté ici, pour que /admin/retours lise une seule source de vérité
+ * quel que soit le type de retour (entraînement, nutrition, profil).
  */
 export interface AdminStudentFeedback {
   id: string;
   studentId: string;
   type: FeedbackType;
+  /** Id de la séance d'origine — uniquement pour type "entrainement". */
+  sessionId?: string;
+  /** Id du programme d'origine — uniquement pour type "entrainement". */
+  programId?: string | null;
   refLabel: string;
   date: string;
+  /** "Séance terminée" côté élève — uniquement pertinent pour type "entrainement". */
+  completed?: boolean;
   rpe: number | null;
   pain: string;
   comment: string;

@@ -324,6 +324,22 @@ export function useAdminData() {
     [],
   );
 
+  const addFeedback = useCallback(
+    (feedback: Omit<AdminStudentFeedback, "id" | "createdAt" | "updatedAt">) => {
+      const current = getSnapshot();
+      const now = new Date().toISOString();
+      const newFeedback: AdminStudentFeedback = {
+        ...feedback,
+        id: generateId("fb"),
+        createdAt: now,
+        updatedAt: now,
+      };
+      writeState({ ...current, feedback: [...current.feedback, newFeedback] });
+      return newFeedback.id;
+    },
+    [],
+  );
+
   const setFeedbackStatus = useCallback((feedbackId: string, status: FeedbackStatus) => {
     const current = getSnapshot();
     writeState({
@@ -480,6 +496,7 @@ export function useAdminData() {
     createDocument,
     updateDocument,
     setAssignment,
+    addFeedback,
     setFeedbackStatus,
     addCoachReply,
     updateCoachSettings,

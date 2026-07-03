@@ -53,6 +53,11 @@ export function FeedbackDetailModal({
             </div>
             <p className="text-xs text-muted-foreground">{formatDate(feedback.date)}</p>
 
+            {feedback.type === "entrainement" && (
+              <p className="text-sm text-foreground">
+                Séance {feedback.completed ? "terminée" : "non terminée"}
+              </p>
+            )}
             {feedback.rpe !== null && (
               <p className="text-sm text-foreground">RPE global : {feedback.rpe} / 10</p>
             )}
