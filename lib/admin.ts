@@ -87,6 +87,51 @@ export function weightProgressLabel(student: AdminStudent): string {
   return `${student.startWeightKg} → ${student.currentWeightKg} kg (${sign}${delta} kg)`;
 }
 
+/**
+ * Renvoie une copie de l'élève admin où toutes les listes/objets imbriqués
+ * sont garantis définis (tableau vide, objet aux champs vides...) même si
+ * l'enregistrement en localStorage date d'avant l'ajout de ces champs, ou a
+ * été corrompu. À appeler juste après avoir récupéré un AdminStudent et
+ * avant de le passer à la page/aux composants détail élève, pour ne jamais
+ * planter sur measurements/customMeasurements/progressPhotos/weightHistory/
+ * coachNotes/assignedXIds/injuries/foodPreferences/sportPreferences absents.
+ */
+export function normalizeAdminStudent(student: AdminStudent): AdminStudent {
+  return {
+    ...student,
+    injuries: student.injuries ?? "",
+    goal: student.goal ?? "",
+    weightHistory: Array.isArray(student.weightHistory) ? student.weightHistory : [],
+    measurements: Array.isArray(student.measurements) ? student.measurements : [],
+    customMeasurements: Array.isArray(student.customMeasurements) ? student.customMeasurements : [],
+    progressPhotos: Array.isArray(student.progressPhotos) ? student.progressPhotos : [],
+    assignedProgramIds: Array.isArray(student.assignedProgramIds) ? student.assignedProgramIds : [],
+    assignedNutritionPlanIds: Array.isArray(student.assignedNutritionPlanIds)
+      ? student.assignedNutritionPlanIds
+      : [],
+    assignedDocumentIds: Array.isArray(student.assignedDocumentIds) ? student.assignedDocumentIds : [],
+    coachNotes: Array.isArray(student.coachNotes) ? student.coachNotes : [],
+    foodPreferences: {
+      diet: student.foodPreferences?.diet ?? "",
+      liked: Array.isArray(student.foodPreferences?.liked) ? student.foodPreferences.liked : [],
+      disliked: Array.isArray(student.foodPreferences?.disliked) ? student.foodPreferences.disliked : [],
+      intolerances: Array.isArray(student.foodPreferences?.intolerances)
+        ? student.foodPreferences.intolerances
+        : [],
+    },
+    sportPreferences: {
+      sports: Array.isArray(student.sportPreferences?.sports) ? student.sportPreferences.sports : [],
+      equipment: Array.isArray(student.sportPreferences?.equipment) ? student.sportPreferences.equipment : [],
+      preferredExercises: Array.isArray(student.sportPreferences?.preferredExercises)
+        ? student.sportPreferences.preferredExercises
+        : [],
+      exercisesToAvoid: Array.isArray(student.sportPreferences?.exercisesToAvoid)
+        ? student.sportPreferences.exercisesToAvoid
+        : [],
+    },
+  };
+}
+
 export function daysSince(dateIso: string | null): number | null {
   if (!dateIso) return null;
   const diffMs = Date.now() - new Date(dateIso).getTime();

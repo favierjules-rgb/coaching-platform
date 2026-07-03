@@ -30,12 +30,13 @@ export function InfoRow({ label, value }: { label: string; value: string }) {
 }
 
 export function TagList({ items }: { items: string[] }) {
-  if (items.length === 0) {
+  const safeItems = Array.isArray(items) ? items : [];
+  if (safeItems.length === 0) {
     return <span className="text-sm text-muted-foreground">—</span>;
   }
   return (
     <div className="flex flex-wrap gap-2">
-      {items.map((item) => (
+      {safeItems.map((item) => (
         <span key={item} className="border border-border px-3 py-1 text-xs text-muted-foreground">
           {item}
         </span>

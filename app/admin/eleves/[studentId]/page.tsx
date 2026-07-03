@@ -40,6 +40,7 @@ import {
   formatDateTime,
   fullName,
   generateId,
+  normalizeAdminStudent,
   studentStatusLabels,
 } from "@/lib/admin";
 import { nextWeightHistoryMonth } from "@/lib/profile";
@@ -65,9 +66,9 @@ export default function AdminStudentDetailPage() {
     photos: elveProgressPhotos,
   });
 
-  const student = students.find((s) => s.id === params.studentId);
+  const rawStudent = students.find((s) => s.id === params.studentId);
 
-  if (!student) {
+  if (!rawStudent) {
     return (
       <div>
         <Link href="/admin/eleves" className="mb-6 inline-flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground hover:text-foreground">
@@ -78,6 +79,11 @@ export default function AdminStudentDetailPage() {
       </div>
     );
   }
+
+  // Un enregistrement élève admin peut dater d'avant l'ajout de certains
+  // champs (mensurations, photos, préférences...) — on normalise pour ne
+  // jamais planter sur une liste undefined plus bas dans la page.
+  const student = normalizeAdminStudent(rawStudent);
 
   const isLinked = student.id === LINKED_STUDENT_ID;
 
@@ -355,7 +361,9 @@ export default function AdminStudentDetailPage() {
             <h2 className="mb-1 font-heading text-sm font-bold uppercase text-amber-400">
               Blessures et contraintes
             </h2>
-            <p className="text-sm text-amber-200/90">{student.injuries}</p>
+            <p className="text-sm text-amber-200/90">
+              {student.injuries.trim() ? student.injuries : "Aucune information renseignée."}
+            </p>
           </div>
         </div>
       </div>

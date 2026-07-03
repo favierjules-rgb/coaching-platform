@@ -61,9 +61,11 @@ function PhotoTile({
 }
 
 export function ProgressPhotos({ photos }: { photos: ProgressPhoto[] }) {
+  const safePhotos = Array.isArray(photos) ? photos : [];
+
   const highlights = highlightTypes
     .map((type) => {
-      const matches = photos.filter((photo) => photo.type === type);
+      const matches = safePhotos.filter((photo) => photo.type === type);
       if (matches.length === 0) {
         return null;
       }
@@ -74,7 +76,7 @@ export function ProgressPhotos({ photos }: { photos: ProgressPhoto[] }) {
     .filter((photo): photo is ProgressPhoto => photo !== null);
 
   const highlightIds = new Set(highlights.map((photo) => photo.id));
-  const gallery = photos
+  const gallery = safePhotos
     .filter((photo) => !highlightIds.has(photo.id))
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 

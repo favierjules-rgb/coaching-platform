@@ -78,46 +78,58 @@ export function MeasurementsSection({
   customMeasurements,
   onSave,
 }: MeasurementsSectionProps) {
+  // Défensif : certains profils élèves (admin en particulier) peuvent avoir
+  // measurements/customMeasurements undefined si l'enregistrement date
+  // d'avant l'ajout de ces champs — on ne doit jamais planter dessus.
+  const safeMeasurements = Array.isArray(measurements) ? measurements : [];
+  const safeCustomMeasurements = Array.isArray(customMeasurements) ? customMeasurements : [];
+
   return (
     <ProfileSection
       title="Mensurations"
-      action={<UpdateMeasurementsModal measurements={measurements} onSave={onSave} />}
+      action={<UpdateMeasurementsModal measurements={safeMeasurements} onSave={onSave} />}
     >
-      <div className="flex flex-col gap-3">
-        {measurements.map((measurement) => (
-          <MeasurementTile
-            key={measurement.type}
-            label={bodyMeasurementLabels[measurement.type]}
-            unit={measurement.unit}
-            startValue={measurement.startValue}
-            currentValue={measurement.currentValue}
-            lastUpdatedAt={measurement.lastUpdatedAt}
-            note={measurement.note || undefined}
-            progressing={isMeasurementProgressing(measurement)}
-          />
-        ))}
-      </div>
-
-      {customMeasurements.length > 0 && (
-        <div className="mt-6">
-          <span className="mb-3 block text-xs uppercase tracking-wide text-muted-foreground">
-            Mesures personnalisées
-          </span>
+      {safeMeasurements.length === 0 && safeCustomMeasurements.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Aucune mensuration enregistrée pour le moment.</p>
+      ) : (
+        <>
           <div className="flex flex-col gap-3">
-            {customMeasurements.map((measurement) => (
+            {safeMeasurements.map((measurement) => (
               <MeasurementTile
-                key={measurement.id}
-                label={measurement.name}
+                key={measurement.type}
+                label={bodyMeasurementLabels[measurement.type]}
                 unit={measurement.unit}
                 startValue={measurement.startValue}
                 currentValue={measurement.currentValue}
                 lastUpdatedAt={measurement.lastUpdatedAt}
                 note={measurement.note || undefined}
-                progressing={null}
+                progressing={isMeasurementProgressing(measurement)}
               />
             ))}
           </div>
-        </div>
+
+          {safeCustomMeasurements.length > 0 && (
+            <div className="mt-6">
+              <span className="mb-3 block text-xs uppercase tracking-wide text-muted-foreground">
+                Mesures personnalisées
+              </span>
+              <div className="flex flex-col gap-3">
+                {safeCustomMeasurements.map((measurement) => (
+                  <MeasurementTile
+                    key={measurement.id}
+                    label={measurement.name}
+                    unit={measurement.unit}
+                    startValue={measurement.startValue}
+                    currentValue={measurement.currentValue}
+                    lastUpdatedAt={measurement.lastUpdatedAt}
+                    note={measurement.note || undefined}
+                    progressing={null}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       )}
     </ProfileSection>
   );
