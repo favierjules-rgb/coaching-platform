@@ -10,6 +10,7 @@ import { FilterButtons, SearchInput } from "@/components/admin/SearchAndFilters"
 import { StatusBadge, studentStatusTone } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
 import { formatDate, fullName, matchesStudentSearch, studentStatusLabels, weightProgressLabel } from "@/lib/admin";
+import { paymentSummaryLabel } from "@/lib/payments";
 import type { StudentAccountStatus } from "@/types";
 
 type StatusFilter = "tous" | StudentAccountStatus;
@@ -86,7 +87,7 @@ export default function AdminStudentsPage() {
                 key={student.id}
                 className="flex flex-col gap-4 border border-border bg-card p-6 lg:flex-row lg:items-center lg:justify-between"
               >
-                <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
                   <div>
                     <span className="block text-xs uppercase tracking-wide text-muted-foreground">Élève</span>
                     <span className="font-heading text-lg font-bold text-foreground">{fullName(student)}</span>
@@ -108,6 +109,10 @@ export default function AdminStudentsPage() {
                     <span className="block text-xs uppercase tracking-wide text-muted-foreground">Poids · Début</span>
                     <span className="block text-sm text-foreground">{weightProgressLabel(student)}</span>
                     <span className="block text-xs text-muted-foreground">Depuis le {formatDate(student.startDate)}</span>
+                  </div>
+                  <div>
+                    <span className="block text-xs uppercase tracking-wide text-muted-foreground">Paiement</span>
+                    <span className="block text-sm text-foreground">{paymentSummaryLabel(student.paymentProfile)}</span>
                   </div>
                 </div>
                 <div className="flex flex-shrink-0 flex-wrap items-center gap-2">

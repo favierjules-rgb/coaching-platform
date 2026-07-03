@@ -37,9 +37,9 @@ export function ProfilPageContent({
   injuryNote,
   studentGoal,
 }: ProfilPageContentProps) {
-  const { state, updateProfile, updateWeight, updateMeasurements, addPhoto, resetProfile } =
+  const { state, updateProfile, updateWeight, updateMeasurements, addPhoto, removePhoto, resetProfile } =
     useStudentProfile(studentId, seed);
-  const { profile, weightHistory, measurements, customMeasurements, photos } = state;
+  const { profile, weightHistory, measurements, customMeasurements, measurementHistory, photos } = state;
 
   function handleReset() {
     if (window.confirm("Réinitialiser le profil de test ? Toutes les modifications locales seront perdues.")) {
@@ -77,6 +77,7 @@ export function ProfilPageContent({
         photos={photos}
         defaultWeightKg={profile.currentWeightKg}
         onAdd={addPhoto}
+        onDelete={removePhoto}
       />
 
       <div className="mb-6">
@@ -111,6 +112,7 @@ export function ProfilPageContent({
         <MeasurementsSection
           measurements={measurements}
           customMeasurements={customMeasurements}
+          measurementHistory={measurementHistory}
           onSave={updateMeasurements}
         />
       </div>

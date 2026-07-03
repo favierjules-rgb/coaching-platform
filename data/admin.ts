@@ -27,8 +27,12 @@ import type {
   BodyMeasurementType,
   ExerciseLibraryItem,
   MuscleGroup,
+  PaymentMethod,
+  PaymentStatus,
   ProgressPhoto,
   StudentDocumentUnlock,
+  StudentPaymentEntry,
+  StudentPaymentProfile,
   WeightEntry,
 } from "@/types";
 
@@ -811,6 +815,63 @@ function weightPoint(month: string, kg: number): WeightEntry {
   return { month, kg };
 }
 
+function paymentEntry(
+  studentId: string,
+  amount: number,
+  date: string,
+  method: PaymentMethod,
+  status: PaymentStatus,
+  note = "",
+): StudentPaymentEntry {
+  return {
+    paymentId: generateId("pay"),
+    studentId,
+    amount,
+    date,
+    method,
+    note,
+    status,
+    createdAt: `${date}T09:00:00.000Z`,
+    updatedAt: `${date}T09:00:00.000Z`,
+  };
+}
+
+function paymentProfile(
+  studentId: string,
+  options: {
+    offerName: string;
+    monthlyPriceEuros: number;
+    durationMonths: number;
+    status: PaymentStatus;
+    method: PaymentMethod;
+    nextPaymentDate: string | null;
+    installmentsTotal: number;
+    installmentsPaid: number;
+    entries: StudentPaymentEntry[];
+    createdAt: string;
+    updatedAt: string;
+  },
+): StudentPaymentProfile {
+  const totalPriceEuros = options.monthlyPriceEuros * options.durationMonths;
+  const paidAmountEuros = options.entries.reduce((sum, entry) => sum + entry.amount, 0);
+  return {
+    studentId,
+    offerName: options.offerName,
+    monthlyPriceEuros: options.monthlyPriceEuros,
+    durationMonths: options.durationMonths,
+    totalPriceEuros,
+    paidAmountEuros,
+    status: options.status,
+    method: options.method,
+    nextPaymentDate: options.nextPaymentDate,
+    installmentsTotal: options.installmentsTotal,
+    installmentsPaid: options.installmentsPaid,
+    entries: options.entries,
+    createdAt: options.createdAt,
+    updatedAt: options.updatedAt,
+  };
+}
+
 export const adminStudents: AdminStudent[] = [
   {
     id: LINKED_STUDENT_ID,
@@ -846,7 +907,24 @@ export const adminStudents: AdminStudent[] = [
     weightHistory: linkedWeightHistory,
     measurements: linkedMeasurements,
     customMeasurements: linkedCustomMeasurements,
+    measurementHistory: [],
     progressPhotos: linkedProgressPhotos,
+    paymentProfile: paymentProfile(LINKED_STUDENT_ID, {
+      offerName: "Coaching 3 mois",
+      monthlyPriceEuros: 180,
+      durationMonths: 3,
+      status: "en attente",
+      method: "virement",
+      nextPaymentDate: "2026-08-12",
+      installmentsTotal: 3,
+      installmentsPaid: 2,
+      entries: [
+        paymentEntry(LINKED_STUDENT_ID, 180, "2026-01-12", "virement", "terminé", "1er versement à l'inscription."),
+        paymentEntry(LINKED_STUDENT_ID, 180, "2026-05-10", "virement", "terminé", "2e versement."),
+      ],
+      createdAt: "2026-01-12T09:00:00.000Z",
+      updatedAt: "2026-05-10T09:00:00.000Z",
+    }),
     assignedProgramIds: ["adm-prog-masse"],
     assignedNutritionPlanIds: ["adm-plan-masse"],
     assignedDocumentIds: ["adm-doc-contrat", "adm-doc-guide-masse", "adm-doc-video-squat"],
@@ -904,10 +982,30 @@ export const adminStudents: AdminStudent[] = [
       bodyMeasurement("adm-1", "hanches", "cm", 108, 101, "2026-06-28"),
     ],
     customMeasurements: [],
+    measurementHistory: [],
     progressPhotos: [
       progressPhoto("adm-1", "avant", "2026-02-10", 74, "Photo de départ."),
       progressPhoto("adm-1", "actuelle", "2026-06-01", 69, "Progrès net sur la taille."),
     ],
+    paymentProfile: paymentProfile("adm-1", {
+      offerName: "Coaching 6 mois",
+      monthlyPriceEuros: 150,
+      durationMonths: 6,
+      status: "à jour",
+      method: "carte",
+      nextPaymentDate: "2026-07-10",
+      installmentsTotal: 6,
+      installmentsPaid: 5,
+      entries: [
+        paymentEntry("adm-1", 150, "2026-02-10", "carte", "terminé"),
+        paymentEntry("adm-1", 150, "2026-03-10", "carte", "terminé"),
+        paymentEntry("adm-1", 150, "2026-04-10", "carte", "terminé"),
+        paymentEntry("adm-1", 150, "2026-05-10", "carte", "terminé"),
+        paymentEntry("adm-1", 150, "2026-06-10", "carte", "terminé"),
+      ],
+      createdAt: "2026-02-10T09:00:00.000Z",
+      updatedAt: "2026-06-10T09:00:00.000Z",
+    }),
     assignedProgramIds: ["adm-prog-seche"],
     assignedNutritionPlanIds: ["adm-plan-perte"],
     assignedDocumentIds: ["adm-doc-contrat", "adm-doc-video-squat"],
@@ -964,10 +1062,31 @@ export const adminStudents: AdminStudent[] = [
       bodyMeasurement("adm-2", "poitrine", "cm", 98, 104, "2026-06-28"),
     ],
     customMeasurements: [],
+    measurementHistory: [],
     progressPhotos: [
       progressPhoto("adm-2", "avant", "2026-01-12", 72, "Photo de départ."),
       progressPhoto("adm-2", "actuelle", "2026-06-28", 80.1, "Bonne évolution générale."),
     ],
+    paymentProfile: paymentProfile("adm-2", {
+      offerName: "Coaching 12 mois",
+      monthlyPriceEuros: 160,
+      durationMonths: 12,
+      status: "en retard",
+      method: "virement",
+      nextPaymentDate: "2026-06-15",
+      installmentsTotal: 12,
+      installmentsPaid: 6,
+      entries: [
+        paymentEntry("adm-2", 160, "2026-01-12", "virement", "terminé"),
+        paymentEntry("adm-2", 160, "2026-02-12", "virement", "terminé"),
+        paymentEntry("adm-2", 160, "2026-03-12", "virement", "terminé"),
+        paymentEntry("adm-2", 160, "2026-04-12", "virement", "terminé"),
+        paymentEntry("adm-2", 160, "2026-05-12", "virement", "terminé"),
+        paymentEntry("adm-2", 160, "2026-05-30", "virement", "terminé"),
+      ],
+      createdAt: "2026-01-12T09:00:00.000Z",
+      updatedAt: "2026-05-30T09:00:00.000Z",
+    }),
     assignedProgramIds: ["adm-prog-masse"],
     assignedNutritionPlanIds: ["adm-plan-masse"],
     assignedDocumentIds: ["adm-doc-contrat", "adm-doc-guide-masse", "adm-doc-video-squat", "adm-doc-mobilite"],
@@ -1016,7 +1135,25 @@ export const adminStudents: AdminStudent[] = [
     weightHistory: [weightPoint("Nov", 63), weightPoint("Jan", 62), weightPoint("Mar", 61)],
     measurements: [bodyMeasurement("adm-3", "taille", "cm", 74, 71, "2026-05-10")],
     customMeasurements: [],
+    measurementHistory: [],
     progressPhotos: [progressPhoto("adm-3", "avant", "2025-11-05", 63, "Photo de départ.")],
+    paymentProfile: paymentProfile("adm-3", {
+      offerName: "Coaching 3 mois",
+      monthlyPriceEuros: 140,
+      durationMonths: 3,
+      status: "terminé",
+      method: "espèces",
+      nextPaymentDate: null,
+      installmentsTotal: 3,
+      installmentsPaid: 3,
+      entries: [
+        paymentEntry("adm-3", 140, "2025-11-05", "espèces", "terminé"),
+        paymentEntry("adm-3", 140, "2025-12-05", "espèces", "terminé"),
+        paymentEntry("adm-3", 140, "2026-01-05", "espèces", "terminé"),
+      ],
+      createdAt: "2025-11-05T09:00:00.000Z",
+      updatedAt: "2026-01-05T09:00:00.000Z",
+    }),
     assignedProgramIds: ["adm-prog-remise"],
     assignedNutritionPlanIds: [],
     assignedDocumentIds: ["adm-doc-contrat", "adm-doc-materiel"],
@@ -1065,7 +1202,26 @@ export const adminStudents: AdminStudent[] = [
     weightHistory: [weightPoint("Mar", 79), weightPoint("Avr", 81), weightPoint("Mai", 82.5), weightPoint("Jun", 84)],
     measurements: [bodyMeasurement("adm-4", "cuisse-droite", "cm", 58, 61, "2026-06-30")],
     customMeasurements: [],
+    measurementHistory: [],
     progressPhotos: [progressPhoto("adm-4", "avant", "2026-03-01", 79, "Photo de départ.")],
+    paymentProfile: paymentProfile("adm-4", {
+      offerName: "Coaching 6 mois",
+      monthlyPriceEuros: 200,
+      durationMonths: 6,
+      status: "à jour",
+      method: "virement",
+      nextPaymentDate: "2026-07-15",
+      installmentsTotal: 6,
+      installmentsPaid: 4,
+      entries: [
+        paymentEntry("adm-4", 200, "2026-03-01", "virement", "terminé"),
+        paymentEntry("adm-4", 200, "2026-04-01", "virement", "terminé"),
+        paymentEntry("adm-4", 200, "2026-05-01", "virement", "terminé"),
+        paymentEntry("adm-4", 200, "2026-06-01", "virement", "terminé"),
+      ],
+      createdAt: "2026-03-01T09:00:00.000Z",
+      updatedAt: "2026-06-01T09:00:00.000Z",
+    }),
     assignedProgramIds: ["adm-prog-masse"],
     assignedNutritionPlanIds: ["adm-plan-masse"],
     assignedDocumentIds: ["adm-doc-contrat", "adm-doc-guide-masse", "adm-doc-video-squat"],
@@ -1102,7 +1258,25 @@ export const adminStudents: AdminStudent[] = [
     weightHistory: [weightPoint("Sep", 65), weightPoint("Déc", 65)],
     measurements: [],
     customMeasurements: [],
+    measurementHistory: [],
     progressPhotos: [],
+    paymentProfile: paymentProfile("adm-5", {
+      offerName: "Coaching 3 mois",
+      monthlyPriceEuros: 130,
+      durationMonths: 3,
+      status: "terminé",
+      method: "chèque",
+      nextPaymentDate: null,
+      installmentsTotal: 3,
+      installmentsPaid: 3,
+      entries: [
+        paymentEntry("adm-5", 130, "2025-09-01", "chèque", "terminé"),
+        paymentEntry("adm-5", 130, "2025-10-01", "chèque", "terminé"),
+        paymentEntry("adm-5", 130, "2025-11-01", "chèque", "terminé"),
+      ],
+      createdAt: "2025-09-01T09:00:00.000Z",
+      updatedAt: "2025-11-01T09:00:00.000Z",
+    }),
     assignedProgramIds: ["adm-prog-remise"],
     assignedNutritionPlanIds: [],
     assignedDocumentIds: ["adm-doc-contrat"],
@@ -1146,7 +1320,21 @@ export const adminStudents: AdminStudent[] = [
     weightHistory: [weightPoint("Jun", 90)],
     measurements: [],
     customMeasurements: [],
+    measurementHistory: [],
     progressPhotos: [],
+    paymentProfile: paymentProfile("adm-6", {
+      offerName: "Coaching 3 mois",
+      monthlyPriceEuros: 170,
+      durationMonths: 3,
+      status: "en attente",
+      method: "carte",
+      nextPaymentDate: "2026-08-01",
+      installmentsTotal: 3,
+      installmentsPaid: 1,
+      entries: [paymentEntry("adm-6", 170, "2026-06-01", "carte", "terminé")],
+      createdAt: "2026-06-01T09:00:00.000Z",
+      updatedAt: "2026-06-01T09:00:00.000Z",
+    }),
     assignedProgramIds: [],
     assignedNutritionPlanIds: [],
     assignedDocumentIds: ["adm-doc-contrat", "adm-doc-video-squat"],

@@ -1,3 +1,4 @@
+import { normalizePaymentProfile } from "@/lib/payments";
 import type {
   AdminContentStatus,
   AdminDocument,
@@ -104,7 +105,9 @@ export function normalizeAdminStudent(student: AdminStudent): AdminStudent {
     weightHistory: Array.isArray(student.weightHistory) ? student.weightHistory : [],
     measurements: Array.isArray(student.measurements) ? student.measurements : [],
     customMeasurements: Array.isArray(student.customMeasurements) ? student.customMeasurements : [],
+    measurementHistory: Array.isArray(student.measurementHistory) ? student.measurementHistory : [],
     progressPhotos: Array.isArray(student.progressPhotos) ? student.progressPhotos : [],
+    paymentProfile: normalizePaymentProfile(student.id, student.paymentProfile),
     assignedProgramIds: Array.isArray(student.assignedProgramIds) ? student.assignedProgramIds : [],
     assignedNutritionPlanIds: Array.isArray(student.assignedNutritionPlanIds)
       ? student.assignedNutritionPlanIds
@@ -138,12 +141,18 @@ export function daysSince(dateIso: string | null): number | null {
   return Math.floor(diffMs / (1000 * 60 * 60 * 24));
 }
 
-export function formatDate(dateIso: string): string {
-  return new Date(dateIso).toLocaleDateString("fr-FR");
+export function formatDate(dateIso: string | null | undefined): string {
+  if (!dateIso) return "Date non renseignée";
+  const date = new Date(dateIso);
+  if (Number.isNaN(date.getTime())) return "Date non renseignée";
+  return date.toLocaleDateString("fr-FR");
 }
 
-export function formatDateTime(dateIso: string): string {
-  return new Date(dateIso).toLocaleString("fr-FR", {
+export function formatDateTime(dateIso: string | null | undefined): string {
+  if (!dateIso) return "Date non renseignée";
+  const date = new Date(dateIso);
+  if (Number.isNaN(date.getTime())) return "Date non renseignée";
+  return date.toLocaleString("fr-FR", {
     dateStyle: "short",
     timeStyle: "short",
   });

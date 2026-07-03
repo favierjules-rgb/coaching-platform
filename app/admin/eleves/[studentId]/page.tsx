@@ -10,6 +10,7 @@ import { AdminSection, InfoRow, TagList } from "@/components/admin/AdminSection"
 import { AssignContentToStudentModal } from "@/components/admin/AssignContentToStudentModal";
 import { EditStudentModal } from "@/components/admin/EditStudentModal";
 import { StatusBadge, feedbackStatusTone, studentStatusTone } from "@/components/admin/StatusBadge";
+import { PaymentSection } from "@/components/admin/PaymentSection";
 import { MeasurementsSection } from "@/components/student/MeasurementsSection";
 import { ProgressPhotoGallerySection } from "@/components/student/ProgressPhotoGallerySection";
 import { WeightEvolutionCard } from "@/components/student/WeightEvolutionCard";
@@ -43,9 +44,15 @@ import {
   normalizeAdminStudent,
   studentStatusLabels,
 } from "@/lib/admin";
-import { nextWeightHistoryMonth } from "@/lib/profile";
+import { bodyMeasurementLabels, nextWeightHistoryMonth } from "@/lib/profile";
 import { calculatePlannedVsActualMetrics, calculateWeekMetrics, formatTonnage } from "@/lib/training-metrics";
-import type { BodyMeasurementType, MuscleGroupFilter, ProgressPhoto } from "@/types";
+import type {
+  BodyMeasurementType,
+  MeasurementLogEntry,
+  MuscleGroupFilter,
+  ProgressPhoto,
+  StudentPaymentProfile,
+} from "@/types";
 import type { CustomMeasurementInput } from "@/components/student/UpdateMeasurementsModal";
 
 export default function AdminStudentDetailPage() {
@@ -63,6 +70,7 @@ export default function AdminStudentDetailPage() {
     weightHistory: elveWeightHistory,
     measurements: elveMeasurements,
     customMeasurements: elveCustomMeasurements,
+    measurementHistory: [],
     photos: elveProgressPhotos,
   });
 
@@ -112,6 +120,7 @@ export default function AdminStudentDetailPage() {
   const weightHistory = isLinked ? linkedProfile.state.weightHistory : student.weightHistory;
   const measurements = isLinked ? linkedProfile.state.measurements : student.measurements;
   const customMeasurements = isLinked ? linkedProfile.state.customMeasurements : student.customMeasurements;
+  const measurementHistory = isLinked ? linkedProfile.state.measurementHistory : student.measurementHistory;
   const photos = isLinked ? linkedProfile.state.photos : student.progressPhotos;
 
   function handleUpdateWeight(weightKg: number) {
@@ -142,28 +151,84 @@ export default function AdminStudentDetailPage() {
       linkedProfile.updateMeasurements(values, date, note, custom);
       return;
     }
+    const newHistoryEntries: MeasurementLogEntry[] = [];
+    const measuredAt = date || new Date().toISOString().slice(0, 10);
+    const createdAt = new Date().toISOString();
+
     const nextMeasurements = student!.measurements.map((m) => {
       const newValue = values[m.type];
       if (newValue === undefined) return m;
+      newHistoryEntries.push({
+        id: generateId("meas-log"),
+        studentId: student!.id,
+        key: m.type,
+        label: bodyMeasurementLabels[m.type] ?? m.type,
+        value: newValue,
+        unit: m.unit,
+        measuredAt,
+        note,
+        createdAt,
+      });
       return { ...m, currentValue: newValue, note: note || m.note, lastUpdatedAt: date };
     });
+
+    // Une mesure personnalisée déjà existante (même nom) est mise à jour
+    // plutôt que dupliquée : la valeur de départ reste exploitable comme
+    // historique (voir hooks/useStudentProfile.ts pour la même logique).
     let nextCustom = student!.customMeasurements;
     if (custom) {
-      nextCustom = [
-        ...nextCustom,
-        {
-          id: generateId("custom"),
+      const normalizedName = custom.name.trim().toLowerCase();
+      const existing = nextCustom.find((m) => m.name.trim().toLowerCase() === normalizedName);
+      if (existing) {
+        nextCustom = nextCustom.map((m) =>
+          m.id === existing.id
+            ? { ...m, currentValue: custom.value, note: custom.note || m.note, lastUpdatedAt: date }
+            : m,
+        );
+        newHistoryEntries.push({
+          id: generateId("meas-log"),
           studentId: student!.id,
-          name: custom.name,
+          key: existing.id,
+          label: existing.name,
+          value: custom.value,
           unit: custom.unit,
-          startValue: custom.value,
-          currentValue: custom.value,
+          measuredAt,
           note: custom.note,
-          lastUpdatedAt: date,
-        },
-      ];
+          createdAt,
+        });
+      } else {
+        const newCustomId = generateId("custom");
+        nextCustom = [
+          ...nextCustom,
+          {
+            id: newCustomId,
+            studentId: student!.id,
+            name: custom.name,
+            unit: custom.unit,
+            startValue: custom.value,
+            currentValue: custom.value,
+            note: custom.note,
+            lastUpdatedAt: date,
+          },
+        ];
+        newHistoryEntries.push({
+          id: generateId("meas-log"),
+          studentId: student!.id,
+          key: newCustomId,
+          label: custom.name,
+          value: custom.value,
+          unit: custom.unit,
+          measuredAt,
+          note: custom.note,
+          createdAt,
+        });
+      }
     }
-    updateStudent(student!.id, { measurements: nextMeasurements, customMeasurements: nextCustom });
+    updateStudent(student!.id, {
+      measurements: nextMeasurements,
+      customMeasurements: nextCustom,
+      measurementHistory: [...student!.measurementHistory, ...newHistoryEntries],
+    });
   }
 
   function handleAddPhoto(photo: ProgressPhoto) {
@@ -172,6 +237,20 @@ export default function AdminStudentDetailPage() {
       return;
     }
     updateStudent(student!.id, { progressPhotos: [...student!.progressPhotos, photo] });
+  }
+
+  function handleDeletePhoto(photoId: string) {
+    if (isLinked) {
+      linkedProfile.removePhoto(photoId);
+      return;
+    }
+    updateStudent(student!.id, {
+      progressPhotos: student!.progressPhotos.filter((photo) => photo.id !== photoId),
+    });
+  }
+
+  function handleUpdatePayment(nextPaymentProfile: StudentPaymentProfile) {
+    updateStudent(student!.id, { paymentProfile: nextPaymentProfile });
   }
 
   const assignedProgram = programs.find((p) => student.assignedProgramIds.includes(p.id));
@@ -288,6 +367,7 @@ export default function AdminStudentDetailPage() {
           photos={photos}
           defaultWeightKg={student.currentWeightKg}
           onAdd={handleAddPhoto}
+          onDelete={handleDeletePhoto}
         />
       </div>
 
@@ -309,7 +389,16 @@ export default function AdminStudentDetailPage() {
         <MeasurementsSection
           measurements={measurements}
           customMeasurements={customMeasurements}
+          measurementHistory={measurementHistory}
           onSave={handleUpdateMeasurements}
+        />
+      </div>
+
+      <div className="mb-6">
+        <PaymentSection
+          studentId={student.id}
+          profile={student.paymentProfile}
+          onUpdate={handleUpdatePayment}
         />
       </div>
 

@@ -49,22 +49,65 @@ const positiveDirection: Record<BodyMeasurementType, "up" | "down"> = {
   "mollet-gauche": "up",
 };
 
-export function measurementDelta(measurement: {
-  startValue: number;
-  currentValue: number;
-}): number {
-  return (
-    Math.round((measurement.currentValue - measurement.startValue) * 10) / 10
-  );
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
 }
 
-export function isMeasurementProgressing(measurement: BodyMeasurement): boolean {
+/**
+ * Écart entre valeur de départ et valeur actuelle. Renvoie null (jamais
+ * NaN) dès que l'une des deux valeurs est absente/invalide, pour que
+ * l'affichage puisse montrer "—" plutôt qu'un calcul incohérent.
+ */
+export function measurementDelta(measurement: {
+  startValue: number | null | undefined;
+  currentValue: number | null | undefined;
+}): number | null {
+  if (!isFiniteNumber(measurement.startValue) || !isFiniteNumber(measurement.currentValue)) {
+    return null;
+  }
+  return Math.round((measurement.currentValue - measurement.startValue) * 10) / 10;
+}
+
+export function isMeasurementProgressing(measurement: BodyMeasurement): boolean | null {
   const delta = measurementDelta(measurement);
+  if (delta === null) {
+    return null;
+  }
   if (delta === 0) {
     return true;
   }
   const direction = delta > 0 ? "up" : "down";
-  return direction === positiveDirection[measurement.type];
+  return direction === (positiveDirection[measurement.type] ?? "up");
+}
+
+/**
+ * Formate une date de mesure de façon sûre : jamais "Invalid Date" à
+ * l'écran, quelle que soit la provenance de la donnée (saisie manuelle,
+ * ancien enregistrement localStorage...).
+ */
+export function formatMeasurementDate(dateIso: string | null | undefined): string {
+  if (!dateIso) {
+    return "Date non renseignée";
+  }
+  const date = new Date(dateIso);
+  if (Number.isNaN(date.getTime())) {
+    return "Date non renseignée";
+  }
+  return date.toLocaleDateString("fr-FR");
+}
+
+/**
+ * Formate une valeur de mensuration de façon sûre : jamais "NaN" à
+ * l'écran, "Non renseigné" si la valeur est absente/invalide.
+ */
+export function formatMeasurementValue(
+  value: number | null | undefined,
+  unit: string,
+): string {
+  if (!isFiniteNumber(value)) {
+    return "Non renseigné";
+  }
+  return `${value} ${unit || ""}`.trim();
 }
 
 export const coachingStatusLabels: Record<CoachingStatus, string> = {

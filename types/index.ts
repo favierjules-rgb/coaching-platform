@@ -259,6 +259,26 @@ export interface CustomMeasurement {
   lastUpdatedAt: string;
 }
 
+/**
+ * Un relevé daté d'une mensuration (préréglée ou personnalisée). Complète
+ * BodyMeasurement/CustomMeasurement — qui ne gardent que la valeur de
+ * départ et la valeur actuelle — par un vrai journal chronologique, pour
+ * l'affichage "Historique" et une future table Supabase `measurement_log`.
+ * `key` vaut le BodyMeasurementType pour une mensuration préréglée, ou l'id
+ * de la CustomMeasurement pour une mesure personnalisée.
+ */
+export interface MeasurementLogEntry {
+  id: string;
+  studentId: string;
+  key: string;
+  label: string;
+  value: number;
+  unit: string;
+  measuredAt: string;
+  note: string;
+  createdAt: string;
+}
+
 export interface FoodPreferences {
   studentId: string;
   liked: string[];
@@ -597,7 +617,10 @@ export interface AdminStudent {
   weightHistory: WeightEntry[];
   measurements: BodyMeasurement[];
   customMeasurements: CustomMeasurement[];
+  measurementHistory: MeasurementLogEntry[];
   progressPhotos: ProgressPhoto[];
+  /** Fiche paiement mockée de l'élève (voir StudentPaymentProfile plus bas). */
+  paymentProfile: StudentPaymentProfile;
   assignedProgramIds: string[];
   assignedNutritionPlanIds: string[];
   assignedDocumentIds: string[];
@@ -607,6 +630,56 @@ export interface AdminStudent {
 }
 
 export type StudentAccountStatus = "actif" | "pause" | "terminé";
+
+/* ─── Paiement élève (admin) ───
+ * Types mockés (aucun paiement réel, aucune donnée bancaire) préparés pour
+ * une future intégration Supabase + prestataire de paiement : chaque
+ * entité porte déjà studentId/paymentId et createdAt/updatedAt.
+ */
+
+export type PaymentStatus = "à jour" | "en attente" | "en retard" | "terminé";
+
+export type PaymentMethod = "virement" | "carte" | "espèces" | "chèque" | "autre";
+
+/**
+ * Historique d'un versement reçu pour le coaching d'un élève. Correspond à
+ * une future table Supabase `student_payment_entry`.
+ */
+export interface StudentPaymentEntry {
+  paymentId: string;
+  studentId: string;
+  amount: number;
+  date: string;
+  method: PaymentMethod;
+  note: string;
+  status: PaymentStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Fiche paiement d'un élève (une par élève) : offre souscrite, prix,
+ * échéancier et statut global. Correspond à une future table Supabase
+ * `student_payment_profile`, reliée à `student_payment_entry` par
+ * studentId. Toutes les données ici sont mockées à des fins de
+ * démonstration — aucun paiement réel n'est traité.
+ */
+export interface StudentPaymentProfile {
+  studentId: string;
+  offerName: string;
+  monthlyPriceEuros: number;
+  durationMonths: number;
+  totalPriceEuros: number;
+  paidAmountEuros: number;
+  status: PaymentStatus;
+  method: PaymentMethod;
+  nextPaymentDate: string | null;
+  installmentsTotal: number;
+  installmentsPaid: number;
+  entries: StudentPaymentEntry[];
+  createdAt: string;
+  updatedAt: string;
+}
 
 export type AdminRepsValue = string; // "8" | "8-10" | "12-15" | "AMRAP" ...
 
