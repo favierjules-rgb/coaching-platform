@@ -956,6 +956,135 @@ export interface AdminCoachSettings {
   mockVersion: string;
 }
 
+/* ─── Fiche élève Supabase (profils élèves) ───
+ * Types correspondant directement aux lignes des tables Supabase
+ * `students`, `student_profiles`, `progress_photos`, `body_measurements`,
+ * `custom_measurements`, `payments`, `payment_entries` et `coach_notes`
+ * (voir supabase/schema.sql et types/supabase.ts pour la forme exacte des
+ * lignes retournées par le client) — lib/supabase/students.ts fait la
+ * conversion entre ces types "bruts" (snake_case, tels que stockés) et les
+ * types mock existants (AdminStudent, BodyMeasurement...) pour que les
+ * composants déjà écrits n'aient rien à changer.
+ */
+export interface SupabaseStudent {
+  id: string;
+  userId: string | null;
+  coachId: string | null;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  age: number | null;
+  heightCm: number | null;
+  currentWeightKg: number | null;
+  startWeightKg: number | null;
+  targetWeightKg: number | null;
+  goal: string;
+  level: string;
+  trainingFrequencyPerWeek: number | null;
+  trainingLocation: string;
+  status: StudentAccountStatus;
+  startDate: string;
+  lastLoginAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SupabaseStudentProfile {
+  id: string;
+  studentId: string;
+  foodPreferences: AdminFoodPreferences;
+  sportPreferences: AdminSportPreferences;
+  injuryNote: string;
+  mainGoal: string;
+  secondaryGoals: string[];
+  targetDate: string | null;
+  priority: GoalPriority | null;
+  trackedIndicators: GoalIndicator[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SupabaseBodyMeasurement {
+  id: string;
+  studentId: string;
+  /** Clé anglaise snake_case telle que stockée en base (voir lib/supabase/measurement-types.ts). */
+  type: string;
+  unit: string;
+  startValue: number;
+  currentValue: number;
+  note: string;
+  lastUpdatedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SupabaseCustomMeasurement {
+  id: string;
+  studentId: string;
+  name: string;
+  unit: string;
+  startValue: number;
+  currentValue: number;
+  note: string;
+  lastUpdatedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SupabaseProgressPhoto {
+  id: string;
+  studentId: string;
+  type: ProgressPhotoType;
+  date: string;
+  weightKg: number | null;
+  note: string;
+  imageUrl: string | null;
+  storagePath: string | null;
+  pending: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SupabasePayment {
+  id: string;
+  studentId: string;
+  offerName: string;
+  monthlyPriceEuros: number;
+  durationMonths: number;
+  totalPriceEuros: number;
+  paidAmountEuros: number;
+  status: PaymentStatus;
+  method: PaymentMethod;
+  nextPaymentDate: string | null;
+  installmentsTotal: number;
+  installmentsPaid: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SupabasePaymentEntry {
+  id: string;
+  paymentId: string;
+  studentId: string;
+  amount: number;
+  date: string;
+  method: PaymentMethod;
+  note: string;
+  status: PaymentStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SupabaseCoachNote {
+  id: string;
+  studentId: string;
+  coachId: string | null;
+  text: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type CoachRole = "coach" | "admin" | "assistant";
 export type CoachAccountStatus = "actif" | "inactif";
 

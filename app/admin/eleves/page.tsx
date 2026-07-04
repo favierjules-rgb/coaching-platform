@@ -9,6 +9,7 @@ import { CreateStudentModal } from "@/components/admin/CreateStudentModal";
 import { FilterButtons, SearchInput } from "@/components/admin/SearchAndFilters";
 import { StatusBadge, studentStatusTone } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
+import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { formatDate, fullName, matchesStudentSearch, studentStatusLabels, weightProgressLabel } from "@/lib/admin";
 import { paymentSummaryLabel } from "@/lib/payments";
 import type { StudentAccountStatus } from "@/types";
@@ -24,7 +25,15 @@ const statusFilters: { value: StatusFilter; label: string }[] = [
 
 export default function AdminStudentsPage() {
   const { state, createStudent, setAssignment } = useAdminData();
-  const { students, programs, nutritionPlans, documents } = state;
+  const { programs, nutritionPlans, documents } = state;
+
+  // Supabase a la priorité dès qu'il a au moins un élève réel ; sinon on
+  // retombe sur la liste mock (localStorage), sans jamais rien casser tant
+  // que Supabase n'est pas configuré ou n'a encore aucune donnée — voir
+  // hooks/useSupabaseStudents.ts. Programmes/plans/documents restent mock
+  // dans tous les cas (non migrés à cette étape).
+  const supabaseStudents = useSupabaseStudents();
+  const students = supabaseStudents.students.length > 0 ? supabaseStudents.students : state.students;
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("tous");
