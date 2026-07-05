@@ -13,8 +13,15 @@ import {
   upsertBodyMeasurements,
   upsertCustomMeasurement,
 } from "@/lib/supabase/students";
+import { getWorkoutFeedbackForStudent } from "@/lib/supabase/workout-feedback";
 import type { CustomMeasurementInput } from "@/components/student/UpdateMeasurementsModal";
-import type { AdminStudent, BodyMeasurementType, ProgressPhoto, StudentPaymentProfile } from "@/types";
+import type {
+  AdminStudent,
+  AdminStudentFeedback,
+  BodyMeasurementType,
+  ProgressPhoto,
+  StudentPaymentProfile,
+} from "@/types";
 
 /**
  * Équivalent Supabase de la logique mock (useAdminData + isLinked) pour
@@ -30,26 +37,31 @@ import type { AdminStudent, BodyMeasurementType, ProgressPhoto, StudentPaymentPr
 export function useSupabaseStudentDetail(studentId: string | undefined) {
   const [loading, setLoading] = useState(true);
   const [student, setStudent] = useState<AdminStudent | null>(null);
+  const [feedback, setFeedback] = useState<AdminStudentFeedback[]>([]);
   const entryCountRef = useRef(0);
 
-  const applyFetchResult = useCallback((found: AdminStudent | null) => {
+  const applyFetchResult = useCallback((found: AdminStudent | null, feedbackList: AdminStudentFeedback[]) => {
     entryCountRef.current = found?.paymentProfile.entries.length ?? 0;
     setStudent(found);
+    setFeedback(feedbackList);
     setLoading(false);
   }, []);
 
   const refetch = useCallback(async () => {
     if (!studentId) {
-      applyFetchResult(null);
+      applyFetchResult(null, []);
       return;
     }
     const supabase = createSupabaseBrowserClient();
     if (!supabase) {
-      applyFetchResult(null);
+      applyFetchResult(null, []);
       return;
     }
-    const found = await getFullAdminStudent(supabase, studentId);
-    applyFetchResult(found);
+    const [found, feedbackList] = await Promise.all([
+      getFullAdminStudent(supabase, studentId),
+      getWorkoutFeedbackForStudent(supabase, studentId),
+    ]);
+    applyFetchResult(found, feedbackList);
   }, [studentId, applyFetchResult]);
 
   // Chargement initial isolé de `refetch` (appelé plus bas par les
@@ -60,16 +72,19 @@ export function useSupabaseStudentDetail(studentId: string | undefined) {
     let cancelled = false;
     async function load() {
       if (!studentId) {
-        if (!cancelled) applyFetchResult(null);
+        if (!cancelled) applyFetchResult(null, []);
         return;
       }
       const supabase = createSupabaseBrowserClient();
       if (!supabase) {
-        if (!cancelled) applyFetchResult(null);
+        if (!cancelled) applyFetchResult(null, []);
         return;
       }
-      const found = await getFullAdminStudent(supabase, studentId);
-      if (!cancelled) applyFetchResult(found);
+      const [found, feedbackList] = await Promise.all([
+        getFullAdminStudent(supabase, studentId),
+        getWorkoutFeedbackForStudent(supabase, studentId),
+      ]);
+      if (!cancelled) applyFetchResult(found, feedbackList);
     }
     load();
     return () => {
@@ -170,6 +185,7 @@ export function useSupabaseStudentDetail(studentId: string | undefined) {
   return {
     loading,
     student,
+    feedback,
     updateStudentFields: updateFields,
     updateWeight,
     updateTarget,

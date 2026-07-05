@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { AlertTriangle, CheckCheck, MessageSquare } from "lucide-react";
+import { AlertTriangle, CheckCheck, MessageSquare, RotateCcw } from "lucide-react";
 
 import { FeedbackDetailModal } from "@/components/admin/FeedbackDetailModal";
 import { FilterButtons, SearchInput } from "@/components/admin/SearchAndFilters";
 import { StatusBadge, feedbackStatusTone } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
+import { useSupabaseAdminFeedback } from "@/hooks/useSupabaseAdminFeedback";
+import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { feedbackStatusLabels, feedbackTypeLabels, formatDate, fullName, matchesTextSearch } from "@/lib/admin";
 import type { FeedbackStatus, FeedbackType } from "@/types";
 
@@ -29,7 +31,17 @@ const typeFilters: { value: TypeFilter; label: string }[] = [
 
 export default function AdminFeedbackPage() {
   const { state, setFeedbackStatus, addCoachReply } = useAdminData();
-  const { feedback, students } = state;
+
+  // Supabase a la priorité dès qu'il a au moins un retour réel ; sinon on
+  // retombe sur la liste mock (localStorage) — même logique que
+  // /admin/eleves (voir hooks/useSupabaseStudents.ts). Les élèves viennent
+  // de la même source que les retours affichés, pour que les noms/emails se
+  // résolvent correctement des deux côtés.
+  const supabaseFeedback = useSupabaseAdminFeedback();
+  const supabaseStudents = useSupabaseStudents();
+  const useSupabase = supabaseFeedback.feedback.length > 0;
+  const feedback = useSupabase ? supabaseFeedback.feedback : state.feedback;
+  const students = useSupabase ? supabaseStudents.students : state.students;
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("tous");
@@ -80,7 +92,7 @@ export default function AdminFeedbackPage() {
       {filtered.length === 0 ? (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <MessageSquare size={16} />
-          Aucun retour ne correspond à ta recherche.
+          {feedback.length === 0 ? "Aucun retour pour le moment." : "Aucun retour ne correspond à ta recherche."}
         </p>
       ) : (
         <div className="flex flex-col gap-4">
@@ -94,7 +106,9 @@ export default function AdminFeedbackPage() {
                 <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
                   <div>
                     <span className="block text-xs uppercase tracking-wide text-muted-foreground">Élève</span>
-                    <span className="text-sm font-bold text-foreground">{student ? fullName(student) : "—"}</span>
+                    <span className="text-sm font-bold text-foreground">
+                      {student ? fullName(student) : "Élève non identifié"}
+                    </span>
                   </div>
                   <div>
                     <span className="block text-xs uppercase tracking-wide text-muted-foreground">Type · Concerné</span>
@@ -116,12 +130,14 @@ export default function AdminFeedbackPage() {
                   <FeedbackDetailModal
                     feedback={f}
                     student={student}
-                    onReply={(reply) => addCoachReply(f.id, reply)}
+                    onReply={(reply) => (useSupabase ? supabaseFeedback.addReply(f.id, reply) : addCoachReply(f.id, reply))}
                   />
                   {f.status !== "important" && (
                     <button
                       type="button"
-                      onClick={() => setFeedbackStatus(f.id, "important")}
+                      onClick={() =>
+                        useSupabase ? supabaseFeedback.updateStatus(f.id, "important") : setFeedbackStatus(f.id, "important")
+                      }
                       className="flex items-center gap-1.5 border border-amber-500/50 px-4 py-2 text-xs uppercase tracking-widest text-amber-400 transition-colors hover:bg-amber-500/10"
                     >
                       <AlertTriangle size={13} />
@@ -131,11 +147,27 @@ export default function AdminFeedbackPage() {
                   {f.status !== "traité" && (
                     <button
                       type="button"
-                      onClick={() => setFeedbackStatus(f.id, "traité")}
+                      onClick={() =>
+                        useSupabase ? supabaseFeedback.updateStatus(f.id, "traité") : setFeedbackStatus(f.id, "traité")
+                      }
                       className="flex items-center gap-1.5 border border-green-500/50 px-4 py-2 text-xs uppercase tracking-widest text-green-400 transition-colors hover:bg-green-500/10"
                     >
                       <CheckCheck size={13} />
                       Marquer traité
+                    </button>
+                  )}
+                  {f.status !== "a-traiter" && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        useSupabase
+                          ? supabaseFeedback.updateStatus(f.id, "a-traiter")
+                          : setFeedbackStatus(f.id, "a-traiter")
+                      }
+                      className="flex items-center gap-1.5 border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+                    >
+                      <RotateCcw size={13} />
+                      Remettre à traiter
                     </button>
                   )}
                 </div>

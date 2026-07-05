@@ -405,6 +405,132 @@ export interface Database {
         };
         Relationships: [];
       };
+      workout_feedback: {
+        Row: {
+          id: string;
+          student_id: string;
+          session_id: string | null;
+          program_id: string | null;
+          session_key: string | null;
+          session_ref_label: string;
+          completed: boolean;
+          global_rpe: number | null;
+          global_comment: string;
+          pain: string;
+          status: "a-traiter" | "traité" | "important";
+          coach_reply: string;
+          submitted_at: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          student_id: string;
+          session_id?: string | null;
+          program_id?: string | null;
+          session_key?: string | null;
+          session_ref_label?: string;
+          completed?: boolean;
+          global_rpe?: number | null;
+          global_comment?: string;
+          pain?: string;
+          status?: "a-traiter" | "traité" | "important";
+          coach_reply?: string;
+          submitted_at?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          student_id?: string;
+          session_id?: string | null;
+          program_id?: string | null;
+          session_key?: string | null;
+          session_ref_label?: string;
+          completed?: boolean;
+          global_rpe?: number | null;
+          global_comment?: string;
+          pain?: string;
+          status?: "a-traiter" | "traité" | "important";
+          coach_reply?: string;
+          submitted_at?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      exercise_feedback: {
+        Row: {
+          id: string;
+          workout_feedback_id: string;
+          student_id: string;
+          exercise_id: string | null;
+          exercise_name: string;
+          exercise_order: number | null;
+          rpe: number | null;
+          comment: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          workout_feedback_id: string;
+          student_id: string;
+          exercise_id?: string | null;
+          exercise_name: string;
+          exercise_order?: number | null;
+          rpe?: number | null;
+          comment?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          workout_feedback_id?: string;
+          student_id?: string;
+          exercise_id?: string | null;
+          exercise_name?: string;
+          exercise_order?: number | null;
+          rpe?: number | null;
+          comment?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      exercise_set_feedback: {
+        Row: {
+          id: string;
+          exercise_feedback_id: string;
+          student_id: string;
+          set_number: number;
+          load_used: string;
+          reps_done: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          exercise_feedback_id: string;
+          student_id: string;
+          set_number: number;
+          load_used?: string;
+          reps_done?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          exercise_feedback_id?: string;
+          student_id?: string;
+          set_number?: number;
+          load_used?: string;
+          reps_done?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
