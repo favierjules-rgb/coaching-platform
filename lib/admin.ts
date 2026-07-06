@@ -83,6 +83,9 @@ export function matchesTextSearch(fields: string[], query: string): boolean {
 }
 
 export function weightProgressLabel(student: AdminStudent): string {
+  if (student.currentWeightKg <= 0) {
+    return "Non renseigné";
+  }
   const delta = Math.round((student.currentWeightKg - student.startWeightKg) * 10) / 10;
   const sign = delta >= 0 ? "+" : "";
   return `${student.startWeightKg} → ${student.currentWeightKg} kg (${sign}${delta} kg)`;

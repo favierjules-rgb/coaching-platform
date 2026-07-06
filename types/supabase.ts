@@ -411,6 +411,36 @@ export interface Database {
         };
         Relationships: [];
       };
+      weight_entries: {
+        Row: {
+          id: string;
+          student_id: string;
+          weight_kg: number;
+          recorded_at: string;
+          source: "initial" | "student_update" | "coach_update";
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          student_id: string;
+          weight_kg: number;
+          recorded_at?: string;
+          source?: "initial" | "student_update" | "coach_update";
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          student_id?: string;
+          weight_kg?: number;
+          recorded_at?: string;
+          source?: "initial" | "student_update" | "coach_update";
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       workout_feedback: {
         Row: {
           id: string;

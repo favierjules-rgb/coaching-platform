@@ -220,6 +220,23 @@ alter table public.students drop column if exists training_frequency_per_week;
 alter table public.students drop column if exists training_location;
 
 -- ============================================================================
+-- 4ter. weight_entries — historique du poids (une ligne par relevé), pour
+--       que la carte "Évolution du poids" ait une vraie courbe à afficher au
+--       lieu de ne connaître que le poids actuel/départ/objectif de
+--       student_profiles. `source` distingue le relevé initial (création de
+--       l'élève), une saisie élève, ou une saisie coach.
+-- ============================================================================
+create table if not exists public.weight_entries (
+  id uuid primary key default gen_random_uuid(),
+  student_id uuid not null references public.students (id) on delete cascade,
+  weight_kg numeric not null,
+  recorded_at date not null default current_date,
+  source text not null default 'coach_update' check (source in ('initial', 'student_update', 'coach_update')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- ============================================================================
 -- 5. progress_photos
 -- ============================================================================
 create table if not exists public.progress_photos (
@@ -597,7 +614,7 @@ declare
 begin
   for t in
     select unnest(array[
-      'profiles', 'coaches', 'students', 'student_profiles', 'progress_photos',
+      'profiles', 'coaches', 'students', 'student_profiles', 'weight_entries', 'progress_photos',
       'body_measurements', 'custom_measurements', 'payments', 'payment_entries',
       'programs', 'program_weeks', 'workout_sessions', 'workout_exercises',
       'exercise_library', 'nutrition_plans', 'nutrition_days', 'meals',
@@ -621,6 +638,7 @@ alter table public.profiles enable row level security;
 alter table public.coaches enable row level security;
 alter table public.students enable row level security;
 alter table public.student_profiles enable row level security;
+alter table public.weight_entries enable row level security;
 alter table public.progress_photos enable row level security;
 alter table public.body_measurements enable row level security;
 alter table public.custom_measurements enable row level security;
@@ -713,6 +731,11 @@ create policy "student_profiles_manage_self_or_staff" on public.student_profiles
 -- photos/mensurations/retours), le coach/admin a un accès complet.
 -- ----------------------------------------------------------------------------
 create policy "progress_photos_student_or_staff" on public.progress_photos
+  for all
+  using (student_id = public.current_student_id() or public.is_coach_or_admin())
+  with check (student_id = public.current_student_id() or public.is_coach_or_admin());
+
+create policy "weight_entries_student_or_staff" on public.weight_entries
   for all
   using (student_id = public.current_student_id() or public.is_coach_or_admin())
   with check (student_id = public.current_student_id() or public.is_coach_or_admin());

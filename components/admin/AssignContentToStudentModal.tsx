@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle, UserPlus } from "lucide-react";
+import { CheckCircle, Info, UserPlus } from "lucide-react";
 
 import { CheckboxField } from "@/components/admin/AdminFormFields";
 import { Modal, PrimaryButton } from "@/components/admin/Modal";
@@ -18,6 +18,14 @@ interface AssignContentToStudentModalProps {
     contentId: string,
     assigned: boolean,
   ) => void;
+  /**
+   * Élève Supabase : programmes/plans/documents ne sont pas encore migrés
+   * (leurs ids mock ne sont pas des UUID, donc aucune ligne `assignments` /
+   * `document_assignments` ne peut réellement être créée). On affiche un
+   * message clair au lieu de cases à cocher factices plutôt que de laisser
+   * croire à une attribution qui ne persiste nulle part.
+   */
+  isSupabaseStudent?: boolean;
 }
 
 export function AssignContentToStudentModal({
@@ -26,6 +34,7 @@ export function AssignContentToStudentModal({
   nutritionPlans,
   documents,
   onSetAssignment,
+  isSupabaseStudent = false,
 }: AssignContentToStudentModalProps) {
   const [open, setOpen] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
@@ -48,7 +57,13 @@ export function AssignContentToStudentModal({
 
       {open && (
         <Modal title={`Attribuer un contenu à ${student.firstName}`} onClose={close} maxWidth="max-w-lg">
-          {confirmed ? (
+          {isSupabaseStudent ? (
+            <div className="flex items-start gap-3 border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-400">
+              <Info size={18} className="mt-0.5 flex-shrink-0" />
+              L&apos;attribution de programmes, plans alimentaires et documents sera disponible après la migration
+              de ces contenus vers Supabase. Cette action n&apos;est pas encore persistée pour cet élève.
+            </div>
+          ) : confirmed ? (
             <div className="flex items-center gap-3 border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-400">
               <CheckCircle size={18} className="flex-shrink-0" />
               Contenus attribués mis à jour.

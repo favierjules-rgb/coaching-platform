@@ -6,6 +6,7 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
   addCoachNoteSupabase,
   addProgressPhotoSupabase,
+  addWeightEntry,
   deleteProgressPhotoSupabase,
   getFullAdminStudent,
   updateStudentFields,
@@ -97,6 +98,9 @@ export function useSupabaseStudentDetail(studentId: string | undefined) {
       const supabase = createSupabaseBrowserClient();
       if (!supabase || !studentId) return;
       await updateStudentFields(supabase, studentId, partial);
+      if (partial.currentWeightKg !== undefined) {
+        await addWeightEntry(supabase, studentId, partial.currentWeightKg, "coach_update");
+      }
       await refetch();
     },
     [studentId, refetch],
@@ -104,9 +108,13 @@ export function useSupabaseStudentDetail(studentId: string | undefined) {
 
   const updateWeight = useCallback(
     async (weightKg: number) => {
-      await updateFields({ currentWeightKg: weightKg });
+      const supabase = createSupabaseBrowserClient();
+      if (!supabase || !studentId) return;
+      await updateStudentFields(supabase, studentId, { currentWeightKg: weightKg });
+      await addWeightEntry(supabase, studentId, weightKg, "coach_update");
+      await refetch();
     },
-    [updateFields],
+    [studentId, refetch],
   );
 
   const updateTarget = useCallback(

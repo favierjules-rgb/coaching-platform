@@ -40,7 +40,7 @@ export default function AdminStudentsPage() {
   const [goalFilter, setGoalFilter] = useState("tous");
 
   const goals = useMemo(() => {
-    const unique = new Set(students.map((s) => s.goal));
+    const unique = new Set(students.map((s) => s.goal).filter((g) => g.trim().length > 0));
     return ["tous", ...Array.from(unique)];
   }, [students]);
 
@@ -104,7 +104,7 @@ export default function AdminStudentsPage() {
                   </div>
                   <div>
                     <span className="block text-xs uppercase tracking-wide text-muted-foreground">Objectif</span>
-                    <span className="text-sm text-foreground">{student.goal}</span>
+                    <span className="text-sm text-foreground">{student.goal || "Non renseigné"}</span>
                     <span className="mt-1 block">
                       <StatusBadge label={studentStatusLabels[student.status]} tone={studentStatusTone(student.status)} />
                     </span>

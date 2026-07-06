@@ -16,6 +16,8 @@ import { StatCard } from "@/components/admin/StatCard";
 import { AdminSection } from "@/components/admin/AdminSection";
 import { StatusBadge, studentStatusTone } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
+import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
+import { useSupabaseAdminFeedback } from "@/hooks/useSupabaseAdminFeedback";
 import {
   fullName,
   studentsWithStaleWeight,
@@ -73,7 +75,19 @@ function StudentWatchList({
 
 export default function AdminDashboardPage() {
   const { state } = useAdminData();
-  const { students, programs, nutritionPlans, documents, feedback } = state;
+  const { programs, nutritionPlans, documents } = state;
+
+  // Élèves et retours entraînement : priorité Supabase dès qu'il y a au
+  // moins une ligne réelle, sinon repli sur les données mock — même
+  // pattern que /admin/eleves et /admin/retours (voir
+  // hooks/useSupabaseStudents.ts et hooks/useSupabaseAdminFeedback.ts).
+  // Programmes/plans/documents restent mock dans tous les cas : ces
+  // contenus ne sont pas encore migrés, les compteurs correspondants sont
+  // donc explicitement marqués "(exemple)" plutôt que présentés comme réels.
+  const supabaseStudents = useSupabaseStudents();
+  const students = supabaseStudents.students.length > 0 ? supabaseStudents.students : state.students;
+  const supabaseFeedback = useSupabaseAdminFeedback();
+  const feedback = supabaseFeedback.feedback.length > 0 ? supabaseFeedback.feedback : state.feedback;
 
   const activeStudents = students.filter((s) => s.status === "actif");
   const pausedStudents = students.filter((s) => s.status === "pause");
@@ -96,16 +110,16 @@ export default function AdminDashboardPage() {
       <div className="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard icon={Users} label="Élèves actifs" value={activeStudents.length} tone="primary" />
         <StatCard icon={Users} label="Élèves en pause" value={pausedStudents.length} tone="amber" />
-        <StatCard icon={Dumbbell} label="Programmes actifs" value={activePrograms.length} />
-        <StatCard icon={UtensilsCrossed} label="Plans alimentaires actifs" value={activePlans.length} />
-        <StatCard icon={FileText} label="Documents partagés" value={publishedDocuments.length} />
+        <StatCard icon={Dumbbell} label="Programmes actifs (exemple)" value={activePrograms.length} />
+        <StatCard icon={UtensilsCrossed} label="Plans alimentaires actifs (exemple)" value={activePlans.length} />
+        <StatCard icon={FileText} label="Documents partagés (exemple)" value={publishedDocuments.length} />
         <StatCard
           icon={ClipboardList}
           label="Retours à traiter"
           value={feedbackToTreat.length}
           tone={feedbackToTreat.length > 0 ? "amber" : "default"}
         />
-        <StatCard icon={Bell} label="Notifications" value={mockNotifications.length} />
+        <StatCard icon={Bell} label="Notifications (exemple)" value={mockNotifications.length} />
       </div>
 
       <div className="mb-8 border border-border bg-card p-6">
@@ -128,7 +142,7 @@ export default function AdminDashboardPage() {
 
       <div className="mb-8 border border-border bg-card p-6">
         <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
-          Notifications
+          Notifications (exemple)
         </h2>
         <div className="flex flex-col gap-3">
           {mockNotifications.map((notif) => (

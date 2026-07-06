@@ -24,6 +24,9 @@ import type {
   SupabaseProgressPhoto,
   SupabaseStudent,
   SupabaseStudentProfile,
+  SupabaseWeightEntry,
+  WeightEntry,
+  WeightEntrySource,
 } from "@/types";
 import type { Database } from "@/types/supabase";
 
@@ -55,6 +58,7 @@ type CustomMeasurementRow = Database["public"]["Tables"]["custom_measurements"][
 type PaymentRow = Database["public"]["Tables"]["payments"]["Row"];
 type PaymentEntryRow = Database["public"]["Tables"]["payment_entries"]["Row"];
 type CoachNoteRow = Database["public"]["Tables"]["coach_notes"]["Row"];
+type WeightEntryRow = Database["public"]["Tables"]["weight_entries"]["Row"];
 
 function devWarn(context: string, error: { message: string } | null): void {
   if (error && process.env.NODE_ENV === "development") {
@@ -219,6 +223,18 @@ function mapCoachNoteRow(row: CoachNoteRow): SupabaseCoachNote {
   };
 }
 
+function mapWeightEntryRow(row: WeightEntryRow): SupabaseWeightEntry {
+  return {
+    id: row.id,
+    studentId: row.student_id,
+    weightKg: row.weight_kg,
+    recordedAt: row.recorded_at,
+    source: row.source,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 /* ─── types Supabase* -> types mock (pour réutiliser les composants existants) ─── */
 
 function toMockProgressPhoto(photo: SupabaseProgressPhoto): ProgressPhoto {
@@ -268,6 +284,15 @@ function toMockCustomMeasurement(measurement: SupabaseCustomMeasurement): Custom
 
 function toMockCoachNote(note: SupabaseCoachNote): CoachNote {
   return { id: note.id, studentId: note.studentId, text: note.text, createdAt: note.createdAt };
+}
+
+/** `month` sert de libellé d'axe pour WeightChart : jour/mois court plutôt qu'un vrai nom de mois mocké. */
+function toMockWeightEntry(entry: SupabaseWeightEntry): WeightEntry {
+  const date = new Date(entry.recordedAt);
+  const label = Number.isNaN(date.getTime())
+    ? entry.recordedAt
+    : date.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
+  return { month: label, kg: entry.weightKg };
 }
 
 function toMockPaymentEntry(entry: SupabasePaymentEntry): StudentPaymentEntry {
@@ -329,6 +354,7 @@ function toAdminStudent(
   student: SupabaseStudent,
   profile: SupabaseStudentProfile | null,
   extras: {
+    weightHistory: WeightEntry[];
     measurements: BodyMeasurement[];
     customMeasurements: CustomMeasurement[];
     progressPhotos: ProgressPhoto[];
@@ -337,6 +363,12 @@ function toAdminStudent(
   },
 ): AdminStudent {
   const currentWeightKg = profile?.currentWeightKg ?? 0;
+  // `weight_entries` est trié par date croissante (voir getWeightHistory) :
+  // son premier relevé est le repli le plus fiable pour le poids de départ
+  // quand student_profiles.start_weight_kg n'a jamais été renseigné —
+  // préférable à retomber directement sur le poids actuel (voir
+  // docs/supabase-student-model.md).
+  const startWeightKg = profile?.startWeightKg ?? extras.weightHistory[0]?.kg ?? currentWeightKg;
   return {
     id: student.id,
     firstName: student.firstName,
@@ -346,7 +378,7 @@ function toAdminStudent(
     age: profile?.age ?? 0,
     heightCm: profile?.heightCm ?? 0,
     currentWeightKg,
-    startWeightKg: profile?.startWeightKg ?? currentWeightKg,
+    startWeightKg,
     targetWeightKg: profile?.targetWeightKg ?? currentWeightKg,
     goal: profile?.goal ?? "",
     level: profile?.level ?? "",
@@ -358,7 +390,7 @@ function toAdminStudent(
     foodPreferences: profile?.foodPreferences ?? emptyFoodPreferences,
     sportPreferences: profile?.sportPreferences ?? emptySportPreferences,
     injuries: profile?.injuryNote ?? "",
-    weightHistory: [],
+    weightHistory: extras.weightHistory,
     measurements: extras.measurements,
     customMeasurements: extras.customMeasurements,
     measurementHistory: [],
@@ -409,6 +441,7 @@ export async function getStudents(supabase: TypedSupabaseClient): Promise<AdminS
   return data.map((row) => {
     const student = mapStudentRow(row);
     return toAdminStudent(student, profileByStudent.get(student.id) ?? null, {
+      weightHistory: [],
       measurements: [],
       customMeasurements: [],
       progressPhotos: [],
@@ -531,9 +564,10 @@ export async function getFullAdminStudent(
     return null;
   }
 
-  const [profile, { measurements, customMeasurements }, progressPhotos, paymentProfile, coachNotes] =
+  const [profile, weightHistory, { measurements, customMeasurements }, progressPhotos, paymentProfile, coachNotes] =
     await Promise.all([
       getStudentProfile(supabase, studentId),
+      getWeightHistory(supabase, studentId),
       getStudentMeasurements(supabase, studentId),
       getStudentProgressPhotos(supabase, studentId),
       getStudentPayments(supabase, studentId),
@@ -541,12 +575,49 @@ export async function getFullAdminStudent(
     ]);
 
   return toAdminStudent(student, profile, {
+    weightHistory,
     measurements,
     customMeasurements,
     progressPhotos,
     paymentProfile,
     coachNotes,
   });
+}
+
+/**
+ * Historique de poids trié par date croissante (le plus ancien en premier,
+ * pour matcher l'ordre attendu par WeightChart/computeWeightEvolution).
+ * Tableau vide si aucun relevé n'existe encore.
+ */
+export async function getWeightHistory(supabase: TypedSupabaseClient, studentId: string): Promise<WeightEntry[]> {
+  const { data, error } = await supabase
+    .from("weight_entries")
+    .select("*")
+    .eq("student_id", studentId)
+    .order("recorded_at", { ascending: true });
+  devWarn("getWeightHistory", error);
+  return (data ?? []).map((row) => toMockWeightEntry(mapWeightEntryRow(row)));
+}
+
+/**
+ * Ajoute un relevé de poids (`source` distingue une saisie élève d'une
+ * saisie coach, voir docs/supabase-student-model.md) — appelé à chaque mise
+ * à jour du poids actuel, en plus de l'écriture sur `student_profiles`, pour
+ * que la carte "Évolution du poids" ait une vraie courbe.
+ */
+export async function addWeightEntry(
+  supabase: TypedSupabaseClient,
+  studentId: string,
+  weightKg: number,
+  source: WeightEntrySource,
+): Promise<void> {
+  const { error } = await supabase.from("weight_entries").insert({
+    student_id: studentId,
+    weight_kg: weightKg,
+    recorded_at: new Date().toISOString().slice(0, 10),
+    source,
+  });
+  devWarn("addWeightEntry", error);
 }
 
 /* ─── Écriture ─── */
