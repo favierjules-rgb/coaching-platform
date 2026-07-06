@@ -97,6 +97,13 @@ function mapStudentProfileRow(row: StudentProfileRow): SupabaseStudentProfile {
   const currentInjuries = asStringArray(injury.currentInjuries);
   const coachRemarks = typeof injury.coachRemarks === "string" ? injury.coachRemarks : "";
 
+  // Repli défensif sur une éventuelle colonne `sport_level` : certains
+  // projets Supabase plus anciens ont pu stocker le niveau sous ce nom
+  // avant que `student_profiles.level` ne soit standardisé — `select("*")`
+  // renvoie cette colonne si elle existe même si elle n'est pas dans le
+  // type généré, donc autant l'exploiter plutôt que perdre la donnée.
+  const legacyRow = row as StudentProfileRow & { sport_level?: string | null };
+
   return {
     id: row.id,
     studentId: row.student_id,
@@ -106,7 +113,7 @@ function mapStudentProfileRow(row: StudentProfileRow): SupabaseStudentProfile {
     startWeightKg: row.start_weight_kg,
     targetWeightKg: row.target_weight_kg,
     goal: row.goal,
-    level: row.level,
+    level: row.level || legacyRow.sport_level || "",
     trainingFrequencyPerWeek: row.training_frequency_per_week,
     trainingLocation: row.training_location,
     foodPreferences: {
@@ -380,7 +387,12 @@ function toAdminStudent(
     currentWeightKg,
     startWeightKg,
     targetWeightKg: profile?.targetWeightKg ?? currentWeightKg,
-    goal: profile?.goal ?? "",
+    // `main_goal` est le champ d'objectif détaillé pré-existant (section
+    // "Objectifs" de /profil, voir docs/supabase-student-model.md) ;
+    // `goal` est le résumé court ajouté par la migration 4bis. Un élève
+    // renseigné uniquement côté `main_goal` ne doit pas afficher "Non
+    // renseigné" ici — on privilégie `main_goal` quand il existe.
+    goal: profile?.mainGoal || profile?.goal || "",
     level: profile?.level ?? "",
     trainingFrequencyPerWeek: profile?.trainingFrequencyPerWeek ?? 0,
     trainingLocation: profile?.trainingLocation ?? "",
@@ -652,7 +664,13 @@ export async function updateStudentFields(
   if (partial.heightCm !== undefined) profileUpdate.height_cm = partial.heightCm;
   if (partial.currentWeightKg !== undefined) profileUpdate.current_weight_kg = partial.currentWeightKg;
   if (partial.targetWeightKg !== undefined) profileUpdate.target_weight_kg = partial.targetWeightKg;
-  if (partial.goal !== undefined) profileUpdate.goal = partial.goal;
+  // `goal` (résumé court) et `main_goal` (champ détaillé pré-existant, lu en
+  // priorité par toAdminStudent) doivent rester synchronisés : sans ça, un
+  // objectif édité ici resterait masqué par un `main_goal` plus ancien.
+  if (partial.goal !== undefined) {
+    profileUpdate.goal = partial.goal;
+    profileUpdate.main_goal = partial.goal;
+  }
   if (partial.level !== undefined) profileUpdate.level = partial.level;
   if (partial.trainingFrequencyPerWeek !== undefined) {
     profileUpdate.training_frequency_per_week = partial.trainingFrequencyPerWeek;
@@ -688,6 +706,21 @@ export async function updateStudentFields(
   }
   const results = await Promise.all(writes);
   return results.every(Boolean);
+}
+
+/**
+ * Met à jour `students.last_login_at` pour l'élève associé à cet utilisateur
+ * Auth — appelée depuis LoginForm juste après une connexion réussie, pour
+ * que "Dernière connexion" dans /admin/eleves/[studentId] reflète une vraie
+ * date plutôt que d'afficher "Jamais" indéfiniment. Sans effet (et sans
+ * erreur) si l'utilisateur connecté n'est pas un élève (coach/admin).
+ */
+export async function updateLastLoginTimestamp(supabase: TypedSupabaseClient, userId: string): Promise<void> {
+  const { error } = await supabase
+    .from("students")
+    .update({ last_login_at: new Date().toISOString() })
+    .eq("user_id", userId);
+  devWarn("updateLastLoginTimestamp", error);
 }
 
 /**
