@@ -48,15 +48,20 @@ export function FeedbackDetailModal({
         <Modal title={`${feedbackTypeLabels[feedback.type]} — ${feedback.refLabel}`} onClose={close} maxWidth="max-w-lg">
           <div className="flex flex-col gap-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-sm text-foreground">{student ? fullName(student) : "Élève inconnu"}</span>
+              <span className="text-sm text-foreground">{student ? fullName(student) : "Élève non identifié"}</span>
               <StatusBadge label={feedbackStatusLabels[feedback.status]} tone={feedbackStatusTone(feedback.status)} />
             </div>
             <p className="text-xs text-muted-foreground">{formatDate(feedback.date)}</p>
 
             {feedback.type === "entrainement" && (
-              <p className="text-sm text-foreground">
-                Séance {feedback.completed ? "terminée" : "non terminée"}
-              </p>
+              <>
+                <p className="text-sm text-foreground">
+                  Séance {feedback.completed ? "terminée" : "non terminée"}
+                </p>
+                {!feedback.programId && (
+                  <p className="text-xs text-muted-foreground">Programme non lié</p>
+                )}
+              </>
             )}
             {feedback.rpe !== null && (
               <p className="text-sm text-foreground">RPE global : {feedback.rpe} / 10</p>

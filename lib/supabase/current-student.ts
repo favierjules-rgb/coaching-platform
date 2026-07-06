@@ -25,6 +25,20 @@ type TypedSupabaseClient = SupabaseClient<Database>;
  * hooks/useSupabaseStudentProfile.ts).
  */
 export async function getCurrentStudentProfile(supabase: TypedSupabaseClient): Promise<AdminStudent | null> {
+  const studentId = await getCurrentStudentId(supabase);
+  if (!studentId) {
+    return null;
+  }
+  return getFullAdminStudent(supabase, studentId);
+}
+
+/**
+ * Version légère de getCurrentStudentProfile : ne renvoie que l'id `students`
+ * du compte connecté, sans charger mensurations/photos/paiement — utilisée
+ * là où seul l'identifiant est nécessaire (ex : soumission d'un retour de
+ * séance, voir hooks/useSupabaseWorkoutFeedback.ts).
+ */
+export async function getCurrentStudentId(supabase: TypedSupabaseClient): Promise<string | null> {
   const { data, error } = await supabase.auth.getUser();
   if (error || !data.user) {
     return null;
@@ -37,7 +51,7 @@ export async function getCurrentStudentProfile(supabase: TypedSupabaseClient): P
   if (studentError || !studentRow) {
     return null;
   }
-  return getFullAdminStudent(supabase, studentRow.id);
+  return studentRow.id;
 }
 
 export async function updateCurrentStudentWeight(

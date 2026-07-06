@@ -351,8 +351,8 @@ export default function AdminStudentDetailPage() {
   const availableDocuments = documentsWithAvailability.filter((d) => d.availability.available);
   const lockedDocuments = documentsWithAvailability.filter((d) => !d.availability.available);
 
-  const studentFeedback = feedback
-    .filter((f) => f.studentId === student.id)
+  const studentFeedback = (isSupabaseStudent ? supabaseDetail.feedback : feedback.filter((f) => f.studentId === student.id))
+    .slice()
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   const daysSinceStart = daysBetween(student.startDate);

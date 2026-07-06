@@ -496,12 +496,21 @@ create table if not exists public.document_assignments (
 -- ============================================================================
 -- 21. workout_feedback — retour élève global pour une séance
 --     (StudentWorkoutFeedback / AdminStudentFeedback type "entrainement").
+--     `session_id` / `program_id` restent uuid (FK vers workout_sessions /
+--     programs) pour quand ces tables seront réellement peuplées — tant que
+--     les programmes ne sont pas migrés (voir lib/supabase/workout-feedback.ts),
+--     ces deux colonnes restent `null` et la séance mock est identifiée via
+--     `session_key` (id mock stable, ex: "session-upper") + `session_ref_label`
+--     (nom affichable), pour retrouver/mettre à jour le bon retour sans
+--     dupliquer et sans dépendre de programmes non encore migrés.
 -- ============================================================================
 create table if not exists public.workout_feedback (
   id uuid primary key default gen_random_uuid(),
   student_id uuid not null references public.students (id) on delete cascade,
   session_id uuid references public.workout_sessions (id) on delete set null,
   program_id uuid references public.programs (id) on delete set null,
+  session_key text,
+  session_ref_label text not null default '',
   completed boolean not null default false,
   global_rpe integer check (global_rpe between 1 and 10),
   global_comment text not null default '',
@@ -510,12 +519,18 @@ create table if not exists public.workout_feedback (
   coach_reply text not null default '',
   submitted_at timestamptz not null default now(),
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  unique (student_id, session_key)
 );
+alter table public.workout_feedback add column if not exists session_key text;
+alter table public.workout_feedback add column if not exists session_ref_label text not null default '';
 
 -- ============================================================================
 -- 22. exercise_feedback — retour élève pour un exercice complet d'une
 --     séance (regroupe les séries + le ressenti sur cet exercice).
+--     `exercise_order` (position dans la séance mock) permet un tri stable
+--     à l'affichage tant que `exercise_id` (FK vers workout_exercises, non
+--     encore peuplée) reste `null`.
 -- ============================================================================
 create table if not exists public.exercise_feedback (
   id uuid primary key default gen_random_uuid(),
@@ -523,11 +538,13 @@ create table if not exists public.exercise_feedback (
   student_id uuid not null references public.students (id) on delete cascade,
   exercise_id uuid references public.workout_exercises (id) on delete set null,
   exercise_name text not null,
+  exercise_order integer,
   rpe integer check (rpe between 1 and 10),
   comment text not null default '',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+alter table public.exercise_feedback add column if not exists exercise_order integer;
 
 -- ============================================================================
 -- 23. exercise_set_feedback — retour élève pour une série d'un exercice.

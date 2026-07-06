@@ -6,6 +6,7 @@ import { CheckCircle } from "lucide-react";
 import { ExerciseFeedbackCard } from "@/components/student/ExerciseFeedbackCard";
 import { TrainingStatCards } from "@/components/shared/TrainingMetricsSummary";
 import { useAdminData } from "@/hooks/useAdminData";
+import { useSupabaseWorkoutFeedback } from "@/hooks/useSupabaseWorkoutFeedback";
 import { calculatePlannedVsActualMetrics, formatTonnage } from "@/lib/training-metrics";
 import type {
   ActualSetEntry,
@@ -13,6 +14,7 @@ import type {
   AdminStudentFeedback,
   Exercise,
   ExerciseFeedback,
+  ExerciseFeedbackPayload,
 } from "@/types";
 
 const rpeOptions = Array.from({ length: 10 }, (_, index) => index + 1);
@@ -138,9 +140,16 @@ export function SessionFeedbackSection({
   sessionMuscleGroup,
 }: SessionFeedbackSectionProps) {
   const { state, addFeedback } = useAdminData();
-  const existingFeedback = state.feedback.find(
+  const mockExistingFeedback = state.feedback.find(
     (f) => f.studentId === studentId && f.sessionId === sessionId && f.type === "entrainement",
   );
+
+  // Supabase a la priorité dès qu'un compte élève réel est identifié pour
+  // l'utilisateur connecté ; sinon (Supabase non configuré, personne
+  // connecté, ou compte sans fiche élève) on continue sur le mock/localStorage
+  // existant (useAdminData) — voir hooks/useSupabaseWorkoutFeedback.ts.
+  const supabaseFeedback = useSupabaseWorkoutFeedback(sessionId);
+  const existingFeedback = supabaseFeedback.active ? supabaseFeedback.existingFeedback : mockExistingFeedback;
 
   const [exerciseFeedback, setExerciseFeedback] = useState(() =>
     buildInitialFeedback(exercises, studentId, sessionId),
@@ -149,6 +158,10 @@ export function SessionFeedbackSection({
   const [globalRpe, setGlobalRpe] = useState("");
   const [globalComment, setGlobalComment] = useState("");
   const [pain, setPain] = useState("");
+
+  if (!supabaseFeedback.ready) {
+    return <p className="text-sm text-muted-foreground">Chargement du retour…</p>;
+  }
 
   function handleSetChange(
     exerciseId: string,
@@ -184,8 +197,34 @@ export function SessionFeedbackSection({
     }));
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    const globalRpeValue = globalRpe === "" ? null : Number(globalRpe);
+
+    if (supabaseFeedback.active) {
+      const exercisesPayload: ExerciseFeedbackPayload[] = Object.values(exerciseFeedback)
+        .map((exerciseFb, index) => ({
+          exerciseName: exerciseFb.exerciseName,
+          exerciseOrder: index,
+          rpe: exerciseFb.rpe,
+          comment: exerciseFb.comment,
+          sets: exerciseFb.sets
+            .filter((set) => set.loadUsed.trim() || set.repsDone.trim())
+            .map((set) => ({ setNumber: set.setNumber, loadUsed: set.loadUsed, repsDone: set.repsDone })),
+        }))
+        .filter((exerciseFb) => exerciseFb.sets.length > 0);
+
+      await supabaseFeedback.submit({
+        sessionRefLabel,
+        completed,
+        globalRpe: globalRpeValue,
+        globalComment,
+        pain,
+        exercises: exercisesPayload,
+      });
+      return;
+    }
 
     const submittedAt = new Date().toISOString();
     const exerciseEntries: AdminExerciseFeedbackEntry[] = Object.values(exerciseFeedback).flatMap(
@@ -211,7 +250,7 @@ export function SessionFeedbackSection({
       refLabel: sessionRefLabel,
       date: submittedAt.slice(0, 10),
       completed,
-      rpe: globalRpe === "" ? null : Number(globalRpe),
+      rpe: globalRpeValue,
       pain,
       comment: globalComment,
       exerciseEntries,
