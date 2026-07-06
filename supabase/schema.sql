@@ -79,7 +79,13 @@ create table if not exists public.coaches (
 );
 
 -- ============================================================================
--- 3. students — fiche élève côté admin (correspond à AdminStudent en mock).
+-- 3. students — identité + statut de suivi de l'élève uniquement (nom,
+--    contact, coach, statut actif/pause/terminé, dates de suivi). Les
+--    détails coaching (mensurations, niveau, objectif, fréquence, lieu,
+--    préférences, contraintes) vivent dans student_profiles — voir
+--    docs/supabase-student-model.md pour la répartition complète et le
+--    bloc de migration plus bas (section 4bis) qui déplace ces colonnes
+--    pour les projets déjà initialisés avec l'ancien schéma.
 -- ============================================================================
 create table if not exists public.students (
   id uuid primary key default gen_random_uuid(),
@@ -89,6 +95,12 @@ create table if not exists public.students (
   last_name text not null,
   email text not null default '',
   phone text not null default '',
+  -- Colonnes historiques (mensurations/objectif/niveau), conservées ici
+  -- uniquement pour qu'un projet déjà initialisé avec l'ancien schéma
+  -- dispose bien de ces colonnes avant que le bloc de migration
+  -- (section 4bis) ne les déplace vers student_profiles et les supprime
+  -- d'ici. Un nouveau projet ne les gardera jamais : la migration
+  -- s'exécute juste après sa création, dans le même script.
   age integer,
   height_cm numeric,
   current_weight_kg numeric,
@@ -106,14 +118,25 @@ create table if not exists public.students (
 );
 
 -- ============================================================================
--- 4. student_profiles — données de profil élève éditables (préférences,
---    blessures, objectifs). Regroupées en jsonb pour rester simples à cette
---    étape plutôt que de créer une table par sous-section — à normaliser
---    plus tard si besoin de requêter finement ces champs.
+-- 4. student_profiles — détails coaching de l'élève (une ligne par élève) :
+--    mensurations de référence, niveau, objectif, fréquence, lieu,
+--    préférences, contraintes. Regroupées en jsonb pour les préférences
+--    (food_preferences/sport_preferences/injury_note) pour rester simple à
+--    cette étape plutôt que de créer une table par sous-section — à
+--    normaliser plus tard si besoin de requêter finement ces champs.
 -- ============================================================================
 create table if not exists public.student_profiles (
   id uuid primary key default gen_random_uuid(),
   student_id uuid not null unique references public.students (id) on delete cascade,
+  age integer,
+  height_cm numeric,
+  current_weight_kg numeric,
+  start_weight_kg numeric,
+  target_weight_kg numeric,
+  goal text not null default '',
+  level text not null default '',
+  training_frequency_per_week integer,
+  training_location text not null default '',
   food_preferences jsonb not null default '{}'::jsonb,
   sport_preferences jsonb not null default '{}'::jsonb,
   injury_note jsonb not null default '{}'::jsonb,
@@ -125,6 +148,76 @@ create table if not exists public.student_profiles (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- ============================================================================
+-- 4bis. Migration : déplacement des colonnes coaching de `students` vers
+--       `student_profiles` (voir docs/supabase-student-model.md).
+--
+--       Sûr à exécuter plusieurs fois, aussi bien sur un projet fraîchement
+--       créé (les étapes n'ont simplement rien à faire) que sur un projet
+--       où `students` porte encore ces colonnes depuis un schéma plus
+--       ancien (les valeurs existantes sont reportées vers
+--       `student_profiles` avant suppression, aucune donnée perdue) :
+--       1) ajoute les colonnes sur student_profiles si absentes ;
+--       2) crée une ligne student_profiles pour chaque élève qui n'en a
+--          pas encore, en reprenant les valeurs de students ;
+--       3) reporte les valeurs de students vers student_profiles pour les
+--          lignes déjà existantes (coalesce : ne touche pas une valeur
+--          déjà renseignée côté student_profiles) ;
+--       4) supprime les colonnes désormais dupliquées sur students.
+-- ============================================================================
+alter table public.student_profiles add column if not exists age integer;
+alter table public.student_profiles add column if not exists height_cm numeric;
+alter table public.student_profiles add column if not exists current_weight_kg numeric;
+alter table public.student_profiles add column if not exists start_weight_kg numeric;
+alter table public.student_profiles add column if not exists target_weight_kg numeric;
+alter table public.student_profiles add column if not exists goal text not null default '';
+alter table public.student_profiles add column if not exists level text not null default '';
+alter table public.student_profiles add column if not exists training_frequency_per_week integer;
+alter table public.student_profiles add column if not exists training_location text not null default '';
+
+-- Le backfill référence des colonnes de `students` déjà supprimées après un
+-- premier passage de cette migration : sur un script relancé tel quel (voir
+-- README.md, "coller schema.sql et l'exécuter" à chaque étape), `students.age`
+-- n'existe alors plus et un simple `insert ... select s.age from students s`
+-- échouerait avec "column does not exist". Le bloc dynamique ci-dessous ne
+-- s'exécute que si `students.age` existe encore, pour rester rejouable.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'students' and column_name = 'age'
+  ) then
+    insert into public.student_profiles (student_id, age, height_cm, current_weight_kg, start_weight_kg, target_weight_kg, goal, level, training_frequency_per_week, training_location)
+    select s.id, s.age, s.height_cm, s.current_weight_kg, s.start_weight_kg, s.target_weight_kg, s.goal, s.level, s.training_frequency_per_week, s.training_location
+    from public.students s
+    where not exists (select 1 from public.student_profiles sp where sp.student_id = s.id)
+    on conflict (student_id) do nothing;
+
+    update public.student_profiles sp
+    set age = coalesce(sp.age, s.age),
+        height_cm = coalesce(sp.height_cm, s.height_cm),
+        current_weight_kg = coalesce(sp.current_weight_kg, s.current_weight_kg),
+        start_weight_kg = coalesce(sp.start_weight_kg, s.start_weight_kg),
+        target_weight_kg = coalesce(sp.target_weight_kg, s.target_weight_kg),
+        goal = case when sp.goal = '' then s.goal else sp.goal end,
+        level = case when sp.level = '' then s.level else sp.level end,
+        training_frequency_per_week = coalesce(sp.training_frequency_per_week, s.training_frequency_per_week),
+        training_location = case when sp.training_location = '' then s.training_location else sp.training_location end
+    from public.students s
+    where sp.student_id = s.id;
+  end if;
+end $$;
+
+alter table public.students drop column if exists age;
+alter table public.students drop column if exists height_cm;
+alter table public.students drop column if exists current_weight_kg;
+alter table public.students drop column if exists start_weight_kg;
+alter table public.students drop column if exists target_weight_kg;
+alter table public.students drop column if exists goal;
+alter table public.students drop column if exists level;
+alter table public.students drop column if exists training_frequency_per_week;
+alter table public.students drop column if exists training_location;
 
 -- ============================================================================
 -- 5. progress_photos

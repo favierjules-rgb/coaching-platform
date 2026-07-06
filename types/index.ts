@@ -1053,6 +1053,7 @@ export interface AdminCoachSettings {
  * types mock existants (AdminStudent, BodyMeasurement...) pour que les
  * composants déjà écrits n'aient rien à changer.
  */
+/** Identité + statut de suivi uniquement — voir docs/supabase-student-model.md. */
 export interface SupabaseStudent {
   id: string;
   userId: string | null;
@@ -1061,6 +1062,21 @@ export interface SupabaseStudent {
   lastName: string;
   email: string;
   phone: string;
+  status: StudentAccountStatus;
+  startDate: string;
+  lastLoginAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Détails coaching (une ligne par élève) : mensurations de référence,
+ * niveau, objectif, contraintes et préférences — voir
+ * docs/supabase-student-model.md.
+ */
+export interface SupabaseStudentProfile {
+  id: string;
+  studentId: string;
   age: number | null;
   heightCm: number | null;
   currentWeightKg: number | null;
@@ -1070,16 +1086,6 @@ export interface SupabaseStudent {
   level: string;
   trainingFrequencyPerWeek: number | null;
   trainingLocation: string;
-  status: StudentAccountStatus;
-  startDate: string;
-  lastLoginAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface SupabaseStudentProfile {
-  id: string;
-  studentId: string;
   foodPreferences: AdminFoodPreferences;
   sportPreferences: AdminSportPreferences;
   injuryNote: string;
