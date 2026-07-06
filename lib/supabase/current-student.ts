@@ -60,9 +60,9 @@ export async function updateCurrentStudentWeight(
   studentId: string,
   weightKg: number,
 ): Promise<boolean> {
-  const success = await updateStudentFields(supabase, studentId, { currentWeightKg: weightKg });
-  await addWeightEntry(supabase, studentId, weightKg, "student_update");
-  return success;
+  const fieldsSuccess = await updateStudentFields(supabase, studentId, { currentWeightKg: weightKg });
+  const entrySuccess = await addWeightEntry(supabase, studentId, weightKg, "student_update");
+  return fieldsSuccess && entrySuccess;
 }
 
 export async function addCurrentStudentMeasurement(

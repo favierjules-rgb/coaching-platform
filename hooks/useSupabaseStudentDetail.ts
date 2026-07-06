@@ -94,33 +94,34 @@ export function useSupabaseStudentDetail(studentId: string | undefined) {
   }, [studentId, applyFetchResult]);
 
   const updateFields = useCallback(
-    async (partial: Partial<AdminStudent>) => {
+    async (partial: Partial<AdminStudent>): Promise<boolean> => {
       const supabase = createSupabaseBrowserClient();
-      if (!supabase || !studentId) return;
-      await updateStudentFields(supabase, studentId, partial);
+      if (!supabase || !studentId) return false;
+      const fieldsSuccess = await updateStudentFields(supabase, studentId, partial);
+      let entrySuccess = true;
       if (partial.currentWeightKg !== undefined) {
-        await addWeightEntry(supabase, studentId, partial.currentWeightKg, "coach_update");
+        entrySuccess = await addWeightEntry(supabase, studentId, partial.currentWeightKg, "coach_update");
       }
       await refetch();
+      return fieldsSuccess && entrySuccess;
     },
     [studentId, refetch],
   );
 
   const updateWeight = useCallback(
-    async (weightKg: number) => {
+    async (weightKg: number): Promise<boolean> => {
       const supabase = createSupabaseBrowserClient();
-      if (!supabase || !studentId) return;
-      await updateStudentFields(supabase, studentId, { currentWeightKg: weightKg });
-      await addWeightEntry(supabase, studentId, weightKg, "coach_update");
+      if (!supabase || !studentId) return false;
+      const fieldsSuccess = await updateStudentFields(supabase, studentId, { currentWeightKg: weightKg });
+      const entrySuccess = await addWeightEntry(supabase, studentId, weightKg, "coach_update");
       await refetch();
+      return fieldsSuccess && entrySuccess;
     },
     [studentId, refetch],
   );
 
   const updateTarget = useCallback(
-    async (targetKg: number) => {
-      await updateFields({ targetWeightKg: targetKg });
-    },
+    async (targetKg: number): Promise<boolean> => updateFields({ targetWeightKg: targetKg }),
     [updateFields],
   );
 

@@ -97,21 +97,23 @@ export function useSupabaseStudentProfile() {
   }, [applyFetchResult]);
 
   const updateProfile = useCallback(
-    async (partial: Partial<StudentProfile>) => {
+    async (partial: Partial<StudentProfile>): Promise<boolean> => {
       const supabase = createSupabaseBrowserClient();
-      if (!supabase || !studentId) return;
-      await updateStudentFields(supabase, studentId, partial);
+      if (!supabase || !studentId) return false;
+      const success = await updateStudentFields(supabase, studentId, partial);
       await refetch();
+      return success;
     },
     [studentId, refetch],
   );
 
   const updateWeight = useCallback(
-    async (weightKg: number) => {
+    async (weightKg: number): Promise<boolean> => {
       const supabase = createSupabaseBrowserClient();
-      if (!supabase || !studentId) return;
-      await updateCurrentStudentWeight(supabase, studentId, weightKg);
+      if (!supabase || !studentId) return false;
+      const success = await updateCurrentStudentWeight(supabase, studentId, weightKg);
       await refetch();
+      return success;
     },
     [studentId, refetch],
   );

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle, Pencil } from "lucide-react";
+import { AlertTriangle, CheckCircle, Pencil } from "lucide-react";
 
 import { Field, SelectField } from "@/components/admin/AdminFormFields";
 import { Modal, PrimaryButton } from "@/components/admin/Modal";
@@ -41,10 +41,12 @@ export function EditStudentModal({
   onSave,
 }: {
   student: AdminStudent;
-  onSave: (partial: Partial<AdminStudent>) => void;
+  onSave: (partial: Partial<AdminStudent>) => Promise<boolean> | void;
 }) {
   const [open, setOpen] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(false);
   const [form, setForm] = useState(() => formFromStudent(student));
 
   function setField(key: keyof ReturnType<typeof formFromStudent>, value: string) {
@@ -54,10 +56,14 @@ export function EditStudentModal({
   function close() {
     setOpen(false);
     setSubmitted(false);
+    setError(false);
   }
 
-  function handleSubmit() {
-    onSave({
+  async function handleSubmit() {
+    if (saving) return;
+    setSaving(true);
+    setError(false);
+    const result = await onSave({
       firstName: form.firstName.trim(),
       lastName: form.lastName.trim(),
       email: form.email.trim(),
@@ -71,7 +77,12 @@ export function EditStudentModal({
       trainingFrequencyPerWeek: Number(form.trainingFrequencyPerWeek) || student.trainingFrequencyPerWeek,
       trainingLocation: form.trainingLocation,
     });
-    setSubmitted(true);
+    setSaving(false);
+    if (result === false) {
+      setError(true);
+    } else {
+      setSubmitted(true);
+    }
   }
 
   return (
@@ -97,6 +108,12 @@ export function EditStudentModal({
             </div>
           ) : (
             <div className="flex flex-col gap-4">
+              {error && (
+                <div className="flex items-center gap-3 border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+                  <AlertTriangle size={18} className="flex-shrink-0" />
+                  Échec de l&apos;enregistrement. Réessaie.
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-4">
                 <Field label="Prénom" value={form.firstName} onChange={(v) => setField("firstName", v)} />
                 <Field label="Nom" value={form.lastName} onChange={(v) => setField("lastName", v)} />
@@ -139,7 +156,9 @@ export function EditStudentModal({
                   options={locationOptions}
                 />
               </div>
-              <PrimaryButton onClick={handleSubmit}>Enregistrer les modifications</PrimaryButton>
+              <PrimaryButton onClick={handleSubmit} disabled={saving}>
+                {saving ? "Enregistrement…" : "Enregistrer les modifications"}
+              </PrimaryButton>
             </div>
           )}
         </Modal>

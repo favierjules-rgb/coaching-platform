@@ -77,6 +77,7 @@ export default function AdminStudentDetailPage() {
     useAdminData();
   const { students, programs, nutritionPlans, documents, feedback, manualDocumentUnlocks } = state;
   const [selectedMuscleGroup, setSelectedMuscleGroup] = useState<MuscleGroupFilter>("tous");
+  const [statusActionError, setStatusActionError] = useState(false);
 
   // Toujours monté (règle des hooks), même si l'élève affiché n'est pas
   // l'élève relié — utilisé uniquement quand isLinked est vrai.
@@ -147,10 +148,9 @@ export default function AdminStudentDetailPage() {
   const measurementHistory = isLinked ? linkedProfile.state.measurementHistory : student.measurementHistory;
   const photos = isLinked ? linkedProfile.state.photos : student.progressPhotos;
 
-  function handleUpdateWeight(weightKg: number) {
+  function handleUpdateWeight(weightKg: number): Promise<boolean> | void {
     if (isSupabaseStudent) {
-      supabaseDetail.updateWeight(weightKg);
-      return;
+      return supabaseDetail.updateWeight(weightKg);
     }
     if (isLinked) {
       linkedProfile.updateWeight(weightKg);
@@ -161,10 +161,9 @@ export default function AdminStudentDetailPage() {
     updateStudent(student!.id, { currentWeightKg: weightKg, weightHistory: newHistory });
   }
 
-  function handleUpdateTarget(targetKg: number) {
+  function handleUpdateTarget(targetKg: number): Promise<boolean> | void {
     if (isSupabaseStudent) {
-      supabaseDetail.updateTarget(targetKg);
-      return;
+      return supabaseDetail.updateTarget(targetKg);
     }
     if (isLinked) {
       linkedProfile.updateProfile({ targetWeightKg: targetKg });
@@ -334,10 +333,9 @@ export default function AdminStudentDetailPage() {
     updateStudent(student!.id, { paymentProfile: nextPaymentProfile });
   }
 
-  function applyStudentUpdate(partial: Partial<AdminStudent>) {
+  function applyStudentUpdate(partial: Partial<AdminStudent>): Promise<boolean> | void {
     if (isSupabaseStudent) {
-      supabaseDetail.updateStudentFields(partial);
-      return;
+      return supabaseDetail.updateStudentFields(partial);
     }
     updateStudent(student!.id, partial);
   }
@@ -430,7 +428,11 @@ export default function AdminStudentDetailPage() {
           <AddCoachNoteModal onAdd={handleAddCoachNote} />
           <button
             type="button"
-            onClick={() => applyStudentUpdate({ status: student.status === "pause" ? "actif" : "pause" })}
+            onClick={async () => {
+              setStatusActionError(false);
+              const result = await applyStudentUpdate({ status: student.status === "pause" ? "actif" : "pause" });
+              if (result === false) setStatusActionError(true);
+            }}
             className="flex items-center gap-1.5 border border-amber-500/50 px-4 py-2 text-xs uppercase tracking-widest text-amber-400 transition-colors hover:bg-amber-500/10"
           >
             {student.status === "pause" ? <Play size={13} /> : <Pause size={13} />}
@@ -438,11 +440,16 @@ export default function AdminStudentDetailPage() {
           </button>
           <button
             type="button"
-            onClick={() => {
+            onClick={async () => {
               if (!window.confirm(`Archiver ${student.firstName} ${student.lastName} ? L'élève restera consultable mais ne sera plus actif.`)) {
                 return;
               }
-              applyStudentUpdate({ status: "terminé" });
+              setStatusActionError(false);
+              const result = await applyStudentUpdate({ status: "terminé" });
+              if (result === false) {
+                setStatusActionError(true);
+                return;
+              }
               router.push("/admin/eleves");
             }}
             className="flex items-center gap-1.5 border border-red-500/50 px-4 py-2 text-xs uppercase tracking-widest text-red-400 transition-colors hover:bg-red-500/10"
@@ -451,6 +458,12 @@ export default function AdminStudentDetailPage() {
             Archiver l&apos;élève
           </button>
         </div>
+        {statusActionError && (
+          <p className="mt-2 flex w-full items-center gap-2 text-xs text-red-400">
+            <AlertTriangle size={14} className="flex-shrink-0" />
+            Échec de la mise à jour du statut. Réessaie.
+          </p>
+        )}
       </div>
 
       <div className="mb-6">

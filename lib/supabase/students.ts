@@ -610,7 +610,7 @@ export async function addWeightEntry(
   studentId: string,
   weightKg: number,
   source: WeightEntrySource,
-): Promise<void> {
+): Promise<boolean> {
   const { error } = await supabase.from("weight_entries").insert({
     student_id: studentId,
     weight_kg: weightKg,
@@ -618,6 +618,7 @@ export async function addWeightEntry(
     source,
   });
   devWarn("addWeightEntry", error);
+  return !error;
 }
 
 /* ─── Écriture ─── */
