@@ -924,6 +924,93 @@ export interface AdminStudentFeedback {
   updatedAt: string;
 }
 
+/* ─── Retours d'entraînement Supabase ───
+ * Types correspondant directement aux lignes des tables Supabase
+ * `workout_feedback`, `exercise_feedback` et `exercise_set_feedback` (voir
+ * supabase/schema.sql et types/supabase.ts) — lib/supabase/workout-feedback.ts
+ * fait la conversion vers AdminStudentFeedback / AdminExerciseFeedbackEntry
+ * pour que /admin/retours et FeedbackDetailModal n'aient rien à changer.
+ *
+ * `sessionId` / `programId` restent les FK uuid réelles (toujours `null`
+ * tant que les programmes ne sont pas migrés) ; `sessionKey` porte l'id
+ * mock de la séance (ex: "session-upper"), utilisé pour retrouver/mettre à
+ * jour le bon retour sans dupliquer.
+ */
+export interface SupabaseWorkoutFeedback {
+  id: string;
+  studentId: string;
+  sessionId: string | null;
+  programId: string | null;
+  sessionKey: string | null;
+  sessionRefLabel: string;
+  completed: boolean;
+  globalRpe: number | null;
+  globalComment: string;
+  pain: string;
+  status: FeedbackStatus;
+  coachReply: string;
+  submittedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SupabaseExerciseFeedback {
+  id: string;
+  workoutFeedbackId: string;
+  studentId: string;
+  exerciseId: string | null;
+  exerciseName: string;
+  exerciseOrder: number | null;
+  rpe: number | null;
+  comment: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SupabaseExerciseSetFeedback {
+  id: string;
+  exerciseFeedbackId: string;
+  studentId: string;
+  setNumber: number;
+  loadUsed: string;
+  repsDone: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Forme d'entrée pour lib/supabase/workout-feedback.ts::saveWorkoutFeedback —
+ * hiérarchique (séance → exercices → séries), contrairement à
+ * AdminStudentFeedback.exerciseEntries qui est une liste à plat (une entrée
+ * par série, exercice/rpe/commentaire dupliqués) : SessionFeedbackSection
+ * tient déjà l'état sous cette forme hiérarchique avant de l'aplatir pour
+ * le mock, donc le chemin Supabase l'utilise directement sans conversion.
+ */
+export interface ExerciseSetFeedbackPayload {
+  setNumber: number;
+  loadUsed: string;
+  repsDone: string;
+}
+
+export interface ExerciseFeedbackPayload {
+  exerciseName: string;
+  exerciseOrder: number;
+  rpe: number | null;
+  comment: string;
+  sets: ExerciseSetFeedbackPayload[];
+}
+
+export interface WorkoutFeedbackPayload {
+  studentId: string;
+  sessionKey: string;
+  sessionRefLabel: string;
+  completed: boolean;
+  globalRpe: number | null;
+  globalComment: string;
+  pain: string;
+  exercises: ExerciseFeedbackPayload[];
+}
+
 export type AssignableContentType = "programme" | "nutrition" | "document";
 
 /**
