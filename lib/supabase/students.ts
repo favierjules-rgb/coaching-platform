@@ -25,6 +25,7 @@ import type {
   SupabaseStudent,
   SupabaseStudentProfile,
   SupabaseWeightEntry,
+  StudentAccountStatus,
   WeightEntry,
   WeightEntrySource,
 } from "@/types";
@@ -61,9 +62,39 @@ type CoachNoteRow = Database["public"]["Tables"]["coach_notes"]["Row"];
 type WeightEntryRow = Database["public"]["Tables"]["weight_entries"]["Row"];
 
 function devWarn(context: string, error: { message: string } | null): void {
-  if (error && process.env.NODE_ENV === "development") {
+  if (error) {
     console.warn(`[Supabase] ${context} :`, error.message);
   }
+}
+
+/**
+ * `students.status` a été vu en pratique sous deux formes selon l'historique
+ * du projet Supabase : la contrainte française documentée dans
+ * schema.sql ('actif' | 'pause' | 'terminé') et une contrainte anglaise
+ * ('active' | 'paused' | 'completed') sur certains projets déjà initialisés
+ * avant que ce nom français ne soit fixé. Le reste de l'app (mock, UI,
+ * StatusBadge, filtres) n'utilise que les valeurs françaises — ces deux
+ * fonctions font la conversion à la frontière Supabase pour que ni le code
+ * d'affichage ni les écritures n'aient à connaître la variante réellement
+ * en place sur un projet donné.
+ */
+const STATUS_DB_TO_APP: Record<string, StudentAccountStatus> = {
+  actif: "actif",
+  pause: "pause",
+  "terminé": "terminé",
+  active: "actif",
+  paused: "pause",
+  completed: "terminé",
+};
+
+const STATUS_APP_TO_DB: Record<StudentAccountStatus, "active" | "paused" | "completed"> = {
+  actif: "active",
+  pause: "paused",
+  "terminé": "completed",
+};
+
+function mapStatusFromDb(raw: string): StudentAccountStatus {
+  return STATUS_DB_TO_APP[raw] ?? "actif";
 }
 
 /* ─── Row -> types Supabase* (camelCase) ─── */
@@ -77,7 +108,7 @@ function mapStudentRow(row: StudentRow): SupabaseStudent {
     lastName: row.last_name,
     email: row.email,
     phone: row.phone,
-    status: row.status,
+    status: mapStatusFromDb(row.status),
     startDate: row.start_date,
     lastLoginAt: row.last_login_at,
     createdAt: row.created_at,
@@ -657,7 +688,9 @@ export async function updateStudentFields(
   if (partial.lastName !== undefined) studentUpdate.last_name = partial.lastName;
   if (partial.email !== undefined) studentUpdate.email = partial.email;
   if (partial.phone !== undefined) studentUpdate.phone = partial.phone;
-  if (partial.status !== undefined) studentUpdate.status = partial.status;
+  if (partial.status !== undefined) {
+    studentUpdate.status = STATUS_APP_TO_DB[partial.status];
+  }
 
   const profileUpdate: Database["public"]["Tables"]["student_profiles"]["Update"] = {};
   if (partial.age !== undefined) profileUpdate.age = partial.age;
@@ -692,10 +725,31 @@ export async function updateStudentFields(
   if (Object.keys(profileUpdate).length > 0) {
     writes.push(
       (async () => {
-        const { error } = await supabase
+        // Update-or-insert explicite plutôt qu'un .upsert({...}, {onConflict:
+        // "student_id"}) : ce dernier échoue silencieusement (ou avec une
+        // erreur uniquement visible en dev) si aucune contrainte unique/
+        // exclusion n'est enregistrée exactement sur cette colonne côté
+        // Postgres, même si les valeurs sont en pratique uniques — vu en
+        // pratique sur ce projet pour `students.status` (voir
+        // STATUS_APP_TO_DB), donc on ne prend plus ce risque ici non plus.
+        const { data: existing, error: lookupError } = await supabase
           .from("student_profiles")
-          .upsert({ student_id: studentId, ...profileUpdate }, { onConflict: "student_id" });
-        devWarn("updateStudentFields (student_profiles)", error);
+          .select("id")
+          .eq("student_id", studentId)
+          .maybeSingle();
+        devWarn("updateStudentFields (student_profiles lookup)", lookupError);
+        if (lookupError) {
+          return false;
+        }
+
+        if (existing) {
+          const { error } = await supabase.from("student_profiles").update(profileUpdate).eq("student_id", studentId);
+          devWarn("updateStudentFields (student_profiles update)", error);
+          return !error;
+        }
+
+        const { error } = await supabase.from("student_profiles").insert({ student_id: studentId, ...profileUpdate });
+        devWarn("updateStudentFields (student_profiles insert)", error);
         return !error;
       })(),
     );

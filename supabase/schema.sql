@@ -110,7 +110,13 @@ create table if not exists public.students (
   level text not null default '',
   training_frequency_per_week integer,
   training_location text not null default '',
-  status text not null default 'actif' check (status in ('actif', 'pause', 'terminé')),
+  -- Valeurs en anglais (pas 'actif'/'pause'/'terminé') pour matcher la
+  -- contrainte réellement en place sur le projet Supabase de production —
+  -- voir la conversion française <-> anglaise dans lib/supabase/students.ts
+  -- (STATUS_DB_TO_APP / STATUS_APP_TO_DB), qui reste le seul endroit à
+  -- connaître cette variante ; le reste de l'app continue d'utiliser les
+  -- valeurs françaises.
+  status text not null default 'active' check (status in ('active', 'paused', 'completed')),
   start_date date not null default current_date,
   last_login_at timestamptz,
   created_at timestamptz not null default now(),

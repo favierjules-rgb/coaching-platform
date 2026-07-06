@@ -60,7 +60,7 @@ export interface Database {
           last_name: string;
           email: string;
           phone: string;
-          status: "actif" | "pause" | "terminé";
+          status: "active" | "paused" | "completed";
           start_date: string;
           last_login_at: string | null;
           created_at: string;
@@ -74,7 +74,7 @@ export interface Database {
           last_name: string;
           email?: string;
           phone?: string;
-          status?: "actif" | "pause" | "terminé";
+          status?: "active" | "paused" | "completed";
           start_date?: string;
           last_login_at?: string | null;
           created_at?: string;
@@ -88,7 +88,7 @@ export interface Database {
           last_name?: string;
           email?: string;
           phone?: string;
-          status?: "actif" | "pause" | "terminé";
+          status?: "active" | "paused" | "completed";
           start_date?: string;
           last_login_at?: string | null;
           created_at?: string;
