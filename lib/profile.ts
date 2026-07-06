@@ -1,3 +1,4 @@
+import { fromSupabaseMeasurementType } from "@/lib/supabase/measurement-types";
 import type {
   BodyMeasurement,
   BodyMeasurementType,
@@ -10,7 +11,7 @@ import type {
 export const bodyMeasurementLabels: Record<BodyMeasurementType, string> = {
   poids: "Poids",
   cou: "Tour de cou",
-  epaules: "Tour d'épaules",
+  epaules: "Épaules",
   poitrine: "Tour de poitrine",
   taille: "Tour de taille",
   nombril: "Tour de nombril",
@@ -24,6 +25,23 @@ export const bodyMeasurementLabels: Record<BodyMeasurementType, string> = {
   "mollet-droit": "Mollet droit",
   "mollet-gauche": "Mollet gauche",
 };
+
+/**
+ * Résout le libellé français d'une mensuration standard à partir de sa clé
+ * de type, qu'elle soit déjà au format mock français (`BodyMeasurementType`)
+ * ou encore au format anglais snake_case tel que stocké en base Supabase
+ * (`neck`, `right_arm`...) — voir lib/supabase/measurement-types.ts. Renvoie
+ * `null` pour une clé qui ne correspond à aucun des deux formats connus :
+ * l'appelant doit alors exclure la mensuration de l'affichage plutôt que de
+ * montrer une carte générique "Mensuration".
+ */
+export function resolveBodyMeasurementLabel(type: string): string | null {
+  if (Object.prototype.hasOwnProperty.call(bodyMeasurementLabels, type)) {
+    return bodyMeasurementLabels[type as BodyMeasurementType];
+  }
+  const mockType = fromSupabaseMeasurementType(type);
+  return mockType ? bodyMeasurementLabels[mockType] : null;
+}
 
 /**
  * Sens d'évolution considéré comme une progression pour chaque mensuration,
@@ -49,8 +67,14 @@ const positiveDirection: Record<BodyMeasurementType, "up" | "down"> = {
   "mollet-gauche": "up",
 };
 
-function isFiniteNumber(value: unknown): value is number {
+export function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
+}
+
+/** true seulement si `value` parse en une date réellement valide (jamais Invalid Date). */
+export function isValidMeasurementDate(value: string | null | undefined): value is string {
+  if (!value) return false;
+  return !Number.isNaN(new Date(value).getTime());
 }
 
 /**

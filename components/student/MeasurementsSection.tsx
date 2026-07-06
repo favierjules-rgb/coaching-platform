@@ -9,11 +9,13 @@ import {
   type CustomMeasurementInput,
 } from "@/components/student/UpdateMeasurementsModal";
 import {
-  bodyMeasurementLabels,
   formatMeasurementDate,
   formatMeasurementValue,
+  isFiniteNumber,
   isMeasurementProgressing,
+  isValidMeasurementDate,
   measurementDelta,
+  resolveBodyMeasurementLabel,
 } from "@/lib/profile";
 import type {
   BodyMeasurement,
@@ -21,6 +23,89 @@ import type {
   CustomMeasurement,
   MeasurementLogEntry,
 } from "@/types";
+
+/** Forme normalisée, déjà validée, consommée par le rendu — voir normalizeStandardMeasurements/normalizeCustomMeasurements. */
+interface DisplayMeasurement {
+  key: string;
+  measurementKey: string;
+  label: string;
+  unit: string;
+  startValue: number;
+  currentValue: number;
+  lastUpdatedAt: string;
+  note: string;
+  progressing: boolean | null;
+}
+
+/**
+ * Filtre les mensurations standards avant affichage : type reconnu (français
+ * ou clé Supabase anglaise), valeurs de départ/actuelle chiffrables, date de
+ * dernière mise à jour valide — sinon la mensuration est purement exclue
+ * plutôt que d'afficher une carte "Mensuration" / "Non renseigné". Dédoublonne
+ * par type en ne gardant que la ligne la plus récemment mise à jour (des
+ * doublons peuvent apparaître sur d'anciennes données mock/localStorage).
+ */
+function normalizeStandardMeasurements(measurements: BodyMeasurement[]): DisplayMeasurement[] {
+  const byType = new Map<string, DisplayMeasurement>();
+
+  measurements.forEach((measurement, index) => {
+    const label = resolveBodyMeasurementLabel(measurement.type);
+    if (!label) return;
+    if (!isFiniteNumber(measurement.startValue) || !isFiniteNumber(measurement.currentValue)) return;
+    if (!isValidMeasurementDate(measurement.lastUpdatedAt)) return;
+
+    const existing = byType.get(measurement.type);
+    if (existing && new Date(existing.lastUpdatedAt).getTime() >= new Date(measurement.lastUpdatedAt).getTime()) {
+      return;
+    }
+
+    byType.set(measurement.type, {
+      key: measurement.id || `${measurement.type}-${measurement.lastUpdatedAt}-${index}`,
+      measurementKey: measurement.type,
+      label,
+      unit: measurement.unit,
+      startValue: measurement.startValue,
+      currentValue: measurement.currentValue,
+      lastUpdatedAt: measurement.lastUpdatedAt,
+      note: measurement.note,
+      progressing: isMeasurementProgressing(measurement),
+    });
+  });
+
+  return Array.from(byType.values());
+}
+
+/** Même logique que normalizeStandardMeasurements, pour les mesures personnalisées (label = nom réel, jamais générique). */
+function normalizeCustomMeasurements(measurements: CustomMeasurement[]): DisplayMeasurement[] {
+  const byKey = new Map<string, DisplayMeasurement>();
+
+  measurements.forEach((measurement, index) => {
+    const label = measurement.name?.trim();
+    if (!label) return;
+    if (!isFiniteNumber(measurement.startValue) || !isFiniteNumber(measurement.currentValue)) return;
+    if (!isValidMeasurementDate(measurement.lastUpdatedAt)) return;
+
+    const dedupeKey = measurement.id || label.toLowerCase();
+    const existing = byKey.get(dedupeKey);
+    if (existing && new Date(existing.lastUpdatedAt).getTime() >= new Date(measurement.lastUpdatedAt).getTime()) {
+      return;
+    }
+
+    byKey.set(dedupeKey, {
+      key: measurement.id || `${label}-${measurement.lastUpdatedAt}-${index}`,
+      measurementKey: measurement.id,
+      label,
+      unit: measurement.unit,
+      startValue: measurement.startValue,
+      currentValue: measurement.currentValue,
+      lastUpdatedAt: measurement.lastUpdatedAt,
+      note: measurement.note,
+      progressing: null,
+    });
+  });
+
+  return Array.from(byKey.values());
+}
 
 function MeasurementTile({
   measurementKey,
@@ -150,43 +235,49 @@ export function MeasurementsSection({
   const safeCustomMeasurements = Array.isArray(customMeasurements) ? customMeasurements : [];
   const safeHistory = Array.isArray(measurementHistory) ? measurementHistory : [];
 
+  // Mensurations invalides/incomplètes (type non reconnu, valeurs non
+  // chiffrables, date invalide) ou en double : exclues avant affichage
+  // plutôt que de montrer une carte "Mensuration" / "Non renseigné".
+  const displayMeasurements = normalizeStandardMeasurements(safeMeasurements);
+  const displayCustomMeasurements = normalizeCustomMeasurements(safeCustomMeasurements);
+
   return (
     <ProfileSection
       title="Mensurations"
       action={<UpdateMeasurementsModal measurements={safeMeasurements} onSave={onSave} />}
     >
-      {safeMeasurements.length === 0 && safeCustomMeasurements.length === 0 ? (
+      {displayMeasurements.length === 0 && displayCustomMeasurements.length === 0 ? (
         <p className="text-sm text-muted-foreground">Aucune mensuration enregistrée pour le moment.</p>
       ) : (
         <>
           <div className="flex flex-col gap-3">
-            {safeMeasurements.map((measurement) => (
+            {displayMeasurements.map((measurement) => (
               <MeasurementTile
-                key={measurement.type}
-                measurementKey={measurement.type}
-                label={bodyMeasurementLabels[measurement.type] ?? "Mensuration"}
+                key={measurement.key}
+                measurementKey={measurement.measurementKey}
+                label={measurement.label}
                 unit={measurement.unit}
                 startValue={measurement.startValue}
                 currentValue={measurement.currentValue}
                 lastUpdatedAt={measurement.lastUpdatedAt}
                 note={measurement.note || undefined}
-                progressing={isMeasurementProgressing(measurement)}
+                progressing={measurement.progressing}
                 history={safeHistory}
               />
             ))}
           </div>
 
-          {safeCustomMeasurements.length > 0 && (
+          {displayCustomMeasurements.length > 0 && (
             <div className="mt-6">
               <span className="mb-3 block text-xs uppercase tracking-wide text-muted-foreground">
                 Mesures personnalisées
               </span>
               <div className="flex flex-col gap-3">
-                {safeCustomMeasurements.map((measurement) => (
+                {displayCustomMeasurements.map((measurement) => (
                   <MeasurementTile
-                    key={measurement.id}
-                    measurementKey={measurement.id}
-                    label={measurement.name || "Mesure personnalisée"}
+                    key={measurement.key}
+                    measurementKey={measurement.measurementKey}
+                    label={measurement.label}
                     unit={measurement.unit}
                     startValue={measurement.startValue}
                     currentValue={measurement.currentValue}
