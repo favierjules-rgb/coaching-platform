@@ -73,15 +73,6 @@ function mapStudentRow(row: StudentRow): SupabaseStudent {
     lastName: row.last_name,
     email: row.email,
     phone: row.phone,
-    age: row.age,
-    heightCm: row.height_cm,
-    currentWeightKg: row.current_weight_kg,
-    startWeightKg: row.start_weight_kg,
-    targetWeightKg: row.target_weight_kg,
-    goal: row.goal,
-    level: row.level,
-    trainingFrequencyPerWeek: row.training_frequency_per_week,
-    trainingLocation: row.training_location,
     status: row.status,
     startDate: row.start_date,
     lastLoginAt: row.last_login_at,
@@ -105,6 +96,15 @@ function mapStudentProfileRow(row: StudentProfileRow): SupabaseStudentProfile {
   return {
     id: row.id,
     studentId: row.student_id,
+    age: row.age,
+    heightCm: row.height_cm,
+    currentWeightKg: row.current_weight_kg,
+    startWeightKg: row.start_weight_kg,
+    targetWeightKg: row.target_weight_kg,
+    goal: row.goal,
+    level: row.level,
+    trainingFrequencyPerWeek: row.training_frequency_per_week,
+    trainingLocation: row.training_location,
     foodPreferences: {
       liked: asStringArray(food.liked),
       disliked: asStringArray(food.disliked),
@@ -311,20 +311,24 @@ function toMockPaymentProfile(
 }
 
 /**
- * Compose un AdminStudent complet à partir de la fiche élève Supabase et de
- * ses données liées, déjà converties en types mock. `assignedProgramIds` /
- * `assignedNutritionPlanIds` / `assignedDocumentIds` / `measurementHistory`
- * restent volontairement vides : programmes, nutrition, documents et
- * historique de mensurations ne sont pas encore migrés (voir consignes de
- * cette étape) — normalizeAdminStudent() garantit un affichage propre
- * ("Aucun programme attribué"...) plutôt qu'un plantage.
+ * Compose un AdminStudent complet à partir de la fiche élève Supabase
+ * (identité + statut, table `students`) et de son profil coaching (table
+ * `student_profiles`, voir docs/supabase-student-model.md), déjà convertis
+ * en types mock. `assignedProgramIds` / `assignedNutritionPlanIds` /
+ * `assignedDocumentIds` / `measurementHistory` restent volontairement
+ * vides : programmes, nutrition, documents et historique de mensurations ne
+ * sont pas encore migrés (voir consignes de cette étape) —
+ * normalizeAdminStudent() garantit un affichage propre ("Aucun programme
+ * attribué"...) plutôt qu'un plantage.
+ *
+ * `profile` peut être `null` (élève sans fiche `student_profiles` encore
+ * créée) : les champs coaching retombent alors sur des valeurs par défaut
+ * plutôt que de laisser passer `undefined`/`NaN` à l'affichage.
  */
 function toAdminStudent(
   student: SupabaseStudent,
+  profile: SupabaseStudentProfile | null,
   extras: {
-    foodPreferences: AdminFoodPreferences;
-    sportPreferences: AdminSportPreferences;
-    injuries: string;
     measurements: BodyMeasurement[];
     customMeasurements: CustomMeasurement[];
     progressPhotos: ProgressPhoto[];
@@ -332,27 +336,28 @@ function toAdminStudent(
     coachNotes: CoachNote[];
   },
 ): AdminStudent {
+  const currentWeightKg = profile?.currentWeightKg ?? 0;
   return {
     id: student.id,
     firstName: student.firstName,
     lastName: student.lastName,
     email: student.email,
     phone: student.phone,
-    age: student.age ?? 0,
-    heightCm: student.heightCm ?? 0,
-    currentWeightKg: student.currentWeightKg ?? 0,
-    startWeightKg: student.startWeightKg ?? student.currentWeightKg ?? 0,
-    targetWeightKg: student.targetWeightKg ?? student.currentWeightKg ?? 0,
-    goal: student.goal,
-    level: student.level,
-    trainingFrequencyPerWeek: student.trainingFrequencyPerWeek ?? 0,
-    trainingLocation: student.trainingLocation,
+    age: profile?.age ?? 0,
+    heightCm: profile?.heightCm ?? 0,
+    currentWeightKg,
+    startWeightKg: profile?.startWeightKg ?? currentWeightKg,
+    targetWeightKg: profile?.targetWeightKg ?? currentWeightKg,
+    goal: profile?.goal ?? "",
+    level: profile?.level ?? "",
+    trainingFrequencyPerWeek: profile?.trainingFrequencyPerWeek ?? 0,
+    trainingLocation: profile?.trainingLocation ?? "",
     status: student.status,
     startDate: student.startDate,
     lastLoginAt: student.lastLoginAt,
-    foodPreferences: extras.foodPreferences,
-    sportPreferences: extras.sportPreferences,
-    injuries: extras.injuries,
+    foodPreferences: profile?.foodPreferences ?? emptyFoodPreferences,
+    sportPreferences: profile?.sportPreferences ?? emptySportPreferences,
+    injuries: profile?.injuryNote ?? "",
     weightHistory: [],
     measurements: extras.measurements,
     customMeasurements: extras.customMeasurements,
@@ -391,19 +396,19 @@ export async function getStudents(supabase: TypedSupabaseClient): Promise<AdminS
   }
 
   const studentIds = data.map((row) => row.id);
-  const { data: paymentRows, error: paymentsError } = await supabase
-    .from("payments")
-    .select("*")
-    .in("student_id", studentIds);
+  const [{ data: profileRows, error: profilesError }, { data: paymentRows, error: paymentsError }] =
+    await Promise.all([
+      supabase.from("student_profiles").select("*").in("student_id", studentIds),
+      supabase.from("payments").select("*").in("student_id", studentIds),
+    ]);
+  devWarn("getStudents (profiles)", profilesError);
   devWarn("getStudents (payments)", paymentsError);
+  const profileByStudent = new Map((profileRows ?? []).map((row) => [row.student_id, mapStudentProfileRow(row)]));
   const paymentByStudent = new Map((paymentRows ?? []).map((row) => [row.student_id, mapPaymentRow(row)]));
 
   return data.map((row) => {
     const student = mapStudentRow(row);
-    return toAdminStudent(student, {
-      foodPreferences: emptyFoodPreferences,
-      sportPreferences: emptySportPreferences,
-      injuries: "",
+    return toAdminStudent(student, profileByStudent.get(student.id) ?? null, {
       measurements: [],
       customMeasurements: [],
       progressPhotos: [],
@@ -535,10 +540,7 @@ export async function getFullAdminStudent(
       getStudentCoachNotes(supabase, studentId),
     ]);
 
-  return toAdminStudent(student, {
-    foodPreferences: profile?.foodPreferences ?? emptyFoodPreferences,
-    sportPreferences: profile?.sportPreferences ?? emptySportPreferences,
-    injuries: profile?.injuryNote ?? "",
+  return toAdminStudent(student, profile, {
     measurements,
     customMeasurements,
     progressPhotos,
@@ -551,9 +553,14 @@ export async function getFullAdminStudent(
 
 /**
  * Écrit les champs "infos personnelles" (EditStudentModal), le statut
- * (pause/réactiver/archiver) et le poids/objectif de poids directement sur
- * la table `students`. Seules les clés reconnues ci-dessous sont transmises
- * — les autres champs d'AdminStudent (mensurations, photos...) passent par
+ * (pause/réactiver/archiver) et les détails coaching (poids, taille,
+ * objectif, niveau, fréquence, lieu) à partir d'un seul `Partial<AdminStudent>`
+ * — en interne, chaque champ est routé vers la bonne table (`students` pour
+ * l'identité/statut, `student_profiles` pour les détails coaching, voir
+ * docs/supabase-student-model.md) sans que l'appelant ait à le savoir.
+ * Les deux écritures sont indépendantes : si l'une échoue (RLS, réseau...),
+ * l'autre est quand même tentée plutôt que de tout bloquer. Les autres
+ * champs d'AdminStudent (mensurations, photos, paiement...) passent par
  * leurs propres fonctions d'écriture ci-dessous.
  */
 export async function updateStudentFields(
@@ -561,29 +568,54 @@ export async function updateStudentFields(
   studentId: string,
   partial: Partial<AdminStudent>,
 ): Promise<boolean> {
-  const update: Database["public"]["Tables"]["students"]["Update"] = {};
-  if (partial.firstName !== undefined) update.first_name = partial.firstName;
-  if (partial.lastName !== undefined) update.last_name = partial.lastName;
-  if (partial.email !== undefined) update.email = partial.email;
-  if (partial.phone !== undefined) update.phone = partial.phone;
-  if (partial.age !== undefined) update.age = partial.age;
-  if (partial.heightCm !== undefined) update.height_cm = partial.heightCm;
-  if (partial.currentWeightKg !== undefined) update.current_weight_kg = partial.currentWeightKg;
-  if (partial.targetWeightKg !== undefined) update.target_weight_kg = partial.targetWeightKg;
-  if (partial.goal !== undefined) update.goal = partial.goal;
-  if (partial.level !== undefined) update.level = partial.level;
-  if (partial.trainingFrequencyPerWeek !== undefined) {
-    update.training_frequency_per_week = partial.trainingFrequencyPerWeek;
-  }
-  if (partial.trainingLocation !== undefined) update.training_location = partial.trainingLocation;
-  if (partial.status !== undefined) update.status = partial.status;
+  const studentUpdate: Database["public"]["Tables"]["students"]["Update"] = {};
+  if (partial.firstName !== undefined) studentUpdate.first_name = partial.firstName;
+  if (partial.lastName !== undefined) studentUpdate.last_name = partial.lastName;
+  if (partial.email !== undefined) studentUpdate.email = partial.email;
+  if (partial.phone !== undefined) studentUpdate.phone = partial.phone;
+  if (partial.status !== undefined) studentUpdate.status = partial.status;
 
-  if (Object.keys(update).length === 0) {
+  const profileUpdate: Database["public"]["Tables"]["student_profiles"]["Update"] = {};
+  if (partial.age !== undefined) profileUpdate.age = partial.age;
+  if (partial.heightCm !== undefined) profileUpdate.height_cm = partial.heightCm;
+  if (partial.currentWeightKg !== undefined) profileUpdate.current_weight_kg = partial.currentWeightKg;
+  if (partial.targetWeightKg !== undefined) profileUpdate.target_weight_kg = partial.targetWeightKg;
+  if (partial.goal !== undefined) profileUpdate.goal = partial.goal;
+  if (partial.level !== undefined) profileUpdate.level = partial.level;
+  if (partial.trainingFrequencyPerWeek !== undefined) {
+    profileUpdate.training_frequency_per_week = partial.trainingFrequencyPerWeek;
+  }
+  if (partial.trainingLocation !== undefined) profileUpdate.training_location = partial.trainingLocation;
+
+  const writes: Promise<boolean>[] = [];
+
+  if (Object.keys(studentUpdate).length > 0) {
+    writes.push(
+      (async () => {
+        const { error } = await supabase.from("students").update(studentUpdate).eq("id", studentId);
+        devWarn("updateStudentFields (students)", error);
+        return !error;
+      })(),
+    );
+  }
+
+  if (Object.keys(profileUpdate).length > 0) {
+    writes.push(
+      (async () => {
+        const { error } = await supabase
+          .from("student_profiles")
+          .upsert({ student_id: studentId, ...profileUpdate }, { onConflict: "student_id" });
+        devWarn("updateStudentFields (student_profiles)", error);
+        return !error;
+      })(),
+    );
+  }
+
+  if (writes.length === 0) {
     return true;
   }
-  const { error } = await supabase.from("students").update(update).eq("id", studentId);
-  devWarn("updateStudentFields", error);
-  return !error;
+  const results = await Promise.all(writes);
+  return results.every(Boolean);
 }
 
 /**

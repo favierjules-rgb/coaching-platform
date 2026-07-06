@@ -60,15 +60,6 @@ export interface Database {
           last_name: string;
           email: string;
           phone: string;
-          age: number | null;
-          height_cm: number | null;
-          current_weight_kg: number | null;
-          start_weight_kg: number | null;
-          target_weight_kg: number | null;
-          goal: string;
-          level: string;
-          training_frequency_per_week: number | null;
-          training_location: string;
           status: "actif" | "pause" | "terminé";
           start_date: string;
           last_login_at: string | null;
@@ -83,15 +74,6 @@ export interface Database {
           last_name: string;
           email?: string;
           phone?: string;
-          age?: number | null;
-          height_cm?: number | null;
-          current_weight_kg?: number | null;
-          start_weight_kg?: number | null;
-          target_weight_kg?: number | null;
-          goal?: string;
-          level?: string;
-          training_frequency_per_week?: number | null;
-          training_location?: string;
           status?: "actif" | "pause" | "terminé";
           start_date?: string;
           last_login_at?: string | null;
@@ -106,15 +88,6 @@ export interface Database {
           last_name?: string;
           email?: string;
           phone?: string;
-          age?: number | null;
-          height_cm?: number | null;
-          current_weight_kg?: number | null;
-          start_weight_kg?: number | null;
-          target_weight_kg?: number | null;
-          goal?: string;
-          level?: string;
-          training_frequency_per_week?: number | null;
-          training_location?: string;
           status?: "actif" | "pause" | "terminé";
           start_date?: string;
           last_login_at?: string | null;
@@ -123,10 +96,25 @@ export interface Database {
         };
         Relationships: [];
       };
+      /**
+       * Détails coaching (une ligne par élève) : mensurations de référence,
+       * niveau, objectifs, contraintes et préférences — voir
+       * docs/supabase-student-model.md pour la répartition students /
+       * student_profiles.
+       */
       student_profiles: {
         Row: {
           id: string;
           student_id: string;
+          age: number | null;
+          height_cm: number | null;
+          current_weight_kg: number | null;
+          start_weight_kg: number | null;
+          target_weight_kg: number | null;
+          goal: string;
+          level: string;
+          training_frequency_per_week: number | null;
+          training_location: string;
           food_preferences: unknown;
           sport_preferences: unknown;
           injury_note: unknown;
@@ -141,6 +129,15 @@ export interface Database {
         Insert: {
           id?: string;
           student_id: string;
+          age?: number | null;
+          height_cm?: number | null;
+          current_weight_kg?: number | null;
+          start_weight_kg?: number | null;
+          target_weight_kg?: number | null;
+          goal?: string;
+          level?: string;
+          training_frequency_per_week?: number | null;
+          training_location?: string;
           food_preferences?: unknown;
           sport_preferences?: unknown;
           injury_note?: unknown;
@@ -155,6 +152,15 @@ export interface Database {
         Update: {
           id?: string;
           student_id?: string;
+          age?: number | null;
+          height_cm?: number | null;
+          current_weight_kg?: number | null;
+          start_weight_kg?: number | null;
+          target_weight_kg?: number | null;
+          goal?: string;
+          level?: string;
+          training_frequency_per_week?: number | null;
+          training_location?: string;
           food_preferences?: unknown;
           sport_preferences?: unknown;
           injury_note?: unknown;
