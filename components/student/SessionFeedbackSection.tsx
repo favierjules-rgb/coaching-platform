@@ -8,6 +8,7 @@ import { TrainingStatCards } from "@/components/shared/TrainingMetricsSummary";
 import { useAdminData } from "@/hooks/useAdminData";
 import { useSupabaseWorkoutFeedback } from "@/hooks/useSupabaseWorkoutFeedback";
 import { calculatePlannedVsActualMetrics, formatTonnage } from "@/lib/training-metrics";
+import { isUuid } from "@/lib/uuid";
 import type {
   ActualSetEntry,
   AdminExerciseFeedbackEntry,
@@ -222,6 +223,12 @@ export function SessionFeedbackSection({
         globalComment,
         pain,
         exercises: exercisesPayload,
+        // Renseignées uniquement quand la séance vient d'un vrai programme
+        // Supabase (voir lib/supabase/programs.ts) — sessionId/programId
+        // mock ("session-upper", "prog-1"...) ne sont pas des uuid valides
+        // et resteraient null, comme avant la migration des programmes.
+        sessionId: isUuid(sessionId) ? sessionId : null,
+        programId: isUuid(programId) ? programId : null,
       });
       return;
     }

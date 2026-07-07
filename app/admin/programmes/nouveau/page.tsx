@@ -8,13 +8,41 @@ import { ArrowLeft, CheckCircle } from "lucide-react";
 import { AssignStudentsModal } from "@/components/admin/AssignStudentsModal";
 import { ProgramBuilder, type ProgramBuilderData } from "@/components/admin/ProgramBuilder";
 import { useAdminData } from "@/hooks/useAdminData";
+import { useProgramAssignment } from "@/hooks/useProgramAssignment";
+import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
+import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { createProgram as createProgramSupabase } from "@/lib/supabase/programs";
 
 export default function NewProgramPage() {
   const router = useRouter();
   const { state, createProgram, setAssignment } = useAdminData();
   const [createdId, setCreatedId] = useState<string | null>(null);
 
-  function handleSave(data: ProgramBuilderData) {
+  // Priorité Supabase dès qu'au moins un programme/élève réel existe — même
+  // pattern que /admin/programmes. Un nouveau programme est créé en réel dès
+  // que Supabase est configuré (jamais seulement en mock quand disponible),
+  // pour que "Créer programme" produise directement un programme utilisable
+  // par un élève réel.
+  const supabasePrograms = useSupabasePrograms();
+  const supabaseStudents = useSupabaseStudents();
+  const students = supabaseStudents.students.length > 0 ? supabaseStudents.students : state.students;
+  const handleSetAssignment = useProgramAssignment(
+    supabasePrograms.programs.length > 0 && supabaseStudents.students.length > 0,
+    setAssignment,
+    supabasePrograms.refetch,
+  );
+
+  async function handleSave(data: ProgramBuilderData) {
+    const supabase = createSupabaseBrowserClient();
+    if (supabase) {
+      const id = await createProgramSupabase(supabase, data);
+      if (id) {
+        await supabasePrograms.refetch();
+        setCreatedId(id);
+        return;
+      }
+    }
     const id = createProgram({
       ...data,
       assignedStudentIds: [],
@@ -23,7 +51,8 @@ export default function NewProgramPage() {
     setCreatedId(id);
   }
 
-  const createdProgram = createdId ? state.programs.find((p) => p.id === createdId) : null;
+  const programs = supabasePrograms.programs.length > 0 ? supabasePrograms.programs : state.programs;
+  const createdProgram = createdId ? programs.find((p) => p.id === createdId) : null;
 
   return (
     <div>
@@ -52,9 +81,9 @@ export default function NewProgramPage() {
               contentLabel={createdProgram.name}
               contentType="programme"
               contentId={createdProgram.id}
-              students={state.students}
+              students={students}
               assignedStudentIds={createdProgram.assignedStudentIds}
-              onSetAssignment={setAssignment}
+              onSetAssignment={handleSetAssignment}
               triggerLabel="Assigner à des élèves"
               triggerVariant="primary"
             />

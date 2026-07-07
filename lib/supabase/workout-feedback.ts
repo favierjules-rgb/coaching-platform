@@ -314,6 +314,8 @@ export async function saveWorkoutFeedback(
     const { error: updateError } = await supabase
       .from("workout_feedback")
       .update({
+        session_id: payload.sessionId ?? null,
+        program_id: payload.programId ?? null,
         session_ref_label: payload.sessionRefLabel,
         completed: payload.completed,
         global_rpe: payload.globalRpe,
@@ -332,6 +334,8 @@ export async function saveWorkoutFeedback(
       .from("workout_feedback")
       .insert({
         student_id: payload.studentId,
+        session_id: payload.sessionId ?? null,
+        program_id: payload.programId ?? null,
         session_key: payload.sessionKey,
         session_ref_label: payload.sessionRefLabel,
         completed: payload.completed,
@@ -397,7 +401,7 @@ export async function saveWorkoutFeedback(
     studentId: payload.studentId,
     type: "entrainement",
     sessionId: payload.sessionKey,
-    programId: null,
+    programId: payload.programId ?? null,
     refLabel: payload.sessionRefLabel || "Séance",
     date: now.slice(0, 10),
     completed: payload.completed,

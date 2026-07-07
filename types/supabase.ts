@@ -678,6 +678,237 @@ export interface Database {
         };
         Relationships: [];
       };
+      programs: {
+        Row: {
+          id: string;
+          coach_id: string | null;
+          name: string;
+          goal: string;
+          level: string;
+          duration_weeks: number;
+          description: string;
+          status: "brouillon" | "actif" | "archivé";
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          coach_id?: string | null;
+          name: string;
+          goal?: string;
+          level?: string;
+          duration_weeks?: number;
+          description?: string;
+          status?: "brouillon" | "actif" | "archivé";
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          coach_id?: string | null;
+          name?: string;
+          goal?: string;
+          level?: string;
+          duration_weeks?: number;
+          description?: string;
+          status?: "brouillon" | "actif" | "archivé";
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      program_weeks: {
+        Row: {
+          id: string;
+          program_id: string;
+          week_number: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          program_id: string;
+          week_number: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          program_id?: string;
+          week_number?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      workout_sessions: {
+        Row: {
+          id: string;
+          program_id: string;
+          program_week_id: string;
+          day: string;
+          is_rest_day: boolean;
+          name: string;
+          muscle_group: string;
+          duration_minutes: number | null;
+          warmup: string;
+          coach_notes: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          program_id: string;
+          program_week_id: string;
+          day: string;
+          is_rest_day?: boolean;
+          name?: string;
+          muscle_group?: string;
+          duration_minutes?: number | null;
+          warmup?: string;
+          coach_notes?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          program_id?: string;
+          program_week_id?: string;
+          day?: string;
+          is_rest_day?: boolean;
+          name?: string;
+          muscle_group?: string;
+          duration_minutes?: number | null;
+          warmup?: string;
+          coach_notes?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      workout_exercises: {
+        Row: {
+          id: string;
+          session_id: string;
+          order_index: number;
+          name: string;
+          sets: number;
+          reps: string;
+          rest_seconds: number;
+          tempo: string;
+          recommended_load: string;
+          video_url: string;
+          notes: string;
+          muscle_group: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          session_id: string;
+          order_index?: number;
+          name: string;
+          sets?: number;
+          reps?: string;
+          rest_seconds?: number;
+          tempo?: string;
+          recommended_load?: string;
+          video_url?: string;
+          notes?: string;
+          muscle_group?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          session_id?: string;
+          order_index?: number;
+          name?: string;
+          sets?: number;
+          reps?: string;
+          rest_seconds?: number;
+          tempo?: string;
+          recommended_load?: string;
+          video_url?: string;
+          notes?: string;
+          muscle_group?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      exercise_library: {
+        Row: {
+          id: string;
+          coach_id: string | null;
+          name: string;
+          category: string;
+          equipment: string;
+          level: string;
+          muscle_group: string;
+          video_url: string;
+          notes: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          coach_id?: string | null;
+          name: string;
+          category?: string;
+          equipment?: string;
+          level?: string;
+          muscle_group?: string;
+          video_url?: string;
+          notes?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          coach_id?: string | null;
+          name?: string;
+          category?: string;
+          equipment?: string;
+          level?: string;
+          muscle_group?: string;
+          video_url?: string;
+          notes?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      assignments: {
+        Row: {
+          id: string;
+          student_id: string;
+          content_type: "programme" | "nutrition";
+          content_id: string;
+          assigned_at: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          student_id: string;
+          content_type: "programme" | "nutrition";
+          content_id: string;
+          assigned_at?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          student_id?: string;
+          content_type?: "programme" | "nutrition";
+          content_id?: string;
+          assigned_at?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

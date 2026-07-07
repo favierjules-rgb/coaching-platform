@@ -7,8 +7,11 @@ import { StatCard } from "@/components/student/StatCard";
 import { WeightChart } from "@/components/student/WeightChart";
 import { useStudentProfile, type StudentProfileState } from "@/hooks/useStudentProfile";
 import { useSupabaseStudentProfile } from "@/hooks/useSupabaseStudentProfile";
+import { useSupabaseTrainingProgram } from "@/hooks/useSupabaseTrainingProgram";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { coachingStatusLabels, computeWeightEvolution } from "@/lib/profile";
+import { getHighlightedScheduleDay } from "@/data/student";
+import { computeCurrentWeekNumber, toEleveTrainingProgram, toEleveWorkoutSession } from "@/lib/training-schedule";
 import type {
   CoachNotification,
   DocumentItem,
@@ -50,6 +53,7 @@ export function DashboardContent({
   const mockProfile = useStudentProfile(studentId, seed);
   const supabaseProfile = useSupabaseStudentProfile();
   const useSupabase = supabaseProfile.ready && supabaseProfile.state !== null;
+  const supabaseTraining = useSupabaseTrainingProgram();
 
   if (!supabaseProfile.ready) {
     return <p className="text-sm text-muted-foreground">Chargement du dashboard…</p>;
@@ -79,6 +83,20 @@ export function DashboardContent({
   const weightDeltaLabel = evolution.hasData
     ? `${evolution.deltaFromStartKg > 0 ? "+" : ""}${evolution.deltaFromStartKg} kg`
     : "—";
+
+  // Prochaine séance réelle : programme réellement assigné à l'élève (voir
+  // hooks/useSupabaseTrainingProgram.ts) plutôt que l'exemple statique
+  // upcomingSession/activeProgram, dès que Supabase a la priorité.
+  const realActiveProgram = useSupabase ? supabaseTraining.activeProgram : null;
+  const realWeekNumber = realActiveProgram ? computeCurrentWeekNumber(realActiveProgram, supabaseTraining.student) : 1;
+  const realEleveProgram = realActiveProgram ? toEleveTrainingProgram(realActiveProgram, realWeekNumber) : null;
+  const realWeekSessions = realActiveProgram
+    ? realActiveProgram.sessions.filter((s) => s.weekNumber === realWeekNumber).map(toEleveWorkoutSession)
+    : [];
+  const realHighlightedDay = realEleveProgram ? getHighlightedScheduleDay(realEleveProgram.schedule) : null;
+  const realHighlightedSession = realHighlightedDay?.sessionId
+    ? realWeekSessions.find((s) => s.id === realHighlightedDay.sessionId)
+    : undefined;
 
   return (
     <div>
@@ -155,25 +173,31 @@ export function DashboardContent({
             <h2 className="font-heading text-lg font-bold uppercase text-foreground">
               Prochaine séance
             </h2>
-            <span className="text-[10px] uppercase tracking-widest text-muted-foreground">
-              Exemple — programme non connecté
-            </span>
+            {!useSupabase && (
+              <span className="text-[10px] uppercase tracking-widest text-muted-foreground">
+                Exemple — programme non connecté
+              </span>
+            )}
           </div>
-          <div className="mb-4 flex items-center gap-4">
-            <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center bg-primary">
-              <Dumbbell size={20} className="text-primary-foreground" />
-            </div>
-            <div>
-              <div className="text-sm font-medium text-foreground">
-                {upcomingSession.name}
+          {useSupabase && !realHighlightedSession ? (
+            <p className="mb-4 text-sm text-muted-foreground">Aucun programme attribué pour le moment.</p>
+          ) : (
+            <div className="mb-4 flex items-center gap-4">
+              <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center bg-primary">
+                <Dumbbell size={20} className="text-primary-foreground" />
               </div>
-              <div className="mt-0.5 text-xs text-muted-foreground">
-                {upcomingSession.day} · {upcomingSession.time} ·{" "}
-                {upcomingSession.durationMinutes} min ·{" "}
-                {upcomingSession.exerciseCount} exercices
+              <div>
+                <div className="text-sm font-medium text-foreground">
+                  {useSupabase ? realHighlightedSession!.name : upcomingSession.name}
+                </div>
+                <div className="mt-0.5 text-xs text-muted-foreground">
+                  {useSupabase
+                    ? `${realHighlightedDay?.isToday ? "Aujourd'hui" : realHighlightedDay?.day} · ${realHighlightedSession!.durationMinutes} min · ${realHighlightedSession!.exercises.length} exercices`
+                    : `${upcomingSession.day} · ${upcomingSession.time} · ${upcomingSession.durationMinutes} min · ${upcomingSession.exerciseCount} exercices`}
+                </div>
               </div>
             </div>
-          </div>
+          )}
           <Link
             href="/entrainement"
             className="block border border-primary py-3 text-center text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"

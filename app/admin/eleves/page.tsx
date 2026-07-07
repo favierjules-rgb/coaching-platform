@@ -9,6 +9,8 @@ import { CreateStudentModal } from "@/components/admin/CreateStudentModal";
 import { FilterButtons, SearchInput } from "@/components/admin/SearchAndFilters";
 import { StatusBadge, studentStatusTone } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
+import { useProgramAssignment } from "@/hooks/useProgramAssignment";
+import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { formatDate, fullName, matchesStudentSearch, studentStatusLabels, weightProgressLabel } from "@/lib/admin";
 import { paymentSummaryLabel } from "@/lib/payments";
@@ -25,15 +27,20 @@ const statusFilters: { value: StatusFilter; label: string }[] = [
 
 export default function AdminStudentsPage() {
   const { state, createStudent, setAssignment } = useAdminData();
-  const { programs, nutritionPlans, documents } = state;
+  const { nutritionPlans, documents } = state;
 
-  // Supabase a la priorité dès qu'il a au moins un élève réel ; sinon on
-  // retombe sur la liste mock (localStorage), sans jamais rien casser tant
-  // que Supabase n'est pas configuré ou n'a encore aucune donnée — voir
-  // hooks/useSupabaseStudents.ts. Programmes/plans/documents restent mock
-  // dans tous les cas (non migrés à cette étape).
+  // Supabase a la priorité dès qu'il a au moins un élève/programme réel ;
+  // sinon on retombe sur la liste mock (localStorage), sans jamais rien
+  // casser tant que Supabase n'est pas configuré ou n'a encore aucune
+  // donnée — voir hooks/useSupabaseStudents.ts et hooks/useSupabasePrograms.ts.
+  // Plans nutrition/documents restent mock dans tous les cas (non migrés à
+  // cette étape).
   const supabaseStudents = useSupabaseStudents();
   const students = supabaseStudents.students.length > 0 ? supabaseStudents.students : state.students;
+  const supabasePrograms = useSupabasePrograms();
+  const programs = supabasePrograms.programs.length > 0 ? supabasePrograms.programs : state.programs;
+  const canAssignRealPrograms = supabaseStudents.students.length > 0 && supabasePrograms.programs.length > 0;
+  const handleSetAssignment = useProgramAssignment(canAssignRealPrograms, setAssignment, supabasePrograms.refetch);
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("tous");
@@ -137,7 +144,9 @@ export default function AdminStudentsPage() {
                     programs={programs}
                     nutritionPlans={nutritionPlans}
                     documents={documents}
-                    onSetAssignment={setAssignment}
+                    onSetAssignment={handleSetAssignment}
+                    isSupabaseStudent={supabaseStudents.students.length > 0}
+                    canAssignRealPrograms={canAssignRealPrograms}
                   />
                 </div>
               </div>
