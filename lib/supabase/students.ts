@@ -61,13 +61,14 @@ type PaymentEntryRow = Database["public"]["Tables"]["payment_entries"]["Row"];
 type CoachNoteRow = Database["public"]["Tables"]["coach_notes"]["Row"];
 type WeightEntryRow = Database["public"]["Tables"]["weight_entries"]["Row"];
 
-function devWarn(context: string, error: { message: string } | null): void {
+function devWarn(context: string, error: { message: string; code?: string; details?: string; hint?: string } | null): void {
   if (error) {
-    // Log l'objet d'erreur complet (pas juste .message) : les erreurs
-    // PostgREST portent souvent le vrai diagnostic dans .code/.details/.hint
-    // (contrainte violée, colonne inconnue, RLS...), invisibles si on ne
-    // garde que le message générique.
-    console.error(`[Supabase] ${context} :`, error);
+    // Chaîne composée plutôt que l'objet brut : un PostgrestError passé tel
+    // quel à console.error s'affiche "{}" dans l'overlay Next.js, ce qui
+    // rend le vrai diagnostic (colonne inconnue, RLS...) invisible.
+    console.error(
+      `[Supabase] ${context} : ${error.message}${error.code ? ` (code ${error.code})` : ""}${error.details ? ` — ${error.details}` : ""}${error.hint ? ` — ${error.hint}` : ""}`,
+    );
   }
 }
 

@@ -7,9 +7,14 @@ import type { StudentOnboardingSubmission, SupabaseStudentProfile, WeightEntrySo
 type TypedSupabaseClient = SupabaseClient<Database>;
 type StudentProfileUpdate = Database["public"]["Tables"]["student_profiles"]["Update"];
 
-function devWarn(context: string, error: { message: string } | null): void {
+function devWarn(context: string, error: { message: string; code?: string; details?: string; hint?: string } | null): void {
   if (error) {
-    console.error(`[Supabase] ${context} :`, error);
+    // Chaîne composée plutôt que l'objet brut : un PostgrestError passé tel
+    // quel à console.error s'affiche "{}" dans l'overlay Next.js, ce qui
+    // rend le vrai diagnostic (colonne inconnue, RLS...) invisible.
+    console.error(
+      `[Supabase] ${context} : ${error.message}${error.code ? ` (code ${error.code})` : ""}${error.details ? ` — ${error.details}` : ""}${error.hint ? ` — ${error.hint}` : ""}`,
+    );
   }
 }
 
@@ -64,9 +69,13 @@ function buildProfileUpdate(
   setNumber("current_weight_kg", partial.currentWeightKg);
   setNumber("start_weight_kg", partial.startWeightKg);
   setNumber("target_weight_kg", partial.targetWeightKg);
+  // Uniquement main_goal / sport_level : ce sont les colonnes réellement
+  // présentes sur le projet Supabase de production — les colonnes goal/level
+  // de schema.sql n'y existent pas, et les inclure ferait échouer TOUTE la
+  // mise à jour PostgREST (même cause que le bug de statut corrigé sur la
+  // PR #15, voir lib/supabase/students.ts updateStudentFields).
   if (partial.mainGoal !== undefined && !(skipEmptyFields && partial.mainGoal.trim() === "")) {
     update.main_goal = partial.mainGoal;
-    update.goal = partial.mainGoal;
   }
   setArray("secondary_goals", partial.secondaryGoals);
   setText("target_timeframe", partial.targetTimeframe);
@@ -75,7 +84,6 @@ function buildProfileUpdate(
   }
   if (partial.level !== undefined && !(skipEmptyFields && partial.level.trim() === "")) {
     update.sport_level = partial.level;
-    update.level = partial.level;
   }
   setNumber("training_frequency_per_week", partial.trainingFrequencyPerWeek);
   setText("training_location", partial.trainingLocation);
