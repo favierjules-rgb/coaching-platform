@@ -178,6 +178,10 @@ export function AdminOnboardingDetailModal({
                     <InfoRow label="Objectifs secondaires" value={(profile?.secondaryGoals ?? []).join(", ") || "Non renseigné"} />
                     <InfoRow label="Délai souhaité" value={val(profile?.targetTimeframe ?? "")} />
                     <InfoRow label="Date cible" value={val(profile?.targetDate ?? "")} />
+                    <div className="py-2">
+                      <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Indicateurs suivis</span>
+                      <TagList items={profile?.trackedIndicators ?? []} />
+                    </div>
                   </Section>
                   <Section title="Niveau et activité">
                     <InfoRow label="Niveau d'activité / NEAT" value={val(profile?.neatLevel ?? "")} />
