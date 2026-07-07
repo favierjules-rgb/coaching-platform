@@ -1098,6 +1098,19 @@ export interface SupabaseStudentProfile {
   updatedAt: string;
 }
 
+export type WeightEntrySource = "initial" | "student_update" | "coach_update";
+
+/** Un relevé de poids daté — voir docs/supabase-student-model.md. */
+export interface SupabaseWeightEntry {
+  id: string;
+  studentId: string;
+  weightKg: number;
+  recordedAt: string;
+  source: WeightEntrySource;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface SupabaseBodyMeasurement {
   id: string;
   studentId: string;

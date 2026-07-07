@@ -44,13 +44,17 @@ export function WeightChart({ data }: { data: WeightEntry[] }) {
         </defs>
         <path d={areaPath} fill="url(#weightGradient)" />
         <path d={linePath} fill="none" stroke="#d62828" strokeWidth={2} />
-        {points.map((point) => (
-          <circle key={point.x} cx={point.x} cy={point.y} r={3} fill="#d62828" />
+        {points.map((point, index) => (
+          <circle key={`${point.x}-${index}`} cx={point.x} cy={point.y} r={3} fill="#d62828" />
         ))}
       </svg>
       <div className="mt-2 flex justify-between text-xs text-muted-foreground">
-        {data.map((entry) => (
-          <span key={entry.month}>{entry.month}</span>
+        {data.map((entry, index) => (
+          // `entry.month` (ex. "06/07") n'est qu'un libellé d'affichage : deux
+          // relevés du même jour (ex. migration initiale + mise à jour coach
+          // le jour même) partagent le même libellé, donc l'index est
+          // nécessaire pour garantir une clé unique.
+          <span key={`${entry.month}-${index}`}>{entry.month}</span>
         ))}
       </div>
     </div>

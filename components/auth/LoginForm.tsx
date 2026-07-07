@@ -7,6 +7,7 @@ import { AlertCircle, ArrowLeft, FlaskConical } from "lucide-react";
 
 import { Logo } from "@/components/ui/Logo";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { updateLastLoginTimestamp } from "@/lib/supabase/students";
 import type { UserRole } from "@/types";
 
 /**
@@ -70,6 +71,10 @@ export function LoginForm({ supabaseConfigured }: { supabaseConfigured: boolean 
     if (!profile) {
       setUnknownRole(true);
       return;
+    }
+
+    if (profile.role === "student") {
+      await updateLastLoginTimestamp(supabase, data.user.id);
     }
 
     router.refresh();

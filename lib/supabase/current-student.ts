@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
   addProgressPhotoSupabase,
+  addWeightEntry,
   getFullAdminStudent,
   updateStudentFields,
   upsertBodyMeasurements,
@@ -59,7 +60,9 @@ export async function updateCurrentStudentWeight(
   studentId: string,
   weightKg: number,
 ): Promise<boolean> {
-  return updateStudentFields(supabase, studentId, { currentWeightKg: weightKg });
+  const fieldsSuccess = await updateStudentFields(supabase, studentId, { currentWeightKg: weightKg });
+  const entrySuccess = await addWeightEntry(supabase, studentId, weightKg, "student_update");
+  return fieldsSuccess && entrySuccess;
 }
 
 export async function addCurrentStudentMeasurement(

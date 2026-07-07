@@ -110,7 +110,13 @@ create table if not exists public.students (
   level text not null default '',
   training_frequency_per_week integer,
   training_location text not null default '',
-  status text not null default 'actif' check (status in ('actif', 'pause', 'terminé')),
+  -- Valeurs en anglais (pas 'actif'/'pause'/'terminé') pour matcher la
+  -- contrainte réellement en place sur le projet Supabase de production —
+  -- voir la conversion française <-> anglaise dans lib/supabase/students.ts
+  -- (STATUS_DB_TO_APP / STATUS_APP_TO_DB), qui reste le seul endroit à
+  -- connaître cette variante ; le reste de l'app continue d'utiliser les
+  -- valeurs françaises.
+  status text not null default 'active' check (status in ('active', 'paused', 'completed')),
   start_date date not null default current_date,
   last_login_at timestamptz,
   created_at timestamptz not null default now(),
@@ -135,6 +141,11 @@ create table if not exists public.student_profiles (
   target_weight_kg numeric,
   goal text not null default '',
   level text not null default '',
+  -- Colonne réellement utilisée en production pour le niveau sportif
+  -- (`level` ci-dessus n'est qu'un repli de lecture, voir
+  -- lib/supabase/students.ts) — pré-existante avant `level`, conservée pour
+  -- ne pas perdre la donnée déjà en place.
+  sport_level text,
   training_frequency_per_week integer,
   training_location text not null default '',
   food_preferences jsonb not null default '{}'::jsonb,
@@ -173,6 +184,7 @@ alter table public.student_profiles add column if not exists start_weight_kg num
 alter table public.student_profiles add column if not exists target_weight_kg numeric;
 alter table public.student_profiles add column if not exists goal text not null default '';
 alter table public.student_profiles add column if not exists level text not null default '';
+alter table public.student_profiles add column if not exists sport_level text;
 alter table public.student_profiles add column if not exists training_frequency_per_week integer;
 alter table public.student_profiles add column if not exists training_location text not null default '';
 
@@ -218,6 +230,23 @@ alter table public.students drop column if exists goal;
 alter table public.students drop column if exists level;
 alter table public.students drop column if exists training_frequency_per_week;
 alter table public.students drop column if exists training_location;
+
+-- ============================================================================
+-- 4ter. weight_entries — historique du poids (une ligne par relevé), pour
+--       que la carte "Évolution du poids" ait une vraie courbe à afficher au
+--       lieu de ne connaître que le poids actuel/départ/objectif de
+--       student_profiles. `source` distingue le relevé initial (création de
+--       l'élève), une saisie élève, ou une saisie coach.
+-- ============================================================================
+create table if not exists public.weight_entries (
+  id uuid primary key default gen_random_uuid(),
+  student_id uuid not null references public.students (id) on delete cascade,
+  weight_kg numeric not null,
+  recorded_at date not null default current_date,
+  source text not null default 'coach_update' check (source in ('initial', 'student_update', 'coach_update')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
 
 -- ============================================================================
 -- 5. progress_photos
@@ -597,7 +626,7 @@ declare
 begin
   for t in
     select unnest(array[
-      'profiles', 'coaches', 'students', 'student_profiles', 'progress_photos',
+      'profiles', 'coaches', 'students', 'student_profiles', 'weight_entries', 'progress_photos',
       'body_measurements', 'custom_measurements', 'payments', 'payment_entries',
       'programs', 'program_weeks', 'workout_sessions', 'workout_exercises',
       'exercise_library', 'nutrition_plans', 'nutrition_days', 'meals',
@@ -621,6 +650,7 @@ alter table public.profiles enable row level security;
 alter table public.coaches enable row level security;
 alter table public.students enable row level security;
 alter table public.student_profiles enable row level security;
+alter table public.weight_entries enable row level security;
 alter table public.progress_photos enable row level security;
 alter table public.body_measurements enable row level security;
 alter table public.custom_measurements enable row level security;
@@ -713,6 +743,11 @@ create policy "student_profiles_manage_self_or_staff" on public.student_profiles
 -- photos/mensurations/retours), le coach/admin a un accès complet.
 -- ----------------------------------------------------------------------------
 create policy "progress_photos_student_or_staff" on public.progress_photos
+  for all
+  using (student_id = public.current_student_id() or public.is_coach_or_admin())
+  with check (student_id = public.current_student_id() or public.is_coach_or_admin());
+
+create policy "weight_entries_student_or_staff" on public.weight_entries
   for all
   using (student_id = public.current_student_id() or public.is_coach_or_admin())
   with check (student_id = public.current_student_id() or public.is_coach_or_admin());

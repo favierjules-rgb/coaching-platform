@@ -24,6 +24,10 @@ import type {
   SupabaseProgressPhoto,
   SupabaseStudent,
   SupabaseStudentProfile,
+  SupabaseWeightEntry,
+  StudentAccountStatus,
+  WeightEntry,
+  WeightEntrySource,
 } from "@/types";
 import type { Database } from "@/types/supabase";
 
@@ -55,11 +59,46 @@ type CustomMeasurementRow = Database["public"]["Tables"]["custom_measurements"][
 type PaymentRow = Database["public"]["Tables"]["payments"]["Row"];
 type PaymentEntryRow = Database["public"]["Tables"]["payment_entries"]["Row"];
 type CoachNoteRow = Database["public"]["Tables"]["coach_notes"]["Row"];
+type WeightEntryRow = Database["public"]["Tables"]["weight_entries"]["Row"];
 
 function devWarn(context: string, error: { message: string } | null): void {
-  if (error && process.env.NODE_ENV === "development") {
-    console.warn(`[Supabase] ${context} :`, error.message);
+  if (error) {
+    // Log l'objet d'erreur complet (pas juste .message) : les erreurs
+    // PostgREST portent souvent le vrai diagnostic dans .code/.details/.hint
+    // (contrainte violée, colonne inconnue, RLS...), invisibles si on ne
+    // garde que le message générique.
+    console.error(`[Supabase] ${context} :`, error);
   }
+}
+
+/**
+ * `students.status` a été vu en pratique sous deux formes selon l'historique
+ * du projet Supabase : la contrainte française documentée dans
+ * schema.sql ('actif' | 'pause' | 'terminé') et une contrainte anglaise
+ * ('active' | 'paused' | 'completed') sur certains projets déjà initialisés
+ * avant que ce nom français ne soit fixé. Le reste de l'app (mock, UI,
+ * StatusBadge, filtres) n'utilise que les valeurs françaises — ces deux
+ * fonctions font la conversion à la frontière Supabase pour que ni le code
+ * d'affichage ni les écritures n'aient à connaître la variante réellement
+ * en place sur un projet donné.
+ */
+const STATUS_DB_TO_APP: Record<string, StudentAccountStatus> = {
+  actif: "actif",
+  pause: "pause",
+  "terminé": "terminé",
+  active: "actif",
+  paused: "pause",
+  completed: "terminé",
+};
+
+const STATUS_APP_TO_DB: Record<StudentAccountStatus, "active" | "paused" | "completed"> = {
+  actif: "active",
+  pause: "paused",
+  "terminé": "completed",
+};
+
+function mapStatusFromDb(raw: string): StudentAccountStatus {
+  return STATUS_DB_TO_APP[raw] ?? "actif";
 }
 
 /* ─── Row -> types Supabase* (camelCase) ─── */
@@ -73,7 +112,7 @@ function mapStudentRow(row: StudentRow): SupabaseStudent {
     lastName: row.last_name,
     email: row.email,
     phone: row.phone,
-    status: row.status,
+    status: mapStatusFromDb(row.status),
     startDate: row.start_date,
     lastLoginAt: row.last_login_at,
     createdAt: row.created_at,
@@ -102,7 +141,10 @@ function mapStudentProfileRow(row: StudentProfileRow): SupabaseStudentProfile {
     startWeightKg: row.start_weight_kg,
     targetWeightKg: row.target_weight_kg,
     goal: row.goal,
-    level: row.level,
+    // `sport_level` est la colonne réellement utilisée sur ce projet pour le
+    // niveau sportif ; `level` (ajoutée par la migration 4bis) reste un repli
+    // si jamais elle est vide, voir docs/supabase-student-model.md.
+    level: row.sport_level || row.level || "",
     trainingFrequencyPerWeek: row.training_frequency_per_week,
     trainingLocation: row.training_location,
     foodPreferences: {
@@ -219,6 +261,18 @@ function mapCoachNoteRow(row: CoachNoteRow): SupabaseCoachNote {
   };
 }
 
+function mapWeightEntryRow(row: WeightEntryRow): SupabaseWeightEntry {
+  return {
+    id: row.id,
+    studentId: row.student_id,
+    weightKg: row.weight_kg,
+    recordedAt: row.recorded_at,
+    source: row.source,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 /* ─── types Supabase* -> types mock (pour réutiliser les composants existants) ─── */
 
 function toMockProgressPhoto(photo: SupabaseProgressPhoto): ProgressPhoto {
@@ -268,6 +322,15 @@ function toMockCustomMeasurement(measurement: SupabaseCustomMeasurement): Custom
 
 function toMockCoachNote(note: SupabaseCoachNote): CoachNote {
   return { id: note.id, studentId: note.studentId, text: note.text, createdAt: note.createdAt };
+}
+
+/** `month` sert de libellé d'axe pour WeightChart : jour/mois court plutôt qu'un vrai nom de mois mocké. */
+function toMockWeightEntry(entry: SupabaseWeightEntry): WeightEntry {
+  const date = new Date(entry.recordedAt);
+  const label = Number.isNaN(date.getTime())
+    ? entry.recordedAt
+    : date.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
+  return { month: label, kg: entry.weightKg };
 }
 
 function toMockPaymentEntry(entry: SupabasePaymentEntry): StudentPaymentEntry {
@@ -329,6 +392,7 @@ function toAdminStudent(
   student: SupabaseStudent,
   profile: SupabaseStudentProfile | null,
   extras: {
+    weightHistory: WeightEntry[];
     measurements: BodyMeasurement[];
     customMeasurements: CustomMeasurement[];
     progressPhotos: ProgressPhoto[];
@@ -337,6 +401,12 @@ function toAdminStudent(
   },
 ): AdminStudent {
   const currentWeightKg = profile?.currentWeightKg ?? 0;
+  // `weight_entries` est trié par date croissante (voir getWeightHistory) :
+  // son premier relevé est le repli le plus fiable pour le poids de départ
+  // quand student_profiles.start_weight_kg n'a jamais été renseigné —
+  // préférable à retomber directement sur le poids actuel (voir
+  // docs/supabase-student-model.md).
+  const startWeightKg = profile?.startWeightKg ?? extras.weightHistory[0]?.kg ?? currentWeightKg;
   return {
     id: student.id,
     firstName: student.firstName,
@@ -346,9 +416,14 @@ function toAdminStudent(
     age: profile?.age ?? 0,
     heightCm: profile?.heightCm ?? 0,
     currentWeightKg,
-    startWeightKg: profile?.startWeightKg ?? currentWeightKg,
+    startWeightKg,
     targetWeightKg: profile?.targetWeightKg ?? currentWeightKg,
-    goal: profile?.goal ?? "",
+    // `main_goal` est le champ d'objectif détaillé pré-existant (section
+    // "Objectifs" de /profil, voir docs/supabase-student-model.md) ;
+    // `goal` est le résumé court ajouté par la migration 4bis. Un élève
+    // renseigné uniquement côté `main_goal` ne doit pas afficher "Non
+    // renseigné" ici — on privilégie `main_goal` quand il existe.
+    goal: profile?.mainGoal || profile?.goal || "",
     level: profile?.level ?? "",
     trainingFrequencyPerWeek: profile?.trainingFrequencyPerWeek ?? 0,
     trainingLocation: profile?.trainingLocation ?? "",
@@ -358,7 +433,7 @@ function toAdminStudent(
     foodPreferences: profile?.foodPreferences ?? emptyFoodPreferences,
     sportPreferences: profile?.sportPreferences ?? emptySportPreferences,
     injuries: profile?.injuryNote ?? "",
-    weightHistory: [],
+    weightHistory: extras.weightHistory,
     measurements: extras.measurements,
     customMeasurements: extras.customMeasurements,
     measurementHistory: [],
@@ -409,6 +484,7 @@ export async function getStudents(supabase: TypedSupabaseClient): Promise<AdminS
   return data.map((row) => {
     const student = mapStudentRow(row);
     return toAdminStudent(student, profileByStudent.get(student.id) ?? null, {
+      weightHistory: [],
       measurements: [],
       customMeasurements: [],
       progressPhotos: [],
@@ -531,9 +607,10 @@ export async function getFullAdminStudent(
     return null;
   }
 
-  const [profile, { measurements, customMeasurements }, progressPhotos, paymentProfile, coachNotes] =
+  const [profile, weightHistory, { measurements, customMeasurements }, progressPhotos, paymentProfile, coachNotes] =
     await Promise.all([
       getStudentProfile(supabase, studentId),
+      getWeightHistory(supabase, studentId),
       getStudentMeasurements(supabase, studentId),
       getStudentProgressPhotos(supabase, studentId),
       getStudentPayments(supabase, studentId),
@@ -541,12 +618,50 @@ export async function getFullAdminStudent(
     ]);
 
   return toAdminStudent(student, profile, {
+    weightHistory,
     measurements,
     customMeasurements,
     progressPhotos,
     paymentProfile,
     coachNotes,
   });
+}
+
+/**
+ * Historique de poids trié par date croissante (le plus ancien en premier,
+ * pour matcher l'ordre attendu par WeightChart/computeWeightEvolution).
+ * Tableau vide si aucun relevé n'existe encore.
+ */
+export async function getWeightHistory(supabase: TypedSupabaseClient, studentId: string): Promise<WeightEntry[]> {
+  const { data, error } = await supabase
+    .from("weight_entries")
+    .select("*")
+    .eq("student_id", studentId)
+    .order("recorded_at", { ascending: true });
+  devWarn("getWeightHistory", error);
+  return (data ?? []).map((row) => toMockWeightEntry(mapWeightEntryRow(row)));
+}
+
+/**
+ * Ajoute un relevé de poids (`source` distingue une saisie élève d'une
+ * saisie coach, voir docs/supabase-student-model.md) — appelé à chaque mise
+ * à jour du poids actuel, en plus de l'écriture sur `student_profiles`, pour
+ * que la carte "Évolution du poids" ait une vraie courbe.
+ */
+export async function addWeightEntry(
+  supabase: TypedSupabaseClient,
+  studentId: string,
+  weightKg: number,
+  source: WeightEntrySource,
+): Promise<boolean> {
+  const { error } = await supabase.from("weight_entries").insert({
+    student_id: studentId,
+    weight_kg: weightKg,
+    recorded_at: new Date().toISOString().slice(0, 10),
+    source,
+  });
+  devWarn("addWeightEntry", error);
+  return !error;
 }
 
 /* ─── Écriture ─── */
@@ -573,15 +688,22 @@ export async function updateStudentFields(
   if (partial.lastName !== undefined) studentUpdate.last_name = partial.lastName;
   if (partial.email !== undefined) studentUpdate.email = partial.email;
   if (partial.phone !== undefined) studentUpdate.phone = partial.phone;
-  if (partial.status !== undefined) studentUpdate.status = partial.status;
+  if (partial.status !== undefined) {
+    studentUpdate.status = STATUS_APP_TO_DB[partial.status];
+  }
 
   const profileUpdate: Database["public"]["Tables"]["student_profiles"]["Update"] = {};
   if (partial.age !== undefined) profileUpdate.age = partial.age;
   if (partial.heightCm !== undefined) profileUpdate.height_cm = partial.heightCm;
   if (partial.currentWeightKg !== undefined) profileUpdate.current_weight_kg = partial.currentWeightKg;
   if (partial.targetWeightKg !== undefined) profileUpdate.target_weight_kg = partial.targetWeightKg;
-  if (partial.goal !== undefined) profileUpdate.goal = partial.goal;
-  if (partial.level !== undefined) profileUpdate.level = partial.level;
+  // `main_goal` et `sport_level` sont les colonnes réellement utilisées sur
+  // ce projet pour l'objectif et le niveau sportif (voir toAdminStudent /
+  // mapStudentProfileRow) — on écrit uniquement celles-ci, pas les colonnes
+  // `goal`/`level` ajoutées par la migration 4bis, qui ne servent plus que
+  // de repli en lecture si jamais main_goal/sport_level sont vides.
+  if (partial.goal !== undefined) profileUpdate.main_goal = partial.goal;
+  if (partial.level !== undefined) profileUpdate.sport_level = partial.level;
   if (partial.trainingFrequencyPerWeek !== undefined) {
     profileUpdate.training_frequency_per_week = partial.trainingFrequencyPerWeek;
   }
@@ -602,10 +724,31 @@ export async function updateStudentFields(
   if (Object.keys(profileUpdate).length > 0) {
     writes.push(
       (async () => {
-        const { error } = await supabase
+        // Update-or-insert explicite plutôt qu'un .upsert({...}, {onConflict:
+        // "student_id"}) : ce dernier échoue silencieusement (ou avec une
+        // erreur uniquement visible en dev) si aucune contrainte unique/
+        // exclusion n'est enregistrée exactement sur cette colonne côté
+        // Postgres, même si les valeurs sont en pratique uniques — vu en
+        // pratique sur ce projet pour `students.status` (voir
+        // STATUS_APP_TO_DB), donc on ne prend plus ce risque ici non plus.
+        const { data: existing, error: lookupError } = await supabase
           .from("student_profiles")
-          .upsert({ student_id: studentId, ...profileUpdate }, { onConflict: "student_id" });
-        devWarn("updateStudentFields (student_profiles)", error);
+          .select("id")
+          .eq("student_id", studentId)
+          .maybeSingle();
+        devWarn("updateStudentFields (student_profiles lookup)", lookupError);
+        if (lookupError) {
+          return false;
+        }
+
+        if (existing) {
+          const { error } = await supabase.from("student_profiles").update(profileUpdate).eq("student_id", studentId);
+          devWarn("updateStudentFields (student_profiles update)", error);
+          return !error;
+        }
+
+        const { error } = await supabase.from("student_profiles").insert({ student_id: studentId, ...profileUpdate });
+        devWarn("updateStudentFields (student_profiles insert)", error);
         return !error;
       })(),
     );
@@ -616,6 +759,21 @@ export async function updateStudentFields(
   }
   const results = await Promise.all(writes);
   return results.every(Boolean);
+}
+
+/**
+ * Met à jour `students.last_login_at` pour l'élève associé à cet utilisateur
+ * Auth — appelée depuis LoginForm juste après une connexion réussie, pour
+ * que "Dernière connexion" dans /admin/eleves/[studentId] reflète une vraie
+ * date plutôt que d'afficher "Jamais" indéfiniment. Sans effet (et sans
+ * erreur) si l'utilisateur connecté n'est pas un élève (coach/admin).
+ */
+export async function updateLastLoginTimestamp(supabase: TypedSupabaseClient, userId: string): Promise<void> {
+  const { error } = await supabase
+    .from("students")
+    .update({ last_login_at: new Date().toISOString() })
+    .eq("user_id", userId);
+  devWarn("updateLastLoginTimestamp", error);
 }
 
 /**

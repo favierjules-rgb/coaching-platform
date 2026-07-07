@@ -60,7 +60,7 @@ export interface Database {
           last_name: string;
           email: string;
           phone: string;
-          status: "actif" | "pause" | "terminé";
+          status: "active" | "paused" | "completed";
           start_date: string;
           last_login_at: string | null;
           created_at: string;
@@ -74,7 +74,7 @@ export interface Database {
           last_name: string;
           email?: string;
           phone?: string;
-          status?: "actif" | "pause" | "terminé";
+          status?: "active" | "paused" | "completed";
           start_date?: string;
           last_login_at?: string | null;
           created_at?: string;
@@ -88,7 +88,7 @@ export interface Database {
           last_name?: string;
           email?: string;
           phone?: string;
-          status?: "actif" | "pause" | "terminé";
+          status?: "active" | "paused" | "completed";
           start_date?: string;
           last_login_at?: string | null;
           created_at?: string;
@@ -113,6 +113,7 @@ export interface Database {
           target_weight_kg: number | null;
           goal: string;
           level: string;
+          sport_level: string | null;
           training_frequency_per_week: number | null;
           training_location: string;
           food_preferences: unknown;
@@ -136,6 +137,7 @@ export interface Database {
           target_weight_kg?: number | null;
           goal?: string;
           level?: string;
+          sport_level?: string | null;
           training_frequency_per_week?: number | null;
           training_location?: string;
           food_preferences?: unknown;
@@ -159,6 +161,7 @@ export interface Database {
           target_weight_kg?: number | null;
           goal?: string;
           level?: string;
+          sport_level?: string | null;
           training_frequency_per_week?: number | null;
           training_location?: string;
           food_preferences?: unknown;
@@ -406,6 +409,36 @@ export interface Database {
           student_id?: string;
           coach_id?: string | null;
           text?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      weight_entries: {
+        Row: {
+          id: string;
+          student_id: string;
+          weight_kg: number;
+          recorded_at: string;
+          source: "initial" | "student_update" | "coach_update";
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          student_id: string;
+          weight_kg: number;
+          recorded_at?: string;
+          source?: "initial" | "student_update" | "coach_update";
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          student_id?: string;
+          weight_kg?: number;
+          recorded_at?: string;
+          source?: "initial" | "student_update" | "coach_update";
           created_at?: string;
           updated_at?: string;
         };

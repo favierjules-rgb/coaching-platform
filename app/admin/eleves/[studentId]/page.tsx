@@ -57,6 +57,19 @@ import type {
 } from "@/types";
 import type { CustomMeasurementInput } from "@/components/student/UpdateMeasurementsModal";
 
+/**
+ * Un profil élève Supabase pas encore complété (student_profiles absent)
+ * renvoie 0/"" pour ses champs de coaching — affichés tels quels, "0 ans"
+ * ou "0 kg" auraient l'air d'une vraie valeur plutôt que d'un champ vide.
+ */
+function formatNumberOrEmpty(value: number, suffix: string) {
+  return value > 0 ? `${value}${suffix}` : "Non renseigné";
+}
+
+function formatTextOrEmpty(value: string) {
+  return value.trim().length > 0 ? value : "Non renseigné";
+}
+
 export default function AdminStudentDetailPage() {
   const params = useParams<{ studentId: string }>();
   const router = useRouter();
@@ -64,6 +77,7 @@ export default function AdminStudentDetailPage() {
     useAdminData();
   const { students, programs, nutritionPlans, documents, feedback, manualDocumentUnlocks } = state;
   const [selectedMuscleGroup, setSelectedMuscleGroup] = useState<MuscleGroupFilter>("tous");
+  const [statusActionError, setStatusActionError] = useState(false);
 
   // Toujours monté (règle des hooks), même si l'élève affiché n'est pas
   // l'élève relié — utilisé uniquement quand isLinked est vrai.
@@ -134,10 +148,9 @@ export default function AdminStudentDetailPage() {
   const measurementHistory = isLinked ? linkedProfile.state.measurementHistory : student.measurementHistory;
   const photos = isLinked ? linkedProfile.state.photos : student.progressPhotos;
 
-  function handleUpdateWeight(weightKg: number) {
+  function handleUpdateWeight(weightKg: number): Promise<boolean> | void {
     if (isSupabaseStudent) {
-      supabaseDetail.updateWeight(weightKg);
-      return;
+      return supabaseDetail.updateWeight(weightKg);
     }
     if (isLinked) {
       linkedProfile.updateWeight(weightKg);
@@ -148,10 +161,9 @@ export default function AdminStudentDetailPage() {
     updateStudent(student!.id, { currentWeightKg: weightKg, weightHistory: newHistory });
   }
 
-  function handleUpdateTarget(targetKg: number) {
+  function handleUpdateTarget(targetKg: number): Promise<boolean> | void {
     if (isSupabaseStudent) {
-      supabaseDetail.updateTarget(targetKg);
-      return;
+      return supabaseDetail.updateTarget(targetKg);
     }
     if (isLinked) {
       linkedProfile.updateProfile({ targetWeightKg: targetKg });
@@ -321,10 +333,9 @@ export default function AdminStudentDetailPage() {
     updateStudent(student!.id, { paymentProfile: nextPaymentProfile });
   }
 
-  function applyStudentUpdate(partial: Partial<AdminStudent>) {
+  function applyStudentUpdate(partial: Partial<AdminStudent>): Promise<boolean> | void {
     if (isSupabaseStudent) {
-      supabaseDetail.updateStudentFields(partial);
-      return;
+      return supabaseDetail.updateStudentFields(partial);
     }
     updateStudent(student!.id, partial);
   }
@@ -412,11 +423,16 @@ export default function AdminStudentDetailPage() {
             nutritionPlans={nutritionPlans}
             documents={documents}
             onSetAssignment={setAssignment}
+            isSupabaseStudent={isSupabaseStudent}
           />
           <AddCoachNoteModal onAdd={handleAddCoachNote} />
           <button
             type="button"
-            onClick={() => applyStudentUpdate({ status: student.status === "pause" ? "actif" : "pause" })}
+            onClick={async () => {
+              setStatusActionError(false);
+              const result = await applyStudentUpdate({ status: student.status === "pause" ? "actif" : "pause" });
+              if (result === false) setStatusActionError(true);
+            }}
             className="flex items-center gap-1.5 border border-amber-500/50 px-4 py-2 text-xs uppercase tracking-widest text-amber-400 transition-colors hover:bg-amber-500/10"
           >
             {student.status === "pause" ? <Play size={13} /> : <Pause size={13} />}
@@ -424,8 +440,16 @@ export default function AdminStudentDetailPage() {
           </button>
           <button
             type="button"
-            onClick={() => {
-              applyStudentUpdate({ status: "terminé" });
+            onClick={async () => {
+              if (!window.confirm(`Archiver ${student.firstName} ${student.lastName} ? L'élève restera consultable mais ne sera plus actif.`)) {
+                return;
+              }
+              setStatusActionError(false);
+              const result = await applyStudentUpdate({ status: "terminé" });
+              if (result === false) {
+                setStatusActionError(true);
+                return;
+              }
               router.push("/admin/eleves");
             }}
             className="flex items-center gap-1.5 border border-red-500/50 px-4 py-2 text-xs uppercase tracking-widest text-red-400 transition-colors hover:bg-red-500/10"
@@ -434,6 +458,12 @@ export default function AdminStudentDetailPage() {
             Archiver l&apos;élève
           </button>
         </div>
+        {statusActionError && (
+          <p className="mt-2 flex w-full items-center gap-2 text-xs text-red-400">
+            <AlertTriangle size={14} className="flex-shrink-0" />
+            Échec de la mise à jour du statut. Réessaie.
+          </p>
+        )}
       </div>
 
       <div className="mb-6">
@@ -457,16 +487,19 @@ export default function AdminStudentDetailPage() {
 
       <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
         <AdminSection title="Informations personnelles">
-          <InfoRow label="Téléphone" value={student.phone} />
-          <InfoRow label="Âge" value={`${student.age} ans`} />
-          <InfoRow label="Taille" value={`${student.heightCm} cm`} />
-          <InfoRow label="Poids actuel" value={`${student.currentWeightKg} kg`} />
-          <InfoRow label="Poids de départ" value={`${student.startWeightKg} kg`} />
-          <InfoRow label="Objectif de poids" value={`${student.targetWeightKg} kg`} />
-          <InfoRow label="Objectif principal" value={student.goal} />
-          <InfoRow label="Niveau sportif" value={student.level} />
-          <InfoRow label="Fréquence d'entraînement" value={`${student.trainingFrequencyPerWeek}x / semaine`} />
-          <InfoRow label="Lieu" value={student.trainingLocation} />
+          <InfoRow label="Téléphone" value={formatTextOrEmpty(student.phone)} />
+          <InfoRow label="Âge" value={formatNumberOrEmpty(student.age, " ans")} />
+          <InfoRow label="Taille" value={formatNumberOrEmpty(student.heightCm, " cm")} />
+          <InfoRow label="Poids actuel" value={formatNumberOrEmpty(student.currentWeightKg, " kg")} />
+          <InfoRow label="Poids de départ" value={formatNumberOrEmpty(student.startWeightKg, " kg")} />
+          <InfoRow label="Objectif de poids" value={formatNumberOrEmpty(student.targetWeightKg, " kg")} />
+          <InfoRow label="Objectif principal" value={formatTextOrEmpty(student.goal)} />
+          <InfoRow label="Niveau sportif" value={formatTextOrEmpty(student.level)} />
+          <InfoRow
+            label="Fréquence d'entraînement"
+            value={formatNumberOrEmpty(student.trainingFrequencyPerWeek, "x / semaine")}
+          />
+          <InfoRow label="Lieu" value={formatTextOrEmpty(student.trainingLocation)} />
           <InfoRow label="Dernière connexion" value={student.lastLoginAt ? formatDateTime(student.lastLoginAt) : "Jamais"} />
         </AdminSection>
 
@@ -489,7 +522,7 @@ export default function AdminStudentDetailPage() {
       <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
         <AdminSection title="Préférences alimentaires">
           <div className="flex flex-col gap-4">
-            <InfoRow label="Régime" value={student.foodPreferences.diet} />
+            <InfoRow label="Régime" value={formatTextOrEmpty(student.foodPreferences.diet)} />
             <div>
               <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Aimés</span>
               <TagList items={student.foodPreferences.liked} />

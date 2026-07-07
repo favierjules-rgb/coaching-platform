@@ -8,8 +8,8 @@ import type { StudentProfile, WeightEntry } from "@/types";
 interface WeightEvolutionCardProps {
   profile: StudentProfile;
   history: WeightEntry[] | null | undefined;
-  onUpdateWeight: (weightKg: number) => void;
-  onUpdateTarget: (targetKg: number) => void;
+  onUpdateWeight: (weightKg: number) => Promise<boolean> | void;
+  onUpdateTarget: (targetKg: number) => Promise<boolean> | void;
 }
 
 export function WeightEvolutionCard({

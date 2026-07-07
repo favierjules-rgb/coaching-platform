@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle, Pencil } from "lucide-react";
+import { AlertTriangle, Pencil } from "lucide-react";
 
 import { Field, SelectField } from "@/components/admin/AdminFormFields";
 import { Modal, PrimaryButton } from "@/components/admin/Modal";
@@ -41,10 +41,11 @@ export function EditStudentModal({
   onSave,
 }: {
   student: AdminStudent;
-  onSave: (partial: Partial<AdminStudent>) => void;
+  onSave: (partial: Partial<AdminStudent>) => Promise<boolean> | void;
 }) {
   const [open, setOpen] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(false);
   const [form, setForm] = useState(() => formFromStudent(student));
 
   function setField(key: keyof ReturnType<typeof formFromStudent>, value: string) {
@@ -53,11 +54,14 @@ export function EditStudentModal({
 
   function close() {
     setOpen(false);
-    setSubmitted(false);
+    setError(false);
   }
 
-  function handleSubmit() {
-    onSave({
+  async function handleSubmit() {
+    if (saving) return;
+    setSaving(true);
+    setError(false);
+    const result = await onSave({
       firstName: form.firstName.trim(),
       lastName: form.lastName.trim(),
       email: form.email.trim(),
@@ -71,7 +75,15 @@ export function EditStudentModal({
       trainingFrequencyPerWeek: Number(form.trainingFrequencyPerWeek) || student.trainingFrequencyPerWeek,
       trainingLocation: form.trainingLocation,
     });
-    setSubmitted(true);
+    setSaving(false);
+    if (result === false) {
+      setError(true);
+      return;
+    }
+    // Ferme uniquement en cas de succès confirmé (students + student_profiles) —
+    // en cas d'échec la modale reste ouverte avec le message d'erreur pour
+    // que l'utilisateur puisse réessayer sans ressaisir le formulaire.
+    close();
   }
 
   return (
@@ -90,58 +102,59 @@ export function EditStudentModal({
 
       {open && (
         <Modal title="Modifier le profil" onClose={close} maxWidth="max-w-lg">
-          {submitted ? (
-            <div className="flex items-center gap-3 border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-400">
-              <CheckCircle size={18} className="flex-shrink-0" />
-              Profil mis à jour.
+          <div className="flex flex-col gap-4">
+            {error && (
+              <div className="flex items-center gap-3 border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+                <AlertTriangle size={18} className="flex-shrink-0" />
+                Échec de l&apos;enregistrement. Réessaie.
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Prénom" value={form.firstName} onChange={(v) => setField("firstName", v)} />
+              <Field label="Nom" value={form.lastName} onChange={(v) => setField("lastName", v)} />
             </div>
-          ) : (
-            <div className="flex flex-col gap-4">
-              <div className="grid grid-cols-2 gap-4">
-                <Field label="Prénom" value={form.firstName} onChange={(v) => setField("firstName", v)} />
-                <Field label="Nom" value={form.lastName} onChange={(v) => setField("lastName", v)} />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <Field label="Email" value={form.email} onChange={(v) => setField("email", v)} />
-                <Field label="Téléphone" value={form.phone} onChange={(v) => setField("phone", v)} />
-              </div>
-              <div className="grid grid-cols-3 gap-4">
-                <Field label="Âge" type="number" value={form.age} onChange={(v) => setField("age", v)} />
-                <Field label="Taille (cm)" type="number" value={form.heightCm} onChange={(v) => setField("heightCm", v)} />
-                <Field
-                  label="Poids actuel (kg)"
-                  type="number"
-                  value={form.currentWeightKg}
-                  onChange={(v) => setField("currentWeightKg", v)}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <Field
-                  label="Objectif de poids (kg)"
-                  type="number"
-                  value={form.targetWeightKg}
-                  onChange={(v) => setField("targetWeightKg", v)}
-                />
-                <SelectField label="Niveau sportif" value={form.level} onChange={(v) => setField("level", v)} options={levelOptions} />
-              </div>
-              <Field label="Objectif principal" value={form.goal} onChange={(v) => setField("goal", v)} />
-              <div className="grid grid-cols-2 gap-4">
-                <Field
-                  label="Fréquence (x/semaine)"
-                  type="number"
-                  value={form.trainingFrequencyPerWeek}
-                  onChange={(v) => setField("trainingFrequencyPerWeek", v)}
-                />
-                <SelectField
-                  label="Lieu d'entraînement"
-                  value={form.trainingLocation}
-                  onChange={(v) => setField("trainingLocation", v)}
-                  options={locationOptions}
-                />
-              </div>
-              <PrimaryButton onClick={handleSubmit}>Enregistrer les modifications</PrimaryButton>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Email" value={form.email} onChange={(v) => setField("email", v)} />
+              <Field label="Téléphone" value={form.phone} onChange={(v) => setField("phone", v)} />
             </div>
-          )}
+            <div className="grid grid-cols-3 gap-4">
+              <Field label="Âge" type="number" value={form.age} onChange={(v) => setField("age", v)} />
+              <Field label="Taille (cm)" type="number" value={form.heightCm} onChange={(v) => setField("heightCm", v)} />
+              <Field
+                label="Poids actuel (kg)"
+                type="number"
+                value={form.currentWeightKg}
+                onChange={(v) => setField("currentWeightKg", v)}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Field
+                label="Objectif de poids (kg)"
+                type="number"
+                value={form.targetWeightKg}
+                onChange={(v) => setField("targetWeightKg", v)}
+              />
+              <SelectField label="Niveau sportif" value={form.level} onChange={(v) => setField("level", v)} options={levelOptions} />
+            </div>
+            <Field label="Objectif principal" value={form.goal} onChange={(v) => setField("goal", v)} />
+            <div className="grid grid-cols-2 gap-4">
+              <Field
+                label="Fréquence (x/semaine)"
+                type="number"
+                value={form.trainingFrequencyPerWeek}
+                onChange={(v) => setField("trainingFrequencyPerWeek", v)}
+              />
+              <SelectField
+                label="Lieu d'entraînement"
+                value={form.trainingLocation}
+                onChange={(v) => setField("trainingLocation", v)}
+                options={locationOptions}
+              />
+            </div>
+            <PrimaryButton onClick={handleSubmit} disabled={saving}>
+              {saving ? "Enregistrement…" : "Enregistrer les modifications"}
+            </PrimaryButton>
+          </div>
         </Modal>
       )}
     </>
