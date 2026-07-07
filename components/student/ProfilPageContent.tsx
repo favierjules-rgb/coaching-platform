@@ -9,6 +9,7 @@ import { InjurySection } from "@/components/student/InjurySection";
 import { MeasurementsSection } from "@/components/student/MeasurementsSection";
 import { InfoRow, ProfileSection, TagList } from "@/components/student/ProfileSection";
 import { ProgressPhotoGallerySection } from "@/components/student/ProgressPhotoGallerySection";
+import { StudentOnboardingDetailModal } from "@/components/student/StudentOnboardingDetailModal";
 import { WeightEvolutionCard } from "@/components/student/WeightEvolutionCard";
 import { useStudentProfile, type StudentProfileState } from "@/hooks/useStudentProfile";
 import { useSupabaseStudentProfile } from "@/hooks/useSupabaseStudentProfile";
@@ -88,7 +89,10 @@ export function ProfilPageContent({
             </button>
           )}
         </div>
-        <EditPersonalInfoModal profile={profile} onSave={updateProfile} />
+        <div className="flex flex-wrap gap-2">
+          {useSupabase && <StudentOnboardingDetailModal student={profile} />}
+          <EditPersonalInfoModal profile={profile} onSave={updateProfile} />
+        </div>
       </div>
 
       <CoachingSummaryCard profile={profile} />

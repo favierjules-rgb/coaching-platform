@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Activity, AlertTriangle, ArrowLeft, Archive, Lock, Pause, Play, Unlock } from "lucide-react";
 
 import { AddCoachNoteModal } from "@/components/admin/AddCoachNoteModal";
+import { AdminOnboardingDetailModal } from "@/components/admin/AdminOnboardingDetailModal";
 import { AdminSection, InfoRow, TagList } from "@/components/admin/AdminSection";
 import { AssignContentToStudentModal } from "@/components/admin/AssignContentToStudentModal";
 import { EditStudentModal } from "@/components/admin/EditStudentModal";
@@ -426,6 +427,7 @@ export default function AdminStudentDetailPage() {
             isSupabaseStudent={isSupabaseStudent}
           />
           <AddCoachNoteModal onAdd={handleAddCoachNote} />
+          {isSupabaseStudent && <AdminOnboardingDetailModal studentId={student.id} student={student} />}
           <button
             type="button"
             onClick={async () => {

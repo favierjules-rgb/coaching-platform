@@ -1094,8 +1094,108 @@ export interface SupabaseStudentProfile {
   targetDate: string | null;
   priority: GoalPriority | null;
   trackedIndicators: GoalIndicator[];
+  // Onboarding élève (voir app/onboarding, docs/supabase-student-model.md) —
+  // beaucoup de ces champs sont optionnels et sensibles (santé, motivation,
+  // contexte personnel) : à ne jamais afficher sur /dashboard ou /admin,
+  // uniquement dans le détail de profil.
+  onboardingCompleted: boolean;
+  onboardingCompletedAt: string | null;
+  targetTimeframe: string;
+  activityLevel: string;
+  neatLevel: string;
+  sportsPracticed: string[];
+  otherActivities: string[];
+  availableEquipment: string[];
+  favoriteExercises: string[];
+  favoriteGymExercises: string[];
+  avoidedExercises: string[];
+  onboardingInjuries: string;
+  trainingNotes: string;
+  medicalTreatments: string;
+  medications: string;
+  healthNotes: string;
+  hydrationLevel: string;
+  dailyWaterIntake: string;
+  sleepDuration: string;
+  sleepQuality: string;
+  recoveryNotes: string;
+  lifestyleNotes: string;
+  motivationSource: string;
+  recentLifeEvents: string;
+  mentalWellbeingGoal: string;
+  emotionalWellbeingNotes: string;
+  dislikedFoods: string[];
+  allergies: string[];
+  intolerances: string[];
+  dietType: string;
+  preferredMealCount: number | null;
+  mealTimingNotes: string;
+  hungerNotes: string;
+  snackingNotes: string;
+  workScheduleNotes: string;
+  nutritionNotes: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * Réponses du questionnaire /onboarding (voir app/onboarding). Un seul type
+ * plat pour les 9 étapes plutôt qu'un type par étape : le formulaire vit en
+ * un seul state React tout du long, converti en écritures Supabase
+ * (students + student_profiles + weight_entries) uniquement à la
+ * validation finale (étape 9). Tous les champs marqués optionnels dans le
+ * questionnaire restent des chaînes/tableaux vides plutôt qu'`undefined` —
+ * jamais bloquant à la sauvegarde.
+ */
+export interface StudentOnboardingSubmission {
+  firstName: string;
+  lastName: string;
+  phone: string;
+  age: number;
+  heightCm: number;
+  currentWeightKg: number;
+  startWeightKg: number | null;
+  targetWeightKg: number;
+  mainGoal: string;
+  secondaryGoals: string[];
+  targetTimeframe: string;
+  targetDate: string;
+  level: string;
+  trainingFrequencyPerWeek: number;
+  trainingLocation: string;
+  neatLevel: string;
+  sportsPracticed: string[];
+  otherActivities: string[];
+  availableEquipment: string[];
+  favoriteGymExercises: string[];
+  favoriteExercises: string[];
+  avoidedExercises: string[];
+  injuries: string;
+  trainingNotes: string;
+  medicalTreatments: string;
+  medications: string;
+  healthNotes: string;
+  sleepDuration: string;
+  sleepQuality: string;
+  recoveryNotes: string;
+  hydrationLevel: string;
+  dailyWaterIntake: string;
+  lifestyleNotes: string;
+  motivationSource: string;
+  recentLifeEvents: string;
+  mentalWellbeingGoal: string;
+  emotionalWellbeingNotes: string;
+  preferredMealCount: number | null;
+  likedFoods: string[];
+  dislikedFoods: string[];
+  allergies: string[];
+  intolerances: string[];
+  dietType: string;
+  mealTimingNotes: string;
+  workScheduleNotes: string;
+  snackingNotes: string;
+  hungerNotes: string;
+  nutritionNotes: string;
 }
 
 export type WeightEntrySource = "initial" | "student_update" | "coach_update";

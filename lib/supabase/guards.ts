@@ -4,6 +4,9 @@ import { redirect } from "next/navigation";
 
 import { getCurrentUser, getCurrentUserRole } from "@/lib/supabase/auth";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getCurrentStudentId } from "@/lib/supabase/current-student";
+import { getOnboardingCompleted } from "@/lib/supabase/onboarding";
 
 /**
  * Guards à appeler en tête d'un layout/page Server Component protégé. Tant
@@ -45,7 +48,61 @@ export async function requireAdminOrCoach(): Promise<void> {
  * au rôle "student" — un coach/admin doit pouvoir prévisualiser l'espace
  * élève (lien "Espace élève" du menu admin), donc seul l'accès anonyme est
  * bloqué ici.
+ *
+ * Si le compte connecté est bien un élève (jamais pour un coach/admin en
+ * prévisualisation) et que son onboarding n'est pas terminé, redirige vers
+ * /onboarding — voir app/onboarding. Un élève sans fiche `students` du tout
+ * (cas normal juste après création par le coach, avant tout lien) n'a rien
+ * à compléter ici et n'est pas redirigé.
  */
 export async function requireStudent(): Promise<void> {
   await requireAuth();
+  if (!isSupabaseConfigured()) {
+    return;
+  }
+  const role = await getCurrentUserRole();
+  if (role !== "student") {
+    return;
+  }
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) {
+    return;
+  }
+  const studentId = await getCurrentStudentId(supabase);
+  if (!studentId) {
+    return;
+  }
+  const completed = await getOnboardingCompleted(supabase, studentId);
+  if (!completed) {
+    redirect("/onboarding");
+  }
+}
+
+/**
+ * Guard pour /onboarding lui-même : authentification requise. Un coach/admin
+ * n'a jamais rien à onboarder, redirigé vers /admin. Un élève ayant déjà
+ * terminé son onboarding (ou sans fiche `students` du tout) est redirigé
+ * vers /dashboard plutôt que de repasser le questionnaire.
+ */
+export async function requireOnboarding(): Promise<void> {
+  await requireAuth();
+  if (!isSupabaseConfigured()) {
+    return;
+  }
+  const role = await getCurrentUserRole();
+  if (role === "admin" || role === "coach") {
+    redirect("/admin");
+  }
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) {
+    return;
+  }
+  const studentId = await getCurrentStudentId(supabase);
+  if (!studentId) {
+    redirect("/dashboard");
+  }
+  const completed = await getOnboardingCompleted(supabase, studentId);
+  if (completed) {
+    redirect("/dashboard");
+  }
 }
