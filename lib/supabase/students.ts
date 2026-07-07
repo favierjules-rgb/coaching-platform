@@ -63,7 +63,11 @@ type WeightEntryRow = Database["public"]["Tables"]["weight_entries"]["Row"];
 
 function devWarn(context: string, error: { message: string } | null): void {
   if (error) {
-    console.warn(`[Supabase] ${context} :`, error.message);
+    // Log l'objet d'erreur complet (pas juste .message) : les erreurs
+    // PostgREST portent souvent le vrai diagnostic dans .code/.details/.hint
+    // (contrainte violée, colonne inconnue, RLS...), invisibles si on ne
+    // garde que le message générique.
+    console.error(`[Supabase] ${context} :`, error);
   }
 }
 
@@ -128,13 +132,6 @@ function mapStudentProfileRow(row: StudentProfileRow): SupabaseStudentProfile {
   const currentInjuries = asStringArray(injury.currentInjuries);
   const coachRemarks = typeof injury.coachRemarks === "string" ? injury.coachRemarks : "";
 
-  // Repli défensif sur une éventuelle colonne `sport_level` : certains
-  // projets Supabase plus anciens ont pu stocker le niveau sous ce nom
-  // avant que `student_profiles.level` ne soit standardisé — `select("*")`
-  // renvoie cette colonne si elle existe même si elle n'est pas dans le
-  // type généré, donc autant l'exploiter plutôt que perdre la donnée.
-  const legacyRow = row as StudentProfileRow & { sport_level?: string | null };
-
   return {
     id: row.id,
     studentId: row.student_id,
@@ -144,7 +141,10 @@ function mapStudentProfileRow(row: StudentProfileRow): SupabaseStudentProfile {
     startWeightKg: row.start_weight_kg,
     targetWeightKg: row.target_weight_kg,
     goal: row.goal,
-    level: row.level || legacyRow.sport_level || "",
+    // `sport_level` est la colonne réellement utilisée sur ce projet pour le
+    // niveau sportif ; `level` (ajoutée par la migration 4bis) reste un repli
+    // si jamais elle est vide, voir docs/supabase-student-model.md.
+    level: row.sport_level || row.level || "",
     trainingFrequencyPerWeek: row.training_frequency_per_week,
     trainingLocation: row.training_location,
     foodPreferences: {
@@ -697,14 +697,13 @@ export async function updateStudentFields(
   if (partial.heightCm !== undefined) profileUpdate.height_cm = partial.heightCm;
   if (partial.currentWeightKg !== undefined) profileUpdate.current_weight_kg = partial.currentWeightKg;
   if (partial.targetWeightKg !== undefined) profileUpdate.target_weight_kg = partial.targetWeightKg;
-  // `goal` (résumé court) et `main_goal` (champ détaillé pré-existant, lu en
-  // priorité par toAdminStudent) doivent rester synchronisés : sans ça, un
-  // objectif édité ici resterait masqué par un `main_goal` plus ancien.
-  if (partial.goal !== undefined) {
-    profileUpdate.goal = partial.goal;
-    profileUpdate.main_goal = partial.goal;
-  }
-  if (partial.level !== undefined) profileUpdate.level = partial.level;
+  // `main_goal` et `sport_level` sont les colonnes réellement utilisées sur
+  // ce projet pour l'objectif et le niveau sportif (voir toAdminStudent /
+  // mapStudentProfileRow) — on écrit uniquement celles-ci, pas les colonnes
+  // `goal`/`level` ajoutées par la migration 4bis, qui ne servent plus que
+  // de repli en lecture si jamais main_goal/sport_level sont vides.
+  if (partial.goal !== undefined) profileUpdate.main_goal = partial.goal;
+  if (partial.level !== undefined) profileUpdate.sport_level = partial.level;
   if (partial.trainingFrequencyPerWeek !== undefined) {
     profileUpdate.training_frequency_per_week = partial.trainingFrequencyPerWeek;
   }

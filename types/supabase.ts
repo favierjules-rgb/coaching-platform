@@ -113,6 +113,7 @@ export interface Database {
           target_weight_kg: number | null;
           goal: string;
           level: string;
+          sport_level: string | null;
           training_frequency_per_week: number | null;
           training_location: string;
           food_preferences: unknown;
@@ -136,6 +137,7 @@ export interface Database {
           target_weight_kg?: number | null;
           goal?: string;
           level?: string;
+          sport_level?: string | null;
           training_frequency_per_week?: number | null;
           training_location?: string;
           food_preferences?: unknown;
@@ -159,6 +161,7 @@ export interface Database {
           target_weight_kg?: number | null;
           goal?: string;
           level?: string;
+          sport_level?: string | null;
           training_frequency_per_week?: number | null;
           training_location?: string;
           food_preferences?: unknown;

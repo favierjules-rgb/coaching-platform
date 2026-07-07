@@ -141,6 +141,11 @@ create table if not exists public.student_profiles (
   target_weight_kg numeric,
   goal text not null default '',
   level text not null default '',
+  -- Colonne réellement utilisée en production pour le niveau sportif
+  -- (`level` ci-dessus n'est qu'un repli de lecture, voir
+  -- lib/supabase/students.ts) — pré-existante avant `level`, conservée pour
+  -- ne pas perdre la donnée déjà en place.
+  sport_level text,
   training_frequency_per_week integer,
   training_location text not null default '',
   food_preferences jsonb not null default '{}'::jsonb,
@@ -179,6 +184,7 @@ alter table public.student_profiles add column if not exists start_weight_kg num
 alter table public.student_profiles add column if not exists target_weight_kg numeric;
 alter table public.student_profiles add column if not exists goal text not null default '';
 alter table public.student_profiles add column if not exists level text not null default '';
+alter table public.student_profiles add column if not exists sport_level text;
 alter table public.student_profiles add column if not exists training_frequency_per_week integer;
 alter table public.student_profiles add column if not exists training_location text not null default '';
 
