@@ -119,6 +119,14 @@ export default function AdminStudentDetailPage() {
   // jamais planter sur une liste undefined plus bas dans la page.
   const student = normalizeAdminStudent(rawStudent);
 
+  // Fiche student_profiles brute (tous les champs du questionnaire
+  // onboarding) pour un élève Supabase — les cartes résumé plus bas
+  // (Préférences alimentaires/sportives, Objectifs, Blessures) doivent lire
+  // ces vraies colonnes plutôt que student.foodPreferences/sportPreferences/
+  // injuries, qui ne portent qu'un sous-ensemble ancien/différent des champs
+  // (voir "Voir le questionnaire complet", même source ici).
+  const onboardingProfile = isSupabaseStudent ? supabaseDetail.profile : null;
+
   const isLinked = !isSupabaseStudent && student.id === LINKED_STUDENT_ID;
 
   const weightProfile = isLinked
@@ -427,7 +435,9 @@ export default function AdminStudentDetailPage() {
             isSupabaseStudent={isSupabaseStudent}
           />
           <AddCoachNoteModal onAdd={handleAddCoachNote} />
-          {isSupabaseStudent && <AdminOnboardingDetailModal studentId={student.id} student={student} />}
+          {isSupabaseStudent && (
+            <AdminOnboardingDetailModal studentId={student.id} student={student} onSaved={supabaseDetail.refetch} />
+          )}
           <button
             type="button"
             onClick={async () => {
@@ -521,60 +531,188 @@ export default function AdminStudentDetailPage() {
         />
       </div>
 
-      <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <AdminSection title="Préférences alimentaires">
-          <div className="flex flex-col gap-4">
-            <InfoRow label="Régime" value={formatTextOrEmpty(student.foodPreferences.diet)} />
-            <div>
-              <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Aimés</span>
-              <TagList items={student.foodPreferences.liked} />
-            </div>
-            <div>
-              <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Non aimés</span>
-              <TagList items={student.foodPreferences.disliked} />
-            </div>
-            <div>
-              <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Intolérances</span>
-              <TagList items={student.foodPreferences.intolerances} />
-            </div>
-          </div>
-        </AdminSection>
+      {onboardingProfile ? (
+        <>
+          <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <AdminSection title="Préférences alimentaires">
+              <div className="flex flex-col gap-4">
+                <InfoRow label="Régime particulier" value={formatTextOrEmpty(onboardingProfile.dietType)} />
+                <InfoRow
+                  label="Repas par jour"
+                  value={formatNumberOrEmpty(onboardingProfile.preferredMealCount ?? 0, "")}
+                />
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Aliments aimés</span>
+                  <TagList items={onboardingProfile.foodPreferences.liked} />
+                </div>
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Aliments à éviter</span>
+                  <TagList items={onboardingProfile.dislikedFoods} />
+                </div>
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Allergies</span>
+                  <TagList items={onboardingProfile.allergies} />
+                </div>
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Intolérances</span>
+                  <TagList items={onboardingProfile.intolerances} />
+                </div>
+                <InfoRow label="Horaires de repas" value={formatTextOrEmpty(onboardingProfile.mealTimingNotes)} />
+                <InfoRow label="Contraintes travail / sociales" value={formatTextOrEmpty(onboardingProfile.workScheduleNotes)} />
+              </div>
+            </AdminSection>
 
-        <AdminSection title="Préférences sportives">
-          <div className="flex flex-col gap-4">
-            <div>
-              <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Sports</span>
-              <TagList items={student.sportPreferences.sports} />
-            </div>
-            <div>
-              <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Matériel</span>
-              <TagList items={student.sportPreferences.equipment} />
-            </div>
-            <div>
-              <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Exercices préférés</span>
-              <TagList items={student.sportPreferences.preferredExercises} />
-            </div>
-            <div>
-              <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Exercices à éviter</span>
-              <TagList items={student.sportPreferences.exercisesToAvoid} />
-            </div>
+            <AdminSection title="Préférences sportives">
+              <div className="flex flex-col gap-4">
+                <InfoRow label="Objectif principal" value={formatTextOrEmpty(onboardingProfile.mainGoal)} />
+                <InfoRow label="Niveau sportif" value={formatTextOrEmpty(student.level)} />
+                <InfoRow
+                  label="Fréquence d'entraînement"
+                  value={formatNumberOrEmpty(student.trainingFrequencyPerWeek, "x / semaine")}
+                />
+                <InfoRow label="Lieu" value={formatTextOrEmpty(student.trainingLocation)} />
+                <InfoRow label="Niveau d'activité / NEAT" value={formatTextOrEmpty(onboardingProfile.neatLevel)} />
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Sports pratiqués</span>
+                  <TagList items={onboardingProfile.sportsPracticed} />
+                </div>
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Autres activités</span>
+                  <TagList items={onboardingProfile.otherActivities} />
+                </div>
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Matériel disponible</span>
+                  <TagList items={onboardingProfile.availableEquipment} />
+                </div>
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Exercices préférés</span>
+                  <TagList items={onboardingProfile.favoriteExercises} />
+                </div>
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Exercices préférés à la salle</span>
+                  <TagList items={onboardingProfile.favoriteGymExercises} />
+                </div>
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Exercices à éviter</span>
+                  <TagList items={onboardingProfile.avoidedExercises} />
+                </div>
+              </div>
+            </AdminSection>
           </div>
-        </AdminSection>
-      </div>
 
-      <div className="mb-6 border border-amber-500/40 bg-amber-500/10 p-6">
-        <div className="flex items-start gap-3">
-          <AlertTriangle size={18} className="mt-0.5 flex-shrink-0 text-amber-400" />
-          <div>
-            <h2 className="mb-1 font-heading text-sm font-bold uppercase text-amber-400">
-              Blessures et contraintes
-            </h2>
-            <p className="text-sm text-amber-200/90">
-              {student.injuries.trim() ? student.injuries : "Aucune information renseignée."}
-            </p>
+          <div className="mb-6">
+            <AdminSection title="Objectifs">
+              <div className="flex flex-col gap-4">
+                <InfoRow label="Objectif principal" value={formatTextOrEmpty(onboardingProfile.mainGoal)} />
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Objectifs secondaires</span>
+                  <TagList items={onboardingProfile.secondaryGoals} />
+                </div>
+                <InfoRow label="Date cible" value={formatTextOrEmpty(onboardingProfile.targetDate ?? "")} />
+                <InfoRow label="Délai souhaité" value={formatTextOrEmpty(onboardingProfile.targetTimeframe)} />
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Indicateurs suivis</span>
+                  <TagList items={onboardingProfile.trackedIndicators} />
+                </div>
+              </div>
+            </AdminSection>
           </div>
-        </div>
-      </div>
+
+          <div className="mb-6 border border-amber-500/40 bg-amber-500/10 p-6">
+            <div className="flex items-start gap-3">
+              <AlertTriangle size={18} className="mt-0.5 flex-shrink-0 text-amber-400" />
+              <div className="flex-1">
+                <h2 className="mb-3 font-heading text-sm font-bold uppercase text-amber-400">
+                  Blessures et contraintes
+                </h2>
+                <div className="flex flex-col gap-3 text-sm text-amber-200/90">
+                  <p>
+                    <span className="mr-2 text-xs uppercase tracking-wide text-amber-400/80">Blessures :</span>
+                    {formatTextOrEmpty(onboardingProfile.onboardingInjuries)}
+                  </p>
+                  <div>
+                    <span className="mb-2 block text-xs uppercase tracking-wide text-amber-400/80">Exercices à éviter</span>
+                    <TagList items={onboardingProfile.avoidedExercises} />
+                  </div>
+                  <p>
+                    <span className="mr-2 text-xs uppercase tracking-wide text-amber-400/80">Notes santé :</span>
+                    {formatTextOrEmpty(onboardingProfile.healthNotes)}
+                  </p>
+                  <p>
+                    <span className="mr-2 text-xs uppercase tracking-wide text-amber-400/80">Traitements :</span>
+                    {formatTextOrEmpty(onboardingProfile.medicalTreatments)}
+                  </p>
+                  <p>
+                    <span className="mr-2 text-xs uppercase tracking-wide text-amber-400/80">Médicaments :</span>
+                    {formatTextOrEmpty(onboardingProfile.medications)}
+                  </p>
+                  <p>
+                    <span className="mr-2 text-xs uppercase tracking-wide text-amber-400/80">Notes coach :</span>
+                    {formatTextOrEmpty(onboardingProfile.trainingNotes)}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <AdminSection title="Préférences alimentaires">
+              <div className="flex flex-col gap-4">
+                <InfoRow label="Régime" value={formatTextOrEmpty(student.foodPreferences.diet)} />
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Aimés</span>
+                  <TagList items={student.foodPreferences.liked} />
+                </div>
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Non aimés</span>
+                  <TagList items={student.foodPreferences.disliked} />
+                </div>
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Intolérances</span>
+                  <TagList items={student.foodPreferences.intolerances} />
+                </div>
+              </div>
+            </AdminSection>
+
+            <AdminSection title="Préférences sportives">
+              <div className="flex flex-col gap-4">
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Sports</span>
+                  <TagList items={student.sportPreferences.sports} />
+                </div>
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Matériel</span>
+                  <TagList items={student.sportPreferences.equipment} />
+                </div>
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Exercices préférés</span>
+                  <TagList items={student.sportPreferences.preferredExercises} />
+                </div>
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Exercices à éviter</span>
+                  <TagList items={student.sportPreferences.exercisesToAvoid} />
+                </div>
+              </div>
+            </AdminSection>
+          </div>
+
+          <div className="mb-6 border border-amber-500/40 bg-amber-500/10 p-6">
+            <div className="flex items-start gap-3">
+              <AlertTriangle size={18} className="mt-0.5 flex-shrink-0 text-amber-400" />
+              <div>
+                <h2 className="mb-1 font-heading text-sm font-bold uppercase text-amber-400">
+                  Blessures et contraintes
+                </h2>
+                <p className="text-sm text-amber-200/90">
+                  {student.injuries.trim() ? student.injuries : "Aucune information renseignée."}
+                </p>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
 
       <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
         <AdminSection title="Programme actif">

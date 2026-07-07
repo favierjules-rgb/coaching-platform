@@ -47,9 +47,14 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 export function AdminOnboardingDetailModal({
   studentId,
   student,
+  onSaved,
 }: {
   studentId: string;
   student: OnboardingProfileSource;
+  /** Appelé après une sauvegarde réussie, pour que la page appelante
+   * rafraîchisse ses propres cartes résumé (elles lisent la même donnée
+   * mais via un fetch séparé, voir hooks/useSupabaseStudentDetail.ts). */
+  onSaved?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -122,6 +127,7 @@ export function AdminOnboardingDetailModal({
     const refreshed = await getStudentOnboardingDetails(supabase, studentId);
     setProfile(refreshed);
     setEditing(false);
+    onSaved?.();
   }
 
   function close() {

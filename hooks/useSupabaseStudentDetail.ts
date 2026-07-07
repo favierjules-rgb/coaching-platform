@@ -9,6 +9,7 @@ import {
   addWeightEntry,
   deleteProgressPhotoSupabase,
   getFullAdminStudent,
+  getStudentProfile,
   updateStudentFields,
   updateStudentPaymentSupabase,
   upsertBodyMeasurements,
@@ -22,6 +23,7 @@ import type {
   BodyMeasurementType,
   ProgressPhoto,
   StudentPaymentProfile,
+  SupabaseStudentProfile,
 } from "@/types";
 
 /**
@@ -39,30 +41,44 @@ export function useSupabaseStudentDetail(studentId: string | undefined) {
   const [loading, setLoading] = useState(true);
   const [student, setStudent] = useState<AdminStudent | null>(null);
   const [feedback, setFeedback] = useState<AdminStudentFeedback[]>([]);
+  // Fiche student_profiles brute (tous les champs onboarding), en plus de
+  // `student` (AdminStudent composé) — les cartes résumé de la page détail
+  // (Préférences alimentaires/sportives, Objectifs, Blessures) doivent lire
+  // les vraies colonnes onboarding (diet_type, sports_practiced, main_goal,
+  // health_notes...), pas seulement le sous-ensemble déjà porté par
+  // AdminStudent.foodPreferences/sportPreferences/injuries — voir
+  // lib/onboarding-form.ts et components/admin/AdminOnboardingDetailModal.tsx
+  // qui utilisent la même source.
+  const [profile, setProfile] = useState<SupabaseStudentProfile | null>(null);
   const entryCountRef = useRef(0);
 
-  const applyFetchResult = useCallback((found: AdminStudent | null, feedbackList: AdminStudentFeedback[]) => {
-    entryCountRef.current = found?.paymentProfile.entries.length ?? 0;
-    setStudent(found);
-    setFeedback(feedbackList);
-    setLoading(false);
-  }, []);
+  const applyFetchResult = useCallback(
+    (found: AdminStudent | null, feedbackList: AdminStudentFeedback[], foundProfile: SupabaseStudentProfile | null) => {
+      entryCountRef.current = found?.paymentProfile.entries.length ?? 0;
+      setStudent(found);
+      setFeedback(feedbackList);
+      setProfile(foundProfile);
+      setLoading(false);
+    },
+    [],
+  );
 
   const refetch = useCallback(async () => {
     if (!studentId) {
-      applyFetchResult(null, []);
+      applyFetchResult(null, [], null);
       return;
     }
     const supabase = createSupabaseBrowserClient();
     if (!supabase) {
-      applyFetchResult(null, []);
+      applyFetchResult(null, [], null);
       return;
     }
-    const [found, feedbackList] = await Promise.all([
+    const [found, feedbackList, foundProfile] = await Promise.all([
       getFullAdminStudent(supabase, studentId),
       getWorkoutFeedbackForStudent(supabase, studentId),
+      getStudentProfile(supabase, studentId),
     ]);
-    applyFetchResult(found, feedbackList);
+    applyFetchResult(found, feedbackList, foundProfile);
   }, [studentId, applyFetchResult]);
 
   // Chargement initial isolé de `refetch` (appelé plus bas par les
@@ -73,19 +89,20 @@ export function useSupabaseStudentDetail(studentId: string | undefined) {
     let cancelled = false;
     async function load() {
       if (!studentId) {
-        if (!cancelled) applyFetchResult(null, []);
+        if (!cancelled) applyFetchResult(null, [], null);
         return;
       }
       const supabase = createSupabaseBrowserClient();
       if (!supabase) {
-        if (!cancelled) applyFetchResult(null, []);
+        if (!cancelled) applyFetchResult(null, [], null);
         return;
       }
-      const [found, feedbackList] = await Promise.all([
+      const [found, feedbackList, foundProfile] = await Promise.all([
         getFullAdminStudent(supabase, studentId),
         getWorkoutFeedbackForStudent(supabase, studentId),
+        getStudentProfile(supabase, studentId),
       ]);
-      if (!cancelled) applyFetchResult(found, feedbackList);
+      if (!cancelled) applyFetchResult(found, feedbackList, foundProfile);
     }
     load();
     return () => {
@@ -194,7 +211,9 @@ export function useSupabaseStudentDetail(studentId: string | undefined) {
   return {
     loading,
     student,
+    profile,
     feedback,
+    refetch,
     updateStudentFields: updateFields,
     updateWeight,
     updateTarget,
