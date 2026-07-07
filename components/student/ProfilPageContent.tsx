@@ -9,6 +9,7 @@ import { InjurySection } from "@/components/student/InjurySection";
 import { MeasurementsSection } from "@/components/student/MeasurementsSection";
 import { InfoRow, ProfileSection, TagList } from "@/components/student/ProfileSection";
 import { ProgressPhotoGallerySection } from "@/components/student/ProgressPhotoGallerySection";
+import { StudentOnboardingDetailModal } from "@/components/student/StudentOnboardingDetailModal";
 import { WeightEvolutionCard } from "@/components/student/WeightEvolutionCard";
 import { useStudentProfile, type StudentProfileState } from "@/hooks/useStudentProfile";
 import { useSupabaseStudentProfile } from "@/hooks/useSupabaseStudentProfile";
@@ -88,7 +89,10 @@ export function ProfilPageContent({
             </button>
           )}
         </div>
-        <EditPersonalInfoModal profile={profile} onSave={updateProfile} />
+        <div className="flex flex-wrap gap-2">
+          {useSupabase && <StudentOnboardingDetailModal student={profile} />}
+          <EditPersonalInfoModal profile={profile} onSave={updateProfile} />
+        </div>
       </div>
 
       <CoachingSummaryCard profile={profile} />
@@ -138,98 +142,107 @@ export function ProfilPageContent({
         />
       </div>
 
-      <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <ProfileSection title="Préférences alimentaires">
-          <div className="flex flex-col gap-4">
-            <div>
-              <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
-                Aliments aimés
-              </span>
-              <TagList items={foodPreferences.liked} />
-            </div>
-            <div>
-              <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
-                Aliments non aimés
-              </span>
-              <TagList items={foodPreferences.disliked} />
-            </div>
-            <div>
-              <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
-                Intolérances
-              </span>
-              <TagList items={foodPreferences.intolerances} />
-            </div>
-            <div>
-              <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
-                Allergies
-              </span>
-              <TagList items={foodPreferences.allergies} />
-            </div>
-            <InfoRow label="Régime alimentaire" value={foodPreferences.diet} />
-            <InfoRow
-              label="Repas par jour"
-              value={`${foodPreferences.mealsPerDay}`}
-            />
-            <div>
-              <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
-                Horaires habituels
-              </span>
-              <TagList items={foodPreferences.mealTimes} />
-            </div>
-            <InfoRow
-              label="Contraintes sociales / pro"
-              value={foodPreferences.socialConstraints}
-            />
-          </div>
-        </ProfileSection>
+      {/* Ces 4 sections viennent de data/student.ts (données d'exemple statiques,
+          jamais de Supabase) — voir app/(student)/profil/page.tsx. Pour un
+          élève Supabase, ces mêmes informations (et bien plus) sont déjà
+          disponibles via "Voir mes informations complètes" ci-dessus ; les
+          afficher ici aussi les ferait passer pour de vraies réponses. */}
+      {!useSupabase && (
+        <>
+          <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <ProfileSection title="Préférences alimentaires">
+              <div className="flex flex-col gap-4">
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                    Aliments aimés
+                  </span>
+                  <TagList items={foodPreferences.liked} />
+                </div>
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                    Aliments non aimés
+                  </span>
+                  <TagList items={foodPreferences.disliked} />
+                </div>
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                    Intolérances
+                  </span>
+                  <TagList items={foodPreferences.intolerances} />
+                </div>
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                    Allergies
+                  </span>
+                  <TagList items={foodPreferences.allergies} />
+                </div>
+                <InfoRow label="Régime alimentaire" value={foodPreferences.diet} />
+                <InfoRow
+                  label="Repas par jour"
+                  value={`${foodPreferences.mealsPerDay}`}
+                />
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                    Horaires habituels
+                  </span>
+                  <TagList items={foodPreferences.mealTimes} />
+                </div>
+                <InfoRow
+                  label="Contraintes sociales / pro"
+                  value={foodPreferences.socialConstraints}
+                />
+              </div>
+            </ProfileSection>
 
-        <ProfileSection title="Préférences sportives">
-          <div className="flex flex-col gap-4">
-            <InfoRow label="Objectif sportif" value={sportPreferences.mainGoal} />
-            <InfoRow label="Niveau sportif" value={profile.level} />
-            <div>
-              <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
-                Sports pratiqués
-              </span>
-              <TagList items={sportPreferences.sports} />
-            </div>
-            <div>
-              <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
-                Matériel disponible
-              </span>
-              <TagList items={sportPreferences.equipment} />
-            </div>
-            <InfoRow label="Lieu d'entraînement" value={sportPreferences.location} />
-            <InfoRow
-              label="Séances par semaine"
-              value={`${sportPreferences.sessionsPerWeek}`}
-            />
-            <div>
-              <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
-                Exercices préférés
-              </span>
-              <TagList items={sportPreferences.preferredExercises} />
-            </div>
-            <div>
-              <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
-                Exercices à éviter
-              </span>
-              <TagList items={sportPreferences.exercisesToAvoid} />
-            </div>
-            <div>
-              <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
-                Disponibilité hebdomadaire
-              </span>
-              <TagList items={sportPreferences.weeklyAvailability} />
-            </div>
+            <ProfileSection title="Préférences sportives">
+              <div className="flex flex-col gap-4">
+                <InfoRow label="Objectif sportif" value={sportPreferences.mainGoal} />
+                <InfoRow label="Niveau sportif" value={profile.level} />
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                    Sports pratiqués
+                  </span>
+                  <TagList items={sportPreferences.sports} />
+                </div>
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                    Matériel disponible
+                  </span>
+                  <TagList items={sportPreferences.equipment} />
+                </div>
+                <InfoRow label="Lieu d'entraînement" value={sportPreferences.location} />
+                <InfoRow
+                  label="Séances par semaine"
+                  value={`${sportPreferences.sessionsPerWeek}`}
+                />
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                    Exercices préférés
+                  </span>
+                  <TagList items={sportPreferences.preferredExercises} />
+                </div>
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                    Exercices à éviter
+                  </span>
+                  <TagList items={sportPreferences.exercisesToAvoid} />
+                </div>
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                    Disponibilité hebdomadaire
+                  </span>
+                  <TagList items={sportPreferences.weeklyAvailability} />
+                </div>
+              </div>
+            </ProfileSection>
           </div>
-        </ProfileSection>
-      </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <InjurySection injury={injuryNote} />
-        <GoalsSection goal={studentGoal} />
-      </div>
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <InjurySection injury={injuryNote} />
+            <GoalsSection goal={studentGoal} />
+          </div>
+        </>
+      )}
     </div>
   );
 }

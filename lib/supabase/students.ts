@@ -61,13 +61,14 @@ type PaymentEntryRow = Database["public"]["Tables"]["payment_entries"]["Row"];
 type CoachNoteRow = Database["public"]["Tables"]["coach_notes"]["Row"];
 type WeightEntryRow = Database["public"]["Tables"]["weight_entries"]["Row"];
 
-function devWarn(context: string, error: { message: string } | null): void {
+function devWarn(context: string, error: { message: string; code?: string; details?: string; hint?: string } | null): void {
   if (error) {
-    // Log l'objet d'erreur complet (pas juste .message) : les erreurs
-    // PostgREST portent souvent le vrai diagnostic dans .code/.details/.hint
-    // (contrainte violée, colonne inconnue, RLS...), invisibles si on ne
-    // garde que le message générique.
-    console.error(`[Supabase] ${context} :`, error);
+    // Chaîne composée plutôt que l'objet brut : un PostgrestError passé tel
+    // quel à console.error s'affiche "{}" dans l'overlay Next.js, ce qui
+    // rend le vrai diagnostic (colonne inconnue, RLS...) invisible.
+    console.error(
+      `[Supabase] ${context} : ${error.message}${error.code ? ` (code ${error.code})` : ""}${error.details ? ` — ${error.details}` : ""}${error.hint ? ` — ${error.hint}` : ""}`,
+    );
   }
 }
 
@@ -165,6 +166,42 @@ function mapStudentProfileRow(row: StudentProfileRow): SupabaseStudentProfile {
     targetDate: row.target_date,
     priority: (row.priority as GoalPriority | null) ?? null,
     trackedIndicators: asStringArray(row.tracked_indicators) as GoalIndicator[],
+    onboardingCompleted: row.onboarding_completed,
+    onboardingCompletedAt: row.onboarding_completed_at,
+    targetTimeframe: row.target_timeframe ?? "",
+    activityLevel: row.activity_level ?? "",
+    neatLevel: row.neat_level ?? "",
+    sportsPracticed: asStringArray(row.sports_practiced),
+    otherActivities: asStringArray(row.other_activities),
+    availableEquipment: asStringArray(row.available_equipment),
+    favoriteExercises: asStringArray(row.favorite_exercises),
+    favoriteGymExercises: asStringArray(row.favorite_gym_exercises),
+    avoidedExercises: asStringArray(row.avoided_exercises),
+    onboardingInjuries: row.injuries ?? "",
+    trainingNotes: row.training_notes ?? "",
+    medicalTreatments: row.medical_treatments ?? "",
+    medications: row.medications ?? "",
+    healthNotes: row.health_notes ?? "",
+    hydrationLevel: row.hydration_level ?? "",
+    dailyWaterIntake: row.daily_water_intake ?? "",
+    sleepDuration: row.sleep_duration ?? "",
+    sleepQuality: row.sleep_quality ?? "",
+    recoveryNotes: row.recovery_notes ?? "",
+    lifestyleNotes: row.lifestyle_notes ?? "",
+    motivationSource: row.motivation_source ?? "",
+    recentLifeEvents: row.recent_life_events ?? "",
+    mentalWellbeingGoal: row.mental_wellbeing_goal ?? "",
+    emotionalWellbeingNotes: row.emotional_wellbeing_notes ?? "",
+    dislikedFoods: asStringArray(row.disliked_foods),
+    allergies: asStringArray(row.allergies),
+    intolerances: asStringArray(row.intolerances),
+    dietType: row.diet_type ?? "",
+    preferredMealCount: row.preferred_meal_count,
+    mealTimingNotes: row.meal_timing_notes ?? "",
+    hungerNotes: row.hunger_notes ?? "",
+    snackingNotes: row.snacking_notes ?? "",
+    workScheduleNotes: row.work_schedule_notes ?? "",
+    nutritionNotes: row.nutrition_notes ?? "",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
