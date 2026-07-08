@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { fromSupabaseMeasurementType, toSupabaseMeasurementType } from "@/lib/supabase/measurement-types";
+import { getAssignedNutritionPlanIdsByStudent } from "@/lib/supabase/nutrition";
 import { getAssignedProgramIdsByStudent } from "@/lib/supabase/programs";
 import { normalizePaymentProfile } from "@/lib/payments";
 import type { CustomMeasurementInput } from "@/components/student/UpdateMeasurementsModal";
@@ -415,13 +416,13 @@ function toMockPaymentProfile(
  * Compose un AdminStudent complet à partir de la fiche élève Supabase
  * (identité + statut, table `students`) et de son profil coaching (table
  * `student_profiles`, voir docs/supabase-student-model.md), déjà convertis
- * en types mock. `assignedNutritionPlanIds` / `assignedDocumentIds` /
- * `measurementHistory` restent volontairement vides : plans nutrition,
- * documents et historique de mensurations ne sont pas encore migrés —
- * normalizeAdminStudent() garantit un affichage propre ("Aucun programme
- * attribué"...) plutôt qu'un plantage. `assignedProgramIds` vient bien de la
- * vraie table `assignments` (voir lib/supabase/programs.ts), les programmes
- * ayant été migrés.
+ * en types mock. `assignedDocumentIds` / `measurementHistory` restent
+ * volontairement vides : documents et historique de mensurations ne sont
+ * pas encore migrés — normalizeAdminStudent() garantit un affichage propre
+ * ("Aucun document"...) plutôt qu'un plantage. `assignedProgramIds` /
+ * `assignedNutritionPlanIds` viennent bien de la vraie table `assignments`
+ * (voir lib/supabase/programs.ts et lib/supabase/nutrition.ts), programmes
+ * et plans alimentaires ayant été migrés.
  *
  * `profile` peut être `null` (élève sans fiche `student_profiles` encore
  * créée) : les champs coaching retombent alors sur des valeurs par défaut
@@ -438,6 +439,7 @@ function toAdminStudent(
     paymentProfile: StudentPaymentProfile;
     coachNotes: CoachNote[];
     assignedProgramIds: string[];
+    assignedNutritionPlanIds: string[];
   },
 ): AdminStudent {
   const currentWeightKg = profile?.currentWeightKg ?? 0;
@@ -480,7 +482,7 @@ function toAdminStudent(
     progressPhotos: extras.progressPhotos,
     paymentProfile: extras.paymentProfile,
     assignedProgramIds: extras.assignedProgramIds,
-    assignedNutritionPlanIds: [],
+    assignedNutritionPlanIds: extras.assignedNutritionPlanIds,
     assignedDocumentIds: [],
     coachNotes: extras.coachNotes,
     createdAt: student.createdAt,
@@ -511,11 +513,12 @@ export async function getStudents(supabase: TypedSupabaseClient): Promise<AdminS
   }
 
   const studentIds = data.map((row) => row.id);
-  const [{ data: profileRows, error: profilesError }, { data: paymentRows, error: paymentsError }, programIdsByStudent] =
+  const [{ data: profileRows, error: profilesError }, { data: paymentRows, error: paymentsError }, programIdsByStudent, nutritionPlanIdsByStudent] =
     await Promise.all([
       supabase.from("student_profiles").select("*").in("student_id", studentIds),
       supabase.from("payments").select("*").in("student_id", studentIds),
       getAssignedProgramIdsByStudent(supabase, studentIds),
+      getAssignedNutritionPlanIdsByStudent(supabase, studentIds),
     ]);
   devWarn("getStudents (profiles)", profilesError);
   devWarn("getStudents (payments)", paymentsError);
@@ -532,6 +535,7 @@ export async function getStudents(supabase: TypedSupabaseClient): Promise<AdminS
       paymentProfile: toMockPaymentProfile(student.id, paymentByStudent.get(student.id) ?? null, []),
       coachNotes: [],
       assignedProgramIds: programIdsByStudent.get(student.id) ?? [],
+      assignedNutritionPlanIds: nutritionPlanIdsByStudent.get(student.id) ?? [],
     });
   });
 }
@@ -649,7 +653,7 @@ export async function getFullAdminStudent(
     return null;
   }
 
-  const [profile, weightHistory, { measurements, customMeasurements }, progressPhotos, paymentProfile, coachNotes, assignedProgramIdsByStudent] =
+  const [profile, weightHistory, { measurements, customMeasurements }, progressPhotos, paymentProfile, coachNotes, assignedProgramIdsByStudent, assignedNutritionPlanIdsByStudent] =
     await Promise.all([
       getStudentProfile(supabase, studentId),
       getWeightHistory(supabase, studentId),
@@ -658,6 +662,7 @@ export async function getFullAdminStudent(
       getStudentPayments(supabase, studentId),
       getStudentCoachNotes(supabase, studentId),
       getAssignedProgramIdsByStudent(supabase, [studentId]),
+      getAssignedNutritionPlanIdsByStudent(supabase, [studentId]),
     ]);
 
   return toAdminStudent(student, profile, {
@@ -668,6 +673,7 @@ export async function getFullAdminStudent(
     paymentProfile,
     coachNotes,
     assignedProgramIds: assignedProgramIdsByStudent.get(studentId) ?? [],
+    assignedNutritionPlanIds: assignedNutritionPlanIdsByStudent.get(studentId) ?? [],
   });
 }
 

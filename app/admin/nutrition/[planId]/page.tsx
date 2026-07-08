@@ -9,7 +9,15 @@ import { AssignStudentsModal } from "@/components/admin/AssignStudentsModal";
 import { NutritionPlanBuilder, type NutritionPlanBuilderData } from "@/components/admin/NutritionPlanBuilder";
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
+import { useContentAssignment } from "@/hooks/useContentAssignment";
+import { useSupabaseNutritionPlans } from "@/hooks/useSupabaseNutritionPlans";
+import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { contentStatusLabels, fullName } from "@/lib/admin";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import {
+  updateNutritionPlan as updateNutritionPlanSupabase,
+  updateNutritionPlanStatus as updateNutritionPlanStatusSupabase,
+} from "@/lib/supabase/nutrition";
 
 const goalLabels: Record<string, string> = {
   "perte-de-poids": "Perte de poids",
@@ -23,7 +31,21 @@ export default function NutritionPlanDetailPage() {
   const { state, updateNutritionPlan, setAssignment } = useAdminData();
   const [editing, setEditing] = useState(false);
 
-  const plan = state.nutritionPlans.find((p) => p.id === params.planId);
+  // Priorité Supabase dès qu'au moins un plan/élève réel existe — même
+  // pattern que /admin/programmes/[programId]. Quand actif, ce plan précis
+  // est garanti réel (la liste bascule entièrement, jamais de mélange).
+  const supabaseNutritionPlans = useSupabaseNutritionPlans();
+  const isSupabasePlansActive = supabaseNutritionPlans.plans.length > 0;
+  const plans = isSupabasePlansActive ? supabaseNutritionPlans.plans : state.nutritionPlans;
+  const supabaseStudents = useSupabaseStudents();
+  const students = supabaseStudents.students.length > 0 ? supabaseStudents.students : state.students;
+  const handleSetAssignment = useContentAssignment(
+    { nutrition: isSupabasePlansActive && supabaseStudents.students.length > 0 },
+    setAssignment,
+    supabaseNutritionPlans.refetch,
+  );
+
+  const plan = plans.find((p) => p.id === params.planId);
 
   if (!plan) {
     return (
@@ -37,11 +59,32 @@ export default function NutritionPlanDetailPage() {
     );
   }
 
-  const assignedStudents = state.students.filter((s) => plan.assignedStudentIds.includes(s.id));
+  const assignedStudents = students.filter((s) => plan.assignedStudentIds.includes(s.id));
 
-  function handleSave(data: NutritionPlanBuilderData) {
+  async function handleSave(data: NutritionPlanBuilderData) {
+    if (isSupabasePlansActive) {
+      const supabase = createSupabaseBrowserClient();
+      if (supabase) {
+        await updateNutritionPlanSupabase(supabase, plan!.id, data);
+        await supabaseNutritionPlans.refetch();
+        setEditing(false);
+        return;
+      }
+    }
     updateNutritionPlan(plan!.id, { ...data, days: data.days.map((d) => ({ ...d, planId: plan!.id })) });
     setEditing(false);
+  }
+
+  async function handleArchive() {
+    if (isSupabasePlansActive) {
+      const supabase = createSupabaseBrowserClient();
+      if (supabase) {
+        await updateNutritionPlanStatusSupabase(supabase, plan!.id, "archivé");
+        await supabaseNutritionPlans.refetch();
+        return;
+      }
+    }
+    updateNutritionPlan(plan!.id, { status: "archivé" });
   }
 
   return (
@@ -103,14 +146,14 @@ export default function NutritionPlanDetailPage() {
                 contentLabel={plan.name}
                 contentType="nutrition"
                 contentId={plan.id}
-                students={state.students}
+                students={students}
                 assignedStudentIds={plan.assignedStudentIds}
-                onSetAssignment={setAssignment}
+                onSetAssignment={handleSetAssignment}
                 triggerLabel="Assigner à des élèves"
               />
               <button
                 type="button"
-                onClick={() => updateNutritionPlan(plan.id, { status: "archivé" })}
+                onClick={handleArchive}
                 className="flex items-center gap-1.5 border border-red-500/50 px-4 py-2 text-xs uppercase tracking-widest text-red-400 transition-colors hover:bg-red-500/10"
               >
                 <Archive size={13} />

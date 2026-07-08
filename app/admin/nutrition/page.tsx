@@ -8,6 +8,9 @@ import { AssignStudentsModal } from "@/components/admin/AssignStudentsModal";
 import { FilterButtons, SearchInput } from "@/components/admin/SearchAndFilters";
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
+import { useContentAssignment } from "@/hooks/useContentAssignment";
+import { useSupabaseNutritionPlans } from "@/hooks/useSupabaseNutritionPlans";
+import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { contentStatusLabels, matchesTextSearch } from "@/lib/admin";
 import type { AdminContentStatus } from "@/types";
 
@@ -29,7 +32,18 @@ const goalLabels: Record<string, string> = {
 
 export default function AdminNutritionPlansPage() {
   const { state, setAssignment } = useAdminData();
-  const { nutritionPlans, students } = state;
+
+  // Priorité Supabase dès qu'au moins un plan/élève réel existe, sinon
+  // repli sur les listes mock — même pattern que /admin/programmes.
+  const supabaseNutritionPlans = useSupabaseNutritionPlans();
+  const nutritionPlans = supabaseNutritionPlans.plans.length > 0 ? supabaseNutritionPlans.plans : state.nutritionPlans;
+  const supabaseStudents = useSupabaseStudents();
+  const students = supabaseStudents.students.length > 0 ? supabaseStudents.students : state.students;
+  const handleSetAssignment = useContentAssignment(
+    { nutrition: supabaseNutritionPlans.plans.length > 0 && supabaseStudents.students.length > 0 },
+    setAssignment,
+    supabaseNutritionPlans.refetch,
+  );
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("tous");
@@ -133,7 +147,7 @@ export default function AdminNutritionPlansPage() {
                   contentId={plan.id}
                   students={students}
                   assignedStudentIds={plan.assignedStudentIds}
-                  onSetAssignment={setAssignment}
+                  onSetAssignment={handleSetAssignment}
                 />
               </div>
             </div>

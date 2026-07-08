@@ -16,6 +16,7 @@ import { StatCard } from "@/components/admin/StatCard";
 import { AdminSection } from "@/components/admin/AdminSection";
 import { StatusBadge, studentStatusTone } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
+import { useSupabaseNutritionPlans } from "@/hooks/useSupabaseNutritionPlans";
 import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { useSupabaseAdminFeedback } from "@/hooks/useSupabaseAdminFeedback";
@@ -76,16 +77,14 @@ function StudentWatchList({
 
 export default function AdminDashboardPage() {
   const { state } = useAdminData();
-  const { nutritionPlans, documents } = state;
+  const { documents } = state;
 
-  // Élèves, retours entraînement et programmes : priorité Supabase dès qu'il
-  // y a au moins une ligne réelle, sinon repli sur les données mock — même
-  // pattern que /admin/eleves, /admin/retours et /admin/programmes (voir
-  // hooks/useSupabaseStudents.ts, hooks/useSupabaseAdminFeedback.ts et
-  // hooks/useSupabasePrograms.ts). Plans/documents restent mock dans tous
-  // les cas : ces contenus ne sont pas encore migrés, le compteur
-  // correspondant est donc explicitement marqué "(exemple)" plutôt que
-  // présenté comme réel.
+  // Élèves, retours entraînement, programmes et plans alimentaires :
+  // priorité Supabase dès qu'il y a au moins une ligne réelle, sinon repli
+  // sur les données mock — même pattern que /admin/eleves, /admin/retours,
+  // /admin/programmes et /admin/nutrition. Documents restent mock dans tous
+  // les cas : ce contenu n'est pas encore migré, le compteur correspondant
+  // est donc explicitement marqué "(exemple)" plutôt que présenté comme réel.
   const supabaseStudents = useSupabaseStudents();
   const students = supabaseStudents.students.length > 0 ? supabaseStudents.students : state.students;
   const supabaseFeedback = useSupabaseAdminFeedback();
@@ -93,6 +92,9 @@ export default function AdminDashboardPage() {
   const supabasePrograms = useSupabasePrograms();
   const programs = supabasePrograms.programs.length > 0 ? supabasePrograms.programs : state.programs;
   const programsAreReal = supabasePrograms.programs.length > 0;
+  const supabaseNutritionPlans = useSupabaseNutritionPlans();
+  const nutritionPlans = supabaseNutritionPlans.plans.length > 0 ? supabaseNutritionPlans.plans : state.nutritionPlans;
+  const nutritionPlansAreReal = supabaseNutritionPlans.plans.length > 0;
 
   const activeStudents = students.filter((s) => s.status === "actif");
   const pausedStudents = students.filter((s) => s.status === "pause");
@@ -120,7 +122,11 @@ export default function AdminDashboardPage() {
           label={programsAreReal ? "Programmes actifs" : "Programmes actifs (exemple)"}
           value={activePrograms.length}
         />
-        <StatCard icon={UtensilsCrossed} label="Plans alimentaires actifs (exemple)" value={activePlans.length} />
+        <StatCard
+          icon={UtensilsCrossed}
+          label={nutritionPlansAreReal ? "Plans alimentaires actifs" : "Plans alimentaires actifs (exemple)"}
+          value={activePlans.length}
+        />
         <StatCard icon={FileText} label="Documents partagés (exemple)" value={publishedDocuments.length} />
         <StatCard
           icon={ClipboardList}

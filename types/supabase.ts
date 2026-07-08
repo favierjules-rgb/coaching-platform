@@ -909,6 +909,132 @@ export interface Database {
         };
         Relationships: [];
       };
+      nutrition_plans: {
+        Row: {
+          id: string;
+          student_id: string | null;
+          coach_id: string | null;
+          name: string;
+          description: string;
+          coach_notes: string;
+          hydration_tip: string;
+          supplements: string[] | null;
+          goal_type: "perte-de-poids" | "maintien" | "prise-de-masse" | "performance";
+          daily_target: { calories?: number; protein?: number; carbs?: number; fat?: number } | null;
+          weekly_target_calories: number | null;
+          status: "actif" | "ancien" | "prochain";
+          shopping_list: string[] | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          student_id?: string | null;
+          coach_id?: string | null;
+          name: string;
+          description?: string;
+          coach_notes?: string;
+          hydration_tip?: string;
+          supplements?: string[] | null;
+          goal_type?: "perte-de-poids" | "maintien" | "prise-de-masse" | "performance";
+          daily_target?: { calories?: number; protein?: number; carbs?: number; fat?: number } | null;
+          weekly_target_calories?: number | null;
+          status?: "actif" | "ancien" | "prochain";
+          shopping_list?: string[] | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          student_id?: string | null;
+          coach_id?: string | null;
+          name?: string;
+          description?: string;
+          coach_notes?: string;
+          hydration_tip?: string;
+          supplements?: string[] | null;
+          goal_type?: "perte-de-poids" | "maintien" | "prise-de-masse" | "performance";
+          daily_target?: { calories?: number; protein?: number; carbs?: number; fat?: number } | null;
+          weekly_target_calories?: number | null;
+          status?: "actif" | "ancien" | "prochain";
+          shopping_list?: string[] | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      nutrition_days: {
+        Row: {
+          id: string;
+          plan_id: string;
+          week_start_date: string | null;
+          day: string;
+          status: "non-commence" | "en-cours" | "valide";
+          target: { calories?: number; protein?: number; carbs?: number; fat?: number } | null;
+          actual: Record<string, unknown> | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          plan_id: string;
+          week_start_date?: string | null;
+          day: string;
+          status?: "non-commence" | "en-cours" | "valide";
+          target?: { calories?: number; protein?: number; carbs?: number; fat?: number } | null;
+          actual?: Record<string, unknown> | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          plan_id?: string;
+          week_start_date?: string | null;
+          day?: string;
+          status?: "non-commence" | "en-cours" | "valide";
+          target?: { calories?: number; protein?: number; carbs?: number; fat?: number } | null;
+          actual?: Record<string, unknown> | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      meals: {
+        Row: {
+          id: string;
+          nutrition_day_id: string;
+          slot: string;
+          name: string;
+          items: { name: string; quantity: string }[] | null;
+          macros: { calories?: number; protein?: number; carbs?: number; fat?: number } | null;
+          coach_notes: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          nutrition_day_id: string;
+          slot: string;
+          name?: string;
+          items?: { name: string; quantity: string }[] | null;
+          macros?: { calories?: number; protein?: number; carbs?: number; fat?: number } | null;
+          coach_notes?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          nutrition_day_id?: string;
+          slot?: string;
+          name?: string;
+          items?: { name: string; quantity: string }[] | null;
+          macros?: { calories?: number; protein?: number; carbs?: number; fat?: number } | null;
+          coach_notes?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

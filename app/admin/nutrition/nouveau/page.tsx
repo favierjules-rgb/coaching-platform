@@ -8,13 +8,40 @@ import { ArrowLeft, CheckCircle } from "lucide-react";
 import { AssignStudentsModal } from "@/components/admin/AssignStudentsModal";
 import { NutritionPlanBuilder, type NutritionPlanBuilderData } from "@/components/admin/NutritionPlanBuilder";
 import { useAdminData } from "@/hooks/useAdminData";
+import { useContentAssignment } from "@/hooks/useContentAssignment";
+import { useSupabaseNutritionPlans } from "@/hooks/useSupabaseNutritionPlans";
+import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { createNutritionPlan as createNutritionPlanSupabase } from "@/lib/supabase/nutrition";
 
 export default function NewNutritionPlanPage() {
   const router = useRouter();
   const { state, createNutritionPlan, setAssignment } = useAdminData();
   const [createdId, setCreatedId] = useState<string | null>(null);
 
-  function handleSave(data: NutritionPlanBuilderData) {
+  // Priorité Supabase dès qu'au moins un plan/élève réel existe — même
+  // pattern que /admin/programmes/nouveau. Un nouveau plan est créé en réel
+  // dès que Supabase est configuré (jamais seulement en mock quand
+  // disponible).
+  const supabaseNutritionPlans = useSupabaseNutritionPlans();
+  const supabaseStudents = useSupabaseStudents();
+  const students = supabaseStudents.students.length > 0 ? supabaseStudents.students : state.students;
+  const handleSetAssignment = useContentAssignment(
+    { nutrition: supabaseNutritionPlans.plans.length > 0 && supabaseStudents.students.length > 0 },
+    setAssignment,
+    supabaseNutritionPlans.refetch,
+  );
+
+  async function handleSave(data: NutritionPlanBuilderData) {
+    const supabase = createSupabaseBrowserClient();
+    if (supabase) {
+      const id = await createNutritionPlanSupabase(supabase, data);
+      if (id) {
+        await supabaseNutritionPlans.refetch();
+        setCreatedId(id);
+        return;
+      }
+    }
     const id = createNutritionPlan({
       ...data,
       assignedStudentIds: [],
@@ -23,7 +50,8 @@ export default function NewNutritionPlanPage() {
     setCreatedId(id);
   }
 
-  const createdPlan = createdId ? state.nutritionPlans.find((p) => p.id === createdId) : null;
+  const plans = supabaseNutritionPlans.plans.length > 0 ? supabaseNutritionPlans.plans : state.nutritionPlans;
+  const createdPlan = createdId ? plans.find((p) => p.id === createdId) : null;
 
   return (
     <div>
@@ -52,9 +80,9 @@ export default function NewNutritionPlanPage() {
               contentLabel={createdPlan.name}
               contentType="nutrition"
               contentId={createdPlan.id}
-              students={state.students}
+              students={students}
               assignedStudentIds={createdPlan.assignedStudentIds}
-              onSetAssignment={setAssignment}
+              onSetAssignment={handleSetAssignment}
               triggerLabel="Assigner à des élèves"
               triggerVariant="primary"
             />

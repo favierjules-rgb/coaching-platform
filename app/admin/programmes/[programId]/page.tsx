@@ -17,7 +17,7 @@ import {
   UntaggedExercisesAlert,
 } from "@/components/shared/TrainingMetricsSummary";
 import { useAdminData } from "@/hooks/useAdminData";
-import { useProgramAssignment } from "@/hooks/useProgramAssignment";
+import { useContentAssignment } from "@/hooks/useContentAssignment";
 import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { contentStatusLabels, fullName, weekDays } from "@/lib/admin";
@@ -40,8 +40,8 @@ export default function ProgramDetailPage() {
   const programs = isSupabaseProgramsActive ? supabasePrograms.programs : state.programs;
   const supabaseStudents = useSupabaseStudents();
   const students = supabaseStudents.students.length > 0 ? supabaseStudents.students : state.students;
-  const handleSetAssignment = useProgramAssignment(
-    isSupabaseProgramsActive && supabaseStudents.students.length > 0,
+  const handleSetAssignment = useContentAssignment(
+    { programme: isSupabaseProgramsActive && supabaseStudents.students.length > 0 },
     setAssignment,
     supabasePrograms.refetch,
   );

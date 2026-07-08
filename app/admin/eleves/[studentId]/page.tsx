@@ -32,8 +32,9 @@ import {
   weightHistory as elveWeightHistory,
 } from "@/data/student";
 import { useAdminData } from "@/hooks/useAdminData";
-import { useProgramAssignment } from "@/hooks/useProgramAssignment";
+import { useContentAssignment } from "@/hooks/useContentAssignment";
 import { useStudentProfile } from "@/hooks/useStudentProfile";
+import { useSupabaseNutritionPlans } from "@/hooks/useSupabaseNutritionPlans";
 import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
 import { useSupabaseStudentDetail } from "@/hooks/useSupabaseStudentDetail";
 import {
@@ -78,16 +79,18 @@ export default function AdminStudentDetailPage() {
   const router = useRouter();
   const { state, updateStudent, addCoachNote, setAssignment, unlockDocumentForStudent, unlockAllDocumentsForStudent } =
     useAdminData();
-  const { students, nutritionPlans, documents, feedback, manualDocumentUnlocks } = state;
+  const { students, documents, feedback, manualDocumentUnlocks } = state;
   const [selectedMuscleGroup, setSelectedMuscleGroup] = useState<MuscleGroupFilter>("tous");
   const [statusActionError, setStatusActionError] = useState(false);
 
-  // Priorité Supabase dès qu'au moins un programme réel existe — même
-  // pattern que /admin/programmes et /admin/eleves. L'assignation réelle
-  // n'est activée que si l'élève affiché est lui-même réel (isSupabaseStudent,
-  // défini plus bas).
+  // Priorité Supabase dès qu'au moins un programme/plan réel existe — même
+  // pattern que /admin/programmes, /admin/nutrition et /admin/eleves.
+  // L'assignation réelle n'est activée que si l'élève affiché est lui-même
+  // réel (isSupabaseStudent, défini plus bas).
   const supabasePrograms = useSupabasePrograms();
   const programs = supabasePrograms.programs.length > 0 ? supabasePrograms.programs : state.programs;
+  const supabaseNutritionPlans = useSupabaseNutritionPlans();
+  const nutritionPlans = supabaseNutritionPlans.plans.length > 0 ? supabaseNutritionPlans.plans : state.nutritionPlans;
 
   // Toujours monté (règle des hooks), même si l'élève affiché n'est pas
   // l'élève relié — utilisé uniquement quand isLinked est vrai.
@@ -106,7 +109,15 @@ export default function AdminStudentDetailPage() {
   const supabaseDetail = useSupabaseStudentDetail(params.studentId);
   const isSupabaseStudent = supabaseDetail.student !== null;
   const canAssignRealPrograms = isSupabaseStudent && supabasePrograms.programs.length > 0;
-  const handleSetAssignment = useProgramAssignment(canAssignRealPrograms, setAssignment, supabasePrograms.refetch);
+  const canAssignRealNutrition = isSupabaseStudent && supabaseNutritionPlans.plans.length > 0;
+  const handleSetAssignment = useContentAssignment(
+    { programme: canAssignRealPrograms, nutrition: canAssignRealNutrition },
+    setAssignment,
+    () => {
+      void supabasePrograms.refetch();
+      void supabaseNutritionPlans.refetch();
+    },
+  );
 
   const rawStudent = isSupabaseStudent ? supabaseDetail.student : students.find((s) => s.id === params.studentId);
 
@@ -445,6 +456,7 @@ export default function AdminStudentDetailPage() {
             onSetAssignment={handleSetAssignment}
             isSupabaseStudent={isSupabaseStudent}
             canAssignRealPrograms={canAssignRealPrograms}
+            canAssignRealNutrition={canAssignRealNutrition}
           />
           <AddCoachNoteModal onAdd={handleAddCoachNote} />
           {isSupabaseStudent && (
@@ -571,6 +583,7 @@ export default function AdminStudentDetailPage() {
                 </div>
                 <InfoRow label="Horaires de repas" value={formatTextOrEmpty(onboardingProfile.mealTimingNotes)} />
                 <InfoRow label="Contraintes travail / sociales" value={formatTextOrEmpty(onboardingProfile.workScheduleNotes)} />
+                <InfoRow label="Notes nutrition" value={formatTextOrEmpty(onboardingProfile.nutritionNotes)} />
               </div>
             </AdminSection>
 
@@ -753,6 +766,13 @@ export default function AdminStudentDetailPage() {
                 {assignedPlan.name}
               </Link>
               <p className="mt-1 text-xs text-muted-foreground">{assignedPlan.caloriesPerDay} kcal/jour</p>
+              <button
+                type="button"
+                onClick={() => handleSetAssignment(student.id, "nutrition", assignedPlan.id, false)}
+                className="mt-2 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary"
+              >
+                Retirer
+              </button>
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">Aucun plan attribué.</p>

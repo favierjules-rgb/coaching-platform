@@ -528,6 +528,34 @@ create table if not exists public.meals (
 );
 
 -- ============================================================================
+-- 17bis. Migration nutrition — chantier "supabase-nutrition-plans".
+--
+-- `nutrition_plans`/`nutrition_days`/`meals` existaient déjà (sections
+-- 15-17) mais jamais branchées à l'app. Deux ajustements additifs
+-- nécessaires, sûrs à rejouer plusieurs fois :
+--
+-- 1) `nutrition_plans.description`/`coach_notes`/`hydration_tip`/
+--    `supplements` — n'existaient pas encore. NutritionPlanBuilder (mock)
+--    collecte déjà ces champs (description courte, notes coach niveau
+--    plan — distinctes des notes par repas déjà couvertes par
+--    `meals.coach_notes` —, conseil hydratation, liste de compléments) :
+--    sans ces colonnes, une saisie coach y serait silencieusement perdue.
+-- 2) `nutrition_days.week_start_date` était `not null`, pensé pour une
+--    journée réelle datée (suivi élève). Un "jour type" créé par le coach
+--    dans le générateur de plan (NutritionPlanBuilder, un jour par nom de
+--    semaine — Lundi..Dimanche, pas de vraie date) n'a pas de date
+--    calendaire à fournir : la colonne est assouplie en nullable plutôt que
+--    d'imposer une date arbitraire sans signification.
+--
+-- Aucune donnée existante n'est supprimée ou écrasée par ces instructions.
+-- ============================================================================
+alter table public.nutrition_plans add column if not exists description text not null default '';
+alter table public.nutrition_plans add column if not exists coach_notes text not null default '';
+alter table public.nutrition_plans add column if not exists hydration_tip text not null default '';
+alter table public.nutrition_plans add column if not exists supplements jsonb not null default '[]'::jsonb;
+alter table public.nutrition_days alter column week_start_date drop not null;
+
+-- ============================================================================
 -- 18. documents — ressources partagées par le coach.
 -- ============================================================================
 create table if not exists public.documents (
@@ -933,42 +961,87 @@ create policy "exercise_library_staff_only" on public.exercise_library
 
 create policy "nutrition_plans_manage_staff" on public.nutrition_plans
   for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
-create policy "nutrition_plans_select_self" on public.nutrition_plans
-  for select using (student_id = public.current_student_id());
+-- Rejoue proprement même si la policy existait déjà sous son ancienne forme
+-- (student_id direct uniquement) — voir migration nutrition plus haut :
+-- un plan de bibliothèque assigné via `assignments` (comme les programmes)
+-- doit aussi être lisible par l'élève, en plus du cas historique où
+-- nutrition_plans.student_id est renseigné directement.
+drop policy if exists "nutrition_plans_select_self" on public.nutrition_plans;
+create policy "nutrition_plans_select_self_or_assigned" on public.nutrition_plans
+  for select using (
+    student_id = public.current_student_id()
+    or exists (
+      select 1 from public.assignments a
+      where a.content_type = 'nutrition'
+        and a.content_id = nutrition_plans.id
+        and a.student_id = public.current_student_id()
+    )
+  );
 
 create policy "nutrition_days_manage_staff" on public.nutrition_days
   for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
-create policy "nutrition_days_select_self" on public.nutrition_days
+drop policy if exists "nutrition_days_select_self" on public.nutrition_days;
+create policy "nutrition_days_select_self_or_assigned" on public.nutrition_days
   for select using (
     exists (
       select 1 from public.nutrition_plans p
-      where p.id = nutrition_days.plan_id and p.student_id = public.current_student_id()
+      where p.id = nutrition_days.plan_id
+        and (
+          p.student_id = public.current_student_id()
+          or exists (
+            select 1 from public.assignments a
+            where a.content_type = 'nutrition' and a.content_id = p.id and a.student_id = public.current_student_id()
+          )
+        )
     )
   );
+drop policy if exists "nutrition_days_update_self" on public.nutrition_days;
 create policy "nutrition_days_update_self" on public.nutrition_days
   -- l'élève valide/modifie sa propre journée (champ "actual")
   for update
   using (
     exists (
       select 1 from public.nutrition_plans p
-      where p.id = nutrition_days.plan_id and p.student_id = public.current_student_id()
+      where p.id = nutrition_days.plan_id
+        and (
+          p.student_id = public.current_student_id()
+          or exists (
+            select 1 from public.assignments a
+            where a.content_type = 'nutrition' and a.content_id = p.id and a.student_id = public.current_student_id()
+          )
+        )
     )
   )
   with check (
     exists (
       select 1 from public.nutrition_plans p
-      where p.id = nutrition_days.plan_id and p.student_id = public.current_student_id()
+      where p.id = nutrition_days.plan_id
+        and (
+          p.student_id = public.current_student_id()
+          or exists (
+            select 1 from public.assignments a
+            where a.content_type = 'nutrition' and a.content_id = p.id and a.student_id = public.current_student_id()
+          )
+        )
     )
   );
 
 create policy "meals_manage_staff" on public.meals
   for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
-create policy "meals_select_self" on public.meals
+drop policy if exists "meals_select_self" on public.meals;
+create policy "meals_select_self_or_assigned" on public.meals
   for select using (
     exists (
       select 1 from public.nutrition_days d
       join public.nutrition_plans p on p.id = d.plan_id
-      where d.id = meals.nutrition_day_id and p.student_id = public.current_student_id()
+      where d.id = meals.nutrition_day_id
+        and (
+          p.student_id = public.current_student_id()
+          or exists (
+            select 1 from public.assignments a
+            where a.content_type = 'nutrition' and a.content_id = p.id and a.student_id = public.current_student_id()
+          )
+        )
     )
   );
 
