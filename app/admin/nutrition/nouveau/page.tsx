@@ -8,13 +8,48 @@ import { ArrowLeft, CheckCircle } from "lucide-react";
 import { AssignStudentsModal } from "@/components/admin/AssignStudentsModal";
 import { NutritionPlanBuilder, type NutritionPlanBuilderData } from "@/components/admin/NutritionPlanBuilder";
 import { useAdminData } from "@/hooks/useAdminData";
+import { useContentAssignment } from "@/hooks/useContentAssignment";
+import { useSupabaseNutritionPlans } from "@/hooks/useSupabaseNutritionPlans";
+import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { isSupabaseConfigured } from "@/lib/supabase/env";
+import { createNutritionPlan as createNutritionPlanSupabase } from "@/lib/supabase/nutrition";
 
 export default function NewNutritionPlanPage() {
   const router = useRouter();
   const { state, createNutritionPlan, setAssignment } = useAdminData();
   const [createdId, setCreatedId] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState(false);
 
-  function handleSave(data: NutritionPlanBuilderData) {
+  // Dès que Supabase est configuré, la création doit produire une vraie
+  // ligne nutrition_plans — jamais de repli mock silencieux (voir
+  // /admin/nutrition). Si l'insertion réelle échoue, on affiche une erreur
+  // plutôt que de créer un plan mock invisible qui masquerait le problème.
+  const supabaseActive = isSupabaseConfigured();
+  const supabaseNutritionPlans = useSupabaseNutritionPlans();
+  const supabaseStudents = useSupabaseStudents();
+  const students = supabaseActive ? supabaseStudents.students : state.students;
+  const handleSetAssignment = useContentAssignment(
+    { nutrition: supabaseActive },
+    setAssignment,
+    supabaseNutritionPlans.refetch,
+  );
+
+  async function handleSave(data: NutritionPlanBuilderData) {
+    setSaveError(false);
+    if (supabaseActive) {
+      const supabase = createSupabaseBrowserClient();
+      if (supabase) {
+        const id = await createNutritionPlanSupabase(supabase, data);
+        if (id) {
+          await supabaseNutritionPlans.refetch();
+          setCreatedId(id);
+          return;
+        }
+        setSaveError(true);
+        return;
+      }
+    }
     const id = createNutritionPlan({
       ...data,
       assignedStudentIds: [],
@@ -23,7 +58,8 @@ export default function NewNutritionPlanPage() {
     setCreatedId(id);
   }
 
-  const createdPlan = createdId ? state.nutritionPlans.find((p) => p.id === createdId) : null;
+  const plans = supabaseActive ? supabaseNutritionPlans.plans : state.nutritionPlans;
+  const createdPlan = createdId ? plans.find((p) => p.id === createdId) : null;
 
   return (
     <div>
@@ -41,6 +77,12 @@ export default function NewNutritionPlanPage() {
         </p>
       </div>
 
+      {saveError && (
+        <p className="mb-6 flex items-center gap-2 border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          Échec de l&apos;enregistrement du plan. Réessaie.
+        </p>
+      )}
+
       {createdPlan ? (
         <div className="flex flex-col gap-4">
           <div className="flex items-center gap-3 border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-400">
@@ -52,9 +94,9 @@ export default function NewNutritionPlanPage() {
               contentLabel={createdPlan.name}
               contentType="nutrition"
               contentId={createdPlan.id}
-              students={state.students}
+              students={students}
               assignedStudentIds={createdPlan.assignedStudentIds}
-              onSetAssignment={setAssignment}
+              onSetAssignment={handleSetAssignment}
               triggerLabel="Assigner à des élèves"
               triggerVariant="primary"
             />

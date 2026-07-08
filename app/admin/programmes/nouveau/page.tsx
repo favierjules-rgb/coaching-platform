@@ -8,7 +8,7 @@ import { ArrowLeft, CheckCircle } from "lucide-react";
 import { AssignStudentsModal } from "@/components/admin/AssignStudentsModal";
 import { ProgramBuilder, type ProgramBuilderData } from "@/components/admin/ProgramBuilder";
 import { useAdminData } from "@/hooks/useAdminData";
-import { useProgramAssignment } from "@/hooks/useProgramAssignment";
+import { useContentAssignment } from "@/hooks/useContentAssignment";
 import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -27,8 +27,8 @@ export default function NewProgramPage() {
   const supabasePrograms = useSupabasePrograms();
   const supabaseStudents = useSupabaseStudents();
   const students = supabaseStudents.students.length > 0 ? supabaseStudents.students : state.students;
-  const handleSetAssignment = useProgramAssignment(
-    supabasePrograms.programs.length > 0 && supabaseStudents.students.length > 0,
+  const handleSetAssignment = useContentAssignment(
+    { programme: supabasePrograms.programs.length > 0 && supabaseStudents.students.length > 0 },
     setAssignment,
     supabasePrograms.refetch,
   );

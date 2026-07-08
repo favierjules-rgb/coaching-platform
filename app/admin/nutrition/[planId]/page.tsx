@@ -9,7 +9,16 @@ import { AssignStudentsModal } from "@/components/admin/AssignStudentsModal";
 import { NutritionPlanBuilder, type NutritionPlanBuilderData } from "@/components/admin/NutritionPlanBuilder";
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
+import { useContentAssignment } from "@/hooks/useContentAssignment";
+import { useSupabaseNutritionPlans } from "@/hooks/useSupabaseNutritionPlans";
+import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { contentStatusLabels, fullName } from "@/lib/admin";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { isSupabaseConfigured } from "@/lib/supabase/env";
+import {
+  updateNutritionPlan as updateNutritionPlanSupabase,
+  updateNutritionPlanStatus as updateNutritionPlanStatusSupabase,
+} from "@/lib/supabase/nutrition";
 
 const goalLabels: Record<string, string> = {
   "perte-de-poids": "Perte de poids",
@@ -22,8 +31,28 @@ export default function NutritionPlanDetailPage() {
   const params = useParams<{ planId: string }>();
   const { state, updateNutritionPlan, setAssignment } = useAdminData();
   const [editing, setEditing] = useState(false);
+  const [saveError, setSaveError] = useState(false);
 
-  const plan = state.nutritionPlans.find((p) => p.id === params.planId);
+  // Dès que Supabase est configuré, cette page ne lit/écrit QUE
+  // nutrition_plans réel — jamais de repli mock une fois actif (voir
+  // /admin/nutrition). isSupabasePlansActive garde ce nom pour la lecture
+  // du diff mais reflète maintenant "Supabase configuré", pas "≥1 plan réel".
+  const isSupabasePlansActive = isSupabaseConfigured();
+  const supabaseNutritionPlans = useSupabaseNutritionPlans();
+  const plans = isSupabasePlansActive ? supabaseNutritionPlans.plans : state.nutritionPlans;
+  const supabaseStudents = useSupabaseStudents();
+  const students = isSupabasePlansActive ? supabaseStudents.students : state.students;
+  const handleSetAssignment = useContentAssignment(
+    { nutrition: isSupabasePlansActive },
+    setAssignment,
+    supabaseNutritionPlans.refetch,
+  );
+
+  if (isSupabasePlansActive && supabaseNutritionPlans.loading) {
+    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+  }
+
+  const plan = plans.find((p) => p.id === params.planId);
 
   if (!plan) {
     return (
@@ -37,11 +66,42 @@ export default function NutritionPlanDetailPage() {
     );
   }
 
-  const assignedStudents = state.students.filter((s) => plan.assignedStudentIds.includes(s.id));
+  const assignedStudents = students.filter((s) => plan.assignedStudentIds.includes(s.id));
 
-  function handleSave(data: NutritionPlanBuilderData) {
+  async function handleSave(data: NutritionPlanBuilderData) {
+    setSaveError(false);
+    if (isSupabasePlansActive) {
+      const supabase = createSupabaseBrowserClient();
+      if (supabase) {
+        const ok = await updateNutritionPlanSupabase(supabase, plan!.id, data);
+        if (!ok) {
+          setSaveError(true);
+          return;
+        }
+        await supabaseNutritionPlans.refetch();
+        setEditing(false);
+        return;
+      }
+    }
     updateNutritionPlan(plan!.id, { ...data, days: data.days.map((d) => ({ ...d, planId: plan!.id })) });
     setEditing(false);
+  }
+
+  async function handleArchive() {
+    setSaveError(false);
+    if (isSupabasePlansActive) {
+      const supabase = createSupabaseBrowserClient();
+      if (supabase) {
+        const ok = await updateNutritionPlanStatusSupabase(supabase, plan!.id, "archivé");
+        if (!ok) {
+          setSaveError(true);
+          return;
+        }
+        await supabaseNutritionPlans.refetch();
+        return;
+      }
+    }
+    updateNutritionPlan(plan!.id, { status: "archivé" });
   }
 
   return (
@@ -50,6 +110,12 @@ export default function NutritionPlanDetailPage() {
         <ArrowLeft size={14} />
         Nutrition
       </Link>
+
+      {saveError && (
+        <p className="mb-6 flex items-center gap-2 border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          Échec de l&apos;enregistrement. Réessaie.
+        </p>
+      )}
 
       {editing ? (
         <>
@@ -103,14 +169,14 @@ export default function NutritionPlanDetailPage() {
                 contentLabel={plan.name}
                 contentType="nutrition"
                 contentId={plan.id}
-                students={state.students}
+                students={students}
                 assignedStudentIds={plan.assignedStudentIds}
-                onSetAssignment={setAssignment}
+                onSetAssignment={handleSetAssignment}
                 triggerLabel="Assigner à des élèves"
               />
               <button
                 type="button"
-                onClick={() => updateNutritionPlan(plan.id, { status: "archivé" })}
+                onClick={handleArchive}
                 className="flex items-center gap-1.5 border border-red-500/50 px-4 py-2 text-xs uppercase tracking-widest text-red-400 transition-colors hover:bg-red-500/10"
               >
                 <Archive size={13} />

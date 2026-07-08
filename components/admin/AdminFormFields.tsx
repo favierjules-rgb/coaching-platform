@@ -41,11 +41,12 @@ interface TextareaFieldProps {
   label: string;
   value: string;
   onChange: (value: string) => void;
+  onBlur?: () => void;
   rows?: number;
   placeholder?: string;
 }
 
-export function TextareaField({ label, value, onChange, rows = 3, placeholder }: TextareaFieldProps) {
+export function TextareaField({ label, value, onChange, onBlur, rows = 3, placeholder }: TextareaFieldProps) {
   const id = useId();
   return (
     <div>
@@ -58,6 +59,7 @@ export function TextareaField({ label, value, onChange, rows = 3, placeholder }:
         value={value}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
+        onBlur={onBlur}
         className={`${inputClass} resize-none`}
       />
     </div>

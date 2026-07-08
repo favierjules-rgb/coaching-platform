@@ -9,11 +9,13 @@ import { CreateStudentModal } from "@/components/admin/CreateStudentModal";
 import { FilterButtons, SearchInput } from "@/components/admin/SearchAndFilters";
 import { StatusBadge, studentStatusTone } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
-import { useProgramAssignment } from "@/hooks/useProgramAssignment";
+import { useContentAssignment } from "@/hooks/useContentAssignment";
+import { useSupabaseNutritionPlans } from "@/hooks/useSupabaseNutritionPlans";
 import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { formatDate, fullName, matchesStudentSearch, studentStatusLabels, weightProgressLabel } from "@/lib/admin";
 import { paymentSummaryLabel } from "@/lib/payments";
+import { isSupabaseConfigured } from "@/lib/supabase/env";
 import type { StudentAccountStatus } from "@/types";
 
 type StatusFilter = "tous" | StudentAccountStatus;
@@ -27,20 +29,32 @@ const statusFilters: { value: StatusFilter; label: string }[] = [
 
 export default function AdminStudentsPage() {
   const { state, createStudent, setAssignment } = useAdminData();
-  const { nutritionPlans, documents } = state;
+  const { documents } = state;
 
-  // Supabase a la priorité dès qu'il a au moins un élève/programme réel ;
-  // sinon on retombe sur la liste mock (localStorage), sans jamais rien
-  // casser tant que Supabase n'est pas configuré ou n'a encore aucune
-  // donnée — voir hooks/useSupabaseStudents.ts et hooks/useSupabasePrograms.ts.
-  // Plans nutrition/documents restent mock dans tous les cas (non migrés à
-  // cette étape).
+  // Supabase a la priorité dès qu'il a au moins un élève/programme/plan
+  // réel ; sinon on retombe sur la liste mock (localStorage), sans jamais
+  // rien casser tant que Supabase n'est pas configuré ou n'a encore aucune
+  // donnée — voir hooks/useSupabaseStudents.ts, hooks/useSupabasePrograms.ts
+  // et hooks/useSupabaseNutritionPlans.ts. Documents restent mock dans tous
+  // les cas (non migrés à cette étape).
   const supabaseStudents = useSupabaseStudents();
   const students = supabaseStudents.students.length > 0 ? supabaseStudents.students : state.students;
   const supabasePrograms = useSupabasePrograms();
   const programs = supabasePrograms.programs.length > 0 ? supabasePrograms.programs : state.programs;
+  const supabaseNutritionActive = isSupabaseConfigured();
+  const supabaseNutritionPlans = useSupabaseNutritionPlans();
+  const nutritionPlans = supabaseNutritionActive ? supabaseNutritionPlans.plans : state.nutritionPlans;
   const canAssignRealPrograms = supabaseStudents.students.length > 0 && supabasePrograms.programs.length > 0;
-  const handleSetAssignment = useProgramAssignment(canAssignRealPrograms, setAssignment, supabasePrograms.refetch);
+  const canAssignRealNutrition =
+    supabaseStudents.students.length > 0 && supabaseNutritionActive && supabaseNutritionPlans.plans.length > 0;
+  const handleSetAssignment = useContentAssignment(
+    { programme: canAssignRealPrograms, nutrition: canAssignRealNutrition },
+    setAssignment,
+    () => {
+      void supabasePrograms.refetch();
+      void supabaseNutritionPlans.refetch();
+    },
+  );
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("tous");
@@ -147,6 +161,7 @@ export default function AdminStudentsPage() {
                     onSetAssignment={handleSetAssignment}
                     isSupabaseStudent={supabaseStudents.students.length > 0}
                     canAssignRealPrograms={canAssignRealPrograms}
+                    canAssignRealNutrition={canAssignRealNutrition}
                   />
                 </div>
               </div>

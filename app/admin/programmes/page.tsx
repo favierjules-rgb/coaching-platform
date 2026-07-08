@@ -9,7 +9,7 @@ import { ExerciseLibraryManager } from "@/components/admin/ExerciseLibraryManage
 import { FilterButtons, SearchInput } from "@/components/admin/SearchAndFilters";
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
-import { useProgramAssignment } from "@/hooks/useProgramAssignment";
+import { useContentAssignment } from "@/hooks/useContentAssignment";
 import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { contentStatusLabels, matchesTextSearch, totalSessions, totalWeeks } from "@/lib/admin";
@@ -38,8 +38,8 @@ export default function AdminProgramsPage() {
   const programs = supabasePrograms.programs.length > 0 ? supabasePrograms.programs : state.programs;
   const supabaseStudents = useSupabaseStudents();
   const students = supabaseStudents.students.length > 0 ? supabaseStudents.students : state.students;
-  const handleSetAssignment = useProgramAssignment(
-    supabasePrograms.programs.length > 0 && supabaseStudents.students.length > 0,
+  const handleSetAssignment = useContentAssignment(
+    { programme: supabasePrograms.programs.length > 0 && supabaseStudents.students.length > 0 },
     setAssignment,
     supabasePrograms.refetch,
   );

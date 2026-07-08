@@ -1114,6 +1114,46 @@ export interface SupabaseExerciseLibraryItem {
 }
 
 /**
+ * Formes Supabase (camelCase) des tables `nutrition_plans` /
+ * `nutrition_days` / `meals` — voir supabase/schema.sql sections 15-17.
+ * lib/supabase/nutrition.ts les compose en AdminNutritionPlan /
+ * AdminNutritionDay / AdminMeal (formes mock déjà utilisées par tout
+ * l'admin) pour que NutritionPlanBuilder et les pages d'affichage n'aient
+ * rien à changer.
+ */
+export interface SupabaseNutritionPlan {
+  id: string;
+  studentId: string | null;
+  coachId: string | null;
+  name: string;
+  description: string;
+  goalType: NutritionGoalType;
+  dailyTarget: MacroTarget;
+  weeklyTargetCalories: number;
+  status: AdminContentStatus;
+  shoppingList: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SupabaseNutritionDay {
+  id: string;
+  planId: string;
+  day: string;
+  target: MacroTarget;
+}
+
+export interface SupabaseMeal {
+  id: string;
+  nutritionDayId: string;
+  slot: string;
+  name: string;
+  items: MealFoodItem[];
+  macros: MacroTarget;
+  coachNotes: string;
+}
+
+/**
  * Paramètres du coach / de la marque, éditables sur /admin/parametres.
  * Correspond à une future table Supabase `coach_settings` (une ligne par
  * coach).

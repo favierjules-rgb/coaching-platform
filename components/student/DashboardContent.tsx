@@ -6,6 +6,7 @@ import { Bell, Dumbbell, Flame, Scale, Target, TrendingUp } from "lucide-react";
 import { StatCard } from "@/components/student/StatCard";
 import { WeightChart } from "@/components/student/WeightChart";
 import { useStudentProfile, type StudentProfileState } from "@/hooks/useStudentProfile";
+import { useSupabaseNutritionForStudent } from "@/hooks/useSupabaseNutritionForStudent";
 import { useSupabaseStudentProfile } from "@/hooks/useSupabaseStudentProfile";
 import { useSupabaseTrainingProgram } from "@/hooks/useSupabaseTrainingProgram";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
@@ -31,10 +32,11 @@ interface DashboardContentProps {
 }
 
 /**
- * Programmes/séances/nutrition/documents ne sont pas encore migrés vers
- * Supabase (voir consignes de cette étape) : ces sections restent des
- * exemples fixes quel que soit le compte connecté, clairement annotés
- * "exemple" plutôt que présentés comme les vraies données de l'élève.
+ * Documents ne sont pas encore migrés vers Supabase : cette section reste
+ * un exemple fixe quel que soit le compte connecté, clairement annotée
+ * "exemple" plutôt que présentée comme les vraies données de l'élève.
+ * Programme et plan alimentaire actifs sont réels dès qu'assignés (voir
+ * hooks/useSupabaseTrainingProgram.ts et hooks/useSupabaseNutritionForStudent.ts).
  */
 export function DashboardContent({
   studentId,
@@ -54,6 +56,7 @@ export function DashboardContent({
   const supabaseProfile = useSupabaseStudentProfile();
   const useSupabase = supabaseProfile.ready && supabaseProfile.state !== null;
   const supabaseTraining = useSupabaseTrainingProgram();
+  const supabaseNutrition = useSupabaseNutritionForStudent();
 
   if (!supabaseProfile.ready) {
     return <p className="text-sm text-muted-foreground">Chargement du dashboard…</p>;
@@ -210,16 +213,20 @@ export function DashboardContent({
           <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
             Plan alimentaire actif
           </h2>
-          <div className="mb-4">
-            <div className="text-sm font-medium text-foreground">
-              {activeMealPlan.name}
+          {useSupabase && !supabaseNutrition.activePlan ? (
+            <p className="mb-4 text-sm text-muted-foreground">Aucun plan alimentaire attribué pour le moment.</p>
+          ) : (
+            <div className="mb-4">
+              <div className="text-sm font-medium text-foreground">
+                {useSupabase ? supabaseNutrition.activePlan!.name : activeMealPlan.name}
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {useSupabase
+                  ? `${supabaseNutrition.activePlan!.caloriesPerDay} kcal · ${supabaseNutrition.activePlan!.protein}g prot. · ${supabaseNutrition.activePlan!.carbs}g gluc. · ${supabaseNutrition.activePlan!.fat}g lip.`
+                  : `${activeMealPlan.calories} kcal · ${activeMealPlan.protein}g prot. · ${activeMealPlan.carbs}g gluc. · ${activeMealPlan.fat}g lip.`}
+              </div>
             </div>
-            <div className="mt-1 text-xs text-muted-foreground">
-              {activeMealPlan.calories} kcal · {activeMealPlan.protein}g
-              prot. · {activeMealPlan.carbs}g gluc. · {activeMealPlan.fat}g
-              lip.
-            </div>
-          </div>
+          )}
           <Link
             href="/nutrition"
             className="block border border-primary py-3 text-center text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
