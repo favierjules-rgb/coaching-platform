@@ -15,6 +15,7 @@ import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { formatDate, fullName, matchesStudentSearch, studentStatusLabels, weightProgressLabel } from "@/lib/admin";
 import { paymentSummaryLabel } from "@/lib/payments";
+import { isSupabaseConfigured } from "@/lib/supabase/env";
 import type { StudentAccountStatus } from "@/types";
 
 type StatusFilter = "tous" | StudentAccountStatus;
@@ -40,10 +41,12 @@ export default function AdminStudentsPage() {
   const students = supabaseStudents.students.length > 0 ? supabaseStudents.students : state.students;
   const supabasePrograms = useSupabasePrograms();
   const programs = supabasePrograms.programs.length > 0 ? supabasePrograms.programs : state.programs;
+  const supabaseNutritionActive = isSupabaseConfigured();
   const supabaseNutritionPlans = useSupabaseNutritionPlans();
-  const nutritionPlans = supabaseNutritionPlans.plans.length > 0 ? supabaseNutritionPlans.plans : state.nutritionPlans;
+  const nutritionPlans = supabaseNutritionActive ? supabaseNutritionPlans.plans : state.nutritionPlans;
   const canAssignRealPrograms = supabaseStudents.students.length > 0 && supabasePrograms.programs.length > 0;
-  const canAssignRealNutrition = supabaseStudents.students.length > 0 && supabaseNutritionPlans.plans.length > 0;
+  const canAssignRealNutrition =
+    supabaseStudents.students.length > 0 && supabaseNutritionActive && supabaseNutritionPlans.plans.length > 0;
   const handleSetAssignment = useContentAssignment(
     { programme: canAssignRealPrograms, nutrition: canAssignRealNutrition },
     setAssignment,

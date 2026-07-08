@@ -12,12 +12,16 @@ générique `assignments` (déjà utilisée pour les programmes) supporte
 `content_type = 'nutrition'` nativement : réutilisée telle quelle, pas de
 `student_nutrition_assignments` créée.
 
-**Vérification live non effectuée pour cette étape** : le connecteur
-Supabase est resté indisponible côté outils malgré plusieurs tentatives de
-réactivation pendant cette session. Le modèle ci-dessous repose sur
-`supabase/schema.sql`, qui s'est révélé fiable (identique à la réalité) lors
-de la migration programmes précédente. **À vérifier en direct avant de
-merger** — voir le bloc SQL ci-dessous, idempotent et sûr à rejouer.
+**Vérification live effectuée** (suite au signalement d'un plan affiché en
+UI absent de `nutrition_plans` côté base) : le schéma live correspond bien
+à `supabase/schema.sql` (colonnes additives dont `description`/
+`coach_notes`/`hydration_tip`/`supplements` présentes), et un `insert`
+simulé sous le rôle `authenticated` avec les claims JWT de l'admin réussit
+sans erreur RLS. Le bug reproduit n'était donc pas côté base : les pages
+admin affichaient encore un plan mock/localStorage à côté des vrais plans
+Supabase, avec un élève réel visible dans les deux listes — d'où
+l'apparence d'une "assignation factice". Corrigé en supprimant tout repli
+mock une fois Supabase configuré (voir "Assignation" plus bas).
 
 ## Ajustements additifs nécessaires
 
@@ -31,14 +35,12 @@ merger** — voir le bloc SQL ci-dessous, idempotent et sûr à rejouer.
    une journée réelle datée (suivi élève), mais un "jour type" créé par le
    coach (un jour par nom de semaine, Lundi..Dimanche, pas de vraie date)
    n'a pas de date calendaire à fournir.
-3. **RLS étendue** (`nutrition_plans_select_self_or_assigned`,
+3. **RLS** (`nutrition_plans_select_self_or_assigned`,
    `nutrition_days_select_self_or_assigned`, `meals_select_self_or_assigned`)
-   — les policies existantes ne laissaient un élève lire un plan que si
-   `nutrition_plans.student_id` était directement renseigné à son id. Un
-   plan de bibliothèque assigné via `assignments` (comme les programmes)
-   doit aussi être lisible. Les anciennes policies sont supprimées
-   (`drop policy if exists`) puis recréées avec la condition élargie —
-   aucune donnée supprimée, uniquement une règle de lecture.
+   — un élève lit un plan uniquement si `nutrition_plans.student_id`
+   correspond à son id (voir "Assignation" ci-dessous). Les policies sont
+   supprimées (`drop policy if exists`) puis recréées à chaque rejeu du
+   script — aucune donnée supprimée, uniquement une règle de lecture.
 
 Aucune suppression de donnée, aucune table cassée. Bloc complet dans
 `supabase/schema.sql` (section "17bis" + policies RLS des tables
@@ -64,13 +66,30 @@ seule côté élève) — migration séparée si besoin.
 
 ## Assignation
 
-`hooks/useContentAssignment.ts` (généralisation de l'ancien
-`useProgramAssignment`, qui ne gérait que les programmes) route vers
-`setNutritionAssignment` dès que le plan **et** l'élève affichés sont tous
-les deux réels ; sinon repli mock. `lib/supabase/students.ts::toAdminStudent`
-peuple désormais `assignedNutritionPlanIds` depuis la vraie table
-`assignments` (auparavant toujours `[]`), via
-`getAssignedNutritionPlanIdsByStudent`.
+**Source de vérité : `nutrition_plans.student_id` directement — pas la
+table générique `assignments`.** Celle-ci reste réservée aux programmes
+(voir `lib/supabase/programs.ts`) ; mélanger les deux mécanismes pour la
+nutrition créerait deux sources de vérité divergentes. Un plan a donc au
+plus un élève assigné à la fois :
+
+- assigner : `update nutrition_plans set student_id = <id élève>`
+- retirer : `update nutrition_plans set student_id = null`
+
+`lib/supabase/nutrition.ts::setNutritionAssignment` implémente cette
+écriture directe. `getAssignedNutritionPlansForStudent` /
+`getAssignedNutritionPlanForStudent` / `getAssignedNutritionPlanIdsByStudent`
+lisent `nutrition_plans` filtré par `student_id` — plus de jointure via
+`assignments`. `hooks/useContentAssignment.ts` route vers
+`setNutritionAssignment` dès que Supabase est configuré ; `lib/supabase/students.ts::toAdminStudent`
+peuple `assignedNutritionPlanIds` depuis cette même source.
+
+**Jamais de mélange mock/réel.** Dès que Supabase est configuré,
+`/admin/nutrition`, `/admin/eleves/[studentId]`, `/nutrition` (élève) et le
+dashboard élève n'affichent plus jamais de plan mock/localStorage — un
+`nutrition_plans` vide affiche un état vide ("Aucun plan alimentaire
+attribué" / liste vide + bouton de création), jamais un plan de démo. Le
+repli mock complet ne s'applique que si Supabase n'est pas configuré du
+tout (environnement de démo sans backend).
 
 ## Contexte onboarding
 

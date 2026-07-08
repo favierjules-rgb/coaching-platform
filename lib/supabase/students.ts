@@ -419,10 +419,11 @@ function toMockPaymentProfile(
  * en types mock. `assignedDocumentIds` / `measurementHistory` restent
  * volontairement vides : documents et historique de mensurations ne sont
  * pas encore migrés — normalizeAdminStudent() garantit un affichage propre
- * ("Aucun document"...) plutôt qu'un plantage. `assignedProgramIds` /
- * `assignedNutritionPlanIds` viennent bien de la vraie table `assignments`
- * (voir lib/supabase/programs.ts et lib/supabase/nutrition.ts), programmes
- * et plans alimentaires ayant été migrés.
+ * ("Aucun document"...) plutôt qu'un plantage. `assignedProgramIds` vient de
+ * la table `assignments` (voir lib/supabase/programs.ts) ;
+ * `assignedNutritionPlanIds` vient de `nutrition_plans.student_id`
+ * directement (voir lib/supabase/nutrition.ts) — les deux mécanismes ne
+ * sont pas mélangés.
  *
  * `profile` peut être `null` (élève sans fiche `student_profiles` encore
  * créée) : les champs coaching retombent alors sur des valeurs par défaut

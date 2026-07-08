@@ -12,33 +12,41 @@ import { useContentAssignment } from "@/hooks/useContentAssignment";
 import { useSupabaseNutritionPlans } from "@/hooks/useSupabaseNutritionPlans";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createNutritionPlan as createNutritionPlanSupabase } from "@/lib/supabase/nutrition";
 
 export default function NewNutritionPlanPage() {
   const router = useRouter();
   const { state, createNutritionPlan, setAssignment } = useAdminData();
   const [createdId, setCreatedId] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState(false);
 
-  // Priorité Supabase dès qu'au moins un plan/élève réel existe — même
-  // pattern que /admin/programmes/nouveau. Un nouveau plan est créé en réel
-  // dès que Supabase est configuré (jamais seulement en mock quand
-  // disponible).
+  // Dès que Supabase est configuré, la création doit produire une vraie
+  // ligne nutrition_plans — jamais de repli mock silencieux (voir
+  // /admin/nutrition). Si l'insertion réelle échoue, on affiche une erreur
+  // plutôt que de créer un plan mock invisible qui masquerait le problème.
+  const supabaseActive = isSupabaseConfigured();
   const supabaseNutritionPlans = useSupabaseNutritionPlans();
   const supabaseStudents = useSupabaseStudents();
-  const students = supabaseStudents.students.length > 0 ? supabaseStudents.students : state.students;
+  const students = supabaseActive ? supabaseStudents.students : state.students;
   const handleSetAssignment = useContentAssignment(
-    { nutrition: supabaseNutritionPlans.plans.length > 0 && supabaseStudents.students.length > 0 },
+    { nutrition: supabaseActive },
     setAssignment,
     supabaseNutritionPlans.refetch,
   );
 
   async function handleSave(data: NutritionPlanBuilderData) {
-    const supabase = createSupabaseBrowserClient();
-    if (supabase) {
-      const id = await createNutritionPlanSupabase(supabase, data);
-      if (id) {
-        await supabaseNutritionPlans.refetch();
-        setCreatedId(id);
+    setSaveError(false);
+    if (supabaseActive) {
+      const supabase = createSupabaseBrowserClient();
+      if (supabase) {
+        const id = await createNutritionPlanSupabase(supabase, data);
+        if (id) {
+          await supabaseNutritionPlans.refetch();
+          setCreatedId(id);
+          return;
+        }
+        setSaveError(true);
         return;
       }
     }
@@ -50,7 +58,7 @@ export default function NewNutritionPlanPage() {
     setCreatedId(id);
   }
 
-  const plans = supabaseNutritionPlans.plans.length > 0 ? supabaseNutritionPlans.plans : state.nutritionPlans;
+  const plans = supabaseActive ? supabaseNutritionPlans.plans : state.nutritionPlans;
   const createdPlan = createdId ? plans.find((p) => p.id === createdId) : null;
 
   return (
@@ -68,6 +76,12 @@ export default function NewNutritionPlanPage() {
           Construis la semaine type, repas par repas.
         </p>
       </div>
+
+      {saveError && (
+        <p className="mb-6 flex items-center gap-2 border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          Échec de l&apos;enregistrement du plan. Réessaie.
+        </p>
+      )}
 
       {createdPlan ? (
         <div className="flex flex-col gap-4">

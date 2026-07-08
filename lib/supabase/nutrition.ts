@@ -6,9 +6,12 @@ import type { Database } from "@/types/supabase";
 
 /**
  * Couche d'accès aux plans alimentaires Supabase (tables `nutrition_plans`,
- * `nutrition_days`, `meals`) et à leur assignation aux élèves (table
- * `assignments`, content_type = "nutrition" — voir supabase/schema.sql
- * sections 15-17bis et 25).
+ * `nutrition_days`, `meals`). L'assignation utilise `nutrition_plans.student_id`
+ * directement comme source de vérité — PAS la table générique `assignments`
+ * (celle-ci reste réservée aux programmes, voir lib/supabase/programs.ts).
+ * Un plan a au plus un élève assigné à la fois ; `AdminNutritionPlan.assignedStudentIds`
+ * (tableau, pour rester compatible avec le type mock partagé) ne contient
+ * donc jamais plus d'un id.
  *
  * Même principe que lib/supabase/programs.ts : lectures toujours "vides"
  * plutôt que d'exception, écritures en delete+reinsert pour la structure
@@ -25,7 +28,6 @@ type TypedSupabaseClient = SupabaseClient<Database>;
 
 type NutritionPlanRow = Database["public"]["Tables"]["nutrition_plans"]["Row"];
 type MealRow = Database["public"]["Tables"]["meals"]["Row"];
-type AssignmentRow = Database["public"]["Tables"]["assignments"]["Row"];
 
 function devWarn(context: string, error: { message: string; code?: string; details?: string; hint?: string } | null): void {
   if (error) {
@@ -106,21 +108,16 @@ function mapNutritionPlanRow(row: NutritionPlanRow, days: AdminNutritionDay[], a
   };
 }
 
-/** Charge et compose un ensemble de plans complets (jours/repas/assignations) en un minimum de requêtes. */
+/** Charge et compose un ensemble de plans complets (jours/repas/assignation) en un minimum de requêtes. */
 async function loadNutritionPlans(supabase: TypedSupabaseClient, planRows: NutritionPlanRow[]): Promise<AdminNutritionPlan[]> {
   if (planRows.length === 0) {
     return [];
   }
   const planIds = planRows.map((p) => p.id);
 
-  const [daysResult, assignmentsResult] = await Promise.all([
-    supabase.from("nutrition_days").select("*").in("plan_id", planIds),
-    supabase.from("assignments").select("*").eq("content_type", "nutrition").in("content_id", planIds),
-  ]);
+  const daysResult = await supabase.from("nutrition_days").select("*").in("plan_id", planIds);
   devWarn("loadNutritionPlans (nutrition_days)", daysResult.error);
-  devWarn("loadNutritionPlans (assignments)", assignmentsResult.error);
   const dayRows = daysResult.data ?? [];
-  const assignmentRows: AssignmentRow[] = assignmentsResult.data ?? [];
 
   const dayIds = dayRows.map((d) => d.id);
   const { data: mealRowsRaw, error: mealsError } =
@@ -132,7 +129,6 @@ async function loadNutritionPlans(supabase: TypedSupabaseClient, planRows: Nutri
 
   const daysByPlan = groupBy(dayRows, (d) => d.plan_id);
   const mealsByDay = groupBy(mealRows, (m) => m.nutrition_day_id);
-  const assignmentsByPlan = groupBy(assignmentRows, (a) => a.content_id);
 
   return planRows.map((planRow) => {
     const days: AdminNutritionDay[] = (daysByPlan.get(planRow.id) ?? []).map((dayRow) => ({
@@ -141,7 +137,7 @@ async function loadNutritionPlans(supabase: TypedSupabaseClient, planRows: Nutri
       day: dayRow.day,
       meals: (mealsByDay.get(dayRow.id) ?? []).map(mapMealRow),
     }));
-    const assignedStudentIds = (assignmentsByPlan.get(planRow.id) ?? []).map((a) => a.student_id);
+    const assignedStudentIds = planRow.student_id ? [planRow.student_id] : [];
     return mapNutritionPlanRow(planRow, days, assignedStudentIds);
   });
 }
@@ -156,35 +152,26 @@ export async function getNutritionPlans(supabase: TypedSupabaseClient): Promise<
 }
 
 /**
- * Tous les plans réellement assignés à un élève, plus récemment assigné en
- * premier — pour la vue élève /nutrition (équivalent réel de la liste mock
- * `nutritionPlans`). Tableau vide si aucun plan n'est assigné.
+ * Tous les plans réellement assignés à un élève (nutrition_plans.student_id),
+ * plus récemment modifié en premier — pour la vue élève /nutrition
+ * (équivalent réel de la liste mock `nutritionPlans`). Tableau vide si aucun
+ * plan n'est assigné.
  */
 export async function getAssignedNutritionPlansForStudent(
   supabase: TypedSupabaseClient,
   studentId: string,
 ): Promise<AdminNutritionPlan[]> {
-  const { data: assignmentRows, error: assignmentError } = await supabase
-    .from("assignments")
-    .select("content_id, assigned_at")
+  const { data: planRows, error: plansError } = await supabase
+    .from("nutrition_plans")
+    .select("*")
     .eq("student_id", studentId)
-    .eq("content_type", "nutrition")
-    .order("assigned_at", { ascending: false });
-  devWarn("getAssignedNutritionPlansForStudent (assignments)", assignmentError);
-  if (!assignmentRows || assignmentRows.length === 0) {
-    return [];
-  }
-
-  const orderedPlanIds = assignmentRows.map((a) => a.content_id);
-  const { data: planRows, error: plansError } = await supabase.from("nutrition_plans").select("*").in("id", orderedPlanIds);
+    .order("updated_at", { ascending: false });
   devWarn("getAssignedNutritionPlansForStudent (nutrition_plans)", plansError);
   if (!planRows || planRows.length === 0) {
     return [];
   }
 
-  const plans = await loadNutritionPlans(supabase, planRows);
-  const planById = new Map(plans.map((p) => [p.id, p]));
-  return orderedPlanIds.map((id) => planById.get(id)).filter((p): p is AdminNutritionPlan => p !== undefined);
+  return loadNutritionPlans(supabase, planRows);
 }
 
 /** Plan à mettre en avant ("plan actif") pour un élève, ou `null` si aucun plan n'est assigné. */
@@ -202,6 +189,7 @@ export async function getAssignedNutritionPlanForStudent(
 /**
  * Ids des plans assignés à chaque élève (batch), pour peupler
  * AdminStudent.assignedNutritionPlanIds — voir lib/supabase/students.ts.
+ * Source : nutrition_plans.student_id directement (un plan = au plus un élève).
  */
 export async function getAssignedNutritionPlanIdsByStudent(
   supabase: TypedSupabaseClient,
@@ -212,14 +200,14 @@ export async function getAssignedNutritionPlanIdsByStudent(
     return map;
   }
   const { data, error } = await supabase
-    .from("assignments")
-    .select("student_id, content_id")
-    .eq("content_type", "nutrition")
+    .from("nutrition_plans")
+    .select("id, student_id")
     .in("student_id", studentIds);
   devWarn("getAssignedNutritionPlanIdsByStudent", error);
   for (const row of data ?? []) {
+    if (!row.student_id) continue;
     const list = map.get(row.student_id) ?? [];
-    list.push(row.content_id);
+    list.push(row.id);
     map.set(row.student_id, list);
   }
   return map;
@@ -327,9 +315,11 @@ export async function updateNutritionPlanStatus(
 }
 
 /**
- * Assigne/retire un plan alimentaire réel à un élève réel via la table
- * `assignments` (content_type = "nutrition") — même principe que
- * setProgramAssignment.
+ * Assigne/retire un plan alimentaire réel à un élève réel en écrivant
+ * directement `nutrition_plans.student_id` — source de vérité unique pour
+ * l'assignation nutrition (PAS la table `assignments`, réservée aux
+ * programmes). Assigner = `student_id = studentId` ; retirer =
+ * `student_id = null`. Un plan n'a jamais plus d'un élève assigné à la fois.
  */
 export async function setNutritionAssignment(
   supabase: TypedSupabaseClient,
@@ -337,34 +327,10 @@ export async function setNutritionAssignment(
   planId: string,
   assigned: boolean,
 ): Promise<boolean> {
-  if (!assigned) {
-    const { error } = await supabase
-      .from("assignments")
-      .delete()
-      .eq("student_id", studentId)
-      .eq("content_type", "nutrition")
-      .eq("content_id", planId);
-    devWarn("setNutritionAssignment (delete)", error);
-    return !error;
-  }
-
-  const { data: existing, error: lookupError } = await supabase
-    .from("assignments")
-    .select("id")
-    .eq("student_id", studentId)
-    .eq("content_type", "nutrition")
-    .eq("content_id", planId)
-    .maybeSingle();
-  devWarn("setNutritionAssignment (lookup)", lookupError);
-  if (existing) {
-    return true;
-  }
-
-  const { error: insertError } = await supabase.from("assignments").insert({
-    student_id: studentId,
-    content_type: "nutrition",
-    content_id: planId,
-  });
-  devWarn("setNutritionAssignment (insert)", insertError);
-  return !insertError;
+  const { error } = await supabase
+    .from("nutrition_plans")
+    .update({ student_id: assigned ? studentId : null, updated_at: new Date().toISOString() })
+    .eq("id", planId);
+  devWarn("setNutritionAssignment", error);
+  return !error;
 }

@@ -75,6 +75,13 @@ function MealEditor({
   onChange: (partial: Partial<AdminMeal>) => void;
   onRemove: () => void;
 }) {
+  // Le texte brut des aliments est tenu en état local, distinct de
+  // meal.items : reparser puis reformater (itemsToText(textToItems(v))) à
+  // chaque frappe casse la saisie (retours à la ligne, espaces, lignes
+  // vides en cours de frappe supprimés par le round-trip). On ne convertit
+  // vers AdminMealFoodItem[] qu'à la perte de focus.
+  const [itemsText, setItemsText] = useState(() => itemsToText(meal.items));
+
   return (
     <div className="border border-border p-4">
       <div className="mb-3 flex items-center justify-between gap-2">
@@ -95,8 +102,9 @@ function MealEditor({
         </div>
         <TextareaField
           label="Aliments (un par ligne — Nom - quantité)"
-          value={itemsToText(meal.items)}
-          onChange={(v) => onChange({ items: textToItems(v) })}
+          value={itemsText}
+          onChange={setItemsText}
+          onBlur={() => onChange({ items: textToItems(itemsText) })}
           rows={3}
           placeholder={"Blanc de poulet - 150 g\nRiz basmati - 200 g"}
         />

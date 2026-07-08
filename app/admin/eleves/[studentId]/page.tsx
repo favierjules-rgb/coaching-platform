@@ -50,6 +50,7 @@ import {
   studentStatusLabels,
 } from "@/lib/admin";
 import { bodyMeasurementLabels, nextWeightHistoryMonth } from "@/lib/profile";
+import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { calculatePlannedVsActualMetrics, calculateWeekMetrics, formatTonnage } from "@/lib/training-metrics";
 import type {
   AdminStudent,
@@ -89,8 +90,12 @@ export default function AdminStudentDetailPage() {
   // réel (isSupabaseStudent, défini plus bas).
   const supabasePrograms = useSupabasePrograms();
   const programs = supabasePrograms.programs.length > 0 ? supabasePrograms.programs : state.programs;
+  // Nutrition : dès que Supabase est configuré, jamais de repli mock (voir
+  // /admin/nutrition) — un élève réel sans plan réel affiche "Aucun plan
+  // attribué", jamais un plan mock.
+  const supabaseNutritionActive = isSupabaseConfigured();
   const supabaseNutritionPlans = useSupabaseNutritionPlans();
-  const nutritionPlans = supabaseNutritionPlans.plans.length > 0 ? supabaseNutritionPlans.plans : state.nutritionPlans;
+  const nutritionPlans = supabaseNutritionActive ? supabaseNutritionPlans.plans : state.nutritionPlans;
 
   // Toujours monté (règle des hooks), même si l'élève affiché n'est pas
   // l'élève relié — utilisé uniquement quand isLinked est vrai.
@@ -109,7 +114,7 @@ export default function AdminStudentDetailPage() {
   const supabaseDetail = useSupabaseStudentDetail(params.studentId);
   const isSupabaseStudent = supabaseDetail.student !== null;
   const canAssignRealPrograms = isSupabaseStudent && supabasePrograms.programs.length > 0;
-  const canAssignRealNutrition = isSupabaseStudent && supabaseNutritionPlans.plans.length > 0;
+  const canAssignRealNutrition = isSupabaseStudent && supabaseNutritionActive && supabaseNutritionPlans.plans.length > 0;
   const handleSetAssignment = useContentAssignment(
     { programme: canAssignRealPrograms, nutrition: canAssignRealNutrition },
     setAssignment,

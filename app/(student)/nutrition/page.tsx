@@ -17,8 +17,8 @@ import { useSupabaseNutritionForStudent } from "@/hooks/useSupabaseNutritionForS
 /**
  * Priorité Supabase dès qu'un compte élève réel est identifié (même
  * principe que /entrainement) : les plans alimentaires réellement assignés
- * (table `assignments`, voir lib/supabase/nutrition.ts) remplacent alors
- * entièrement data/student.ts, y compris pour afficher "Aucun plan
+ * (nutrition_plans.student_id, voir lib/supabase/nutrition.ts) remplacent
+ * alors entièrement data/student.ts, y compris pour afficher "Aucun plan
  * alimentaire attribué" plutôt qu'un plan mock qui ferait croire à un vrai
  * suivi. Le suivi jour par jour (validation, ajustement calorique) reste
  * hors périmètre pour un plan réel — lecture seule.

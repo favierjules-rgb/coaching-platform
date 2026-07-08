@@ -12,6 +12,7 @@ import { useContentAssignment } from "@/hooks/useContentAssignment";
 import { useSupabaseNutritionPlans } from "@/hooks/useSupabaseNutritionPlans";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { contentStatusLabels, matchesTextSearch } from "@/lib/admin";
+import { isSupabaseConfigured } from "@/lib/supabase/env";
 import type { AdminContentStatus } from "@/types";
 
 type StatusFilter = "tous" | AdminContentStatus;
@@ -33,20 +34,28 @@ const goalLabels: Record<string, string> = {
 export default function AdminNutritionPlansPage() {
   const { state, setAssignment } = useAdminData();
 
-  // Priorité Supabase dès qu'au moins un plan/élève réel existe, sinon
-  // repli sur les listes mock — même pattern que /admin/programmes.
+  // Dès que Supabase est configuré, /admin/nutrition n'affiche QUE les vrais
+  // plans nutrition_plans — jamais de mélange avec les plans mock/localStorage,
+  // même si nutrition_plans est vide (état vide plutôt que démo). Le repli
+  // mock complet ne s'applique que si Supabase n'est pas configuré du tout
+  // (environnement de démo sans backend).
+  const supabaseActive = isSupabaseConfigured();
   const supabaseNutritionPlans = useSupabaseNutritionPlans();
-  const nutritionPlans = supabaseNutritionPlans.plans.length > 0 ? supabaseNutritionPlans.plans : state.nutritionPlans;
+  const nutritionPlans = supabaseActive ? supabaseNutritionPlans.plans : state.nutritionPlans;
   const supabaseStudents = useSupabaseStudents();
-  const students = supabaseStudents.students.length > 0 ? supabaseStudents.students : state.students;
+  const students = supabaseActive ? supabaseStudents.students : state.students;
   const handleSetAssignment = useContentAssignment(
-    { nutrition: supabaseNutritionPlans.plans.length > 0 && supabaseStudents.students.length > 0 },
+    { nutrition: supabaseActive },
     setAssignment,
     supabaseNutritionPlans.refetch,
   );
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("tous");
+
+  if (supabaseActive && supabaseNutritionPlans.loading) {
+    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+  }
 
   const filtered = nutritionPlans.filter(
     (p) => matchesTextSearch([p.name, goalLabels[p.goalType]], query) && (statusFilter === "tous" || p.status === statusFilter),

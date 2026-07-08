@@ -1002,23 +1002,14 @@ create policy "exercise_library_staff_only" on public.exercise_library
 drop policy if exists "nutrition_plans_manage_staff" on public.nutrition_plans;
 create policy "nutrition_plans_manage_staff" on public.nutrition_plans
   for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
--- Rejoue proprement même si la policy existait déjà sous son ancienne forme
--- (student_id direct uniquement) — voir migration nutrition plus haut :
--- un plan de bibliothèque assigné via `assignments` (comme les programmes)
--- doit aussi être lisible par l'élève, en plus du cas historique où
--- nutrition_plans.student_id est renseigné directement.
+-- Assignation nutrition = nutrition_plans.student_id directement (PAS la
+-- table `assignments`, réservée aux programmes — voir lib/supabase/nutrition.ts).
+-- Rejoue proprement même si la policy existait déjà sous une forme
+-- précédente (avec ou sans branche `assignments`).
 drop policy if exists "nutrition_plans_select_self" on public.nutrition_plans;
 drop policy if exists "nutrition_plans_select_self_or_assigned" on public.nutrition_plans;
 create policy "nutrition_plans_select_self_or_assigned" on public.nutrition_plans
-  for select using (
-    student_id = public.current_student_id()
-    or exists (
-      select 1 from public.assignments a
-      where a.content_type = 'nutrition'
-        and a.content_id = nutrition_plans.id
-        and a.student_id = public.current_student_id()
-    )
-  );
+  for select using (student_id = public.current_student_id());
 
 drop policy if exists "nutrition_days_manage_staff" on public.nutrition_days;
 create policy "nutrition_days_manage_staff" on public.nutrition_days
@@ -1030,13 +1021,7 @@ create policy "nutrition_days_select_self_or_assigned" on public.nutrition_days
     exists (
       select 1 from public.nutrition_plans p
       where p.id = nutrition_days.plan_id
-        and (
-          p.student_id = public.current_student_id()
-          or exists (
-            select 1 from public.assignments a
-            where a.content_type = 'nutrition' and a.content_id = p.id and a.student_id = public.current_student_id()
-          )
-        )
+        and p.student_id = public.current_student_id()
     )
   );
 drop policy if exists "nutrition_days_update_self" on public.nutrition_days;
@@ -1047,26 +1032,14 @@ create policy "nutrition_days_update_self" on public.nutrition_days
     exists (
       select 1 from public.nutrition_plans p
       where p.id = nutrition_days.plan_id
-        and (
-          p.student_id = public.current_student_id()
-          or exists (
-            select 1 from public.assignments a
-            where a.content_type = 'nutrition' and a.content_id = p.id and a.student_id = public.current_student_id()
-          )
-        )
+        and p.student_id = public.current_student_id()
     )
   )
   with check (
     exists (
       select 1 from public.nutrition_plans p
       where p.id = nutrition_days.plan_id
-        and (
-          p.student_id = public.current_student_id()
-          or exists (
-            select 1 from public.assignments a
-            where a.content_type = 'nutrition' and a.content_id = p.id and a.student_id = public.current_student_id()
-          )
-        )
+        and p.student_id = public.current_student_id()
     )
   );
 
@@ -1081,13 +1054,7 @@ create policy "meals_select_self_or_assigned" on public.meals
       select 1 from public.nutrition_days d
       join public.nutrition_plans p on p.id = d.plan_id
       where d.id = meals.nutrition_day_id
-        and (
-          p.student_id = public.current_student_id()
-          or exists (
-            select 1 from public.assignments a
-            where a.content_type = 'nutrition' and a.content_id = p.id and a.student_id = public.current_student_id()
-          )
-        )
+        and p.student_id = public.current_student_id()
     )
   );
 
