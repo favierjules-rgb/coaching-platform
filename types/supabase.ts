@@ -51,6 +51,42 @@ export interface Database {
         };
         Relationships: [];
       };
+      coaches: {
+        Row: {
+          id: string;
+          user_id: string | null;
+          name: string;
+          email: string;
+          role: "admin" | "assistant";
+          status: "actif" | "inactif";
+          specialty: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string | null;
+          name: string;
+          email?: string;
+          role?: "admin" | "assistant";
+          status?: "actif" | "inactif";
+          specialty?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string | null;
+          name?: string;
+          email?: string;
+          role?: "admin" | "assistant";
+          status?: "actif" | "inactif";
+          specialty?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       students: {
         Row: {
           id: string;
@@ -1252,6 +1288,201 @@ export interface Database {
           viewed_at?: string | null;
           manually_unlocked?: boolean;
           unlock_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      coach_availabilities: {
+        Row: {
+          id: string;
+          coach_id: string | null;
+          weekday: number;
+          start_time: string;
+          end_time: string;
+          slot_duration_minutes: number;
+          appointment_type: string;
+          location: string;
+          is_active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          coach_id?: string | null;
+          weekday: number;
+          start_time: string;
+          end_time: string;
+          slot_duration_minutes?: number;
+          appointment_type?: string;
+          location?: string;
+          is_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          coach_id?: string | null;
+          weekday?: number;
+          start_time?: string;
+          end_time?: string;
+          slot_duration_minutes?: number;
+          appointment_type?: string;
+          location?: string;
+          is_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      coach_unavailabilities: {
+        Row: {
+          id: string;
+          coach_id: string | null;
+          start_at: string;
+          end_at: string;
+          reason: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          coach_id?: string | null;
+          start_at: string;
+          end_at: string;
+          reason?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          coach_id?: string | null;
+          start_at?: string;
+          end_at?: string;
+          reason?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      appointments: {
+        Row: {
+          id: string;
+          student_id: string | null;
+          coach_id: string | null;
+          title: string;
+          description: string;
+          appointment_type: string;
+          start_at: string;
+          end_at: string;
+          timezone: string;
+          location: string;
+          meeting_url: string;
+          status: "pending" | "confirmed" | "cancelled" | "completed" | "no_show";
+          cancellation_reason: string;
+          rescheduled_from_id: string | null;
+          calendar_event_id: string | null;
+          ics_uid: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          student_id?: string | null;
+          coach_id?: string | null;
+          title?: string;
+          description?: string;
+          appointment_type?: string;
+          start_at: string;
+          end_at: string;
+          timezone?: string;
+          location?: string;
+          meeting_url?: string;
+          status?: "pending" | "confirmed" | "cancelled" | "completed" | "no_show";
+          cancellation_reason?: string;
+          rescheduled_from_id?: string | null;
+          calendar_event_id?: string | null;
+          ics_uid?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          student_id?: string | null;
+          coach_id?: string | null;
+          title?: string;
+          description?: string;
+          appointment_type?: string;
+          start_at?: string;
+          end_at?: string;
+          timezone?: string;
+          location?: string;
+          meeting_url?: string;
+          status?: "pending" | "confirmed" | "cancelled" | "completed" | "no_show";
+          cancellation_reason?: string;
+          rescheduled_from_id?: string | null;
+          calendar_event_id?: string | null;
+          ics_uid?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      appointment_email_logs: {
+        Row: {
+          id: string;
+          appointment_id: string | null;
+          recipient_email: string;
+          type: string;
+          status: string;
+          sent_at: string | null;
+          error: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          appointment_id?: string | null;
+          recipient_email?: string;
+          type?: string;
+          status?: string;
+          sent_at?: string | null;
+          error?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          appointment_id?: string | null;
+          recipient_email?: string;
+          type?: string;
+          status?: string;
+          sent_at?: string | null;
+          error?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      booking_settings: {
+        Row: {
+          id: string;
+          min_lead_minutes: number;
+          max_days_ahead: number;
+          default_duration_minutes: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          min_lead_minutes?: number;
+          max_days_ahead?: number;
+          default_duration_minutes?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          min_lead_minutes?: number;
+          max_days_ahead?: number;
+          default_duration_minutes?: number;
           created_at?: string;
           updated_at?: string;
         };

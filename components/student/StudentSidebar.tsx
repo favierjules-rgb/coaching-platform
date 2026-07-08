@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Apple,
+  CalendarDays,
   Dumbbell,
   FileText,
   LayoutDashboard,
@@ -18,6 +19,7 @@ const studentLinks = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/entrainement", label: "Entraînement", icon: Dumbbell },
   { href: "/nutrition", label: "Nutrition", icon: Apple },
+  { href: "/rendez-vous", label: "Rendez-vous", icon: CalendarDays },
   { href: "/documents", label: "Documents", icon: FileText },
   { href: "/profil", label: "Profil", icon: User },
 ];

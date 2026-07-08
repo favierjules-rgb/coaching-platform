@@ -1370,6 +1370,202 @@ begin
 end $$;
 
 -- ============================================================================
+-- Migration additive — chantier "supabase-calendar-booking-system" :
+-- calendrier / réservation type Calendly. Aucune table de calendrier
+-- n'existait déjà (audit : aucune occurrence de calendar/appointments/
+-- bookings/availability dans le repo hors ce chantier) — 5 tables nouvelles,
+-- toutes `create table if not exists` pour rester rejouable sans erreur.
+--
+-- Choix de coach_id : nullable, jamais renseigné à l'écriture (même
+-- convention que programs.coach_id / nutrition_plans.coach_id /
+-- exercise_library.coach_id, déjà en place et jamais réellement écrite non
+-- plus) — l'app reste un espace staff partagé unique (is_coach_or_admin()),
+-- pas un modèle multi-coach avec isolation par coach. FK vers coaches(id)
+-- pour rester cohérent avec ces mêmes colonnes existantes.
+--
+-- appointments.student_id référence students(id) (jamais profiles.id,
+-- auth.users.id ni student_profiles.id) — même convention que
+-- assignments.student_id / workout_feedback.student_id / documents.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 26. coach_availabilities — plages récurrentes hebdomadaires du coach.
+-- ----------------------------------------------------------------------------
+create table if not exists public.coach_availabilities (
+  id uuid primary key default gen_random_uuid(),
+  coach_id uuid references public.coaches (id) on delete set null,
+  weekday integer not null check (weekday between 0 and 6), -- 0 dimanche .. 6 samedi (JS Date#getDay())
+  start_time time not null,
+  end_time time not null,
+  slot_duration_minutes integer not null default 60 check (slot_duration_minutes > 0),
+  appointment_type text not null default 'Autre',
+  location text not null default '',
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint coach_availabilities_time_order check (end_time > start_time)
+);
+
+-- ----------------------------------------------------------------------------
+-- 27. coach_unavailabilities — exceptions ponctuelles (vacances, jour
+--     férié, déplacement, rendez-vous personnel...).
+-- ----------------------------------------------------------------------------
+create table if not exists public.coach_unavailabilities (
+  id uuid primary key default gen_random_uuid(),
+  coach_id uuid references public.coaches (id) on delete set null,
+  start_at timestamptz not null,
+  end_at timestamptz not null,
+  reason text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint coach_unavailabilities_time_order check (end_at > start_at)
+);
+
+-- ----------------------------------------------------------------------------
+-- 28. appointments — un rendez-vous coach/élève.
+-- ----------------------------------------------------------------------------
+create table if not exists public.appointments (
+  id uuid primary key default gen_random_uuid(),
+  student_id uuid references public.students (id) on delete cascade,
+  coach_id uuid references public.coaches (id) on delete set null,
+  title text not null default '',
+  description text not null default '',
+  appointment_type text not null default 'Autre',
+  start_at timestamptz not null,
+  end_at timestamptz not null,
+  timezone text not null default 'Europe/Paris',
+  location text not null default '',
+  meeting_url text not null default '',
+  status text not null default 'confirmed' check (status in ('pending', 'confirmed', 'cancelled', 'completed', 'no_show')),
+  cancellation_reason text not null default '',
+  rescheduled_from_id uuid references public.appointments (id) on delete set null,
+  calendar_event_id text,
+  ics_uid text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint appointments_time_order check (end_at > start_at)
+);
+create index if not exists appointments_student_id_idx on public.appointments (student_id);
+create index if not exists appointments_start_at_idx on public.appointments (start_at);
+
+-- ----------------------------------------------------------------------------
+-- 29. appointment_email_logs — traçabilité des envois (confirmation,
+--     annulation, report), y compris quand aucun provider n'est encore
+--     branché (voir lib/email/appointment-emails.ts).
+-- ----------------------------------------------------------------------------
+create table if not exists public.appointment_email_logs (
+  id uuid primary key default gen_random_uuid(),
+  appointment_id uuid references public.appointments (id) on delete cascade,
+  recipient_email text not null default '',
+  type text not null default '',
+  status text not null default '',
+  sent_at timestamptz,
+  error text,
+  created_at timestamptz not null default now()
+);
+
+-- ----------------------------------------------------------------------------
+-- 30. booking_settings — réglages globaux de réservation (durée par défaut,
+--     délai minimum avant réservation, limite dans le futur). Ligne
+--     singleton (une seule rangée utilisée, la plus ancienne) plutôt que
+--     rattachée à un coach précis — même raisonnement que coach_id ci-dessus.
+-- ----------------------------------------------------------------------------
+create table if not exists public.booking_settings (
+  id uuid primary key default gen_random_uuid(),
+  min_lead_minutes integer not null default 120 check (min_lead_minutes >= 0),
+  max_days_ahead integer not null default 30 check (max_days_ahead > 0),
+  default_duration_minutes integer not null default 60 check (default_duration_minutes > 0),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+insert into public.booking_settings (min_lead_minutes, max_days_ahead, default_duration_minutes)
+select 120, 30, 60
+where not exists (select 1 from public.booking_settings);
+
+-- ----------------------------------------------------------------------------
+-- Triggers updated_at pour les nouvelles tables.
+-- ----------------------------------------------------------------------------
+do $$
+declare
+  t text;
+begin
+  for t in
+    select unnest(array[
+      'coach_availabilities', 'coach_unavailabilities', 'appointments', 'booking_settings'
+    ])
+  loop
+    execute format(
+      'drop trigger if exists set_updated_at on public.%I; ' ||
+      'create trigger set_updated_at before update on public.%I ' ||
+      'for each row execute function public.set_updated_at();',
+      t, t
+    );
+  end loop;
+end $$;
+
+-- ----------------------------------------------------------------------------
+-- Row Level Security.
+-- ----------------------------------------------------------------------------
+alter table public.coach_availabilities enable row level security;
+alter table public.coach_unavailabilities enable row level security;
+alter table public.appointments enable row level security;
+alter table public.appointment_email_logs enable row level security;
+alter table public.booking_settings enable row level security;
+
+-- coach_availabilities / coach_unavailabilities / booking_settings : lecture
+-- par tout utilisateur authentifié (l'élève doit pouvoir calculer les
+-- créneaux disponibles côté client), écriture réservée au staff — même
+-- principe que document_levels (référentiel partagé, pas de donnée
+-- personnelle).
+drop policy if exists "coach_availabilities_select_authenticated" on public.coach_availabilities;
+create policy "coach_availabilities_select_authenticated" on public.coach_availabilities
+  for select using (auth.role() = 'authenticated');
+drop policy if exists "coach_availabilities_manage_staff" on public.coach_availabilities;
+create policy "coach_availabilities_manage_staff" on public.coach_availabilities
+  for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
+
+drop policy if exists "coach_unavailabilities_select_authenticated" on public.coach_unavailabilities;
+create policy "coach_unavailabilities_select_authenticated" on public.coach_unavailabilities
+  for select using (auth.role() = 'authenticated');
+drop policy if exists "coach_unavailabilities_manage_staff" on public.coach_unavailabilities;
+create policy "coach_unavailabilities_manage_staff" on public.coach_unavailabilities
+  for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
+
+drop policy if exists "booking_settings_select_authenticated" on public.booking_settings;
+create policy "booking_settings_select_authenticated" on public.booking_settings
+  for select using (auth.role() = 'authenticated');
+drop policy if exists "booking_settings_manage_staff" on public.booking_settings;
+create policy "booking_settings_manage_staff" on public.booking_settings
+  for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
+
+-- appointments : staff accès complet (lecture/création/modification/
+-- annulation de tous les rendez-vous, y compris ceux de tous les élèves) ;
+-- élève limité à ses propres rendez-vous (lecture, création pour lui-même,
+-- modification pour lui-même — utilisée uniquement pour l'annulation côté
+-- UI élève, jamais pour modifier le rendez-vous d'un autre puisque
+-- restreinte à `student_id = current_student_id()`).
+drop policy if exists "appointments_manage_staff" on public.appointments;
+create policy "appointments_manage_staff" on public.appointments
+  for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
+drop policy if exists "appointments_select_own_student" on public.appointments;
+create policy "appointments_select_own_student" on public.appointments
+  for select using (student_id = public.current_student_id());
+drop policy if exists "appointments_insert_own_student" on public.appointments;
+create policy "appointments_insert_own_student" on public.appointments
+  for insert with check (student_id = public.current_student_id());
+drop policy if exists "appointments_update_own_student" on public.appointments;
+create policy "appointments_update_own_student" on public.appointments
+  for update
+  using (student_id = public.current_student_id())
+  with check (student_id = public.current_student_id());
+
+-- appointment_email_logs : staff uniquement (journal interne, jamais exposé
+-- à l'élève).
+drop policy if exists "appointment_email_logs_manage_staff" on public.appointment_email_logs;
+create policy "appointment_email_logs_manage_staff" on public.appointment_email_logs
+  for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
+
+-- ============================================================================
 -- Fin du schéma initial. Prochaine étape (pas dans ce fichier) : régénérer
 -- types/supabase.ts avec `supabase gen types typescript`, puis brancher
 -- progressivement chaque page mock sur ces tables (voir README.md).

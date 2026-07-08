@@ -12,6 +12,7 @@ const PRIVATE_PREFIXES = [
   "/nutrition",
   "/documents",
   "/profil",
+  "/rendez-vous",
   "/admin",
   "/connexion",
   "/inscription",

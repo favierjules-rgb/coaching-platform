@@ -1,14 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { Bell, Dumbbell, Flame, Scale, Target, TrendingUp } from "lucide-react";
+import { Bell, CalendarDays, Dumbbell, Flame, Scale, Target, TrendingUp } from "lucide-react";
 
 import { StatCard } from "@/components/student/StatCard";
 import { WeightChart } from "@/components/student/WeightChart";
 import { useStudentProfile, type StudentProfileState } from "@/hooks/useStudentProfile";
+import { useSupabaseAppointmentsForStudent } from "@/hooks/useSupabaseAppointmentsForStudent";
 import { useSupabaseNutritionForStudent } from "@/hooks/useSupabaseNutritionForStudent";
 import { useSupabaseStudentProfile } from "@/hooks/useSupabaseStudentProfile";
 import { useSupabaseTrainingProgram } from "@/hooks/useSupabaseTrainingProgram";
+import { formatDateTime } from "@/lib/admin";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { coachingStatusLabels, computeWeightEvolution } from "@/lib/profile";
 import { getHighlightedScheduleDay } from "@/data/student";
@@ -57,6 +59,7 @@ export function DashboardContent({
   const useSupabase = supabaseProfile.ready && supabaseProfile.state !== null;
   const supabaseTraining = useSupabaseTrainingProgram();
   const supabaseNutrition = useSupabaseNutritionForStudent();
+  const supabaseAppointments = useSupabaseAppointmentsForStudent();
 
   if (!supabaseProfile.ready) {
     return <p className="text-sm text-muted-foreground">Chargement du dashboard…</p>;
@@ -235,6 +238,36 @@ export function DashboardContent({
           </Link>
         </div>
       </div>
+
+      {supabaseAppointments.active &&
+        (() => {
+          const nextAppointment = supabaseAppointments.appointments
+            .filter((a) => (a.status === "pending" || a.status === "confirmed") && new Date(a.startAt).getTime() >= new Date().getTime())
+            .sort((a, b) => a.startAt.localeCompare(b.startAt))[0];
+          return (
+            <div className="mt-6 border border-border bg-card p-6">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="font-heading text-lg font-bold uppercase text-foreground">Prochain rendez-vous</h2>
+                <Link href="/rendez-vous" className="text-xs uppercase tracking-wide text-primary hover:underline">
+                  Tout voir
+                </Link>
+              </div>
+              {!nextAppointment ? (
+                <p className="text-sm text-muted-foreground">Aucun rendez-vous à venir.</p>
+              ) : (
+                <div className="flex items-center gap-4">
+                  <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center bg-primary">
+                    <CalendarDays size={20} className="text-primary-foreground" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-foreground">{nextAppointment.title}</div>
+                    <div className="mt-0.5 text-xs text-muted-foreground">{formatDateTime(nextAppointment.startAt)}</div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
       <div className="mt-6 border border-border bg-card p-6">
         <div className="mb-4 flex items-center justify-between">

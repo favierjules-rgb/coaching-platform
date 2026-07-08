@@ -1705,3 +1705,101 @@ export interface PlannedVsActualTrainingMetrics {
   tonnageDeltaKg: number | null;
   tonnageDeltaPercent: number | null;
 }
+
+/* ─── Calendrier / réservation (chantier "supabase-calendar-booking-system") ───
+ * Types de la table Supabase réelle `appointments` + `coach_availabilities` +
+ * `coach_unavailabilities` + `booking_settings`. Aucun mock équivalent
+ * n'existait avant ce chantier (voir docs/supabase-calendar-booking-model.md).
+ */
+
+export type AppointmentType =
+  | "Coaching en salle"
+  | "Coaching visio"
+  | "Point nutrition"
+  | "Bilan mensuel"
+  | "Appel suivi"
+  | "Autre";
+
+export const appointmentTypes: AppointmentType[] = [
+  "Coaching en salle",
+  "Coaching visio",
+  "Point nutrition",
+  "Bilan mensuel",
+  "Appel suivi",
+  "Autre",
+];
+
+export type AppointmentStatus = "pending" | "confirmed" | "cancelled" | "completed" | "no_show";
+
+export interface AdminAppointment {
+  id: string;
+  studentId: string | null;
+  coachId: string | null;
+  title: string;
+  description: string;
+  appointmentType: AppointmentType;
+  startAt: string;
+  endAt: string;
+  timezone: string;
+  location: string;
+  meetingUrl: string;
+  status: AppointmentStatus;
+  cancellationReason: string;
+  rescheduledFromId: string | null;
+  icsUid: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 0 dimanche .. 6 samedi (voir JS Date#getDay(), même convention que la colonne `weekday`). */
+export type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
+export const weekdayLabels: Record<Weekday, string> = {
+  0: "Dimanche",
+  1: "Lundi",
+  2: "Mardi",
+  3: "Mercredi",
+  4: "Jeudi",
+  5: "Vendredi",
+  6: "Samedi",
+};
+
+export interface CoachAvailability {
+  id: string;
+  coachId: string | null;
+  weekday: Weekday;
+  /** "09:00" (format HH:mm, colonne SQL `time`). */
+  startTime: string;
+  endTime: string;
+  slotDurationMinutes: number;
+  appointmentType: AppointmentType;
+  location: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CoachUnavailability {
+  id: string;
+  coachId: string | null;
+  startAt: string;
+  endAt: string;
+  reason: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BookingSettings {
+  id: string | null;
+  minLeadMinutes: number;
+  maxDaysAhead: number;
+  defaultDurationMinutes: number;
+}
+
+/** Un créneau proposable à la réservation, déjà purgé des chevauchements/indisponibilités. */
+export interface AvailableSlot {
+  startAt: string;
+  endAt: string;
+  appointmentType: AppointmentType;
+  location: string;
+}
