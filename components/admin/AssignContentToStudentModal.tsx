@@ -18,19 +18,14 @@ interface AssignContentToStudentModalProps {
     contentId: string,
     assigned: boolean,
   ) => void;
-  /**
-   * Élève Supabase : les documents ne sont pas encore migrés (leurs ids
-   * mock ne sont pas des UUID, donc aucune ligne `document_assignments` ne
-   * peut réellement être créée) — cette section reste un message
-   * informatif plutôt que des cases à cocher factices. Programmes et plans
-   * alimentaires, eux, sont réellement assignables dès que
-   * `canAssignRealPrograms`/`canAssignRealNutrition` sont vrais.
-   */
+  /** true si l'élève affiché est lui-même réel (Supabase). */
   isSupabaseStudent?: boolean;
   /** true si `programs` contient de vrais programmes Supabase et que cet élève est lui-même réel. */
   canAssignRealPrograms?: boolean;
   /** true si `nutritionPlans` contient de vrais plans Supabase et que cet élève est lui-même réel. */
   canAssignRealNutrition?: boolean;
+  /** true si `documents` contient de vrais documents Supabase et que cet élève est lui-même réel. */
+  canAssignRealDocuments?: boolean;
 }
 
 export function AssignContentToStudentModal({
@@ -42,6 +37,7 @@ export function AssignContentToStudentModal({
   isSupabaseStudent = false,
   canAssignRealPrograms = false,
   canAssignRealNutrition = false,
+  canAssignRealDocuments = false,
 }: AssignContentToStudentModalProps) {
   const [open, setOpen] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
@@ -120,16 +116,19 @@ export function AssignContentToStudentModal({
                 )}
               </div>
 
-              {isSupabaseStudent ? (
-                <div className="flex items-start gap-3 border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-400">
-                  <Info size={18} className="mt-0.5 flex-shrink-0" />
-                  Documents : attribution disponible après la migration de ce contenu vers Supabase. Cette action
-                  n&apos;est pas encore persistée pour cet élève.
-                </div>
-              ) : (
-                <div>
-                  <h4 className="mb-3 text-xs uppercase tracking-wide text-muted-foreground">Documents</h4>
+              <div>
+                <h4 className="mb-3 text-xs uppercase tracking-wide text-muted-foreground">Documents</h4>
+                {isSupabaseStudent && !canAssignRealDocuments ? (
+                  <div className="flex items-start gap-3 border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-400">
+                    <Info size={18} className="mt-0.5 flex-shrink-0" />
+                    Crée d&apos;abord un document réel (Admin &gt; Documents) pour pouvoir l&apos;attribuer à cet
+                    élève.
+                  </div>
+                ) : (
                   <div className="flex max-h-40 flex-col gap-2 overflow-y-auto">
+                    {documents.length === 0 && (
+                      <p className="text-sm text-muted-foreground">Aucun document créé pour le moment.</p>
+                    )}
                     {documents.map((d) => (
                       <CheckboxField
                         key={d.id}
@@ -139,8 +138,8 @@ export function AssignContentToStudentModal({
                       />
                     ))}
                   </div>
-                </div>
-              )}
+                )}
+              </div>
 
               <PrimaryButton onClick={() => setConfirmed(true)}>Terminer</PrimaryButton>
             </div>

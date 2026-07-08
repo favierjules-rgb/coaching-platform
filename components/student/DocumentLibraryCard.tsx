@@ -5,6 +5,7 @@ import {
   Image as ImageIcon,
   Link2,
   Lock,
+  StickyNote,
   Video,
   type LucideIcon,
 } from "lucide-react";
@@ -20,6 +21,7 @@ const typeIcons: Record<DocumentType, LucideIcon> = {
   guide: BookOpen,
   lien: Link2,
   image: ImageIcon,
+  texte: StickyNote,
 };
 
 interface DocumentLibraryCardProps {

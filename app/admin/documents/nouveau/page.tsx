@@ -8,12 +8,19 @@ import { ArrowLeft, CheckCircle, FileUp } from "lucide-react";
 import { CheckboxField, Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
 import { PrimaryButton } from "@/components/admin/Modal";
 import { useAdminData } from "@/hooks/useAdminData";
+import { useContentAssignment } from "@/hooks/useContentAssignment";
+import { useSupabaseDocuments } from "@/hooks/useSupabaseDocuments";
+import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { fullName } from "@/lib/admin";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { createDocument as createDocumentSupabase } from "@/lib/supabase/documents";
+import { isSupabaseConfigured } from "@/lib/supabase/env";
 import type {
   AdminDocumentStatus,
   DocumentCategory,
   DocumentDistributionMode,
   DocumentType,
+  DocumentVisibility,
 } from "@/types";
 
 const typeOptions: { value: DocumentType; label: string }[] = [
@@ -22,6 +29,7 @@ const typeOptions: { value: DocumentType; label: string }[] = [
   { value: "lien", label: "Lien" },
   { value: "guide", label: "Guide" },
   { value: "image", label: "Image" },
+  { value: "texte", label: "Texte / note" },
 ];
 
 const categoryOptions: { value: DocumentCategory; label: string }[] = [
@@ -53,6 +61,12 @@ const distributionOptions: { value: DocumentDistributionMode; label: string }[] 
   { value: "immediat", label: "Tout disponible immédiatement" },
   { value: "deblocage-auto", label: "Déblocage automatique progressif" },
   { value: "deblocage-manuel", label: "Déblocage manuel par le coach" },
+  { value: "deblocage-date", label: "Déblocage à une date précise" },
+];
+
+const visibilityOptions: { value: DocumentVisibility; label: string }[] = [
+  { value: "assigned", label: "Élèves assignés uniquement" },
+  { value: "global", label: "Tous les élèves actifs (global)" },
 ];
 
 export default function NewDocumentPage() {
@@ -61,6 +75,19 @@ export default function NewDocumentPage() {
   const fileInputId = useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Dès que Supabase est configuré, la création doit produire une vraie
+  // ligne `documents` — jamais de repli mock silencieux (même principe que
+  // /admin/nutrition/nouveau).
+  const supabaseActive = isSupabaseConfigured();
+  const supabaseDocuments = useSupabaseDocuments();
+  const supabaseStudents = useSupabaseStudents();
+  const students = supabaseActive ? supabaseStudents.students : state.students;
+  const handleSetAssignment = useContentAssignment(
+    { document: supabaseActive },
+    setAssignment,
+    supabaseDocuments.refetch,
+  );
+
   const [title, setTitle] = useState("");
   const [type, setType] = useState<DocumentType>("pdf");
   const [category, setCategory] = useState<DocumentCategory>("nutrition");
@@ -68,14 +95,20 @@ export default function NewDocumentPage() {
   const [difficulty, setDifficulty] = useState<"facile" | "intermédiaire" | "avancé">("facile");
   const [shortDescription, setShortDescription] = useState("");
   const [fullDescription, setFullDescription] = useState("");
+  const [contentText, setContentText] = useState("");
   const [externalUrl, setExternalUrl] = useState("");
+  const [videoUrl, setVideoUrl] = useState("");
   const [fileName, setFileName] = useState<string | null>(null);
   const [status, setStatus] = useState<AdminDocumentStatus>("brouillon");
   const [important, setImportant] = useState(false);
   const [distributionMode, setDistributionMode] = useState<DocumentDistributionMode>("immediat");
   const [unlockAfterWeeks, setUnlockAfterWeeks] = useState("0");
+  const [unlockAt, setUnlockAt] = useState("");
+  const [visibility, setVisibility] = useState<DocumentVisibility>("assigned");
+  const [tags, setTags] = useState("");
   const [assignedStudentIds, setAssignedStudentIds] = useState<string[]>([]);
   const [createdId, setCreatedId] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const selected = event.target.files?.[0];
@@ -86,8 +119,28 @@ export default function NewDocumentPage() {
     setAssignedStudentIds((prev) => (checked ? [...prev, studentId] : prev.filter((id) => id !== studentId)));
   }
 
-  function handleCreate(publish: boolean) {
-    const id = createDocument({
+  function validateUrls(): string | null {
+    const urlToCheck = type === "vidéo" ? videoUrl : type === "texte" ? "" : externalUrl;
+    if (!urlToCheck.trim()) {
+      return null;
+    }
+    try {
+      new URL(urlToCheck);
+      return null;
+    } catch {
+      return "L'URL saisie n'est pas valide (ex : https://...).";
+    }
+  }
+
+  async function handleCreate(publish: boolean) {
+    setSaveError(null);
+    const urlError = validateUrls();
+    if (urlError) {
+      setSaveError(urlError);
+      return;
+    }
+
+    const data = {
       title: title.trim() || "Document sans titre",
       type,
       category,
@@ -95,20 +148,44 @@ export default function NewDocumentPage() {
       difficulty,
       shortDescription,
       fullDescription,
+      contentText,
       externalUrl,
+      videoUrl,
       fileName,
       storagePath: null,
-      status: publish ? "publié" : status,
+      status: publish ? ("publié" as const) : status,
       important,
       distributionMode,
       unlockAfterWeeks: Number(unlockAfterWeeks) || 0,
-      assignedStudentIds: [],
-    });
+      unlockAt: distributionMode === "deblocage-date" && unlockAt ? new Date(unlockAt).toISOString() : null,
+      visibility,
+      tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
+    };
+
+    if (supabaseActive) {
+      const supabase = createSupabaseBrowserClient();
+      if (supabase) {
+        const id = await createDocumentSupabase(supabase, data);
+        if (!id) {
+          setSaveError("Échec de l'enregistrement du document. Réessaie.");
+          return;
+        }
+        for (const studentId of assignedStudentIds) {
+          await handleSetAssignment(studentId, "document", id, true);
+        }
+        await supabaseDocuments.refetch();
+        setCreatedId(id);
+        return;
+      }
+    }
+
+    const id = createDocument({ ...data, assignedStudentIds: [] });
     assignedStudentIds.forEach((studentId) => setAssignment(studentId, "document", id, true));
     setCreatedId(id);
   }
 
-  const created = createdId ? state.documents.find((d) => d.id === createdId) : null;
+  const documents = supabaseActive ? supabaseDocuments.documents : state.documents;
+  const created = createdId ? documents.find((d) => d.id === createdId) : null;
 
   if (created) {
     return (
@@ -145,6 +222,12 @@ export default function NewDocumentPage() {
         </h1>
       </div>
 
+      {saveError && (
+        <p className="mb-6 flex items-center gap-2 border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          {saveError}
+        </p>
+      )}
+
       <div className="flex flex-col gap-6">
         <div className="border border-border bg-card p-6">
           <div className="flex flex-col gap-4">
@@ -164,7 +247,14 @@ export default function NewDocumentPage() {
             </div>
             <TextareaField label="Description courte" value={shortDescription} onChange={setShortDescription} rows={2} />
             <TextareaField label="Description complète" value={fullDescription} onChange={setFullDescription} rows={4} />
-            <Field label="Lien externe (fictif)" value={externalUrl} onChange={setExternalUrl} placeholder="https://documents.seth-coaching.mock/..." />
+            {type === "texte" ? (
+              <TextareaField label="Contenu texte" value={contentText} onChange={setContentText} rows={5} />
+            ) : type === "vidéo" ? (
+              <Field label="Lien vidéo (YouTube, Vimeo...)" value={videoUrl} onChange={setVideoUrl} placeholder="https://..." />
+            ) : (
+              <Field label="Lien externe / PDF" value={externalUrl} onChange={setExternalUrl} placeholder="https://..." />
+            )}
+            <Field label="Tags (séparés par des virgules)" value={tags} onChange={setTags} />
 
             <div>
               <label htmlFor={fileInputId} className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
@@ -180,13 +270,19 @@ export default function NewDocumentPage() {
               {fileName && (
                 <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
                   <FileUp size={13} />
-                  {fileName} — sera préparé pour Supabase Storage une fois connecté.
+                  {fileName} — upload Storage réel non encore branché, utilise un lien externe pour l&apos;instant.
                 </p>
               )}
             </div>
 
             <SelectField label="Statut" value={status} onChange={(v) => setStatus(v as AdminDocumentStatus)} options={statusOptions} />
             <CheckboxField label="Marquer comme important" checked={important} onChange={setImportant} />
+            <SelectField
+              label="Visibilité"
+              value={visibility}
+              onChange={(v) => setVisibility(v as DocumentVisibility)}
+              options={visibilityOptions}
+            />
           </div>
         </div>
 
@@ -217,6 +313,9 @@ export default function NewDocumentPage() {
                 coaching de l&apos;élève.
               </p>
             )}
+            {distributionMode === "deblocage-date" && (
+              <Field label="Date de déblocage" type="date" value={unlockAt} onChange={setUnlockAt} />
+            )}
           </div>
         </div>
 
@@ -224,8 +323,14 @@ export default function NewDocumentPage() {
           <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
             Élèves autorisés
           </h2>
+          {visibility === "global" && (
+            <p className="mb-3 text-xs text-muted-foreground">
+              Document global : visible de tous les élèves actifs dès publié, l&apos;assignation ci-dessous reste
+              optionnelle.
+            </p>
+          )}
           <div className="flex flex-col gap-2">
-            {state.students.map((s) => (
+            {students.map((s) => (
               <CheckboxField
                 key={s.id}
                 label={fullName(s)}

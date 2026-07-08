@@ -210,7 +210,9 @@ export interface HydrationAndSupplements {
 }
 
 export type DocumentCategory = "nutrition" | "entrainement" | "administratif";
-export type DocumentType = "pdf" | "vidéo" | "lien" | "guide" | "image";
+export type DocumentType = "pdf" | "vidéo" | "lien" | "guide" | "image" | "texte";
+/** "global" : visible de tout élève actif dès publié, sans assignation. "assigned" : visible seulement des élèves assignés. */
+export type DocumentVisibility = "global" | "assigned";
 
 export interface DocumentItem {
   id: string;
@@ -820,8 +822,9 @@ export interface AdminNutritionPlan {
  * - deblocage-auto : débloqué automatiquement selon le niveau du document
  *   et le nombre de semaines écoulées depuis le début du coaching
  * - deblocage-manuel : le coach débloque lui-même, élève par élève
+ * - deblocage-date : débloqué à une date précise (AdminDocument.unlockAt)
  */
-export type DocumentDistributionMode = "immediat" | "deblocage-auto" | "deblocage-manuel";
+export type DocumentDistributionMode = "immediat" | "deblocage-auto" | "deblocage-manuel" | "deblocage-date";
 
 /**
  * Règle de déblocage dérivée d'un document (niveau + délai). Prête à
@@ -864,13 +867,22 @@ export interface AdminDocument {
   difficulty: "facile" | "intermédiaire" | "avancé";
   shortDescription: string;
   fullDescription: string;
+  /** Contenu texte pour type "texte" (note/guide affiché directement, sans fichier ni lien). */
+  contentText: string;
   externalUrl: string;
+  /** Lien vidéo (YouTube/Vimeo/...), distinct de externalUrl pour type "vidéo". */
+  videoUrl: string;
   fileName: string | null;
   storagePath: string | null;
   status: AdminDocumentStatus;
   important: boolean;
   distributionMode: DocumentDistributionMode;
   unlockAfterWeeks: number;
+  /** Date de déblocage précise, utilisée quand distributionMode = "deblocage-date". */
+  unlockAt: string | null;
+  /** "global" : visible de tout élève actif dès publié. "assigned" : seulement les élèves assignés (assignedStudentIds). */
+  visibility: DocumentVisibility;
+  tags: string[];
   assignedStudentIds: string[];
   createdAt: string;
   updatedAt: string;

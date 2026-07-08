@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { fromSupabaseMeasurementType, toSupabaseMeasurementType } from "@/lib/supabase/measurement-types";
+import { getAssignedDocumentIdsByStudent } from "@/lib/supabase/documents";
 import { getAssignedNutritionPlanIdsByStudent } from "@/lib/supabase/nutrition";
 import { getAssignedProgramIdsByStudent } from "@/lib/supabase/programs";
 import { normalizePaymentProfile } from "@/lib/payments";
@@ -416,14 +417,14 @@ function toMockPaymentProfile(
  * Compose un AdminStudent complet à partir de la fiche élève Supabase
  * (identité + statut, table `students`) et de son profil coaching (table
  * `student_profiles`, voir docs/supabase-student-model.md), déjà convertis
- * en types mock. `assignedDocumentIds` / `measurementHistory` restent
- * volontairement vides : documents et historique de mensurations ne sont
- * pas encore migrés — normalizeAdminStudent() garantit un affichage propre
- * ("Aucun document"...) plutôt qu'un plantage. `assignedProgramIds` vient de
+ * en types mock. `measurementHistory` reste volontairement vide : l'historique
+ * de mensurations n'est pas encore migré — normalizeAdminStudent() garantit
+ * un affichage propre plutôt qu'un plantage. `assignedProgramIds` vient de
  * la table `assignments` (voir lib/supabase/programs.ts) ;
  * `assignedNutritionPlanIds` vient de `nutrition_plans.student_id`
- * directement (voir lib/supabase/nutrition.ts) — les deux mécanismes ne
- * sont pas mélangés.
+ * directement (voir lib/supabase/nutrition.ts) ; `assignedDocumentIds` vient
+ * de `document_assignments` (voir lib/supabase/documents.ts) — ces trois
+ * mécanismes ne sont jamais mélangés entre eux.
  *
  * `profile` peut être `null` (élève sans fiche `student_profiles` encore
  * créée) : les champs coaching retombent alors sur des valeurs par défaut
@@ -441,6 +442,7 @@ function toAdminStudent(
     coachNotes: CoachNote[];
     assignedProgramIds: string[];
     assignedNutritionPlanIds: string[];
+    assignedDocumentIds: string[];
   },
 ): AdminStudent {
   const currentWeightKg = profile?.currentWeightKg ?? 0;
@@ -484,7 +486,7 @@ function toAdminStudent(
     paymentProfile: extras.paymentProfile,
     assignedProgramIds: extras.assignedProgramIds,
     assignedNutritionPlanIds: extras.assignedNutritionPlanIds,
-    assignedDocumentIds: [],
+    assignedDocumentIds: extras.assignedDocumentIds,
     coachNotes: extras.coachNotes,
     createdAt: student.createdAt,
     updatedAt: student.updatedAt,
@@ -514,13 +516,19 @@ export async function getStudents(supabase: TypedSupabaseClient): Promise<AdminS
   }
 
   const studentIds = data.map((row) => row.id);
-  const [{ data: profileRows, error: profilesError }, { data: paymentRows, error: paymentsError }, programIdsByStudent, nutritionPlanIdsByStudent] =
-    await Promise.all([
-      supabase.from("student_profiles").select("*").in("student_id", studentIds),
-      supabase.from("payments").select("*").in("student_id", studentIds),
-      getAssignedProgramIdsByStudent(supabase, studentIds),
-      getAssignedNutritionPlanIdsByStudent(supabase, studentIds),
-    ]);
+  const [
+    { data: profileRows, error: profilesError },
+    { data: paymentRows, error: paymentsError },
+    programIdsByStudent,
+    nutritionPlanIdsByStudent,
+    documentIdsByStudent,
+  ] = await Promise.all([
+    supabase.from("student_profiles").select("*").in("student_id", studentIds),
+    supabase.from("payments").select("*").in("student_id", studentIds),
+    getAssignedProgramIdsByStudent(supabase, studentIds),
+    getAssignedNutritionPlanIdsByStudent(supabase, studentIds),
+    getAssignedDocumentIdsByStudent(supabase, studentIds),
+  ]);
   devWarn("getStudents (profiles)", profilesError);
   devWarn("getStudents (payments)", paymentsError);
   const profileByStudent = new Map((profileRows ?? []).map((row) => [row.student_id, mapStudentProfileRow(row)]));
@@ -537,6 +545,7 @@ export async function getStudents(supabase: TypedSupabaseClient): Promise<AdminS
       coachNotes: [],
       assignedProgramIds: programIdsByStudent.get(student.id) ?? [],
       assignedNutritionPlanIds: nutritionPlanIdsByStudent.get(student.id) ?? [],
+      assignedDocumentIds: documentIdsByStudent.get(student.id) ?? [],
     });
   });
 }
@@ -654,17 +663,27 @@ export async function getFullAdminStudent(
     return null;
   }
 
-  const [profile, weightHistory, { measurements, customMeasurements }, progressPhotos, paymentProfile, coachNotes, assignedProgramIdsByStudent, assignedNutritionPlanIdsByStudent] =
-    await Promise.all([
-      getStudentProfile(supabase, studentId),
-      getWeightHistory(supabase, studentId),
-      getStudentMeasurements(supabase, studentId),
-      getStudentProgressPhotos(supabase, studentId),
-      getStudentPayments(supabase, studentId),
-      getStudentCoachNotes(supabase, studentId),
-      getAssignedProgramIdsByStudent(supabase, [studentId]),
-      getAssignedNutritionPlanIdsByStudent(supabase, [studentId]),
-    ]);
+  const [
+    profile,
+    weightHistory,
+    { measurements, customMeasurements },
+    progressPhotos,
+    paymentProfile,
+    coachNotes,
+    assignedProgramIdsByStudent,
+    assignedNutritionPlanIdsByStudent,
+    assignedDocumentIdsByStudent,
+  ] = await Promise.all([
+    getStudentProfile(supabase, studentId),
+    getWeightHistory(supabase, studentId),
+    getStudentMeasurements(supabase, studentId),
+    getStudentProgressPhotos(supabase, studentId),
+    getStudentPayments(supabase, studentId),
+    getStudentCoachNotes(supabase, studentId),
+    getAssignedProgramIdsByStudent(supabase, [studentId]),
+    getAssignedNutritionPlanIdsByStudent(supabase, [studentId]),
+    getAssignedDocumentIdsByStudent(supabase, [studentId]),
+  ]);
 
   return toAdminStudent(student, profile, {
     weightHistory,
@@ -675,6 +694,7 @@ export async function getFullAdminStudent(
     coachNotes,
     assignedProgramIds: assignedProgramIdsByStudent.get(studentId) ?? [],
     assignedNutritionPlanIds: assignedNutritionPlanIdsByStudent.get(studentId) ?? [],
+    assignedDocumentIds: assignedDocumentIdsByStudent.get(studentId) ?? [],
   });
 }
 

@@ -20,6 +20,7 @@ import type {
   DocumentCategory,
   DocumentDistributionMode,
   DocumentType,
+  DocumentVisibility,
 } from "@/types";
 
 const typeOptions: { value: DocumentType; label: string }[] = [
@@ -28,6 +29,7 @@ const typeOptions: { value: DocumentType; label: string }[] = [
   { value: "lien", label: "Lien" },
   { value: "guide", label: "Guide" },
   { value: "image", label: "Image" },
+  { value: "texte", label: "Texte / note" },
 ];
 
 const categoryOptions: { value: DocumentCategory; label: string }[] = [
@@ -59,6 +61,12 @@ const distributionOptions: { value: DocumentDistributionMode; label: string }[] 
   { value: "immediat", label: "Tout disponible immédiatement" },
   { value: "deblocage-auto", label: "Déblocage automatique progressif" },
   { value: "deblocage-manuel", label: "Déblocage manuel par le coach" },
+  { value: "deblocage-date", label: "Déblocage à une date précise" },
+];
+
+const visibilityOptions: { value: DocumentVisibility; label: string }[] = [
+  { value: "assigned", label: "Élèves assignés uniquement" },
+  { value: "global", label: "Tous les élèves actifs (global)" },
 ];
 
 function formFromDoc(doc: AdminDocument) {
@@ -70,12 +78,17 @@ function formFromDoc(doc: AdminDocument) {
     difficulty: doc.difficulty,
     shortDescription: doc.shortDescription,
     fullDescription: doc.fullDescription,
+    contentText: doc.contentText,
     externalUrl: doc.externalUrl,
+    videoUrl: doc.videoUrl,
     fileName: doc.fileName ?? "",
     status: doc.status,
     important: doc.important,
     distributionMode: doc.distributionMode,
     unlockAfterWeeks: String(doc.unlockAfterWeeks),
+    unlockAt: doc.unlockAt ? doc.unlockAt.slice(0, 10) : "",
+    visibility: doc.visibility,
+    tags: doc.tags.join(", "),
   };
 }
 
@@ -118,12 +131,17 @@ export function DocumentModal({
       difficulty: form.difficulty,
       shortDescription: form.shortDescription,
       fullDescription: form.fullDescription,
+      contentText: form.contentText,
       externalUrl: form.externalUrl,
+      videoUrl: form.videoUrl,
       fileName: form.fileName || null,
       status: form.status,
       important: form.important,
       distributionMode: form.distributionMode,
       unlockAfterWeeks: Number(form.unlockAfterWeeks) || 0,
+      unlockAt: form.unlockAt ? new Date(form.unlockAt).toISOString() : null,
+      visibility: form.visibility,
+      tags: form.tags.split(",").map((t) => t.trim()).filter(Boolean),
     });
     setSaved(true);
   }
@@ -172,10 +190,23 @@ export function DocumentModal({
               </div>
               <TextareaField label="Description courte" value={form.shortDescription} onChange={(v) => setField("shortDescription", v)} rows={2} />
               <TextareaField label="Description complète" value={form.fullDescription} onChange={(v) => setField("fullDescription", v)} rows={3} />
-              <Field label="Lien externe" value={form.externalUrl} onChange={(v) => setField("externalUrl", v)} />
+              {form.type === "texte" ? (
+                <TextareaField label="Contenu texte" value={form.contentText} onChange={(v) => setField("contentText", v)} rows={5} />
+              ) : form.type === "vidéo" ? (
+                <Field label="Lien vidéo (YouTube, Vimeo...)" value={form.videoUrl} onChange={(v) => setField("videoUrl", v)} placeholder="https://..." />
+              ) : (
+                <Field label="Lien externe / PDF" value={form.externalUrl} onChange={(v) => setField("externalUrl", v)} placeholder="https://..." />
+              )}
               <Field label="Nom du fichier (mocké)" value={form.fileName} onChange={(v) => setField("fileName", v)} />
+              <Field label="Tags (séparés par des virgules)" value={form.tags} onChange={(v) => setField("tags", v)} />
               <SelectField label="Statut" value={form.status} onChange={(v) => setField("status", v as AdminDocumentStatus)} options={statusOptions} />
               <CheckboxField label="Marquer comme important" checked={form.important} onChange={(v) => setField("important", v)} />
+              <SelectField
+                label="Visibilité"
+                value={form.visibility}
+                onChange={(v) => setField("visibility", v as DocumentVisibility)}
+                options={visibilityOptions}
+              />
               <SelectField
                 label="Mode de distribution"
                 value={form.distributionMode}
@@ -190,6 +221,14 @@ export function DocumentModal({
                   onChange={(v) => setField("unlockAfterWeeks", v)}
                 />
               )}
+              {form.distributionMode === "deblocage-date" && (
+                <Field
+                  label="Date de déblocage"
+                  type="date"
+                  value={form.unlockAt}
+                  onChange={(v) => setField("unlockAt", v)}
+                />
+              )}
               <PrimaryButton onClick={handleSave}>Enregistrer</PrimaryButton>
             </div>
           ) : (
@@ -198,19 +237,36 @@ export function DocumentModal({
                 <StatusBadge label={documentStatusLabels[document.status]} tone={contentStatusTone(document.status)} />
                 {document.important && <StatusBadge label="Important" tone="red" />}
                 <StatusBadge label={`Niveau ${document.level}`} tone="muted" />
+                <StatusBadge label={document.visibility === "global" ? "Global" : "Assigné"} tone="muted" />
               </div>
               <div className="text-xs uppercase tracking-wide text-muted-foreground">
                 {documentTypeLabels[document.type]} · {documentCategoryLabels[document.category]} · {document.difficulty}
               </div>
               <p className="text-sm text-foreground">{document.shortDescription}</p>
               <p className="text-sm text-muted-foreground">{document.fullDescription}</p>
+              {document.contentText && (
+                <p className="whitespace-pre-wrap text-sm text-foreground">{document.contentText}</p>
+              )}
+              {document.videoUrl && (
+                <p className="text-xs text-muted-foreground">Vidéo : {document.videoUrl}</p>
+              )}
               {document.externalUrl && (
                 <p className="text-xs text-muted-foreground">Lien : {document.externalUrl}</p>
               )}
               {document.fileName && <p className="text-xs text-muted-foreground">Fichier : {document.fileName}</p>}
+              {document.tags.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {document.tags.map((tag) => (
+                    <span key={tag} className="border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              )}
               <p className="text-xs text-muted-foreground">
                 Distribution : {distributionModeLabels[document.distributionMode]}
                 {document.distributionMode === "deblocage-auto" && ` (après ${document.unlockAfterWeeks} semaine(s))`}
+                {document.distributionMode === "deblocage-date" && document.unlockAt && ` (${document.unlockAt.slice(0, 10)})`}
               </p>
               <div>
                 <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
