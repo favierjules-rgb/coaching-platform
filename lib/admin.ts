@@ -58,6 +58,7 @@ export const documentTypeLabels: Record<DocumentType, string> = {
   lien: "Lien",
   guide: "Guide",
   image: "Image",
+  texte: "Texte / note",
 };
 
 export const documentCategoryLabels: Record<DocumentCategory, string> = {
@@ -285,6 +286,7 @@ export const distributionModeLabels: Record<DocumentDistributionMode, string> = 
   immediat: "Disponible immédiatement",
   "deblocage-auto": "Déblocage automatique progressif",
   "deblocage-manuel": "Déblocage manuel par le coach",
+  "deblocage-date": "Déblocage à une date précise",
 };
 
 export const documentDifficultyLabels: Record<AdminDocument["difficulty"], string> = {
@@ -340,6 +342,14 @@ export function computeDocumentAvailability(
   }
   if (document.distributionMode === "deblocage-manuel") {
     return { available: false, unlockDate: null, manuallyUnlocked: false };
+  }
+  if (document.distributionMode === "deblocage-date") {
+    const unlockAt = safeDate(document.unlockAt);
+    if (!unlockAt) {
+      return { available: true, unlockDate: null, manuallyUnlocked: false };
+    }
+    const available = reference.getTime() >= unlockAt.getTime();
+    return { available, unlockDate: available ? null : unlockAt.toISOString().slice(0, 10), manuallyUnlocked: false };
   }
 
   const startDate = safeDate(student.startDate);

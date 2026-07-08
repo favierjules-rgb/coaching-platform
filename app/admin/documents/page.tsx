@@ -9,6 +9,9 @@ import { FilterButtons, SearchInput } from "@/components/admin/SearchAndFilters"
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
 import { ImportantMark } from "@/components/admin/ImportantMark";
 import { useAdminData } from "@/hooks/useAdminData";
+import { useContentAssignment } from "@/hooks/useContentAssignment";
+import { useSupabaseDocuments } from "@/hooks/useSupabaseDocuments";
+import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import {
   distributionModeLabels,
   documentCategoryLabels,
@@ -18,7 +21,10 @@ import {
   formatDate,
   matchesTextSearch,
 } from "@/lib/admin";
-import type { AdminDocumentStatus } from "@/types";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { isSupabaseConfigured } from "@/lib/supabase/env";
+import { updateDocument as updateDocumentSupabase } from "@/lib/supabase/documents";
+import type { AdminDocument, AdminDocumentStatus } from "@/types";
 
 type StatusFilter = "tous" | AdminDocumentStatus;
 type LevelFilter = "tous" | 1 | 2 | 3 | 4;
@@ -32,13 +38,43 @@ const statusFilters: { value: StatusFilter; label: string }[] = [
 
 export default function AdminDocumentsPage() {
   const { state, updateDocument, setAssignment } = useAdminData();
-  const { documents, students } = state;
+
+  // Dès que Supabase est configuré, /admin/documents n'affiche QUE les
+  // vrais documents — jamais de mélange avec les documents mock/
+  // localStorage, même si la table est vide (état vide plutôt que démo),
+  // même principe que /admin/nutrition (voir docs/supabase-documents-model.md).
+  const supabaseActive = isSupabaseConfigured();
+  const supabaseDocuments = useSupabaseDocuments();
+  const documents = supabaseActive ? supabaseDocuments.documents : state.documents;
+  const supabaseStudents = useSupabaseStudents();
+  const students = supabaseActive ? supabaseStudents.students : state.students;
+  const handleSetAssignment = useContentAssignment(
+    { document: supabaseActive },
+    setAssignment,
+    supabaseDocuments.refetch,
+  );
+
+  async function handleSave(documentId: string, partial: Partial<AdminDocument>) {
+    if (supabaseActive) {
+      const supabase = createSupabaseBrowserClient();
+      if (supabase) {
+        await updateDocumentSupabase(supabase, documentId, partial);
+        await supabaseDocuments.refetch();
+        return;
+      }
+    }
+    updateDocument(documentId, partial);
+  }
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("tous");
   const [typeFilter, setTypeFilter] = useState("tous");
   const [categoryFilter, setCategoryFilter] = useState("tous");
   const [levelFilter, setLevelFilter] = useState<LevelFilter>("tous");
+
+  if (supabaseActive && supabaseDocuments.loading) {
+    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+  }
 
   const filtered = documents.filter(
     (d) =>
@@ -160,15 +196,15 @@ export default function AdminDocumentsPage() {
                 <DocumentModal
                   document={doc}
                   students={students}
-                  onSave={(partial) => updateDocument(doc.id, partial)}
-                  onSetAssignment={setAssignment}
+                  onSave={(partial) => handleSave(doc.id, partial)}
+                  onSetAssignment={handleSetAssignment}
                   triggerLabel="Voir"
                 />
                 <DocumentModal
                   document={doc}
                   students={students}
-                  onSave={(partial) => updateDocument(doc.id, partial)}
-                  onSetAssignment={setAssignment}
+                  onSave={(partial) => handleSave(doc.id, partial)}
+                  onSetAssignment={handleSetAssignment}
                   triggerLabel="Modifier"
                   initialEditing
                 />

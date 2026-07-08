@@ -638,6 +638,55 @@ create table if not exists public.document_assignments (
 );
 
 -- ============================================================================
+-- 20bis. Migration documents — chantier "supabase-documents-library".
+--
+-- `documents`/`document_levels`/`document_assignments` existaient déjà
+-- (sections 18-20), avec RLS et buckets Storage `documents`/`videos` prêts,
+-- mais jamais branchées à l'app (AdminDocument/DocumentResource restaient
+-- 100% mock/localStorage). Ajustements additifs, sûrs à rejouer :
+--
+-- 1) `documents.full_description` — le mock (AdminDocument) sépare une
+--    description courte (déjà couverte par `documents.description`) d'une
+--    description complète affichée en détail. Colonne manquante.
+-- 2) `documents.difficulty` — existe côté mock (AdminDocument.difficulty),
+--    utilisé par la liste admin existante (filtre/affichage) ; absent de la
+--    table.
+-- 3) `documents.content_text` — nouveau type de ressource "Texte / note"
+--    demandé (contenu texte affiché directement, sans fichier ni lien).
+-- 4) `documents.visibility` — capacité nouvelle : un document peut être
+--    'global' (visible de tout élève actif dès que publié, sans ligne
+--    document_assignments) ou 'assigned' (visible uniquement des élèves
+--    explicitement assignés, comportement historique). Sans cette colonne,
+--    aucune diffusion "à tous" n'est possible.
+-- 5) `documents.unlock_at` — déblocage à date précise, en plus du
+--    déblocage par niveau/semaines (`level`/`unlock_after_weeks`) déjà
+--    existant. `distribution_mode` gagne la valeur 'deblocage-date' pour ce
+--    cas (colonne texte libre, pas de contrainte check existante à modifier).
+-- 6) `documents.tags` — tags libres optionnels.
+-- 7) `documents.type` — contrainte élargie pour accepter 'texte'.
+-- 8) `document_assignments.unlock_at` — déblocage à date précise propre à
+--    UNE assignation (ex : document en mode manuel débloqué pour un élève
+--    donné à une date choisie), distinct de `documents.unlock_at` qui
+--    s'applique à tous les élèves assignés.
+--
+-- Aucune donnée existante supprimée ou écrasée.
+-- ============================================================================
+alter table public.documents add column if not exists full_description text not null default '';
+alter table public.documents add column if not exists difficulty text not null default 'intermédiaire'
+  check (difficulty in ('facile', 'intermédiaire', 'avancé'));
+alter table public.documents add column if not exists content_text text not null default '';
+alter table public.documents add column if not exists visibility text not null default 'assigned'
+  check (visibility in ('global', 'assigned'));
+alter table public.documents add column if not exists unlock_at timestamptz;
+alter table public.documents add column if not exists tags jsonb not null default '[]'::jsonb;
+
+alter table public.documents drop constraint if exists documents_type_check;
+alter table public.documents add constraint documents_type_check
+  check (type in ('pdf', 'vidéo', 'lien', 'guide', 'image', 'texte'));
+
+alter table public.document_assignments add column if not exists unlock_at timestamptz;
+
+-- ============================================================================
 -- 21. workout_feedback — retour élève global pour une séance
 --     (StudentWorkoutFeedback / AdminStudentFeedback type "entrainement").
 --     `session_id` / `program_id` restent uuid (FK vers workout_sessions /
@@ -1100,12 +1149,22 @@ create policy "nutrition_daily_logs_student_or_staff" on public.nutrition_daily_
 drop policy if exists "documents_manage_staff" on public.documents;
 create policy "documents_manage_staff" on public.documents
   for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
+-- Un élève ne voit qu'un document publié (jamais brouillon/archivé), et
+-- seulement s'il est global ou explicitement assigné — le déblocage dans le
+-- temps (level/unlock_after_weeks/unlock_at) reste calculé côté app (voir
+-- lib/supabase/documents.ts), même principe que le reste de l'app (aucune
+-- autre fonctionnalité de déblocage temporel n'est appliquée au niveau RLS).
 drop policy if exists "documents_select_assigned_student" on public.documents;
-create policy "documents_select_assigned_student" on public.documents
+drop policy if exists "documents_select_global_or_assigned" on public.documents;
+create policy "documents_select_global_or_assigned" on public.documents
   for select using (
-    exists (
-      select 1 from public.document_assignments da
-      where da.document_id = documents.id and da.student_id = public.current_student_id()
+    status = 'publié'
+    and (
+      visibility = 'global'
+      or exists (
+        select 1 from public.document_assignments da
+        where da.document_id = documents.id and da.student_id = public.current_student_id()
+      )
     )
   );
 

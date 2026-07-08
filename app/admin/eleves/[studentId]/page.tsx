@@ -35,6 +35,8 @@ import {
 import { useAdminData } from "@/hooks/useAdminData";
 import { useContentAssignment } from "@/hooks/useContentAssignment";
 import { useStudentProfile } from "@/hooks/useStudentProfile";
+import { useSupabaseDocuments } from "@/hooks/useSupabaseDocuments";
+import { useSupabaseDocumentsForStudent } from "@/hooks/useSupabaseDocumentsForStudent";
 import { useSupabaseNutritionPlans } from "@/hooks/useSupabaseNutritionPlans";
 import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
 import { useSupabaseStudentDetail } from "@/hooks/useSupabaseStudentDetail";
@@ -51,6 +53,8 @@ import {
   studentStatusLabels,
 } from "@/lib/admin";
 import { bodyMeasurementLabels, nextWeightHistoryMonth } from "@/lib/profile";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { unlockDocumentForStudent as unlockDocumentForStudentSupabase } from "@/lib/supabase/documents";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { calculatePlannedVsActualMetrics, calculateWeekMetrics, formatTonnage } from "@/lib/training-metrics";
 import type {
@@ -81,7 +85,7 @@ export default function AdminStudentDetailPage() {
   const router = useRouter();
   const { state, updateStudent, addCoachNote, setAssignment, unlockDocumentForStudent, unlockAllDocumentsForStudent } =
     useAdminData();
-  const { students, documents, feedback, manualDocumentUnlocks } = state;
+  const { students, feedback, manualDocumentUnlocks } = state;
   const [selectedMuscleGroup, setSelectedMuscleGroup] = useState<MuscleGroupFilter>("tous");
   const [statusActionError, setStatusActionError] = useState(false);
 
@@ -97,6 +101,11 @@ export default function AdminStudentDetailPage() {
   const supabaseNutritionActive = isSupabaseConfigured();
   const supabaseNutritionPlans = useSupabaseNutritionPlans();
   const nutritionPlans = supabaseNutritionActive ? supabaseNutritionPlans.plans : state.nutritionPlans;
+  // Documents : même principe, jamais de repli mock une fois Supabase
+  // configuré (voir /admin/documents).
+  const supabaseDocumentsActive = isSupabaseConfigured();
+  const supabaseDocuments = useSupabaseDocuments();
+  const documents = supabaseDocumentsActive ? supabaseDocuments.documents : state.documents;
 
   // Toujours monté (règle des hooks), même si l'élève affiché n'est pas
   // l'élève relié — utilisé uniquement quand isLinked est vrai.
@@ -116,12 +125,24 @@ export default function AdminStudentDetailPage() {
   const isSupabaseStudent = supabaseDetail.student !== null;
   const canAssignRealPrograms = isSupabaseStudent && supabasePrograms.programs.length > 0;
   const canAssignRealNutrition = isSupabaseStudent && supabaseNutritionActive && supabaseNutritionPlans.plans.length > 0;
+  const canAssignRealDocuments = isSupabaseStudent && supabaseDocumentsActive && supabaseDocuments.documents.length > 0;
+
+  // Documents réellement accessibles à cet élève précis (disponibilité
+  // incluse) — hook toujours monté (règle des hooks), no-op si l'élève
+  // affiché n'est pas réel.
+  const studentDocuments = useSupabaseDocumentsForStudent(
+    isSupabaseStudent ? (supabaseDetail.student?.id ?? null) : null,
+    isSupabaseStudent ? (supabaseDetail.student?.startDate ?? null) : null,
+  );
+
   const handleSetAssignment = useContentAssignment(
-    { programme: canAssignRealPrograms, nutrition: canAssignRealNutrition },
+    { programme: canAssignRealPrograms, nutrition: canAssignRealNutrition, document: canAssignRealDocuments },
     setAssignment,
     () => {
       void supabasePrograms.refetch();
       void supabaseNutritionPlans.refetch();
+      void supabaseDocuments.refetch();
+      void studentDocuments.refetch();
     },
   );
 
@@ -387,17 +408,50 @@ export default function AdminStudentDetailPage() {
 
   const assignedProgram = programs.find((p) => student.assignedProgramIds.includes(p.id));
   const assignedPlan = nutritionPlans.find((p) => student.assignedNutritionPlanIds.includes(p.id));
-  const assignedDocuments = documents.filter((d) => student.assignedDocumentIds.includes(d.id));
-  const documentsWithAvailability = assignedDocuments.map((d) => ({
-    document: d,
-    availability: computeDocumentAvailability(
-      student,
-      d,
-      manualDocumentUnlocks.filter((u) => u.studentId === student.id),
-    ),
-  }));
+  // Documents : élève réel -> disponibilité réelle (déblocage propre à
+  // l'assignation puis règle du document, voir lib/supabase/documents.ts) ;
+  // élève mock -> calcul existant (computeDocumentAvailability + déblocages
+  // manuels localStorage).
+  const documentsWithAvailability = isSupabaseStudent
+    ? studentDocuments.documents
+    : documents
+        .filter((d) => student.assignedDocumentIds.includes(d.id))
+        .map((d) => ({
+          document: d,
+          availability: computeDocumentAvailability(
+            student,
+            d,
+            manualDocumentUnlocks.filter((u) => u.studentId === student.id),
+          ),
+        }));
   const availableDocuments = documentsWithAvailability.filter((d) => d.availability.available);
   const lockedDocuments = documentsWithAvailability.filter((d) => !d.availability.available);
+
+  async function handleUnlockDocument(documentId: string) {
+    if (isSupabaseStudent) {
+      const supabase = createSupabaseBrowserClient();
+      if (supabase) {
+        await unlockDocumentForStudentSupabase(supabase, student!.id, documentId);
+        await studentDocuments.refetch();
+        return;
+      }
+    }
+    unlockDocumentForStudent(student!.id, documentId);
+  }
+
+  async function handleUnlockAllDocuments() {
+    if (isSupabaseStudent) {
+      const supabase = createSupabaseBrowserClient();
+      if (supabase) {
+        for (const { document } of lockedDocuments) {
+          await unlockDocumentForStudentSupabase(supabase, student!.id, document.id);
+        }
+        await studentDocuments.refetch();
+        return;
+      }
+    }
+    unlockAllDocumentsForStudent(student!.id);
+  }
 
   const studentFeedback = (isSupabaseStudent ? supabaseDetail.feedback : feedback.filter((f) => f.studentId === student.id))
     .slice()
@@ -463,6 +517,7 @@ export default function AdminStudentDetailPage() {
             isSupabaseStudent={isSupabaseStudent}
             canAssignRealPrograms={canAssignRealPrograms}
             canAssignRealNutrition={canAssignRealNutrition}
+            canAssignRealDocuments={canAssignRealDocuments}
           />
           <AddCoachNoteModal onAdd={handleAddCoachNote} />
           {isSupabaseStudent && (
@@ -790,7 +845,7 @@ export default function AdminStudentDetailPage() {
             lockedDocuments.length > 0 ? (
               <button
                 type="button"
-                onClick={() => unlockAllDocumentsForStudent(student.id)}
+                onClick={() => void handleUnlockAllDocuments()}
                 className="flex items-center gap-1.5 border border-primary px-3 py-1.5 text-[11px] uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
               >
                 <Unlock size={12} />
@@ -809,8 +864,17 @@ export default function AdminStudentDetailPage() {
               ) : (
                 <ul className="flex flex-col gap-1.5">
                   {availableDocuments.map(({ document }) => (
-                    <li key={document.id} className="text-sm text-foreground">
+                    <li key={document.id} className="flex items-center justify-between gap-2 text-sm text-foreground">
                       {document.title}
+                      {isSupabaseStudent && (
+                        <button
+                          type="button"
+                          onClick={() => handleSetAssignment(student.id, "document", document.id, false)}
+                          className="flex-shrink-0 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary"
+                        >
+                          Retirer
+                        </button>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -831,7 +895,7 @@ export default function AdminStudentDetailPage() {
                       </span>
                       <button
                         type="button"
-                        onClick={() => unlockDocumentForStudent(student.id, document.id)}
+                        onClick={() => void handleUnlockDocument(document.id)}
                         className="flex-shrink-0 text-[11px] uppercase tracking-widest text-primary hover:underline"
                       >
                         Débloquer

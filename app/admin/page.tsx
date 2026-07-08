@@ -16,6 +16,7 @@ import { StatCard } from "@/components/admin/StatCard";
 import { AdminSection } from "@/components/admin/AdminSection";
 import { StatusBadge, studentStatusTone } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
+import { useSupabaseDocuments } from "@/hooks/useSupabaseDocuments";
 import { useSupabaseNutritionPlans } from "@/hooks/useSupabaseNutritionPlans";
 import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
@@ -79,12 +80,10 @@ export default function AdminDashboardPage() {
   const { state } = useAdminData();
   const { documents } = state;
 
-  // Élèves, retours entraînement, programmes et plans alimentaires :
-  // priorité Supabase dès qu'il y a au moins une ligne réelle, sinon repli
-  // sur les données mock — même pattern que /admin/eleves, /admin/retours,
-  // /admin/programmes et /admin/nutrition. Documents restent mock dans tous
-  // les cas : ce contenu n'est pas encore migré, le compteur correspondant
-  // est donc explicitement marqué "(exemple)" plutôt que présenté comme réel.
+  // Élèves, retours entraînement, programmes, plans alimentaires et
+  // documents : priorité Supabase dès qu'il y a au moins une ligne réelle,
+  // sinon repli sur les données mock — même pattern que /admin/eleves,
+  // /admin/retours, /admin/programmes, /admin/nutrition et /admin/documents.
   const supabaseStudents = useSupabaseStudents();
   const students = supabaseStudents.students.length > 0 ? supabaseStudents.students : state.students;
   const supabaseFeedback = useSupabaseAdminFeedback();
@@ -95,12 +94,15 @@ export default function AdminDashboardPage() {
   const supabaseNutritionPlans = useSupabaseNutritionPlans();
   const nutritionPlans = supabaseNutritionPlans.plans.length > 0 ? supabaseNutritionPlans.plans : state.nutritionPlans;
   const nutritionPlansAreReal = supabaseNutritionPlans.plans.length > 0;
+  const supabaseDocuments = useSupabaseDocuments();
+  const realDocuments = supabaseDocuments.documents.length > 0 ? supabaseDocuments.documents : documents;
+  const documentsAreReal = supabaseDocuments.documents.length > 0;
 
   const activeStudents = students.filter((s) => s.status === "actif");
   const pausedStudents = students.filter((s) => s.status === "pause");
   const activePrograms = programs.filter((p) => p.status === "actif");
   const activePlans = nutritionPlans.filter((p) => p.status === "actif");
-  const publishedDocuments = documents.filter((d) => d.status === "publié");
+  const publishedDocuments = realDocuments.filter((d) => d.status === "publié");
   const feedbackToTreat = feedback.filter((f) => f.status === "a-traiter" || f.status === "important");
 
   return (
@@ -127,7 +129,11 @@ export default function AdminDashboardPage() {
           label={nutritionPlansAreReal ? "Plans alimentaires actifs" : "Plans alimentaires actifs (exemple)"}
           value={activePlans.length}
         />
-        <StatCard icon={FileText} label="Documents partagés (exemple)" value={publishedDocuments.length} />
+        <StatCard
+          icon={FileText}
+          label={documentsAreReal ? "Documents partagés" : "Documents partagés (exemple)"}
+          value={publishedDocuments.length}
+        />
         <StatCard
           icon={ClipboardList}
           label="Retours à traiter"

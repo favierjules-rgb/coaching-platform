@@ -43,6 +43,7 @@ export const documentTypeLabels: Record<DocumentType, string> = {
   lien: "Lien",
   guide: "Guide",
   image: "Image",
+  texte: "Texte / note",
 };
 
 export const documentFilters = [
