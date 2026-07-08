@@ -792,15 +792,20 @@ $$;
 -- afficher le nom du coach côté élève), écriture réservée à soi-même ou à
 -- un coach/admin.
 -- ----------------------------------------------------------------------------
+drop policy if exists "profiles_select_authenticated" on public.profiles;
 create policy "profiles_select_authenticated" on public.profiles
   for select using (auth.role() = 'authenticated');
+drop policy if exists "profiles_update_self_or_admin" on public.profiles;
 create policy "profiles_update_self_or_admin" on public.profiles
   for update using (user_id = auth.uid() or public.is_coach_or_admin());
+drop policy if exists "profiles_insert_self_or_admin" on public.profiles;
 create policy "profiles_insert_self_or_admin" on public.profiles
   for insert with check (user_id = auth.uid() or public.is_coach_or_admin());
 
+drop policy if exists "coaches_select_authenticated" on public.coaches;
 create policy "coaches_select_authenticated" on public.coaches
   for select using (auth.role() = 'authenticated');
+drop policy if exists "coaches_manage_admin" on public.coaches;
 create policy "coaches_manage_admin" on public.coaches
   for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
 
@@ -808,17 +813,23 @@ create policy "coaches_manage_admin" on public.coaches
 -- students / student_profiles : un élève lit/modifie sa propre fiche, un
 -- coach/admin lit et gère toutes les fiches élèves.
 -- ----------------------------------------------------------------------------
+drop policy if exists "students_select_self_or_staff" on public.students;
 create policy "students_select_self_or_staff" on public.students
   for select using (user_id = auth.uid() or public.is_coach_or_admin());
+drop policy if exists "students_update_self_or_staff" on public.students;
 create policy "students_update_self_or_staff" on public.students
   for update using (user_id = auth.uid() or public.is_coach_or_admin());
+drop policy if exists "students_manage_staff" on public.students;
 create policy "students_manage_staff" on public.students
   for insert with check (public.is_coach_or_admin());
+drop policy if exists "students_delete_staff" on public.students;
 create policy "students_delete_staff" on public.students
   for delete using (public.is_coach_or_admin());
 
+drop policy if exists "student_profiles_select_self_or_staff" on public.student_profiles;
 create policy "student_profiles_select_self_or_staff" on public.student_profiles
   for select using (student_id = public.current_student_id() or public.is_coach_or_admin());
+drop policy if exists "student_profiles_manage_self_or_staff" on public.student_profiles;
 create policy "student_profiles_manage_self_or_staff" on public.student_profiles
   for all
   using (student_id = public.current_student_id() or public.is_coach_or_admin())
@@ -828,36 +839,43 @@ create policy "student_profiles_manage_self_or_staff" on public.student_profiles
 -- Tables où l'élève lit ET écrit ses propres données (il ajoute lui-même ses
 -- photos/mensurations/retours), le coach/admin a un accès complet.
 -- ----------------------------------------------------------------------------
+drop policy if exists "progress_photos_student_or_staff" on public.progress_photos;
 create policy "progress_photos_student_or_staff" on public.progress_photos
   for all
   using (student_id = public.current_student_id() or public.is_coach_or_admin())
   with check (student_id = public.current_student_id() or public.is_coach_or_admin());
 
+drop policy if exists "weight_entries_student_or_staff" on public.weight_entries;
 create policy "weight_entries_student_or_staff" on public.weight_entries
   for all
   using (student_id = public.current_student_id() or public.is_coach_or_admin())
   with check (student_id = public.current_student_id() or public.is_coach_or_admin());
 
+drop policy if exists "body_measurements_student_or_staff" on public.body_measurements;
 create policy "body_measurements_student_or_staff" on public.body_measurements
   for all
   using (student_id = public.current_student_id() or public.is_coach_or_admin())
   with check (student_id = public.current_student_id() or public.is_coach_or_admin());
 
+drop policy if exists "custom_measurements_student_or_staff" on public.custom_measurements;
 create policy "custom_measurements_student_or_staff" on public.custom_measurements
   for all
   using (student_id = public.current_student_id() or public.is_coach_or_admin())
   with check (student_id = public.current_student_id() or public.is_coach_or_admin());
 
+drop policy if exists "workout_feedback_student_or_staff" on public.workout_feedback;
 create policy "workout_feedback_student_or_staff" on public.workout_feedback
   for all
   using (student_id = public.current_student_id() or public.is_coach_or_admin())
   with check (student_id = public.current_student_id() or public.is_coach_or_admin());
 
+drop policy if exists "exercise_feedback_student_or_staff" on public.exercise_feedback;
 create policy "exercise_feedback_student_or_staff" on public.exercise_feedback
   for all
   using (student_id = public.current_student_id() or public.is_coach_or_admin())
   with check (student_id = public.current_student_id() or public.is_coach_or_admin());
 
+drop policy if exists "exercise_set_feedback_student_or_staff" on public.exercise_set_feedback;
 create policy "exercise_set_feedback_student_or_staff" on public.exercise_set_feedback
   for all
   using (student_id = public.current_student_id() or public.is_coach_or_admin())
@@ -867,37 +885,50 @@ create policy "exercise_set_feedback_student_or_staff" on public.exercise_set_fe
 -- Tables où l'élève lit seulement ses propres données, gérées par le
 -- coach/admin (paiement, notes internes, statut de lecture documents).
 -- ----------------------------------------------------------------------------
+drop policy if exists "payments_select_self_or_staff" on public.payments;
 create policy "payments_select_self_or_staff" on public.payments
   for select using (student_id = public.current_student_id() or public.is_coach_or_admin());
+drop policy if exists "payments_manage_staff" on public.payments;
 create policy "payments_manage_staff" on public.payments
   for insert with check (public.is_coach_or_admin());
+drop policy if exists "payments_update_staff" on public.payments;
 create policy "payments_update_staff" on public.payments
   for update using (public.is_coach_or_admin());
+drop policy if exists "payments_delete_staff" on public.payments;
 create policy "payments_delete_staff" on public.payments
   for delete using (public.is_coach_or_admin());
 
+drop policy if exists "payment_entries_select_self_or_staff" on public.payment_entries;
 create policy "payment_entries_select_self_or_staff" on public.payment_entries
   for select using (student_id = public.current_student_id() or public.is_coach_or_admin());
+drop policy if exists "payment_entries_manage_staff" on public.payment_entries;
 create policy "payment_entries_manage_staff" on public.payment_entries
   for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
 
+drop policy if exists "coach_notes_staff_only" on public.coach_notes;
 create policy "coach_notes_staff_only" on public.coach_notes
   for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
 
+drop policy if exists "document_assignments_select_self_or_staff" on public.document_assignments;
 create policy "document_assignments_select_self_or_staff" on public.document_assignments
   for select using (student_id = public.current_student_id() or public.is_coach_or_admin());
+drop policy if exists "document_assignments_update_self_or_staff" on public.document_assignments;
 create policy "document_assignments_update_self_or_staff" on public.document_assignments
   -- l'élève peut mettre à jour viewed_at (marquer un document comme consulté)
   for update
   using (student_id = public.current_student_id() or public.is_coach_or_admin())
   with check (student_id = public.current_student_id() or public.is_coach_or_admin());
+drop policy if exists "document_assignments_manage_staff" on public.document_assignments;
 create policy "document_assignments_manage_staff" on public.document_assignments
   for insert with check (public.is_coach_or_admin());
+drop policy if exists "document_assignments_delete_staff" on public.document_assignments;
 create policy "document_assignments_delete_staff" on public.document_assignments
   for delete using (public.is_coach_or_admin());
 
+drop policy if exists "assignments_select_self_or_staff" on public.assignments;
 create policy "assignments_select_self_or_staff" on public.assignments
   for select using (student_id = public.current_student_id() or public.is_coach_or_admin());
+drop policy if exists "assignments_manage_staff" on public.assignments;
 create policy "assignments_manage_staff" on public.assignments
   for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
 
@@ -907,8 +938,10 @@ create policy "assignments_manage_staff" on public.assignments
 -- limitée au contenu qui lui est assigné (via assignments / document_
 -- assignments, ou via le student_id direct pour les plans nutrition).
 -- ----------------------------------------------------------------------------
+drop policy if exists "programs_manage_staff" on public.programs;
 create policy "programs_manage_staff" on public.programs
   for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
+drop policy if exists "programs_select_assigned_student" on public.programs;
 create policy "programs_select_assigned_student" on public.programs
   for select using (
     exists (
@@ -919,8 +952,10 @@ create policy "programs_select_assigned_student" on public.programs
     )
   );
 
+drop policy if exists "program_weeks_manage_staff" on public.program_weeks;
 create policy "program_weeks_manage_staff" on public.program_weeks
   for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
+drop policy if exists "program_weeks_select_assigned_student" on public.program_weeks;
 create policy "program_weeks_select_assigned_student" on public.program_weeks
   for select using (
     exists (
@@ -931,8 +966,10 @@ create policy "program_weeks_select_assigned_student" on public.program_weeks
     )
   );
 
+drop policy if exists "workout_sessions_manage_staff" on public.workout_sessions;
 create policy "workout_sessions_manage_staff" on public.workout_sessions
   for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
+drop policy if exists "workout_sessions_select_assigned_student" on public.workout_sessions;
 create policy "workout_sessions_select_assigned_student" on public.workout_sessions
   for select using (
     exists (
@@ -943,8 +980,10 @@ create policy "workout_sessions_select_assigned_student" on public.workout_sessi
     )
   );
 
+drop policy if exists "workout_exercises_manage_staff" on public.workout_exercises;
 create policy "workout_exercises_manage_staff" on public.workout_exercises
   for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
+drop policy if exists "workout_exercises_select_assigned_student" on public.workout_exercises;
 create policy "workout_exercises_select_assigned_student" on public.workout_exercises
   for select using (
     exists (
@@ -956,9 +995,11 @@ create policy "workout_exercises_select_assigned_student" on public.workout_exer
     )
   );
 
+drop policy if exists "exercise_library_staff_only" on public.exercise_library;
 create policy "exercise_library_staff_only" on public.exercise_library
   for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
 
+drop policy if exists "nutrition_plans_manage_staff" on public.nutrition_plans;
 create policy "nutrition_plans_manage_staff" on public.nutrition_plans
   for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
 -- Rejoue proprement même si la policy existait déjà sous son ancienne forme
@@ -967,6 +1008,7 @@ create policy "nutrition_plans_manage_staff" on public.nutrition_plans
 -- doit aussi être lisible par l'élève, en plus du cas historique où
 -- nutrition_plans.student_id est renseigné directement.
 drop policy if exists "nutrition_plans_select_self" on public.nutrition_plans;
+drop policy if exists "nutrition_plans_select_self_or_assigned" on public.nutrition_plans;
 create policy "nutrition_plans_select_self_or_assigned" on public.nutrition_plans
   for select using (
     student_id = public.current_student_id()
@@ -978,9 +1020,11 @@ create policy "nutrition_plans_select_self_or_assigned" on public.nutrition_plan
     )
   );
 
+drop policy if exists "nutrition_days_manage_staff" on public.nutrition_days;
 create policy "nutrition_days_manage_staff" on public.nutrition_days
   for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
 drop policy if exists "nutrition_days_select_self" on public.nutrition_days;
+drop policy if exists "nutrition_days_select_self_or_assigned" on public.nutrition_days;
 create policy "nutrition_days_select_self_or_assigned" on public.nutrition_days
   for select using (
     exists (
@@ -1026,9 +1070,11 @@ create policy "nutrition_days_update_self" on public.nutrition_days
     )
   );
 
+drop policy if exists "meals_manage_staff" on public.meals;
 create policy "meals_manage_staff" on public.meals
   for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
 drop policy if exists "meals_select_self" on public.meals;
+drop policy if exists "meals_select_self_or_assigned" on public.meals;
 create policy "meals_select_self_or_assigned" on public.meals
   for select using (
     exists (
@@ -1045,8 +1091,10 @@ create policy "meals_select_self_or_assigned" on public.meals
     )
   );
 
+drop policy if exists "documents_manage_staff" on public.documents;
 create policy "documents_manage_staff" on public.documents
   for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
+drop policy if exists "documents_select_assigned_student" on public.documents;
 create policy "documents_select_assigned_student" on public.documents
   for select using (
     exists (
@@ -1055,8 +1103,10 @@ create policy "documents_select_assigned_student" on public.documents
     )
   );
 
+drop policy if exists "document_levels_select_authenticated" on public.document_levels;
 create policy "document_levels_select_authenticated" on public.document_levels
   for select using (auth.role() = 'authenticated');
+drop policy if exists "document_levels_manage_staff" on public.document_levels;
 create policy "document_levels_manage_staff" on public.document_levels
   for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
 
@@ -1096,6 +1146,7 @@ on conflict (id) do nothing;
 -- nommé avec son propre student_id (convention : "<student_id>/<fichier>"),
 -- le coach/admin a accès à tout. À affiner selon la convention de nommage
 -- réellement choisie côté application au moment du branchement.
+drop policy if exists "progress_photos_bucket_student_or_staff" on storage.objects;
 create policy "progress_photos_bucket_student_or_staff" on storage.objects
   for all
   using (
@@ -1113,21 +1164,29 @@ create policy "progress_photos_bucket_student_or_staff" on storage.objects
     )
   );
 
+drop policy if exists "documents_bucket_select_authenticated" on storage.objects;
 create policy "documents_bucket_select_authenticated" on storage.objects
   for select using (bucket_id = 'documents' and auth.role() = 'authenticated');
+drop policy if exists "documents_bucket_manage_staff" on storage.objects;
 create policy "documents_bucket_manage_staff" on storage.objects
   for insert with check (bucket_id = 'documents' and public.is_coach_or_admin());
+drop policy if exists "documents_bucket_update_staff" on storage.objects;
 create policy "documents_bucket_update_staff" on storage.objects
   for update using (bucket_id = 'documents' and public.is_coach_or_admin());
+drop policy if exists "documents_bucket_delete_staff" on storage.objects;
 create policy "documents_bucket_delete_staff" on storage.objects
   for delete using (bucket_id = 'documents' and public.is_coach_or_admin());
 
+drop policy if exists "videos_bucket_select_authenticated" on storage.objects;
 create policy "videos_bucket_select_authenticated" on storage.objects
   for select using (bucket_id = 'videos' and auth.role() = 'authenticated');
+drop policy if exists "videos_bucket_manage_staff" on storage.objects;
 create policy "videos_bucket_manage_staff" on storage.objects
   for insert with check (bucket_id = 'videos' and public.is_coach_or_admin());
+drop policy if exists "videos_bucket_update_staff" on storage.objects;
 create policy "videos_bucket_update_staff" on storage.objects
   for update using (bucket_id = 'videos' and public.is_coach_or_admin());
+drop policy if exists "videos_bucket_delete_staff" on storage.objects;
 create policy "videos_bucket_delete_staff" on storage.objects
   for delete using (bucket_id = 'videos' and public.is_coach_or_admin());
 
