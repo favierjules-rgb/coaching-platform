@@ -9,6 +9,7 @@ import { AssignStudentsModal } from "@/components/admin/AssignStudentsModal";
 import { ProgramBuilder, type ProgramBuilderData } from "@/components/admin/ProgramBuilder";
 import { useAdminData } from "@/hooks/useAdminData";
 import { useContentAssignment } from "@/hooks/useContentAssignment";
+import { useSupabaseExerciseLibrary } from "@/hooks/useSupabaseExerciseLibrary";
 import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -18,6 +19,9 @@ export default function NewProgramPage() {
   const router = useRouter();
   const { state, createProgram, setAssignment } = useAdminData();
   const [createdId, setCreatedId] = useState<string | null>(null);
+
+  const supabaseExerciseLibrary = useSupabaseExerciseLibrary();
+  const exerciseLibrary = supabaseExerciseLibrary.items.length > 0 ? supabaseExerciseLibrary.items : state.exerciseLibrary;
 
   // Priorité Supabase dès qu'au moins un programme/élève réel existe — même
   // pattern que /admin/programmes. Un nouveau programme est créé en réel dès
@@ -107,7 +111,7 @@ export default function NewProgramPage() {
             status: "brouillon",
             sessions: [],
           }}
-          library={state.exerciseLibrary}
+          library={exerciseLibrary}
           onSave={handleSave}
           saveLabel="Enregistrer le programme"
         />

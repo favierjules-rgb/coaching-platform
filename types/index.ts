@@ -728,6 +728,16 @@ export interface AdminExercise {
    * retombe sur le muscleGroup de la séance parente.
    */
   muscleGroup?: string;
+  /**
+   * Référence vers l'exercice de la banque (`exercise_library`) dont cet
+   * exercice de séance a été créé, s'il y en a une — voir
+   * lib/supabase/exercise-library.ts. Les champs ci-dessus restent copiés
+   * par valeur (nom, vidéo, groupe musculaire...) et modifiables librement
+   * pour ce programme précis, sans jamais être réécrits par une future
+   * modification de l'exercice source dans la banque. Absente pour tout
+   * exercice créé en texte libre ou avant ce chantier.
+   */
+  libraryExerciseId?: string;
 }
 
 export interface AdminWorkoutSession {
@@ -1483,20 +1493,38 @@ export interface AdminSecuritySettings {
 }
 
 /* ─── Banque d'exercices ───
- * Types préparés pour une future table Supabase `exercise_library`, pour
- * réutiliser des exercices (nom, vidéo, consignes...) d'un programme à
- * l'autre sans ressaisie.
+ * Types de la table Supabase réelle `exercise_library` (chantier
+ * "supabase-exercise-library"), composés en localStorage tant que Supabase
+ * n'est pas configuré (voir hooks/useSupabaseExerciseLibrary.ts).
  */
 
-export type ExerciseCategory = "push" | "pull" | "legs" | "cardio" | "mobilité" | "abdos" | "autre";
+export type ExerciseCategory =
+  | "Force"
+  | "Hypertrophie"
+  | "Mobilité"
+  | "Cardio"
+  | "Gainage"
+  | "Plyométrie"
+  | "Échauffement"
+  | "Réathlétisation"
+  | "Technique";
+/** Partage volontairement la même liste que ExerciseCategory (aucune liste distincte fournie pour le "type" d'exercice). */
+export type ExerciseType = ExerciseCategory;
 export type ExerciseEquipment =
-  | "haltères"
-  | "barre"
-  | "machine"
-  | "poids du corps"
-  | "élastique"
-  | "autre";
+  | "Aucun"
+  | "Haltères"
+  | "Barre"
+  | "Machine"
+  | "Poulie"
+  | "Élastique"
+  | "Kettlebell"
+  | "Smith machine"
+  | "TRX"
+  | "Médecine ball"
+  | "Cardio machine"
+  | "Autre";
 export type ExerciseLevel = "débutant" | "intermédiaire" | "avancé";
+export type ExerciseLibraryStatus = "active" | "archived";
 
 export interface ExerciseTag {
   id: string;
@@ -1506,14 +1534,26 @@ export interface ExerciseTag {
 export interface ExerciseLibraryItem {
   id: string;
   name: string;
-  muscleGroup: string;
+  description: string;
+  /** Groupe musculaire principal (voir MuscleGroup, lib/training-metrics.ts). */
+  muscleGroup: MuscleGroup;
+  secondaryMuscles: MuscleGroup[];
   category: ExerciseCategory;
+  exerciseType: ExerciseType;
   equipment: ExerciseEquipment;
   level: ExerciseLevel;
   videoUrl: string;
+  alternativeVideoUrl: string;
+  /** Consignes techniques. */
   technicalNote: string;
+  /** Erreurs fréquentes. */
+  commonMistakes: string;
+  /** Note interne coach (colonne `notes`, jamais affichée à l'élève). */
   coachInstructions: string;
+  defaultTempo: string;
+  defaultRestSeconds: number | null;
   tags: string[];
+  status: ExerciseLibraryStatus;
   createdAt: string;
   updatedAt: string;
 }
@@ -1556,6 +1596,7 @@ export type MuscleGroup =
   | "mollets"
   | "abdos"
   | "lombaires"
+  | "avant-bras"
   | "cardio"
   | "full-body"
   | "autre";

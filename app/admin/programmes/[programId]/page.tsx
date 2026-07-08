@@ -18,6 +18,7 @@ import {
 } from "@/components/shared/TrainingMetricsSummary";
 import { useAdminData } from "@/hooks/useAdminData";
 import { useContentAssignment } from "@/hooks/useContentAssignment";
+import { useSupabaseExerciseLibrary } from "@/hooks/useSupabaseExerciseLibrary";
 import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { contentStatusLabels, fullName, weekDays } from "@/lib/admin";
@@ -45,6 +46,8 @@ export default function ProgramDetailPage() {
     setAssignment,
     supabasePrograms.refetch,
   );
+  const supabaseExerciseLibrary = useSupabaseExerciseLibrary();
+  const exerciseLibrary = supabaseExerciseLibrary.items.length > 0 ? supabaseExerciseLibrary.items : state.exerciseLibrary;
 
   const program = programs.find((p) => p.id === params.programId);
 
@@ -120,7 +123,7 @@ export default function ProgramDetailPage() {
               status: program.status,
               sessions: program.sessions,
             }}
-            library={state.exerciseLibrary}
+            library={exerciseLibrary}
             onSave={handleSave}
             saveLabel="Enregistrer les modifications"
           />

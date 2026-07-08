@@ -379,22 +379,30 @@ export function computeDocumentAvailability(
 /* ─── Banque d'exercices ─── */
 
 export const exerciseCategoryLabels: Record<ExerciseCategory, string> = {
-  push: "Push",
-  pull: "Pull",
-  legs: "Legs",
-  cardio: "Cardio",
-  mobilité: "Mobilité",
-  abdos: "Abdos",
-  autre: "Autre",
+  Force: "Force",
+  Hypertrophie: "Hypertrophie",
+  "Mobilité": "Mobilité",
+  Cardio: "Cardio",
+  Gainage: "Gainage",
+  "Plyométrie": "Plyométrie",
+  "Échauffement": "Échauffement",
+  "Réathlétisation": "Réathlétisation",
+  Technique: "Technique",
 };
 
 export const exerciseEquipmentLabels: Record<ExerciseEquipment, string> = {
-  haltères: "Haltères",
-  barre: "Barre",
-  machine: "Machine",
-  "poids du corps": "Poids du corps",
-  élastique: "Élastique",
-  autre: "Autre",
+  Aucun: "Aucun",
+  "Haltères": "Haltères",
+  Barre: "Barre",
+  Machine: "Machine",
+  Poulie: "Poulie",
+  "Élastique": "Élastique",
+  Kettlebell: "Kettlebell",
+  "Smith machine": "Smith machine",
+  TRX: "TRX",
+  "Médecine ball": "Médecine ball",
+  "Cardio machine": "Cardio machine",
+  Autre: "Autre",
 };
 
 export const exerciseLevelLabels: Record<ExerciseLevel, string> = {
@@ -405,7 +413,9 @@ export const exerciseLevelLabels: Record<ExerciseLevel, string> = {
 
 export function matchesExerciseSearch(item: ExerciseLibraryItem, query: string): boolean {
   if (!query.trim()) return true;
-  const haystack = [item.name, item.muscleGroup, item.equipment, ...item.tags].join(" ").toLowerCase();
+  const haystack = [item.name, item.muscleGroup, item.equipment, item.category, ...item.tags]
+    .join(" ")
+    .toLowerCase();
   return haystack.includes(query.trim().toLowerCase());
 }
 

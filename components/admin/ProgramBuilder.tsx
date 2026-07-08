@@ -67,11 +67,16 @@ function exerciseFromLibrary(order: number, item: ExerciseLibraryItem): AdminExe
     name: item.name,
     sets: 3,
     reps: "8-10",
-    restSeconds: 60,
-    tempo: "2-0-1-0",
+    restSeconds: item.defaultRestSeconds ?? 60,
+    tempo: item.defaultTempo || "2-0-1-0",
     recommendedLoad: "",
-    videoUrl: item.videoUrl,
+    // Copié par valeur au moment de l'ajout — une future modification de
+    // l'exercice source dans la banque ne modifie jamais cette séance déjà
+    // enregistrée (voir docs/supabase-exercise-library-model.md).
+    videoUrl: item.videoUrl.trim() || item.alternativeVideoUrl.trim(),
     notes: item.technicalNote,
+    muscleGroup: item.muscleGroup,
+    libraryExerciseId: item.id,
   };
 }
 
@@ -109,8 +114,13 @@ function ExerciseRow({
   return (
     <div className="border border-border p-4">
       <div className="mb-3 flex items-center justify-between gap-2">
-        <span className="text-xs uppercase tracking-wide text-muted-foreground">
+        <span className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
           Exercice #{exercise.order}
+          {exercise.libraryExerciseId && (
+            <span className="border border-primary/40 px-1.5 py-0.5 text-[10px] normal-case tracking-normal text-primary">
+              Depuis la banque
+            </span>
+          )}
         </span>
         <div className="flex items-center gap-2">
           <button type="button" onClick={() => onMove("up")} disabled={isFirst} className="text-muted-foreground hover:text-foreground disabled:opacity-30">

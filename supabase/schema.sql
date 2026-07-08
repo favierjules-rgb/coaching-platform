@@ -1307,6 +1307,69 @@ create policy "videos_bucket_delete_staff" on storage.objects
   for delete using (bucket_id = 'videos' and public.is_coach_or_admin());
 
 -- ============================================================================
+-- Migration additive — chantier "supabase-exercise-library" : bibliothèque
+-- d'exercices réelle (branchement complet de `exercise_library`, jusqu'ici
+-- créée mais jamais utilisée par l'app — voir lib/supabase/programs.ts).
+-- `exercise_library` et `workout_exercises` existaient déjà : colonnes
+-- ajoutées additivement, aucune table recréée, aucune colonne renommée.
+-- ============================================================================
+alter table public.exercise_library add column if not exists description text not null default '';
+alter table public.exercise_library add column if not exists secondary_muscles jsonb not null default '[]'::jsonb;
+alter table public.exercise_library add column if not exists exercise_type text not null default '';
+alter table public.exercise_library add column if not exists alternative_video_url text not null default '';
+alter table public.exercise_library add column if not exists technical_cues text not null default '';
+alter table public.exercise_library add column if not exists common_mistakes text not null default '';
+alter table public.exercise_library add column if not exists default_tempo text not null default '';
+alter table public.exercise_library add column if not exists default_rest_seconds integer;
+alter table public.exercise_library add column if not exists tags jsonb not null default '[]'::jsonb;
+alter table public.exercise_library add column if not exists status text not null default 'active';
+
+alter table public.exercise_library drop constraint if exists exercise_library_status_check;
+alter table public.exercise_library add constraint exercise_library_status_check check (status in ('active', 'archived'));
+
+-- Lien optionnel d'un exercice de séance vers la banque — nullable pour ne
+-- jamais casser les `workout_exercises` déjà créés par valeur (copie
+-- name/video_url/... sans FK), qui continuent de s'afficher normalement.
+alter table public.workout_exercises add column if not exists exercise_library_id uuid references public.exercise_library (id) on delete set null;
+
+-- RLS : le coach/admin garde un accès complet (remplace l'ancienne policy
+-- "staff only" qui interdisait toute lecture élève). L'élève peut désormais
+-- lire les exercices actifs (jamais archivés) — lecture générale plutôt que
+-- restreinte à ses programmes assignés, car la banque est un référentiel
+-- partagé non spécifique à un élève (même principe que document_levels).
+drop policy if exists "exercise_library_staff_only" on public.exercise_library;
+drop policy if exists "exercise_library_manage_staff" on public.exercise_library;
+create policy "exercise_library_manage_staff" on public.exercise_library
+  for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
+drop policy if exists "exercise_library_select_active" on public.exercise_library;
+create policy "exercise_library_select_active" on public.exercise_library
+  for select using (status = 'active');
+
+-- Données initiales — reprend les exercices mock déjà rédigés dans
+-- data/admin.ts (adminExerciseLibrary) plutôt qu'une liste arbitraire,
+-- uniquement si la banque est vide côté base. Idempotent : rejouable sans
+-- créer de doublons (vérifie l'absence par nom avant chaque insertion).
+do $$
+begin
+  if not exists (select 1 from public.exercise_library) then
+    insert into public.exercise_library
+      (name, description, muscle_group, secondary_muscles, category, exercise_type, equipment, level, video_url, technical_cues, common_mistakes, tags, status)
+    values
+      ('Développé couché barre', '', 'pectoraux', '["triceps","épaules"]'::jsonb, 'Force', 'Force', 'Barre', 'intermédiaire', 'https://videos.seth-coaching.mock/exercices/developpe-couche.mp4', 'Omoplates rétractées, pieds ancrés au sol, barre touche le bas de la poitrine.', 'Contrôle la descente sur 2 secondes, pousse explosif en haut.', '["pectoraux","force","barre"]'::jsonb, 'active'),
+      ('Squat barre', '', 'quadriceps', '["fessiers","ischios"]'::jsonb, 'Force', 'Force', 'Barre', 'intermédiaire', 'https://videos.seth-coaching.mock/exercices/squat-barre.mp4', 'Descend jusqu''à parallèle minimum, dos neutre, genoux dans l''axe des pieds.', 'Échauffement progressif obligatoire avant les séries lourdes.', '["jambes","force","barre"]'::jsonb, 'active'),
+      ('Tractions lestées', '', 'dos', '["biceps"]'::jsonb, 'Force', 'Force', 'Aucun', 'avancé', 'https://videos.seth-coaching.mock/exercices/tractions.mp4', 'Amplitude complète, menton au-dessus de la barre, descente contrôlée.', 'Ajoute du lest par palier de 2,5 kg quand 8 reps strictes sont atteintes.', '["dos","tirage","poids du corps"]'::jsonb, 'active'),
+      ('Rowing barre', '', 'dos', '["biceps"]'::jsonb, 'Hypertrophie', 'Hypertrophie', 'Barre', 'intermédiaire', 'https://videos.seth-coaching.mock/exercices/rowing-barre.mp4', 'Buste penché à 45°, tire la barre vers le nombril, serre les omoplates.', 'Évite de cambrer le bas du dos pour tricher la charge.', '["dos","tirage","barre"]'::jsonb, 'active'),
+      ('Développé militaire barre', '', 'épaules', '["triceps"]'::jsonb, 'Force', 'Force', 'Barre', 'intermédiaire', 'https://videos.seth-coaching.mock/exercices/developpe-militaire.mp4', 'Gainage serré, barre part du haut des clavicules, trajectoire verticale.', 'Éviter en cas de gêne d''épaule — proposer l''alternative haltères assis.', '["épaules","force","barre"]'::jsonb, 'active'),
+      ('Élévations latérales', '', 'épaules', '[]'::jsonb, 'Hypertrophie', 'Hypertrophie', 'Haltères', 'débutant', 'https://videos.seth-coaching.mock/exercices/elevations-laterales.mp4', 'Coudes légèrement fléchis, monte jusqu''à hauteur d''épaule, pas plus haut.', 'Charge légère, priorité à la qualité d''exécution sur ce mouvement d''isolation.', '["épaules","isolation","haltères"]'::jsonb, 'active'),
+      ('Fentes marchées haltères', '', 'quadriceps', '["fessiers"]'::jsonb, 'Hypertrophie', 'Hypertrophie', 'Haltères', 'intermédiaire', 'https://videos.seth-coaching.mock/exercices/fentes-marchees.mp4', 'Grand pas en avant, genou arrière frôle le sol, buste droit.', 'Bien adapté en fin de séance jambes pour finir en douceur.', '["jambes","unilatéral","haltères"]'::jsonb, 'active'),
+      ('Gainage planche', '', 'abdos', '["lombaires"]'::jsonb, 'Gainage', 'Gainage', 'Aucun', 'débutant', 'https://videos.seth-coaching.mock/exercices/gainage-planche.mp4', 'Corps aligné tête-bassin-talons, ne pas laisser tomber les hanches.', 'Bon exercice de fin de séance ou d''échauffement pour l''activation du tronc.', '["abdos","statique","poids du corps"]'::jsonb, 'active'),
+      ('Corde à sauter', '', 'cardio', '["mollets"]'::jsonb, 'Cardio', 'Cardio', 'Cardio machine', 'débutant', 'https://videos.seth-coaching.mock/exercices/corde-a-sauter.mp4', 'Petits sauts, poignets qui font tourner la corde, atterrissage sur l''avant-pied.', 'Idéal en échauffement ou en fin de séance pour la dépense calorique.', '["cardio","conditionnement"]'::jsonb, 'active'),
+      ('Rotations d''épaules élastique', '', 'épaules', '[]'::jsonb, 'Échauffement', 'Échauffement', 'Élastique', 'débutant', 'https://videos.seth-coaching.mock/exercices/mobilite-epaule.mp4', 'Rotation externe contrôlée, coude fixe au corps, amplitude progressive.', 'À intégrer systématiquement en échauffement avant les séances haut du corps.', '["mobilité","échauffement","élastique"]'::jsonb, 'active')
+    on conflict do nothing;
+  end if;
+end $$;
+
+-- ============================================================================
 -- Fin du schéma initial. Prochaine étape (pas dans ce fichier) : régénérer
 -- types/supabase.ts avec `supabase gen types typescript`, puis brancher
 -- progressivement chaque page mock sur ces tables (voir README.md).
