@@ -1035,6 +1035,48 @@ export interface Database {
         };
         Relationships: [];
       };
+      nutrition_daily_logs: {
+        Row: {
+          id: string;
+          student_id: string;
+          nutrition_plan_id: string;
+          log_date: string;
+          calories: number | null;
+          protein_g: number | null;
+          carbs_g: number | null;
+          fat_g: number | null;
+          note: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          student_id: string;
+          nutrition_plan_id: string;
+          log_date: string;
+          calories?: number | null;
+          protein_g?: number | null;
+          carbs_g?: number | null;
+          fat_g?: number | null;
+          note?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          student_id?: string;
+          nutrition_plan_id?: string;
+          log_date?: string;
+          calories?: number | null;
+          protein_g?: number | null;
+          carbs_g?: number | null;
+          fat_g?: number | null;
+          note?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

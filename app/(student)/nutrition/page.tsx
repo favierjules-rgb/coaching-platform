@@ -6,6 +6,7 @@ import { Droplet, Lightbulb, Pill } from "lucide-react";
 import { StatusBadge } from "@/components/student/StatusBadge";
 import { NutritionPlansListClient } from "@/components/student/NutritionPlansListClient";
 import { NutritionWeekStatusClient } from "@/components/student/NutritionWeekStatusClient";
+import { WeeklyNutritionTracker } from "@/components/student/WeeklyNutritionTracker";
 import {
   activeNutritionPlan,
   hydrationAndSupplements,
@@ -31,7 +32,7 @@ export default function NutritionPage() {
   }
 
   if (supabaseNutrition.active) {
-    const { plans, activePlan } = supabaseNutrition;
+    const { plans, activePlan, studentId } = supabaseNutrition;
 
     if (!activePlan) {
       return (
@@ -59,6 +60,20 @@ export default function NutritionPage() {
             {activePlan.weeklyTargetCalories.toLocaleString("fr-FR")} kcal/semaine
           </p>
         </div>
+
+        {studentId && (
+          <WeeklyNutritionTracker
+            studentId={studentId}
+            planId={activePlan.id}
+            target={{
+              calories: activePlan.caloriesPerDay,
+              protein: activePlan.protein,
+              carbs: activePlan.carbs,
+              fat: activePlan.fat,
+              weeklyTargetCalories: activePlan.weeklyTargetCalories,
+            }}
+          />
+        )}
 
         {(activePlan.hydrationTip || activePlan.supplements.length > 0) && (
           <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-2">

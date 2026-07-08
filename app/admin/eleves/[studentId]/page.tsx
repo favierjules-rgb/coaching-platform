@@ -10,6 +10,7 @@ import { AdminOnboardingDetailModal } from "@/components/admin/AdminOnboardingDe
 import { AdminSection, InfoRow, TagList } from "@/components/admin/AdminSection";
 import { AssignContentToStudentModal } from "@/components/admin/AssignContentToStudentModal";
 import { EditStudentModal } from "@/components/admin/EditStudentModal";
+import { NutritionWeekSummaryCard } from "@/components/admin/NutritionWeekSummaryCard";
 import { StatusBadge, feedbackStatusTone, studentStatusTone } from "@/components/admin/StatusBadge";
 import { PaymentSection } from "@/components/admin/PaymentSection";
 import { MeasurementsSection } from "@/components/student/MeasurementsSection";
@@ -843,6 +844,25 @@ export default function AdminStudentDetailPage() {
           </div>
         </AdminSection>
       </div>
+
+      {isSupabaseStudent && assignedPlan && (
+        <div className="mb-6 border border-border bg-card p-6">
+          <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
+            Suivi nutrition
+          </h2>
+          <NutritionWeekSummaryCard
+            studentId={student.id}
+            planId={assignedPlan.id}
+            target={{
+              calories: assignedPlan.caloriesPerDay,
+              protein: assignedPlan.protein,
+              carbs: assignedPlan.carbs,
+              fat: assignedPlan.fat,
+              weeklyTargetCalories: assignedPlan.weeklyTargetCalories,
+            }}
+          />
+        </div>
+      )}
 
       <div className="mb-6 border border-border bg-card p-6">
         <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
