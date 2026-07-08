@@ -9,6 +9,9 @@ import { ExerciseLibraryManager } from "@/components/admin/ExerciseLibraryManage
 import { FilterButtons, SearchInput } from "@/components/admin/SearchAndFilters";
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
+import { useProgramAssignment } from "@/hooks/useProgramAssignment";
+import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
+import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { contentStatusLabels, matchesTextSearch, totalSessions, totalWeeks } from "@/lib/admin";
 import type { AdminContentStatus } from "@/types";
 
@@ -24,7 +27,22 @@ const statusFilters: { value: StatusFilter; label: string }[] = [
 
 export default function AdminProgramsPage() {
   const { state, setAssignment, createLibraryExercise, updateLibraryExercise, deleteLibraryExercise } = useAdminData();
-  const { programs, students, exerciseLibrary } = state;
+  const { exerciseLibrary } = state;
+
+  // Priorité Supabase dès qu'au moins un programme/élève réel existe, sinon
+  // repli sur les listes mock — même pattern que /admin/eleves. Les deux
+  // priorités sont indépendantes (un coach peut avoir des élèves réels sans
+  // avoir encore créé de programme réel, ou l'inverse) ; l'assignation
+  // réelle (table `assignments`) n'est activée que si les deux le sont.
+  const supabasePrograms = useSupabasePrograms();
+  const programs = supabasePrograms.programs.length > 0 ? supabasePrograms.programs : state.programs;
+  const supabaseStudents = useSupabaseStudents();
+  const students = supabaseStudents.students.length > 0 ? supabaseStudents.students : state.students;
+  const handleSetAssignment = useProgramAssignment(
+    supabasePrograms.programs.length > 0 && supabaseStudents.students.length > 0,
+    setAssignment,
+    supabasePrograms.refetch,
+  );
 
   const [tab, setTab] = useState<Tab>("programmes");
   const [query, setQuery] = useState("");
@@ -172,7 +190,7 @@ export default function AdminProgramsPage() {
                   contentId={program.id}
                   students={students}
                   assignedStudentIds={program.assignedStudentIds}
-                  onSetAssignment={setAssignment}
+                  onSetAssignment={handleSetAssignment}
                 />
               </div>
             </div>

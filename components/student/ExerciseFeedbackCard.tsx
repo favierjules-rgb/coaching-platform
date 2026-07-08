@@ -42,13 +42,25 @@ export function ExerciseFeedbackCard({
           <span>Tempo {exercise.tempo}</span>
           <span>Charge conseillée : {exercise.recommendedLoad}</span>
         </div>
-        <button
-          type="button"
-          className="flex items-center gap-2 border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
-        >
-          <PlayCircle size={16} />
-          Voir la démo
-        </button>
+        {exercise.videoUrl.trim() ? (
+          <a
+            href={exercise.videoUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+          >
+            <PlayCircle size={16} />
+            Voir la démo
+          </a>
+        ) : (
+          <span
+            title="Aucune vidéo disponible"
+            className="flex cursor-not-allowed items-center gap-2 border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground/40"
+          >
+            <PlayCircle size={16} />
+            Aucune vidéo disponible
+          </span>
+        )}
       </div>
 
       <div className="border-t border-border pt-4">

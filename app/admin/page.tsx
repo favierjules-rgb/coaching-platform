@@ -16,6 +16,7 @@ import { StatCard } from "@/components/admin/StatCard";
 import { AdminSection } from "@/components/admin/AdminSection";
 import { StatusBadge, studentStatusTone } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
+import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { useSupabaseAdminFeedback } from "@/hooks/useSupabaseAdminFeedback";
 import {
@@ -75,19 +76,23 @@ function StudentWatchList({
 
 export default function AdminDashboardPage() {
   const { state } = useAdminData();
-  const { programs, nutritionPlans, documents } = state;
+  const { nutritionPlans, documents } = state;
 
-  // Élèves et retours entraînement : priorité Supabase dès qu'il y a au
-  // moins une ligne réelle, sinon repli sur les données mock — même
-  // pattern que /admin/eleves et /admin/retours (voir
-  // hooks/useSupabaseStudents.ts et hooks/useSupabaseAdminFeedback.ts).
-  // Programmes/plans/documents restent mock dans tous les cas : ces
-  // contenus ne sont pas encore migrés, les compteurs correspondants sont
-  // donc explicitement marqués "(exemple)" plutôt que présentés comme réels.
+  // Élèves, retours entraînement et programmes : priorité Supabase dès qu'il
+  // y a au moins une ligne réelle, sinon repli sur les données mock — même
+  // pattern que /admin/eleves, /admin/retours et /admin/programmes (voir
+  // hooks/useSupabaseStudents.ts, hooks/useSupabaseAdminFeedback.ts et
+  // hooks/useSupabasePrograms.ts). Plans/documents restent mock dans tous
+  // les cas : ces contenus ne sont pas encore migrés, le compteur
+  // correspondant est donc explicitement marqué "(exemple)" plutôt que
+  // présenté comme réel.
   const supabaseStudents = useSupabaseStudents();
   const students = supabaseStudents.students.length > 0 ? supabaseStudents.students : state.students;
   const supabaseFeedback = useSupabaseAdminFeedback();
   const feedback = supabaseFeedback.feedback.length > 0 ? supabaseFeedback.feedback : state.feedback;
+  const supabasePrograms = useSupabasePrograms();
+  const programs = supabasePrograms.programs.length > 0 ? supabasePrograms.programs : state.programs;
+  const programsAreReal = supabasePrograms.programs.length > 0;
 
   const activeStudents = students.filter((s) => s.status === "actif");
   const pausedStudents = students.filter((s) => s.status === "pause");
@@ -110,7 +115,11 @@ export default function AdminDashboardPage() {
       <div className="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard icon={Users} label="Élèves actifs" value={activeStudents.length} tone="primary" />
         <StatCard icon={Users} label="Élèves en pause" value={pausedStudents.length} tone="amber" />
-        <StatCard icon={Dumbbell} label="Programmes actifs (exemple)" value={activePrograms.length} />
+        <StatCard
+          icon={Dumbbell}
+          label={programsAreReal ? "Programmes actifs" : "Programmes actifs (exemple)"}
+          value={activePrograms.length}
+        />
         <StatCard icon={UtensilsCrossed} label="Plans alimentaires actifs (exemple)" value={activePlans.length} />
         <StatCard icon={FileText} label="Documents partagés (exemple)" value={publishedDocuments.length} />
         <StatCard

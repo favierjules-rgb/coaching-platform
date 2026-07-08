@@ -17,7 +17,12 @@ import {
   UntaggedExercisesAlert,
 } from "@/components/shared/TrainingMetricsSummary";
 import { useAdminData } from "@/hooks/useAdminData";
+import { useProgramAssignment } from "@/hooks/useProgramAssignment";
+import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
+import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { contentStatusLabels, fullName, weekDays } from "@/lib/admin";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { updateProgram as updateProgramSupabase, updateProgramStatus as updateProgramStatusSupabase } from "@/lib/supabase/programs";
 import { calculateTrainingMetrics, calculateWeekMetrics, formatSets, formatTonnage, formatVolume, muscleGroupLabels } from "@/lib/training-metrics";
 import type { MuscleGroupFilter } from "@/types";
 
@@ -27,7 +32,21 @@ export default function ProgramDetailPage() {
   const [editing, setEditing] = useState(false);
   const [selectedMuscleGroup, setSelectedMuscleGroup] = useState<MuscleGroupFilter>("tous");
 
-  const program = state.programs.find((p) => p.id === params.programId);
+  // Priorité Supabase dès qu'au moins un programme/élève réel existe — même
+  // pattern que /admin/programmes. Quand actif, ce programme précis est
+  // garanti réel (la liste bascule entièrement, jamais de mélange mock/réel).
+  const supabasePrograms = useSupabasePrograms();
+  const isSupabaseProgramsActive = supabasePrograms.programs.length > 0;
+  const programs = isSupabaseProgramsActive ? supabasePrograms.programs : state.programs;
+  const supabaseStudents = useSupabaseStudents();
+  const students = supabaseStudents.students.length > 0 ? supabaseStudents.students : state.students;
+  const handleSetAssignment = useProgramAssignment(
+    isSupabaseProgramsActive && supabaseStudents.students.length > 0,
+    setAssignment,
+    supabasePrograms.refetch,
+  );
+
+  const program = programs.find((p) => p.id === params.programId);
 
   if (!program) {
     return (
@@ -42,18 +61,39 @@ export default function ProgramDetailPage() {
   }
 
   const weekNumbers = Array.from(new Set(program.sessions.map((s) => s.weekNumber))).sort((a, b) => a - b);
-  const assignedStudents = state.students.filter((s) => program.assignedStudentIds.includes(s.id));
+  const assignedStudents = students.filter((s) => program.assignedStudentIds.includes(s.id));
   const programMetrics = calculateTrainingMetrics(program.sessions, selectedMuscleGroup);
   const weekMetricsList = weekNumbers.map((weekNumber) =>
     calculateWeekMetrics(program.sessions, weekNumber, selectedMuscleGroup),
   );
 
-  function handleSave(data: ProgramBuilderData) {
+  async function handleSave(data: ProgramBuilderData) {
+    if (isSupabaseProgramsActive) {
+      const supabase = createSupabaseBrowserClient();
+      if (supabase) {
+        await updateProgramSupabase(supabase, program!.id, data);
+        await supabasePrograms.refetch();
+        setEditing(false);
+        return;
+      }
+    }
     updateProgram(program!.id, {
       ...data,
       sessions: data.sessions.map((s) => ({ ...s, programId: program!.id })),
     });
     setEditing(false);
+  }
+
+  async function handleArchive() {
+    if (isSupabaseProgramsActive) {
+      const supabase = createSupabaseBrowserClient();
+      if (supabase) {
+        await updateProgramStatusSupabase(supabase, program!.id, "archivé");
+        await supabasePrograms.refetch();
+        return;
+      }
+    }
+    updateProgram(program!.id, { status: "archivé" });
   }
 
   return (
@@ -110,14 +150,14 @@ export default function ProgramDetailPage() {
                 contentLabel={program.name}
                 contentType="programme"
                 contentId={program.id}
-                students={state.students}
+                students={students}
                 assignedStudentIds={program.assignedStudentIds}
-                onSetAssignment={setAssignment}
+                onSetAssignment={handleSetAssignment}
                 triggerLabel="Assigner à des élèves"
               />
               <button
                 type="button"
-                onClick={() => updateProgram(program.id, { status: "archivé" })}
+                onClick={handleArchive}
                 className="flex items-center gap-1.5 border border-red-500/50 px-4 py-2 text-xs uppercase tracking-widest text-red-400 transition-colors hover:bg-red-500/10"
               >
                 <Archive size={13} />

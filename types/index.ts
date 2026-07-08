@@ -743,8 +743,10 @@ export interface AdminWorkoutSession {
 }
 
 /**
- * Programme d'entraînement créé par le coach. Correspond à une future
- * table Supabase `program`, reliée à `workout_session` par programId.
+ * Programme d'entraînement créé par le coach. Composé depuis les tables
+ * Supabase `programs`/`program_weeks`/`workout_sessions`/`workout_exercises`
+ * quand elles ont au moins un programme réel (voir lib/supabase/programs.ts),
+ * sinon mock/localStorage (useAdminData) — même forme dans les deux cas.
  */
 export interface AdminProgram {
   id: string;
@@ -1009,6 +1011,9 @@ export interface WorkoutFeedbackPayload {
   globalComment: string;
   pain: string;
   exercises: ExerciseFeedbackPayload[];
+  /** FK uuid réelles quand la séance vient d'un programme Supabase migré (voir lib/supabase/programs.ts). */
+  sessionId?: string | null;
+  programId?: string | null;
 }
 
 export type AssignableContentType = "programme" | "nutrition" | "document";
@@ -1026,6 +1031,86 @@ export interface AdminAssignment {
   contentType: AssignableContentType;
   contentId: string;
   assignedAt: string;
+}
+
+/**
+ * Ligne brute de la table Supabase `assignments` (studentId + contentType +
+ * contentId réels, contrairement à AdminAssignment qui peut aussi être
+ * dérivée d'assignedStudentIds mock) — voir lib/supabase/programs.ts.
+ */
+export interface SupabaseAssignment {
+  id: string;
+  studentId: string;
+  contentType: "programme" | "nutrition";
+  contentId: string;
+  assignedAt: string;
+}
+
+/**
+ * Formes Supabase (camelCase) des tables `programs` / `program_weeks` /
+ * `workout_sessions` / `workout_exercises` / `exercise_library` — voir
+ * supabase/schema.sql sections 10-14. lib/supabase/programs.ts les compose
+ * en AdminProgram / AdminWorkoutSession / AdminExercise (formes mock déjà
+ * utilisées par tout l'admin et l'élève) pour que les composants existants
+ * n'aient rien à changer.
+ */
+export interface SupabaseProgram {
+  id: string;
+  coachId: string | null;
+  name: string;
+  goal: string;
+  level: string;
+  durationWeeks: number;
+  description: string;
+  status: AdminContentStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SupabaseProgramWeek {
+  id: string;
+  programId: string;
+  weekNumber: number;
+}
+
+export interface SupabaseWorkoutSession {
+  id: string;
+  programId: string;
+  programWeekId: string;
+  day: string;
+  isRestDay: boolean;
+  name: string;
+  muscleGroup: string;
+  durationMinutes: number | null;
+  warmup: string;
+  coachNotes: string;
+}
+
+export interface SupabaseWorkoutExercise {
+  id: string;
+  sessionId: string;
+  orderIndex: number;
+  name: string;
+  sets: number;
+  reps: string;
+  restSeconds: number;
+  tempo: string;
+  recommendedLoad: string;
+  videoUrl: string;
+  notes: string;
+  muscleGroup: string | null;
+}
+
+export interface SupabaseExerciseLibraryItem {
+  id: string;
+  coachId: string | null;
+  name: string;
+  category: string;
+  equipment: string;
+  level: string;
+  muscleGroup: string;
+  videoUrl: string;
+  notes: string;
 }
 
 /**

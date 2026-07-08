@@ -241,6 +241,19 @@ export function parseLoad(load: string): ParsedLoad {
     };
   }
 
+  // Nombre seul, sans unité (ex: "30", "32,5") — cas courant d'une saisie
+  // élève dans le formulaire de retour de séance (le placeholder n'impose
+  // pas "kg") : on considère qu'il s'agit de kilos plutôt que de laisser
+  // tomber la série entière du calcul de tonnage.
+  const bareNumberMatch = text.match(/^(\d+(?:[.,]\d+)?)$/);
+  if (bareNumberMatch) {
+    return {
+      loadType: "kg",
+      valueKg: Number(bareNumberMatch[1].replace(",", ".")),
+      isEstimate: false,
+    };
+  }
+
   return { loadType: "other", valueKg: null, isEstimate: true };
 }
 
@@ -447,13 +460,24 @@ export function calculatePlannedVsActualMetrics(
     const repsValues = entries.map((e) => getAverageReps(e.repsDone)).filter((v) => v > 0);
     const averageReps = repsValues.length > 0 ? repsValues.reduce((a, b) => a + b, 0) / repsValues.length : 0;
 
-    const loadValues = entries.map((e) => getEffectiveLoadKg(parseLoad(e.loadUsed))).filter((v): v is number => v !== null);
-    const notCalculated = loadValues.length === 0;
-    const averageLoadKg = loadValues.length > 0 ? loadValues.reduce((a, b) => a + b, 0) / loadValues.length : 0;
+    // Tonnage réalisé = somme(charge × reps) série par série (pas une
+    // moyenne des charges multipliée par une moyenne des reps, qui ne
+    // donne le même résultat que si toutes les séries sont identiques) —
+    // une série dont la charge ou les reps ne sont pas chiffrables (champ
+    // vide, texte libre) est simplement exclue de la somme.
+    const setTonnagesKg = entries
+      .map((e) => {
+        const loadKg = getEffectiveLoadKg(parseLoad(e.loadUsed));
+        const reps = getAverageReps(e.repsDone);
+        if (loadKg === null || reps <= 0) return null;
+        return loadKg * reps;
+      })
+      .filter((v): v is number => v !== null);
+    const notCalculated = setTonnagesKg.length === 0;
 
     const muscleGroup = resolveExerciseMuscleGroup(exercise, planned.muscleGroup);
     const volume = actualSets * averageReps;
-    const tonnageKg = notCalculated ? 0 : actualSets * averageReps * averageLoadKg;
+    const tonnageKg = setTonnagesKg.reduce((sum, value) => sum + value, 0);
 
     actualExercises.push({
       exerciseId: exercise.id,
