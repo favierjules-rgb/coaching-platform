@@ -687,6 +687,23 @@ alter table public.documents add constraint documents_type_check
 alter table public.document_assignments add column if not exists unlock_at timestamptz;
 
 -- ============================================================================
+-- 20ter. Migration documents — chantier "supabase-documents-storage-upload".
+--
+-- `documents.storage_path` existait déjà mais n'était jamais réellement
+-- écrit (aucun upload branché) — désormais le chemin réel de l'objet dans
+-- le bucket Storage "documents" (déjà créé, voir plus bas) une fois un
+-- fichier uploadé, format `<document_id>/<timestamp>-<nom-fichier>`.
+-- `file_url` reste réservé au cas "URL externe" (lien PDF/vidéo collé par
+-- le coach, comportement de la PR #20 inchangé) ; les deux restent
+-- indépendants et peuvent coexister (l'app privilégie `storage_path` à
+-- l'affichage s'il est renseigné). Colonnes additives pour l'affichage
+-- (nom/taille/type du fichier uploadé) — aucune nouvelle table.
+-- ============================================================================
+alter table public.documents add column if not exists file_name text;
+alter table public.documents add column if not exists file_size_bytes bigint;
+alter table public.documents add column if not exists file_mime_type text;
+
+-- ============================================================================
 -- 21. workout_feedback — retour élève global pour une séance
 --     (StudentWorkoutFeedback / AdminStudentFeedback type "entrainement").
 --     `session_id` / `program_id` restent uuid (FK vers workout_sessions /
@@ -1187,16 +1204,23 @@ values
 on conflict (level_number) do nothing;
 
 -- ============================================================================
--- Supabase Storage — buckets prévus (pas encore utilisés par l'application).
+-- Supabase Storage — buckets prévus.
 -- ============================================================================
 -- progress-photos : photos de progression élève (Avant/Actuelle/Objectif/
 --                    mensuelle). Remplacera à terme le stockage en base64
 --                    dans localStorage utilisé par le mock.
--- documents        : fichiers PDF partagés par le coach (guides, contrats,
---                    grilles de suivi...).
--- videos           : vidéos techniques hébergées directement (à défaut,
---                    documents.video_url peut aussi pointer vers un lien
---                    externe — YouTube, Vimeo... — sans passer par ce bucket).
+-- documents        : fichiers uploadés depuis /admin/documents (PDF, images,
+--                    vidéos, autres) — branché depuis le chantier
+--                    "supabase-documents-storage-upload", convention de
+--                    chemin `<document_id>/<timestamp>-<nom-fichier>` (voir
+--                    lib/supabase/storage-documents.ts). Reste privé
+--                    (public: false) — lecture élève via URL signée
+--                    (`createSignedUrl`), jamais d'URL publique directe.
+-- videos           : provisionné mais volontairement non utilisé — les
+--                    vidéos uploadées passent aussi par le bucket
+--                    "documents" pour éviter de dupliquer la policy
+--                    d'accès par document sur deux buckets ; `documents.video_url`
+--                    reste disponible pour un lien externe (YouTube, Vimeo...).
 --
 -- Ces inserts sont idempotents (on conflict do nothing) et peuvent aussi être
 -- faits depuis Dashboard > Storage si préféré à cette étape.
@@ -1229,9 +1253,36 @@ create policy "progress_photos_bucket_student_or_staff" on storage.objects
     )
   );
 
+-- Lecture resserrée par document (chantier "supabase-documents-storage-upload") :
+-- remplace l'ancienne policy "authenticated" (n'importe quel élève pouvait
+-- lire n'importe quel fichier du bucket) par un vrai contrôle d'accès —
+-- même règle que la lecture de la ligne `documents` elle-même
+-- (`documents_select_global_or_assigned`, voir PR #20) : staff toujours OK,
+-- élève seulement si le document `<document_id>` (premier segment du
+-- chemin) est publié et global ou lui est assigné. Le déblocage dans le
+-- temps (niveau/semaines/date) reste calculé côté app, jamais en RLS —
+-- même principe que le reste du projet (voir docs/supabase-documents-storage-upload-model.md).
 drop policy if exists "documents_bucket_select_authenticated" on storage.objects;
-create policy "documents_bucket_select_authenticated" on storage.objects
-  for select using (bucket_id = 'documents' and auth.role() = 'authenticated');
+drop policy if exists "documents_bucket_select_accessible" on storage.objects;
+create policy "documents_bucket_select_accessible" on storage.objects
+  for select using (
+    bucket_id = 'documents'
+    and (
+      public.is_coach_or_admin()
+      or exists (
+        select 1 from public.documents d
+        where d.id::text = (storage.foldername(name))[1]
+          and d.status = 'publié'
+          and (
+            d.visibility = 'global'
+            or exists (
+              select 1 from public.document_assignments da
+              where da.document_id = d.id and da.student_id = public.current_student_id()
+            )
+          )
+      )
+    )
+  );
 drop policy if exists "documents_bucket_manage_staff" on storage.objects;
 create policy "documents_bucket_manage_staff" on storage.objects
   for insert with check (bucket_id = 'documents' and public.is_coach_or_admin());

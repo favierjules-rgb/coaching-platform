@@ -1095,6 +1095,9 @@ export interface Database {
           video_url: string | null;
           external_url: string | null;
           storage_path: string | null;
+          file_name: string | null;
+          file_size_bytes: number | null;
+          file_mime_type: string | null;
           content_text: string;
           visibility: "global" | "assigned";
           tags: string[];
@@ -1120,6 +1123,9 @@ export interface Database {
           video_url?: string | null;
           external_url?: string | null;
           storage_path?: string | null;
+          file_name?: string | null;
+          file_size_bytes?: number | null;
+          file_mime_type?: string | null;
           content_text?: string;
           visibility?: "global" | "assigned";
           tags?: string[];
@@ -1145,6 +1151,9 @@ export interface Database {
           video_url?: string | null;
           external_url?: string | null;
           storage_path?: string | null;
+          file_name?: string | null;
+          file_size_bytes?: number | null;
+          file_mime_type?: string | null;
           content_text?: string;
           visibility?: "global" | "assigned";
           tags?: string[];

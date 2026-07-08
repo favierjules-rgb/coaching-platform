@@ -1,11 +1,13 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Download, ExternalLink, FileText, Lock, PlayCircle } from "lucide-react";
+import { AlertTriangle, Download, ExternalLink, FileText, Loader2, Lock, PlayCircle } from "lucide-react";
 
 import { ImportantMark } from "@/components/admin/ImportantMark";
 import { documentCategoryLabels, documentTypeLabels, formatDate, matchesTextSearch } from "@/lib/admin";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import type { StudentDocumentWithAvailability } from "@/lib/supabase/documents";
+import { getSignedDocumentFileUrl } from "@/lib/supabase/storage-documents";
 import type { AdminDocumentStatus, DocumentCategory } from "@/types";
 
 type FilterKey = "tous" | DocumentCategory | "vidéo" | "guide" | "verrouilles";
@@ -43,6 +45,58 @@ const statusDotTone: Record<AdminDocumentStatus, string> = {
   archivé: "bg-red-500",
 };
 
+/**
+ * Ouvre un fichier réellement uploadé (Storage privé) via une URL signée
+ * générée à la demande — jamais d'URL stockée/permanente. La génération
+ * elle-même est soumise à la policy RLS du bucket (voir schema.sql,
+ * `documents_bucket_select_accessible`) : un document verrouillé côté app
+ * n'expose de toute façon jamais ce bouton (voir `availability.available`
+ * plus bas), donc ce chemin n'est jamais atteint pour un document non
+ * débloqué.
+ */
+function StorageFileButton({ storagePath, label, icon: Icon }: { storagePath: string; label: string; icon: typeof Download }) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
+
+  async function handleOpen() {
+    setLoading(true);
+    setError(false);
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) {
+      setLoading(false);
+      setError(true);
+      return;
+    }
+    const url = await getSignedDocumentFileUrl(supabase, storagePath);
+    setLoading(false);
+    if (!url) {
+      setError(true);
+      return;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <button
+        type="button"
+        onClick={() => void handleOpen()}
+        disabled={loading}
+        className="flex items-center gap-1.5 border border-primary px-3 py-2 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground disabled:opacity-50"
+      >
+        {loading ? <Loader2 size={14} className="animate-spin" /> : <Icon size={14} />}
+        {label}
+      </button>
+      {error && (
+        <p className="flex items-center gap-1.5 text-[11px] text-red-400">
+          <AlertTriangle size={12} className="flex-shrink-0" />
+          Impossible d&apos;ouvrir ce fichier.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function DocumentCard({ item }: { item: StudentDocumentWithAvailability }) {
   const { document, availability } = item;
 
@@ -70,39 +124,56 @@ function DocumentCard({ item }: { item: StudentDocumentWithAvailability }) {
           {document.type === "texte" && document.contentText && (
             <p className="whitespace-pre-wrap text-sm text-foreground">{document.contentText}</p>
           )}
-          {document.type === "vidéo" && document.videoUrl && (
-            <a
-              href={document.videoUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 border border-primary px-3 py-2 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
-            >
-              <PlayCircle size={14} />
-              Voir la vidéo
-            </a>
-          )}
-          {document.type === "pdf" && (document.fileName || document.externalUrl) && (
-            <a
-              href={document.fileName ?? document.externalUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 border border-primary px-3 py-2 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
-            >
-              <Download size={14} />
-              Télécharger
-            </a>
-          )}
-          {document.type !== "vidéo" && document.type !== "pdf" && document.type !== "texte" && document.externalUrl && (
-            <a
-              href={document.externalUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 border border-primary px-3 py-2 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
-            >
-              <ExternalLink size={14} />
-              Ouvrir
-            </a>
-          )}
+          {document.type === "vidéo" &&
+            (document.storagePath ? (
+              <StorageFileButton storagePath={document.storagePath} label="Voir la vidéo" icon={PlayCircle} />
+            ) : (
+              document.videoUrl && (
+                <a
+                  href={document.videoUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 border border-primary px-3 py-2 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+                >
+                  <PlayCircle size={14} />
+                  Voir la vidéo
+                </a>
+              )
+            ))}
+          {document.type === "pdf" &&
+            (document.storagePath ? (
+              <StorageFileButton storagePath={document.storagePath} label="Télécharger" icon={Download} />
+            ) : (
+              document.externalUrl && (
+                <a
+                  href={document.externalUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 border border-primary px-3 py-2 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+                >
+                  <Download size={14} />
+                  Télécharger
+                </a>
+              )
+            ))}
+          {document.type !== "vidéo" &&
+            document.type !== "pdf" &&
+            document.type !== "texte" &&
+            (document.storagePath ? (
+              <StorageFileButton storagePath={document.storagePath} label="Ouvrir" icon={ExternalLink} />
+            ) : (
+              document.externalUrl && (
+                <a
+                  href={document.externalUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 border border-primary px-3 py-2 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+                >
+                  <ExternalLink size={14} />
+                  Ouvrir
+                </a>
+              )
+            ))}
         </div>
       )}
 

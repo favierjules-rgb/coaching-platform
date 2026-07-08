@@ -56,8 +56,10 @@ function mapDocumentRow(row: DocumentRow, assignedStudentIds: string[]): AdminDo
     contentText: row.content_text,
     externalUrl: row.external_url ?? "",
     videoUrl: row.video_url ?? "",
-    fileName: row.file_url ?? row.storage_path,
+    fileName: row.file_name,
     storagePath: row.storage_path,
+    fileSizeBytes: row.file_size_bytes,
+    fileMimeType: row.file_mime_type,
     status: row.status,
     important: row.important,
     distributionMode: row.distribution_mode as AdminDocument["distributionMode"],
@@ -213,6 +215,10 @@ function documentFields(data: DocumentFormData) {
     unlock_at: data.unlockAt,
     external_url: data.externalUrl || null,
     video_url: data.videoUrl || null,
+    storage_path: data.storagePath,
+    file_name: data.fileName,
+    file_size_bytes: data.fileSizeBytes,
+    file_mime_type: data.fileMimeType,
     visibility: data.visibility,
     tags: data.tags,
     status: data.status,
@@ -220,9 +226,27 @@ function documentFields(data: DocumentFormData) {
   };
 }
 
-/** Crée un nouveau document réel. */
-export async function createDocument(supabase: TypedSupabaseClient, data: DocumentFormData): Promise<string | null> {
-  const { data: row, error } = await supabase.from("documents").insert(documentFields(data)).select("id").single();
+/**
+ * Crée un nouveau document réel. `id` optionnel : permet de fournir un id
+ * généré côté client (`crypto.randomUUID()`) *avant* la création de la
+ * ligne, pour uploader le fichier vers `<documentId>/...` dans le bucket
+ * Storage avant même que le document existe côté base (voir
+ * app/admin/documents/nouveau/page.tsx) — évite un déplacement de fichier
+ * après coup.
+ */
+export async function createDocument(
+  supabase: TypedSupabaseClient,
+  data: DocumentFormData,
+  id?: string,
+): Promise<string | null> {
+  const fields: Database["public"]["Tables"]["documents"]["Insert"] = id
+    ? { id, ...documentFields(data) }
+    : documentFields(data);
+  const { data: row, error } = await supabase
+    .from("documents")
+    .insert(fields)
+    .select("id")
+    .single();
   devWarn("createDocument", error);
   return row?.id ?? null;
 }
@@ -241,6 +265,10 @@ const PARTIAL_FIELD_MAP: Partial<Record<keyof AdminDocument, string>> = {
   unlockAt: "unlock_at",
   externalUrl: "external_url",
   videoUrl: "video_url",
+  storagePath: "storage_path",
+  fileName: "file_name",
+  fileSizeBytes: "file_size_bytes",
+  fileMimeType: "file_mime_type",
   visibility: "visibility",
   tags: "tags",
   status: "status",
