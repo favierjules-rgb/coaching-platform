@@ -22,12 +22,13 @@ import type { Database } from "@/types/supabase";
  * voir types/index.ts) pour que ProgramBuilder et les pages d'affichage
  * n'aient rien à changer.
  *
- * La banque d'exercices (`exercise_library`) reste volontairement en mock/
- * localStorage à cette étape : sa forme mock (category/equipment/level
- * typés, tags, technicalNote/coachInstructions séparés) diverge de la table
- * réelle (colonnes texte libres, pas de tags) et n'est qu'un outil de
- * préremplissage dans ProgramBuilder — les exercices choisis sont de toute
- * façon copiés par valeur dans `workout_exercises`, jamais référencés par FK.
+ * La banque d'exercices (`exercise_library`) est branchée à Supabase depuis
+ * le chantier "supabase-exercise-library" (voir lib/supabase/exercise-library.ts).
+ * `workout_exercises.exercise_library_id` référence optionnellement
+ * l'exercice source, mais tous les champs affichés (nom, vidéo, groupe
+ * musculaire...) restent copiés par valeur à l'ajout — une modification
+ * ultérieure de l'exercice dans la banque n'affecte jamais un programme déjà
+ * enregistré.
  */
 
 type TypedSupabaseClient = SupabaseClient<Database>;
@@ -74,6 +75,7 @@ function mapExerciseRow(row: WorkoutExerciseRow): AdminExercise {
     videoUrl: row.video_url,
     notes: row.notes,
     muscleGroup: row.muscle_group ?? undefined,
+    libraryExerciseId: row.exercise_library_id ?? undefined,
   };
 }
 
@@ -313,6 +315,7 @@ async function insertProgramStructure(
           video_url: ex.videoUrl,
           notes: ex.notes,
           muscle_group: ex.muscleGroup ?? null,
+          exercise_library_id: ex.libraryExerciseId ?? null,
         })),
       );
       devWarn("insertProgramStructure (workout_exercises)", exercisesError);

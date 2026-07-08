@@ -10,10 +10,17 @@ import { FilterButtons, SearchInput } from "@/components/admin/SearchAndFilters"
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
 import { useContentAssignment } from "@/hooks/useContentAssignment";
+import { useSupabaseExerciseLibrary } from "@/hooks/useSupabaseExerciseLibrary";
 import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { contentStatusLabels, matchesTextSearch, totalSessions, totalWeeks } from "@/lib/admin";
-import type { AdminContentStatus } from "@/types";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import {
+  createExerciseLibraryItem,
+  setExerciseLibraryStatus,
+  updateExerciseLibraryItem,
+} from "@/lib/supabase/exercise-library";
+import type { AdminContentStatus, ExerciseLibraryItem } from "@/types";
 
 type StatusFilter = "tous" | AdminContentStatus;
 type Tab = "programmes" | "banque";
@@ -26,8 +33,7 @@ const statusFilters: { value: StatusFilter; label: string }[] = [
 ];
 
 export default function AdminProgramsPage() {
-  const { state, setAssignment, createLibraryExercise, updateLibraryExercise, deleteLibraryExercise } = useAdminData();
-  const { exerciseLibrary } = state;
+  const { state, setAssignment, createLibraryExercise, updateLibraryExercise } = useAdminData();
 
   // Priorité Supabase dès qu'au moins un programme/élève réel existe, sinon
   // repli sur les listes mock — même pattern que /admin/eleves. Les deux
@@ -43,6 +49,46 @@ export default function AdminProgramsPage() {
     setAssignment,
     supabasePrograms.refetch,
   );
+
+  const supabaseExerciseLibrary = useSupabaseExerciseLibrary();
+  const isLibrarySupabaseActive = supabaseExerciseLibrary.items.length > 0;
+  const exerciseLibrary = isLibrarySupabaseActive ? supabaseExerciseLibrary.items : state.exerciseLibrary;
+
+  async function handleCreateExercise(data: Omit<ExerciseLibraryItem, "id" | "createdAt" | "updatedAt">) {
+    const supabase = createSupabaseBrowserClient();
+    if (supabase) {
+      const id = await createExerciseLibraryItem(supabase, data);
+      if (id) {
+        await supabaseExerciseLibrary.refetch();
+        return;
+      }
+    }
+    createLibraryExercise(data);
+  }
+
+  async function handleUpdateExercise(id: string, partial: Partial<ExerciseLibraryItem>) {
+    if (isLibrarySupabaseActive) {
+      const supabase = createSupabaseBrowserClient();
+      if (supabase) {
+        await updateExerciseLibraryItem(supabase, id, partial);
+        await supabaseExerciseLibrary.refetch();
+        return;
+      }
+    }
+    updateLibraryExercise(id, partial);
+  }
+
+  async function handleSetExerciseStatus(id: string, status: "active" | "archived") {
+    if (isLibrarySupabaseActive) {
+      const supabase = createSupabaseBrowserClient();
+      if (supabase) {
+        await setExerciseLibraryStatus(supabase, id, status);
+        await supabaseExerciseLibrary.refetch();
+        return;
+      }
+    }
+    updateLibraryExercise(id, { status });
+  }
 
   const [tab, setTab] = useState<Tab>("programmes");
   const [query, setQuery] = useState("");
@@ -104,9 +150,9 @@ export default function AdminProgramsPage() {
       {tab === "banque" ? (
         <ExerciseLibraryManager
           items={exerciseLibrary}
-          onCreate={createLibraryExercise}
-          onUpdate={updateLibraryExercise}
-          onDelete={deleteLibraryExercise}
+          onCreate={handleCreateExercise}
+          onUpdate={handleUpdateExercise}
+          onSetStatus={handleSetExerciseStatus}
         />
       ) : (
         <>
