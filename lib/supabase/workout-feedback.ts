@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { buildStudentActivityLink, logActivityEvent } from "@/lib/supabase/activity";
 import type {
   AdminExerciseFeedbackEntry,
   AdminStudentFeedback,
@@ -395,6 +396,15 @@ export async function saveWorkoutFeedback(
       });
     }
   }
+
+  await logActivityEvent(supabase, {
+    studentId: payload.studentId,
+    actorType: "student",
+    eventType: "workout_feedback_submitted",
+    title: "Retour entraînement envoyé",
+    description: payload.sessionRefLabel ? `Retour envoyé pour "${payload.sessionRefLabel}".` : "Retour d'entraînement envoyé.",
+    metadata: buildStudentActivityLink(payload.studentId),
+  });
 
   return {
     id: feedbackId,

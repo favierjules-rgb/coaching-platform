@@ -3,8 +3,9 @@
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { Activity, AlertTriangle, ArrowLeft, Archive, Lock, Pause, Play, Unlock } from "lucide-react";
+import { Activity, AlertTriangle, ArrowLeft, Archive, History, Lock, Pause, Play, Unlock } from "lucide-react";
 
+import { ActivityFeed } from "@/components/admin/ActivityFeed";
 import { AddCoachNoteModal } from "@/components/admin/AddCoachNoteModal";
 import { AdminOnboardingDetailModal } from "@/components/admin/AdminOnboardingDetailModal";
 import { AdminSection, InfoRow, TagList } from "@/components/admin/AdminSection";
@@ -951,6 +952,16 @@ export default function AdminStudentDetailPage() {
           </div>
         )}
       </div>
+
+      {isSupabaseStudent && (
+        <div className="mb-6 border border-border bg-card p-6">
+          <h2 className="mb-4 flex items-center gap-2 font-heading text-lg font-bold uppercase text-foreground">
+            <History size={18} className="text-primary" />
+            Historique récent
+          </h2>
+          <ActivityFeed events={supabaseDetail.activityEvents} emptyLabel="Aucune activité récente pour cet élève." />
+        </div>
+      )}
 
       <div className="mb-6 border border-border bg-card p-6">
         <h2 className="mb-4 flex items-center gap-2 font-heading text-lg font-bold uppercase text-foreground">

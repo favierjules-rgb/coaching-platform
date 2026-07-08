@@ -79,7 +79,7 @@ export default function AdminCalendrierPage() {
 
   async function handleCreateAppointment(data: AppointmentModalSaveData) {
     await withSupabase(async (supabase) => {
-      const id = await createAppointment(supabase, data);
+      const id = await createAppointment(supabase, { ...data, actorType: "coach" });
       if (!id) return;
       const student = studentById.get(data.studentId);
       const created: AdminAppointment = {
@@ -114,7 +114,7 @@ export default function AdminCalendrierPage() {
 
   async function handleCancel(appointment: AdminAppointment, reason: string) {
     await withSupabase(async (supabase) => {
-      await cancelAppointment(supabase, appointment.id, reason);
+      await cancelAppointment(supabase, appointment.id, reason, appointment.studentId, "coach");
       const student = studentById.get(appointment.studentId ?? "");
       if (student?.email) {
         await notifyAppointmentCancellation(supabase, appointment, {

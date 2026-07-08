@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { buildStudentActivityLink, logActivityEvent } from "@/lib/supabase/activity";
 import { fromSupabaseMeasurementType, toSupabaseMeasurementType } from "@/lib/supabase/measurement-types";
 import { getAssignedDocumentIdsByStudent } from "@/lib/supabase/documents";
 import { getAssignedNutritionPlanIdsByStudent } from "@/lib/supabase/nutrition";
@@ -732,6 +733,19 @@ export async function addWeightEntry(
     source,
   });
   devWarn("addWeightEntry", error);
+  // "initial" = relevé créé automatiquement pendant l'onboarding (déjà
+  // couvert par l'évènement "onboarding_completed") — pas de doublon dans
+  // le centre d'activité pour cette source.
+  if (!error && source !== "initial") {
+    await logActivityEvent(supabase, {
+      studentId,
+      actorType: source === "student_update" ? "student" : "coach",
+      eventType: "weight_added",
+      title: "Poids mis à jour",
+      description: `Nouveau poids enregistré : ${weightKg} kg.`,
+      metadata: buildStudentActivityLink(studentId),
+    });
+  }
   return !error;
 }
 
@@ -953,6 +967,16 @@ export async function addCoachNoteSupabase(
     .select("*")
     .single();
   devWarn("addCoachNoteSupabase", error);
+  if (data) {
+    await logActivityEvent(supabase, {
+      studentId,
+      actorType: "coach",
+      eventType: "coach_note_added",
+      title: "Note coach ajoutée",
+      description: text.length > 140 ? `${text.slice(0, 140)}…` : text,
+      metadata: buildStudentActivityLink(studentId),
+    });
+  }
   return data ? toMockCoachNote(mapCoachNoteRow(data)) : null;
 }
 

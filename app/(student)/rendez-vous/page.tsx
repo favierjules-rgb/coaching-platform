@@ -114,7 +114,7 @@ export default function RendezVousPage() {
   async function handleCancel(appointment: AdminAppointment, reason: string) {
     const supabase = createSupabaseBrowserClient();
     if (!supabase) return;
-    await cancelAppointment(supabase, appointment.id, reason);
+    await cancelAppointment(supabase, appointment.id, reason, appointment.studentId, "student");
     if (supabaseAppointments.studentEmail) {
       await notifyAppointmentCancellation(supabase, appointment, {
         studentFirstName: supabaseAppointments.studentFirstName,

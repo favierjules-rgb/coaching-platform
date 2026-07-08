@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { buildStudentActivityLink, logActivityEvent } from "@/lib/supabase/activity";
 import { computeAvailableSlots } from "@/lib/booking";
 import {
   sendAppointmentCancellationEmail,
@@ -8,6 +9,7 @@ import {
   type AppointmentEmailContext,
 } from "@/lib/email/appointment-emails";
 import type {
+  ActivityActorType,
   AdminAppointment,
   AppointmentStatus,
   AvailableSlot,
@@ -283,6 +285,8 @@ export interface CreateAppointmentInput {
   location: string;
   meetingUrl: string;
   status?: AppointmentStatus;
+  /** Qui déclenche la création — "student" (réservation élève, par défaut) ou "coach" (création manuelle admin). */
+  actorType?: ActivityActorType;
 }
 
 /** Crée un rendez-vous (réservation élève ou création manuelle admin) et renvoie l'id créé, ou null en cas d'échec. */
@@ -305,6 +309,16 @@ export async function createAppointment(supabase: TypedSupabaseClient, input: Cr
     .select("id")
     .single();
   devWarn("createAppointment", error);
+  if (row) {
+    await logActivityEvent(supabase, {
+      studentId: input.studentId,
+      actorType: input.actorType ?? "student",
+      eventType: "appointment_booked",
+      title: "Rendez-vous réservé",
+      description: `${input.appointmentType} le ${new Date(input.startAt).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}.`,
+      metadata: buildStudentActivityLink(input.studentId),
+    });
+  }
   return row?.id ?? null;
 }
 
@@ -312,12 +326,24 @@ export async function cancelAppointment(
   supabase: TypedSupabaseClient,
   id: string,
   reason: string,
+  studentId: string | null = null,
+  actorType: ActivityActorType = "student",
 ): Promise<boolean> {
   const { error } = await supabase
     .from("appointments")
     .update({ status: "cancelled", cancellation_reason: reason, updated_at: new Date().toISOString() })
     .eq("id", id);
   devWarn("cancelAppointment", error);
+  if (!error && studentId) {
+    await logActivityEvent(supabase, {
+      studentId,
+      actorType,
+      eventType: "appointment_cancelled",
+      title: "Rendez-vous annulé",
+      description: reason ? `Rendez-vous annulé : ${reason}` : "Rendez-vous annulé.",
+      metadata: buildStudentActivityLink(studentId),
+    });
+  }
   return !error;
 }
 

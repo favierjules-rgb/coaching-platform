@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { computeDocumentAvailability, type DocumentAvailability } from "@/lib/admin";
+import { buildStudentActivityLink, logActivityEvent } from "@/lib/supabase/activity";
 import type { AdminDocument } from "@/types";
 import type { Database } from "@/types/supabase";
 
@@ -340,6 +341,17 @@ export async function setDocumentAssignment(
     .from("document_assignments")
     .insert({ student_id: studentId, document_id: documentId, unlock_at: unlockAt });
   devWarn("setDocumentAssignment (insert)", insertError);
+  if (!insertError) {
+    const { data: document } = await supabase.from("documents").select("title").eq("id", documentId).maybeSingle();
+    await logActivityEvent(supabase, {
+      studentId,
+      actorType: "coach",
+      eventType: "document_assigned",
+      title: "Document assigné",
+      description: document?.title ? `"${document.title}" assigné.` : "Un document a été assigné.",
+      metadata: buildStudentActivityLink(studentId),
+    });
+  }
   return !insertError;
 }
 
