@@ -556,6 +556,35 @@ alter table public.nutrition_plans add column if not exists supplements jsonb no
 alter table public.nutrition_days alter column week_start_date drop not null;
 
 -- ============================================================================
+-- 17ter. nutrition_daily_logs — chantier "nutrition-weekly-adjustment-tool".
+--
+-- Saisie élève réelle (calories/macros consommées un jour donné), pour
+-- l'outil "Suivi de la semaine" côté /nutrition : redistribue l'objectif
+-- hebdomadaire du plan actif sur les jours restants non encore remplis.
+-- `nutrition_days.actual`/`target` existaient déjà mais représentent un
+-- jour-modèle (Lundi..Dimanche, sans date, potentiellement partagé si un
+-- plan de bibliothèque est réassigné) — impropres à porter une saisie réelle
+-- datée par élève, d'où une table dédiée plutôt qu'une réutilisation.
+-- `student_id` référence directement `students.id` (jamais `profiles.id`,
+-- `auth.users.id` ni `student_profiles.id`), comme `weight_entries` et
+-- `progress_photos`.
+-- ============================================================================
+create table if not exists public.nutrition_daily_logs (
+  id uuid primary key default gen_random_uuid(),
+  student_id uuid not null references public.students (id) on delete cascade,
+  nutrition_plan_id uuid not null references public.nutrition_plans (id) on delete cascade,
+  log_date date not null,
+  calories numeric,
+  protein_g numeric,
+  carbs_g numeric,
+  fat_g numeric,
+  note text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (student_id, nutrition_plan_id, log_date)
+);
+
+-- ============================================================================
 -- 18. documents — ressources partagées par le coach.
 -- ============================================================================
 create table if not exists public.documents (
@@ -715,7 +744,7 @@ begin
       'profiles', 'coaches', 'students', 'student_profiles', 'weight_entries', 'progress_photos',
       'body_measurements', 'custom_measurements', 'payments', 'payment_entries',
       'programs', 'program_weeks', 'workout_sessions', 'workout_exercises',
-      'exercise_library', 'nutrition_plans', 'nutrition_days', 'meals',
+      'exercise_library', 'nutrition_plans', 'nutrition_days', 'meals', 'nutrition_daily_logs',
       'documents', 'document_levels', 'document_assignments', 'workout_feedback',
       'exercise_feedback', 'exercise_set_feedback', 'coach_notes', 'assignments'
     ])
@@ -750,6 +779,7 @@ alter table public.exercise_library enable row level security;
 alter table public.nutrition_plans enable row level security;
 alter table public.nutrition_days enable row level security;
 alter table public.meals enable row level security;
+alter table public.nutrition_daily_logs enable row level security;
 alter table public.documents enable row level security;
 alter table public.document_levels enable row level security;
 alter table public.document_assignments enable row level security;
@@ -1057,6 +1087,15 @@ create policy "meals_select_self_or_assigned" on public.meals
         and p.student_id = public.current_student_id()
     )
   );
+
+-- L'élève lit/écrit uniquement ses propres logs journaliers (même pattern
+-- que weight_entries/progress_photos) ; le coach/admin a un accès complet
+-- (lecture des logs de ses élèves, correction si nécessaire).
+drop policy if exists "nutrition_daily_logs_student_or_staff" on public.nutrition_daily_logs;
+create policy "nutrition_daily_logs_student_or_staff" on public.nutrition_daily_logs
+  for all
+  using (student_id = public.current_student_id() or public.is_coach_or_admin())
+  with check (student_id = public.current_student_id() or public.is_coach_or_admin());
 
 drop policy if exists "documents_manage_staff" on public.documents;
 create policy "documents_manage_staff" on public.documents
