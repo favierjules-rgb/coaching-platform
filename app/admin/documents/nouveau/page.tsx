@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, CheckCircle, FileUp } from "lucide-react";
 
 import { CheckboxField, Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
+import { DocumentFileUploadField } from "@/components/admin/DocumentFileUploadField";
 import { PrimaryButton } from "@/components/admin/Modal";
 import { useAdminData } from "@/hooks/useAdminData";
 import { useContentAssignment } from "@/hooks/useContentAssignment";
@@ -15,6 +16,7 @@ import { fullName } from "@/lib/admin";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { createDocument as createDocumentSupabase } from "@/lib/supabase/documents";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
+import type { UploadedDocumentFile } from "@/lib/supabase/storage-documents";
 import type {
   AdminDocumentStatus,
   DocumentCategory,
@@ -74,6 +76,11 @@ export default function NewDocumentPage() {
   const { state, createDocument, setAssignment } = useAdminData();
   const fileInputId = useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Id généré côté client avant la création de la ligne `documents`, pour
+  // uploader directement vers `<documentId>/...` dans le bucket Storage
+  // sans déplacement de fichier après coup (voir lib/supabase/documents.ts::createDocument).
+  const [pendingDocumentId] = useState(() => crypto.randomUUID());
+  const [uploadedFile, setUploadedFile] = useState<UploadedDocumentFile | null>(null);
 
   // Dès que Supabase est configuré, la création doit produire une vraie
   // ligne `documents` — jamais de repli mock silencieux (même principe que
@@ -132,11 +139,27 @@ export default function NewDocumentPage() {
     }
   }
 
+  /** Au moins un contenu réel doit être fourni selon le type — jamais de document vide silencieusement enregistré. */
+  function validateContent(): string | null {
+    if (type === "texte") {
+      return contentText.trim() ? null : "Renseigne le contenu texte de ce document.";
+    }
+    if (type === "vidéo") {
+      return videoUrl.trim() || uploadedFile ? null : "Ajoute un lien vidéo ou uploade un fichier vidéo.";
+    }
+    return externalUrl.trim() || uploadedFile ? null : "Ajoute une URL externe ou uploade un fichier.";
+  }
+
   async function handleCreate(publish: boolean) {
     setSaveError(null);
     const urlError = validateUrls();
     if (urlError) {
       setSaveError(urlError);
+      return;
+    }
+    const contentError = validateContent();
+    if (contentError) {
+      setSaveError(contentError);
       return;
     }
 
@@ -151,8 +174,10 @@ export default function NewDocumentPage() {
       contentText,
       externalUrl,
       videoUrl,
-      fileName,
-      storagePath: null,
+      fileName: uploadedFile?.fileName ?? fileName,
+      storagePath: uploadedFile?.storagePath ?? null,
+      fileSizeBytes: uploadedFile?.fileSizeBytes ?? null,
+      fileMimeType: uploadedFile?.fileMimeType ?? null,
       status: publish ? ("publié" as const) : status,
       important,
       distributionMode,
@@ -165,7 +190,7 @@ export default function NewDocumentPage() {
     if (supabaseActive) {
       const supabase = createSupabaseBrowserClient();
       if (supabase) {
-        const id = await createDocumentSupabase(supabase, data);
+        const id = await createDocumentSupabase(supabase, data, pendingDocumentId);
         if (!id) {
           setSaveError("Échec de l'enregistrement du document. Réessaie.");
           return;
@@ -256,24 +281,33 @@ export default function NewDocumentPage() {
             )}
             <Field label="Tags (séparés par des virgules)" value={tags} onChange={setTags} />
 
-            <div>
-              <label htmlFor={fileInputId} className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
-                Fichier (mocké)
-              </label>
-              <input
-                ref={fileInputRef}
-                id={fileInputId}
-                type="file"
-                onChange={handleFileChange}
-                className="block w-full text-sm text-muted-foreground file:mr-4 file:border file:border-primary file:bg-transparent file:px-4 file:py-2 file:text-xs file:uppercase file:tracking-widest file:text-primary hover:file:bg-primary hover:file:text-primary-foreground"
+            {supabaseActive ? (
+              <DocumentFileUploadField
+                documentId={pendingDocumentId}
+                type={type}
+                current={null}
+                onUploaded={setUploadedFile}
               />
-              {fileName && (
-                <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                  <FileUp size={13} />
-                  {fileName} — upload Storage réel non encore branché, utilise un lien externe pour l&apos;instant.
-                </p>
-              )}
-            </div>
+            ) : (
+              <div>
+                <label htmlFor={fileInputId} className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                  Fichier (mocké)
+                </label>
+                <input
+                  ref={fileInputRef}
+                  id={fileInputId}
+                  type="file"
+                  onChange={handleFileChange}
+                  className="block w-full text-sm text-muted-foreground file:mr-4 file:border file:border-primary file:bg-transparent file:px-4 file:py-2 file:text-xs file:uppercase file:tracking-widest file:text-primary hover:file:bg-primary hover:file:text-primary-foreground"
+                />
+                {fileName && (
+                  <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                    <FileUp size={13} />
+                    {fileName} — mode démo (Supabase non configuré), aucun upload réel.
+                  </p>
+                )}
+              </div>
+            )}
 
             <SelectField label="Statut" value={status} onChange={(v) => setStatus(v as AdminDocumentStatus)} options={statusOptions} />
             <CheckboxField label="Marquer comme important" checked={important} onChange={setImportant} />

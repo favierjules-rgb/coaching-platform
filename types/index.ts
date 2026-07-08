@@ -873,7 +873,10 @@ export interface AdminDocument {
   /** Lien vidéo (YouTube/Vimeo/...), distinct de externalUrl pour type "vidéo". */
   videoUrl: string;
   fileName: string | null;
+  /** Chemin réel dans le bucket Storage "documents" si un fichier a été uploadé (voir lib/supabase/storage-documents.ts) — distinct de externalUrl/videoUrl (lien externe). */
   storagePath: string | null;
+  fileSizeBytes: number | null;
+  fileMimeType: string | null;
   status: AdminDocumentStatus;
   important: boolean;
   distributionMode: DocumentDistributionMode;

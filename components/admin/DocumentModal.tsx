@@ -4,6 +4,7 @@ import { useState } from "react";
 import { CheckCircle, Eye, Pencil } from "lucide-react";
 
 import { CheckboxField, Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
+import { DocumentFileUploadField } from "@/components/admin/DocumentFileUploadField";
 import { Modal, PrimaryButton } from "@/components/admin/Modal";
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
 import { StudentPickerList } from "@/components/admin/StudentPickerList";
@@ -13,6 +14,8 @@ import {
   documentStatusLabels,
   documentTypeLabels,
 } from "@/lib/admin";
+import { isSupabaseConfigured } from "@/lib/supabase/env";
+import type { UploadedDocumentFile } from "@/lib/supabase/storage-documents";
 import type {
   AdminDocument,
   AdminDocumentStatus,
@@ -111,6 +114,9 @@ export function DocumentModal({
   const [editing, setEditing] = useState(initialEditing);
   const [saved, setSaved] = useState(false);
   const [form, setForm] = useState(() => formFromDoc(document));
+  const [uploadedFile, setUploadedFile] = useState<UploadedDocumentFile | null>(
+    document.storagePath ? { storagePath: document.storagePath, fileName: document.fileName ?? "", fileSizeBytes: document.fileSizeBytes ?? 0, fileMimeType: document.fileMimeType ?? "" } : null,
+  );
 
   function setField<K extends keyof ReturnType<typeof formFromDoc>>(key: K, value: (typeof form)[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -134,7 +140,10 @@ export function DocumentModal({
       contentText: form.contentText,
       externalUrl: form.externalUrl,
       videoUrl: form.videoUrl,
-      fileName: form.fileName || null,
+      fileName: uploadedFile?.fileName || form.fileName || null,
+      storagePath: uploadedFile?.storagePath ?? null,
+      fileSizeBytes: uploadedFile?.fileSizeBytes ?? null,
+      fileMimeType: uploadedFile?.fileMimeType ?? null,
       status: form.status,
       important: form.important,
       distributionMode: form.distributionMode,
@@ -197,7 +206,20 @@ export function DocumentModal({
               ) : (
                 <Field label="Lien externe / PDF" value={form.externalUrl} onChange={(v) => setField("externalUrl", v)} placeholder="https://..." />
               )}
-              <Field label="Nom du fichier (mocké)" value={form.fileName} onChange={(v) => setField("fileName", v)} />
+              {isSupabaseConfigured() ? (
+                <DocumentFileUploadField
+                  documentId={document.id}
+                  type={form.type}
+                  current={
+                    uploadedFile
+                      ? { storagePath: uploadedFile.storagePath, fileName: uploadedFile.fileName, fileSizeBytes: uploadedFile.fileSizeBytes }
+                      : null
+                  }
+                  onUploaded={setUploadedFile}
+                />
+              ) : (
+                <Field label="Nom du fichier (mocké)" value={form.fileName} onChange={(v) => setField("fileName", v)} />
+              )}
               <Field label="Tags (séparés par des virgules)" value={form.tags} onChange={(v) => setField("tags", v)} />
               <SelectField label="Statut" value={form.status} onChange={(v) => setField("status", v as AdminDocumentStatus)} options={statusOptions} />
               <CheckboxField label="Marquer comme important" checked={form.important} onChange={(v) => setField("important", v)} />
@@ -253,7 +275,15 @@ export function DocumentModal({
               {document.externalUrl && (
                 <p className="text-xs text-muted-foreground">Lien : {document.externalUrl}</p>
               )}
-              {document.fileName && <p className="text-xs text-muted-foreground">Fichier : {document.fileName}</p>}
+              {document.storagePath && document.fileName && (
+                <p className="text-xs text-muted-foreground">
+                  Fichier uploadé : {document.fileName}
+                  {document.fileSizeBytes ? ` (${Math.round(document.fileSizeBytes / 1024)} Ko)` : ""}
+                </p>
+              )}
+              {!document.storagePath && document.fileName && (
+                <p className="text-xs text-muted-foreground">Fichier : {document.fileName}</p>
+              )}
               {document.tags.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
                   {document.tags.map((tag) => (
