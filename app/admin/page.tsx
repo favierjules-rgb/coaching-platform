@@ -3,6 +3,7 @@
 import Link from "next/link";
 import {
   Bell,
+  CalendarDays,
   ClipboardList,
   Dumbbell,
   FileText,
@@ -16,6 +17,7 @@ import { StatCard } from "@/components/admin/StatCard";
 import { AdminSection } from "@/components/admin/AdminSection";
 import { StatusBadge, studentStatusTone } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
+import { useSupabaseAppointments } from "@/hooks/useSupabaseAppointments";
 import { useSupabaseDocuments } from "@/hooks/useSupabaseDocuments";
 import { useSupabaseNutritionPlans } from "@/hooks/useSupabaseNutritionPlans";
 import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
@@ -35,6 +37,7 @@ const quickActions = [
   { label: "Créer un programme", href: "/admin/programmes/nouveau", icon: Dumbbell },
   { label: "Créer un plan alimentaire", href: "/admin/nutrition/nouveau", icon: UtensilsCrossed },
   { label: "Ajouter un document", href: "/admin/documents/nouveau", icon: FileText },
+  { label: "Voir le calendrier", href: "/admin/calendrier", icon: CalendarDays },
   { label: "Voir les retours élèves", href: "/admin/retours", icon: MessageSquare },
 ];
 
@@ -97,6 +100,7 @@ export default function AdminDashboardPage() {
   const supabaseDocuments = useSupabaseDocuments();
   const realDocuments = supabaseDocuments.documents.length > 0 ? supabaseDocuments.documents : documents;
   const documentsAreReal = supabaseDocuments.documents.length > 0;
+  const supabaseAppointments = useSupabaseAppointments();
 
   const activeStudents = students.filter((s) => s.status === "actif");
   const pausedStudents = students.filter((s) => s.status === "pause");
@@ -104,6 +108,10 @@ export default function AdminDashboardPage() {
   const activePlans = nutritionPlans.filter((p) => p.status === "actif");
   const publishedDocuments = realDocuments.filter((d) => d.status === "publié");
   const feedbackToTreat = feedback.filter((f) => f.status === "a-traiter" || f.status === "important");
+  const todayKey = new Date().toDateString();
+  const todaysAppointments = supabaseAppointments.appointments.filter(
+    (a) => (a.status === "pending" || a.status === "confirmed") && new Date(a.startAt).toDateString() === todayKey,
+  );
 
   return (
     <div>
@@ -140,6 +148,7 @@ export default function AdminDashboardPage() {
           value={feedbackToTreat.length}
           tone={feedbackToTreat.length > 0 ? "amber" : "default"}
         />
+        <StatCard icon={CalendarDays} label="Rendez-vous aujourd'hui" value={todaysAppointments.length} />
         <StatCard icon={Bell} label="Notifications (exemple)" value={mockNotifications.length} />
       </div>
 

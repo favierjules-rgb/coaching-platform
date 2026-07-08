@@ -7,6 +7,7 @@ import type {
   AdminNutritionPlan,
   AdminStudent,
   AdminStudentFeedback,
+  AppointmentStatus,
   CoachAccountStatus,
   CoachRole,
   DocumentCategory,
@@ -417,6 +418,23 @@ export function matchesExerciseSearch(item: ExerciseLibraryItem, query: string):
     .join(" ")
     .toLowerCase();
   return haystack.includes(query.trim().toLowerCase());
+}
+
+/* ─── Calendrier / rendez-vous ─── */
+
+export const appointmentStatusLabels: Record<AppointmentStatus, string> = {
+  pending: "En attente",
+  confirmed: "Confirmé",
+  cancelled: "Annulé",
+  completed: "Terminé",
+  no_show: "Absence",
+};
+
+export function appointmentStatusTone(status: AppointmentStatus): "green" | "amber" | "muted" | "red" | "primary" {
+  if (status === "confirmed") return "green";
+  if (status === "pending") return "amber";
+  if (status === "cancelled" || status === "no_show") return "red";
+  return "muted";
 }
 
 /* ─── Coachs ─── */
