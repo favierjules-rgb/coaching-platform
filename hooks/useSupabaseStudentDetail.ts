@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { getActivityEventsForStudent } from "@/lib/supabase/activity";
 import {
   addCoachNoteSupabase,
   addProgressPhotoSupabase,
@@ -18,6 +19,7 @@ import {
 import { getWorkoutFeedbackForStudent } from "@/lib/supabase/workout-feedback";
 import type { CustomMeasurementInput } from "@/components/student/UpdateMeasurementsModal";
 import type {
+  ActivityEvent,
   AdminStudent,
   AdminStudentFeedback,
   BodyMeasurementType,
@@ -50,14 +52,21 @@ export function useSupabaseStudentDetail(studentId: string | undefined) {
   // lib/onboarding-form.ts et components/admin/AdminOnboardingDetailModal.tsx
   // qui utilisent la même source.
   const [profile, setProfile] = useState<SupabaseStudentProfile | null>(null);
+  const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
   const entryCountRef = useRef(0);
 
   const applyFetchResult = useCallback(
-    (found: AdminStudent | null, feedbackList: AdminStudentFeedback[], foundProfile: SupabaseStudentProfile | null) => {
+    (
+      found: AdminStudent | null,
+      feedbackList: AdminStudentFeedback[],
+      foundProfile: SupabaseStudentProfile | null,
+      events: ActivityEvent[],
+    ) => {
       entryCountRef.current = found?.paymentProfile.entries.length ?? 0;
       setStudent(found);
       setFeedback(feedbackList);
       setProfile(foundProfile);
+      setActivityEvents(events);
       setLoading(false);
     },
     [],
@@ -65,20 +74,21 @@ export function useSupabaseStudentDetail(studentId: string | undefined) {
 
   const refetch = useCallback(async () => {
     if (!studentId) {
-      applyFetchResult(null, [], null);
+      applyFetchResult(null, [], null, []);
       return;
     }
     const supabase = createSupabaseBrowserClient();
     if (!supabase) {
-      applyFetchResult(null, [], null);
+      applyFetchResult(null, [], null, []);
       return;
     }
-    const [found, feedbackList, foundProfile] = await Promise.all([
+    const [found, feedbackList, foundProfile, events] = await Promise.all([
       getFullAdminStudent(supabase, studentId),
       getWorkoutFeedbackForStudent(supabase, studentId),
       getStudentProfile(supabase, studentId),
+      getActivityEventsForStudent(supabase, studentId),
     ]);
-    applyFetchResult(found, feedbackList, foundProfile);
+    applyFetchResult(found, feedbackList, foundProfile, events);
   }, [studentId, applyFetchResult]);
 
   // Chargement initial isolé de `refetch` (appelé plus bas par les
@@ -89,20 +99,21 @@ export function useSupabaseStudentDetail(studentId: string | undefined) {
     let cancelled = false;
     async function load() {
       if (!studentId) {
-        if (!cancelled) applyFetchResult(null, [], null);
+        if (!cancelled) applyFetchResult(null, [], null, []);
         return;
       }
       const supabase = createSupabaseBrowserClient();
       if (!supabase) {
-        if (!cancelled) applyFetchResult(null, [], null);
+        if (!cancelled) applyFetchResult(null, [], null, []);
         return;
       }
-      const [found, feedbackList, foundProfile] = await Promise.all([
+      const [found, feedbackList, foundProfile, events] = await Promise.all([
         getFullAdminStudent(supabase, studentId),
         getWorkoutFeedbackForStudent(supabase, studentId),
         getStudentProfile(supabase, studentId),
+        getActivityEventsForStudent(supabase, studentId),
       ]);
-      if (!cancelled) applyFetchResult(found, feedbackList, foundProfile);
+      if (!cancelled) applyFetchResult(found, feedbackList, foundProfile, events);
     }
     load();
     return () => {
@@ -213,6 +224,7 @@ export function useSupabaseStudentDetail(studentId: string | undefined) {
     student,
     profile,
     feedback,
+    activityEvents,
     refetch,
     updateStudentFields: updateFields,
     updateWeight,

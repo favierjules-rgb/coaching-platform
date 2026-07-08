@@ -1488,6 +1488,42 @@ export interface Database {
         };
         Relationships: [];
       };
+      activity_events: {
+        Row: {
+          id: string;
+          student_id: string | null;
+          actor_type: "student" | "coach" | "system";
+          event_type: string;
+          title: string;
+          description: string;
+          metadata: Record<string, unknown>;
+          is_read: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          student_id?: string | null;
+          actor_type?: "student" | "coach" | "system";
+          event_type: string;
+          title: string;
+          description?: string;
+          metadata?: Record<string, unknown>;
+          is_read?: boolean;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          student_id?: string | null;
+          actor_type?: "student" | "coach" | "system";
+          event_type?: string;
+          title?: string;
+          description?: string;
+          metadata?: Record<string, unknown>;
+          is_read?: boolean;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

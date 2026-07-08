@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { buildStudentActivityLink, logActivityEvent } from "@/lib/supabase/activity";
 import type { DailyNutritionLog } from "@/lib/nutrition-weekly";
 import type { Database } from "@/types/supabase";
 
@@ -95,5 +96,15 @@ export async function upsertNutritionDailyLog(
       { onConflict: "student_id,nutrition_plan_id,log_date" },
     );
   devWarn("upsertNutritionDailyLog", error);
+  if (!error) {
+    await logActivityEvent(supabase, {
+      studentId,
+      actorType: "student",
+      eventType: "nutrition_log_filled",
+      title: "Suivi nutrition rempli",
+      description: `Suivi nutrition rempli pour le ${new Date(log.logDate).toLocaleDateString("fr-FR")}.`,
+      metadata: buildStudentActivityLink(studentId),
+    });
+  }
   return !error;
 }

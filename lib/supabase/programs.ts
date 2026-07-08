@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { buildStudentActivityLink, logActivityEvent } from "@/lib/supabase/activity";
 import type { ProgramBuilderData } from "@/components/admin/ProgramBuilder";
 import type { AdminExercise, AdminProgram, AdminWorkoutSession } from "@/types";
 import type { Database } from "@/types/supabase";
@@ -436,5 +437,16 @@ export async function setProgramAssignment(
     content_id: programId,
   });
   devWarn("setProgramAssignment (insert)", insertError);
+  if (!insertError) {
+    const { data: program } = await supabase.from("programs").select("name").eq("id", programId).maybeSingle();
+    await logActivityEvent(supabase, {
+      studentId,
+      actorType: "coach",
+      eventType: "program_assigned",
+      title: "Programme assigné",
+      description: program?.name ? `Programme "${program.name}" assigné.` : "Un programme a été assigné.",
+      metadata: buildStudentActivityLink(studentId),
+    });
+  }
   return !insertError;
 }

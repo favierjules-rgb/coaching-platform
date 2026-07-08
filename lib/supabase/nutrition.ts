@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { buildStudentActivityLink, logActivityEvent } from "@/lib/supabase/activity";
 import type { NutritionPlanBuilderData } from "@/components/admin/NutritionPlanBuilder";
 import type { AdminMeal, AdminNutritionDay, AdminNutritionPlan, MealSlot } from "@/types";
 import type { Database } from "@/types/supabase";
@@ -332,5 +333,16 @@ export async function setNutritionAssignment(
     .update({ student_id: assigned ? studentId : null, updated_at: new Date().toISOString() })
     .eq("id", planId);
   devWarn("setNutritionAssignment", error);
+  if (!error && assigned) {
+    const { data: plan } = await supabase.from("nutrition_plans").select("name").eq("id", planId).maybeSingle();
+    await logActivityEvent(supabase, {
+      studentId,
+      actorType: "coach",
+      eventType: "nutrition_assigned",
+      title: "Plan nutrition assigné",
+      description: plan?.name ? `Plan nutrition "${plan.name}" assigné.` : "Un plan nutrition a été assigné.",
+      metadata: buildStudentActivityLink(studentId),
+    });
+  }
   return !error;
 }

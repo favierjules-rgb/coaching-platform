@@ -1566,6 +1566,42 @@ create policy "appointment_email_logs_manage_staff" on public.appointment_email_
   for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
 
 -- ============================================================================
+-- Migration additive — chantier "supabase-activity-notifications" : centre
+-- d'activité interne coach/admin (aucune table équivalente n'existait —
+-- audit : aucune occurrence de activity_events/notifications réelles dans
+-- le repo, seulement des panneaux "Notifications (exemple)" mock non liés).
+-- ============================================================================
+create table if not exists public.activity_events (
+  id uuid primary key default gen_random_uuid(),
+  student_id uuid references public.students (id) on delete cascade,
+  actor_type text not null default 'system' check (actor_type in ('student', 'coach', 'system')),
+  event_type text not null,
+  title text not null,
+  description text not null default '',
+  metadata jsonb not null default '{}'::jsonb,
+  is_read boolean not null default false,
+  created_at timestamptz not null default now()
+);
+create index if not exists activity_events_student_id_idx on public.activity_events (student_id);
+create index if not exists activity_events_created_at_idx on public.activity_events (created_at desc);
+create index if not exists activity_events_is_read_idx on public.activity_events (is_read);
+
+alter table public.activity_events enable row level security;
+
+-- Staff : accès complet (lecture du centre d'activité, marquer comme lu).
+-- Élève : peut uniquement créer un évènement pour lui-même (actions
+-- déclenchées côté client élève — onboarding, poids, retour entraînement,
+-- suivi nutrition, réservation/annulation de rendez-vous), jamais lire ni
+-- modifier le centre d'activité (réservé au staff), jamais créer un
+-- évènement pour un autre élève.
+drop policy if exists "activity_events_manage_staff" on public.activity_events;
+create policy "activity_events_manage_staff" on public.activity_events
+  for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
+drop policy if exists "activity_events_insert_own_student" on public.activity_events;
+create policy "activity_events_insert_own_student" on public.activity_events
+  for insert with check (student_id = public.current_student_id());
+
+-- ============================================================================
 -- Fin du schéma initial. Prochaine étape (pas dans ce fichier) : régénérer
 -- types/supabase.ts avec `supabase gen types typescript`, puis brancher
 -- progressivement chaque page mock sur ces tables (voir README.md).

@@ -13,10 +13,12 @@ import {
   UtensilsCrossed,
 } from "lucide-react";
 
+import { ActivityFeed } from "@/components/admin/ActivityFeed";
 import { StatCard } from "@/components/admin/StatCard";
 import { AdminSection } from "@/components/admin/AdminSection";
 import { StatusBadge, studentStatusTone } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
+import { useSupabaseActivity } from "@/hooks/useSupabaseActivity";
 import { useSupabaseAppointments } from "@/hooks/useSupabaseAppointments";
 import { useSupabaseDocuments } from "@/hooks/useSupabaseDocuments";
 import { useSupabaseNutritionPlans } from "@/hooks/useSupabaseNutritionPlans";
@@ -101,6 +103,7 @@ export default function AdminDashboardPage() {
   const realDocuments = supabaseDocuments.documents.length > 0 ? supabaseDocuments.documents : documents;
   const documentsAreReal = supabaseDocuments.documents.length > 0;
   const supabaseAppointments = useSupabaseAppointments();
+  const supabaseActivity = useSupabaseActivity();
 
   const activeStudents = students.filter((s) => s.status === "actif");
   const pausedStudents = students.filter((s) => s.status === "pause");
@@ -182,6 +185,20 @@ export default function AdminDashboardPage() {
             </div>
           ))}
         </div>
+      </div>
+
+      <div className="mb-8 border border-border bg-card p-6">
+        <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
+          Centre d&apos;activité
+        </h2>
+        {!supabaseActivity.loading && supabaseActivity.events.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Aucune activité pour le moment — elle apparaîtra ici dès qu&apos;un élève complète son onboarding, envoie un
+            retour, réserve un rendez-vous, ou qu&apos;une action leur est assignée.
+          </p>
+        ) : (
+          <ActivityFeed events={supabaseActivity.events} students={students} onMarkRead={supabaseActivity.markRead} showFilter />
+        )}
       </div>
 
       <AdminSection title="Élèves à suivre">

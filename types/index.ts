@@ -1803,3 +1803,38 @@ export interface AvailableSlot {
   appointmentType: AppointmentType;
   location: string;
 }
+
+/* ─── Centre d'activité (chantier "supabase-activity-notifications") ───
+ * Types de la table Supabase réelle `activity_events`. Aucun système de
+ * notification équivalent n'existait avant ce chantier (le panneau
+ * "Notifications (exemple)" de /admin et coachNotifications côté élève sont
+ * des fonctionnalités mock distinctes, non liées, non modifiées ici).
+ */
+
+export type ActivityActorType = "student" | "coach" | "system";
+
+export type ActivityEventType =
+  | "onboarding_completed"
+  | "weight_added"
+  | "workout_feedback_submitted"
+  | "nutrition_log_filled"
+  | "appointment_booked"
+  | "appointment_cancelled"
+  | "document_assigned"
+  | "document_viewed"
+  | "program_assigned"
+  | "nutrition_assigned"
+  | "coach_note_added";
+
+export interface ActivityEvent {
+  id: string;
+  studentId: string | null;
+  actorType: ActivityActorType;
+  eventType: ActivityEventType;
+  title: string;
+  description: string;
+  /** Contient généralement { link: string } — page admin à ouvrir depuis le centre d'activité. */
+  metadata: Record<string, unknown>;
+  isRead: boolean;
+  createdAt: string;
+}

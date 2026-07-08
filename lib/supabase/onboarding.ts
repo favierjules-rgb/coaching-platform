@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { buildStudentActivityLink, logActivityEvent } from "@/lib/supabase/activity";
 import { addWeightEntry, getStudentProfile } from "@/lib/supabase/students";
 import type { Database } from "@/types/supabase";
 import type { StudentOnboardingSubmission, SupabaseStudentProfile, WeightEntrySource } from "@/types";
@@ -188,7 +189,18 @@ export async function submitOnboarding(
     addWeightEntry(supabase, studentId, submission.currentWeightKg, "initial" satisfies WeightEntrySource),
   ]);
 
-  return studentsSuccess && profileSuccess && weightEntrySuccess;
+  const success = studentsSuccess && profileSuccess && weightEntrySuccess;
+  if (success) {
+    await logActivityEvent(supabase, {
+      studentId,
+      actorType: "student",
+      eventType: "onboarding_completed",
+      title: "Onboarding complété",
+      description: `${submission.firstName} ${submission.lastName}`.trim() + " a terminé son questionnaire d'onboarding.",
+      metadata: buildStudentActivityLink(studentId),
+    });
+  }
+  return success;
 }
 
 /**
