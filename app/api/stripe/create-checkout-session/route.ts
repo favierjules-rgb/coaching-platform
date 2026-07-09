@@ -6,29 +6,36 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getBillingCustomerForStudent } from "@/lib/supabase/billing";
 import { getStudentById } from "@/lib/supabase/students";
+import { getSubscriptionTemplateById } from "@/lib/supabase/subscription-templates";
 import { getResolvedPlanByKey } from "@/lib/stripe/plans-server";
 import { getStripeClient } from "@/lib/stripe/client";
 
 /**
  * POST /api/stripe/create-checkout-session — crée une session Stripe
- * Checkout (mode subscription) pour un élève. Appelable par l'élève
- * lui-même (uniquement pour son propre student_id) ou par un coach/admin
- * (pour n'importe quel élève) — jamais par un élève pour un autre élève
- * (chantier "supabase-stripe-payments-subscriptions").
+ * Checkout pour un élève. Appelable par l'élève lui-même (uniquement pour
+ * son propre student_id) ou par un coach/admin (pour n'importe quel élève)
+ * — jamais par un élève pour un autre élève (chantier
+ * "supabase-stripe-payments-subscriptions").
  *
- * Body attendu : { studentId: string, planKey: string }.
+ * Body attendu : { studentId: string, templateId?: string, planKey?: string }.
+ * `templateId` (table `subscription_templates`, chantier
+ * "supabase-subscription-templates") est la source prioritaire du
+ * price_id — `planKey` (mapping statique par variable d'environnement,
+ * lib/stripe/plans-server.ts) n'est conservé qu'en repli temporaire tant
+ * qu'aucun modèle n'a encore été créé pour une formule. Au moins l'un des
+ * deux est requis.
  */
 export async function POST(request: Request) {
-  let body: { studentId?: string; planKey?: string };
+  let body: { studentId?: string; templateId?: string; planKey?: string };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Corps de requête invalide." }, { status: 400 });
   }
 
-  const { studentId, planKey } = body;
-  if (!studentId || !planKey) {
-    return NextResponse.json({ error: "studentId et planKey sont requis." }, { status: 400 });
+  const { studentId, templateId, planKey } = body;
+  if (!studentId || (!templateId && !planKey)) {
+    return NextResponse.json({ error: "studentId et (templateId ou planKey) sont requis." }, { status: 400 });
   }
 
   const sessionSupabase = await createSupabaseServerClient();
@@ -51,9 +58,31 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Accès refusé." }, { status: 403 });
   }
 
-  const plan = getResolvedPlanByKey(planKey);
-  if (!plan) {
-    return NextResponse.json({ error: "Formule inconnue ou non configurée (price_id manquant en environnement)." }, { status: 400 });
+  let priceId: string | null = null;
+  let planLabel = "";
+  let resolvedTemplateId: string | null = null;
+  let mode: "subscription" | "payment" = "subscription";
+
+  if (templateId) {
+    const template = await getSubscriptionTemplateById(sessionSupabase, templateId);
+    if (!template || !template.isActive || !template.stripePriceId) {
+      return NextResponse.json({ error: "Modèle d'abonnement introuvable, inactif ou sans prix Stripe configuré." }, { status: 400 });
+    }
+    priceId = template.stripePriceId;
+    planLabel = template.name;
+    resolvedTemplateId = template.id;
+    mode = template.billingInterval === "one_time" ? "payment" : "subscription";
+  } else if (planKey) {
+    const plan = getResolvedPlanByKey(planKey);
+    if (!plan) {
+      return NextResponse.json({ error: "Formule inconnue ou non configurée (price_id manquant en environnement)." }, { status: 400 });
+    }
+    priceId = plan.priceId;
+    planLabel = plan.label;
+  }
+
+  if (!priceId) {
+    return NextResponse.json({ error: "Aucun price_id Stripe résolu pour cette formule." }, { status: 400 });
   }
 
   const stripe = getStripeClient();
@@ -76,26 +105,27 @@ export async function POST(request: Request) {
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
 
+  const metadata: Record<string, string> = {
+    student_id: studentId,
+    email: student.email,
+    plan_name: planLabel,
+  };
+  if (resolvedTemplateId) {
+    metadata.template_id = resolvedTemplateId;
+    metadata.template_name = planLabel;
+  }
+
   try {
     const checkoutSession = await stripe.checkout.sessions.create({
-      mode: "subscription",
+      mode,
       customer: existingCustomer?.stripeCustomerId,
       customer_email: existingCustomer ? undefined : student.email || undefined,
-      line_items: [{ price: plan.priceId, quantity: 1 }],
+      line_items: [{ price: priceId, quantity: 1 }],
       success_url: `${appUrl}/paiement/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${appUrl}/paiement/cancel`,
       client_reference_id: studentId,
-      metadata: {
-        student_id: studentId,
-        email: student.email,
-        plan_name: plan.label,
-      },
-      subscription_data: {
-        metadata: {
-          student_id: studentId,
-          plan_name: plan.label,
-        },
-      },
+      metadata,
+      ...(mode === "subscription" ? { subscription_data: { metadata } } : {}),
     });
 
     return NextResponse.json({ url: checkoutSession.url });

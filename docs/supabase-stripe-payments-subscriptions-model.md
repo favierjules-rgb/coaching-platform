@@ -6,7 +6,9 @@ admin et élève, source de vérité = webhook Stripe.
 
 > Voir aussi [`docs/supabase-stripe-access-control-model.md`](./supabase-stripe-access-control-model.md)
 > (chantier suivant) : blocage de l'accès élève aux pages payantes selon ce
-> même statut d'abonnement, avec dérogation manuelle possible.
+> même statut d'abonnement, avec dérogation manuelle possible. Ce même
+> document couvre aussi le chantier "supabase-subscription-templates" (gestion
+> des formules depuis l'admin, plus besoin de variable d'environnement).
 
 ## Audit — 4 tables nouvelles, aucune réutilisée par erreur
 
@@ -78,11 +80,18 @@ Toutes les écritures réelles (création/mise à jour de `billing_customers`/
 
 ## Routes API
 
-- `POST /api/stripe/create-checkout-session` — `{ studentId, planKey }` →
-  `{ url }`. Mode `subscription`, réutilise le `stripe_customer_id`
-  existant si connu (sinon Stripe crée le customer via `customer_email`),
-  `client_reference_id` + `metadata.student_id/email/plan_name` sur la
-  session **et** sur la subscription créée (`subscription_data.metadata`),
+- `POST /api/stripe/create-checkout-session` — `{ studentId, templateId?, planKey? }`
+  (au moins l'un des deux) → `{ url }`. `templateId` (table
+  `subscription_templates`, chantier "supabase-subscription-templates") est
+  la source **prioritaire** du `price_id` — `planKey` (mapping .env,
+  `lib/stripe/plans-server.ts`) n'est qu'un repli temporaire, voir section
+  dédiée dans `docs/supabase-stripe-access-control-model.md`. Mode
+  `subscription` (ou `payment` si le modèle est `billing_interval:
+  "one_time"`), réutilise le `stripe_customer_id` existant si connu (sinon
+  Stripe crée le customer via `customer_email`), `client_reference_id` +
+  `metadata.student_id/email/plan_name` (+ `template_id`/`template_name` si
+  `templateId` fourni) sur la session **et** sur la subscription créée
+  (`subscription_data.metadata`),
   `success_url = APP_URL/paiement/success?session_id={CHECKOUT_SESSION_ID}`,
   `cancel_url = APP_URL/paiement/cancel` (voir "Pages de retour Stripe"
   ci-dessous — `/dashboard?payment=success` et `/profil?payment=cancelled`
@@ -103,9 +112,10 @@ Les deux premières routes rejettent (403) un élève tentant d'agir pour un
 `studentId` autre que le sien ; un rôle `admin`/`coach` peut agir pour
 n'importe quel élève ; un appelant non authentifié reçoit 401.
 
-## Formules (plans)
+## Formules (plans) — repli .env, remplacé par les modèles d'abonnements
 
-`lib/stripe/plans.ts` (client-safe, aucun price_id) définit 3 clés :
+`lib/stripe/plans.ts` (client-safe, aucun price_id) définissait initialement
+3 clés statiques :
 
 | Clé | Libellé affiché | Variable d'env du price_id |
 |---|---|---|
@@ -118,6 +128,14 @@ depuis `process.env` au moment de créer la session Checkout — **aucun
 price_id en dur dans le code**. Une formule dont la variable d'env n'est pas
 renseignée est simplement absente de `getAvailablePlans()` (la création de
 checkout échoue proprement avec un message explicite plutôt que de planter).
+
+Depuis le chantier "supabase-subscription-templates", ce mapping .env n'est
+plus que le **repli temporaire** utilisé uniquement quand aucun modèle actif
+n'existe encore dans la table `subscription_templates` (gérée depuis
+`/admin/abonnements`, sans jamais toucher au code) — voir la section dédiée
+dans [`docs/supabase-stripe-access-control-model.md`](./supabase-stripe-access-control-model.md#modèles-dabonnements-chantier-supabase-subscription-templates).
+`lib/stripe/plans.ts::buildCheckoutOffers(templates)` bascule automatiquement
+sur les modèles actifs dès qu'il y en a un.
 
 ## À faire manuellement dans le dashboard Stripe
 
@@ -190,14 +208,19 @@ d'être puisque Stripe ne redirige plus vers ces pages.
   un compte élève Supabase réel (`useSupabase`).
 - `/paiement/success`, `/paiement/cancel` (nouveau) : voir section dédiée
   ci-dessus.
-- `/admin/eleves/[studentId]` : nouvelle section "Paiement / abonnement
-  (Stripe)" (`components/admin/StudentBillingSection.tsx`), sous la section
-  "Paiement" manuelle existante (inchangée), visible uniquement pour un
-  élève Supabase réel.
-- `/admin/paiements` (nouveau, lien "Paiements" dans le menu admin) : liste
-  de tous les élèves avec statut/formule/montant/échéance/dernier paiement,
-  filtres (tous/actifs/en retard/annulés/sans abonnement), recherche,
-  boutons "Créer lien de paiement"/"Portail"/"Stripe".
+- `/admin/eleves/[studentId]` : carte unique "Abonnement & Paiement"
+  (`components/admin/StudentSubscriptionSection.tsx`, chantier
+  "supabase-subscription-templates") — fusion des 3 blocs précédents
+  (Stripe, Accès au site, Paiement manuel) en un résumé + 3 sous-sections
+  repliables, voir détail dans `docs/supabase-stripe-access-control-model.md`.
+  Visible uniquement pour un élève Supabase réel ; sinon `PaymentSection`
+  (manuel) seule, comme avant ce chantier.
+- `/admin/paiements` (lien "Paiements" dans le menu admin) : liste de tous
+  les élèves avec statut/**modèle attribué**/accès site/montant/échéance/
+  dernier paiement, filtres (tous/actifs/en retard/annulés/sans abonnement
+  + accès autorisé/bloqué), recherche, boutons "Créer lien de
+  paiement"/"Portail"/"Stripe", et bouton "Gérer les modèles
+  d'abonnements" → `/admin/abonnements`.
 - `/admin` (dashboard) : 3 nouvelles tuiles (abonnements actifs, paiements
   en retard, revenu mensuel estimé), sous les tuiles existantes — grille
   séparée, aucune tuile existante déplacée.

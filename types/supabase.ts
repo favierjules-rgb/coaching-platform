@@ -202,6 +202,7 @@ export interface Database {
           access_note: string;
           access_updated_at: string | null;
           access_updated_by: string | null;
+          assigned_subscription_template_id: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -268,6 +269,7 @@ export interface Database {
           access_note?: string;
           access_updated_at?: string | null;
           access_updated_by?: string | null;
+          assigned_subscription_template_id?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -334,6 +336,7 @@ export interface Database {
           access_note?: string;
           access_updated_at?: string | null;
           access_updated_by?: string | null;
+          assigned_subscription_template_id?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -1719,6 +1722,54 @@ export interface Database {
           payload?: Record<string, unknown>;
           processed_at?: string;
           created_at?: string;
+        };
+        Relationships: [];
+      };
+      subscription_templates: {
+        Row: {
+          id: string;
+          name: string;
+          description: string;
+          amount_cents: number;
+          currency: string;
+          billing_interval: "monthly" | "quarterly" | "yearly" | "one_time";
+          duration_months: number | null;
+          stripe_product_id: string | null;
+          stripe_price_id: string | null;
+          is_active: boolean;
+          created_at: string;
+          updated_at: string;
+          created_by: string | null;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          description?: string;
+          amount_cents: number;
+          currency?: string;
+          billing_interval?: "monthly" | "quarterly" | "yearly" | "one_time";
+          duration_months?: number | null;
+          stripe_product_id?: string | null;
+          stripe_price_id?: string | null;
+          is_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+          created_by?: string | null;
+        };
+        Update: {
+          id?: string;
+          name?: string;
+          description?: string;
+          amount_cents?: number;
+          currency?: string;
+          billing_interval?: "monthly" | "quarterly" | "yearly" | "one_time";
+          duration_months?: number | null;
+          stripe_product_id?: string | null;
+          stripe_price_id?: string | null;
+          is_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+          created_by?: string | null;
         };
         Relationships: [];
       };

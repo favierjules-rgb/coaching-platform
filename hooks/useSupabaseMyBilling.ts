@@ -15,6 +15,8 @@ export interface SupabaseMyBillingState {
   refetch: () => Promise<void>;
   /** Renvoie l'URL Stripe Checkout à ouvrir, ou `null` en cas d'échec (voir `error`). */
   startCheckout: (planKey: string) => Promise<{ url: string | null; error: string | null }>;
+  /** Chantier "supabase-subscription-templates" — source prioritaire, `startCheckout` (planKey/.env) reste un repli temporaire. */
+  startCheckoutForTemplate: (templateId: string) => Promise<{ url: string | null; error: string | null }>;
   openPortal: () => Promise<{ url: string | null; error: string | null }>;
 }
 
@@ -100,6 +102,24 @@ export function useSupabaseMyBilling(): SupabaseMyBillingState {
     [studentId],
   );
 
+  const startCheckoutForTemplate = useCallback(
+    async (templateId: string): Promise<{ url: string | null; error: string | null }> => {
+      if (!studentId) return { url: null, error: "Compte élève non identifié." };
+      try {
+        const response = await fetch("/api/stripe/create-checkout-session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ studentId, templateId }),
+        });
+        const data = await response.json();
+        return response.ok ? { url: data.url as string, error: null } : { url: null, error: data.error ?? "Échec de la création du paiement." };
+      } catch {
+        return { url: null, error: "Échec de la création du paiement." };
+      }
+    },
+    [studentId],
+  );
+
   const openPortal = useCallback(async (): Promise<{ url: string | null; error: string | null }> => {
     if (!studentId) return { url: null, error: "Compte élève non identifié." };
     try {
@@ -115,5 +135,5 @@ export function useSupabaseMyBilling(): SupabaseMyBillingState {
     }
   }, [studentId]);
 
-  return { ready, active: studentId !== null, studentId, summary, refetch, startCheckout, openPortal };
+  return { ready, active: studentId !== null, studentId, summary, refetch, startCheckout, startCheckoutForTemplate, openPortal };
 }

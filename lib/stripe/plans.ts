@@ -9,6 +9,9 @@
  * lib/stripe/plans-server.ts — jamais de price_id en dur ici.
  */
 
+import { formatAmountCents } from "@/lib/stripe/status";
+import type { BillingInterval, SubscriptionTemplate } from "@/types";
+
 export type PlanKey = "basic" | "premium" | "distanciel";
 
 export interface PlanDefinition {
@@ -32,4 +35,34 @@ export function getPlanDefinition(key: string): PlanDefinition | null {
 export function getPlanLabel(key: string | null | undefined): string {
   if (!key) return "";
   return getPlanDefinition(key)?.label ?? key;
+}
+
+/* ─── Offres pour CreateCheckoutLinkModal (chantier "supabase-subscription-templates") ───
+ * Les modèles d'abonnements (table `subscription_templates`) sont la source
+ * prioritaire des formules proposées à l'achat — ce mapping .env n'est
+ * conservé que comme repli temporaire tant qu'aucun modèle n'existe encore.
+ */
+
+export const billingIntervalLabels: Record<BillingInterval, string> = {
+  monthly: "/mois",
+  quarterly: "/trimestre",
+  yearly: "/an",
+  one_time: " (paiement unique)",
+};
+
+export function formatTemplateOffer(template: SubscriptionTemplate): string {
+  return `${template.name} — ${formatAmountCents(template.amountCents, template.currency)}${billingIntervalLabels[template.billingInterval]}`;
+}
+
+export interface CheckoutOffer {
+  id: string;
+  label: string;
+}
+
+/** Modèles actifs si disponibles (id = template.id), sinon repli sur les 3 formules statiques par variable d'environnement (id = plan key). */
+export function buildCheckoutOffers(templates: SubscriptionTemplate[]): CheckoutOffer[] {
+  if (templates.length > 0) {
+    return templates.map((template) => ({ id: template.id, label: formatTemplateOffer(template) }));
+  }
+  return PLAN_DEFINITIONS.map((plan) => ({ id: plan.key, label: plan.label }));
 }

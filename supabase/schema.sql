@@ -1852,6 +1852,96 @@ create trigger protect_access_columns
   execute function public.protect_student_profiles_access_columns();
 
 -- ============================================================================
+-- Migration additive — chantier "supabase-subscription-templates" : modèles
+-- d'abonnements gérés depuis l'admin (plus besoin de modifier le code pour
+-- changer un prix/une formule). Remplace progressivement le mapping statique
+-- par variables d'environnement (STRIPE_PRICE_COACHING_BASIC/PREMIUM/
+-- DISTANCIEL, chantier "supabase-stripe-payments-subscriptions") — celui-ci
+-- reste en repli tant qu'aucun template ne correspond, voir
+-- lib/stripe/plans-server.ts.
+--
+-- `stripe_price_id` unique : un prix Stripe donné ne doit correspondre qu'à
+-- un seul template (sert aussi de clé d'idempotence pour le seed ci-dessous
+-- des 3 formules déjà créées manuellement dans Stripe par l'utilisateur).
+-- ============================================================================
+create table if not exists public.subscription_templates (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  description text not null default '',
+  amount_cents integer not null check (amount_cents >= 0),
+  currency text not null default 'eur',
+  billing_interval text not null default 'monthly' check (billing_interval in ('monthly', 'quarterly', 'yearly', 'one_time')),
+  duration_months integer,
+  stripe_product_id text,
+  stripe_price_id text unique,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  created_by uuid references public.coaches (id) on delete set null
+);
+create index if not exists subscription_templates_is_active_idx on public.subscription_templates (is_active);
+
+drop trigger if exists set_updated_at on public.subscription_templates;
+create trigger set_updated_at before update on public.subscription_templates
+  for each row execute function public.set_updated_at();
+
+alter table public.subscription_templates enable row level security;
+
+-- Lecture : tout utilisateur authentifié peut voir les formules actives
+-- (nécessaire au sélecteur élève "Activer mon abonnement" et au sélecteur
+-- admin "Modèle attribué") — même principe que coach_availabilities
+-- (référentiel partagé, pas de donnée personnelle). Les formules archivées
+-- (is_active = false, conservées pour l'historique des prix) restent
+-- réservées au staff.
+drop policy if exists "subscription_templates_select_active_or_staff" on public.subscription_templates;
+create policy "subscription_templates_select_active_or_staff" on public.subscription_templates
+  for select using (is_active = true or public.is_coach_or_admin());
+drop policy if exists "subscription_templates_manage_staff" on public.subscription_templates;
+create policy "subscription_templates_manage_staff" on public.subscription_templates
+  for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
+
+-- Seed : les 3 formules déjà créées manuellement dans le dashboard Stripe
+-- par l'utilisateur avant ce chantier (voir docs/supabase-subscription-templates-model.md)
+-- — idempotent via le unique sur stripe_price_id, aucun risque de doublon
+-- si ce script est rejoué.
+insert into public.subscription_templates (name, description, amount_cents, currency, billing_interval, stripe_product_id, stripe_price_id)
+values
+  ('Coaching distanciel', 'Coaching à distance — suivi personnalisé.', 15000, 'eur', 'monthly', 'prod_Uqy4ixEkxNgZLf', 'price_1TrG83LBSSMeCJsshZXkkXW6'),
+  ('Coaching Présentiel', 'Coaching en salle — séances encadrées.', 24700, 'eur', 'monthly', 'prod_Uqzhuc21b5EznN', 'price_1TrHi7LBSSMeCJssb0gnx2Fi'),
+  ('Coaching premium', 'Formule complète — suivi renforcé.', 39700, 'eur', 'monthly', 'prod_UqzhniwVDaqmBG', 'price_1TrHiNLBSSMeCJssVW33aKUw')
+on conflict (stripe_price_id) do nothing;
+
+-- ----------------------------------------------------------------------------
+-- Attribution d'un modèle à un élève (student_profiles). Colonne protégée
+-- au même titre que les 6 colonnes d'accès déjà en place (voir chantier
+-- "supabase-stripe-access-control" plus haut) : le trigger
+-- protect_access_columns est étendu pour couvrir aussi celle-ci.
+-- ----------------------------------------------------------------------------
+alter table public.student_profiles add column if not exists assigned_subscription_template_id uuid references public.subscription_templates (id) on delete set null;
+
+create or replace function public.protect_student_profiles_access_columns()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_coach_or_admin() then
+    new.billing_access_mode := old.billing_access_mode;
+    new.assigned_stripe_plan := old.assigned_stripe_plan;
+    new.assigned_stripe_price_id := old.assigned_stripe_price_id;
+    new.access_note := old.access_note;
+    new.access_updated_at := old.access_updated_at;
+    new.access_updated_by := old.access_updated_by;
+    new.assigned_subscription_template_id := old.assigned_subscription_template_id;
+  end if;
+  return new;
+end;
+$$;
+-- Le trigger existant réutilise automatiquement cette nouvelle définition
+-- (create or replace function), aucun besoin de le recréer.
+
+-- ============================================================================
 -- Fin du schéma initial. Prochaine étape (pas dans ce fichier) : régénérer
 -- types/supabase.ts avec `supabase gen types typescript`, puis brancher
 -- progressivement chaque page mock sur ces tables (voir README.md).

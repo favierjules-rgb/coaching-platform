@@ -1,15 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import { CreditCard, ExternalLink } from "lucide-react";
+import Link from "next/link";
+import { CreditCard, ExternalLink, Settings } from "lucide-react";
 
 import { FilterButtons, SearchInput } from "@/components/admin/SearchAndFilters";
 import { StatusBadge } from "@/components/admin/StatusBadge";
 import { BillingStatusBadge } from "@/components/shared/BillingStatusBadge";
 import { CreateCheckoutLinkModal } from "@/components/shared/CreateCheckoutLinkModal";
 import { useSupabaseAdminBilling } from "@/hooks/useSupabaseAdminBilling";
+import { useSupabaseSubscriptionTemplates } from "@/hooks/useSupabaseSubscriptionTemplates";
 import { formatDate, matchesTextSearch } from "@/lib/admin";
-import { getPlanLabel } from "@/lib/stripe/plans";
+import { buildCheckoutOffers, getPlanLabel, type CheckoutOffer } from "@/lib/stripe/plans";
 import { formatAmountCents } from "@/lib/stripe/status";
 import { accessReasonLabels } from "@/lib/supabase/student-access";
 import type { AdminBillingListItem } from "@/lib/supabase/billing";
@@ -45,12 +47,16 @@ function matchesAccessFilter(allowed: boolean, filter: AccessFilter): boolean {
   return filter === "autorise" ? allowed : !allowed;
 }
 
-async function createCheckoutLinkFor(studentId: string, planKey: string): Promise<{ url: string | null; error: string | null }> {
+async function createCheckoutLinkFor(
+  studentId: string,
+  offerId: string,
+  hasTemplates: boolean,
+): Promise<{ url: string | null; error: string | null }> {
   try {
     const response = await fetch("/api/stripe/create-checkout-session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ studentId, planKey }),
+      body: JSON.stringify(hasTemplates ? { studentId, templateId: offerId } : { studentId, planKey: offerId }),
     });
     const data = await response.json();
     return response.ok ? { url: data.url as string, error: null } : { url: null, error: data.error ?? "Échec de la création du lien." };
@@ -73,7 +79,13 @@ async function openPortalFor(studentId: string): Promise<{ url: string | null; e
   }
 }
 
-function BillingRow({ item }: { item: AdminBillingListItem }) {
+function planLabelFor(item: AdminBillingListItem): string {
+  if (item.subscription?.planName) return item.subscription.planName;
+  const assignedName = item.assignedTemplateName ?? (item.assignedStripePlan ? getPlanLabel(item.assignedStripePlan) : null);
+  return assignedName ? `${assignedName} (attribuée)` : "—";
+}
+
+function BillingRow({ item, offers, hasTemplates }: { item: AdminBillingListItem; offers: CheckoutOffer[]; hasTemplates: boolean }) {
   async function handleOpenPortal() {
     const result = await openPortalFor(item.studentId);
     if (result.url) window.open(result.url, "_blank", "noopener,noreferrer");
@@ -104,9 +116,7 @@ function BillingRow({ item }: { item: AdminBillingListItem }) {
         </div>
         <div>
           <span className="block text-xs uppercase tracking-wide text-muted-foreground">Formule · Montant</span>
-          <span className="block text-sm text-foreground">
-            {item.subscription?.planName || (item.assignedStripePlan ? `${getPlanLabel(item.assignedStripePlan)} (attribuée)` : "—")}
-          </span>
+          <span className="block text-sm text-foreground">{planLabelFor(item)}</span>
           <span className="block text-sm text-muted-foreground">
             {item.subscription ? formatAmountCents(item.subscription.amountCents, item.subscription.currency) : "—"}
           </span>
@@ -130,7 +140,9 @@ function BillingRow({ item }: { item: AdminBillingListItem }) {
         <CreateCheckoutLinkModal
           triggerLabel="Créer lien de paiement"
           mode="admin"
-          onCreateCheckout={(planKey) => createCheckoutLinkFor(item.studentId, planKey)}
+          offers={offers}
+          defaultOfferId={hasTemplates ? item.assignedSubscriptionTemplateId : item.assignedStripePlan}
+          onCreateCheckout={(offerId) => createCheckoutLinkFor(item.studentId, offerId, hasTemplates)}
         />
         {item.customer && (
           <>
@@ -160,9 +172,13 @@ function BillingRow({ item }: { item: AdminBillingListItem }) {
 
 export default function AdminBillingPage() {
   const billing = useSupabaseAdminBilling();
+  const templates = useSupabaseSubscriptionTemplates(true);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("tous");
   const [accessFilter, setAccessFilter] = useState<AccessFilter>("tous");
+
+  const offers = buildCheckoutOffers(templates.templates);
+  const hasTemplates = templates.templates.length > 0;
 
   const filtered = billing.items.filter(
     (item) =>
@@ -180,11 +196,20 @@ export default function AdminBillingPage() {
 
   return (
     <div>
-      <div className="mb-8">
-        <h1 className="font-heading text-3xl font-extrabold uppercase text-foreground md:text-4xl">Paiements</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Statuts d&apos;abonnement et de paiement Stripe de tous les élèves.
-        </p>
+      <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="font-heading text-3xl font-extrabold uppercase text-foreground md:text-4xl">Paiements</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Statuts d&apos;abonnement et de paiement Stripe de tous les élèves.
+          </p>
+        </div>
+        <Link
+          href="/admin/abonnements"
+          className="flex items-center gap-1.5 border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+        >
+          <Settings size={14} aria-hidden="true" />
+          Gérer les modèles d&apos;abonnements
+        </Link>
       </div>
 
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -219,7 +244,7 @@ export default function AdminBillingPage() {
       ) : (
         <div className="flex flex-col gap-4">
           {filtered.map((item) => (
-            <BillingRow key={item.studentId} item={item} />
+            <BillingRow key={item.studentId} item={item} offers={offers} hasTemplates={hasTemplates} />
           ))}
         </div>
       )}

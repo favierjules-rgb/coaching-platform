@@ -14,8 +14,7 @@ import { EditStudentModal } from "@/components/admin/EditStudentModal";
 import { NutritionWeekSummaryCard } from "@/components/admin/NutritionWeekSummaryCard";
 import { StatusBadge, feedbackStatusTone, studentStatusTone } from "@/components/admin/StatusBadge";
 import { PaymentSection } from "@/components/admin/PaymentSection";
-import { StudentAccessSection } from "@/components/admin/StudentAccessSection";
-import { StudentBillingSection } from "@/components/admin/StudentBillingSection";
+import { StudentSubscriptionSection } from "@/components/admin/StudentSubscriptionSection";
 import { MeasurementsSection } from "@/components/student/MeasurementsSection";
 import { ProgressPhotoGallerySection } from "@/components/student/ProgressPhotoGallerySection";
 import { WeightEvolutionCard } from "@/components/student/WeightEvolutionCard";
@@ -621,24 +620,12 @@ export default function AdminStudentDetailPage() {
       </div>
 
       <div className="mb-6">
-        <PaymentSection
-          studentId={student.id}
-          profile={student.paymentProfile}
-          onUpdate={handleUpdatePayment}
-        />
+        {isSupabaseStudent ? (
+          <StudentSubscriptionSection studentId={student.id} profile={student.paymentProfile} onUpdatePayment={handleUpdatePayment} />
+        ) : (
+          <PaymentSection studentId={student.id} profile={student.paymentProfile} onUpdate={handleUpdatePayment} />
+        )}
       </div>
-
-      {isSupabaseStudent && (
-        <div className="mb-6">
-          <StudentBillingSection studentId={student.id} />
-        </div>
-      )}
-
-      {isSupabaseStudent && (
-        <div className="mb-6">
-          <StudentAccessSection studentId={student.id} />
-        </div>
-      )}
 
       {onboardingProfile ? (
         <>

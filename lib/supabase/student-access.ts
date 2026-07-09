@@ -43,7 +43,8 @@ export async function getStudentAccessStatus(supabase: TypedSupabaseClient, stud
 
 export interface UpdateStudentAccessInput {
   billingAccessMode: BillingAccessMode;
-  assignedStripePlan: string | null;
+  /** Modèle attribué (chantier "supabase-subscription-templates") — source de vérité pour la formule ; `assigned_stripe_plan`/`assigned_stripe_price_id` sont recopiés depuis ce modèle pour compatibilité descendante (affichage), jamais l'inverse. */
+  assignedSubscriptionTemplateId: string | null;
   accessNote: string;
 }
 
@@ -53,11 +54,25 @@ export async function updateStudentAccess(
   studentId: string,
   input: UpdateStudentAccessInput,
 ): Promise<boolean> {
+  let assignedStripePlan: string | null = null;
+  let assignedStripePriceId: string | null = null;
+  if (input.assignedSubscriptionTemplateId) {
+    const { data: template } = await supabase
+      .from("subscription_templates")
+      .select("name, stripe_price_id")
+      .eq("id", input.assignedSubscriptionTemplateId)
+      .maybeSingle();
+    assignedStripePlan = template?.name ?? null;
+    assignedStripePriceId = template?.stripe_price_id ?? null;
+  }
+
   const { error } = await supabase
     .from("student_profiles")
     .update({
       billing_access_mode: input.billingAccessMode,
-      assigned_stripe_plan: input.assignedStripePlan,
+      assigned_subscription_template_id: input.assignedSubscriptionTemplateId,
+      assigned_stripe_plan: assignedStripePlan,
+      assigned_stripe_price_id: assignedStripePriceId,
       access_note: input.accessNote,
       access_updated_at: new Date().toISOString(),
     })

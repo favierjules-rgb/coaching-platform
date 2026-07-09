@@ -11,6 +11,8 @@ export interface SupabaseStudentBillingState {
   summary: StudentBillingSummary | null;
   refetch: () => Promise<void>;
   createCheckoutLink: (planKey: string) => Promise<{ url: string | null; error: string | null }>;
+  /** Chantier "supabase-subscription-templates" — source prioritaire, `createCheckoutLink` (planKey/.env) reste un repli temporaire. */
+  createCheckoutLinkForTemplate: (templateId: string) => Promise<{ url: string | null; error: string | null }>;
   openPortal: () => Promise<{ url: string | null; error: string | null }>;
 }
 
@@ -90,6 +92,24 @@ export function useSupabaseStudentBilling(studentId: string | undefined): Supaba
     [studentId],
   );
 
+  const createCheckoutLinkForTemplate = useCallback(
+    async (templateId: string): Promise<{ url: string | null; error: string | null }> => {
+      if (!studentId) return { url: null, error: "Élève non identifié." };
+      try {
+        const response = await fetch("/api/stripe/create-checkout-session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ studentId, templateId }),
+        });
+        const data = await response.json();
+        return response.ok ? { url: data.url as string, error: null } : { url: null, error: data.error ?? "Échec de la création du lien." };
+      } catch {
+        return { url: null, error: "Échec de la création du lien." };
+      }
+    },
+    [studentId],
+  );
+
   const openPortal = useCallback(async (): Promise<{ url: string | null; error: string | null }> => {
     if (!studentId) return { url: null, error: "Élève non identifié." };
     try {
@@ -105,5 +125,5 @@ export function useSupabaseStudentBilling(studentId: string | undefined): Supaba
     }
   }, [studentId]);
 
-  return { loading, summary, refetch, createCheckoutLink, openPortal };
+  return { loading, summary, refetch, createCheckoutLink, createCheckoutLinkForTemplate, openPortal };
 }

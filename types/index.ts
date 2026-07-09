@@ -1317,6 +1317,8 @@ export interface SupabaseStudentProfile {
   accessNote: string;
   accessUpdatedAt: string | null;
   accessUpdatedBy: string | null;
+  /** Modèle d'abonnement attribué (chantier "supabase-subscription-templates") — voir lib/supabase/subscription-templates.ts. */
+  assignedSubscriptionTemplateId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1996,4 +1998,28 @@ export interface StudentAccessStatus {
   accessMode: BillingAccessMode;
   /** Statut Stripe brut ayant servi au calcul (null si aucun abonnement) — jamais recalculé/stocké ailleurs, toujours dérivé à la volée. */
   subscriptionStatus: string | null;
+}
+
+/* ─── Modèles d'abonnements (chantier "supabase-subscription-templates") ───
+ * Formules gérées depuis l'admin (table subscription_templates) au lieu
+ * d'un mapping figé par variables d'environnement — voir
+ * lib/supabase/subscription-templates.ts et
+ * docs/supabase-stripe-payments-subscriptions-model.md.
+ */
+export type BillingInterval = "monthly" | "quarterly" | "yearly" | "one_time";
+
+export interface SubscriptionTemplate {
+  id: string;
+  name: string;
+  description: string;
+  amountCents: number;
+  currency: string;
+  billingInterval: BillingInterval;
+  durationMonths: number | null;
+  stripeProductId: string | null;
+  stripePriceId: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string | null;
 }

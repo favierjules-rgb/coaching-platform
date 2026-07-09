@@ -12,6 +12,7 @@ import {
 } from "@/lib/supabase/billing";
 import { getInvoiceCustomerId, getInvoicePaymentIntentId, getInvoiceSubscriptionId } from "@/lib/stripe/invoice-helpers";
 import { getResolvedPlanByPriceId } from "@/lib/stripe/plans-server";
+import { getSubscriptionTemplateByPriceId } from "@/lib/supabase/subscription-templates";
 import type { Database } from "@/types/supabase";
 
 /**
@@ -51,6 +52,11 @@ async function upsertSubscriptionFromStripeObject(supabase: TypedSupabaseClient,
   const price = item?.price;
   const priceId = price?.id ?? null;
   const productId = extractId(price?.product as string | { id: string } | undefined) ?? null;
+  // Nom de formule : `subscription_templates` (source prioritaire, chantier
+  // "supabase-subscription-templates") d'abord, mapping .env
+  // (lib/stripe/plans-server.ts) en repli tant qu'aucun modèle ne
+  // correspond à ce price_id.
+  const template = priceId ? await getSubscriptionTemplateByPriceId(supabase, priceId) : null;
   const plan = getResolvedPlanByPriceId(priceId);
 
   await upsertSubscription(supabase, {
@@ -59,7 +65,7 @@ async function upsertSubscriptionFromStripeObject(supabase: TypedSupabaseClient,
     stripeSubscriptionId: subscription.id,
     stripePriceId: priceId,
     stripeProductId: productId,
-    planName: plan?.label ?? "",
+    planName: template?.name ?? plan?.label ?? "",
     status: subscription.status,
     currentPeriodStart: toIso(item?.current_period_start),
     currentPeriodEnd: toIso(item?.current_period_end),

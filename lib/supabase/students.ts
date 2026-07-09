@@ -212,6 +212,7 @@ function mapStudentProfileRow(row: StudentProfileRow): SupabaseStudentProfile {
     accessNote: row.access_note ?? "",
     accessUpdatedAt: row.access_updated_at,
     accessUpdatedBy: row.access_updated_by,
+    assignedSubscriptionTemplateId: row.assigned_subscription_template_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

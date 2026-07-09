@@ -7,22 +7,29 @@ import { Lock } from "lucide-react";
 import { CreateCheckoutLinkModal } from "@/components/shared/CreateCheckoutLinkModal";
 import { PaymentResultCard } from "@/components/shared/PaymentResultCard";
 import { useSupabaseMyAccess } from "@/hooks/useSupabaseMyAccess";
+import { useSupabaseSubscriptionTemplates } from "@/hooks/useSupabaseSubscriptionTemplates";
+import { buildCheckoutOffers } from "@/lib/stripe/plans";
 
 /**
- * Contenu de /acces-limite (chantier "supabase-stripe-access-control") —
- * page atteinte via requireActiveStudentAccess() quand l'élève n'a pas
- * d'abonnement actif/trialing (ou accès manuel) pour entraînement/
- * nutrition/documents/progression.
+ * Contenu de /acces-limite (chantier "supabase-stripe-access-control",
+ * étendu par "supabase-subscription-templates") — page atteinte via
+ * requireActiveStudentAccess() quand l'élève n'a pas d'abonnement
+ * actif/trialing (ou accès manuel) pour entraînement/nutrition/documents/
+ * progression.
  */
 export function AccessLimitedContent() {
   const access = useSupabaseMyAccess();
+  const templates = useSupabaseSubscriptionTemplates(true);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handlePayAssignedPlan(planKey: string) {
+  const hasTemplates = templates.templates.length > 0;
+  const assignedOfferId = hasTemplates ? access.assignedTemplateId : access.assignedPlan;
+
+  async function handlePayAssignedOffer(offerId: string) {
     setCreating(true);
     setError(null);
-    const result = await access.startCheckout(planKey);
+    const result = hasTemplates ? await access.startCheckoutForTemplate(offerId) : await access.startCheckout(offerId);
     if (result.url) {
       window.location.href = result.url;
       return;
@@ -40,17 +47,22 @@ export function AccessLimitedContent() {
     >
       {!access.ready ? (
         <span className="border border-border px-4 py-3 text-xs uppercase tracking-widest text-muted-foreground">Chargement…</span>
-      ) : access.assignedPlan ? (
+      ) : assignedOfferId ? (
         <button
           type="button"
-          onClick={() => handlePayAssignedPlan(access.assignedPlan!)}
+          onClick={() => handlePayAssignedOffer(assignedOfferId)}
           disabled={creating}
           className="border border-primary bg-primary px-4 py-3 text-center text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {creating ? "Redirection…" : "Régler mon abonnement"}
         </button>
       ) : (
-        <CreateCheckoutLinkModal triggerLabel="Régler mon abonnement" mode="student" onCreateCheckout={access.startCheckout} />
+        <CreateCheckoutLinkModal
+          triggerLabel="Régler mon abonnement"
+          mode="student"
+          offers={buildCheckoutOffers(templates.templates)}
+          onCreateCheckout={hasTemplates ? access.startCheckoutForTemplate : access.startCheckout}
+        />
       )}
 
       {error && <p className="text-xs text-red-400">{error}</p>}

@@ -251,7 +251,13 @@ function AddPaymentEntryModal({
   );
 }
 
-export function PaymentSection({
+/**
+ * Contenu du bloc "Paiement manuel" — extrait de `PaymentSection` (sans le
+ * wrapper `AdminSection`) pour être embarqué dans
+ * `StudentSubscriptionSection` (chantier "supabase-subscription-templates",
+ * sous-section C "Paiement manuel existant"), sans dupliquer la logique.
+ */
+export function PaymentSectionContent({
   studentId,
   profile,
   onUpdate,
@@ -278,24 +284,21 @@ export function PaymentSection({
   }
 
   return (
-    <AdminSection
-      title="Paiement"
-      action={
-        <div className="flex flex-wrap gap-2">
-          <EditPaymentProfileModal profile={profile} onSave={onUpdate} />
-          <AddPaymentEntryModal studentId={studentId} profile={profile} onSave={onUpdate} />
-          <button
-            type="button"
-            onClick={handleMarkAsPaid}
-            disabled={profile.status === "terminé" && remaining === 0}
-            className="flex items-center gap-1.5 border border-green-500/50 px-4 py-2 text-xs uppercase tracking-widest text-green-400 transition-colors hover:bg-green-500/10 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <CreditCard size={13} />
-            Marquer comme payé
-          </button>
-        </div>
-      }
-    >
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap gap-2">
+        <EditPaymentProfileModal profile={profile} onSave={onUpdate} />
+        <AddPaymentEntryModal studentId={studentId} profile={profile} onSave={onUpdate} />
+        <button
+          type="button"
+          onClick={handleMarkAsPaid}
+          disabled={profile.status === "terminé" && remaining === 0}
+          className="flex items-center gap-1.5 border border-green-500/50 px-4 py-2 text-xs uppercase tracking-widest text-green-400 transition-colors hover:bg-green-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <CreditCard size={13} />
+          Marquer comme payé
+        </button>
+      </div>
+
       {!profile.offerName && profile.totalPriceEuros === 0 && entries.length === 0 ? (
         <p className="text-sm text-muted-foreground">Aucun paiement renseigné pour le moment.</p>
       ) : (
@@ -353,6 +356,22 @@ export function PaymentSection({
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+export function PaymentSection({
+  studentId,
+  profile,
+  onUpdate,
+}: {
+  studentId: string;
+  profile: StudentPaymentProfile;
+  onUpdate: (next: StudentPaymentProfile) => void;
+}) {
+  return (
+    <AdminSection title="Paiement">
+      <PaymentSectionContent studentId={studentId} profile={profile} onUpdate={onUpdate} />
     </AdminSection>
   );
 }

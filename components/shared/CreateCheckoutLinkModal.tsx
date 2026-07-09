@@ -3,28 +3,30 @@
 import { useId, useState } from "react";
 import { CreditCard, ExternalLink, X } from "lucide-react";
 
-import { PLAN_DEFINITIONS, type PlanKey } from "@/lib/stripe/plans";
+import type { CheckoutOffer } from "@/lib/stripe/plans";
 
 interface CreateCheckoutLinkModalProps {
   triggerLabel: string;
   /** "student" : redirige automatiquement vers Stripe Checkout après création. "admin" : affiche un bouton "Ouvrir le lien" pour ne pas quitter la page admin. */
   mode: "student" | "admin";
-  onCreateCheckout: (planKey: string) => Promise<{ url: string | null; error: string | null }>;
+  /** Formules sélectionnables — modèles d'abonnements actifs (chantier "supabase-subscription-templates", source prioritaire) ou repli .env (lib/stripe/plans.ts) selon l'appelant. */
+  offers: CheckoutOffer[];
+  onCreateCheckout: (offerId: string) => Promise<{ url: string | null; error: string | null }>;
   /** Formule pré-sélectionnée à l'ouverture (ex : formule attribuée à l'élève) — reste modifiable dans le sélecteur. */
-  defaultPlanKey?: string | null;
+  defaultOfferId?: string | null;
 }
 
 /** Sélection de formule + création de session Stripe Checkout, partagée élève ("Activer mon abonnement") et admin ("Créer lien de paiement"). */
-export function CreateCheckoutLinkModal({ triggerLabel, mode, onCreateCheckout, defaultPlanKey }: CreateCheckoutLinkModalProps) {
+export function CreateCheckoutLinkModal({ triggerLabel, mode, offers, onCreateCheckout, defaultOfferId }: CreateCheckoutLinkModalProps) {
   const [open, setOpen] = useState(false);
-  const [planKey, setPlanKey] = useState<PlanKey | "">((defaultPlanKey as PlanKey | null) ?? PLAN_DEFINITIONS[0]?.key ?? "");
+  const [offerId, setOfferId] = useState(defaultOfferId ?? offers[0]?.id ?? "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
   const selectId = useId();
 
   function openModal() {
-    setPlanKey((defaultPlanKey as PlanKey | null) ?? PLAN_DEFINITIONS[0]?.key ?? "");
+    setOfferId(defaultOfferId ?? offers[0]?.id ?? "");
     setOpen(true);
   }
 
@@ -36,9 +38,13 @@ export function CreateCheckoutLinkModal({ triggerLabel, mode, onCreateCheckout, 
   }
 
   async function handleCreate() {
+    if (!offerId) {
+      setError("Aucune formule disponible.");
+      return;
+    }
     setLoading(true);
     setError(null);
-    const result = await onCreateCheckout(planKey);
+    const result = await onCreateCheckout(offerId);
     setLoading(false);
     if (result.error || !result.url) {
       setError(result.error ?? "Échec de la création du lien de paiement.");
@@ -95,6 +101,8 @@ export function CreateCheckoutLinkModal({ triggerLabel, mode, onCreateCheckout, 
                   Ouvrir le lien Stripe
                 </a>
               </div>
+            ) : offers.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Aucune formule disponible pour le moment.</p>
             ) : (
               <div className="flex flex-col gap-4">
                 <div>
@@ -103,13 +111,13 @@ export function CreateCheckoutLinkModal({ triggerLabel, mode, onCreateCheckout, 
                   </label>
                   <select
                     id={selectId}
-                    value={planKey}
-                    onChange={(event) => setPlanKey(event.target.value as PlanKey)}
+                    value={offerId}
+                    onChange={(event) => setOfferId(event.target.value)}
                     className="w-full border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none"
                   >
-                    {PLAN_DEFINITIONS.map((plan) => (
-                      <option key={plan.key} value={plan.key}>
-                        {plan.label}
+                    {offers.map((offer) => (
+                      <option key={offer.id} value={offer.id}>
+                        {offer.label}
                       </option>
                     ))}
                   </select>

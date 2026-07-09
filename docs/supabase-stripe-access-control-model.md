@@ -163,6 +163,125 @@ réutilisé), bouton secondaire "Retour à mon profil". Ajoutée aux
   filtre statut d'abonnement existant (conservé, rien retiré), nouvelle
   tuile de synthèse "Accès bloqué".
 
+## Modèles d'abonnements (chantier "supabase-subscription-templates")
+
+Prolonge ce chantier : les formules proposées ne sont plus figées par 3
+variables d'environnement (`STRIPE_PRICE_COACHING_BASIC`/`PREMIUM`/
+`DISTANCIEL`, chantier précédent) mais gérées depuis l'admin
+(`/admin/abonnements`), sans jamais toucher au code pour ajouter, modifier ou
+retirer une formule.
+
+### Table `subscription_templates`
+
+```sql
+subscription_templates (
+  id, name, description, amount_cents, currency, billing_interval
+    ('monthly'|'quarterly'|'yearly'|'one_time'), duration_months,
+  stripe_product_id, stripe_price_id unique, is_active,
+  created_at, updated_at, created_by
+)
+```
+
+- **RLS** : lecture = formules actives (`is_active = true`) ou staff (accès
+  aux archivées aussi, pour l'historique) ; écriture (insert/update/delete)
+  = staff uniquement (`is_coach_or_admin()`), jamais l'élève — répond
+  explicitement à la contrainte "élèves peuvent lire seulement leur modèle
+  attribué si nécessaire, mais ne modifient jamais rien" : la lecture des
+  formules actives par tous les élèves connectés (pas seulement la leur)
+  reste nécessaire pour le sélecteur de paiement existant
+  (`CreateCheckoutLinkModal`) — les données (nom/prix) ne sont pas
+  sensibles, aucune fuite d'information privée entre élèves.
+- **Seedée** une fois avec les 3 formules déjà créées manuellement dans
+  Stripe par l'utilisateur (Coaching distanciel/Présentiel/premium),
+  `on conflict (stripe_price_id) do nothing` pour rester rejouable.
+
+`student_profiles.assigned_subscription_template_id` (uuid, référence
+`subscription_templates(id)`) est une 7ème colonne protégée par le même
+trigger `protect_access_columns` que les 6 colonnes du chantier précédent
+(`create or replace function`, un seul trigger, aucune duplication) —
+inscriptible uniquement par un coach/admin, jamais par l'élève lui-même.
+
+### Création automatique du Product/Price Stripe
+
+`POST /api/admin/subscription-templates` (staff uniquement) crée le
+`Product` puis le `Price` Stripe correspondant (`lib/stripe/subscription-templates.ts::createStripeProductAndPrice`)
+avant d'insérer la ligne — jamais de `stripe_price_id` renseigné à la main.
+Si Stripe n'est pas configuré (`STRIPE_SECRET_KEY` absente), le modèle est
+tout de même créé côté Supabase avec `stripe_product_id`/`stripe_price_id`
+à `null` (visible dans `/admin/abonnements`, non payable tant que Stripe
+n'est pas configuré).
+
+Un **Price Stripe est immuable** : `PATCH /api/admin/subscription-templates/[id]`
+détecte un changement de `amountCents` et crée un **nouveau** Price sur le
+même Product (`createStripePriceForExistingProduct`), puis désactive
+l'ancien (`active: false`, jamais supprimé — l'historique des abonnements
+déjà souscrits sur l'ancien prix n'est pas affecté). La ligne
+`subscription_templates.stripe_price_id` est mise à jour vers le nouveau
+Price. Un modèle "archivé" (`isActive: false`) n'est qu'un signal côté
+Supabase (plus proposé aux élèves) — il ne touche pas Stripe.
+
+### Checkout — price_id résolu par modèle, jamais en dur
+
+`POST /api/stripe/create-checkout-session` accepte désormais `{ studentId,
+templateId }` en priorité (`{ studentId, planKey }` reste un repli
+temporaire tant qu'aucun modèle actif n'existe, voir
+`docs/supabase-stripe-payments-subscriptions-model.md`). `templateId` est
+résolu vers `subscription_templates.stripe_price_id` côté serveur — **jamais
+de price_id passé depuis le client**. `metadata.template_id`/`template_name`
+ajoutés à la session et à la subscription Stripe créée, en plus des champs
+existants (`student_id`/`email`/`plan_name`).
+
+Le webhook (`lib/stripe/webhook-handlers.ts::upsertSubscriptionFromStripeObject`)
+résout désormais le nom de formule (`subscriptions.plan_name`) en
+interrogeant d'abord `subscription_templates` par `stripe_price_id`
+(source prioritaire), puis le mapping .env en repli — cohérent avec le
+reste du chantier : un abonnement souscrit via un modèle affiche le bon nom
+même si aucune variable d'environnement `STRIPE_PRICE_COACHING_*` ne
+correspond à ce price_id.
+
+### UI admin
+
+- **`/admin/abonnements`** (nouveau, atteint via le bouton "Gérer les
+  modèles d'abonnements" de `/admin/paiements`) : liste des modèles
+  (actifs + archivés), création (formulaire nom/description/prix/période/
+  durée), modification (avertissement explicite si le prix change —
+  "un nouveau Price sera créé, l'ancien désactivé"), archivage.
+- **Fiche élève** (`components/admin/StudentSubscriptionSection.tsx`) :
+  les 3 blocs précédents (Paiement/abonnement Stripe, Accès au site,
+  Paiement manuel) sont fusionnés en **une seule carte** "Abonnement &
+  Paiement" — résumé compact (statut accès, raison, statut Stripe, formule
+  attribuée, montant, prochaine échéance, dernier paiement, reste à payer
+  manuel) + 3 sous-sections repliables (`<details>`) :
+  - **A. Accès au site** : mode d'accès (automatique/autoriser sans
+    paiement/bloquer), note interne — identique au chantier précédent.
+  - **B. Modèle d'abonnement** : sélecteur de modèle actif + bouton
+    "Attribuer" (écrit `assigned_subscription_template_id`, et par
+    compatibilité descendante recopie `assigned_stripe_plan`/
+    `assigned_stripe_price_id` depuis le modèle choisi), bouton "Créer lien
+    de paiement Stripe" pour ce modèle, portail client/lien Stripe Dashboard
+    si un `billing_customers` existe déjà.
+  - **C. Paiement manuel existant** : contenu de l'ancienne `PaymentSection`
+    réutilisé tel quel (`PaymentSectionContent`, aucune duplication de
+    logique) — inchangé.
+- **`/admin/paiements`** : colonne "Formule · Montant" affiche désormais le
+  nom du modèle attribué (`assignedTemplateName`, résolu par jointure en
+  mémoire dans `getAdminBillingList`) en priorité sur l'ancien
+  `assignedStripePlan` (env-based) ; bouton "Gérer les modèles
+  d'abonnements".
+- **`/profil` élève** (`components/student/SubscriptionSection.tsx`) :
+  formule attribuée affichée via le nom du modèle (repli sur l'ancien
+  libellé .env si aucun modèle n'est assigné), bouton de paiement basé sur
+  les modèles actifs (repli automatique sur les 3 formules .env si aucun
+  modèle n'existe encore en base).
+
+### Ce qui n'a PAS changé (dans ce sous-chantier)
+
+- Le webhook continue de n'écrire que `billing_customers`/`subscriptions`/
+  `stripe_payments`/`billing_events` — jamais `student_profiles` (l'accès se
+  recalcule toujours à la lecture, voir plus haut).
+- Aucune policy RLS existante affaiblie ; le trigger `protect_access_columns`
+  est étendu (`create or replace function`), jamais recréé/dupliqué.
+
 ## Ce qui n'a PAS changé
 
 - Le webhook Stripe (`app/api/stripe/webhook/route.ts`) : aucune
@@ -197,3 +316,41 @@ formule depuis la fiche élève ; cadenas du menu qui se met à jour après
 paiement réel. La logique de calcul (`computeStudentAccess`) étant une
 fonction pure entièrement déterministe par ses deux arguments, elle reste
 néanmoins vérifiable par lecture directe du code sans session Supabase.
+
+### Tests — chantier "supabase-subscription-templates"
+
+`npm run lint`, `npx tsc --noEmit`, `npm run build` : passent tous après
+l'ajout des modèles d'abonnements.
+
+**Vérifié en direct** (accès MCP Supabase + Stripe réels disponibles pour ce
+sous-chantier, contrairement aux précédents) :
+- Migration `subscription_templates` appliquée sur le projet Supabase réel
+  (`apply_migration`), table + colonne `assigned_subscription_template_id`
+  visibles via `list_tables`/`execute_sql`.
+- Policies RLS confirmées via `pg_policies` :
+  `subscription_templates_manage_staff` (`ALL`, `is_coach_or_admin()`) et
+  `subscription_templates_select_active_or_staff` (`SELECT`, `is_active =
+  true OR is_coach_or_admin()`).
+- Trigger `protect_access_columns` confirmé (lecture de `pg_proc.prosrc`) :
+  couvre bien les 6 colonnes existantes **et**
+  `assigned_subscription_template_id` (7ème colonne protégée).
+- `get_advisors` (sécurité) : aucune alerte nouvelle après ces migrations —
+  uniquement les avertissements préexistants déjà présents avant ce
+  chantier (fonctions `SECURITY DEFINER` appelables en RPC, `search_path`
+  mutable sur `set_updated_at`), non liés à `subscription_templates`.
+- 3 modèles seedés avec les vrais `stripe_product_id`/`stripe_price_id` de
+  3 Products/Prices déjà créés manuellement par l'utilisateur dans le
+  compte Stripe réel (mode test) — confirmés via le connecteur Stripe
+  (`GetProducts`/`GetPrices`).
+
+**Non vérifié en direct** (aucune session navigateur authentifiée
+disponible dans cet environnement, malgré l'accès MCP) : création d'un
+modèle depuis `/admin/abonnements` avec création automatique du Product/Price
+Stripe réel ; changement de prix d'un modèle existant (nouveau Price +
+désactivation de l'ancien) ; attribution d'un modèle à un élève depuis la
+fiche élève ; checkout réel avec le `price_id` résolu depuis
+`subscription_templates` ; mise à jour du webhook avec le bon `plan_name`
+résolu via `subscription_templates` plutôt que le mapping .env ;
+déverrouillage/verrouillage de l'accès après paiement réel via un modèle.
+Vérifiable par lecture directe du code (chaque route API et fonction citée
+ci-dessus a été relue ligne à ligne) en l'absence de session réelle.

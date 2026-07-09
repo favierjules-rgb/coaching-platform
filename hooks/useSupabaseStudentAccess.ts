@@ -10,17 +10,17 @@ import type { StudentAccessStatus } from "@/types";
 export interface SupabaseStudentAccessState {
   loading: boolean;
   status: StudentAccessStatus | null;
-  assignedPlan: string | null;
+  assignedTemplateId: string | null;
   accessNote: string;
   refetch: () => Promise<void>;
   save: (input: UpdateStudentAccessInput) => Promise<boolean>;
 }
 
-/** Bloc "Accès au site" de la fiche élève admin (chantier "supabase-stripe-access-control"). */
+/** Bloc "Accès au site" de la fiche élève admin (chantier "supabase-stripe-access-control", étendu par "supabase-subscription-templates"). */
 export function useSupabaseStudentAccess(studentId: string | undefined): SupabaseStudentAccessState {
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<StudentAccessStatus | null>(null);
-  const [assignedPlan, setAssignedPlan] = useState<string | null>(null);
+  const [assignedTemplateId, setAssignedTemplateId] = useState<string | null>(null);
   const [accessNote, setAccessNote] = useState("");
 
   const refetch = useCallback(async () => {
@@ -40,7 +40,7 @@ export function useSupabaseStudentAccess(studentId: string | undefined): Supabas
       getStudentProfile(supabase, studentId),
     ]);
     setStatus(accessStatus);
-    setAssignedPlan(profile?.assignedStripePlan ?? null);
+    setAssignedTemplateId(profile?.assignedSubscriptionTemplateId ?? null);
     setAccessNote(profile?.accessNote ?? "");
     setLoading(false);
   }, [studentId]);
@@ -70,7 +70,7 @@ export function useSupabaseStudentAccess(studentId: string | undefined): Supabas
       ]);
       if (!cancelled) {
         setStatus(accessStatus);
-        setAssignedPlan(profile?.assignedStripePlan ?? null);
+        setAssignedTemplateId(profile?.assignedSubscriptionTemplateId ?? null);
         setAccessNote(profile?.accessNote ?? "");
         setLoading(false);
       }
@@ -93,5 +93,5 @@ export function useSupabaseStudentAccess(studentId: string | undefined): Supabas
     [studentId, refetch],
   );
 
-  return { loading, status, assignedPlan, accessNote, refetch, save };
+  return { loading, status, assignedTemplateId, accessNote, refetch, save };
 }
