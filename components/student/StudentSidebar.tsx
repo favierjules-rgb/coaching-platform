@@ -8,6 +8,7 @@ import {
   Dumbbell,
   FileText,
   LayoutDashboard,
+  TrendingUp,
   User,
   X,
 } from "lucide-react";
@@ -20,6 +21,7 @@ const studentLinks = [
   { href: "/entrainement", label: "Entraînement", icon: Dumbbell },
   { href: "/nutrition", label: "Nutrition", icon: Apple },
   { href: "/rendez-vous", label: "Rendez-vous", icon: CalendarDays },
+  { href: "/progression", label: "Progression", icon: TrendingUp },
   { href: "/documents", label: "Documents", icon: FileText },
   { href: "/profil", label: "Profil", icon: User },
 ];

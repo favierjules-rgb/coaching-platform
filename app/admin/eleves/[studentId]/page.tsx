@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { Activity, AlertTriangle, ArrowLeft, Archive, History, Lock, Pause, Play, Unlock } from "lucide-react";
+import { Activity, AlertTriangle, ArrowLeft, Archive, History, Lock, Pause, Play, TrendingUp, Unlock } from "lucide-react";
 
 import { ActivityFeed } from "@/components/admin/ActivityFeed";
 import { AddCoachNoteModal } from "@/components/admin/AddCoachNoteModal";
@@ -508,6 +508,15 @@ export default function AdminStudentDetailPage() {
           )}
         </div>
         <div className="flex flex-wrap gap-2">
+          {isSupabaseStudent && (
+            <Link
+              href={`/admin/eleves/${student.id}/progression`}
+              className="flex items-center gap-1.5 border border-primary px-4 py-2 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+            >
+              <TrendingUp size={14} />
+              Progression
+            </Link>
+          )}
           <EditStudentModal student={student} onSave={applyStudentUpdate} />
           <AssignContentToStudentModal
             student={student}
