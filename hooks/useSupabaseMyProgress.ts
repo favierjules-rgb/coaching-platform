@@ -22,6 +22,7 @@ import type { ProgressPhoto } from "@/types";
 export interface SupabaseMyProgressState {
   ready: boolean;
   active: boolean;
+  studentId: string | null;
   summary: StudentProgressSummary | null;
   weight: StudentWeightProgress | null;
   workout: StudentWorkoutAnalytics | null;
@@ -43,6 +44,7 @@ export function useSupabaseMyProgress(): SupabaseMyProgressState {
   const [state, setState] = useState<SupabaseMyProgressState>({
     ready: false,
     active: false,
+    studentId: null,
     summary: null,
     weight: null,
     workout: null,
@@ -74,7 +76,7 @@ export function useSupabaseMyProgress(): SupabaseMyProgressState {
         getStudentProgressPhotos(supabase, studentId),
       ]);
       if (!cancelled) {
-        setState({ ready: true, active: true, summary, weight, workout, nutrition, appointments, photos });
+        setState({ ready: true, active: true, studentId, summary, weight, workout, nutrition, appointments, photos });
       }
     }
 

@@ -51,6 +51,8 @@ function devWarn(context: string, error: unknown): void {
 /* ─── 1. Résumé global ─── */
 
 export interface StudentProgressSummary {
+  firstName: string;
+  lastName: string;
   startWeightKg: number | null;
   currentWeightKg: number | null;
   targetWeightKg: number | null;
@@ -105,6 +107,8 @@ export async function getStudentProgressSummary(
     .sort((a, b) => a.startAt.localeCompare(b.startAt))[0];
 
   return {
+    firstName: student?.firstName ?? "",
+    lastName: student?.lastName ?? "",
     startWeightKg,
     currentWeightKg,
     targetWeightKg,

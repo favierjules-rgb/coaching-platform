@@ -6,6 +6,7 @@ import {
   Activity,
   Calendar,
   CalendarX,
+  Camera,
   CheckCircle2,
   Dumbbell,
   FileText,
@@ -30,6 +31,7 @@ const EVENT_ICONS: Record<ActivityEventType, typeof Activity> = {
   program_assigned: Dumbbell,
   nutrition_assigned: Utensils,
   coach_note_added: MessageSquare,
+  progress_photo_uploaded: Camera,
 };
 
 function relativeTime(dateIso: string): string {
