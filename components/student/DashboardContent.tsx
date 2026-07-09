@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Bell, CalendarDays, Dumbbell, Flame, Scale, Target, TrendingUp } from "lucide-react";
 
+import { PaymentStatusBanner } from "@/components/shared/PaymentStatusBanner";
 import { StatCard } from "@/components/student/StatCard";
 import { WeightChart } from "@/components/student/WeightChart";
 import { useStudentProfile, type StudentProfileState } from "@/hooks/useStudentProfile";
@@ -106,6 +107,8 @@ export function DashboardContent({
 
   return (
     <div>
+      <PaymentStatusBanner />
+
       <div className="mb-8">
         <h1 className="font-heading text-3xl font-extrabold uppercase text-foreground md:text-4xl">
           Bonjour, {profile.firstName}

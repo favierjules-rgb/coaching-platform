@@ -7,7 +7,7 @@ Projet [Next.js](https://nextjs.org) (App Router) + TypeScript + Tailwind CSS v4
 ## État actuel
 
 Site public + espace élève + espace admin fonctionnels, avec toutes les **données** encore en **mock/localStorage** (aucune donnée métier ne quitte le navigateur). L'**authentification** (Supabase Auth, rôles admin/coach/student, protection des routes) est en revanche réellement branchée — voir [Authentification](#authentification) ci-dessous — mais reste elle aussi optionnelle : sans configuration Supabase, l'application tourne en mode mock (accès libre, comme avant).
-Pas encore développés : Stripe, migration effective des données métier (programmes, nutrition, documents, photos, paiements, retours) vers Supabase.
+Paiements/abonnements Stripe branchés (Checkout + Customer Portal, voir [docs/supabase-stripe-payments-subscriptions-model.md](./docs/supabase-stripe-payments-subscriptions-model.md)) — configuration Stripe (clés, webhook, produits/prix) à faire manuellement, voir ce document.
 
 ## Démarrer en local
 
@@ -52,10 +52,12 @@ NEXT_PUBLIC_SUPABASE_URL=https://xxxxxxxx.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
 
 # Client serveur "admin" (service role) — lib/supabase/admin.ts uniquement,
-# jamais utilisé côté navigateur. Optionnelle tant que l'admin Supabase
-# n'est pas utilisé.
+# jamais utilisé côté navigateur. Requise pour le webhook Stripe
+# (app/api/stripe/webhook) — voir docs/supabase-stripe-payments-subscriptions-model.md.
 SUPABASE_SERVICE_ROLE_KEY=eyJ...
 ```
+
+Voir [`.env.example`](./.env.example) pour la liste complète des variables (Supabase + Stripe).
 
 Sans ces variables, l'application continue de fonctionner normalement en mock/localStorage (un warning s'affiche dans la console en développement, jamais en production, jamais d'erreur bloquante — voir `lib/supabase/env.ts`).
 
