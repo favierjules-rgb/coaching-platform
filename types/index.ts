@@ -1310,6 +1310,13 @@ export interface SupabaseStudentProfile {
   snackingNotes: string;
   workScheduleNotes: string;
   nutritionNotes: string;
+  /** Accès conditionnel au site (chantier "supabase-stripe-access-control") — voir lib/supabase/student-access.ts. */
+  billingAccessMode: BillingAccessMode;
+  assignedStripePlan: string | null;
+  assignedStripePriceId: string | null;
+  accessNote: string;
+  accessUpdatedAt: string | null;
+  accessUpdatedBy: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1960,4 +1967,33 @@ export interface StudentBillingSummary {
   subscription: Subscription | null;
   lastPayment: StripePayment | null;
   status: StudentBillingStatus;
+}
+
+/* ─── Accès conditionnel au site (chantier "supabase-stripe-access-control") ───
+ * Colonnes ajoutées sur student_profiles — voir supabase/schema.sql et
+ * lib/supabase/student-access.ts. `subscription_required` (défaut) : accès
+ * dérivé de subscriptions.status. `manual_allowed`/`manual_blocked` :
+ * dérogation posée par le coach, prioritaire sur le statut Stripe.
+ */
+export type BillingAccessMode = "subscription_required" | "manual_allowed" | "manual_blocked";
+
+/** Raison précise de l'autorisation/refus d'accès — sert à afficher un message explicite (jamais juste "bloqué"). */
+export type StudentAccessReason =
+  | "manual_allowed"
+  | "manual_blocked"
+  | "subscription_active"
+  | "no_subscription"
+  | "subscription_incomplete"
+  | "subscription_incomplete_expired"
+  | "subscription_past_due"
+  | "subscription_canceled"
+  | "subscription_unpaid"
+  | "subscription_paused";
+
+export interface StudentAccessStatus {
+  allowed: boolean;
+  reason: StudentAccessReason;
+  accessMode: BillingAccessMode;
+  /** Statut Stripe brut ayant servi au calcul (null si aucun abonnement) — jamais recalculé/stocké ailleurs, toujours dérivé à la volée. */
+  subscriptionStatus: string | null;
 }

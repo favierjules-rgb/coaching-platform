@@ -19,6 +19,7 @@ const PRIVATE_PREFIXES = [
   "/connexion",
   "/inscription",
   "/acces-refuse",
+  "/acces-limite",
 ];
 
 export function SiteChrome({ children }: { children: ReactNode }) {

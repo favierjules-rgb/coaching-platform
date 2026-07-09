@@ -4,15 +4,19 @@ import { useState } from "react";
 import { CreditCard, ExternalLink } from "lucide-react";
 
 import { FilterButtons, SearchInput } from "@/components/admin/SearchAndFilters";
+import { StatusBadge } from "@/components/admin/StatusBadge";
 import { BillingStatusBadge } from "@/components/shared/BillingStatusBadge";
 import { CreateCheckoutLinkModal } from "@/components/shared/CreateCheckoutLinkModal";
 import { useSupabaseAdminBilling } from "@/hooks/useSupabaseAdminBilling";
 import { formatDate, matchesTextSearch } from "@/lib/admin";
+import { getPlanLabel } from "@/lib/stripe/plans";
 import { formatAmountCents } from "@/lib/stripe/status";
+import { accessReasonLabels } from "@/lib/supabase/student-access";
 import type { AdminBillingListItem } from "@/lib/supabase/billing";
 import type { StudentBillingStatus } from "@/types";
 
 type StatusFilter = "tous" | "actif" | "en_retard" | "annule" | "sans_abonnement";
+type AccessFilter = "tous" | "autorise" | "bloque";
 
 const statusFilters: { value: StatusFilter; label: string }[] = [
   { value: "tous", label: "Tous" },
@@ -22,12 +26,23 @@ const statusFilters: { value: StatusFilter; label: string }[] = [
   { value: "sans_abonnement", label: "Sans abonnement" },
 ];
 
+const accessFilters: { value: AccessFilter; label: string }[] = [
+  { value: "tous", label: "Tous" },
+  { value: "autorise", label: "Accès autorisé" },
+  { value: "bloque", label: "Accès bloqué" },
+];
+
 function matchesStatusFilter(status: StudentBillingStatus, filter: StatusFilter): boolean {
   if (filter === "tous") return true;
   if (filter === "actif") return status === "actif";
   if (filter === "en_retard") return status === "paiement_echoue";
   if (filter === "annule") return status === "annule" || status === "expire";
   return status === "sans_abonnement";
+}
+
+function matchesAccessFilter(allowed: boolean, filter: AccessFilter): boolean {
+  if (filter === "tous") return true;
+  return filter === "autorise" ? allowed : !allowed;
 }
 
 async function createCheckoutLinkFor(studentId: string, planKey: string): Promise<{ url: string | null; error: string | null }> {
@@ -66,7 +81,7 @@ function BillingRow({ item }: { item: AdminBillingListItem }) {
 
   return (
     <div className="flex flex-col gap-4 border border-border bg-card p-6 lg:flex-row lg:items-center lg:justify-between">
-      <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-6">
         <div>
           <span className="block text-xs uppercase tracking-wide text-muted-foreground">Élève</span>
           <span className="font-heading text-lg font-bold text-foreground">
@@ -75,14 +90,23 @@ function BillingRow({ item }: { item: AdminBillingListItem }) {
           <span className="block text-xs text-muted-foreground">{item.studentEmail}</span>
         </div>
         <div>
-          <span className="block text-xs uppercase tracking-wide text-muted-foreground">Statut</span>
+          <span className="block text-xs uppercase tracking-wide text-muted-foreground">Statut abonnement</span>
           <span className="mt-1 block">
             <BillingStatusBadge status={item.status} />
           </span>
         </div>
         <div>
+          <span className="block text-xs uppercase tracking-wide text-muted-foreground">Accès au site</span>
+          <span className="mt-1 block">
+            <StatusBadge label={item.access.allowed ? "Autorisé" : "Bloqué"} tone={item.access.allowed ? "green" : "red"} />
+          </span>
+          <span className="mt-1 block text-xs text-muted-foreground">{accessReasonLabels[item.access.reason]}</span>
+        </div>
+        <div>
           <span className="block text-xs uppercase tracking-wide text-muted-foreground">Formule · Montant</span>
-          <span className="block text-sm text-foreground">{item.subscription?.planName || "—"}</span>
+          <span className="block text-sm text-foreground">
+            {item.subscription?.planName || (item.assignedStripePlan ? `${getPlanLabel(item.assignedStripePlan)} (attribuée)` : "—")}
+          </span>
           <span className="block text-sm text-muted-foreground">
             {item.subscription ? formatAmountCents(item.subscription.amountCents, item.subscription.currency) : "—"}
           </span>
@@ -138,15 +162,18 @@ export default function AdminBillingPage() {
   const billing = useSupabaseAdminBilling();
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("tous");
+  const [accessFilter, setAccessFilter] = useState<AccessFilter>("tous");
 
   const filtered = billing.items.filter(
     (item) =>
       matchesTextSearch([item.studentFirstName, item.studentLastName, item.studentEmail], query) &&
-      matchesStatusFilter(item.status, statusFilter),
+      matchesStatusFilter(item.status, statusFilter) &&
+      matchesAccessFilter(item.access.allowed, accessFilter),
   );
 
   const activeCount = billing.items.filter((item) => item.status === "actif").length;
   const lateCount = billing.items.filter((item) => item.status === "paiement_echoue").length;
+  const blockedCount = billing.items.filter((item) => !item.access.allowed).length;
   const monthlyRevenueCents = billing.items
     .filter((item) => item.status === "actif")
     .reduce((total, item) => total + (item.subscription?.amountCents ?? 0), 0);
@@ -160,7 +187,7 @@ export default function AdminBillingPage() {
         </p>
       </div>
 
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="border border-border bg-card p-4">
           <span className="block text-xs uppercase tracking-wide text-muted-foreground">Abonnements actifs</span>
           <span className="font-heading text-2xl font-bold text-foreground">{activeCount}</span>
@@ -168,6 +195,10 @@ export default function AdminBillingPage() {
         <div className="border border-border bg-card p-4">
           <span className="block text-xs uppercase tracking-wide text-muted-foreground">Paiements en retard</span>
           <span className="font-heading text-2xl font-bold text-foreground">{lateCount}</span>
+        </div>
+        <div className="border border-border bg-card p-4">
+          <span className="block text-xs uppercase tracking-wide text-muted-foreground">Accès bloqué</span>
+          <span className="font-heading text-2xl font-bold text-foreground">{blockedCount}</span>
         </div>
         <div className="border border-border bg-card p-4">
           <span className="block text-xs uppercase tracking-wide text-muted-foreground">Revenu mensuel estimé</span>
@@ -178,6 +209,7 @@ export default function AdminBillingPage() {
       <div className="mb-6 flex flex-col gap-4">
         <SearchInput value={query} onChange={setQuery} placeholder="Rechercher par nom ou email..." />
         <FilterButtons options={statusFilters} active={statusFilter} onChange={setStatusFilter} />
+        <FilterButtons options={accessFilters} active={accessFilter} onChange={setAccessFilter} />
       </div>
 
       {billing.loading ? (

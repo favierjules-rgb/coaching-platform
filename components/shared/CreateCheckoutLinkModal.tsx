@@ -10,16 +10,23 @@ interface CreateCheckoutLinkModalProps {
   /** "student" : redirige automatiquement vers Stripe Checkout après création. "admin" : affiche un bouton "Ouvrir le lien" pour ne pas quitter la page admin. */
   mode: "student" | "admin";
   onCreateCheckout: (planKey: string) => Promise<{ url: string | null; error: string | null }>;
+  /** Formule pré-sélectionnée à l'ouverture (ex : formule attribuée à l'élève) — reste modifiable dans le sélecteur. */
+  defaultPlanKey?: string | null;
 }
 
 /** Sélection de formule + création de session Stripe Checkout, partagée élève ("Activer mon abonnement") et admin ("Créer lien de paiement"). */
-export function CreateCheckoutLinkModal({ triggerLabel, mode, onCreateCheckout }: CreateCheckoutLinkModalProps) {
+export function CreateCheckoutLinkModal({ triggerLabel, mode, onCreateCheckout, defaultPlanKey }: CreateCheckoutLinkModalProps) {
   const [open, setOpen] = useState(false);
-  const [planKey, setPlanKey] = useState<PlanKey | "">(PLAN_DEFINITIONS[0]?.key ?? "");
+  const [planKey, setPlanKey] = useState<PlanKey | "">((defaultPlanKey as PlanKey | null) ?? PLAN_DEFINITIONS[0]?.key ?? "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
   const selectId = useId();
+
+  function openModal() {
+    setPlanKey((defaultPlanKey as PlanKey | null) ?? PLAN_DEFINITIONS[0]?.key ?? "");
+    setOpen(true);
+  }
 
   function close() {
     setOpen(false);
@@ -48,7 +55,7 @@ export function CreateCheckoutLinkModal({ triggerLabel, mode, onCreateCheckout }
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={openModal}
         className="flex items-center gap-1.5 border border-primary px-4 py-2 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
       >
         <CreditCard size={14} aria-hidden="true" />

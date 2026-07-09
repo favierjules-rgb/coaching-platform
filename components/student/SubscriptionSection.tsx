@@ -2,15 +2,20 @@
 
 import { CreditCard } from "lucide-react";
 
+import { StatusBadge } from "@/components/admin/StatusBadge";
 import { BillingStatusBadge } from "@/components/shared/BillingStatusBadge";
 import { CreateCheckoutLinkModal } from "@/components/shared/CreateCheckoutLinkModal";
+import { useSupabaseMyAccess } from "@/hooks/useSupabaseMyAccess";
 import { useSupabaseMyBilling } from "@/hooks/useSupabaseMyBilling";
 import { formatDate } from "@/lib/admin";
+import { getPlanLabel } from "@/lib/stripe/plans";
 import { formatAmountCents } from "@/lib/stripe/status";
+import { accessReasonLabels } from "@/lib/supabase/student-access";
 
-/** Section "Mon abonnement" de /profil (chantier "supabase-stripe-payments-subscriptions"). */
+/** Section "Mon abonnement" de /profil (chantier "supabase-stripe-payments-subscriptions" + "supabase-stripe-access-control"). */
 export function SubscriptionSection() {
   const billing = useSupabaseMyBilling();
+  const access = useSupabaseMyAccess();
 
   if (!billing.ready) {
     return <p className="text-sm text-muted-foreground">Chargement…</p>;
@@ -36,7 +41,17 @@ export function SubscriptionSection() {
       <div className="flex flex-wrap items-center gap-3">
         <BillingStatusBadge status={status} />
         {subscription?.planName && <span className="text-sm font-medium text-foreground">{subscription.planName}</span>}
+        {!subscription?.planName && access.assignedPlan && (
+          <span className="text-sm text-muted-foreground">Formule attribuée : {getPlanLabel(access.assignedPlan)}</span>
+        )}
       </div>
+
+      {access.ready && access.status && (
+        <div className="flex flex-wrap items-center gap-3 border border-border bg-background p-4">
+          <StatusBadge label={access.status.allowed ? "Accès au site autorisé" : "Accès au site bloqué"} tone={access.status.allowed ? "green" : "red"} />
+          <span className="text-xs text-muted-foreground">{accessReasonLabels[access.status.reason]}</span>
+        </div>
+      )}
 
       {subscription ? (
         <dl className="grid grid-cols-2 gap-4 text-sm">

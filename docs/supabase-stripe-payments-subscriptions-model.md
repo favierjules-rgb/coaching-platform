@@ -4,6 +4,10 @@ Chantier "supabase-stripe-payments-subscriptions" : Stripe Checkout (mode
 subscription) + Stripe Customer Portal, statut d'abonnement/paiement visible
 admin et élève, source de vérité = webhook Stripe.
 
+> Voir aussi [`docs/supabase-stripe-access-control-model.md`](./supabase-stripe-access-control-model.md)
+> (chantier suivant) : blocage de l'accès élève aux pages payantes selon ce
+> même statut d'abonnement, avec dérogation manuelle possible.
+
 ## Audit — 4 tables nouvelles, aucune réutilisée par erreur
 
 **Repo** : aucune trace de Stripe/checkout/billing/subscription/webhook

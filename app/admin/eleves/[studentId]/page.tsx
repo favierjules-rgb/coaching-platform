@@ -14,6 +14,7 @@ import { EditStudentModal } from "@/components/admin/EditStudentModal";
 import { NutritionWeekSummaryCard } from "@/components/admin/NutritionWeekSummaryCard";
 import { StatusBadge, feedbackStatusTone, studentStatusTone } from "@/components/admin/StatusBadge";
 import { PaymentSection } from "@/components/admin/PaymentSection";
+import { StudentAccessSection } from "@/components/admin/StudentAccessSection";
 import { StudentBillingSection } from "@/components/admin/StudentBillingSection";
 import { MeasurementsSection } from "@/components/student/MeasurementsSection";
 import { ProgressPhotoGallerySection } from "@/components/student/ProgressPhotoGallerySection";
@@ -630,6 +631,12 @@ export default function AdminStudentDetailPage() {
       {isSupabaseStudent && (
         <div className="mb-6">
           <StudentBillingSection studentId={student.id} />
+        </div>
+      )}
+
+      {isSupabaseStudent && (
+        <div className="mb-6">
+          <StudentAccessSection studentId={student.id} />
         </div>
       )}
 

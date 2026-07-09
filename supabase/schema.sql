@@ -1801,6 +1801,57 @@ create policy "stripe_payments_select_own_student" on public.stripe_payments
 -- billing_events : aucune policy élève — journal interne, jamais exposé.
 
 -- ============================================================================
+-- Migration additive — chantier "supabase-stripe-access-control" : accès
+-- conditionnel aux pages élève (entraînement, nutrition, documents,
+-- progression) selon l'abonnement Stripe, avec dérogation manuelle
+-- possible par le coach. Ajoute 6 colonnes sur `student_profiles`
+-- (proposition de l'utilisateur — table déjà porteuse d'autres réglages
+-- élève, aucune nouvelle table nécessaire). `student_profiles` a déjà une
+-- policy `student_profiles_manage_self_or_staff` en `for all` qui laisse
+-- l'élève modifier SA PROPRE ligne (utilisée pour l'auto-édition du profil/
+-- préférences) — Postgres RLS étant limité à la ligne entière (pas de
+-- restriction par colonne), un trigger dédié protège spécifiquement ces 6
+-- colonnes : toute tentative de modification par un appelant qui n'est pas
+-- coach/admin est silencieusement annulée (revert à l'ancienne valeur),
+-- sans affecter le reste de la ligne (ses préférences restent modifiables
+-- normalement). C'est la seule modification de sécurité de ce chantier —
+-- aucune policy existante n'est supprimée ni affaiblie.
+-- ============================================================================
+alter table public.student_profiles add column if not exists billing_access_mode text not null default 'subscription_required';
+alter table public.student_profiles drop constraint if exists student_profiles_billing_access_mode_check;
+alter table public.student_profiles add constraint student_profiles_billing_access_mode_check check (billing_access_mode in ('subscription_required', 'manual_allowed', 'manual_blocked'));
+alter table public.student_profiles add column if not exists assigned_stripe_plan text;
+alter table public.student_profiles add column if not exists assigned_stripe_price_id text;
+alter table public.student_profiles add column if not exists access_note text not null default '';
+alter table public.student_profiles add column if not exists access_updated_at timestamptz;
+alter table public.student_profiles add column if not exists access_updated_by uuid references public.coaches (id) on delete set null;
+
+create or replace function public.protect_student_profiles_access_columns()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_coach_or_admin() then
+    new.billing_access_mode := old.billing_access_mode;
+    new.assigned_stripe_plan := old.assigned_stripe_plan;
+    new.assigned_stripe_price_id := old.assigned_stripe_price_id;
+    new.access_note := old.access_note;
+    new.access_updated_at := old.access_updated_at;
+    new.access_updated_by := old.access_updated_by;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists protect_access_columns on public.student_profiles;
+create trigger protect_access_columns
+  before update on public.student_profiles
+  for each row
+  execute function public.protect_student_profiles_access_columns();
+
+-- ============================================================================
 -- Fin du schéma initial. Prochaine étape (pas dans ce fichier) : régénérer
 -- types/supabase.ts avec `supabase gen types typescript`, puis brancher
 -- progressivement chaque page mock sur ces tables (voir README.md).

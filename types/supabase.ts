@@ -196,6 +196,12 @@ export interface Database {
           snacking_notes: string | null;
           work_schedule_notes: string | null;
           nutrition_notes: string | null;
+          billing_access_mode: "subscription_required" | "manual_allowed" | "manual_blocked";
+          assigned_stripe_plan: string | null;
+          assigned_stripe_price_id: string | null;
+          access_note: string;
+          access_updated_at: string | null;
+          access_updated_by: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -256,6 +262,12 @@ export interface Database {
           snacking_notes?: string | null;
           work_schedule_notes?: string | null;
           nutrition_notes?: string | null;
+          billing_access_mode?: "subscription_required" | "manual_allowed" | "manual_blocked";
+          assigned_stripe_plan?: string | null;
+          assigned_stripe_price_id?: string | null;
+          access_note?: string;
+          access_updated_at?: string | null;
+          access_updated_by?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -316,6 +328,12 @@ export interface Database {
           snacking_notes?: string | null;
           work_schedule_notes?: string | null;
           nutrition_notes?: string | null;
+          billing_access_mode?: "subscription_required" | "manual_allowed" | "manual_blocked";
+          assigned_stripe_plan?: string | null;
+          assigned_stripe_price_id?: string | null;
+          access_note?: string;
+          access_updated_at?: string | null;
+          access_updated_by?: string | null;
           created_at?: string;
           updated_at?: string;
         };

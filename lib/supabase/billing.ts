@@ -1,8 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { computeStudentAccess } from "@/lib/stripe/access-status";
 import { toStudentBillingStatus } from "@/lib/stripe/status";
 import { getStudents } from "@/lib/supabase/students";
-import type { BillingCustomer, StripePayment, Subscription, StudentBillingSummary } from "@/types";
+import type { BillingAccessMode, BillingCustomer, StripePayment, StudentAccessStatus, Subscription, StudentBillingSummary } from "@/types";
 import type { Database } from "@/types/supabase";
 
 /**
@@ -129,25 +130,36 @@ export interface AdminBillingListItem extends StudentBillingSummary {
   studentFirstName: string;
   studentLastName: string;
   studentEmail: string;
+  /** Accès conditionnel au site (chantier "supabase-stripe-access-control"), calculé à partir de billing_access_mode + du statut Stripe. */
+  access: StudentAccessStatus;
+  assignedStripePlan: string | null;
 }
 
 /**
- * Vue admin complète (`/admin/billing`) : un élève par ligne, avec son
- * résumé billing. Composé côté application (3 lectures + jointure en
- * mémoire) plutôt qu'une vue SQL — volume attendu faible (une agence de
- * coaching, pas des milliers d'élèves), cohérent avec le reste du repo.
+ * Vue admin complète (`/admin/paiements`) : un élève par ligne, avec son
+ * résumé billing + son accès conditionnel. Composé côté application (4
+ * lectures + jointure en mémoire) plutôt qu'une vue SQL — volume attendu
+ * faible (une agence de coaching, pas des milliers d'élèves), cohérent
+ * avec le reste du repo.
  */
 export async function getAdminBillingList(supabase: TypedSupabaseClient): Promise<AdminBillingListItem[]> {
-  const [students, { data: customerRows, error: customerError }, { data: subscriptionRows, error: subscriptionError }, { data: paymentRows, error: paymentError }] =
-    await Promise.all([
-      getStudents(supabase),
-      supabase.from("billing_customers").select("*"),
-      supabase.from("subscriptions").select("*").order("updated_at", { ascending: false }),
-      supabase.from("stripe_payments").select("*").order("created_at", { ascending: false }),
-    ]);
+  const [
+    students,
+    { data: customerRows, error: customerError },
+    { data: subscriptionRows, error: subscriptionError },
+    { data: paymentRows, error: paymentError },
+    { data: profileRows, error: profileError },
+  ] = await Promise.all([
+    getStudents(supabase),
+    supabase.from("billing_customers").select("*"),
+    supabase.from("subscriptions").select("*").order("updated_at", { ascending: false }),
+    supabase.from("stripe_payments").select("*").order("created_at", { ascending: false }),
+    supabase.from("student_profiles").select("student_id, billing_access_mode, assigned_stripe_plan"),
+  ]);
   devWarn("getAdminBillingList (billing_customers)", customerError);
   devWarn("getAdminBillingList (subscriptions)", subscriptionError);
   devWarn("getAdminBillingList (stripe_payments)", paymentError);
+  devWarn("getAdminBillingList (student_profiles)", profileError);
 
   const customersByStudent = new Map((customerRows ?? []).map((row) => [row.student_id, mapBillingCustomerRow(row)]));
   const subscriptionByStudent = new Map<string, Subscription>();
@@ -162,9 +174,14 @@ export async function getAdminBillingList(supabase: TypedSupabaseClient): Promis
       lastPaymentByStudent.set(row.student_id, mapStripePaymentRow(row));
     }
   }
+  const accessModeByStudent = new Map<string, BillingAccessMode>(
+    (profileRows ?? []).map((row) => [row.student_id, row.billing_access_mode as BillingAccessMode]),
+  );
+  const assignedPlanByStudent = new Map<string, string | null>((profileRows ?? []).map((row) => [row.student_id, row.assigned_stripe_plan]));
 
   return students.map((student) => {
     const subscription = subscriptionByStudent.get(student.id) ?? null;
+    const accessMode = accessModeByStudent.get(student.id) ?? "subscription_required";
     return {
       studentId: student.id,
       studentFirstName: student.firstName,
@@ -174,6 +191,8 @@ export async function getAdminBillingList(supabase: TypedSupabaseClient): Promis
       subscription,
       lastPayment: lastPaymentByStudent.get(student.id) ?? null,
       status: subscription ? toStudentBillingStatus(subscription.status) : "sans_abonnement",
+      access: computeStudentAccess(accessMode, subscription?.status ?? null),
+      assignedStripePlan: assignedPlanByStudent.get(student.id) ?? null,
     };
   });
 }
