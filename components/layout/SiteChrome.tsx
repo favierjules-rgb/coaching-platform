@@ -13,6 +13,7 @@ const PRIVATE_PREFIXES = [
   "/documents",
   "/profil",
   "/rendez-vous",
+  "/progression",
   "/admin",
   "/connexion",
   "/inscription",
