@@ -1,19 +1,25 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
 import { ActivityFeed } from "@/components/admin/ActivityFeed";
+import { BeforeAfterComparison } from "@/components/shared/BeforeAfterComparison";
+import { GenerateTransformationPdfButton } from "@/components/shared/GenerateTransformationPdfButton";
 import { ProgressAppointmentsSection } from "@/components/shared/ProgressAppointmentsSection";
 import { ProgressMeasurementsSection } from "@/components/shared/ProgressMeasurementsSection";
 import { ProgressNutritionSection } from "@/components/shared/ProgressNutritionSection";
+import { ProgressPhotosSection } from "@/components/shared/ProgressPhotosSection";
 import { ProgressSummaryCards } from "@/components/shared/ProgressSummaryCards";
 import { ProgressWeightSection } from "@/components/shared/ProgressWeightSection";
 import { ProgressWorkoutSection } from "@/components/shared/ProgressWorkoutSection";
+import { useProgressPhotosGallery } from "@/hooks/useProgressPhotosGallery";
 import { useSupabaseStudentDetail } from "@/hooks/useSupabaseStudentDetail";
 import { useSupabaseStudentProgress } from "@/hooks/useSupabaseStudentProgress";
 import { fullName } from "@/lib/admin";
+import { buildTransformationRecapInput } from "@/lib/pdf/transformation-recap";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -28,6 +34,9 @@ export default function AdminStudentProgressionPage() {
   const params = useParams<{ studentId: string }>();
   const detail = useSupabaseStudentDetail(params.studentId);
   const progress = useSupabaseStudentProgress(params.studentId);
+  const gallery = useProgressPhotosGallery(params.studentId, "coach");
+  const [coachComment, setCoachComment] = useState("");
+  const [nextObjective, setNextObjective] = useState("");
 
   if (detail.loading || progress.loading) {
     return <p className="text-sm text-muted-foreground">Chargement…</p>;
@@ -51,6 +60,34 @@ export default function AdminStudentProgressionPage() {
   }
 
   const { summary, weight, workout, nutrition, appointments, activity } = progress;
+  const activePhotos = gallery.photos.filter((p) => (p.status ?? "active") === "active");
+  const latestPhoto = activePhotos.slice().sort((a, b) => b.date.localeCompare(a.date))[0] ?? null;
+  const beforePhoto = activePhotos.find((p) => p.isBeforeCandidate) ?? null;
+  const afterPhoto = activePhotos.find((p) => p.isAfterCandidate) ?? null;
+
+  const pdfInput =
+    summary && beforePhoto && afterPhoto
+      ? buildTransformationRecapInput(
+          {
+            firstName: summary.firstName,
+            lastName: summary.lastName,
+            mainGoal: summary.goal,
+            startWeightKg: summary.startWeightKg,
+            currentWeightKg: summary.currentWeightKg,
+            sessionsCompleted: summary.sessionsCompleted,
+            nutrition: nutrition
+              ? {
+                  hasActivePlan: nutrition.hasActivePlan,
+                  averageCalories: nutrition.averageCalories,
+                  targetCaloriesPerDay: nutrition.targetCaloriesPerDay,
+                }
+              : null,
+          },
+          { url: beforePhoto.imageUrl ?? "", date: beforePhoto.date, weightKg: beforePhoto.weightKg },
+          { url: afterPhoto.imageUrl ?? "", date: afterPhoto.date, weightKg: afterPhoto.weightKg },
+          { coachComment: coachComment.trim() || null, nextObjective: nextObjective.trim() || null },
+        )
+      : null;
 
   return (
     <div>
@@ -89,6 +126,58 @@ export default function AdminStudentProgressionPage() {
 
       <Section title="Activité récente">
         <ActivityFeed events={activity} emptyLabel="Aucune activité récente pour cet élève." />
+      </Section>
+
+      <Section title="Photos de progression">
+        {!gallery.loading && (
+          <p className="mb-4 text-xs text-muted-foreground">
+            {activePhotos.length} photo{activePhotos.length > 1 ? "s" : ""}
+            {latestPhoto ? ` · dernière photo le ${new Date(latestPhoto.date).toLocaleDateString("fr-FR")}` : ""}
+          </p>
+        )}
+        <ProgressPhotosSection gallery={gallery} defaultWeightKg={detail.student.currentWeightKg ?? null} />
+      </Section>
+
+      <Section title="Comparaison avant / après — export PDF">
+        {beforePhoto && afterPhoto ? (
+          <div className="flex flex-col gap-5">
+            <BeforeAfterComparison before={beforePhoto} after={afterPhoto} coachComment={coachComment.trim() || null} />
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label htmlFor="coach-comment" className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                  Commentaire du coach (optionnel, inclus dans le PDF)
+                </label>
+                <textarea
+                  id="coach-comment"
+                  value={coachComment}
+                  onChange={(event) => setCoachComment(event.target.value)}
+                  rows={3}
+                  className="w-full border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none"
+                  placeholder="Ex : très belle progression, continue comme ça sur les prochaines semaines."
+                />
+              </div>
+              <div>
+                <label htmlFor="next-objective" className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                  Prochain objectif (optionnel, inclus dans le PDF)
+                </label>
+                <textarea
+                  id="next-objective"
+                  value={nextObjective}
+                  onChange={(event) => setNextObjective(event.target.value)}
+                  rows={3}
+                  className="w-full border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none"
+                  placeholder="Ex : viser -2 kg d'ici la prochaine évaluation."
+                />
+              </div>
+            </div>
+            <GenerateTransformationPdfButton input={pdfInput} fileName={`transformation-${fullName(detail.student)}.pdf`} />
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Sélectionne une photo « avant » et une photo « après » dans la galerie ci-dessus pour générer la comparaison et le PDF de
+            transformation.
+          </p>
+        )}
       </Section>
     </div>
   );

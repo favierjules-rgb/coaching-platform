@@ -511,10 +511,26 @@ export interface StudentDocumentAccess {
 export type ProgressPhotoType = "avant" | "actuelle" | "objectif" | "mensuelle";
 
 /**
+ * Angle de prise de vue (chantier "supabase-progress-photos-before-after-export").
+ * Distinct de ProgressPhotoType ci-dessus, qui reste le *rôle* de la photo
+ * (avant/actuelle/objectif/mensuelle) — les deux colonnes coexistent, voir
+ * docs/supabase-progress-photos-before-after-export-model.md.
+ */
+export type ProgressPhotoAngle = "face" | "profil" | "dos" | "autre";
+
+export type ProgressPhotoStatus = "active" | "archived";
+
+/**
  * Photo de progression. `imageUrl` est une URL objet locale
  * (URL.createObjectURL) tant qu'aucun backend n'est connecté ; `storagePath`
  * est préparé pour recevoir le chemin retourné par Supabase Storage une fois
  * l'upload réel branché (photoId = id).
+ *
+ * Les champs ci-dessous (photoType → updatedAt) sont optionnels : ajoutés
+ * par le chantier "supabase-progress-photos-before-after-export" pour le
+ * vrai upload Storage + comparaison avant/après, sans casser les usages
+ * existants (mock data/admin.ts, data/student.ts, AddProgressPhotoModal...)
+ * qui ne les renseignent pas.
  */
 export interface ProgressPhoto {
   id: string;
@@ -526,6 +542,16 @@ export interface ProgressPhoto {
   imageUrl: string | null;
   storagePath: string | null;
   pending: boolean;
+  photoType?: ProgressPhotoAngle;
+  uploadedBy?: string | null;
+  fileName?: string | null;
+  fileSizeBytes?: number | null;
+  fileMimeType?: string | null;
+  isBeforeCandidate?: boolean;
+  isAfterCandidate?: boolean;
+  status?: ProgressPhotoStatus;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 /**
@@ -1398,6 +1424,14 @@ export interface SupabaseProgressPhoto {
   imageUrl: string | null;
   storagePath: string | null;
   pending: boolean;
+  photoType: ProgressPhotoAngle;
+  uploadedBy: string | null;
+  fileName: string | null;
+  fileSizeBytes: number | null;
+  fileMimeType: string | null;
+  isBeforeCandidate: boolean;
+  isAfterCandidate: boolean;
+  status: ProgressPhotoStatus;
   createdAt: string;
   updatedAt: string;
 }
@@ -1824,7 +1858,8 @@ export type ActivityEventType =
   | "document_viewed"
   | "program_assigned"
   | "nutrition_assigned"
-  | "coach_note_added";
+  | "coach_note_added"
+  | "progress_photo_uploaded";
 
 export interface ActivityEvent {
   id: string;

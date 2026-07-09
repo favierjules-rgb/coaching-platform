@@ -2,13 +2,17 @@
 
 import { TrendingUp } from "lucide-react";
 
+import { BeforeAfterComparison } from "@/components/shared/BeforeAfterComparison";
+import { GenerateTransformationPdfButton } from "@/components/shared/GenerateTransformationPdfButton";
 import { ProgressAppointmentsSection } from "@/components/shared/ProgressAppointmentsSection";
 import { ProgressNutritionSection } from "@/components/shared/ProgressNutritionSection";
+import { ProgressPhotosSection } from "@/components/shared/ProgressPhotosSection";
 import { ProgressSummaryCards } from "@/components/shared/ProgressSummaryCards";
 import { ProgressWeightSection } from "@/components/shared/ProgressWeightSection";
 import { ProgressWorkoutSection } from "@/components/shared/ProgressWorkoutSection";
+import { useProgressPhotosGallery } from "@/hooks/useProgressPhotosGallery";
 import { useSupabaseMyProgress } from "@/hooks/useSupabaseMyProgress";
-import { formatDate } from "@/lib/admin";
+import { buildTransformationRecapInput } from "@/lib/pdf/transformation-recap";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -21,6 +25,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 export default function StudentProgressionPage() {
   const progress = useSupabaseMyProgress();
+  const gallery = useProgressPhotosGallery(progress.studentId, "student");
 
   if (!progress.ready) {
     return <p className="text-sm text-muted-foreground">Chargement…</p>;
@@ -43,7 +48,34 @@ export default function StudentProgressionPage() {
     );
   }
 
-  const { summary, weight, workout, nutrition, appointments, photos } = progress;
+  const { summary, weight, workout, nutrition, appointments } = progress;
+  const activePhotos = gallery.photos.filter((p) => (p.status ?? "active") === "active");
+  const latestPhoto = activePhotos.slice().sort((a, b) => b.date.localeCompare(a.date))[0] ?? null;
+  const beforePhoto = activePhotos.find((p) => p.isBeforeCandidate) ?? null;
+  const afterPhoto = activePhotos.find((p) => p.isAfterCandidate) ?? null;
+
+  const pdfInput =
+    summary && beforePhoto && afterPhoto
+      ? buildTransformationRecapInput(
+          {
+            firstName: summary.firstName,
+            lastName: summary.lastName,
+            mainGoal: summary.goal,
+            startWeightKg: summary.startWeightKg,
+            currentWeightKg: summary.currentWeightKg,
+            sessionsCompleted: summary.sessionsCompleted,
+            nutrition: nutrition
+              ? {
+                  hasActivePlan: nutrition.hasActivePlan,
+                  averageCalories: nutrition.averageCalories,
+                  targetCaloriesPerDay: nutrition.targetCaloriesPerDay,
+                }
+              : null,
+          },
+          { url: beforePhoto.imageUrl ?? "", date: beforePhoto.date, weightKg: beforePhoto.weightKg },
+          { url: afterPhoto.imageUrl ?? "", date: afterPhoto.date, weightKg: afterPhoto.weightKg },
+        )
+      : null;
 
   return (
     <div>
@@ -66,21 +98,29 @@ export default function StudentProgressionPage() {
 
       <Section title="Rendez-vous">{appointments && <ProgressAppointmentsSection appointments={appointments} />}</Section>
 
-      {photos.filter((p) => p.imageUrl).length > 0 && (
-        <Section title="Mes photos">
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-            {photos
-              .filter((p) => p.imageUrl)
-              .map((photo) => (
-                <figure key={photo.id} className="border border-border">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={photo.imageUrl ?? undefined} alt={`Photo de progression du ${formatDate(photo.date)}`} className="aspect-square w-full object-cover" />
-                  <figcaption className="p-2 text-[11px] text-muted-foreground">{formatDate(photo.date)}</figcaption>
-                </figure>
-              ))}
+      <Section title="Photos de progression">
+        {!gallery.loading && (
+          <p className="mb-4 text-xs text-muted-foreground">
+            {activePhotos.length} photo{activePhotos.length > 1 ? "s" : ""}
+            {latestPhoto ? ` · dernière photo le ${new Date(latestPhoto.date).toLocaleDateString("fr-FR")}` : ""}
+          </p>
+        )}
+        <ProgressPhotosSection gallery={gallery} defaultWeightKg={summary?.currentWeightKg ?? null} />
+      </Section>
+
+      <Section title="Comparaison avant / après">
+        {beforePhoto && afterPhoto ? (
+          <div className="flex flex-col gap-4">
+            <BeforeAfterComparison before={beforePhoto} after={afterPhoto} />
+            <GenerateTransformationPdfButton input={pdfInput} fileName={`transformation-${summary?.lastName || "eleve"}.pdf`} />
           </div>
-        </Section>
-      )}
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Choisis une photo « avant » et une photo « après » dans ta galerie ci-dessus pour générer ta comparaison et ton PDF de
+            transformation.
+          </p>
+        )}
+      </Section>
     </div>
   );
 }

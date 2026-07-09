@@ -1602,6 +1602,37 @@ create policy "activity_events_insert_own_student" on public.activity_events
   for insert with check (student_id = public.current_student_id());
 
 -- ============================================================================
+-- Migration additive — chantier "supabase-progress-photos-before-after-export" :
+-- photos de progression réelles (upload Storage, comparaison avant/après,
+-- export PDF). La table `progress_photos` et le bucket Storage
+-- "progress-photos" existaient déjà (voir plus haut section 21 et policies
+-- `progress_photos_student_or_staff` / `progress_photos_bucket_student_or_staff`
+-- ci-dessus) avec un schéma minimal (type/date/weight_kg/note/image_url/
+-- storage_path/pending) pensé pour un mock local (URL objet, pas d'upload
+-- réel). Ce chantier étend la table pour un vrai upload et ne crée NI
+-- nouvelle table NI nouvelle policy : la RLS déjà en place (staff accès
+-- complet, élève limité à `student_id = current_student_id()` ; bucket
+-- limité au dossier `{studentId}/...` de l'élève) couvre déjà exactement les
+-- règles de sécurité demandées.
+--
+-- `photo_type` (face/profil/dos/autre = angle de prise de vue) est distinct
+-- de la colonne `type` existante (avant/actuelle/objectif/mensuelle = rôle
+-- de la photo) — les deux coexistent, aucune ne remplace l'autre.
+-- ============================================================================
+alter table public.progress_photos add column if not exists photo_type text not null default 'autre';
+alter table public.progress_photos drop constraint if exists progress_photos_photo_type_check;
+alter table public.progress_photos add constraint progress_photos_photo_type_check check (photo_type in ('face', 'profil', 'dos', 'autre'));
+alter table public.progress_photos add column if not exists uploaded_by uuid;
+alter table public.progress_photos add column if not exists file_name text;
+alter table public.progress_photos add column if not exists file_size_bytes bigint;
+alter table public.progress_photos add column if not exists file_mime_type text;
+alter table public.progress_photos add column if not exists is_before_candidate boolean not null default false;
+alter table public.progress_photos add column if not exists is_after_candidate boolean not null default false;
+alter table public.progress_photos add column if not exists status text not null default 'active';
+alter table public.progress_photos drop constraint if exists progress_photos_status_check;
+alter table public.progress_photos add constraint progress_photos_status_check check (status in ('active', 'archived'));
+
+-- ============================================================================
 -- Fin du schéma initial. Prochaine étape (pas dans ce fichier) : régénérer
 -- types/supabase.ts avec `supabase gen types typescript`, puis brancher
 -- progressivement chaque page mock sur ces tables (voir README.md).

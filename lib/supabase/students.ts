@@ -222,6 +222,14 @@ function mapProgressPhotoRow(row: ProgressPhotoRow): SupabaseProgressPhoto {
     imageUrl: row.image_url,
     storagePath: row.storage_path,
     pending: row.pending,
+    photoType: row.photo_type,
+    uploadedBy: row.uploaded_by,
+    fileName: row.file_name,
+    fileSizeBytes: row.file_size_bytes,
+    fileMimeType: row.file_mime_type,
+    isBeforeCandidate: row.is_before_candidate,
+    isAfterCandidate: row.is_after_candidate,
+    status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -327,6 +335,16 @@ function toMockProgressPhoto(photo: SupabaseProgressPhoto): ProgressPhoto {
     imageUrl: photo.imageUrl,
     storagePath: photo.storagePath,
     pending: photo.pending,
+    photoType: photo.photoType,
+    uploadedBy: photo.uploadedBy,
+    fileName: photo.fileName,
+    fileSizeBytes: photo.fileSizeBytes,
+    fileMimeType: photo.fileMimeType,
+    isBeforeCandidate: photo.isBeforeCandidate,
+    isAfterCandidate: photo.isAfterCandidate,
+    status: photo.status,
+    createdAt: photo.createdAt,
+    updatedAt: photo.updatedAt,
   };
 }
 
