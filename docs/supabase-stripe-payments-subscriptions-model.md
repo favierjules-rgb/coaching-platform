@@ -79,8 +79,10 @@ Toutes les écritures réelles (création/mise à jour de `billing_customers`/
   existant si connu (sinon Stripe crée le customer via `customer_email`),
   `client_reference_id` + `metadata.student_id/email/plan_name` sur la
   session **et** sur la subscription créée (`subscription_data.metadata`),
-  `success_url = APP_URL/dashboard?payment=success`,
-  `cancel_url = APP_URL/profil?payment=cancelled`.
+  `success_url = APP_URL/paiement/success?session_id={CHECKOUT_SESSION_ID}`,
+  `cancel_url = APP_URL/paiement/cancel` (voir "Pages de retour Stripe"
+  ci-dessous — `/dashboard?payment=success` et `/profil?payment=cancelled`
+  utilisés initialement ont été abandonnés).
 - `POST /api/stripe/create-customer-portal-session` — `{ studentId }` →
   `{ url }`. 404 explicite si l'élève n'a pas encore de `billing_customers`
   (jamais passé par Checkout).
@@ -137,13 +139,53 @@ checkout échoue proprement avec un message explicite plutôt que de planter).
 8. Rejouer `supabase/schema.sql` sur le projet Supabase (4 nouvelles
    tables + policies).
 
+## Pages de retour Stripe
+
+`success_url`/`cancel_url` pointaient initialement vers `/dashboard?payment=success`
+et `/profil?payment=cancelled` (bannière `PaymentStatusBanner` lisant le
+paramètre d'URL). En pratique cette URL de retour est construite à partir de
+`NEXT_PUBLIC_APP_URL` : tant que cette variable n'était pas correctement
+renseignée (ou pointait vers le mauvais domaine/port), Stripe redirigeait
+vers une URL invalide côté déploiement réel, d'où la 404 constatée sur
+`/dashboard?payment=success` — la route existe bien dans le repo
+(`app/(student)/dashboard`), le problème était la valeur de la variable
+d'environnement, pas la route.
+
+Pour éviter de dépendre d'une page "métier" existante pour ce flux
+critique, deux pages dédiées et minimalistes ont été créées à la place :
+
+- `/paiement/success` (`components/shared/PaymentSuccessContent.tsx`) —
+  message "Paiement reçu" + "ton abonnement est en cours d'activation".
+  **Ne lit jamais `session_id`** et ne considère jamais le paiement comme
+  confirmé à partir du seul retour Stripe : le vrai statut vient
+  exclusivement du webhook → Supabase (voir plus haut). Bouton "Retour à
+  mon espace" résolu selon le rôle (`lib/stripe/return-routes.ts`) :
+  élève → `/dashboard`, staff → `/admin/paiements`, rôle inconnu →
+  `/connexion`.
+- `/paiement/cancel` (`components/shared/PaymentCancelContent.tsx`) —
+  message "Paiement annulé, aucun prélèvement effectué", boutons
+  "Réessayer" (élève → `/profil` où vit "Activer mon abonnement", staff →
+  `/admin/paiements`) et "Retour à mon espace" (même résolution que
+  ci-dessus).
+
+Le rôle est résolu côté navigateur via le nouveau hook
+`hooks/useCurrentUserRole.ts` (même requête `profiles` que
+`lib/supabase/auth.ts::getCurrentUserRole`, mais utilisable depuis un
+Client Component). Les deux pages sont ajoutées à `PRIVATE_PREFIXES`
+(`components/layout/SiteChrome.tsx`) pour ne jamais être enveloppées par le
+header/footer public.
+
+L'ancienne bannière `PaymentStatusBanner` (lue sur `/dashboard` et
+`/profil` via `?payment=...`) est supprimée : elle n'a plus de raison
+d'être puisque Stripe ne redirige plus vers ces pages.
+
 ## Pages modifiées
 
 - `/profil` (élève) : nouvelle section "Mon abonnement"
   (`components/student/SubscriptionSection.tsx`), visible uniquement pour
-  un compte élève Supabase réel (`useSupabase`). Bannière de retour Checkout
-  (`?payment=cancelled`) via `components/shared/PaymentStatusBanner.tsx`.
-- `/dashboard` (élève) : même bannière pour `?payment=success`.
+  un compte élève Supabase réel (`useSupabase`).
+- `/paiement/success`, `/paiement/cancel` (nouveau) : voir section dédiée
+  ci-dessus.
 - `/admin/eleves/[studentId]` : nouvelle section "Paiement / abonnement
   (Stripe)" (`components/admin/StudentBillingSection.tsx`), sous la section
   "Paiement" manuelle existante (inchangée), visible uniquement pour un

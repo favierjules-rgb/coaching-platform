@@ -14,6 +14,7 @@ const PRIVATE_PREFIXES = [
   "/profil",
   "/rendez-vous",
   "/progression",
+  "/paiement",
   "/admin",
   "/connexion",
   "/inscription",

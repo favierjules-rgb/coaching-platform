@@ -82,8 +82,8 @@ export async function POST(request: Request) {
       customer: existingCustomer?.stripeCustomerId,
       customer_email: existingCustomer ? undefined : student.email || undefined,
       line_items: [{ price: plan.priceId, quantity: 1 }],
-      success_url: `${appUrl}/dashboard?payment=success`,
-      cancel_url: `${appUrl}/profil?payment=cancelled`,
+      success_url: `${appUrl}/paiement/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${appUrl}/paiement/cancel`,
       client_reference_id: studentId,
       metadata: {
         student_id: studentId,

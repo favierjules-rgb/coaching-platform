@@ -7,7 +7,6 @@ import { EditPersonalInfoModal } from "@/components/student/EditPersonalInfoModa
 import { GoalsSection } from "@/components/student/GoalsSection";
 import { InjurySection } from "@/components/student/InjurySection";
 import { MeasurementsSection } from "@/components/student/MeasurementsSection";
-import { PaymentStatusBanner } from "@/components/shared/PaymentStatusBanner";
 import { InfoRow, ProfileSection, TagList } from "@/components/student/ProfileSection";
 import { ProgressPhotoGallerySection } from "@/components/student/ProgressPhotoGallerySection";
 import { StudentOnboardingDetailModal } from "@/components/student/StudentOnboardingDetailModal";
@@ -71,8 +70,6 @@ export function ProfilPageContent({
 
   return (
     <div>
-      <PaymentStatusBanner />
-
       <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="font-heading text-3xl font-extrabold uppercase text-foreground md:text-4xl">
