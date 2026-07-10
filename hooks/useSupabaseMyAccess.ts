@@ -1,24 +1,35 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { getCurrentStudentId } from "@/lib/supabase/current-student";
 import { getStudentAccessStatus } from "@/lib/supabase/student-access";
+import { getSubscriptionTemplateById } from "@/lib/supabase/subscription-templates";
 import { getStudentProfile } from "@/lib/supabase/students";
-import type { StudentAccessStatus } from "@/types";
+import type { StudentAccessStatus, SubscriptionTemplate } from "@/types";
 
 export interface SupabaseMyAccessState {
   ready: boolean;
   active: boolean;
   studentId: string | null;
   status: StudentAccessStatus | null;
-  /** Formule attribuée par le coach (clé lib/stripe/plans.ts, repli .env), pour proposer un paiement direct sans repasser par le sélecteur. */
-  assignedPlan: string | null;
-  /** Modèle attribué (chantier "supabase-subscription-templates") — source prioritaire sur `assignedPlan`. */
-  assignedTemplateId: string | null;
-  startCheckout: (planKey: string) => Promise<{ url: string | null; error: string | null }>;
-  startCheckoutForTemplate: (templateId: string) => Promise<{ url: string | null; error: string | null }>;
+  /**
+   * Modèle attribué par le coach (chantier "supabase-subscription-templates")
+   * — unique source de la formule côté élève. `null` si aucun modèle n'a
+   * encore été attribué : dans ce cas, ne jamais proposer de paiement ni de
+   * sélecteur de formule (l'élève ne choisit jamais librement).
+   */
+  assignedTemplate: SubscriptionTemplate | null;
+  /**
+   * Crée une session Stripe Checkout pour le modèle attribué. N'envoie
+   * volontairement aucun `templateId`/`planKey` : le serveur
+   * (`/api/stripe/create-checkout-session`) résout systématiquement
+   * `student_profiles.assigned_subscription_template_id` lui-même pour un
+   * appelant élève — impossible de payer une autre formule que celle
+   * attribuée, même en modifiant la requête depuis le navigateur.
+   */
+  payAssignedTemplate: () => Promise<{ url: string | null; error: string | null }>;
 }
 
 /**
@@ -31,8 +42,7 @@ export function useSupabaseMyAccess(): SupabaseMyAccessState {
   const [ready, setReady] = useState(false);
   const [studentId, setStudentId] = useState<string | null>(null);
   const [status, setStatus] = useState<StudentAccessStatus | null>(null);
-  const [assignedPlan, setAssignedPlan] = useState<string | null>(null);
-  const [assignedTemplateId, setAssignedTemplateId] = useState<string | null>(null);
+  const [assignedTemplate, setAssignedTemplate] = useState<SubscriptionTemplate | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -51,11 +61,13 @@ export function useSupabaseMyAccess(): SupabaseMyAccessState {
         getStudentAccessStatus(supabase, id),
         getStudentProfile(supabase, id),
       ]);
+      const template = profile?.assignedSubscriptionTemplateId
+        ? await getSubscriptionTemplateById(supabase, profile.assignedSubscriptionTemplateId)
+        : null;
       if (!cancelled) {
         setStudentId(id);
         setStatus(accessStatus);
-        setAssignedPlan(profile?.assignedStripePlan ?? null);
-        setAssignedTemplateId(profile?.assignedSubscriptionTemplateId ?? null);
+        setAssignedTemplate(template);
         setReady(true);
       }
     }
@@ -65,45 +77,22 @@ export function useSupabaseMyAccess(): SupabaseMyAccessState {
     };
   }, []);
 
-  const startCheckout = useCallback(
-    async (planKey: string): Promise<{ url: string | null; error: string | null }> => {
-      if (!studentId) return { url: null, error: "Compte élève non identifié." };
-      try {
-        const response = await fetch("/api/stripe/create-checkout-session", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ studentId, planKey }),
-        });
-        const data = await response.json();
-        return response.ok
-          ? { url: data.url as string, error: null }
-          : { url: null, error: data.error ?? "Échec de la création du paiement." };
-      } catch {
-        return { url: null, error: "Échec de la création du paiement." };
-      }
-    },
-    [studentId],
-  );
+  async function payAssignedTemplate(): Promise<{ url: string | null; error: string | null }> {
+    if (!studentId) return { url: null, error: "Compte élève non identifié." };
+    try {
+      const response = await fetch("/api/stripe/create-checkout-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentId }),
+      });
+      const data = await response.json();
+      return response.ok
+        ? { url: data.url as string, error: null }
+        : { url: null, error: data.error ?? "Échec de la création du paiement." };
+    } catch {
+      return { url: null, error: "Échec de la création du paiement." };
+    }
+  }
 
-  const startCheckoutForTemplate = useCallback(
-    async (templateId: string): Promise<{ url: string | null; error: string | null }> => {
-      if (!studentId) return { url: null, error: "Compte élève non identifié." };
-      try {
-        const response = await fetch("/api/stripe/create-checkout-session", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ studentId, templateId }),
-        });
-        const data = await response.json();
-        return response.ok
-          ? { url: data.url as string, error: null }
-          : { url: null, error: data.error ?? "Échec de la création du paiement." };
-      } catch {
-        return { url: null, error: "Échec de la création du paiement." };
-      }
-    },
-    [studentId],
-  );
-
-  return { ready, active: studentId !== null, studentId, status, assignedPlan, assignedTemplateId, startCheckout, startCheckoutForTemplate };
+  return { ready, active: studentId !== null, studentId, status, assignedTemplate, payAssignedTemplate };
 }

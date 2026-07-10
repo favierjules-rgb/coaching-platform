@@ -5,7 +5,7 @@ import { getCurrentUser, getCurrentUserRole } from "@/lib/supabase/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getBillingCustomerForStudent } from "@/lib/supabase/billing";
-import { getStudentById } from "@/lib/supabase/students";
+import { getStudentById, getStudentProfile } from "@/lib/supabase/students";
 import { getSubscriptionTemplateById } from "@/lib/supabase/subscription-templates";
 import { getResolvedPlanByKey } from "@/lib/stripe/plans-server";
 import { getStripeClient } from "@/lib/stripe/client";
@@ -15,15 +15,22 @@ import { getStripeClient } from "@/lib/stripe/client";
  * Checkout pour un élève. Appelable par l'élève lui-même (uniquement pour
  * son propre student_id) ou par un coach/admin (pour n'importe quel élève)
  * — jamais par un élève pour un autre élève (chantier
- * "supabase-stripe-payments-subscriptions").
+ * "supabase-stripe-payments-subscriptions", étendu par
+ * "supabase-subscription-templates").
  *
  * Body attendu : { studentId: string, templateId?: string, planKey?: string }.
- * `templateId` (table `subscription_templates`, chantier
- * "supabase-subscription-templates") est la source prioritaire du
- * price_id — `planKey` (mapping statique par variable d'environnement,
- * lib/stripe/plans-server.ts) n'est conservé qu'en repli temporaire tant
- * qu'aucun modèle n'a encore été créé pour une formule. Au moins l'un des
- * deux est requis.
+ *
+ * **Élève** : `templateId`/`planKey` envoyés par le client sont **ignorés**
+ * — l'élève ne choisit jamais librement une formule. Le modèle facturé est
+ * systématiquement résolu côté serveur depuis
+ * `student_profiles.assigned_subscription_template_id` (attribué par un
+ * coach/admin). Si aucun modèle n'est attribué, la création échoue
+ * explicitement (400) plutôt que de retomber sur un choix arbitraire.
+ *
+ * **Admin/coach** : `templateId` (table `subscription_templates`, source
+ * prioritaire) ou `planKey` (mapping statique par variable d'environnement,
+ * `lib/stripe/plans-server.ts`, repli temporaire) peut être choisi librement
+ * pour n'importe quel élève.
  */
 export async function POST(request: Request) {
   let body: { studentId?: string; templateId?: string; planKey?: string };
@@ -33,9 +40,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Corps de requête invalide." }, { status: 400 });
   }
 
-  const { studentId, templateId, planKey } = body;
-  if (!studentId || (!templateId && !planKey)) {
-    return NextResponse.json({ error: "studentId et (templateId ou planKey) sont requis." }, { status: 400 });
+  const { studentId } = body;
+  if (!studentId) {
+    return NextResponse.json({ error: "studentId est requis." }, { status: 400 });
   }
 
   const sessionSupabase = await createSupabaseServerClient();
@@ -49,13 +56,33 @@ export async function POST(request: Request) {
   }
 
   const role = await getCurrentUserRole();
-  if (role === "student") {
+  const isStudentCaller = role === "student";
+  if (isStudentCaller) {
     const ownStudentId = await getCurrentStudentId(sessionSupabase);
     if (!ownStudentId || ownStudentId !== studentId) {
       return NextResponse.json({ error: "Un élève ne peut créer une session de paiement que pour lui-même." }, { status: 403 });
     }
   } else if (role !== "admin" && role !== "coach") {
     return NextResponse.json({ error: "Accès refusé." }, { status: 403 });
+  }
+
+  // L'élève ne choisit jamais la formule : on résout systématiquement le
+  // modèle attribué par le coach côté serveur, en ignorant tout templateId/
+  // planKey éventuellement envoyé par le client.
+  let templateId: string | null = null;
+  let planKey: string | null = null;
+  if (isStudentCaller) {
+    const profile = await getStudentProfile(sessionSupabase, studentId);
+    if (!profile?.assignedSubscriptionTemplateId) {
+      return NextResponse.json({ error: "Aucune formule ne vous a encore été attribuée. Contactez votre coach." }, { status: 400 });
+    }
+    templateId = profile.assignedSubscriptionTemplateId;
+  } else {
+    templateId = body.templateId ?? null;
+    planKey = body.planKey ?? null;
+    if (!templateId && !planKey) {
+      return NextResponse.json({ error: "templateId ou planKey est requis." }, { status: 400 });
+    }
   }
 
   let priceId: string | null = null;
@@ -65,8 +92,8 @@ export async function POST(request: Request) {
 
   if (templateId) {
     const template = await getSubscriptionTemplateById(sessionSupabase, templateId);
-    if (!template || !template.isActive || !template.stripePriceId) {
-      return NextResponse.json({ error: "Modèle d'abonnement introuvable, inactif ou sans prix Stripe configuré." }, { status: 400 });
+    if (!template || !template.stripePriceId) {
+      return NextResponse.json({ error: "Modèle d'abonnement introuvable ou sans prix Stripe configuré." }, { status: 400 });
     }
     priceId = template.stripePriceId;
     planLabel = template.name;
@@ -109,6 +136,7 @@ export async function POST(request: Request) {
     student_id: studentId,
     email: student.email,
     plan_name: planLabel,
+    price_id: priceId,
   };
   if (resolvedTemplateId) {
     metadata.template_id = resolvedTemplateId;
@@ -131,6 +159,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ url: checkoutSession.url });
   } catch (error) {
     console.error("[Stripe] create-checkout-session", error);
-    return NextResponse.json({ error: "Échec de la création de la session de paiement." }, { status: 502 });
+    const message = error instanceof Error ? error.message : "Échec de la création de la session de paiement.";
+    return NextResponse.json({ error: message }, { status: 502 });
   }
 }

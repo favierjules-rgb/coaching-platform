@@ -13,10 +13,6 @@ export interface SupabaseMyBillingState {
   studentId: string | null;
   summary: StudentBillingSummary | null;
   refetch: () => Promise<void>;
-  /** Renvoie l'URL Stripe Checkout à ouvrir, ou `null` en cas d'échec (voir `error`). */
-  startCheckout: (planKey: string) => Promise<{ url: string | null; error: string | null }>;
-  /** Chantier "supabase-subscription-templates" — source prioritaire, `startCheckout` (planKey/.env) reste un repli temporaire. */
-  startCheckoutForTemplate: (templateId: string) => Promise<{ url: string | null; error: string | null }>;
   openPortal: () => Promise<{ url: string | null; error: string | null }>;
 }
 
@@ -26,6 +22,11 @@ export interface SupabaseMyBillingState {
  * navigateur (RLS `*_select_own_student`) — jamais de mock, jamais les
  * données d'un autre élève. `active` ne vaut `true` que si un compte élève
  * Supabase est réellement identifié.
+ *
+ * Pas de `startCheckout` ici (chantier "supabase-subscription-templates") :
+ * l'élève ne choisit jamais de formule, voir
+ * `useSupabaseMyAccess().payAssignedTemplate` qui paie exclusivement le
+ * modèle attribué par le coach.
  */
 export function useSupabaseMyBilling(): SupabaseMyBillingState {
   const [ready, setReady] = useState(false);
@@ -84,42 +85,6 @@ export function useSupabaseMyBilling(): SupabaseMyBillingState {
     };
   }, []);
 
-  const startCheckout = useCallback(
-    async (planKey: string): Promise<{ url: string | null; error: string | null }> => {
-      if (!studentId) return { url: null, error: "Compte élève non identifié." };
-      try {
-        const response = await fetch("/api/stripe/create-checkout-session", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ studentId, planKey }),
-        });
-        const data = await response.json();
-        return response.ok ? { url: data.url as string, error: null } : { url: null, error: data.error ?? "Échec de la création du paiement." };
-      } catch {
-        return { url: null, error: "Échec de la création du paiement." };
-      }
-    },
-    [studentId],
-  );
-
-  const startCheckoutForTemplate = useCallback(
-    async (templateId: string): Promise<{ url: string | null; error: string | null }> => {
-      if (!studentId) return { url: null, error: "Compte élève non identifié." };
-      try {
-        const response = await fetch("/api/stripe/create-checkout-session", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ studentId, templateId }),
-        });
-        const data = await response.json();
-        return response.ok ? { url: data.url as string, error: null } : { url: null, error: data.error ?? "Échec de la création du paiement." };
-      } catch {
-        return { url: null, error: "Échec de la création du paiement." };
-      }
-    },
-    [studentId],
-  );
-
   const openPortal = useCallback(async (): Promise<{ url: string | null; error: string | null }> => {
     if (!studentId) return { url: null, error: "Compte élève non identifié." };
     try {
@@ -135,5 +100,5 @@ export function useSupabaseMyBilling(): SupabaseMyBillingState {
     }
   }, [studentId]);
 
-  return { ready, active: studentId !== null, studentId, summary, refetch, startCheckout, startCheckoutForTemplate, openPortal };
+  return { ready, active: studentId !== null, studentId, summary, refetch, openPortal };
 }

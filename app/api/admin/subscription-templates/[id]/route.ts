@@ -4,7 +4,12 @@ import { getCurrentUser, getCurrentUserRole } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getSubscriptionTemplateById, updateSubscriptionTemplate } from "@/lib/supabase/subscription-templates";
 import { getStripeClient } from "@/lib/stripe/client";
-import { createStripePriceForExistingProduct, createStripeProductAndPrice } from "@/lib/stripe/subscription-templates";
+import {
+  createStripePriceForExistingProduct,
+  createStripeProductAndPrice,
+  describeStripeError,
+  isStripeResourceMissing,
+} from "@/lib/stripe/subscription-templates";
 
 /**
  * PATCH /api/admin/subscription-templates/[id] — modifie un modèle
@@ -63,13 +68,35 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     }
     try {
       if (stripeProductId) {
-        stripePriceId = await createStripePriceForExistingProduct(stripe, {
-          productId: stripeProductId,
-          amountCents: body.amountCents!,
-          currency: existing.currency,
-          billingInterval: existing.billingInterval,
-          previousPriceId: stripePriceId,
-        });
+        try {
+          stripePriceId = await createStripePriceForExistingProduct(stripe, {
+            productId: stripeProductId,
+            amountCents: body.amountCents!,
+            currency: existing.currency,
+            billingInterval: existing.billingInterval,
+            previousPriceId: stripePriceId,
+          });
+        } catch (error) {
+          // Cause fréquente : stripe_product_id enregistré dans un autre
+          // mode Stripe (test/live) que la clé secrète actuellement
+          // configurée — le produit n'existe simplement plus pour ce
+          // compte/mode. Plutôt que d'échouer, on recrée un Product/Price
+          // neuf (l'ancien price_id en base, s'il existe encore quelque
+          // part, n'est de toute façon plus valide).
+          if (!isStripeResourceMissing(error)) throw error;
+          console.error(
+            `[Stripe] update-subscription-template : produit ${stripeProductId} introuvable (${describeStripeError(error)}), recréation d'un Product/Price neuf.`,
+          );
+          const created = await createStripeProductAndPrice(stripe, {
+            name: body.name ?? existing.name,
+            description: body.description ?? existing.description,
+            amountCents: body.amountCents!,
+            currency: existing.currency,
+            billingInterval: existing.billingInterval,
+          });
+          stripeProductId = created.productId;
+          stripePriceId = created.priceId;
+        }
       } else {
         const created = await createStripeProductAndPrice(stripe, {
           name: body.name ?? existing.name,
@@ -82,8 +109,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         stripePriceId = created.priceId;
       }
     } catch (error) {
-      console.error("[Stripe] update-subscription-template (price)", error);
-      return NextResponse.json({ error: "Échec de la mise à jour du prix Stripe." }, { status: 502 });
+      const message = describeStripeError(error);
+      console.error(`[Stripe] update-subscription-template (price) : ${message}`, error);
+      return NextResponse.json({ error: `Échec de la mise à jour du prix Stripe : ${message}` }, { status: 502 });
     }
   }
 

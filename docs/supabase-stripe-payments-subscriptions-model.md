@@ -81,17 +81,24 @@ Toutes les écritures réelles (création/mise à jour de `billing_customers`/
 ## Routes API
 
 - `POST /api/stripe/create-checkout-session` — `{ studentId, templateId?, planKey? }`
-  (au moins l'un des deux) → `{ url }`. `templateId` (table
-  `subscription_templates`, chantier "supabase-subscription-templates") est
-  la source **prioritaire** du `price_id` — `planKey` (mapping .env,
-  `lib/stripe/plans-server.ts`) n'est qu'un repli temporaire, voir section
-  dédiée dans `docs/supabase-stripe-access-control-model.md`. Mode
-  `subscription` (ou `payment` si le modèle est `billing_interval:
-  "one_time"`), réutilise le `stripe_customer_id` existant si connu (sinon
-  Stripe crée le customer via `customer_email`), `client_reference_id` +
-  `metadata.student_id/email/plan_name` (+ `template_id`/`template_name` si
-  `templateId` fourni) sur la session **et** sur la subscription créée
-  (`subscription_data.metadata`),
+  → `{ url }`. **Le comportement diffère selon le rôle de l'appelant**
+  (correction du chantier "supabase-subscription-templates", voir détail
+  dans `docs/supabase-stripe-access-control-model.md`) :
+  - Appelant **élève** : `templateId`/`planKey` du corps de requête sont
+    **ignorés** — la route résout elle-même
+    `student_profiles.assigned_subscription_template_id` de l'élève
+    connecté. Aucun modèle attribué → 400, aucune session créée.
+  - Appelant **admin/coach** : `templateId` (table `subscription_templates`,
+    source prioritaire) ou `planKey` (mapping .env,
+    `lib/stripe/plans-server.ts`, repli temporaire) choisi librement pour
+    n'importe quel élève.
+
+  Dans tous les cas : mode `subscription` (ou `payment` si le modèle est
+  `billing_interval: "one_time"`), réutilise le `stripe_customer_id`
+  existant si connu (sinon Stripe crée le customer via `customer_email`),
+  `client_reference_id` + `metadata.student_id/email/plan_name/price_id`
+  (+ `template_id`/`template_name` si un modèle est utilisé) sur la session
+  **et** sur la subscription créée (`subscription_data.metadata`),
   `success_url = APP_URL/paiement/success?session_id={CHECKOUT_SESSION_ID}`,
   `cancel_url = APP_URL/paiement/cancel` (voir "Pages de retour Stripe"
   ci-dessous — `/dashboard?payment=success` et `/profil?payment=cancelled`

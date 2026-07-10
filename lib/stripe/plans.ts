@@ -50,6 +50,14 @@ export const billingIntervalLabels: Record<BillingInterval, string> = {
   one_time: " (paiement unique)",
 };
 
+/** Libellé "fréquence" autonome (sans le montant devant), pour un affichage en champ dédié. */
+export const billingIntervalFrequencyLabels: Record<BillingInterval, string> = {
+  monthly: "Mensuel",
+  quarterly: "Trimestriel",
+  yearly: "Annuel",
+  one_time: "Paiement unique",
+};
+
 export function formatTemplateOffer(template: SubscriptionTemplate): string {
   return `${template.name} — ${formatAmountCents(template.amountCents, template.currency)}${billingIntervalLabels[template.billingInterval]}`;
 }

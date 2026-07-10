@@ -1941,6 +1941,27 @@ $$;
 -- Le trigger existant réutilise automatiquement cette nouvelle définition
 -- (create or replace function), aucun besoin de le recréer.
 
+-- ----------------------------------------------------------------------------
+-- Correction "supabase-subscription-templates" (suite) : un élève doit
+-- pouvoir lire le modèle qui lui a été attribué même si l'admin l'a
+-- archivé depuis (is_active = false) — sinon /profil et /acces-limite
+-- afficheraient "aucune formule attribuée" à tort après un archivage,
+-- alors que l'élève doit toujours voir/payer exactement ce qui lui a été
+-- attribué. Élargit la policy de lecture existante (formules actives ou
+-- staff) pour couvrir aussi "le modèle référencé par ma propre fiche
+-- élève", sans rien retirer.
+-- ----------------------------------------------------------------------------
+drop policy if exists "subscription_templates_select_active_or_staff" on public.subscription_templates;
+create policy "subscription_templates_select_active_or_staff" on public.subscription_templates
+  for select using (
+    is_active = true
+    or public.is_coach_or_admin()
+    or id in (
+      select assigned_subscription_template_id from public.student_profiles
+      where student_id = public.current_student_id()
+    )
+  );
+
 -- ============================================================================
 -- Fin du schéma initial. Prochaine étape (pas dans ce fichier) : régénérer
 -- types/supabase.ts avec `supabase gen types typescript`, puis brancher

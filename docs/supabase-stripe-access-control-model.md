@@ -171,6 +171,15 @@ variables d'environnement (`STRIPE_PRICE_COACHING_BASIC`/`PREMIUM`/
 (`/admin/abonnements`), sans jamais toucher au code pour ajouter, modifier ou
 retirer une formule.
 
+> **Correction appliquée après une première version imparfaite** : le
+> premier jet laissait encore l'élève choisir librement parmi les formules
+> actives (sélecteur dans `/profil` et `/acces-limite`, avec repli sur les 3
+> anciennes formules .env si aucun modèle n'existait). Ce n'était pas le
+> comportement voulu : **l'élève ne doit jamais choisir une formule** —
+> uniquement voir et payer celle que le coach lui a attribuée. Voir
+> "Checkout — l'élève ne choisit jamais de formule" ci-dessous pour le détail
+> de la correction (enforcement serveur, pas seulement UI).
+
 ### Table `subscription_templates`
 
 ```sql
@@ -182,15 +191,19 @@ subscription_templates (
 )
 ```
 
-- **RLS** : lecture = formules actives (`is_active = true`) ou staff (accès
-  aux archivées aussi, pour l'historique) ; écriture (insert/update/delete)
-  = staff uniquement (`is_coach_or_admin()`), jamais l'élève — répond
-  explicitement à la contrainte "élèves peuvent lire seulement leur modèle
-  attribué si nécessaire, mais ne modifient jamais rien" : la lecture des
-  formules actives par tous les élèves connectés (pas seulement la leur)
-  reste nécessaire pour le sélecteur de paiement existant
-  (`CreateCheckoutLinkModal`) — les données (nom/prix) ne sont pas
-  sensibles, aucune fuite d'information privée entre élèves.
+- **RLS** : lecture = formules actives (`is_active = true`), staff (accès
+  aux archivées aussi, pour l'historique), **ou l'élève propriétaire de sa
+  propre fiche** (`id in (select assigned_subscription_template_id from
+  student_profiles where student_id = current_student_id())`, ajouté par la
+  correction "l'élève ne choisit jamais parmi une liste" ci-dessous) — un
+  élève peut donc toujours lire le modèle qui lui a été attribué, même
+  archivé depuis par l'admin. Écriture (insert/update/delete) = staff
+  uniquement (`is_coach_or_admin()`), jamais l'élève. Répond explicitement à
+  la contrainte "élèves peuvent lire seulement leur modèle attribué, mais ne
+  modifient jamais rien" : `CreateCheckoutLinkModal` (qui affiche un
+  sélecteur de plusieurs formules) n'est utilisé **que côté admin**
+  désormais (fiche élève, `/admin/paiements`) — un élève ne lit plus jamais
+  la liste des formules actives, uniquement la sienne, par id.
 - **Seedée** une fois avec les 3 formules déjà créées manuellement dans
   Stripe par l'utilisateur (Coaching distanciel/Présentiel/premium),
   `on conflict (stripe_price_id) do nothing` pour rester rejouable.
@@ -220,16 +233,42 @@ déjà souscrits sur l'ancien prix n'est pas affecté). La ligne
 Price. Un modèle "archivé" (`isActive: false`) n'est qu'un signal côté
 Supabase (plus proposé aux élèves) — il ne touche pas Stripe.
 
-### Checkout — price_id résolu par modèle, jamais en dur
+### Checkout — l'élève ne choisit jamais de formule
 
-`POST /api/stripe/create-checkout-session` accepte désormais `{ studentId,
-templateId }` en priorité (`{ studentId, planKey }` reste un repli
-temporaire tant qu'aucun modèle actif n'existe, voir
-`docs/supabase-stripe-payments-subscriptions-model.md`). `templateId` est
-résolu vers `subscription_templates.stripe_price_id` côté serveur — **jamais
-de price_id passé depuis le client**. `metadata.template_id`/`template_name`
-ajoutés à la session et à la subscription Stripe créée, en plus des champs
-existants (`student_id`/`email`/`plan_name`).
+**Correction importante** (suite à un premier essai qui laissait encore
+l'élève choisir parmi les 3 anciennes formules .env dans certains cas de
+repli) : `POST /api/stripe/create-checkout-session` traite désormais deux
+cas complètement différents selon le rôle de l'appelant :
+
+- **Élève** : tout `templateId`/`planKey` envoyé par le client est
+  **ignoré**. Le serveur résout systématiquement
+  `student_profiles.assigned_subscription_template_id` de l'élève connecté
+  lui-même (jamais un id passé en paramètre) et facture exclusivement ce
+  modèle. Si aucun modèle n'est attribué, la route renvoie 400 explicite
+  ("Aucune formule ne vous a encore été attribuée. Contactez votre coach.")
+  — **aucune session Stripe n'est créée**. Un élève ne peut donc pas payer
+  une autre formule que celle attribuée, même en modifiant la requête
+  réseau depuis les outils de développement du navigateur.
+- **Admin/coach** : `templateId` (table `subscription_templates`, source
+  prioritaire) ou `planKey` (mapping .env, repli temporaire) reste
+  librement choisi, pour n'importe quel élève — c'est la route utilisée par
+  `StudentSubscriptionSection` (bouton "Créer lien de paiement Stripe" pour
+  le modèle sélectionné dans la fiche élève).
+
+Dans les deux cas, `templateId` est résolu vers
+`subscription_templates.stripe_price_id` côté serveur — **jamais de
+price_id passé depuis le client**. `metadata.student_id`/`template_id`/
+`template_name`/`price_id`/`plan_name` ajoutés à la session et à la
+subscription Stripe créée.
+
+Côté élève, le seul point d'entrée est
+`useSupabaseMyAccess().payAssignedTemplate()` (`hooks/useSupabaseMyAccess.ts`)
+qui poste `{ studentId }` sans aucun `templateId`/`planKey` — il n'existe
+plus aucun sélecteur de formule ni aucune modale de choix dans les
+composants élève (`components/student/SubscriptionSection.tsx`,
+`components/shared/AccessLimitedContent.tsx`) : `CreateCheckoutLinkModal`
+(qui affiche un `<select>` de formules) n'est désormais utilisé que côté
+admin (fiche élève, `/admin/paiements`).
 
 Le webhook (`lib/stripe/webhook-handlers.ts::upsertSubscriptionFromStripeObject`)
 résout désormais le nom de formule (`subscriptions.plan_name`) en
@@ -269,10 +308,18 @@ correspond à ce price_id.
   `assignedStripePlan` (env-based) ; bouton "Gérer les modèles
   d'abonnements".
 - **`/profil` élève** (`components/student/SubscriptionSection.tsx`) :
-  formule attribuée affichée via le nom du modèle (repli sur l'ancien
-  libellé .env si aucun modèle n'est assigné), bouton de paiement basé sur
-  les modèles actifs (repli automatique sur les 3 formules .env si aucun
-  modèle n'existe encore en base).
+  affiche **uniquement** le modèle attribué (`useSupabaseMyAccess().assignedTemplate`
+  — nom, prix, fréquence, durée si renseignée), le statut d'abonnement Stripe
+  et le statut d'accès au site, avec un unique bouton "Activer mon
+  abonnement" (ou "Gérer mon abonnement" si déjà actif/en attente/passé dû —
+  ouvre le portail client). **Aucun sélecteur, aucune modale de choix** :
+  si aucun modèle n'est attribué, affiche "Aucune formule ne vous a encore
+  été attribuée. Contactez votre coach." et aucun bouton de paiement.
+- **`/acces-limite`** (`components/shared/AccessLimitedContent.tsx`) : même
+  logique — bouton "Régler mon abonnement" si un modèle est attribué
+  (`payAssignedTemplate()`), sinon message "Aucune formule attribuée pour le
+  moment." et uniquement le bouton "Retour à mon profil" (aucune tentative
+  de création de session Stripe sans modèle attribué).
 
 ### Ce qui n'a PAS changé (dans ce sous-chantier)
 
@@ -354,3 +401,53 @@ résolu via `subscription_templates` plutôt que le mapping .env ;
 déverrouillage/verrouillage de l'accès après paiement réel via un modèle.
 Vérifiable par lecture directe du code (chaque route API et fonction citée
 ci-dessus a été relue ligne à ligne) en l'absence de session réelle.
+
+### Tests — correction "l'élève ne choisit jamais de formule"
+
+`npm run lint`, `npx tsc --noEmit`, `npm run build` : passent tous après
+cette correction (aucune clé Supabase/Stripe réelle dans cet environnement
+pour cette passe — le connecteur Supabase MCP s'est déconnecté en cours de
+session, contrairement au sous-chantier précédent).
+
+**Vérifié par lecture directe du code** (pas de session réelle
+disponible) :
+- `POST /api/stripe/create-checkout-session` : pour un appelant de rôle
+  `student`, tout `templateId`/`planKey` du corps de requête est ignoré ;
+  `student_profiles.assigned_subscription_template_id` est relu côté
+  serveur via `getStudentProfile(sessionSupabase, studentId)` ; absence de
+  modèle attribué → 400 avant tout appel Stripe (aucune session créée).
+  Pour `admin`/`coach`, `templateId`/`planKey` reste libre.
+- `components/student/SubscriptionSection.tsx` et
+  `components/shared/AccessLimitedContent.tsx` : plus aucun import de
+  `CreateCheckoutLinkModal`/`buildCheckoutOffers`/`PLAN_DEFINITIONS` — grep
+  du repo confirmé (`Coaching mensuel|Coaching premium|Coaching
+  distanciel|STRIPE_PRICE_COACHING|planKey|PLAN_DEFINITIONS|
+  buildCheckoutOffers|CreateCheckoutLinkModal`) : les seules occurrences
+  restantes sont côté admin (`StudentSubscriptionSection.tsx`,
+  `/admin/paiements`, `/admin/abonnements`) ou dans des commentaires
+  documentant explicitement que ces éléments sont exclus du parcours élève.
+- `lib/supabase/student-access.ts::updateStudentAccess` (bouton
+  "Attribuer" de la fiche élève admin) : écrit bien
+  `billing_access_mode`/`assigned_subscription_template_id`/
+  `assigned_stripe_plan`/`assigned_stripe_price_id`/`access_note`/
+  `access_updated_at` en une seule requête — ces deux derniers champs sont
+  recopiés depuis le modèle choisi (jamais saisis à la main), donc toujours
+  cohérents avec `assigned_subscription_template_id`.
+- `app/api/admin/subscription-templates/[id]/route.ts` (bug rapporté :
+  "Échec de la mise à jour du prix Stripe") : la cause la plus probable est
+  un `stripe_product_id` enregistré dans un mode Stripe (test) différent de
+  celui de la clé secrète réellement configurée en production (live) — les
+  3 modèles seedés proviennent d'un compte Stripe en mode test. Corrigé de
+  deux façons : (1) le message d'erreur réel de Stripe est maintenant
+  loggué côté serveur et renvoyé dans la réponse JSON
+  (`describeStripeError`, route réservée au staff) au lieu du texte
+  générique précédent ; (2) si le Product référencé n'existe plus pour le
+  mode Stripe courant (`isStripeResourceMissing`), la route recrée
+  automatiquement un Product/Price neuf plutôt que d'échouer. À confirmer
+  en conditions réelles avec la vraie clé Stripe de production.
+
+**Non vérifié en direct** : le parcours complet décrit dans la demande
+(création d'un modèle "Test abonnement 147", attribution, checkout réel,
+retour `/paiement/success`, mise à jour webhook, accès débloqué/bloqué
+selon chaque statut) — nécessite une session Supabase/Stripe réelle non
+disponible dans cet environnement pour cette passe de corrections.

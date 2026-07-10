@@ -4,7 +4,7 @@ import { getCurrentUser, getCurrentUserRole } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSubscriptionTemplate } from "@/lib/supabase/subscription-templates";
 import { getStripeClient } from "@/lib/stripe/client";
-import { createStripeProductAndPrice } from "@/lib/stripe/subscription-templates";
+import { createStripeProductAndPrice, describeStripeError } from "@/lib/stripe/subscription-templates";
 import type { BillingInterval } from "@/types";
 
 const VALID_INTERVALS: BillingInterval[] = ["monthly", "quarterly", "yearly", "one_time"];
@@ -68,8 +68,9 @@ export async function POST(request: Request) {
       stripeProductId = created.productId;
       stripePriceId = created.priceId;
     } catch (error) {
-      console.error("[Stripe] create-subscription-template (product/price)", error);
-      return NextResponse.json({ error: "Échec de la création du produit/prix Stripe." }, { status: 502 });
+      const message = describeStripeError(error);
+      console.error(`[Stripe] create-subscription-template (product/price) : ${message}`, error);
+      return NextResponse.json({ error: `Échec de la création du produit/prix Stripe : ${message}` }, { status: 502 });
     }
   }
 
