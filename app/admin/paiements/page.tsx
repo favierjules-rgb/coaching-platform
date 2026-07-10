@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { CreditCard, ExternalLink, Settings } from "lucide-react";
+import { CreditCard, ExternalLink, Settings, Trash2 } from "lucide-react";
 
 import { FilterButtons, SearchInput } from "@/components/admin/SearchAndFilters";
 import { StatusBadge } from "@/components/admin/StatusBadge";
@@ -79,16 +79,56 @@ async function openPortalFor(studentId: string): Promise<{ url: string | null; e
   }
 }
 
+async function deletePayment(paymentId: string): Promise<boolean> {
+  const response = await fetch(`/api/admin/billing/payments/${paymentId}`, { method: "DELETE" });
+  return response.ok;
+}
+
+async function deleteSubscription(subscriptionId: string): Promise<boolean> {
+  const response = await fetch(`/api/admin/billing/subscriptions/${subscriptionId}`, { method: "DELETE" });
+  return response.ok;
+}
+
 function planLabelFor(item: AdminBillingListItem): string {
   if (item.subscription?.planName) return item.subscription.planName;
   const assignedName = item.assignedTemplateName ?? (item.assignedStripePlan ? getPlanLabel(item.assignedStripePlan) : null);
   return assignedName ? `${assignedName} (attribuée)` : "—";
 }
 
-function BillingRow({ item, offers, hasTemplates }: { item: AdminBillingListItem; offers: CheckoutOffer[]; hasTemplates: boolean }) {
+function BillingRow({
+  item,
+  offers,
+  hasTemplates,
+  onChanged,
+}: {
+  item: AdminBillingListItem;
+  offers: CheckoutOffer[];
+  hasTemplates: boolean;
+  onChanged: () => void;
+}) {
+  const [deleting, setDeleting] = useState(false);
+
   async function handleOpenPortal() {
     const result = await openPortalFor(item.studentId);
     if (result.url) window.open(result.url, "_blank", "noopener,noreferrer");
+  }
+
+  async function handleDeleteSubscription() {
+    if (!item.subscription) return;
+    if (!window.confirm(`Supprimer définitivement l'abonnement Supabase de ${item.studentFirstName} ${item.studentLastName} ? Ceci ne résilie rien côté Stripe.`)) return;
+    setDeleting(true);
+    const ok = await deleteSubscription(item.subscription.id);
+    setDeleting(false);
+    if (ok) onChanged();
+  }
+
+  async function handleDeletePayment() {
+    if (!item.lastPayment) return;
+    if (!window.confirm(`Supprimer définitivement le dernier paiement de ${item.studentFirstName} ${item.studentLastName} ? Ceci ne rembourse rien côté Stripe.`)) return;
+    setDeleting(true);
+    const ok = await deletePayment(item.lastPayment.id);
+    setDeleting(false);
+    if (ok) onChanged();
   }
 
   return (
@@ -164,6 +204,36 @@ function BillingRow({ item, offers, hasTemplates }: { item: AdminBillingListItem
               Stripe
             </a>
           </>
+        )}
+        {(item.subscription || item.lastPayment) && (
+          <details className="relative">
+            <summary className="flex cursor-pointer list-none items-center gap-1.5 border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-red-500 hover:text-red-400 [&::-webkit-details-marker]:hidden">
+              <Trash2 size={13} />
+              Nettoyer
+            </summary>
+            <div className="absolute right-0 z-10 mt-1 flex w-56 flex-col gap-1 border border-border bg-card p-2 shadow-lg">
+              {item.subscription && (
+                <button
+                  type="button"
+                  onClick={handleDeleteSubscription}
+                  disabled={deleting}
+                  className="px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-red-500/10 hover:text-red-400 disabled:opacity-40"
+                >
+                  Supprimer l&apos;abonnement (Supabase)
+                </button>
+              )}
+              {item.lastPayment && (
+                <button
+                  type="button"
+                  onClick={handleDeletePayment}
+                  disabled={deleting}
+                  className="px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-red-500/10 hover:text-red-400 disabled:opacity-40"
+                >
+                  Supprimer le dernier paiement (Supabase)
+                </button>
+              )}
+            </div>
+          </details>
         )}
       </div>
     </div>
@@ -244,7 +314,7 @@ export default function AdminBillingPage() {
       ) : (
         <div className="flex flex-col gap-4">
           {filtered.map((item) => (
-            <BillingRow key={item.studentId} item={item} offers={offers} hasTemplates={hasTemplates} />
+            <BillingRow key={item.studentId} item={item} offers={offers} hasTemplates={hasTemplates} onChanged={billing.refetch} />
           ))}
         </div>
       )}

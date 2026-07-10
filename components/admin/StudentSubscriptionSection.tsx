@@ -123,6 +123,8 @@ function StudentSubscriptionForm({
   const [savedAccess, setSavedAccess] = useState(false);
   const [assigning, setAssigning] = useState(false);
   const [assigned, setAssigned] = useState(false);
+  const [deletingSubscription, setDeletingSubscription] = useState(false);
+  const [deletingPayment, setDeletingPayment] = useState(false);
   const modeSelectId = useId();
   const templateSelectId = useId();
   const noteId = useId();
@@ -152,6 +154,31 @@ function StudentSubscriptionForm({
     const result = await openPortal();
     if (result.url) {
       window.open(result.url, "_blank", "noopener,noreferrer");
+    }
+  }
+
+  async function handleDeleteSubscription() {
+    if (!activeSubscription) return;
+    if (!window.confirm("Supprimer définitivement cette ligne d'abonnement Supabase ? Ceci ne résilie rien côté Stripe.")) return;
+    setDeletingSubscription(true);
+    try {
+      await fetch(`/api/admin/billing/subscriptions/${activeSubscription.id}`, { method: "DELETE" });
+      window.location.reload();
+    } finally {
+      setDeletingSubscription(false);
+    }
+  }
+
+  async function handleDeletePayment() {
+    const lastPayment = billingSummary?.lastPayment;
+    if (!lastPayment) return;
+    if (!window.confirm("Supprimer définitivement ce paiement Supabase ? Ceci ne rembourse rien côté Stripe.")) return;
+    setDeletingPayment(true);
+    try {
+      await fetch(`/api/admin/billing/payments/${lastPayment.id}`, { method: "DELETE" });
+      window.location.reload();
+    } finally {
+      setDeletingPayment(false);
     }
   }
 
@@ -190,6 +217,30 @@ function StudentSubscriptionForm({
           />
           <InfoRow label="Reste à payer (manuel)" value={`${remainingAmountEuros(profile)} €`} />
         </div>
+        {(activeSubscription || billingSummary?.lastPayment) && (
+          <div className="flex flex-wrap gap-2 border-t border-border pt-3">
+            {activeSubscription && (
+              <button
+                type="button"
+                onClick={handleDeleteSubscription}
+                disabled={deletingSubscription}
+                className="text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {deletingSubscription ? "Suppression…" : "Supprimer l'abonnement (Supabase)"}
+              </button>
+            )}
+            {billingSummary?.lastPayment && (
+              <button
+                type="button"
+                onClick={handleDeletePayment}
+                disabled={deletingPayment}
+                className="text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {deletingPayment ? "Suppression…" : "Supprimer le dernier paiement (Supabase)"}
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex flex-col gap-3">

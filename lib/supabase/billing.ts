@@ -348,3 +348,41 @@ export async function recordStripePayment(supabase: TypedSupabaseClient, input: 
   devWarn("recordStripePayment (insert)", error);
   return data ? mapStripePaymentRow(data) : null;
 }
+
+/* ─── Suppression (routes API admin uniquement, nettoyage de données de test/historique) ─── */
+
+/**
+ * Historique complet des paiements Stripe d'un élève (contrairement à
+ * `getLastPaymentForStudent`, qui ne renvoie que le plus récent) — utilisé
+ * par l'admin pour lister et supprimer d'anciens paiements de test.
+ */
+export async function getPaymentsForStudent(supabase: TypedSupabaseClient, studentId: string): Promise<StripePayment[]> {
+  const { data, error } = await supabase
+    .from("stripe_payments")
+    .select("*")
+    .eq("student_id", studentId)
+    .order("created_at", { ascending: false });
+  devWarn("getPaymentsForStudent", error);
+  return (data ?? []).map(mapStripePaymentRow);
+}
+
+/** Supprime définitivement une ligne `stripe_payments` (nettoyage de test/erreur — n'annule rien côté Stripe). */
+export async function deleteStripePayment(supabase: TypedSupabaseClient, paymentId: string): Promise<boolean> {
+  const { error } = await supabase.from("stripe_payments").delete().eq("id", paymentId);
+  devWarn("deleteStripePayment", error);
+  return !error;
+}
+
+/** Supprime définitivement une ligne `subscriptions` (nettoyage de test/erreur — n'annule rien côté Stripe, voir aussi le Customer Portal pour une vraie annulation). */
+export async function deleteSubscriptionRecord(supabase: TypedSupabaseClient, subscriptionId: string): Promise<boolean> {
+  const { error } = await supabase.from("subscriptions").delete().eq("id", subscriptionId);
+  devWarn("deleteSubscriptionRecord", error);
+  return !error;
+}
+
+/** Supprime définitivement une ligne `billing_customers` (nettoyage de test — ne supprime pas le Customer côté Stripe). */
+export async function deleteBillingCustomer(supabase: TypedSupabaseClient, billingCustomerId: string): Promise<boolean> {
+  const { error } = await supabase.from("billing_customers").delete().eq("id", billingCustomerId);
+  devWarn("deleteBillingCustomer", error);
+  return !error;
+}
