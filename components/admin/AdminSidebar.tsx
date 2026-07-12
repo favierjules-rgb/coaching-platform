@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   ArrowLeft,
   CalendarDays,
+  CreditCard,
   Dumbbell,
   FileText,
   LayoutDashboard,
@@ -27,6 +28,7 @@ const adminLinks = [
   { href: "/admin/calendrier", label: "Calendrier", icon: CalendarDays },
   { href: "/admin/nutrition", label: "Nutrition", icon: Utensils },
   { href: "/admin/documents", label: "Documents", icon: FileText },
+  { href: "/admin/paiements", label: "Paiements", icon: CreditCard },
   { href: "/admin/retours", label: "Retours élèves", icon: MessageSquare },
   { href: "/admin/parametres", label: "Paramètres", icon: Settings },
 ];

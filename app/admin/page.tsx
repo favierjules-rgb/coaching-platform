@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import {
+  AlertTriangle,
   Bell,
   CalendarDays,
   ClipboardList,
+  CreditCard,
   Dumbbell,
   FileText,
   MessageSquare,
@@ -19,12 +21,14 @@ import { AdminSection } from "@/components/admin/AdminSection";
 import { StatusBadge, studentStatusTone } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
 import { useSupabaseActivity } from "@/hooks/useSupabaseActivity";
+import { useSupabaseAdminBilling } from "@/hooks/useSupabaseAdminBilling";
 import { useSupabaseAppointments } from "@/hooks/useSupabaseAppointments";
 import { useSupabaseDocuments } from "@/hooks/useSupabaseDocuments";
 import { useSupabaseNutritionPlans } from "@/hooks/useSupabaseNutritionPlans";
 import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { useSupabaseAdminFeedback } from "@/hooks/useSupabaseAdminFeedback";
+import { formatAmountCents } from "@/lib/stripe/status";
 import {
   fullName,
   studentsWithStaleWeight,
@@ -104,6 +108,7 @@ export default function AdminDashboardPage() {
   const documentsAreReal = supabaseDocuments.documents.length > 0;
   const supabaseAppointments = useSupabaseAppointments();
   const supabaseActivity = useSupabaseActivity();
+  const supabaseBilling = useSupabaseAdminBilling();
 
   const activeStudents = students.filter((s) => s.status === "actif");
   const pausedStudents = students.filter((s) => s.status === "pause");
@@ -114,6 +119,13 @@ export default function AdminDashboardPage() {
   const todayKey = new Date().toDateString();
   const todaysAppointments = supabaseAppointments.appointments.filter(
     (a) => (a.status === "pending" || a.status === "confirmed") && new Date(a.startAt).toDateString() === todayKey,
+  );
+
+  const activeSubscriptions = supabaseBilling.items.filter((item) => item.status === "actif");
+  const latePayments = supabaseBilling.items.filter((item) => item.status === "paiement_echoue");
+  const estimatedMonthlyRevenueCents = activeSubscriptions.reduce(
+    (total, item) => total + (item.subscription?.amountCents ?? 0),
+    0,
   );
 
   return (
@@ -153,6 +165,17 @@ export default function AdminDashboardPage() {
         />
         <StatCard icon={CalendarDays} label="Rendez-vous aujourd'hui" value={todaysAppointments.length} />
         <StatCard icon={Bell} label="Notifications (exemple)" value={mockNotifications.length} />
+      </div>
+
+      <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <StatCard icon={CreditCard} label="Abonnements actifs" value={activeSubscriptions.length} tone="primary" />
+        <StatCard
+          icon={AlertTriangle}
+          label="Paiements en retard"
+          value={latePayments.length}
+          tone={latePayments.length > 0 ? "amber" : "default"}
+        />
+        <StatCard icon={CreditCard} label="Revenu mensuel estimé" value={formatAmountCents(estimatedMonthlyRevenueCents)} />
       </div>
 
       <div className="mb-8 border border-border bg-card p-6">

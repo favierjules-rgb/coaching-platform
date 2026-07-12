@@ -7,6 +7,7 @@ import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getCurrentStudentId } from "@/lib/supabase/current-student";
 import { getOnboardingCompleted } from "@/lib/supabase/onboarding";
+import { getStudentAccessStatus } from "@/lib/supabase/student-access";
 
 /**
  * Guards à appeler en tête d'un layout/page Server Component protégé. Tant
@@ -75,6 +76,39 @@ export async function requireStudent(): Promise<void> {
   const completed = await getOnboardingCompleted(supabase, studentId);
   if (!completed) {
     redirect("/onboarding");
+  }
+}
+
+/**
+ * Contenu élève payant (entraînement, nutrition, documents, progression —
+ * chantier "supabase-stripe-access-control") : nécessite un abonnement
+ * Stripe actif/trialing, sauf dérogation manuelle du coach
+ * (`billing_access_mode`). Un coach/admin en prévisualisation n'est jamais
+ * bloqué (même logique que `requireStudent`) ; un élève sans fiche
+ * `students` du tout n'a rien à vérifier ici (cas déjà géré ailleurs).
+ * Redirige vers /acces-limite (jamais /acces-refuse, qui signifie "mauvais
+ * rôle" et non "paiement requis") si l'accès est refusé.
+ */
+export async function requireActiveStudentAccess(): Promise<void> {
+  await requireAuth();
+  if (!isSupabaseConfigured()) {
+    return;
+  }
+  const role = await getCurrentUserRole();
+  if (role !== "student") {
+    return;
+  }
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) {
+    return;
+  }
+  const studentId = await getCurrentStudentId(supabase);
+  if (!studentId) {
+    return;
+  }
+  const status = await getStudentAccessStatus(supabase, studentId);
+  if (!status.allowed) {
+    redirect("/acces-limite");
   }
 }
 

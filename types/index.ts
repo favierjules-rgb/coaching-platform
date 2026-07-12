@@ -1310,6 +1310,15 @@ export interface SupabaseStudentProfile {
   snackingNotes: string;
   workScheduleNotes: string;
   nutritionNotes: string;
+  /** Accès conditionnel au site (chantier "supabase-stripe-access-control") — voir lib/supabase/student-access.ts. */
+  billingAccessMode: BillingAccessMode;
+  assignedStripePlan: string | null;
+  assignedStripePriceId: string | null;
+  accessNote: string;
+  accessUpdatedAt: string | null;
+  accessUpdatedBy: string | null;
+  /** Modèle d'abonnement attribué (chantier "supabase-subscription-templates") — voir lib/supabase/subscription-templates.ts. */
+  assignedSubscriptionTemplateId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1859,7 +1868,10 @@ export type ActivityEventType =
   | "program_assigned"
   | "nutrition_assigned"
   | "coach_note_added"
-  | "progress_photo_uploaded";
+  | "progress_photo_uploaded"
+  | "payment_succeeded"
+  | "payment_failed"
+  | "subscription_cancelled";
 
 export interface ActivityEvent {
   id: string;
@@ -1872,4 +1884,142 @@ export interface ActivityEvent {
   metadata: Record<string, unknown>;
   isRead: boolean;
   createdAt: string;
+}
+
+/* ─── Paiements / abonnements Stripe (chantier "supabase-stripe-payments-subscriptions") ───
+ * Types des tables Supabase réelles billing_customers / subscriptions /
+ * stripe_payments / billing_events — voir supabase/schema.sql et
+ * docs/supabase-stripe-payments-subscriptions-model.md. Distincts de
+ * StudentPaymentProfile/StudentPaymentEntry (PaymentStatus/PaymentMethod
+ * plus haut), qui restent la fiche paiement saisie manuellement par le
+ * coach (table `payments`, inchangée) — deux systèmes séparés, non fusionnés.
+ * Source de vérité : Stripe (webhook) → Supabase, jamais l'inverse.
+ */
+
+export interface BillingCustomer {
+  id: string;
+  studentId: string;
+  stripeCustomerId: string;
+  email: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Statut Stripe brut (jamais traduit avant stockage) — voir lib/stripe/status.ts pour la traduction élève (actif/en attente/paiement échoué/annulé/expiré). */
+export type StripeSubscriptionStatus =
+  | "incomplete"
+  | "incomplete_expired"
+  | "trialing"
+  | "active"
+  | "past_due"
+  | "canceled"
+  | "unpaid"
+  | "paused";
+
+export interface Subscription {
+  id: string;
+  studentId: string;
+  stripeCustomerId: string | null;
+  stripeSubscriptionId: string;
+  stripePriceId: string | null;
+  stripeProductId: string | null;
+  planName: string;
+  status: StripeSubscriptionStatus | string;
+  currentPeriodStart: string | null;
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
+  cancelledAt: string | null;
+  amountCents: number | null;
+  currency: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StripePayment {
+  id: string;
+  studentId: string;
+  stripeCustomerId: string | null;
+  stripePaymentIntentId: string | null;
+  stripeInvoiceId: string | null;
+  stripeSubscriptionId: string | null;
+  amountCents: number | null;
+  currency: string;
+  status: string;
+  paidAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BillingEvent {
+  id: string;
+  stripeEventId: string;
+  eventType: string;
+  payload: Record<string, unknown>;
+  processedAt: string;
+  createdAt: string;
+}
+
+/** Statut simplifié affiché à l'élève, dérivé de Subscription.status (voir lib/stripe/status.ts). */
+export type StudentBillingStatus = "actif" | "en_attente" | "paiement_echoue" | "annule" | "expire" | "sans_abonnement";
+
+/** Résumé billing d'un élève, composé pour l'affichage admin/élève (voir lib/supabase/billing.ts). */
+export interface StudentBillingSummary {
+  studentId: string;
+  customer: BillingCustomer | null;
+  subscription: Subscription | null;
+  lastPayment: StripePayment | null;
+  status: StudentBillingStatus;
+}
+
+/* ─── Accès conditionnel au site (chantier "supabase-stripe-access-control") ───
+ * Colonnes ajoutées sur student_profiles — voir supabase/schema.sql et
+ * lib/supabase/student-access.ts. `subscription_required` (défaut) : accès
+ * dérivé de subscriptions.status. `manual_allowed`/`manual_blocked` :
+ * dérogation posée par le coach, prioritaire sur le statut Stripe.
+ */
+export type BillingAccessMode = "subscription_required" | "manual_allowed" | "manual_blocked";
+
+/** Raison précise de l'autorisation/refus d'accès — sert à afficher un message explicite (jamais juste "bloqué"). */
+export type StudentAccessReason =
+  | "manual_allowed"
+  | "manual_blocked"
+  | "subscription_active"
+  | "no_subscription"
+  | "subscription_incomplete"
+  | "subscription_incomplete_expired"
+  | "subscription_past_due"
+  | "subscription_canceled"
+  | "subscription_unpaid"
+  | "subscription_paused";
+
+export interface StudentAccessStatus {
+  allowed: boolean;
+  reason: StudentAccessReason;
+  accessMode: BillingAccessMode;
+  /** Statut Stripe brut ayant servi au calcul (null si aucun abonnement) — jamais recalculé/stocké ailleurs, toujours dérivé à la volée. */
+  subscriptionStatus: string | null;
+}
+
+/* ─── Modèles d'abonnements (chantier "supabase-subscription-templates") ───
+ * Formules gérées depuis l'admin (table subscription_templates) au lieu
+ * d'un mapping figé par variables d'environnement — voir
+ * lib/supabase/subscription-templates.ts et
+ * docs/supabase-stripe-payments-subscriptions-model.md.
+ */
+export type BillingInterval = "monthly" | "quarterly" | "yearly" | "one_time";
+
+export interface SubscriptionTemplate {
+  id: string;
+  name: string;
+  description: string;
+  amountCents: number;
+  currency: string;
+  billingInterval: BillingInterval;
+  durationMonths: number | null;
+  stripeProductId: string | null;
+  stripePriceId: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string | null;
 }

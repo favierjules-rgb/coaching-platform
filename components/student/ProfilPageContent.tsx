@@ -10,6 +10,7 @@ import { MeasurementsSection } from "@/components/student/MeasurementsSection";
 import { InfoRow, ProfileSection, TagList } from "@/components/student/ProfileSection";
 import { ProgressPhotoGallerySection } from "@/components/student/ProgressPhotoGallerySection";
 import { StudentOnboardingDetailModal } from "@/components/student/StudentOnboardingDetailModal";
+import { SubscriptionSection } from "@/components/student/SubscriptionSection";
 import { WeightEvolutionCard } from "@/components/student/WeightEvolutionCard";
 import { useStudentProfile, type StudentProfileState } from "@/hooks/useStudentProfile";
 import { useSupabaseStudentProfile } from "@/hooks/useSupabaseStudentProfile";
@@ -96,6 +97,14 @@ export function ProfilPageContent({
       </div>
 
       <CoachingSummaryCard profile={profile} />
+
+      {useSupabase && (
+        <div className="mb-6">
+          <ProfileSection title="Mon abonnement">
+            <SubscriptionSection />
+          </ProfileSection>
+        </div>
+      )}
 
       <ProgressPhotoGallerySection
         studentId={studentId}

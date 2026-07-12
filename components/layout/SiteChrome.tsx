@@ -14,10 +14,12 @@ const PRIVATE_PREFIXES = [
   "/profil",
   "/rendez-vous",
   "/progression",
+  "/paiement",
   "/admin",
   "/connexion",
   "/inscription",
   "/acces-refuse",
+  "/acces-limite",
 ];
 
 export function SiteChrome({ children }: { children: ReactNode }) {

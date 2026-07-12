@@ -4,16 +4,19 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Activity,
+  AlertTriangle,
   Calendar,
   CalendarX,
   Camera,
   CheckCircle2,
+  CreditCard,
   Dumbbell,
   FileText,
   MessageSquare,
   Scale,
   UserCheck,
   Utensils,
+  XCircle,
 } from "lucide-react";
 
 import { fullName } from "@/lib/admin";
@@ -32,6 +35,9 @@ const EVENT_ICONS: Record<ActivityEventType, typeof Activity> = {
   nutrition_assigned: Utensils,
   coach_note_added: MessageSquare,
   progress_photo_uploaded: Camera,
+  payment_succeeded: CreditCard,
+  payment_failed: AlertTriangle,
+  subscription_cancelled: XCircle,
 };
 
 function relativeTime(dateIso: string): string {

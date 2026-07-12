@@ -8,6 +8,7 @@ import {
   Dumbbell,
   FileText,
   LayoutDashboard,
+  Lock,
   TrendingUp,
   User,
   X,
@@ -15,15 +16,16 @@ import {
 
 import { SignOutButton } from "@/components/auth/SignOutButton";
 import { Logo } from "@/components/ui/Logo";
+import { useSupabaseMyAccess } from "@/hooks/useSupabaseMyAccess";
 
 const studentLinks = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/entrainement", label: "Entraînement", icon: Dumbbell },
-  { href: "/nutrition", label: "Nutrition", icon: Apple },
-  { href: "/rendez-vous", label: "Rendez-vous", icon: CalendarDays },
-  { href: "/progression", label: "Progression", icon: TrendingUp },
-  { href: "/documents", label: "Documents", icon: FileText },
-  { href: "/profil", label: "Profil", icon: User },
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, requiresAccess: false },
+  { href: "/entrainement", label: "Entraînement", icon: Dumbbell, requiresAccess: true },
+  { href: "/nutrition", label: "Nutrition", icon: Apple, requiresAccess: true },
+  { href: "/rendez-vous", label: "Rendez-vous", icon: CalendarDays, requiresAccess: false },
+  { href: "/progression", label: "Progression", icon: TrendingUp, requiresAccess: true },
+  { href: "/documents", label: "Documents", icon: FileText, requiresAccess: true },
+  { href: "/profil", label: "Profil", icon: User, requiresAccess: false },
 ];
 
 interface StudentSidebarProps {
@@ -36,6 +38,12 @@ export function StudentSidebar({
   onNavigate,
 }: StudentSidebarProps) {
   const pathname = usePathname();
+  // Cadenas plutôt que masquage (chantier "supabase-stripe-access-control")
+  // : l'onglet reste visible et cliquable — le clic mène bien à la page
+  // (le guard requireActiveStudentAccess redirige vers /acces-limite le cas
+  // échéant), c'est juste un indice visuel pour comprendre pourquoi.
+  const access = useSupabaseMyAccess();
+  const isBlocked = access.ready && access.status !== null && !access.status.allowed;
 
   return (
     <div className="flex h-full w-60 flex-col border-r border-border bg-card">
@@ -54,13 +62,15 @@ export function StudentSidebar({
       </div>
 
       <nav className="flex flex-1 flex-col gap-1 px-3 py-4">
-        {studentLinks.map(({ href, label, icon: Icon }) => {
+        {studentLinks.map(({ href, label, icon: Icon, requiresAccess }) => {
           const active = pathname === href;
+          const locked = requiresAccess && isBlocked;
           return (
             <Link
               key={href}
               href={href}
               onClick={onNavigate}
+              aria-label={locked ? `${label} (accès verrouillé — abonnement requis)` : label}
               className={`flex items-center gap-3 px-4 py-3 text-sm transition-colors ${
                 active
                   ? "bg-primary text-primary-foreground"
@@ -68,7 +78,8 @@ export function StudentSidebar({
               }`}
             >
               <Icon size={18} />
-              {label}
+              <span className="flex-1">{label}</span>
+              {locked && <Lock size={13} className="text-amber-400" aria-hidden="true" />}
             </Link>
           );
         })}

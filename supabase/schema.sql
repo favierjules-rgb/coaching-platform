@@ -1633,6 +1633,336 @@ alter table public.progress_photos drop constraint if exists progress_photos_sta
 alter table public.progress_photos add constraint progress_photos_status_check check (status in ('active', 'archived'));
 
 -- ============================================================================
+-- Migration additive — chantier "supabase-stripe-payments-subscriptions" :
+-- paiements/abonnements réels via Stripe Checkout + Customer Portal.
+--
+-- Audit : une table `payments` existe déjà (section 8 plus haut), mais elle
+-- correspond à une fiche paiement saisie manuellement par le coach
+-- (StudentPaymentProfile — offre, méthode virement/carte/espèces/chèque,
+-- échéancier saisi à la main, une seule ligne par élève via
+-- `student_id ... unique`). Ce n'est PAS un journal de transactions Stripe :
+-- forme différente (pas de colonnes stripe_*), cardinalité différente (une
+-- ligne par élève vs une ligne par transaction), et alimentée différemment
+-- (formulaire admin vs webhook). La réutiliser aurait cassé la section
+-- "Paiement" existante de /admin/eleves/[studentId] (PaymentSection). Elle
+-- est donc laissée totalement intacte, et la table de transactions Stripe
+-- ci-dessous est nommée `stripe_payments` pour éviter toute confusion/
+-- collision de nom.
+--
+-- Aucune des 4 tables ci-dessous (billing_customers, subscriptions,
+-- stripe_payments, billing_events) n'existait avant ce chantier.
+--
+-- Source de vérité : Stripe (webhook) → Supabase, jamais l'inverse. Toutes
+-- les écritures viennent du webhook `/api/stripe/webhook` ou des routes
+-- `/api/stripe/create-checkout-session` / `create-customer-portal-session`,
+-- exécutées côté serveur avec le client service role
+-- (lib/supabase/admin.ts, contourne RLS) après vérification manuelle des
+-- droits de l'appelant — jamais directement depuis le navigateur élève.
+-- Les policies RLS ci-dessous ne servent donc qu'à la LECTURE côté client
+-- (élève : son propre statut ; staff : tous) — aucune policy d'écriture
+-- n'est posée pour l'élève, conformément à "le statut abonnement ne doit
+-- jamais être modifié manuellement par l'élève côté frontend".
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 31. billing_customers — correspondance élève ↔ client Stripe (1:1).
+-- ----------------------------------------------------------------------------
+create table if not exists public.billing_customers (
+  id uuid primary key default gen_random_uuid(),
+  student_id uuid not null unique references public.students (id) on delete cascade,
+  stripe_customer_id text not null unique,
+  email text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists billing_customers_student_id_idx on public.billing_customers (student_id);
+
+-- ----------------------------------------------------------------------------
+-- 32. subscriptions — abonnement Stripe d'un élève. `status` reste la valeur
+--     Stripe brute (active/past_due/canceled/trialing/incomplete/unpaid/
+--     paused/incomplete_expired) — la traduction en statut élève (actif/en
+--     attente/paiement échoué/annulé/expiré) se fait à l'affichage
+--     (lib/stripe/status.ts), jamais stockée transformée.
+-- ----------------------------------------------------------------------------
+create table if not exists public.subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  student_id uuid not null references public.students (id) on delete cascade,
+  stripe_customer_id text,
+  stripe_subscription_id text not null unique,
+  stripe_price_id text,
+  stripe_product_id text,
+  plan_name text not null default '',
+  status text not null default 'incomplete',
+  current_period_start timestamptz,
+  current_period_end timestamptz,
+  cancel_at_period_end boolean not null default false,
+  cancelled_at timestamptz,
+  amount_cents integer,
+  currency text not null default 'eur',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists subscriptions_student_id_idx on public.subscriptions (student_id);
+create index if not exists subscriptions_status_idx on public.subscriptions (status);
+
+-- ----------------------------------------------------------------------------
+-- 33. stripe_payments — journal des transactions Stripe (une ligne par
+--     facture/paiement), distinct de la table `payments` existante (voir
+--     note d'audit ci-dessus).
+-- ----------------------------------------------------------------------------
+create table if not exists public.stripe_payments (
+  id uuid primary key default gen_random_uuid(),
+  student_id uuid not null references public.students (id) on delete cascade,
+  stripe_customer_id text,
+  stripe_payment_intent_id text,
+  stripe_invoice_id text,
+  stripe_subscription_id text,
+  amount_cents integer,
+  currency text not null default 'eur',
+  status text not null default '',
+  paid_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists stripe_payments_student_id_idx on public.stripe_payments (student_id);
+create unique index if not exists stripe_payments_invoice_id_idx on public.stripe_payments (stripe_invoice_id) where stripe_invoice_id is not null;
+
+-- ----------------------------------------------------------------------------
+-- 34. billing_events — journal brut des évènements webhook Stripe déjà
+--     traités, pour rendre le webhook idempotent (Stripe peut renvoyer le
+--     même évènement plusieurs fois).
+-- ----------------------------------------------------------------------------
+create table if not exists public.billing_events (
+  id uuid primary key default gen_random_uuid(),
+  stripe_event_id text not null unique,
+  event_type text not null,
+  payload jsonb not null default '{}'::jsonb,
+  processed_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);
+
+-- ----------------------------------------------------------------------------
+-- Triggers updated_at pour les nouvelles tables.
+-- ----------------------------------------------------------------------------
+do $$
+declare
+  t text;
+begin
+  for t in
+    select unnest(array['billing_customers', 'subscriptions', 'stripe_payments'])
+  loop
+    execute format(
+      'drop trigger if exists set_updated_at on public.%I; ' ||
+      'create trigger set_updated_at before update on public.%I ' ||
+      'for each row execute function public.set_updated_at();',
+      t, t
+    );
+  end loop;
+end $$;
+
+-- ----------------------------------------------------------------------------
+-- Row Level Security.
+-- ----------------------------------------------------------------------------
+alter table public.billing_customers enable row level security;
+alter table public.subscriptions enable row level security;
+alter table public.stripe_payments enable row level security;
+alter table public.billing_events enable row level security;
+
+-- Staff : accès complet (lecture du statut billing de tous les élèves,
+-- résumé paiement) — les écritures réelles passent par le client service
+-- role depuis les routes API, cette policy ne sert qu'à une éventuelle
+-- lecture directe côté navigateur admin.
+drop policy if exists "billing_customers_manage_staff" on public.billing_customers;
+create policy "billing_customers_manage_staff" on public.billing_customers
+  for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
+drop policy if exists "subscriptions_manage_staff" on public.subscriptions;
+create policy "subscriptions_manage_staff" on public.subscriptions
+  for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
+drop policy if exists "stripe_payments_manage_staff" on public.stripe_payments;
+create policy "stripe_payments_manage_staff" on public.stripe_payments
+  for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
+drop policy if exists "billing_events_manage_staff" on public.billing_events;
+create policy "billing_events_manage_staff" on public.billing_events
+  for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
+
+-- Élève : lecture seule de son propre statut billing. Aucune policy
+-- d'insert/update/delete pour l'élève : le statut ne peut jamais être
+-- modifié directement depuis le frontend élève, uniquement via le webhook
+-- Stripe (client service role, contourne RLS).
+drop policy if exists "billing_customers_select_own_student" on public.billing_customers;
+create policy "billing_customers_select_own_student" on public.billing_customers
+  for select using (student_id = public.current_student_id());
+drop policy if exists "subscriptions_select_own_student" on public.subscriptions;
+create policy "subscriptions_select_own_student" on public.subscriptions
+  for select using (student_id = public.current_student_id());
+drop policy if exists "stripe_payments_select_own_student" on public.stripe_payments;
+create policy "stripe_payments_select_own_student" on public.stripe_payments
+  for select using (student_id = public.current_student_id());
+-- billing_events : aucune policy élève — journal interne, jamais exposé.
+
+-- ============================================================================
+-- Migration additive — chantier "supabase-stripe-access-control" : accès
+-- conditionnel aux pages élève (entraînement, nutrition, documents,
+-- progression) selon l'abonnement Stripe, avec dérogation manuelle
+-- possible par le coach. Ajoute 6 colonnes sur `student_profiles`
+-- (proposition de l'utilisateur — table déjà porteuse d'autres réglages
+-- élève, aucune nouvelle table nécessaire). `student_profiles` a déjà une
+-- policy `student_profiles_manage_self_or_staff` en `for all` qui laisse
+-- l'élève modifier SA PROPRE ligne (utilisée pour l'auto-édition du profil/
+-- préférences) — Postgres RLS étant limité à la ligne entière (pas de
+-- restriction par colonne), un trigger dédié protège spécifiquement ces 6
+-- colonnes : toute tentative de modification par un appelant qui n'est pas
+-- coach/admin est silencieusement annulée (revert à l'ancienne valeur),
+-- sans affecter le reste de la ligne (ses préférences restent modifiables
+-- normalement). C'est la seule modification de sécurité de ce chantier —
+-- aucune policy existante n'est supprimée ni affaiblie.
+-- ============================================================================
+alter table public.student_profiles add column if not exists billing_access_mode text not null default 'subscription_required';
+alter table public.student_profiles drop constraint if exists student_profiles_billing_access_mode_check;
+alter table public.student_profiles add constraint student_profiles_billing_access_mode_check check (billing_access_mode in ('subscription_required', 'manual_allowed', 'manual_blocked'));
+alter table public.student_profiles add column if not exists assigned_stripe_plan text;
+alter table public.student_profiles add column if not exists assigned_stripe_price_id text;
+alter table public.student_profiles add column if not exists access_note text not null default '';
+alter table public.student_profiles add column if not exists access_updated_at timestamptz;
+alter table public.student_profiles add column if not exists access_updated_by uuid references public.coaches (id) on delete set null;
+
+create or replace function public.protect_student_profiles_access_columns()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_coach_or_admin() then
+    new.billing_access_mode := old.billing_access_mode;
+    new.assigned_stripe_plan := old.assigned_stripe_plan;
+    new.assigned_stripe_price_id := old.assigned_stripe_price_id;
+    new.access_note := old.access_note;
+    new.access_updated_at := old.access_updated_at;
+    new.access_updated_by := old.access_updated_by;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists protect_access_columns on public.student_profiles;
+create trigger protect_access_columns
+  before update on public.student_profiles
+  for each row
+  execute function public.protect_student_profiles_access_columns();
+
+-- ============================================================================
+-- Migration additive — chantier "supabase-subscription-templates" : modèles
+-- d'abonnements gérés depuis l'admin (plus besoin de modifier le code pour
+-- changer un prix/une formule). Remplace progressivement le mapping statique
+-- par variables d'environnement (STRIPE_PRICE_COACHING_BASIC/PREMIUM/
+-- DISTANCIEL, chantier "supabase-stripe-payments-subscriptions") — celui-ci
+-- reste en repli tant qu'aucun template ne correspond, voir
+-- lib/stripe/plans-server.ts.
+--
+-- `stripe_price_id` unique : un prix Stripe donné ne doit correspondre qu'à
+-- un seul template (sert aussi de clé d'idempotence pour le seed ci-dessous
+-- des 3 formules déjà créées manuellement dans Stripe par l'utilisateur).
+-- ============================================================================
+create table if not exists public.subscription_templates (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  description text not null default '',
+  amount_cents integer not null check (amount_cents >= 0),
+  currency text not null default 'eur',
+  billing_interval text not null default 'monthly' check (billing_interval in ('monthly', 'quarterly', 'yearly', 'one_time')),
+  duration_months integer,
+  stripe_product_id text,
+  stripe_price_id text unique,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  created_by uuid references public.coaches (id) on delete set null
+);
+create index if not exists subscription_templates_is_active_idx on public.subscription_templates (is_active);
+
+drop trigger if exists set_updated_at on public.subscription_templates;
+create trigger set_updated_at before update on public.subscription_templates
+  for each row execute function public.set_updated_at();
+
+alter table public.subscription_templates enable row level security;
+
+-- Lecture : tout utilisateur authentifié peut voir les formules actives
+-- (nécessaire au sélecteur élève "Activer mon abonnement" et au sélecteur
+-- admin "Modèle attribué") — même principe que coach_availabilities
+-- (référentiel partagé, pas de donnée personnelle). Les formules archivées
+-- (is_active = false, conservées pour l'historique des prix) restent
+-- réservées au staff.
+drop policy if exists "subscription_templates_select_active_or_staff" on public.subscription_templates;
+create policy "subscription_templates_select_active_or_staff" on public.subscription_templates
+  for select using (is_active = true or public.is_coach_or_admin());
+drop policy if exists "subscription_templates_manage_staff" on public.subscription_templates;
+create policy "subscription_templates_manage_staff" on public.subscription_templates
+  for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
+
+-- Seed : les 3 formules déjà créées manuellement dans le dashboard Stripe
+-- par l'utilisateur avant ce chantier (voir docs/supabase-subscription-templates-model.md)
+-- — idempotent via le unique sur stripe_price_id, aucun risque de doublon
+-- si ce script est rejoué.
+insert into public.subscription_templates (name, description, amount_cents, currency, billing_interval, stripe_product_id, stripe_price_id)
+values
+  ('Coaching distanciel', 'Coaching à distance — suivi personnalisé.', 15000, 'eur', 'monthly', 'prod_Uqy4ixEkxNgZLf', 'price_1TrG83LBSSMeCJsshZXkkXW6'),
+  ('Coaching Présentiel', 'Coaching en salle — séances encadrées.', 24700, 'eur', 'monthly', 'prod_Uqzhuc21b5EznN', 'price_1TrHi7LBSSMeCJssb0gnx2Fi'),
+  ('Coaching premium', 'Formule complète — suivi renforcé.', 39700, 'eur', 'monthly', 'prod_UqzhniwVDaqmBG', 'price_1TrHiNLBSSMeCJssVW33aKUw')
+on conflict (stripe_price_id) do nothing;
+
+-- ----------------------------------------------------------------------------
+-- Attribution d'un modèle à un élève (student_profiles). Colonne protégée
+-- au même titre que les 6 colonnes d'accès déjà en place (voir chantier
+-- "supabase-stripe-access-control" plus haut) : le trigger
+-- protect_access_columns est étendu pour couvrir aussi celle-ci.
+-- ----------------------------------------------------------------------------
+alter table public.student_profiles add column if not exists assigned_subscription_template_id uuid references public.subscription_templates (id) on delete set null;
+
+create or replace function public.protect_student_profiles_access_columns()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_coach_or_admin() then
+    new.billing_access_mode := old.billing_access_mode;
+    new.assigned_stripe_plan := old.assigned_stripe_plan;
+    new.assigned_stripe_price_id := old.assigned_stripe_price_id;
+    new.access_note := old.access_note;
+    new.access_updated_at := old.access_updated_at;
+    new.access_updated_by := old.access_updated_by;
+    new.assigned_subscription_template_id := old.assigned_subscription_template_id;
+  end if;
+  return new;
+end;
+$$;
+-- Le trigger existant réutilise automatiquement cette nouvelle définition
+-- (create or replace function), aucun besoin de le recréer.
+
+-- ----------------------------------------------------------------------------
+-- Correction "supabase-subscription-templates" (suite) : un élève doit
+-- pouvoir lire le modèle qui lui a été attribué même si l'admin l'a
+-- archivé depuis (is_active = false) — sinon /profil et /acces-limite
+-- afficheraient "aucune formule attribuée" à tort après un archivage,
+-- alors que l'élève doit toujours voir/payer exactement ce qui lui a été
+-- attribué. Élargit la policy de lecture existante (formules actives ou
+-- staff) pour couvrir aussi "le modèle référencé par ma propre fiche
+-- élève", sans rien retirer.
+-- ----------------------------------------------------------------------------
+drop policy if exists "subscription_templates_select_active_or_staff" on public.subscription_templates;
+create policy "subscription_templates_select_active_or_staff" on public.subscription_templates
+  for select using (
+    is_active = true
+    or public.is_coach_or_admin()
+    or id in (
+      select assigned_subscription_template_id from public.student_profiles
+      where student_id = public.current_student_id()
+    )
+  );
+
+-- ============================================================================
 -- Fin du schéma initial. Prochaine étape (pas dans ce fichier) : régénérer
 -- types/supabase.ts avec `supabase gen types typescript`, puis brancher
 -- progressivement chaque page mock sur ces tables (voir README.md).

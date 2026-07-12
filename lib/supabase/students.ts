@@ -206,6 +206,13 @@ function mapStudentProfileRow(row: StudentProfileRow): SupabaseStudentProfile {
     snackingNotes: row.snacking_notes ?? "",
     workScheduleNotes: row.work_schedule_notes ?? "",
     nutritionNotes: row.nutrition_notes ?? "",
+    billingAccessMode: row.billing_access_mode,
+    assignedStripePlan: row.assigned_stripe_plan,
+    assignedStripePriceId: row.assigned_stripe_price_id,
+    accessNote: row.access_note ?? "",
+    accessUpdatedAt: row.access_updated_at,
+    accessUpdatedBy: row.access_updated_by,
+    assignedSubscriptionTemplateId: row.assigned_subscription_template_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
