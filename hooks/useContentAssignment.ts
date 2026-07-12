@@ -42,8 +42,18 @@ export function useContentAssignment(
       if (active[contentType] && write) {
         const supabase = createSupabaseBrowserClient();
         if (supabase) {
-          void write(supabase, studentId, contentId, assigned).then(() => {
+          void write(supabase, studentId, contentId, assigned).then((ok) => {
             onWritten?.();
+            // Email envoyé uniquement lors d'une vraie nouvelle attribution
+            // (jamais au retrait, "assigned" ci-dessus) — best-effort, ne
+            // bloque jamais l'action d'attribution elle-même.
+            if (ok && assigned) {
+              fetch("/api/email/content-assigned", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ studentId, contentType, contentId }),
+              }).catch(() => {});
+            }
           });
           return;
         }
