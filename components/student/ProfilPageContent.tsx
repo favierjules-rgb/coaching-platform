@@ -8,6 +8,7 @@ import { GoalsSection } from "@/components/student/GoalsSection";
 import { InjurySection } from "@/components/student/InjurySection";
 import { MeasurementsSection } from "@/components/student/MeasurementsSection";
 import { InfoRow, ProfileSection, TagList } from "@/components/student/ProfileSection";
+import { NewsletterPreferenceToggle } from "@/components/student/NewsletterPreferenceToggle";
 import { ProgressPhotoGallerySection } from "@/components/student/ProgressPhotoGallerySection";
 import { StudentOnboardingDetailModal } from "@/components/student/StudentOnboardingDetailModal";
 import { SubscriptionSection } from "@/components/student/SubscriptionSection";
@@ -252,6 +253,7 @@ export function ProfilPageContent({
           </div>
         </>
       )}
+    <NewsletterPreferenceToggle />
     </div>
   );
 }
