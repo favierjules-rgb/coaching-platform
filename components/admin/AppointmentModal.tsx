@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CheckCircle, Plus } from "lucide-react";
 
 import { Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
@@ -45,6 +45,11 @@ export function AppointmentModal({
   const [durationMinutes, setDurationMinutes] = useState(defaultDurationMinutes);
   const [location, setLocation] = useState("");
   const [meetingUrl, setMeetingUrl] = useState("");
+
+  useEffect(() => {
+    if (studentId || students.length === 0) return;
+    setStudentId(students[0].id);
+  }, [students, studentId]);
 
   function close() {
     setOpen(false);
