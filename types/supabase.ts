@@ -1773,6 +1773,54 @@ export interface Database {
         };
         Relationships: [];
       };
+      email_logs: {
+        Row: {
+          id: string;
+          recipient_email: string;
+          recipient_user_id: string | null;
+          email_type: string;
+          subject: string;
+          resend_email_id: string | null;
+          status: string;
+          related_entity_type: string | null;
+          related_entity_id: string | null;
+          error_message: string | null;
+          metadata: Record<string, unknown>;
+          sent_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          recipient_email: string;
+          recipient_user_id?: string | null;
+          email_type: string;
+          subject: string;
+          resend_email_id?: string | null;
+          status?: string;
+          related_entity_type?: string | null;
+          related_entity_id?: string | null;
+          error_message?: string | null;
+          metadata?: Record<string, unknown>;
+          sent_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          recipient_email?: string;
+          recipient_user_id?: string | null;
+          email_type?: string;
+          subject?: string;
+          resend_email_id?: string | null;
+          status?: string;
+          related_entity_type?: string | null;
+          related_entity_id?: string | null;
+          error_message?: string | null;
+          metadata?: Record<string, unknown>;
+          sent_at?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

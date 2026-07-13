@@ -223,6 +223,13 @@ export async function updateBookingSettings(
 
 /* ─── Rendez-vous ─── */
 
+/** Un rendez-vous précis par id — utilisé notamment par app/api/email/appointment-notification (chantier "supabase-resend-transactional-emails") pour relire l'état réel avant d'envoyer l'email correspondant. */
+export async function getAppointmentById(supabase: TypedSupabaseClient, appointmentId: string): Promise<AdminAppointment | null> {
+  const { data, error } = await supabase.from("appointments").select("*").eq("id", appointmentId).maybeSingle();
+  devWarn("getAppointmentById", error);
+  return data ? mapAppointmentRow(data) : null;
+}
+
 /** Tous les rendez-vous (vue admin), plus récents en premier par date de début. */
 export async function getAllAppointments(supabase: TypedSupabaseClient): Promise<AdminAppointment[]> {
   const { data, error } = await supabase.from("appointments").select("*").order("start_at", { ascending: false });

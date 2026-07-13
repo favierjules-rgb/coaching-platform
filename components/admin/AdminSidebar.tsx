@@ -10,6 +10,7 @@ import {
   FileText,
   LayoutDashboard,
   Library,
+  Mail,
   MessageSquare,
   Settings,
   Users,
@@ -29,6 +30,7 @@ const adminLinks = [
   { href: "/admin/nutrition", label: "Nutrition", icon: Utensils },
   { href: "/admin/documents", label: "Documents", icon: FileText },
   { href: "/admin/paiements", label: "Paiements", icon: CreditCard },
+  { href: "/admin/emails", label: "Emails", icon: Mail },
   { href: "/admin/retours", label: "Retours élèves", icon: MessageSquare },
   { href: "/admin/parametres", label: "Paramètres", icon: Settings },
 ];

@@ -2023,3 +2023,40 @@ export interface SubscriptionTemplate {
   updatedAt: string;
   createdBy: string | null;
 }
+
+/* ─── Emails transactionnels (chantier "supabase-resend-transactional-emails") ───
+ * Un seul journal (table email_logs) pour tous les emails envoyés via
+ * Resend, quel que soit le déclencheur — voir
+ * lib/email/send-transactional-email.ts et docs/resend-transactional-emails.md.
+ * Union centralisée pour éviter les chaînes répétées dans le code.
+ */
+export type EmailType =
+  | "welcome"
+  | "subscription_assigned"
+  | "payment_succeeded"
+  | "payment_failed"
+  | "subscription_cancelled"
+  | "program_assigned"
+  | "nutrition_assigned"
+  | "document_assigned"
+  | "appointment_created"
+  | "appointment_cancelled"
+  | "appointment_reminder";
+
+export type EmailStatus = "pending" | "sent" | "failed" | "skipped";
+
+export interface EmailLog {
+  id: string;
+  recipientEmail: string;
+  recipientUserId: string | null;
+  emailType: EmailType;
+  subject: string;
+  resendEmailId: string | null;
+  status: EmailStatus;
+  relatedEntityType: string | null;
+  relatedEntityId: string | null;
+  errorMessage: string | null;
+  metadata: Record<string, unknown>;
+  sentAt: string | null;
+  createdAt: string;
+}

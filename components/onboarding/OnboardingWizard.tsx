@@ -77,6 +77,11 @@ export function OnboardingWizard() {
       setError(true);
       return;
     }
+    fetch("/api/email/welcome", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ studentId }),
+    }).catch(() => {});
     router.refresh();
     router.push("/dashboard");
   }

@@ -3,15 +3,24 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type Stripe from "stripe";
 
+import {
+  composePaymentFailedEmail,
+  composePaymentSucceededEmail,
+  composeSubscriptionCancelledEmail,
+} from "@/lib/email/templates";
+import { sendTransactionalEmail } from "@/lib/email/send-transactional-email";
+import { getStripeClient } from "@/lib/stripe/client";
+import { getInvoiceCustomerId, getInvoicePaymentIntentId, getInvoiceSubscriptionId } from "@/lib/stripe/invoice-helpers";
+import { getResolvedPlanByPriceId } from "@/lib/stripe/plans-server";
 import { buildStudentActivityLink, logActivityEvent } from "@/lib/supabase/activity";
 import {
   findStudentIdByStripeCustomerId,
+  getSubscriptionForStudent,
   recordStripePayment,
   upsertBillingCustomer,
   upsertSubscription,
 } from "@/lib/supabase/billing";
-import { getInvoiceCustomerId, getInvoicePaymentIntentId, getInvoiceSubscriptionId } from "@/lib/stripe/invoice-helpers";
-import { getResolvedPlanByPriceId } from "@/lib/stripe/plans-server";
+import { getStudentById } from "@/lib/supabase/students";
 import { getSubscriptionTemplateByPriceId } from "@/lib/supabase/subscription-templates";
 import type { Database } from "@/types/supabase";
 
@@ -33,6 +42,24 @@ function toIso(unixSeconds: number | null | undefined): string | null {
 function extractId(value: string | { id: string } | null | undefined): string | null {
   if (!value) return null;
   return typeof value === "string" ? value : value.id;
+}
+
+function appUrl(): string {
+  return process.env.NEXT_PUBLIC_APP_URL || "";
+}
+
+/** Portail client Stripe pour le bouton "Mettre à jour mon moyen de paiement" de l'email d'échec de paiement — repli sur /profil (où l'élève peut relancer le portail lui-même) si la création échoue ou si Stripe n'est pas disponible. */
+async function buildPortalUrlOrFallback(stripeCustomerId: string): Promise<string> {
+  const profileUrl = `${appUrl()}/profil`;
+  const stripe = getStripeClient();
+  if (!stripe) return profileUrl;
+  try {
+    const session = await stripe.billingPortal.sessions.create({ customer: stripeCustomerId, return_url: profileUrl });
+    return session.url;
+  } catch (error) {
+    console.error("[Stripe webhook] Échec de création du lien portail pour l'email d'échec de paiement", error);
+    return profileUrl;
+  }
 }
 
 /** Upsert la ligne `subscriptions` à partir d'un objet Stripe.Subscription — renvoie le student_id résolu, ou `null` si impossible à résoudre. */
@@ -110,6 +137,27 @@ export async function handleSubscriptionDeleted(supabase: TypedSupabaseClient, s
     description: "L'abonnement Stripe de l'élève a été annulé.",
     metadata: buildStudentActivityLink(studentId),
   });
+
+  const student = await getStudentById(supabase, studentId);
+  if (student?.email) {
+    const item = subscription.items.data[0];
+    const email = composeSubscriptionCancelledEmail({
+      firstName: student.firstName,
+      accessEndDate: toIso(item?.current_period_end),
+      profileUrl: `${appUrl()}/profil`,
+    });
+    await sendTransactionalEmail(supabase, {
+      emailType: "subscription_cancelled",
+      recipientEmail: student.email,
+      recipientUserId: student.userId,
+      subject: email.subject,
+      html: email.html,
+      text: email.text,
+      relatedEntityType: "subscription",
+      relatedEntityId: studentId,
+      metadata: { stripeSubscriptionId: subscription.id },
+    });
+  }
 }
 
 /** invoice.payment_succeeded. */
@@ -140,6 +188,33 @@ export async function handleInvoicePaymentSucceeded(supabase: TypedSupabaseClien
     description: `${(invoice.amount_paid / 100).toFixed(2)} ${invoice.currency.toUpperCase()}`,
     metadata: buildStudentActivityLink(studentId),
   });
+
+  // Seule source de l'email "paiement réussi" : invoice.payment_succeeded,
+  // jamais checkout.session.completed (qui ne fait que relier le customer,
+  // voir handleCheckoutSessionCompleted) — évite tout doublon entre les
+  // deux évènements, conformément à la consigne du chantier.
+  const student = await getStudentById(supabase, studentId);
+  if (student?.email) {
+    const subscription = await getSubscriptionForStudent(supabase, studentId);
+    const email = composePaymentSucceededEmail({
+      firstName: student.firstName,
+      planName: subscription?.planName ?? "",
+      amountCents: invoice.amount_paid,
+      currency: invoice.currency,
+      dashboardUrl: `${appUrl()}/dashboard`,
+    });
+    await sendTransactionalEmail(supabase, {
+      emailType: "payment_succeeded",
+      recipientEmail: student.email,
+      recipientUserId: student.userId,
+      subject: email.subject,
+      html: email.html,
+      text: email.text,
+      relatedEntityType: "stripe_invoice",
+      relatedEntityId: studentId,
+      metadata: { stripeInvoiceId: invoice.id, amountCents: invoice.amount_paid },
+    });
+  }
 }
 
 /** invoice.payment_failed. */
@@ -170,4 +245,25 @@ export async function handleInvoicePaymentFailed(supabase: TypedSupabaseClient, 
     description: `${(invoice.amount_due / 100).toFixed(2)} ${invoice.currency.toUpperCase()}`,
     metadata: buildStudentActivityLink(studentId),
   });
+
+  const student = await getStudentById(supabase, studentId);
+  if (student?.email) {
+    const portalUrl = await buildPortalUrlOrFallback(stripeCustomerId);
+    const email = composePaymentFailedEmail({
+      firstName: student.firstName,
+      portalUrl,
+      profileUrl: `${appUrl()}/profil`,
+    });
+    await sendTransactionalEmail(supabase, {
+      emailType: "payment_failed",
+      recipientEmail: student.email,
+      recipientUserId: student.userId,
+      subject: email.subject,
+      html: email.html,
+      text: email.text,
+      relatedEntityType: "stripe_invoice",
+      relatedEntityId: studentId,
+      metadata: { stripeInvoiceId: invoice.id, amountCents: invoice.amount_due },
+    });
+  }
 }

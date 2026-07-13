@@ -145,9 +145,20 @@ function StudentSubscriptionForm({
   async function handleAssignTemplate() {
     setAssigning(true);
     setAssigned(false);
+    const isNewAssignment = !!templateId && templateId !== assignedTemplateId;
     const ok = await saveAccess({ billingAccessMode: mode, assignedSubscriptionTemplateId: templateId || null, accessNote: note });
     setAssigning(false);
     setAssigned(ok);
+    // Email envoyé uniquement lors d'une vraie nouvelle attribution (pas si
+    // le modèle attribué n'a pas changé, pas si on l'a retiré) — best-effort,
+    // n'affecte jamais le retour visuel "Modèle attribué." ci-dessus.
+    if (ok && isNewAssignment) {
+      fetch("/api/email/subscription-assigned", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentId }),
+      }).catch(() => {});
+    }
   }
 
   async function handleOpenPortal() {
