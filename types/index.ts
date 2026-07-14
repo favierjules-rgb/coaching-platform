@@ -737,6 +737,63 @@ export interface StudentPaymentProfile {
 
 export type AdminRepsValue = string; // "8" | "8-10" | "12-15" | "AMRAP" ...
 
+/* ─── Training Builder V2 (chantier "training-builder-v2") ───
+ * Blocs (superset/circuit/EMOM...) et prescriptions par série (mode
+ * détaillé), en plus des champs "mode simple" déjà existants sur
+ * AdminExercise (sets/reps/recommendedLoad) qui restent intacts et
+ * fonctionnels seuls — voir docs/training-builder-v2.md.
+ */
+
+export type ProgramType = "individual" | "group" | "fixed_duration";
+export type PublicationStatus = "draft" | "published" | "archived";
+
+export type TrainingBlockType =
+  | "standard"
+  | "warmup"
+  | "strength"
+  | "superset"
+  | "tri_set"
+  | "giant_set"
+  | "circuit"
+  | "emom"
+  | "amrap"
+  | "interval"
+  | "cooldown"
+  | "benchmark"
+  | "custom";
+
+export type TrainingBlockColorKey = "gray" | "red" | "orange" | "yellow" | "green" | "blue" | "purple";
+export type TrainingSetType = "normal" | "warmup" | "top_set" | "back_off" | "failure" | "optional";
+export type LoadUnit = "kg" | "lb";
+/** Convention explicite de saisie de charge — voir docs/training-builder-v2.md pour la formule de tonnage associée à chaque valeur. */
+export type LoadInputMode = "total" | "per_side" | "per_implement";
+
+export interface AdminTrainingPrescription {
+  id: string;
+  exerciseId: string;
+  setNumber: number;
+  setType: TrainingSetType;
+  targetReps: number | null;
+  repsMin: number | null;
+  repsMax: number | null;
+  durationSeconds: number | null;
+  distanceMeters: number | null;
+  targetLoad: number | null;
+  loadUnit: LoadUnit;
+  loadInputMode: LoadInputMode;
+  targetPercentage: number | null;
+  targetRpe: number | null;
+  targetRir: number | null;
+  bodyweightPercentage: number | null;
+  tempoEccentric: string | null;
+  tempoBottomPause: string | null;
+  tempoConcentric: string | null;
+  tempoTopPause: string | null;
+  restSeconds: number | null;
+  coachNotes: string;
+  position: number;
+}
+
 export interface AdminExercise {
   id: string;
   order: number;
@@ -764,6 +821,34 @@ export interface AdminExercise {
    * exercice créé en texte libre ou avant ce chantier.
    */
   libraryExerciseId?: string;
+  /** Bloc parent (voir AdminTrainingBlock). Absent pour un exercice legacy (regroupé dans un bloc "standard" synthétisé à la lecture, jamais écrit en base). */
+  blockId?: string;
+  /** Label A1/A2/A3 au sein d'un bloc superset/tri-set/giant-set. */
+  supersetLabel?: string;
+  /** Mode détaillé (une prescription par série) — absent/vide en mode simple, qui reste piloté par sets/reps/recommendedLoad ci-dessus. */
+  prescriptions?: AdminTrainingPrescription[];
+}
+
+export interface AdminTrainingBlock {
+  id: string;
+  sessionId: string;
+  blockType: TrainingBlockType;
+  title: string;
+  description: string;
+  scoringType: string | null;
+  colorKey: TrainingBlockColorKey;
+  rounds: number | null;
+  timeCapSeconds: number | null;
+  durationSeconds: number | null;
+  workSeconds: number | null;
+  restSeconds: number | null;
+  emomMinutes: number | null;
+  position: number;
+  mediaPath: string | null;
+  versionNumber: number;
+  /** true pour un bloc "standard" reconstitué à la lecture pour une séance legacy (block_id absent en base) — jamais persisté tel quel. */
+  isSynthesizedStandard?: boolean;
+  exercises: AdminExercise[];
 }
 
 export interface AdminWorkoutSession {
@@ -777,6 +862,9 @@ export interface AdminWorkoutSession {
   durationMinutes: number;
   warmup: string;
   coachNotes: string;
+  /** Exercices groupés en blocs (voir AdminTrainingBlock) — source de vérité côté V2. */
+  blocks: AdminTrainingBlock[];
+  /** Liste plate dérivée de `blocks` (flatMap), conservée pour compatibilité avec le code existant (lib/training-metrics.ts, affichage élève legacy...) qui lit directement `session.exercises`. */
   exercises: AdminExercise[];
 }
 
@@ -794,6 +882,20 @@ export interface AdminProgram {
   durationWeeks: number;
   description: string;
   status: AdminContentStatus;
+  /** Individuel (copie propre à un élève) / groupe (structure partagée, comportement historique) / durée fixe. Default "group" pour tout programme créé avant ce chantier. */
+  programType: ProgramType;
+  /** Frontière RLS élève réelle (distincte de `status` ci-dessus, qui reste purement informatif côté admin) — un élève ne voit jamais un programme "draft". */
+  publicationStatus: PublicationStatus;
+  coverImagePath: string | null;
+  experienceLevel: number | null;
+  expectedDaysPerWeek: number | null;
+  estimatedSessionDurationMinutes: number | null;
+  /** Programme modèle dont celui-ci a été copié (copie individuelle à l'attribution) — null pour un modèle ou un programme créé avant ce chantier. */
+  sourceTemplateId: string | null;
+  /** Renseigné uniquement pour une copie individualisée (programType "individual"). */
+  ownerStudentId: string | null;
+  versionNumber: number;
+  publishedAt: string | null;
   assignedStudentIds: string[];
   sessions: AdminWorkoutSession[];
   createdAt: string;

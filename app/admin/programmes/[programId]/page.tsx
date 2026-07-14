@@ -121,7 +121,18 @@ export default function ProgramDetailPage() {
               durationWeeks: program.durationWeeks,
               description: program.description,
               status: program.status,
-              sessions: program.sessions,
+              // Ce builder ne sait pas encore éditer les blocs (voir
+              // chantier training-builder-v2, éditeur de blocs à venir) —
+              // `blocks` est toujours vidé ici pour que la sauvegarde
+              // reconstruise systématiquement un unique bloc "standard" à
+              // partir d'`exercises` (lib/supabase/programs.ts,
+              // upsertBlocksForSession) plutôt que de réécrire une
+              // structure de blocs figée au moment du chargement.
+              sessions: program.sessions.map((session) => ({
+                ...session,
+                blocks: [],
+                exercises: session.exercises.map((ex) => ({ ...ex, blockId: undefined, supersetLabel: undefined, prescriptions: undefined })),
+              })),
             }}
             library={exerciseLibrary}
             onSave={handleSave}

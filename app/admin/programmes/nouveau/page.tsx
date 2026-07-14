@@ -49,6 +49,16 @@ export default function NewProgramPage() {
     }
     const id = createProgram({
       ...data,
+      programType: "group",
+      publicationStatus: "published",
+      coverImagePath: null,
+      experienceLevel: null,
+      expectedDaysPerWeek: null,
+      estimatedSessionDurationMinutes: null,
+      sourceTemplateId: null,
+      ownerStudentId: null,
+      versionNumber: 1,
+      publishedAt: null,
       assignedStudentIds: [],
       sessions: data.sessions.map((s) => ({ ...s, programId: "" })),
     });

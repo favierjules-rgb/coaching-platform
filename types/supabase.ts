@@ -769,6 +769,17 @@ export interface Database {
           duration_weeks: number;
           description: string;
           status: "brouillon" | "actif" | "archivé";
+          program_type: "individual" | "group" | "fixed_duration";
+          publication_status: "draft" | "published" | "archived";
+          cover_image_path: string | null;
+          experience_level: number | null;
+          expected_days_per_week: number | null;
+          estimated_session_duration_minutes: number | null;
+          source_template_id: string | null;
+          owner_student_id: string | null;
+          version_number: number;
+          published_at: string | null;
+          last_updated_by: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -781,6 +792,17 @@ export interface Database {
           duration_weeks?: number;
           description?: string;
           status?: "brouillon" | "actif" | "archivé";
+          program_type?: "individual" | "group" | "fixed_duration";
+          publication_status?: "draft" | "published" | "archived";
+          cover_image_path?: string | null;
+          experience_level?: number | null;
+          expected_days_per_week?: number | null;
+          estimated_session_duration_minutes?: number | null;
+          source_template_id?: string | null;
+          owner_student_id?: string | null;
+          version_number?: number;
+          published_at?: string | null;
+          last_updated_by?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -793,6 +815,17 @@ export interface Database {
           duration_weeks?: number;
           description?: string;
           status?: "brouillon" | "actif" | "archivé";
+          program_type?: "individual" | "group" | "fixed_duration";
+          publication_status?: "draft" | "published" | "archived";
+          cover_image_path?: string | null;
+          experience_level?: number | null;
+          expected_days_per_week?: number | null;
+          estimated_session_duration_minutes?: number | null;
+          source_template_id?: string | null;
+          owner_student_id?: string | null;
+          version_number?: number;
+          published_at?: string | null;
+          last_updated_by?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -882,6 +915,8 @@ export interface Database {
           notes: string;
           muscle_group: string | null;
           exercise_library_id: string | null;
+          block_id: string | null;
+          superset_label: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -899,6 +934,8 @@ export interface Database {
           notes?: string;
           muscle_group?: string | null;
           exercise_library_id?: string | null;
+          block_id?: string | null;
+          superset_label?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -916,8 +953,241 @@ export interface Database {
           notes?: string;
           muscle_group?: string | null;
           exercise_library_id?: string | null;
+          block_id?: string | null;
+          superset_label?: string | null;
           created_at?: string;
           updated_at?: string;
+        };
+        Relationships: [];
+      };
+      training_blocks: {
+        Row: {
+          id: string;
+          session_id: string;
+          block_type:
+            | "standard"
+            | "warmup"
+            | "strength"
+            | "superset"
+            | "tri_set"
+            | "giant_set"
+            | "circuit"
+            | "emom"
+            | "amrap"
+            | "interval"
+            | "cooldown"
+            | "benchmark"
+            | "custom";
+          title: string;
+          description: string;
+          scoring_type: string | null;
+          color_key: "gray" | "red" | "orange" | "yellow" | "green" | "blue" | "purple";
+          rounds: number | null;
+          time_cap_seconds: number | null;
+          duration_seconds: number | null;
+          work_seconds: number | null;
+          rest_seconds: number | null;
+          emom_minutes: number | null;
+          position: number;
+          media_path: string | null;
+          version_number: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          session_id: string;
+          block_type?:
+            | "standard"
+            | "warmup"
+            | "strength"
+            | "superset"
+            | "tri_set"
+            | "giant_set"
+            | "circuit"
+            | "emom"
+            | "amrap"
+            | "interval"
+            | "cooldown"
+            | "benchmark"
+            | "custom";
+          title?: string;
+          description?: string;
+          scoring_type?: string | null;
+          color_key?: "gray" | "red" | "orange" | "yellow" | "green" | "blue" | "purple";
+          rounds?: number | null;
+          time_cap_seconds?: number | null;
+          duration_seconds?: number | null;
+          work_seconds?: number | null;
+          rest_seconds?: number | null;
+          emom_minutes?: number | null;
+          position?: number;
+          media_path?: string | null;
+          version_number?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          session_id?: string;
+          block_type?:
+            | "standard"
+            | "warmup"
+            | "strength"
+            | "superset"
+            | "tri_set"
+            | "giant_set"
+            | "circuit"
+            | "emom"
+            | "amrap"
+            | "interval"
+            | "cooldown"
+            | "benchmark"
+            | "custom";
+          title?: string;
+          description?: string;
+          scoring_type?: string | null;
+          color_key?: "gray" | "red" | "orange" | "yellow" | "green" | "blue" | "purple";
+          rounds?: number | null;
+          time_cap_seconds?: number | null;
+          duration_seconds?: number | null;
+          work_seconds?: number | null;
+          rest_seconds?: number | null;
+          emom_minutes?: number | null;
+          position?: number;
+          media_path?: string | null;
+          version_number?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      training_prescriptions: {
+        Row: {
+          id: string;
+          exercise_id: string;
+          set_number: number;
+          set_type: "normal" | "warmup" | "top_set" | "back_off" | "failure" | "optional";
+          target_reps: number | null;
+          reps_min: number | null;
+          reps_max: number | null;
+          duration_seconds: number | null;
+          distance_meters: number | null;
+          target_load: number | null;
+          load_unit: "kg" | "lb";
+          load_input_mode: "total" | "per_side" | "per_implement";
+          target_percentage: number | null;
+          target_rpe: number | null;
+          target_rir: number | null;
+          bodyweight_percentage: number | null;
+          tempo_eccentric: string | null;
+          tempo_bottom_pause: string | null;
+          tempo_concentric: string | null;
+          tempo_top_pause: string | null;
+          rest_seconds: number | null;
+          coach_notes: string;
+          position: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          exercise_id: string;
+          set_number: number;
+          set_type?: "normal" | "warmup" | "top_set" | "back_off" | "failure" | "optional";
+          target_reps?: number | null;
+          reps_min?: number | null;
+          reps_max?: number | null;
+          duration_seconds?: number | null;
+          distance_meters?: number | null;
+          target_load?: number | null;
+          load_unit?: "kg" | "lb";
+          load_input_mode?: "total" | "per_side" | "per_implement";
+          target_percentage?: number | null;
+          target_rpe?: number | null;
+          target_rir?: number | null;
+          bodyweight_percentage?: number | null;
+          tempo_eccentric?: string | null;
+          tempo_bottom_pause?: string | null;
+          tempo_concentric?: string | null;
+          tempo_top_pause?: string | null;
+          rest_seconds?: number | null;
+          coach_notes?: string;
+          position?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          exercise_id?: string;
+          set_number?: number;
+          set_type?: "normal" | "warmup" | "top_set" | "back_off" | "failure" | "optional";
+          target_reps?: number | null;
+          reps_min?: number | null;
+          reps_max?: number | null;
+          duration_seconds?: number | null;
+          distance_meters?: number | null;
+          target_load?: number | null;
+          load_unit?: "kg" | "lb";
+          load_input_mode?: "total" | "per_side" | "per_implement";
+          target_percentage?: number | null;
+          target_rpe?: number | null;
+          target_rir?: number | null;
+          bodyweight_percentage?: number | null;
+          tempo_eccentric?: string | null;
+          tempo_bottom_pause?: string | null;
+          tempo_concentric?: string | null;
+          tempo_top_pause?: string | null;
+          rest_seconds?: number | null;
+          coach_notes?: string;
+          position?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      training_change_history: {
+        Row: {
+          id: string;
+          program_id: string;
+          entity_type: string;
+          entity_id: string | null;
+          student_id: string | null;
+          actor_id: string | null;
+          actor_role: string | null;
+          action_type: string;
+          before_data: Record<string, unknown> | null;
+          after_data: Record<string, unknown> | null;
+          version_number: number | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          program_id: string;
+          entity_type: string;
+          entity_id?: string | null;
+          student_id?: string | null;
+          actor_id?: string | null;
+          actor_role?: string | null;
+          action_type: string;
+          before_data?: Record<string, unknown> | null;
+          after_data?: Record<string, unknown> | null;
+          version_number?: number | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          program_id?: string;
+          entity_type?: string;
+          entity_id?: string | null;
+          student_id?: string | null;
+          actor_id?: string | null;
+          actor_role?: string | null;
+          action_type?: string;
+          before_data?: Record<string, unknown> | null;
+          after_data?: Record<string, unknown> | null;
+          version_number?: number | null;
+          created_at?: string;
         };
         Relationships: [];
       };

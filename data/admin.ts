@@ -102,6 +102,7 @@ function session(
     durationMinutes,
     warmup,
     coachNotes,
+    blocks: [],
     exercises,
   };
 }
@@ -118,6 +119,7 @@ function restDay(id: string, weekNumber: number, day: string): AdminWorkoutSessi
     durationMinutes: 0,
     warmup: "",
     coachNotes: "",
+    blocks: [],
     exercises: [],
   };
 }
@@ -363,6 +365,16 @@ export const adminPrograms: AdminProgram[] = [
     description:
       "Programme en split haut/bas orienté hypertrophie, 4 séances par semaine, progression linéaire de charge sur 12 semaines.",
     status: "actif",
+    programType: "group",
+    publicationStatus: "published",
+    coverImagePath: null,
+    experienceLevel: 3,
+    expectedDaysPerWeek: 4,
+    estimatedSessionDurationMinutes: 60,
+    sourceTemplateId: null,
+    ownerStudentId: null,
+    versionNumber: 1,
+    publishedAt: "2026-01-05T09:00:00.000Z",
     assignedStudentIds: ["adm-2", "adm-4", LINKED_STUDENT_ID],
     sessions: withProgramId("adm-prog-masse", [
       session(
@@ -454,6 +466,16 @@ export const adminPrograms: AdminProgram[] = [
     description:
       "Programme full-body à haute densité, 3 séances par semaine, volume élevé et repos courts pour maximiser la dépense calorique.",
     status: "actif",
+    programType: "group",
+    publicationStatus: "published",
+    coverImagePath: null,
+    experienceLevel: 3,
+    expectedDaysPerWeek: 3,
+    estimatedSessionDurationMinutes: 45,
+    sourceTemplateId: null,
+    ownerStudentId: null,
+    versionNumber: 1,
+    publishedAt: "2026-02-01T09:00:00.000Z",
     assignedStudentIds: ["adm-1"],
     sessions: withProgramId("adm-prog-seche", [
       session(
@@ -494,6 +516,16 @@ export const adminPrograms: AdminProgram[] = [
     durationWeeks: 6,
     description: "Programme de reprise en douceur, 2 séances par semaine, charges légères.",
     status: "archivé",
+    programType: "group",
+    publicationStatus: "archived",
+    coverImagePath: null,
+    experienceLevel: 1,
+    expectedDaysPerWeek: 2,
+    estimatedSessionDurationMinutes: 35,
+    sourceTemplateId: null,
+    ownerStudentId: null,
+    versionNumber: 1,
+    publishedAt: null,
     assignedStudentIds: ["adm-5"],
     sessions: withProgramId("adm-prog-remise", [
       session(

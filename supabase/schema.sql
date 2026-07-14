@@ -2087,3 +2087,309 @@ create policy "newsletter_subscribers_delete_staff"
 -- Intentionally no insert policy for anon/authenticated roles: the only way
 -- to create a row is through the secured POST /api/newsletter/subscribe
 -- route, which uses the service-role client and therefore bypasses RLS.
+
+-- ============================================================================
+-- Migration additive — chantier "training-builder-v2".
+--
+-- Étend le module Entraînement existant (`programs` / `program_weeks` /
+-- `workout_sessions` / `workout_exercises`, déjà en place, jamais renommées
+-- ni recréées) avec : des blocs (superset/circuit/EMOM/...), des
+-- prescriptions par série (mode détaillé), un historique de modifications,
+-- et une vraie distinction individuel/groupe/durée fixe. Aucune ligne
+-- existante n'est supprimée ou réécrite par cette migration ; les valeurs
+-- par défaut sont choisies pour préserver EXACTEMENT le comportement actuel
+-- (voir commentaires colonne par colonne).
+--
+-- Compatibilité legacy : un `workout_exercises` avec `block_id` null (tous
+-- les exercices déjà en base) est regroupé à la lecture (voir
+-- lib/supabase/programs.ts) en un bloc "standard" synthétique, jamais écrit
+-- en base — adaptateur de lecture, pas migration destructive.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- `programs` — colonnes additives.
+-- ----------------------------------------------------------------------------
+
+-- program_type : le modèle actuel (assignation via `assignments`, plusieurs
+-- élèves pouvant pointer vers le même `program_id`) correspond déjà au
+-- comportement "groupe" de Strivee (une structure partagée, synchronisée
+-- pour tous les élèves assignés) — donc default 'group', jamais 'individual',
+-- pour ne rien changer au sens des programmes déjà attribués.
+alter table public.programs add column if not exists program_type text not null default 'group';
+alter table public.programs drop constraint if exists programs_program_type_check;
+alter table public.programs add constraint programs_program_type_check
+  check (program_type in ('individual', 'group', 'fixed_duration'));
+
+-- publication_status : distinct du `status` existant (brouillon/actif/
+-- archivé, qui reste inchangé et continue de piloter l'affichage admin) —
+-- c'est la nouvelle frontière de sécurité RLS élève (voir plus bas).
+-- Default 'published' sur les lignes existantes : c'est la SEULE valeur qui
+-- ne change rien à ce qu'un élève voit aujourd'hui (la RLS actuelle ne
+-- filtrait déjà pas sur `status`, donc tout programme assigné était déjà
+-- visible quel que soit son `status`).
+alter table public.programs add column if not exists publication_status text not null default 'published';
+alter table public.programs drop constraint if exists programs_publication_status_check;
+alter table public.programs add constraint programs_publication_status_check
+  check (publication_status in ('draft', 'published', 'archived'));
+
+alter table public.programs add column if not exists cover_image_path text;
+alter table public.programs add column if not exists experience_level integer;
+alter table public.programs drop constraint if exists programs_experience_level_check;
+alter table public.programs add constraint programs_experience_level_check
+  check (experience_level is null or experience_level between 1 and 5);
+alter table public.programs add column if not exists expected_days_per_week integer;
+alter table public.programs add column if not exists estimated_session_duration_minutes integer;
+
+-- source_template_id : programme modèle dont ce programme a été copié (voir
+-- assignIndividualProgram côté app) — null pour un modèle lui-même ou pour
+-- tout programme créé avant ce chantier.
+alter table public.programs add column if not exists source_template_id uuid references public.programs (id) on delete set null;
+
+-- owner_student_id : renseigné uniquement pour une copie individualisée
+-- (program_type = 'individual'), jamais pour un modèle ni un programme de
+-- groupe. La visibilité élève reste entièrement pilotée par `assignments`
+-- (inchangé) — cette colonne est de la provenance, pas une nouvelle
+-- frontière RLS.
+alter table public.programs add column if not exists owner_student_id uuid references public.students (id) on delete cascade;
+
+alter table public.programs add column if not exists version_number integer not null default 1;
+alter table public.programs add column if not exists published_at timestamptz;
+alter table public.programs add column if not exists last_updated_by uuid references auth.users (id) on delete set null;
+
+-- ----------------------------------------------------------------------------
+-- `workout_exercises` — colonnes additives (rattachement à un bloc).
+-- ----------------------------------------------------------------------------
+alter table public.workout_exercises add column if not exists block_id uuid;
+alter table public.workout_exercises add column if not exists superset_label text;
+
+-- ----------------------------------------------------------------------------
+-- training_blocks — regroupement d'exercices au sein d'une séance
+-- (superset, circuit, EMOM...). `session_id` seul suffit à retrouver le
+-- programme/l'élève via les jointures déjà utilisées par les policies
+-- workout_exercises existantes.
+-- ----------------------------------------------------------------------------
+create table if not exists public.training_blocks (
+  id uuid primary key default gen_random_uuid(),
+  session_id uuid not null references public.workout_sessions (id) on delete cascade,
+  block_type text not null default 'standard' check (block_type in (
+    'standard', 'warmup', 'strength', 'superset', 'tri_set', 'giant_set',
+    'circuit', 'emom', 'amrap', 'interval', 'cooldown', 'benchmark', 'custom'
+  )),
+  title text not null default '',
+  description text not null default '',
+  scoring_type text,
+  color_key text not null default 'gray'
+    check (color_key in ('gray', 'red', 'orange', 'yellow', 'green', 'blue', 'purple')),
+  rounds integer,
+  time_cap_seconds integer,
+  duration_seconds integer,
+  work_seconds integer,
+  rest_seconds integer,
+  emom_minutes integer,
+  position integer not null default 1,
+  media_path text,
+  version_number integer not null default 1,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists training_blocks_session_id_idx on public.training_blocks (session_id);
+
+-- Maintenant que `training_blocks` existe, `workout_exercises.block_id` peut
+-- référencer la table (ajout de la contrainte séparément : la colonne a été
+-- créée plus haut, avant la table, pour rester dans un ordre de migration
+-- additif simple à relire).
+alter table public.workout_exercises drop constraint if exists workout_exercises_block_id_fkey;
+alter table public.workout_exercises add constraint workout_exercises_block_id_fkey
+  foreign key (block_id) references public.training_blocks (id) on delete cascade;
+create index if not exists workout_exercises_block_id_idx on public.workout_exercises (block_id);
+
+-- ----------------------------------------------------------------------------
+-- training_prescriptions — prescription par série (mode détaillé). Le mode
+-- simple existant (workout_exercises.sets/reps/recommended_load) reste
+-- intact et continue de fonctionner seul ; ces lignes sont une enrichissement
+-- optionnel, jamais un remplacement (voir lib/supabase/programs.ts).
+-- ----------------------------------------------------------------------------
+create table if not exists public.training_prescriptions (
+  id uuid primary key default gen_random_uuid(),
+  exercise_id uuid not null references public.workout_exercises (id) on delete cascade,
+  set_number integer not null,
+  set_type text not null default 'normal'
+    check (set_type in ('normal', 'warmup', 'top_set', 'back_off', 'failure', 'optional')),
+  target_reps integer,
+  reps_min integer,
+  reps_max integer,
+  duration_seconds integer,
+  distance_meters numeric,
+  target_load numeric,
+  load_unit text not null default 'kg' check (load_unit in ('kg', 'lb')),
+  -- Convention explicite pour éviter tout doublement implicite d'une charge
+  -- (voir docs/training-builder-v2.md) : 'total' = charge saisie déjà
+  -- totale, 'per_side' = par côté (à doubler pour le tonnage total),
+  -- 'per_implement' = par haltère/kettlebell (même traitement que
+  -- 'kg_per_dumbbell' dans lib/training-metrics.ts aujourd'hui).
+  load_input_mode text not null default 'total'
+    check (load_input_mode in ('total', 'per_side', 'per_implement')),
+  target_percentage numeric,
+  target_rpe numeric check (target_rpe is null or target_rpe between 0 and 10),
+  target_rir numeric check (target_rir is null or target_rir between 0 and 10),
+  bodyweight_percentage numeric,
+  tempo_eccentric text,
+  tempo_bottom_pause text,
+  tempo_concentric text,
+  tempo_top_pause text,
+  rest_seconds integer,
+  coach_notes text not null default '',
+  position integer not null default 1,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (exercise_id, set_number)
+);
+create index if not exists training_prescriptions_exercise_id_idx on public.training_prescriptions (exercise_id);
+
+-- ----------------------------------------------------------------------------
+-- training_change_history — historique des modifications significatives
+-- (jamais une ligne par frappe clavier — voir debounce/regroupement côté
+-- app dans lib/supabase/programs.ts). Uniquement staff, comme coach_notes.
+-- ----------------------------------------------------------------------------
+create table if not exists public.training_change_history (
+  id uuid primary key default gen_random_uuid(),
+  program_id uuid not null references public.programs (id) on delete cascade,
+  entity_type text not null,
+  entity_id uuid,
+  student_id uuid references public.students (id) on delete set null,
+  actor_id uuid references auth.users (id) on delete set null,
+  actor_role text,
+  action_type text not null,
+  before_data jsonb,
+  after_data jsonb,
+  version_number integer,
+  created_at timestamptz not null default now()
+);
+create index if not exists training_change_history_program_id_idx on public.training_change_history (program_id);
+create index if not exists training_change_history_created_at_idx on public.training_change_history (created_at desc);
+
+-- ----------------------------------------------------------------------------
+-- Triggers updated_at pour les nouvelles tables (training_change_history est
+-- un journal append-only, comme activity_events/billing_events : pas de
+-- colonne updated_at, donc pas de trigger).
+-- ----------------------------------------------------------------------------
+do $$
+declare
+  t text;
+begin
+  for t in
+    select unnest(array['training_blocks', 'training_prescriptions'])
+  loop
+    execute format(
+      'drop trigger if exists set_updated_at on public.%I; ' ||
+      'create trigger set_updated_at before update on public.%I ' ||
+      'for each row execute function public.set_updated_at();',
+      t, t
+    );
+  end loop;
+end $$;
+
+-- ----------------------------------------------------------------------------
+-- Row Level Security — nouvelles tables.
+-- ----------------------------------------------------------------------------
+alter table public.training_blocks enable row level security;
+alter table public.training_prescriptions enable row level security;
+alter table public.training_change_history enable row level security;
+
+drop policy if exists "training_blocks_manage_staff" on public.training_blocks;
+create policy "training_blocks_manage_staff" on public.training_blocks
+  for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
+drop policy if exists "training_blocks_select_assigned_student" on public.training_blocks;
+create policy "training_blocks_select_assigned_student" on public.training_blocks
+  for select using (
+    exists (
+      select 1 from public.workout_sessions s
+      join public.programs p on p.id = s.program_id
+      join public.assignments a on a.content_type = 'programme' and a.content_id = p.id
+      where s.id = training_blocks.session_id
+        and a.student_id = public.current_student_id()
+        and p.publication_status = 'published'
+    )
+  );
+
+drop policy if exists "training_prescriptions_manage_staff" on public.training_prescriptions;
+create policy "training_prescriptions_manage_staff" on public.training_prescriptions
+  for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
+drop policy if exists "training_prescriptions_select_assigned_student" on public.training_prescriptions;
+create policy "training_prescriptions_select_assigned_student" on public.training_prescriptions
+  for select using (
+    exists (
+      select 1 from public.workout_exercises e
+      join public.workout_sessions s on s.id = e.session_id
+      join public.programs p on p.id = s.program_id
+      join public.assignments a on a.content_type = 'programme' and a.content_id = p.id
+      where e.id = training_prescriptions.exercise_id
+        and a.student_id = public.current_student_id()
+        and p.publication_status = 'published'
+    )
+  );
+
+-- Historique : uniquement staff, aucune policy élève (même principe que
+-- coach_notes — outil interne coach, jamais exposé à l'élève).
+drop policy if exists "training_change_history_staff_only" on public.training_change_history;
+create policy "training_change_history_staff_only" on public.training_change_history
+  for all using (public.is_coach_or_admin()) with check (public.is_coach_or_admin());
+
+-- ----------------------------------------------------------------------------
+-- Durcissement RLS élève — `programs`/`program_weeks`/`workout_sessions`/
+-- `workout_exercises` : ajoute `publication_status = 'published'` aux
+-- policies de lecture élève existantes (elles ne filtraient sur AUCUN statut
+-- jusqu'ici — un programme "brouillon" assigné était déjà visible). Pur
+-- durcissement : ne retire aucun accès déjà accordé à un programme publié
+-- (default 'published' sur toutes les lignes existantes, voir plus haut).
+-- ----------------------------------------------------------------------------
+drop policy if exists "programs_select_assigned_student" on public.programs;
+create policy "programs_select_assigned_student" on public.programs
+  for select using (
+    publication_status = 'published'
+    and exists (
+      select 1 from public.assignments a
+      where a.content_type = 'programme'
+        and a.content_id = programs.id
+        and a.student_id = public.current_student_id()
+    )
+  );
+
+drop policy if exists "program_weeks_select_assigned_student" on public.program_weeks;
+create policy "program_weeks_select_assigned_student" on public.program_weeks
+  for select using (
+    exists (
+      select 1 from public.assignments a
+      join public.programs p on p.id = a.content_id
+      where a.content_type = 'programme'
+        and a.content_id = program_weeks.program_id
+        and a.student_id = public.current_student_id()
+        and p.publication_status = 'published'
+    )
+  );
+
+drop policy if exists "workout_sessions_select_assigned_student" on public.workout_sessions;
+create policy "workout_sessions_select_assigned_student" on public.workout_sessions
+  for select using (
+    exists (
+      select 1 from public.assignments a
+      join public.programs p on p.id = a.content_id
+      where a.content_type = 'programme'
+        and a.content_id = workout_sessions.program_id
+        and a.student_id = public.current_student_id()
+        and p.publication_status = 'published'
+    )
+  );
+
+drop policy if exists "workout_exercises_select_assigned_student" on public.workout_exercises;
+create policy "workout_exercises_select_assigned_student" on public.workout_exercises
+  for select using (
+    exists (
+      select 1 from public.workout_sessions s
+      join public.programs p on p.id = s.program_id
+      join public.assignments a on a.content_type = 'programme' and a.content_id = s.program_id
+      where s.id = workout_exercises.session_id
+        and a.student_id = public.current_student_id()
+        and p.publication_status = 'published'
+    )
+  );

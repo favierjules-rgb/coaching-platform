@@ -92,6 +92,7 @@ function restDaySession(weekNumber: number, day: string): AdminWorkoutSession {
     durationMinutes: 0,
     warmup: "",
     coachNotes: "",
+    blocks: [],
     exercises: [],
   };
 }
@@ -346,7 +347,13 @@ export function ProgramBuilder({
         ...s,
         id: generateId("sess"),
         weekNumber: targetWeek,
-        exercises: s.exercises.map((ex) => ({ ...ex, id: generateId("ex") })),
+        // `blocks` n'est pas encore éditable dans ce builder (voir
+        // upsertBlocksForSession côté lib/supabase/programs.ts, qui
+        // reconstruit automatiquement un bloc "standard" à partir
+        // d'`exercises`) — le vider ici évite de porter des ids de blocs
+        // appartenant à la séance source vers cette copie.
+        blocks: [],
+        exercises: s.exercises.map((ex) => ({ ...ex, id: generateId("ex"), blockId: undefined })),
       }));
   }
 
@@ -385,7 +392,16 @@ export function ProgramBuilder({
     setSessions((prev) =>
       prev.map((s) =>
         s.id === target.id
-          ? { ...session, id: target.id, weekNumber: target.weekNumber, exercises: session.exercises.map((ex) => ({ ...ex, id: generateId("ex") })) }
+          ? {
+              ...session,
+              id: target.id,
+              weekNumber: target.weekNumber,
+              // Voir cloneWeekSessions ci-dessus : `blocks` reste vide, le
+              // bloc "standard" est reconstruit côté écriture à partir
+              // d'`exercises`.
+              blocks: [],
+              exercises: session.exercises.map((ex) => ({ ...ex, id: generateId("ex"), blockId: undefined })),
+            }
           : s,
       ),
     );
