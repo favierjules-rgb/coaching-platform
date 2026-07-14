@@ -2032,3 +2032,58 @@ create policy "email_logs_select_staff" on public.email_logs
 -- types/supabase.ts avec `supabase gen types typescript`, puis brancher
 -- progressivement chaque page mock sur ces tables (voir README.md).
 -- ============================================================================
+
+-- Newsletter (Brevo) subscribers table. Additive migration, kept fully
+-- separate from the Resend transactional email system. Applied live via
+-- the Supabase MCP tool (migration: create_newsletter_subscribers); mirrored
+-- here so schema.sql stays the single source of truth.
+create table if not exists public.newsletter_subscribers (
+  id uuid primary key default gen_random_uuid(),
+  email text not null,
+  normalized_email text not null unique,
+  profile_id uuid null references public.profiles(id) on delete set null,
+  status text not null default 'pending'
+    check (status in ('pending', 'subscribed', 'unsubscribed', 'bounced', 'complained', 'sync_failed')),
+  source text not null default 'landing_page',
+  consent_text_version text not null,
+  consent_at timestamptz not null default now(),
+  confirmed_at timestamptz null,
+  unsubscribed_at timestamptz null,
+  brevo_contact_id text null,
+  brevo_list_id text null,
+  last_sync_status text null,
+  last_sync_error text null,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists newsletter_subscribers_status_idx
+  on public.newsletter_subscribers (status);
+create index if not exists newsletter_subscribers_profile_id_idx
+  on public.newsletter_subscribers (profile_id);
+
+alter table public.newsletter_subscribers enable row level security;
+
+drop policy if exists "newsletter_subscribers_select_staff" on public.newsletter_subscribers;
+create policy "newsletter_subscribers_select_staff"
+  on public.newsletter_subscribers
+  for select
+  using (public.is_coach_or_admin());
+
+drop policy if exists "newsletter_subscribers_update_staff" on public.newsletter_subscribers;
+create policy "newsletter_subscribers_update_staff"
+  on public.newsletter_subscribers
+  for update
+  using (public.is_coach_or_admin())
+  with check (public.is_coach_or_admin());
+
+drop policy if exists "newsletter_subscribers_delete_staff" on public.newsletter_subscribers;
+create policy "newsletter_subscribers_delete_staff"
+  on public.newsletter_subscribers
+  for delete
+  using (public.is_coach_or_admin());
+
+-- Intentionally no insert policy for anon/authenticated roles: the only way
+-- to create a row is through the secured POST /api/newsletter/subscribe
+-- route, which uses the service-role client and therefore bypasses RLS.
