@@ -2184,7 +2184,12 @@ create table if not exists public.training_blocks (
   time_cap_seconds integer,
   duration_seconds integer,
   work_seconds integer,
+  -- rest_seconds : repos entre exercices au sein d'un tour (superset/circuit)
+  -- ou repos générique du bloc. rest_between_rounds_seconds : repos après
+  -- chaque tour complet (distinct, superset "repos après chaque tour" /
+  -- circuit "repos entre tours" — section 13 du chantier).
   rest_seconds integer,
+  rest_between_rounds_seconds integer,
   emom_minutes integer,
   position integer not null default 1,
   media_path text,

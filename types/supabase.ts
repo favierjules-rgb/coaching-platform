@@ -987,6 +987,7 @@ export interface Database {
           duration_seconds: number | null;
           work_seconds: number | null;
           rest_seconds: number | null;
+          rest_between_rounds_seconds: number | null;
           emom_minutes: number | null;
           position: number;
           media_path: string | null;
@@ -1020,6 +1021,7 @@ export interface Database {
           duration_seconds?: number | null;
           work_seconds?: number | null;
           rest_seconds?: number | null;
+          rest_between_rounds_seconds?: number | null;
           emom_minutes?: number | null;
           position?: number;
           media_path?: string | null;
@@ -1053,6 +1055,7 @@ export interface Database {
           duration_seconds?: number | null;
           work_seconds?: number | null;
           rest_seconds?: number | null;
+          rest_between_rounds_seconds?: number | null;
           emom_minutes?: number | null;
           position?: number;
           media_path?: string | null;

@@ -49,16 +49,10 @@ export default function NewProgramPage() {
     }
     const id = createProgram({
       ...data,
-      programType: "group",
-      publicationStatus: "published",
-      coverImagePath: null,
-      experienceLevel: null,
-      expectedDaysPerWeek: null,
-      estimatedSessionDurationMinutes: null,
       sourceTemplateId: null,
       ownerStudentId: null,
       versionNumber: 1,
-      publishedAt: null,
+      publishedAt: data.publicationStatus === "published" ? new Date().toISOString() : null,
       assignedStudentIds: [],
       sessions: data.sessions.map((s) => ({ ...s, programId: "" })),
     });
@@ -119,6 +113,12 @@ export default function NewProgramPage() {
             durationWeeks: 4,
             description: "",
             status: "brouillon",
+            programType: "group",
+            publicationStatus: "draft",
+            coverImagePath: null,
+            experienceLevel: null,
+            expectedDaysPerWeek: null,
+            estimatedSessionDurationMinutes: null,
             sessions: [],
           }}
           library={exerciseLibrary}

@@ -23,9 +23,85 @@ import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { contentStatusLabels, fullName, weekDays } from "@/lib/admin";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
-import { updateProgram as updateProgramSupabase, updateProgramStatus as updateProgramStatusSupabase } from "@/lib/supabase/programs";
+import {
+  assignIndividualProgram as assignIndividualProgramSupabase,
+  updateProgram as updateProgramSupabase,
+  updateProgramStatus as updateProgramStatusSupabase,
+} from "@/lib/supabase/programs";
 import { calculateTrainingMetrics, calculateWeekMetrics, formatSets, formatTonnage, formatVolume, muscleGroupLabels } from "@/lib/training-metrics";
-import type { MuscleGroupFilter } from "@/types";
+import type { AdminStudent, MuscleGroupFilter } from "@/types";
+
+/**
+ * Attribution "individuelle" (chantier training-builder-v2) : contrairement
+ * au bouton "Assigner à des élèves" (AssignStudentsModal, réservé aux
+ * programmes groupe/durée fixe qui partagent une seule structure), attribuer
+ * un programme individuel crée une copie serveur dédiée par élève
+ * (assignIndividualProgram) — nécessite Supabase (pas de repli mock, cette
+ * fonctionnalité n'existe pas côté données mockées).
+ */
+function IndividualAssignPanel({
+  programId,
+  students,
+  assignedStudentIds,
+  onAssigned,
+}: {
+  programId: string;
+  students: AdminStudent[];
+  assignedStudentIds: string[];
+  onAssigned: () => void;
+}) {
+  const [selectedStudentId, setSelectedStudentId] = useState("");
+  const [assigning, setAssigning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const availableStudents = students.filter((s) => !assignedStudentIds.includes(s.id));
+
+  async function handleAssign() {
+    if (!selectedStudentId) return;
+    setAssigning(true);
+    setError(null);
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) {
+      setError("Supabase non configuré.");
+      setAssigning(false);
+      return;
+    }
+    const copyId = await assignIndividualProgramSupabase(supabase, programId, selectedStudentId);
+    setAssigning(false);
+    if (!copyId) {
+      setError("Échec de l'attribution individuelle.");
+      return;
+    }
+    setSelectedStudentId("");
+    onAssigned();
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <select
+        value={selectedStudentId}
+        onChange={(e) => setSelectedStudentId(e.target.value)}
+        aria-label="Choisir un élève à attribuer"
+        className="border border-border bg-background px-3 py-2 text-xs text-foreground"
+      >
+        <option value="">Choisir un élève…</option>
+        {availableStudents.map((s) => (
+          <option key={s.id} value={s.id}>
+            {fullName(s)}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        onClick={handleAssign}
+        disabled={!selectedStudentId || assigning}
+        className="flex items-center gap-1.5 border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700 disabled:opacity-50"
+      >
+        {assigning ? "Attribution…" : "Attribuer une copie individuelle"}
+      </button>
+      {error && <span className="text-xs text-red-400">{error}</span>}
+    </div>
+  );
+}
 
 export default function ProgramDetailPage() {
   const params = useParams<{ programId: string }>();
@@ -71,6 +147,19 @@ export default function ProgramDetailPage() {
   );
 
   async function handleSave(data: ProgramBuilderData) {
+    // Programmation de groupe : une publication affecte immédiatement TOUS
+    // les élèves déjà assignés (structure partagée) — demande confirmation
+    // explicite avant de publier, en listant qui sera affecté.
+    const isNewlyPublishing = data.publicationStatus === "published" && program!.publicationStatus !== "published";
+    if (program!.programType === "group" && isNewlyPublishing && assignedStudents.length > 0) {
+      const names = assignedStudents.map((s) => fullName(s)).join(", ");
+      const confirmed = window.confirm(
+        `Cette publication sera immédiatement visible par ${assignedStudents.length} élève(s) : ${names}. Continuer ?`,
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
     if (isSupabaseProgramsActive) {
       const supabase = createSupabaseBrowserClient();
       if (supabase) {
@@ -121,18 +210,13 @@ export default function ProgramDetailPage() {
               durationWeeks: program.durationWeeks,
               description: program.description,
               status: program.status,
-              // Ce builder ne sait pas encore éditer les blocs (voir
-              // chantier training-builder-v2, éditeur de blocs à venir) —
-              // `blocks` est toujours vidé ici pour que la sauvegarde
-              // reconstruise systématiquement un unique bloc "standard" à
-              // partir d'`exercises` (lib/supabase/programs.ts,
-              // upsertBlocksForSession) plutôt que de réécrire une
-              // structure de blocs figée au moment du chargement.
-              sessions: program.sessions.map((session) => ({
-                ...session,
-                blocks: [],
-                exercises: session.exercises.map((ex) => ({ ...ex, blockId: undefined, supersetLabel: undefined, prescriptions: undefined })),
-              })),
+              programType: program.programType,
+              publicationStatus: program.publicationStatus,
+              coverImagePath: program.coverImagePath,
+              experienceLevel: program.experienceLevel,
+              expectedDaysPerWeek: program.expectedDaysPerWeek,
+              estimatedSessionDurationMinutes: program.estimatedSessionDurationMinutes,
+              sessions: program.sessions,
             }}
             library={exerciseLibrary}
             onSave={handleSave}
@@ -160,15 +244,28 @@ export default function ProgramDetailPage() {
                 <Pencil size={13} />
                 Modifier
               </button>
-              <AssignStudentsModal
-                contentLabel={program.name}
-                contentType="programme"
-                contentId={program.id}
-                students={students}
-                assignedStudentIds={program.assignedStudentIds}
-                onSetAssignment={handleSetAssignment}
-                triggerLabel="Assigner à des élèves"
-              />
+              {program.programType === "individual" ? (
+                isSupabaseProgramsActive ? (
+                  <IndividualAssignPanel
+                    programId={program.id}
+                    students={students}
+                    assignedStudentIds={program.assignedStudentIds}
+                    onAssigned={() => supabasePrograms.refetch()}
+                  />
+                ) : (
+                  <span className="text-xs text-muted-foreground">Attribution individuelle disponible une fois Supabase configuré.</span>
+                )
+              ) : (
+                <AssignStudentsModal
+                  contentLabel={program.name}
+                  contentType="programme"
+                  contentId={program.id}
+                  students={students}
+                  assignedStudentIds={program.assignedStudentIds}
+                  onSetAssignment={handleSetAssignment}
+                  triggerLabel="Assigner à des élèves"
+                />
+              )}
               <button
                 type="button"
                 onClick={handleArchive}

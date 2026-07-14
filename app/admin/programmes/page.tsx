@@ -6,6 +6,7 @@ import { Dumbbell, Plus } from "lucide-react";
 
 import { AssignStudentsModal } from "@/components/admin/AssignStudentsModal";
 import { ExerciseLibraryManager } from "@/components/admin/ExerciseLibraryManager";
+import { programTypeOptions } from "@/components/admin/ProgramBuilder";
 import { FilterButtons, SearchInput } from "@/components/admin/SearchAndFilters";
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
@@ -20,9 +21,10 @@ import {
   setExerciseLibraryStatus,
   updateExerciseLibraryItem,
 } from "@/lib/supabase/exercise-library";
-import type { AdminContentStatus, ExerciseLibraryItem } from "@/types";
+import type { AdminContentStatus, ExerciseLibraryItem, ProgramType, PublicationStatus } from "@/types";
 
 type StatusFilter = "tous" | AdminContentStatus;
+type ProgramTypeFilter = "tous" | ProgramType;
 type Tab = "programmes" | "banque";
 
 const statusFilters: { value: StatusFilter; label: string }[] = [
@@ -31,6 +33,27 @@ const statusFilters: { value: StatusFilter; label: string }[] = [
   { value: "actif", label: "Actif" },
   { value: "archivé", label: "Archivé" },
 ];
+
+const programTypeFilters: { value: ProgramTypeFilter; label: string }[] = [
+  { value: "tous", label: "Tous les types" },
+  ...programTypeOptions.map((o) => ({ value: o.value as ProgramTypeFilter, label: o.label })),
+];
+
+const programTypeLabels: Record<ProgramType, string> = Object.fromEntries(
+  programTypeOptions.map((o) => [o.value, o.label]),
+) as Record<ProgramType, string>;
+
+const publicationStatusLabels: Record<PublicationStatus, string> = {
+  draft: "Brouillon",
+  published: "Publié",
+  archived: "Archivé",
+};
+
+function publicationStatusTone(status: PublicationStatus): "green" | "amber" | "muted" {
+  if (status === "published") return "green";
+  if (status === "draft") return "amber";
+  return "muted";
+}
 
 export default function AdminProgramsPage() {
   const { state, setAssignment, createLibraryExercise, updateLibraryExercise } = useAdminData();
@@ -94,6 +117,7 @@ export default function AdminProgramsPage() {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("tous");
   const [levelFilter, setLevelFilter] = useState("tous");
+  const [typeFilter, setTypeFilter] = useState<ProgramTypeFilter>("tous");
 
   const levels = useMemo(() => ["tous", ...Array.from(new Set(programs.map((p) => p.level)))], [programs]);
 
@@ -101,7 +125,8 @@ export default function AdminProgramsPage() {
     (p) =>
       matchesTextSearch([p.name, p.goal], query) &&
       (statusFilter === "tous" || p.status === statusFilter) &&
-      (levelFilter === "tous" || p.level === levelFilter),
+      (levelFilter === "tous" || p.level === levelFilter) &&
+      (typeFilter === "tous" || p.programType === typeFilter),
   );
 
   return (
@@ -121,7 +146,7 @@ export default function AdminProgramsPage() {
             className="flex items-center gap-2 border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700"
           >
             <Plus size={14} />
-            Créer programme
+            Créer une programmation
           </Link>
         )}
       </div>
@@ -161,6 +186,17 @@ export default function AdminProgramsPage() {
         <div className="flex flex-wrap items-center gap-4">
           <FilterButtons options={statusFilters} active={statusFilter} onChange={setStatusFilter} />
           <select
+            value={typeFilter}
+            onChange={(e) => setTypeFilter(e.target.value as ProgramTypeFilter)}
+            className="border border-border bg-background px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground"
+          >
+            {programTypeFilters.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          <select
             value={levelFilter}
             onChange={(e) => setLevelFilter(e.target.value)}
             className="border border-border bg-background px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground"
@@ -188,8 +224,14 @@ export default function AdminProgramsPage() {
                   <h2 className="font-heading text-lg font-bold uppercase text-foreground">{program.name}</h2>
                   <p className="text-sm text-muted-foreground">{program.goal}</p>
                 </div>
-                <StatusBadge label={contentStatusLabels[program.status]} tone={contentStatusTone(program.status)} />
+                <div className="flex flex-col items-end gap-1.5">
+                  <StatusBadge label={contentStatusLabels[program.status]} tone={contentStatusTone(program.status)} />
+                  <StatusBadge label={publicationStatusLabels[program.publicationStatus]} tone={publicationStatusTone(program.publicationStatus)} />
+                </div>
               </div>
+              <span className="w-fit border border-border px-2 py-0.5 text-[10px] uppercase tracking-widest text-muted-foreground">
+                {programTypeLabels[program.programType]}
+              </span>
               <div className="grid grid-cols-3 gap-3 text-sm text-foreground">
                 <div>
                   <span className="block text-xs uppercase tracking-wide text-muted-foreground">Niveau</span>
@@ -230,14 +272,23 @@ export default function AdminProgramsPage() {
                 >
                   Modifier
                 </Link>
-                <AssignStudentsModal
-                  contentLabel={program.name}
-                  contentType="programme"
-                  contentId={program.id}
-                  students={students}
-                  assignedStudentIds={program.assignedStudentIds}
-                  onSetAssignment={handleSetAssignment}
-                />
+                {program.programType === "individual" ? (
+                  <Link
+                    href={`/admin/programmes/${program.id}`}
+                    className="border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+                  >
+                    Attribuer (individuel)
+                  </Link>
+                ) : (
+                  <AssignStudentsModal
+                    contentLabel={program.name}
+                    contentType="programme"
+                    contentId={program.id}
+                    students={students}
+                    assignedStudentIds={program.assignedStudentIds}
+                    onSetAssignment={handleSetAssignment}
+                  />
+                )}
               </div>
             </div>
           ))}

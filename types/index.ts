@@ -841,7 +841,10 @@ export interface AdminTrainingBlock {
   timeCapSeconds: number | null;
   durationSeconds: number | null;
   workSeconds: number | null;
+  /** Repos entre exercices au sein d'un tour (superset/circuit) ou repos générique du bloc. */
   restSeconds: number | null;
+  /** Repos après chaque tour complet — distinct de restSeconds (superset "repos après chaque tour" / circuit "repos entre tours"). */
+  restBetweenRoundsSeconds: number | null;
   emomMinutes: number | null;
   position: number;
   mediaPath: string | null;

@@ -161,6 +161,7 @@ function buildBlocksForSession(
         durationSeconds: block.duration_seconds,
         workSeconds: block.work_seconds,
         restSeconds: block.rest_seconds,
+        restBetweenRoundsSeconds: block.rest_between_rounds_seconds,
         emomMinutes: block.emom_minutes,
         position: block.position,
         mediaPath: block.media_path,
@@ -189,6 +190,7 @@ function buildBlocksForSession(
       durationSeconds: null,
       workSeconds: null,
       restSeconds: null,
+      restBetweenRoundsSeconds: null,
       emomMinutes: null,
       position: -1,
       mediaPath: null,
@@ -572,6 +574,7 @@ async function upsertBlocksForSession(supabase: TypedSupabaseClient, sessionId: 
         duration_seconds: block.durationSeconds,
         work_seconds: block.workSeconds,
         rest_seconds: block.restSeconds,
+        rest_between_rounds_seconds: block.restBetweenRoundsSeconds,
         emom_minutes: block.emomMinutes,
         position: block.position ?? index + 1,
         media_path: block.mediaPath,
@@ -748,8 +751,50 @@ async function upsertProgramStructure(supabase: TypedSupabaseClient, programId: 
   }
 }
 
+/**
+ * Historique des modifications significatives (chantier training-builder-v2)
+ * — jamais une ligne par frappe clavier, seulement sur sauvegarde/action
+ * significative (création, publication, attribution...). Best-effort :
+ * l'échec de l'écriture d'historique ne doit jamais bloquer l'action
+ * principale déjà effectuée.
+ */
+async function logTrainingChange(
+  supabase: TypedSupabaseClient,
+  input: {
+    programId: string;
+    entityType: string;
+    entityId?: string | null;
+    studentId?: string | null;
+    actionType: string;
+    beforeData?: Record<string, unknown> | null;
+    afterData?: Record<string, unknown> | null;
+    versionNumber?: number | null;
+  },
+): Promise<void> {
+  const { data: userData } = await supabase.auth.getUser();
+  let actorRole: string | null = null;
+  if (userData.user) {
+    const { data: profile } = await supabase.from("profiles").select("role").eq("user_id", userData.user.id).maybeSingle();
+    actorRole = profile?.role ?? null;
+  }
+  const { error } = await supabase.from("training_change_history").insert({
+    program_id: input.programId,
+    entity_type: input.entityType,
+    entity_id: input.entityId ?? null,
+    student_id: input.studentId ?? null,
+    actor_id: userData.user?.id ?? null,
+    actor_role: actorRole,
+    action_type: input.actionType,
+    before_data: input.beforeData ?? null,
+    after_data: input.afterData ?? null,
+    version_number: input.versionNumber ?? null,
+  });
+  devWarn("logTrainingChange", error);
+}
+
 /** Crée un nouveau programme réel avec toute sa structure (semaines/séances/blocs/exercices). */
 export async function createProgram(supabase: TypedSupabaseClient, data: ProgramBuilderData): Promise<string | null> {
+  const isPublishing = data.publicationStatus === "published";
   const { data: programRow, error: programError } = await supabase
     .from("programs")
     .insert({
@@ -759,10 +804,14 @@ export async function createProgram(supabase: TypedSupabaseClient, data: Program
       duration_weeks: data.durationWeeks,
       description: data.description,
       status: data.status,
-      // program_type/publication_status/etc. restent sur leur défaut DB
-      // ('group'/'published') tant que le parcours de création en 3 étapes
-      // (chantier training-builder-v2, tâche "3-step program creation
-      // flow") ne les expose pas encore dans ProgramBuilderData.
+      program_type: data.programType,
+      publication_status: data.publicationStatus,
+      cover_image_path: data.coverImagePath,
+      experience_level: data.experienceLevel,
+      expected_days_per_week: data.expectedDaysPerWeek,
+      estimated_session_duration_minutes: data.estimatedSessionDurationMinutes,
+      version_number: 1,
+      published_at: isPublishing ? new Date().toISOString() : null,
     })
     .select("id")
     .single();
@@ -772,6 +821,14 @@ export async function createProgram(supabase: TypedSupabaseClient, data: Program
   }
 
   await upsertProgramStructure(supabase, programRow.id, data.sessions);
+  await logTrainingChange(supabase, {
+    programId: programRow.id,
+    entityType: "program",
+    entityId: programRow.id,
+    actionType: isPublishing ? "created_published" : "created_draft",
+    afterData: { name: data.name, programType: data.programType, publicationStatus: data.publicationStatus },
+    versionNumber: 1,
+  });
   return programRow.id;
 }
 
@@ -780,12 +837,23 @@ export async function createProgram(supabase: TypedSupabaseClient, data: Program
  * en place, et sa structure (semaines/séances/blocs/exercices) est diffée
  * (voir upsertProgramStructure) plutôt qu'intégralement remplacée — les
  * identifiants des lignes non touchées par cette édition restent stables.
+ * Une transition vers `publicationStatus: "published"` incrémente
+ * `version_number`, met à jour `published_at` et enregistre un évènement
+ * d'historique (section "Publication" du chantier training-builder-v2) —
+ * une simple re-sauvegarde alors que le programme est déjà publié ne
+ * republie pas silencieusement (pas de nouvelle version ni d'historique).
  */
 export async function updateProgram(
   supabase: TypedSupabaseClient,
   programId: string,
   data: ProgramBuilderData,
 ): Promise<boolean> {
+  const { data: existing } = await supabase.from("programs").select("publication_status, version_number").eq("id", programId).maybeSingle();
+  const wasPublished = existing?.publication_status === "published";
+  const isNowPublished = data.publicationStatus === "published";
+  const isNewlyPublished = isNowPublished && !wasPublished;
+  const nextVersion = isNewlyPublished ? (existing?.version_number ?? 1) + 1 : existing?.version_number ?? 1;
+
   const { error: updateError } = await supabase
     .from("programs")
     .update({
@@ -795,12 +863,31 @@ export async function updateProgram(
       duration_weeks: data.durationWeeks,
       description: data.description,
       status: data.status,
+      program_type: data.programType,
+      publication_status: data.publicationStatus,
+      cover_image_path: data.coverImagePath,
+      experience_level: data.experienceLevel,
+      expected_days_per_week: data.expectedDaysPerWeek,
+      estimated_session_duration_minutes: data.estimatedSessionDurationMinutes,
+      version_number: nextVersion,
+      published_at: isNewlyPublished ? new Date().toISOString() : undefined,
       updated_at: new Date().toISOString(),
     })
     .eq("id", programId);
   devWarn("updateProgram", updateError);
 
   await upsertProgramStructure(supabase, programId, data.sessions);
+
+  if (isNewlyPublished) {
+    await logTrainingChange(supabase, {
+      programId,
+      entityType: "program",
+      entityId: programId,
+      actionType: "published",
+      afterData: { publicationStatus: data.publicationStatus },
+      versionNumber: nextVersion,
+    });
+  }
   return !updateError;
 }
 

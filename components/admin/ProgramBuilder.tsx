@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowDown, ArrowUp, BarChart3, Copy, Plus, Trash2 } from "lucide-react";
+import { BarChart3, Copy, Plus } from "lucide-react";
 
+import { blankBlock, BlockCard, blockTypeOptions } from "@/components/admin/BlockEditor";
 import { Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
-import { ExerciseSearchPicker } from "@/components/admin/ExerciseSearchPicker";
 import { PrimaryButton } from "@/components/admin/Modal";
 import {
   AnalysisFilterLabel,
@@ -15,13 +15,17 @@ import {
   UntaggedExercisesAlert,
 } from "@/components/shared/TrainingMetricsSummary";
 import { generateId, weekDays } from "@/lib/admin";
-import { calculateSessionMetrics, muscleGroupLabels, muscleGroupOrder } from "@/lib/training-metrics";
-import type { AdminContentStatus, AdminExercise, AdminWorkoutSession, ExerciseLibraryItem, MuscleGroupFilter } from "@/types";
-
-const muscleGroupOptions = [
-  { value: "", label: "Hérité de la séance" },
-  ...muscleGroupOrder.map((group) => ({ value: group, label: muscleGroupLabels[group] })),
-];
+import { calculateSessionMetrics } from "@/lib/training-metrics";
+import type {
+  AdminContentStatus,
+  AdminTrainingBlock,
+  AdminWorkoutSession,
+  ExerciseLibraryItem,
+  MuscleGroupFilter,
+  ProgramType,
+  PublicationStatus,
+  TrainingBlockType,
+} from "@/types";
 
 const statusOptions: { value: AdminContentStatus; label: string }[] = [
   { value: "brouillon", label: "Brouillon" },
@@ -35,6 +39,32 @@ const levelOptions = [
   { value: "Avancé", label: "Avancé" },
 ];
 
+export const programTypeOptions: { value: ProgramType; label: string; description: string }[] = [
+  {
+    value: "individual",
+    label: "Individuel",
+    description: "Chaque élève assigné reçoit sa propre copie, adaptable indépendamment des autres.",
+  },
+  {
+    value: "group",
+    label: "Groupe",
+    description: "Une seule structure partagée par tous les élèves assignés, synchronisée pour tous.",
+  },
+  {
+    value: "fixed_duration",
+    label: "Durée fixe",
+    description: "Programme complet créé à l'avance, avec un début et une fin (structure prête pour une future vente).",
+  },
+];
+
+const publicationStatusOptions: { value: PublicationStatus; label: string }[] = [
+  { value: "draft", label: "Brouillon (invisible pour l'élève)" },
+  { value: "published", label: "Publié (visible par l'élève assigné)" },
+  { value: "archived", label: "Archivé" },
+];
+
+const experienceLevelOptions = [1, 2, 3, 4, 5].map((n) => ({ value: String(n), label: `${n} / 5` }));
+
 export interface ProgramBuilderData {
   name: string;
   goal: string;
@@ -42,42 +72,13 @@ export interface ProgramBuilderData {
   durationWeeks: number;
   description: string;
   status: AdminContentStatus;
+  programType: ProgramType;
+  publicationStatus: PublicationStatus;
+  coverImagePath: string | null;
+  experienceLevel: number | null;
+  expectedDaysPerWeek: number | null;
+  estimatedSessionDurationMinutes: number | null;
   sessions: AdminWorkoutSession[];
-}
-
-function blankExercise(order: number): AdminExercise {
-  return {
-    id: generateId("ex"),
-    order,
-    name: "",
-    sets: 3,
-    reps: "8-10",
-    restSeconds: 60,
-    tempo: "2-0-1-0",
-    recommendedLoad: "",
-    videoUrl: "",
-    notes: "",
-  };
-}
-
-function exerciseFromLibrary(order: number, item: ExerciseLibraryItem): AdminExercise {
-  return {
-    id: generateId("ex"),
-    order,
-    name: item.name,
-    sets: 3,
-    reps: "8-10",
-    restSeconds: item.defaultRestSeconds ?? 60,
-    tempo: item.defaultTempo || "2-0-1-0",
-    recommendedLoad: "",
-    // Copié par valeur au moment de l'ajout — une future modification de
-    // l'exercice source dans la banque ne modifie jamais cette séance déjà
-    // enregistrée (voir docs/supabase-exercise-library-model.md).
-    videoUrl: item.videoUrl.trim() || item.alternativeVideoUrl.trim(),
-    notes: item.technicalNote,
-    muscleGroup: item.muscleGroup,
-    libraryExerciseId: item.id,
-  };
 }
 
 function restDaySession(weekNumber: number, day: string): AdminWorkoutSession {
@@ -97,66 +98,28 @@ function restDaySession(weekNumber: number, day: string): AdminWorkoutSession {
   };
 }
 
-function ExerciseRow({
-  exercise,
-  onChange,
-  onRemove,
-  onMove,
-  isFirst,
-  isLast,
-}: {
-  exercise: AdminExercise;
-  onChange: (partial: Partial<AdminExercise>) => void;
-  onRemove: () => void;
-  onMove: (direction: "up" | "down") => void;
-  isFirst: boolean;
-  isLast: boolean;
-}) {
-  return (
-    <div className="border border-border p-4">
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <span className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
-          Exercice #{exercise.order}
-          {exercise.libraryExerciseId && (
-            <span className="border border-primary/40 px-1.5 py-0.5 text-[10px] normal-case tracking-normal text-primary">
-              Depuis la banque
-            </span>
-          )}
-        </span>
-        <div className="flex items-center gap-2">
-          <button type="button" onClick={() => onMove("up")} disabled={isFirst} className="text-muted-foreground hover:text-foreground disabled:opacity-30">
-            <ArrowUp size={14} />
-          </button>
-          <button type="button" onClick={() => onMove("down")} disabled={isLast} className="text-muted-foreground hover:text-foreground disabled:opacity-30">
-            <ArrowDown size={14} />
-          </button>
-          <button type="button" onClick={onRemove} className="text-red-400 hover:text-red-300">
-            <Trash2 size={14} />
-          </button>
-        </div>
-      </div>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Field label="Nom de l'exercice" value={exercise.name} onChange={(v) => onChange({ name: v })} />
-        <Field label="Charge conseillée" value={exercise.recommendedLoad} onChange={(v) => onChange({ recommendedLoad: v })} />
-        <Field label="Séries" type="number" value={String(exercise.sets)} onChange={(v) => onChange({ sets: Number(v) || 0 })} />
-        <Field
-          label="Répétitions (ex : 8, 8-10, AMRAP)"
-          value={exercise.reps}
-          onChange={(v) => onChange({ reps: v })}
-        />
-        <Field label="Repos (s)" type="number" value={String(exercise.restSeconds)} onChange={(v) => onChange({ restSeconds: Number(v) || 0 })} />
-        <Field label="Tempo" value={exercise.tempo} onChange={(v) => onChange({ tempo: v })} />
-        <Field label="Lien vidéo" value={exercise.videoUrl} onChange={(v) => onChange({ videoUrl: v })} />
-        <SelectField
-          label="Groupe musculaire (analyse de charge)"
-          value={exercise.muscleGroup ?? ""}
-          onChange={(v) => onChange({ muscleGroup: v || undefined })}
-          options={muscleGroupOptions}
-        />
-        <Field label="Notes" value={exercise.notes} onChange={(v) => onChange({ notes: v })} />
-      </div>
-    </div>
-  );
+/**
+ * Nouveaux identifiants pour chaque bloc/exercice/prescription d'une copie
+ * (duplication de séance/semaine). Un bloc "standard" synthétisé à la
+ * lecture (voir lib/supabase/programs.ts) devient un bloc réel neuf — ses
+ * exercices ne sont jamais perdus, seul l'id synthétique change.
+ */
+function cloneBlocks(blocks: AdminTrainingBlock[]): AdminTrainingBlock[] {
+  return blocks.map((block) => {
+    const exercises = block.exercises.map((ex) => {
+      const newExerciseId = generateId("ex");
+      return {
+        ...ex,
+        id: newExerciseId,
+        prescriptions: ex.prescriptions?.map((p) => ({ ...p, id: generateId("presc"), exerciseId: newExerciseId })),
+      };
+    });
+    return { ...block, id: generateId("block"), isSynthesizedStandard: undefined, exercises };
+  });
+}
+
+function deriveExercises(blocks: AdminTrainingBlock[]) {
+  return blocks.flatMap((b) => b.exercises);
 }
 
 function DayCard({
@@ -173,48 +136,48 @@ function DayCard({
   onDuplicate: () => void;
 }) {
   const [selectedMuscleGroup, setSelectedMuscleGroup] = useState<MuscleGroupFilter>("tous");
+  const [addBlockType, setAddBlockType] = useState<TrainingBlockType>("standard");
 
   function toggleRest() {
     if (session.isRestDay) {
       onUpdate({ ...session, isRestDay: false, name: "" });
     } else {
-      onUpdate({ ...session, isRestDay: true, name: "Repos", exercises: [] });
+      onUpdate({ ...session, isRestDay: true, name: "Repos", blocks: [], exercises: [] });
     }
   }
 
-  function updateExercise(index: number, partial: Partial<AdminExercise>) {
-    const exercises = session.exercises.map((ex, i) => (i === index ? { ...ex, ...partial } : ex));
-    onUpdate({ ...session, exercises });
+  function updateBlock(blockId: string, updated: AdminTrainingBlock) {
+    const blocks = session.blocks.map((b) => (b.id === blockId ? updated : b));
+    onUpdate({ ...session, blocks, exercises: deriveExercises(blocks) });
   }
 
-  function removeExercise(index: number) {
-    const exercises = session.exercises
-      .filter((_, i) => i !== index)
-      .map((ex, i) => ({ ...ex, order: i + 1 }));
-    onUpdate({ ...session, exercises });
+  function removeBlock(blockId: string) {
+    const blocks = session.blocks.filter((b) => b.id !== blockId).map((b, i) => ({ ...b, position: i + 1 }));
+    onUpdate({ ...session, blocks, exercises: deriveExercises(blocks) });
   }
 
-  function moveExercise(index: number, direction: "up" | "down") {
+  function moveBlock(blockId: string, direction: "up" | "down") {
+    const index = session.blocks.findIndex((b) => b.id === blockId);
     const targetIndex = direction === "up" ? index - 1 : index + 1;
-    if (targetIndex < 0 || targetIndex >= session.exercises.length) return;
-    const exercises = [...session.exercises];
-    [exercises[index], exercises[targetIndex]] = [exercises[targetIndex], exercises[index]];
-    onUpdate({ ...session, exercises: exercises.map((ex, i) => ({ ...ex, order: i + 1 })) });
+    if (index === -1 || targetIndex < 0 || targetIndex >= session.blocks.length) return;
+    const blocks = [...session.blocks];
+    [blocks[index], blocks[targetIndex]] = [blocks[targetIndex], blocks[index]];
+    const repositioned = blocks.map((b, i) => ({ ...b, position: i + 1 }));
+    onUpdate({ ...session, blocks: repositioned, exercises: deriveExercises(repositioned) });
   }
 
-  function addExercise() {
-    onUpdate({
-      ...session,
-      exercises: [...session.exercises, blankExercise(session.exercises.length + 1)],
-    });
+  function duplicateBlock(blockId: string) {
+    const source = session.blocks.find((b) => b.id === blockId);
+    if (!source) return;
+    const [copy] = cloneBlocks([source]);
+    const blocks = [...session.blocks, { ...copy, position: session.blocks.length + 1 }];
+    onUpdate({ ...session, blocks, exercises: deriveExercises(blocks) });
   }
 
-  function addExerciseFromLibrary(item: ExerciseLibraryItem) {
-    onUpdate({
-      ...session,
-      muscleGroup: session.muscleGroup || item.muscleGroup,
-      exercises: [...session.exercises, exerciseFromLibrary(session.exercises.length + 1, item)],
-    });
+  function addBlock() {
+    const block = blankBlock(session.id, session.blocks.length + 1, addBlockType);
+    const blocks = [...session.blocks, block];
+    onUpdate({ ...session, blocks, exercises: deriveExercises(blocks) });
   }
 
   return (
@@ -258,27 +221,38 @@ function DayCard({
           <TextareaField label="Échauffement" value={session.warmup} onChange={(v) => onUpdate({ ...session, warmup: v })} rows={2} />
           <TextareaField label="Notes coach" value={session.coachNotes} onChange={(v) => onUpdate({ ...session, coachNotes: v })} rows={2} />
 
-          <ExerciseSearchPicker library={library} onPick={addExerciseFromLibrary} />
-
           <div className="flex flex-col gap-3">
-            {session.exercises.map((ex, i) => (
-              <ExerciseRow
-                key={ex.id}
-                exercise={ex}
-                onChange={(partial) => updateExercise(i, partial)}
-                onRemove={() => removeExercise(i)}
-                onMove={(dir) => moveExercise(i, dir)}
+            {session.blocks.map((block, i) => (
+              <BlockCard
+                key={block.id}
+                block={block}
+                library={library}
+                onChange={(updated) => updateBlock(block.id, updated)}
+                onRemove={() => removeBlock(block.id)}
+                onDuplicate={() => duplicateBlock(block.id)}
+                onMove={(dir) => moveBlock(block.id, dir)}
                 isFirst={i === 0}
-                isLast={i === session.exercises.length - 1}
+                isLast={i === session.blocks.length - 1}
               />
             ))}
+          </div>
+
+          <div className="flex flex-wrap items-end gap-3 border border-dashed border-border p-3">
+            <div className="min-w-[220px] flex-1">
+              <SelectField
+                label="Type de bloc à ajouter"
+                value={addBlockType}
+                onChange={(v) => setAddBlockType(v as TrainingBlockType)}
+                options={blockTypeOptions}
+              />
+            </div>
             <button
               type="button"
-              onClick={addExercise}
-              className="flex items-center justify-center gap-2 border border-dashed border-border py-3 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+              onClick={addBlock}
+              className="flex items-center gap-2 border border-primary bg-primary px-4 py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700"
             >
               <Plus size={14} />
-              Ajouter un exercice vierge
+              Ajouter bloc
             </button>
           </div>
 
@@ -335,6 +309,14 @@ export function ProgramBuilder({
   const [durationWeeks, setDurationWeeks] = useState(initial.durationWeeks);
   const [description, setDescription] = useState(initial.description);
   const [status, setStatus] = useState<AdminContentStatus>(initial.status);
+  const [programType, setProgramType] = useState<ProgramType>(initial.programType);
+  const [publicationStatus, setPublicationStatus] = useState<PublicationStatus>(initial.publicationStatus);
+  const [coverImagePath, setCoverImagePath] = useState(initial.coverImagePath ?? "");
+  const [experienceLevel, setExperienceLevel] = useState(initial.experienceLevel !== null ? String(initial.experienceLevel) : "");
+  const [expectedDaysPerWeek, setExpectedDaysPerWeek] = useState(initial.expectedDaysPerWeek !== null ? String(initial.expectedDaysPerWeek) : "");
+  const [estimatedSessionDurationMinutes, setEstimatedSessionDurationMinutes] = useState(
+    initial.estimatedSessionDurationMinutes !== null ? String(initial.estimatedSessionDurationMinutes) : "",
+  );
   const [sessions, setSessions] = useState<AdminWorkoutSession[]>(initial.sessions);
   const [weekMessages, setWeekMessages] = useState<Record<number, string>>({});
 
@@ -343,18 +325,10 @@ export function ProgramBuilder({
   function cloneWeekSessions(sourceWeek: number, targetWeek: number): AdminWorkoutSession[] {
     return sessions
       .filter((s) => s.weekNumber === sourceWeek)
-      .map((s) => ({
-        ...s,
-        id: generateId("sess"),
-        weekNumber: targetWeek,
-        // `blocks` n'est pas encore éditable dans ce builder (voir
-        // upsertBlocksForSession côté lib/supabase/programs.ts, qui
-        // reconstruit automatiquement un bloc "standard" à partir
-        // d'`exercises`) — le vider ici évite de porter des ids de blocs
-        // appartenant à la séance source vers cette copie.
-        blocks: [],
-        exercises: s.exercises.map((ex) => ({ ...ex, id: generateId("ex"), blockId: undefined })),
-      }));
+      .map((s) => {
+        const blocks = cloneBlocks(s.blocks);
+        return { ...s, id: generateId("sess"), weekNumber: targetWeek, blocks, exercises: deriveExercises(blocks) };
+      });
   }
 
   function addWeek(copyPrevious: boolean) {
@@ -389,19 +363,11 @@ export function ProgramBuilder({
   function duplicateSession(session: AdminWorkoutSession) {
     const target = sessions.find((s) => s.weekNumber === session.weekNumber + 1 && s.day === session.day);
     if (!target) return;
+    const blocks = cloneBlocks(session.blocks);
     setSessions((prev) =>
       prev.map((s) =>
         s.id === target.id
-          ? {
-              ...session,
-              id: target.id,
-              weekNumber: target.weekNumber,
-              // Voir cloneWeekSessions ci-dessus : `blocks` reste vide, le
-              // bloc "standard" est reconstruit côté écriture à partir
-              // d'`exercises`.
-              blocks: [],
-              exercises: session.exercises.map((ex) => ({ ...ex, id: generateId("ex"), blockId: undefined })),
-            }
+          ? { ...session, id: target.id, weekNumber: target.weekNumber, blocks, exercises: deriveExercises(blocks) }
           : s,
       ),
     );
@@ -414,6 +380,26 @@ export function ProgramBuilder({
           Informations générales
         </h2>
         <div className="flex flex-col gap-4">
+          <div>
+            <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Type de programmation</span>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {programTypeOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setProgramType(option.value)}
+                  aria-pressed={programType === option.value}
+                  className={`flex flex-col gap-1 border p-3 text-left transition-colors ${
+                    programType === option.value ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"
+                  }`}
+                >
+                  <span className="text-xs font-bold uppercase tracking-widest text-foreground">{option.label}</span>
+                  <span className="text-[11px] text-muted-foreground">{option.description}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
           <Field label="Nom du programme" value={name} onChange={setName} />
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <Field label="Objectif" value={goal} onChange={setGoal} />
@@ -426,12 +412,46 @@ export function ProgramBuilder({
             />
           </div>
           <TextareaField label="Description" value={description} onChange={setDescription} rows={3} />
-          <SelectField
-            label="Statut"
-            value={status}
-            onChange={(v) => setStatus(v as AdminContentStatus)}
-            options={statusOptions}
-          />
+          <Field label="Image de couverture (URL, optionnel)" value={coverImagePath} onChange={setCoverImagePath} />
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <SelectField
+              label="Niveau d'expérience requis"
+              value={experienceLevel}
+              onChange={setExperienceLevel}
+              options={[{ value: "", label: "Non précisé" }, ...experienceLevelOptions]}
+            />
+            <Field
+              label="Jours par semaine (moyenne)"
+              type="number"
+              value={expectedDaysPerWeek}
+              onChange={setExpectedDaysPerWeek}
+            />
+            <Field
+              label="Durée d'une séance (min, moyenne)"
+              type="number"
+              value={estimatedSessionDurationMinutes}
+              onChange={setEstimatedSessionDurationMinutes}
+            />
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <SelectField
+              label="Statut"
+              value={status}
+              onChange={(v) => setStatus(v as AdminContentStatus)}
+              options={statusOptions}
+            />
+            <div>
+              <SelectField
+                label="Visibilité élève"
+                value={publicationStatus}
+                onChange={(v) => setPublicationStatus(v as PublicationStatus)}
+                options={publicationStatusOptions}
+              />
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                Contrôle si l&apos;élève assigné voit ce programme, indépendamment du statut ci-dessus.
+              </p>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -517,6 +537,12 @@ export function ProgramBuilder({
             durationWeeks,
             description,
             status,
+            programType,
+            publicationStatus,
+            coverImagePath: coverImagePath.trim() || null,
+            experienceLevel: experienceLevel === "" ? null : Number(experienceLevel),
+            expectedDaysPerWeek: expectedDaysPerWeek === "" ? null : Number(expectedDaysPerWeek),
+            estimatedSessionDurationMinutes: estimatedSessionDurationMinutes === "" ? null : Number(estimatedSessionDurationMinutes),
             sessions,
           })
         }

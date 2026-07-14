@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft, Flame, MessageSquare } from "lucide-react";
 
+import { BlockAwareSessionBlocks } from "@/components/student/BlockAwareSessionBlocks";
 import { SessionAnalysisSection } from "@/components/student/SessionAnalysisSection";
 import { SessionFeedbackSection } from "@/components/student/SessionFeedbackSection";
 import {
@@ -13,6 +14,7 @@ import {
 } from "@/data/student";
 import { useSupabaseTrainingProgram } from "@/hooks/useSupabaseTrainingProgram";
 import { toEleveWorkoutSession } from "@/lib/training-schedule";
+import type { AdminTrainingBlock } from "@/types";
 
 export default function SessionDetailPage() {
   const params = useParams<{ sessionId: string }>();
@@ -24,6 +26,7 @@ export default function SessionDetailPage() {
 
   if (supabaseTraining.active) {
     let realSession: ReturnType<typeof toEleveWorkoutSession> | null = null;
+    let realSessionBlocks: AdminTrainingBlock[] = [];
     let realProgramName: string | null = null;
     let realProgramId: string | null = null;
 
@@ -31,6 +34,7 @@ export default function SessionDetailPage() {
       const match = program.sessions.find((s) => s.id === params.sessionId);
       if (match) {
         realSession = toEleveWorkoutSession(match);
+        realSessionBlocks = match.blocks;
         realProgramName = program.name;
         realProgramId = program.id;
         break;
@@ -72,6 +76,8 @@ export default function SessionDetailPage() {
         </div>
 
         <SessionAnalysisSection session={{ ...realSession, muscleGroup: realSession.muscleGroups }} />
+
+        <BlockAwareSessionBlocks blocks={realSessionBlocks} />
 
         {realSession.warmup && (
           <div className="mb-8 flex items-start gap-4 border border-border bg-card p-6">
