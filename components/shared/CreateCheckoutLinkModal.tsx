@@ -17,16 +17,28 @@ interface CreateCheckoutLinkModalProps {
 }
 
 /** Sélection de formule + création de session Stripe Checkout, partagée élève ("Activer mon abonnement") et admin ("Créer lien de paiement"). */
+function resolveDefaultOfferId(offers: CheckoutOffer[], defaultOfferId?: string | null): string {
+  // Ne retient defaultOfferId que s'il correspond a une offre encore active/
+  // presente dans la liste actuelle. Sans cette verification, une offre
+  // desactivee ou supprimee depuis (ex: modele d'abonnement retire) restait
+  // selectionnee silencieusement et onCreateCheckout() echouait ou generait
+  // un lien de paiement pour la mauvaise offre.
+  if (defaultOfferId && offers.some((offer) => offer.id === defaultOfferId)) {
+    return defaultOfferId;
+  }
+  return offers[0]?.id ?? "";
+}
+
 export function CreateCheckoutLinkModal({ triggerLabel, mode, offers, onCreateCheckout, defaultOfferId }: CreateCheckoutLinkModalProps) {
   const [open, setOpen] = useState(false);
-  const [offerId, setOfferId] = useState(defaultOfferId ?? offers[0]?.id ?? "");
+  const [offerId, setOfferId] = useState(() => resolveDefaultOfferId(offers, defaultOfferId));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
   const selectId = useId();
 
   function openModal() {
-    setOfferId(defaultOfferId ?? offers[0]?.id ?? "");
+    setOfferId(resolveDefaultOfferId(offers, defaultOfferId));
     setOpen(true);
   }
 
