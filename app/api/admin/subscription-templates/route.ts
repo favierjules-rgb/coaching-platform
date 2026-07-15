@@ -5,9 +5,9 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSubscriptionTemplate } from "@/lib/supabase/subscription-templates";
 import { getStripeClient } from "@/lib/stripe/client";
 import { createStripeProductAndPrice, describeStripeError } from "@/lib/stripe/subscription-templates";
+import { parseJsonBody } from "@/lib/api/validate";
+import { createSubscriptionTemplateBodySchema } from "@/lib/api/schemas/subscription-templates";
 import type { BillingInterval } from "@/types";
-
-const VALID_INTERVALS: BillingInterval[] = ["monthly", "quarterly", "yearly", "one_time"];
 
 /**
  * POST /api/admin/subscription-templates — crée un modèle d'abonnement
@@ -20,24 +20,9 @@ const VALID_INTERVALS: BillingInterval[] = ["monthly", "quarterly", "yearly", "o
  * Body attendu : { name, description?, amountCents, currency?, billingInterval, durationMonths? }.
  */
 export async function POST(request: Request) {
-  let body: {
-    name?: string;
-    description?: string;
-    amountCents?: number;
-    currency?: string;
-    billingInterval?: string;
-    durationMonths?: number | null;
-  };
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Corps de requête invalide." }, { status: 400 });
-  }
-
-  const { name, amountCents, billingInterval } = body;
-  if (!name || !amountCents || amountCents <= 0 || !billingInterval || !VALID_INTERVALS.includes(billingInterval as BillingInterval)) {
-    return NextResponse.json({ error: "name, amountCents (> 0) et billingInterval valides sont requis." }, { status: 400 });
-  }
+  const parsed = await parseJsonBody(request, createSubscriptionTemplateBodySchema);
+  if (!parsed.success) return parsed.response;
+  const { name, description, amountCents, currency, billingInterval, durationMonths } = parsed.data;
 
   const sessionSupabase = await createSupabaseServerClient();
   if (!sessionSupabase) {
@@ -60,9 +45,9 @@ export async function POST(request: Request) {
     try {
       const created = await createStripeProductAndPrice(stripe, {
         name,
-        description: body.description ?? "",
+        description: description ?? "",
         amountCents,
-        currency: (body.currency ?? "eur").toLowerCase(),
+        currency: (currency ?? "eur").toLowerCase(),
         billingInterval: billingInterval as BillingInterval,
       });
       stripeProductId = created.productId;
@@ -78,11 +63,11 @@ export async function POST(request: Request) {
 
   const template = await createSubscriptionTemplate(sessionSupabase, {
     name,
-    description: body.description ?? "",
+    description: description ?? "",
     amountCents,
-    currency: (body.currency ?? "eur").toLowerCase(),
+    currency: (currency ?? "eur").toLowerCase(),
     billingInterval: billingInterval as BillingInterval,
-    durationMonths: body.durationMonths ?? null,
+    durationMonths: durationMonths ?? null,
     stripeProductId,
     stripePriceId,
     createdBy: coach?.id ?? null,

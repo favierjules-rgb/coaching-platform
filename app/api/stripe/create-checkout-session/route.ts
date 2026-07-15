@@ -9,6 +9,8 @@ import { getStudentById, getStudentProfile } from "@/lib/supabase/students";
 import { getSubscriptionTemplateById } from "@/lib/supabase/subscription-templates";
 import { getResolvedPlanByKey } from "@/lib/stripe/plans-server";
 import { getStripeClient } from "@/lib/stripe/client";
+import { parseJsonBody } from "@/lib/api/validate";
+import { createCheckoutSessionBodySchema } from "@/lib/api/schemas/stripe";
 
 /**
  * POST /api/stripe/create-checkout-session — crée une session Stripe
@@ -33,17 +35,9 @@ import { getStripeClient } from "@/lib/stripe/client";
  * pour n'importe quel élève.
  */
 export async function POST(request: Request) {
-  let body: { studentId?: string; templateId?: string; planKey?: string };
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Corps de requête invalide." }, { status: 400 });
-  }
-
-  const { studentId } = body;
-  if (!studentId) {
-    return NextResponse.json({ error: "studentId est requis." }, { status: 400 });
-  }
+  const parsed = await parseJsonBody(request, createCheckoutSessionBodySchema);
+  if (!parsed.success) return parsed.response;
+  const { studentId, templateId: bodyTemplateId, planKey: bodyPlanKey } = parsed.data;
 
   const sessionSupabase = await createSupabaseServerClient();
   if (!sessionSupabase) {
@@ -78,8 +72,8 @@ export async function POST(request: Request) {
     }
     templateId = profile.assignedSubscriptionTemplateId;
   } else {
-    templateId = body.templateId ?? null;
-    planKey = body.planKey ?? null;
+    templateId = bodyTemplateId ?? null;
+    planKey = bodyPlanKey ?? null;
     if (!templateId && !planKey) {
       return NextResponse.json({ error: "templateId ou planKey est requis." }, { status: 400 });
     }

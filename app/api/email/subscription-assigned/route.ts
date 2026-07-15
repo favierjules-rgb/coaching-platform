@@ -7,6 +7,8 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getStudentById, getStudentProfile } from "@/lib/supabase/students";
 import { getSubscriptionTemplateById } from "@/lib/supabase/subscription-templates";
+import { parseJsonBody } from "@/lib/api/validate";
+import { subscriptionAssignedBodySchema } from "@/lib/api/schemas/email";
 
 /**
  * POST /api/email/subscription-assigned — envoie l'email "formule
@@ -19,17 +21,9 @@ import { getSubscriptionTemplateById } from "@/lib/supabase/subscription-templat
  * depuis le navigateur.
  */
 export async function POST(request: Request) {
-  let body: { studentId?: string };
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Corps de requête invalide." }, { status: 400 });
-  }
-
-  const { studentId } = body;
-  if (!studentId) {
-    return NextResponse.json({ error: "studentId est requis." }, { status: 400 });
-  }
+  const parsed = await parseJsonBody(request, subscriptionAssignedBodySchema);
+  if (!parsed.success) return parsed.response;
+  const { studentId } = parsed.data;
 
   const sessionSupabase = await createSupabaseServerClient();
   if (!sessionSupabase) {

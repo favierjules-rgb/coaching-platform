@@ -6,6 +6,8 @@ import { getCurrentUser, getCurrentUserRole } from "@/lib/supabase/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getEmailLogById } from "@/lib/supabase/email-logs";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { parseParams } from "@/lib/api/validate";
+import { idParamSchema } from "@/lib/api/schemas/common";
 
 /**
  * POST /api/admin/emails/[id]/resend — renvoie un email transactionnel en
@@ -18,7 +20,9 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
  * HTML stocké — le destinataire reste strictement celui du log d'origine.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+  const parsedParams = parseParams(await params, idParamSchema);
+  if (!parsedParams.success) return parsedParams.response;
+  const { id } = parsedParams.data;
 
   const sessionSupabase = await createSupabaseServerClient();
   if (!sessionSupabase) {

@@ -14,6 +14,8 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getCurrentStudentId } from "@/lib/supabase/current-student";
 import { getStudentById } from "@/lib/supabase/students";
 import type { EmailType } from "@/types";
+import { parseJsonBody } from "@/lib/api/validate";
+import { appointmentNotificationBodySchema } from "@/lib/api/schemas/email";
 
 /**
  * POST /api/email/appointment-notification — envoie l'email de
@@ -31,17 +33,9 @@ import type { EmailType } from "@/types";
  * est relu côté serveur, ainsi que les emails élève/coach.
  */
 export async function POST(request: Request) {
-  let body: { appointmentId?: string };
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Corps de requête invalide." }, { status: 400 });
-  }
-
-  const { appointmentId } = body;
-  if (!appointmentId) {
-    return NextResponse.json({ error: "appointmentId est requis." }, { status: 400 });
-  }
+  const parsed = await parseJsonBody(request, appointmentNotificationBodySchema);
+  if (!parsed.success) return parsed.response;
+  const { appointmentId } = parsed.data;
 
   const sessionSupabase = await createSupabaseServerClient();
   if (!sessionSupabase) {

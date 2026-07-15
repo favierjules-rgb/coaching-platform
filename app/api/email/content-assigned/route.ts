@@ -7,9 +7,8 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getStudentById } from "@/lib/supabase/students";
 import type { EmailType } from "@/types";
-
-type ContentType = "programme" | "nutrition" | "document";
-const VALID_CONTENT_TYPES: ContentType[] = ["programme", "nutrition", "document"];
+import { parseJsonBody } from "@/lib/api/validate";
+import { contentAssignedBodySchema } from "@/lib/api/schemas/email";
 
 /**
  * POST /api/email/content-assigned — envoie l'email "programme/plan
@@ -22,18 +21,9 @@ const VALID_CONTENT_TYPES: ContentType[] = ["programme", "nutrition", "document"
  * réellement attribué à cet élève).
  */
 export async function POST(request: Request) {
-  let body: { studentId?: string; contentType?: string; contentId?: string };
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Corps de requête invalide." }, { status: 400 });
-  }
-
-  const { studentId, contentId } = body;
-  const contentType = body.contentType as ContentType | undefined;
-  if (!studentId || !contentId || !contentType || !VALID_CONTENT_TYPES.includes(contentType)) {
-    return NextResponse.json({ error: "studentId, contentId et contentType (programme|nutrition|document) sont requis." }, { status: 400 });
-  }
+  const parsed = await parseJsonBody(request, contentAssignedBodySchema);
+  if (!parsed.success) return parsed.response;
+  const { studentId, contentId, contentType } = parsed.data;
 
   const sessionSupabase = await createSupabaseServerClient();
   if (!sessionSupabase) {

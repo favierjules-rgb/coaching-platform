@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { getCurrentUser, getCurrentUserRole } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { deleteStripePayment } from "@/lib/supabase/billing";
+import { parseParams } from "@/lib/api/validate";
+import { idParamSchema } from "@/lib/api/schemas/common";
 
 /**
  * DELETE /api/admin/billing/payments/[id] — supprime définitivement une
@@ -16,7 +18,9 @@ import { deleteStripePayment } from "@/lib/supabase/billing";
  * retraité (aucune suppression du billing_events associé).
  */
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+  const parsedParams = parseParams(await params, idParamSchema);
+  if (!parsedParams.success) return parsedParams.response;
+  const { id } = parsedParams.data;
 
   const sessionSupabase = await createSupabaseServerClient();
   if (!sessionSupabase) {
