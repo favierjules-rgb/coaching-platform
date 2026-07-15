@@ -15,7 +15,9 @@ export const brevoWebhookEventSchema = z
     event: z.string().max(100).optional(),
     email: z.string().trim().max(254).optional(),
     date: z.string().max(100).optional(),
-    ts: z.number().optional(),
+    // Timestamp Unix en secondes. Non utilise actuellement (champ passthrough),
+    // mais borne par principe : entier positif, plafonne a l'an 2100.
+    ts: z.number().int().positive().max(4102444800).optional(),
     reason: z.string().max(2000).optional(),
   })
   .passthrough();
