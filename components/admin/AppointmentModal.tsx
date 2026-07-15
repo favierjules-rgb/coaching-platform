@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { CheckCircle, Plus } from "lucide-react";
 
 import { Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
@@ -46,10 +46,17 @@ export function AppointmentModal({
   const [location, setLocation] = useState("");
   const [meetingUrl, setMeetingUrl] = useState("");
 
-  useEffect(() => {
-    if (studentId || students.length === 0) return;
-    setStudentId(students[0].id);
-  }, [students, studentId]);
+  // Selectionne automatiquement le premier eleve quand la liste `students` change,
+  // mais seulement si aucun eleve n'est deja choisi. Mise a jour pendant le rendu
+  // (plutot que dans un effect) pour eviter les rendus en cascade -- voir
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const [studentsSnapshot, setStudentsSnapshot] = useState(students);
+  if (students !== studentsSnapshot) {
+    setStudentsSnapshot(students);
+    if (!studentId && students.length > 0) {
+      setStudentId(students[0].id);
+    }
+  }
 
   function close() {
     setOpen(false);
