@@ -6,6 +6,8 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getBillingCustomerForStudent } from "@/lib/supabase/billing";
 import { getStripeClient } from "@/lib/stripe/client";
+import { parseJsonBody } from "@/lib/api/validate";
+import { createCustomerPortalSessionBodySchema } from "@/lib/api/schemas/stripe";
 
 /**
  * POST /api/stripe/create-customer-portal-session — ouvre le portail
@@ -16,17 +18,9 @@ import { getStripeClient } from "@/lib/stripe/client";
  * Body attendu : { studentId: string }.
  */
 export async function POST(request: Request) {
-  let body: { studentId?: string };
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Corps de requête invalide." }, { status: 400 });
-  }
-
-  const { studentId } = body;
-  if (!studentId) {
-    return NextResponse.json({ error: "studentId est requis." }, { status: 400 });
-  }
+  const parsed = await parseJsonBody(request, createCustomerPortalSessionBodySchema);
+  if (!parsed.success) return parsed.response;
+  const { studentId } = parsed.data;
 
   const sessionSupabase = await createSupabaseServerClient();
   if (!sessionSupabase) {

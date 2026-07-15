@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { normalizeEmail } from "@/lib/newsletter/validation";
+import { brevoWebhookEventSchema } from "@/lib/api/schemas/brevo";
 import {
   findSubscriberByNormalizedEmail,
   updateSubscriberByNormalizedEmail,
@@ -119,9 +120,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true }, { status: 200 });
   }
 
-  const events: BrevoWebhookEvent[] = Array.isArray(body)
-    ? (body as BrevoWebhookEvent[])
-    : [body as BrevoWebhookEvent];
+  const rawEvents: unknown[] = Array.isArray(body) ? body : [body];
+
+  // Validation souple : un evenement individuel malforme est ignore (log) plutot que
+  // de faire echouer tout le webhook (Brevo peut regrouper plusieurs evenements par requete).
+  const events: BrevoWebhookEvent[] = [];
+  for (const raw of rawEvents) {
+    const result = brevoWebhookEventSchema.safeParse(raw);
+    if (!result.success) {
+      console.warn("[Brevo webhook] Evenement ignore (schema invalide):", result.error.flatten());
+      continue;
+    }
+    events.push(result.data as BrevoWebhookEvent);
+  }
 
   for (const event of events) {
     try {

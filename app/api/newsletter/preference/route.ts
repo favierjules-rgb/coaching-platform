@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser, getCurrentProfile } from "@/lib/supabase/auth";
+import { parseJsonBody } from "@/lib/api/validate";
+import { newsletterPreferenceBodySchema } from "@/lib/api/schemas/newsletter";
 import { normalizeEmail, NEWSLETTER_CONSENT_TEXT_VERSION } from "@/lib/newsletter/validation";
 import {
   createSubscriber,
@@ -49,17 +51,9 @@ export async function POST(request: Request) {
   if ("error" in result) return result.error;
   const { profile } = result;
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Corps de requête invalide." }, { status: 400 });
-  }
-
-  const { subscribed } = (body ?? {}) as { subscribed?: unknown };
-  if (typeof subscribed !== "boolean") {
-    return NextResponse.json({ error: "Paramètre 'subscribed' manquant." }, { status: 400 });
-  }
+  const parsed = await parseJsonBody(request, newsletterPreferenceBodySchema);
+  if (!parsed.success) return parsed.response;
+  const { subscribed } = parsed.data;
 
   const normalizedEmail = normalizeEmail(profile.email);
   const nowIso = new Date().toISOString();

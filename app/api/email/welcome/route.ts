@@ -7,6 +7,8 @@ import { getCurrentUser, getCurrentUserRole } from "@/lib/supabase/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getStudentById } from "@/lib/supabase/students";
+import { parseJsonBody } from "@/lib/api/validate";
+import { welcomeEmailBodySchema } from "@/lib/api/schemas/email";
 
 /**
  * POST /api/email/welcome — envoie l'email de bienvenue (chantier
@@ -19,17 +21,9 @@ import { getStudentById } from "@/lib/supabase/students";
  * `/api/email/*` qui n'utilisent qu'un court anti-double-clic.
  */
 export async function POST(request: Request) {
-  let body: { studentId?: string };
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Corps de requête invalide." }, { status: 400 });
-  }
-
-  const { studentId } = body;
-  if (!studentId) {
-    return NextResponse.json({ error: "studentId est requis." }, { status: 400 });
-  }
+  const parsed = await parseJsonBody(request, welcomeEmailBodySchema);
+  if (!parsed.success) return parsed.response;
+  const { studentId } = parsed.data;
 
   const sessionSupabase = await createSupabaseServerClient();
   if (!sessionSupabase) {

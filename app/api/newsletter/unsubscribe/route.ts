@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyUnsubscribeToken } from "@/lib/newsletter/tokens";
+import { parseJsonBody } from "@/lib/api/validate";
+import { newsletterUnsubscribeBodySchema } from "@/lib/api/schemas/newsletter";
 import { normalizeEmail } from "@/lib/newsletter/validation";
 import {
   findSubscriberByNormalizedEmail,
@@ -22,17 +24,9 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Corps de requête invalide." }, { status: 400 });
-  }
-
-  const { token } = (body ?? {}) as { token?: unknown };
-  if (typeof token !== "string" || token.length === 0) {
-    return NextResponse.json({ error: "Lien de désinscription invalide." }, { status: 400 });
-  }
+  const parsed = await parseJsonBody(request, newsletterUnsubscribeBodySchema);
+  if (!parsed.success) return parsed.response;
+  const { token } = parsed.data;
 
   const verified = verifyUnsubscribeToken(token);
   if (!verified.valid) {

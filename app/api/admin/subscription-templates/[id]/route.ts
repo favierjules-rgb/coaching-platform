@@ -4,6 +4,9 @@ import { getCurrentUser, getCurrentUserRole } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getSubscriptionTemplateById, updateSubscriptionTemplate } from "@/lib/supabase/subscription-templates";
 import { getStripeClient } from "@/lib/stripe/client";
+import { parseJsonBody, parseParams } from "@/lib/api/validate";
+import { idParamSchema } from "@/lib/api/schemas/common";
+import { updateSubscriptionTemplateBodySchema } from "@/lib/api/schemas/subscription-templates";
 import {
   createStripePriceForExistingProduct,
   createStripeProductAndPrice,
@@ -23,20 +26,13 @@ import {
  * amountCents?, durationMonths?, isActive? }.
  */
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+  const parsedParams = parseParams(await params, idParamSchema);
+  if (!parsedParams.success) return parsedParams.response;
+  const { id } = parsedParams.data;
 
-  let body: {
-    name?: string;
-    description?: string;
-    amountCents?: number;
-    durationMonths?: number | null;
-    isActive?: boolean;
-  };
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Corps de requête invalide." }, { status: 400 });
-  }
+  const parsed = await parseJsonBody(request, updateSubscriptionTemplateBodySchema);
+  if (!parsed.success) return parsed.response;
+  const body = parsed.data;
 
   const sessionSupabase = await createSupabaseServerClient();
   if (!sessionSupabase) {

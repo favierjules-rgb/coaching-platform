@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { getCurrentUser, getCurrentUserRole } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { deleteSubscriptionRecord } from "@/lib/supabase/billing";
+import { parseParams } from "@/lib/api/validate";
+import { idParamSchema } from "@/lib/api/schemas/common";
 
 /**
  * DELETE /api/admin/billing/subscriptions/[id] — supprime définitivement
@@ -17,7 +19,9 @@ import { deleteSubscriptionRecord } from "@/lib/supabase/billing";
  * l'abonnement existe toujours réellement côté Stripe.
  */
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+  const parsedParams = parseParams(await params, idParamSchema);
+  if (!parsedParams.success) return parsedParams.response;
+  const { id } = parsedParams.data;
 
   const sessionSupabase = await createSupabaseServerClient();
   if (!sessionSupabase) {

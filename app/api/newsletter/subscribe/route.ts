@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import {
-  isValidEmail,
   normalizeEmail,
   NEWSLETTER_CONSENT_TEXT_VERSION,
 } from "@/lib/newsletter/validation";
+import { parseJsonBody } from "@/lib/api/validate";
+import { newsletterSubscribeBodySchema } from "@/lib/api/schemas/newsletter";
 import { checkRateLimit, getClientIp } from "@/lib/newsletter/rate-limit";
 import {
   createSubscriber,
@@ -38,32 +39,13 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Corps de requête invalide." }, { status: 400 });
-  }
-
-  const { email, consent, source } = (body ?? {}) as {
-    email?: unknown;
-    consent?: unknown;
-    source?: unknown;
-  };
-
-  if (typeof email !== "string" || !isValidEmail(email)) {
-    return NextResponse.json({ error: "Adresse email invalide." }, { status: 400 });
-  }
-  if (consent !== true) {
-    return NextResponse.json(
-      { error: "Le consentement est requis pour s'inscrire." },
-      { status: 400 }
-    );
-  }
+  const parsed = await parseJsonBody(request, newsletterSubscribeBodySchema);
+  if (!parsed.success) return parsed.response;
+  const { email, source } = parsed.data;
 
   const normalizedEmail = normalizeEmail(email);
   const nowIso = new Date().toISOString();
-  const resolvedSource = typeof source === "string" && source.trim() ? source.trim() : "landing_page";
+  const resolvedSource = source ?? "landing_page";
 
   const existing = await findSubscriberByNormalizedEmail(normalizedEmail);
 

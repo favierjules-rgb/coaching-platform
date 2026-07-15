@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser, getCurrentUserRole } from "@/lib/supabase/auth";
+import { parseJsonBody } from "@/lib/api/validate";
+import { newsletterResyncBodySchema } from "@/lib/api/schemas/newsletter";
 import {
   getSubscriberByIdForStaff,
   updateSubscriberById,
@@ -18,17 +20,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Accès refusé." }, { status: 403 });
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Corps de requête invalide." }, { status: 400 });
-  }
-
-  const { id } = (body ?? {}) as { id?: unknown };
-  if (typeof id !== "string" || id.length === 0) {
-    return NextResponse.json({ error: "Identifiant d'abonné manquant." }, { status: 400 });
-  }
+  const parsed = await parseJsonBody(request, newsletterResyncBodySchema);
+  if (!parsed.success) return parsed.response;
+  const { id } = parsed.data;
 
   const subscriber = await getSubscriberByIdForStaff(id);
   if (!subscriber) {
