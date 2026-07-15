@@ -1,41 +1,36 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, CheckCircle } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 
-import { AssignStudentsModal } from "@/components/admin/AssignStudentsModal";
 import { ProgramBuilder, type ProgramBuilderData } from "@/components/admin/ProgramBuilder";
 import { useAdminData } from "@/hooks/useAdminData";
-import { useContentAssignment } from "@/hooks/useContentAssignment";
 import { useSupabaseExerciseLibrary } from "@/hooks/useSupabaseExerciseLibrary";
 import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
-import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { createProgram as createProgramSupabase } from "@/lib/supabase/programs";
 
+/**
+ * Creation en un seul flux continu (chantier training-builder-v2, tache #54) :
+ * auparavant, apres "Enregistrer le programme", cette page affichait un
+ * ecran de confirmation intermediaire (carte de succes) qui obligeait a
+ * cliquer sur "Voir le programme" pour continuer -- une rupture percue
+ * comme "une autre page qui s'ouvre". On redirige desormais automatiquement
+ * vers la page du programme juste cree, qui reutilise le meme ProgramBuilder
+ * en mode edition (bouton "Assigner a des eleves" y est deja disponible).
+ */
 export default function NewProgramPage() {
   const router = useRouter();
-  const { state, createProgram, setAssignment } = useAdminData();
-  const [createdId, setCreatedId] = useState<string | null>(null);
+  const { state, createProgram } = useAdminData();
 
   const supabaseExerciseLibrary = useSupabaseExerciseLibrary();
   const exerciseLibrary = supabaseExerciseLibrary.items.length > 0 ? supabaseExerciseLibrary.items : state.exerciseLibrary;
 
-  // Priorité Supabase dès qu'au moins un programme/élève réel existe — même
-  // pattern que /admin/programmes. Un nouveau programme est créé en réel dès
-  // que Supabase est configuré (jamais seulement en mock quand disponible),
-  // pour que "Créer programme" produise directement un programme utilisable
-  // par un élève réel.
+  // Priorite Supabase des qu'au moins un programme reel existe -- meme
+  // pattern que /admin/programmes. Un nouveau programme est cree en reel des
+  // que Supabase est configure (jamais seulement en mock quand disponible).
   const supabasePrograms = useSupabasePrograms();
-  const supabaseStudents = useSupabaseStudents();
-  const students = supabaseStudents.students.length > 0 ? supabaseStudents.students : state.students;
-  const handleSetAssignment = useContentAssignment(
-    { programme: supabasePrograms.programs.length > 0 && supabaseStudents.students.length > 0 },
-    setAssignment,
-    supabasePrograms.refetch,
-  );
 
   async function handleSave(data: ProgramBuilderData) {
     const supabase = createSupabaseBrowserClient();
@@ -43,7 +38,7 @@ export default function NewProgramPage() {
       const id = await createProgramSupabase(supabase, data);
       if (id) {
         await supabasePrograms.refetch();
-        setCreatedId(id);
+        router.push(`/admin/programmes/${id}`);
         return;
       }
     }
@@ -56,11 +51,8 @@ export default function NewProgramPage() {
       assignedStudentIds: [],
       sessions: data.sessions.map((s) => ({ ...s, programId: "" })),
     });
-    setCreatedId(id);
+    router.push(`/admin/programmes/${id}`);
   }
-
-  const programs = supabasePrograms.programs.length > 0 ? supabasePrograms.programs : state.programs;
-  const createdProgram = createdId ? programs.find((p) => p.id === createdId) : null;
 
   return (
     <div>
@@ -71,61 +63,33 @@ export default function NewProgramPage() {
 
       <div className="mb-8">
         <h1 className="font-heading text-3xl font-extrabold uppercase text-foreground md:text-4xl">
-          Créer un programme
+          Creer un programme
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Construis la structure semaine par semaine, séance par séance, exercice par exercice.
+          Construis la structure semaine par semaine, seance par seance, exercice par exercice.
         </p>
       </div>
 
-      {createdProgram ? (
-        <div className="flex flex-col gap-4">
-          <div className="flex items-center gap-3 border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-400">
-            <CheckCircle size={18} className="flex-shrink-0" />
-            Programme &quot;{createdProgram.name}&quot; enregistré.
-          </div>
-          <div className="flex flex-wrap gap-3">
-            <AssignStudentsModal
-              contentLabel={createdProgram.name}
-              contentType="programme"
-              contentId={createdProgram.id}
-              students={students}
-              assignedStudentIds={createdProgram.assignedStudentIds}
-              onSetAssignment={handleSetAssignment}
-              triggerLabel="Assigner à des élèves"
-              triggerVariant="primary"
-            />
-            <button
-              type="button"
-              onClick={() => router.push(`/admin/programmes/${createdProgram.id}`)}
-              className="border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
-            >
-              Voir le programme
-            </button>
-          </div>
-        </div>
-      ) : (
-        <ProgramBuilder
-          initial={{
-            name: "",
-            goal: "",
-            level: "Intermédiaire",
-            durationWeeks: 4,
-            description: "",
-            status: "brouillon",
-            programType: "group",
-            publicationStatus: "draft",
-            coverImagePath: null,
-            experienceLevel: null,
-            expectedDaysPerWeek: null,
-            estimatedSessionDurationMinutes: null,
-            sessions: [],
-          }}
-          library={exerciseLibrary}
-          onSave={handleSave}
-          saveLabel="Enregistrer le programme"
-        />
-      )}
+      <ProgramBuilder
+        initial={{
+          name: "",
+          goal: "",
+          level: "Intermediaire",
+          durationWeeks: 4,
+          description: "",
+          status: "brouillon",
+          programType: "group",
+          publicationStatus: "draft",
+          coverImagePath: null,
+          experienceLevel: null,
+          expectedDaysPerWeek: null,
+          estimatedSessionDurationMinutes: null,
+          sessions: [],
+        }}
+        library={exerciseLibrary}
+        onSave={handleSave}
+        saveLabel="Enregistrer le programme"
+      />
     </div>
   );
 }

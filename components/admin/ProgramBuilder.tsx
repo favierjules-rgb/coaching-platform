@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { BarChart3, Copy, Plus } from "lucide-react";
+import { BarChart3, Copy, ImagePlus, Plus } from "lucide-react";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { uploadProgramCoverImage } from "@/lib/supabase/storage-program-covers";
 
 import { blankBlock, BlockCard, blockTypeOptions } from "@/components/admin/BlockEditor";
 import { Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
@@ -312,6 +314,8 @@ export function ProgramBuilder({
   const [programType, setProgramType] = useState<ProgramType>(initial.programType);
   const [publicationStatus, setPublicationStatus] = useState<PublicationStatus>(initial.publicationStatus);
   const [coverImagePath, setCoverImagePath] = useState(initial.coverImagePath ?? "");
+  const [coverImageUploading, setCoverImageUploading] = useState(false);
+  const [coverImageError, setCoverImageError] = useState<string | null>(null);
   const [experienceLevel, setExperienceLevel] = useState(initial.experienceLevel !== null ? String(initial.experienceLevel) : "");
   const [expectedDaysPerWeek, setExpectedDaysPerWeek] = useState(initial.expectedDaysPerWeek !== null ? String(initial.expectedDaysPerWeek) : "");
   const [estimatedSessionDurationMinutes, setEstimatedSessionDurationMinutes] = useState(
@@ -373,6 +377,25 @@ export function ProgramBuilder({
     );
   }
 
+  async function handleCoverImageUpload(file: File) {
+    setCoverImageError(null);
+    setCoverImageUploading(true);
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) {
+      setCoverImageError("Supabase non configuré.");
+      setCoverImageUploading(false);
+      return;
+    }
+    const result = await uploadProgramCoverImage(supabase, file);
+    if (result.error) {
+      setCoverImageError(result.error);
+      setCoverImageUploading(false);
+      return;
+    }
+    setCoverImagePath(result.publicUrl);
+    setCoverImageUploading(false);
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <div className="border border-border bg-card p-6">
@@ -412,7 +435,52 @@ export function ProgramBuilder({
             />
           </div>
           <TextareaField label="Description" value={description} onChange={setDescription} rows={3} />
-          <Field label="Image de couverture (URL, optionnel)" value={coverImagePath} onChange={setCoverImagePath} />
+          <div className="flex flex-col gap-3">
+            <span className="block text-xs uppercase tracking-wide text-muted-foreground">Photo de bannière du programme</span>
+            {coverImagePath && (
+              <img
+                src={coverImagePath}
+                alt={name ? `Bannière du programme ${name}` : "Bannière du programme"}
+                className="h-40 w-full max-w-md border border-border object-cover"
+              />
+            )}
+            <div className="flex flex-wrap items-center gap-3">
+              <label
+                htmlFor="program-cover-upload"
+                className="flex cursor-pointer items-center gap-2 border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-within:ring-2 focus-within:ring-primary"
+              >
+                <ImagePlus size={14} aria-hidden="true" />
+                {coverImageUploading ? "Envoi en cours…" : coverImagePath ? "Changer la photo" : "Choisir une photo"}
+              </label>
+              <input
+                id="program-cover-upload"
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="sr-only"
+                disabled={coverImageUploading}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  if (file) void handleCoverImageUpload(file);
+                }}
+              />
+              {coverImagePath && (
+                <button
+                  type="button"
+                  onClick={() => setCoverImagePath("")}
+                  className="text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-red-400"
+                >
+                  Retirer la photo
+                </button>
+              )}
+            </div>
+            {coverImageError && (
+              <p role="alert" className="text-xs text-red-400">
+                {coverImageError}
+              </p>
+            )}
+            <Field label="Ou coller une URL d'image" value={coverImagePath} onChange={setCoverImagePath} />
+          </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <SelectField
               label="Niveau d'expérience requis"
@@ -505,21 +573,26 @@ export function ProgramBuilder({
                     {weekMessages[weekNumber]}
                   </p>
                 )}
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <div
+                  role="list"
+                  aria-label={`Jours de la semaine ${weekNumber}, du lundi au dimanche`}
+                  className="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-2"
+                >
                   {sessions
                     .filter((s) => s.weekNumber === weekNumber)
                     .sort((a, b) => weekDays.indexOf(a.day) - weekDays.indexOf(b.day))
                     .map((session) => (
-                      <DayCard
-                        key={session.id}
-                        session={session}
-                        nextWeekSession={sessions.find(
-                          (s) => s.weekNumber === weekNumber + 1 && s.day === session.day,
-                        )}
-                        library={library}
-                        onUpdate={(updated) => updateSession(session.id, updated)}
-                        onDuplicate={() => duplicateSession(session)}
-                      />
+                      <div key={session.id} role="listitem" className="w-72 flex-shrink-0 snap-start sm:w-80">
+                        <DayCard
+                          session={session}
+                          nextWeekSession={sessions.find(
+                            (s) => s.weekNumber === weekNumber + 1 && s.day === session.day,
+                          )}
+                          library={library}
+                          onUpdate={(updated) => updateSession(session.id, updated)}
+                          onDuplicate={() => duplicateSession(session)}
+                        />
+                      </div>
                     ))}
                 </div>
               </div>
