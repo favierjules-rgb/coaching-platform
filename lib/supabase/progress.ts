@@ -97,7 +97,7 @@ export async function getStudentProgressSummary(
   const completedFeedback = feedback.filter((f) => f.type === "entrainement" && f.completed !== false);
   const sessionsCompleted = completedFeedback.length;
   const plannedSessions = program ? program.sessions.filter((s) => !s.isRestDay).length : 0;
-  const attendanceRatePercent = plannedSessions > 0 ? Math.round((sessionsCompleted / plannedSessions) * 100) : null;
+  const attendanceRatePercent = plannedSessions > 0 ? Math.min(100, Math.round((sessionsCompleted / plannedSessions) * 100)) : null;
 
   const lastWorkoutFeedbackAt = feedback.length > 0 ? feedback.slice().sort((a, b) => b.date.localeCompare(a.date))[0].date : null;
 

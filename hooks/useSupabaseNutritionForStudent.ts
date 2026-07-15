@@ -51,7 +51,7 @@ export function useSupabaseNutritionForStudent() {
     };
   }, []);
 
-  const activePlan = plans.find((p) => p.status === "actif") ?? plans[0] ?? null;
+  const activePlan = plans.find((p) => p.status === "actif") ?? null;
 
   return { ready, active: ready && studentId !== null, studentId, plans, activePlan };
 }

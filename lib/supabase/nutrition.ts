@@ -184,7 +184,7 @@ export async function getAssignedNutritionPlanForStudent(
   if (plans.length === 0) {
     return null;
   }
-  return plans.find((p) => p.status === "actif") ?? plans[0];
+  return plans.find((p) => p.status === "actif") ?? null;
 }
 
 /**
