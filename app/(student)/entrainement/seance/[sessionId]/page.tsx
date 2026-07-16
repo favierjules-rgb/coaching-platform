@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft, Flame, MessageSquare } from "lucide-react";
 
+import { CardioBlocksSection } from "@/components/student/CardioBlocksSection";
 import { SessionAnalysisSection } from "@/components/student/SessionAnalysisSection";
 import { SessionFeedbackSection } from "@/components/student/SessionFeedbackSection";
 import {
@@ -67,7 +68,11 @@ export default function SessionDetailPage() {
             {realSession.name}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {realSession.day} · {realSession.durationMinutes} min · {realSession.exercises.length} exercices
+            {realSession.day} · {realSession.durationMinutes} min
+            {(realSession.sessionType ?? "strength") !== "cardio" ? ` · ${realSession.exercises.length} exercices` : ""}
+            {(realSession.sessionType ?? "strength") !== "strength"
+              ? ` · ${(realSession.cardioBlocks ?? []).length} bloc${(realSession.cardioBlocks ?? []).length > 1 ? "s" : ""} cardio`
+              : ""}
           </p>
         </div>
 
@@ -92,6 +97,8 @@ export default function SessionDetailPage() {
             </div>
           </div>
         )}
+
+        <CardioBlocksSection blocks={realSession.cardioBlocks ?? []} />
 
         <SessionFeedbackSection
           studentId={supabaseTraining.studentId ?? ""}

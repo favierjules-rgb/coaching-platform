@@ -134,6 +134,76 @@ export function formatSpeed(speedKmh: number | null | undefined): string {
   return `${speedKmh.toFixed(1)} km/h`;
 }
 
+/** Formate une durée en secondes (ex : 90 -> "1min30", 600 -> "10 min", 45 -> "45 s"), "—" si non calculable. */
+export function formatDurationSeconds(seconds: number | null | undefined): string {
+  if (!seconds || seconds <= 0) return "—";
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.round(seconds % 60);
+  if (hours > 0) return `${hours}h${String(minutes).padStart(2, "0")}`;
+  if (minutes > 0 && secs > 0) return `${minutes}min${String(secs).padStart(2, "0")}`;
+  if (minutes > 0) return `${minutes} min`;
+  return `${secs} s`;
+}
+
+/** Formate une distance en mètres (ex : 400 -> "400 m", 5000 -> "5 km", 12500 -> "12.5 km"), "—" si non calculable. */
+export function formatDistanceMeters(meters: number | null | undefined): string {
+  if (!meters || meters <= 0) return "—";
+  if (meters >= 1000) {
+    const km = meters / 1000;
+    return `${km % 1 === 0 ? km.toFixed(0) : km.toFixed(1)} km`;
+  }
+  return `${meters} m`;
+}
+
+/**
+ * Valeur d'intensité d'un segment telle qu'authored par le coach, sans
+ * conversion personnalisée (contrairement à segmentIntensityPreview, qui
+ * calcule un aperçu vitesse/allure à partir d'un VMA de référence saisi côté
+ * builder). Utilisé par l'affichage élève en lecture seule (voir
+ * components/student/CardioBlocksSection.tsx) — la conversion à partir du
+ * VMA personnel de l'élève (student_profiles.vma_kmh) est une limite
+ * documentée, pas encore branchée (voir docs/training-builder-v3.md).
+ */
+export function formatIntensityTargetRaw(
+  segment: Pick<
+    AdminCardioSegment,
+    | "intensityTargetType"
+    | "targetVmaPercentage"
+    | "targetSpeedKmh"
+    | "targetPaceSecondsPerKm"
+    | "targetHrPercentage"
+    | "targetHrZone"
+    | "targetPowerWatts"
+    | "intensityMin"
+  >,
+): string {
+  switch (segment.intensityTargetType) {
+    case "vma_percentage":
+      return segment.targetVmaPercentage ? `${segment.targetVmaPercentage}% VMA` : "—";
+    case "speed_kmh":
+      return formatSpeed(segment.targetSpeedKmh);
+    case "pace":
+      return formatPace(segment.targetPaceSecondsPerKm);
+    case "heart_rate_percentage":
+      return segment.targetHrPercentage ? `${segment.targetHrPercentage}% FC max` : "—";
+    case "heart_rate_zone":
+      return segment.targetHrZone ? `Zone ${segment.targetHrZone}` : "—";
+    case "power":
+      return segment.targetPowerWatts ? `${segment.targetPowerWatts} W` : "—";
+    case "rpe":
+      return segment.intensityMin !== undefined ? `RPE ${segment.intensityMin}/10` : "—";
+    case "race_pace":
+      return "Allure course";
+    case "free":
+      return "Libre";
+    case "custom":
+      return "Personnalisé";
+    default:
+      return "—";
+  }
+}
+
 export interface SegmentIntensityPreview {
   speedKmh: number | null;
   paceLabel: string | null;

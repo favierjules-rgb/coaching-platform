@@ -122,6 +122,16 @@ export interface WorkoutSession {
   warmup: string;
   exercises: Exercise[];
   coachNotes: string;
+  /**
+   * Type de séance et blocs cardio (V3), passés tels quels depuis
+   * AdminWorkoutSession par toEleveWorkoutSession (voir
+   * lib/training-schedule.ts) — réutilise directement SessionType/
+   * AdminCardioBlock plutôt que dupliquer ces types côté élève. Optionnels
+   * pour rester compatibles avec les séances mock/anciennes qui n'ont pas ce
+   * champ ; voir components/student/CardioBlocksSection.tsx pour l'affichage.
+   */
+  sessionType?: SessionType;
+  cardioBlocks?: AdminCardioBlock[];
 }
 
 /**

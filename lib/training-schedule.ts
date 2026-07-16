@@ -84,6 +84,10 @@ export function toEleveWorkoutSession(session: AdminWorkoutSession): WorkoutSess
     warmup: session.warmup,
     coachNotes: session.coachNotes,
     exercises: session.exercises.map(toEleveExercise),
+    // V3 étape 5 : transmis tels quels pour l'affichage cardio élève, voir
+    // components/student/CardioBlocksSection.tsx.
+    sessionType: session.sessionType,
+    cardioBlocks: session.cardioBlocks,
   };
 }
 
