@@ -72,6 +72,9 @@ export interface ProgramBuilderData {
   sessions: AdminWorkoutSession[];
   /** Photo bannière (chantier module Programmation, étape 4). */
   bannerUrl?: string | null;
+  /** Mode groupe + date de démarrage fixe (chantier module Programmation, étape 5). */
+  programMode?: "individuel" | "groupe";
+  groupStartDate?: string | null;
 }
 
 export function blankExercise(order: number): AdminExercise {

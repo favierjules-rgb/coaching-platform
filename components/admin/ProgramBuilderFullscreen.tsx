@@ -52,7 +52,15 @@ export interface BuilderData {
   sessions: AdminWorkoutSession[];
   /** Photo bannière (chantier module Programmation, étape 4). */
   bannerUrl?: string | null;
+  /** Mode groupe + date de démarrage fixe (chantier module Programmation, étape 5). */
+  programMode?: "individuel" | "groupe";
+  groupStartDate?: string | null;
 }
+
+const programModeOptions = [
+  { value: "individuel", label: "Individuel" },
+  { value: "groupe", label: "De groupe" },
+];
 
 /**
  * Petit résumé compact d'une séance pour une cellule de la grille 7 jours —
@@ -151,6 +159,8 @@ export function ProgramBuilderFullscreen({
   const [description, setDescription] = useState(program.description);
   const [status, setStatus] = useState<AdminContentStatus>(program.status);
   const [bannerUrl, setBannerUrl] = useState<string | null>(program.bannerUrl ?? null);
+  const [programMode, setProgramMode] = useState<"individuel" | "groupe">(program.programMode ?? "individuel");
+  const [groupStartDate, setGroupStartDate] = useState<string | null>(program.groupStartDate ?? null);
   const [sessions, setSessions] = useState<AdminWorkoutSession[]>(program.sessions);
 
   const weekNumbers = useMemo(
@@ -182,7 +192,7 @@ export function ProgramBuilderFullscreen({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [name, goal, level, durationWeeks, description, status, bannerUrl, sessions]);
+  }, [name, goal, level, durationWeeks, description, status, bannerUrl, programMode, groupStartDate, sessions]);
 
   function markDirty() {
     setSaveStatus("dirty");
@@ -190,7 +200,7 @@ export function ProgramBuilderFullscreen({
 
   async function handleSave() {
     setSaveStatus("saving");
-    const ok = await onSave({ name, goal, level, durationWeeks, description, status, bannerUrl, sessions });
+    const ok = await onSave({ name, goal, level, durationWeeks, description, status, bannerUrl, programMode, groupStartDate, sessions });
     if (ok) {
       setSaveStatus("saved");
       setSavedAt(new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }));
@@ -559,6 +569,28 @@ export function ProgramBuilderFullscreen({
               <Field label="Objectif" value={goal} onChange={(v) => { setGoal(v); markDirty(); }} />
               <SelectField label="Niveau" value={level} onChange={(v) => { setLevel(v); markDirty(); }} options={levelOptions} />
             </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <SelectField
+                label="Mode du programme"
+                value={programMode}
+                onChange={(v) => { setProgramMode(v as "individuel" | "groupe"); markDirty(); }}
+                options={programModeOptions}
+              />
+              {programMode === "groupe" && (
+                <Field
+                  label="Date de démarrage (groupe)"
+                  type="date"
+                  value={groupStartDate ?? ""}
+                  onChange={(v) => { setGroupStartDate(v || null); markDirty(); }}
+                />
+              )}
+            </div>
+            {programMode === "groupe" && (
+              <p className="-mt-2 text-xs leading-relaxed text-muted-foreground">
+                Calendrier partagé : la semaine affichée à tous les élèves assignés est calculée depuis cette date de
+                démarrage, quelle que soit leur date de suivi individuelle.
+              </p>
+            )}
             <Field
               label="Durée (semaines)"
               type="number"

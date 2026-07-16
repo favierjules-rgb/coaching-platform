@@ -964,6 +964,19 @@ export interface AdminProgram {
    * bannière.
    */
   bannerUrl?: string | null;
+  /**
+   * Mode du programme (chantier module Programmation, étape 5) : "individuel"
+   * (défaut, comportement historique — semaine calculée depuis la date de
+   * suivi de chaque élève) ou "groupe" (calendrier partagé, une seule date de
+   * démarrage fixe pour tous les élèves assignés, voir groupStartDate).
+   */
+  programMode?: "individuel" | "groupe";
+  /**
+   * Date de démarrage fixe (YYYY-MM-DD) utilisée uniquement quand
+   * programMode === "groupe" pour calculer la semaine courante partagée par
+   * tous les élèves assignés au programme.
+   */
+  groupStartDate?: string | null;
 }
 
 export interface AdminMealFoodItem {

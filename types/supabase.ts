@@ -791,6 +791,8 @@ export interface Database {
           description: string;
           status: "brouillon" | "actif" | "archivé";
           banner_url: string | null;
+          program_mode: "individuel" | "groupe";
+          group_start_date: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -804,6 +806,8 @@ export interface Database {
           description?: string;
           status?: "brouillon" | "actif" | "archivé";
           banner_url?: string | null;
+          program_mode?: "individuel" | "groupe";
+          group_start_date?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -817,6 +821,8 @@ export interface Database {
           description?: string;
           status?: "brouillon" | "actif" | "archivé";
           banner_url?: string | null;
+          program_mode?: "individuel" | "groupe";
+          group_start_date?: string | null;
           created_at?: string;
           updated_at?: string;
         };

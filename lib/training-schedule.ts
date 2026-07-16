@@ -29,12 +29,23 @@ const STATUS_ADMIN_TO_STUDENT: Record<AdminContentStatus, ProgramStatus> = {
   "archivé": "terminé",
 };
 
-/** Numéro de semaine "actuelle" pour un élève, dérivé de sa date de début de suivi. */
+/**
+ * Numéro de semaine "actuelle", dérivé soit de la date de début de suivi de
+ * l'élève (mode individuel, comportement historique), soit de la date de
+ * démarrage fixe du programme partagée par toute la cohorte (mode groupe —
+ * chantier module Programmation, étape 5).
+ */
 export function computeCurrentWeekNumber(program: AdminProgram, student: AdminStudent | null): number {
-  if (program.status !== "actif" || !student || !student.startDate) {
+  if (program.status !== "actif") {
     return 1;
   }
-  const daysSinceStart = daysBetween(student.startDate);
+
+  const referenceDate = program.programMode === "groupe" ? program.groupStartDate : student?.startDate;
+  if (!referenceDate) {
+    return 1;
+  }
+
+  const daysSinceStart = daysBetween(referenceDate);
   if (!Number.isFinite(daysSinceStart) || daysSinceStart < 0) {
     return 1;
   }

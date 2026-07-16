@@ -175,6 +175,8 @@ function mapProgramRow(row: ProgramRow, sessions: AdminWorkoutSession[], assigne
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     bannerUrl: row.banner_url ?? null,
+    programMode: row.program_mode ?? "individuel",
+    groupStartDate: row.group_start_date ?? null,
   };
 }
 
@@ -492,6 +494,8 @@ export async function createProgram(supabase: TypedSupabaseClient, data: Program
       description: data.description,
       status: data.status,
       banner_url: data.bannerUrl ?? null,
+      program_mode: data.programMode ?? "individuel",
+      group_start_date: data.programMode === "groupe" ? (data.groupStartDate ?? null) : null,
     })
     .select("id")
     .single();
@@ -536,6 +540,11 @@ export async function duplicateProgram(supabase: TypedSupabaseClient, programId:
       description: program.description,
       status: "brouillon",
       banner_url: program.bannerUrl ?? null,
+      // étape 5 : une copie repart toujours en mode individuel, sans date de
+      // groupe — la copie d'un programme de groupe n'est pas automatiquement
+      // liée à la même cohorte/date de démarrage, le coach reconfigure si besoin.
+      program_mode: "individuel",
+      group_start_date: null,
     })
     .select("id")
     .single();
@@ -869,6 +878,8 @@ export async function updateProgram(
       description: data.description,
       status: data.status,
       banner_url: data.bannerUrl ?? null,
+      program_mode: data.programMode ?? "individuel",
+      group_start_date: data.programMode === "groupe" ? (data.groupStartDate ?? null) : null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", programId);
