@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -25,7 +25,7 @@ import { Modal, PrimaryButton } from "@/components/admin/Modal";
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
 import { contentStatusLabels, generateId, weekDays } from "@/lib/admin";
 import { cloneCardioBlock } from "@/lib/cardio";
-import type { AdminContentStatus, AdminProgram, AdminWorkoutSession, ExerciseLibraryItem } from "@/types";
+import type { AdminContentStatus, AdminProgram, AdminWorkoutSession, ExerciseLibraryItem, SessionTemplate } from "@/types";
 
 const levelOptions = [
   { value: "Débutant", label: "Débutant" },
@@ -61,18 +61,38 @@ function DayGridCell({
   session,
   isSelected,
   onSelect,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+  isDropTarget,
 }: {
   session: AdminWorkoutSession;
   isSelected: boolean;
   onSelect: () => void;
+  // Glisser-déposer entre jours de la semaine affichée (voir
+  // swapSessionContent plus bas) — échange le contenu éditable des deux
+  // séances tout en gardant id/day/weekNumber ancrés à leur case de la
+  // grille, pour rester compatible avec le diff par (semaine, jour) sans
+  // aucun changement côté lib/supabase/programs.ts.
+  onDragStart: () => void;
+  onDragOver: (event: DragEvent<HTMLButtonElement>) => void;
+  onDrop: () => void;
+  onDragEnd: () => void;
+  isDropTarget: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onSelect}
+      draggable={!session.isRestDay}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
       className={`flex min-h-[140px] flex-col gap-2 border p-3 text-left transition-colors ${
         isSelected ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"
-      }`}
+      } ${isDropTarget ? "border-dashed border-primary/70" : ""}`}
     >
       <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{session.day}</span>
       {session.isRestDay ? (
@@ -112,10 +132,14 @@ export function ProgramBuilderFullscreen({
   program,
   library,
   onSave,
+  templates,
+  onSaveAsTemplate,
 }: {
   program: AdminProgram;
   library: ExerciseLibraryItem[];
   onSave: (data: BuilderData) => Promise<boolean>;
+  templates?: SessionTemplate[];
+  onSaveAsTemplate?: (session: AdminWorkoutSession, name: string, description: string) => Promise<boolean>;
 }) {
   const [name, setName] = useState(program.name);
   const [goal, setGoal] = useState(program.goal);
@@ -225,6 +249,56 @@ export function ProgramBuilderFullscreen({
           : s,
       ),
     );
+    markDirty();
+  }
+
+  // Glisser-déposer une séance entre deux jours de la semaine affichée :
+  // échange le contenu éditable des deux séances (nom, exercices, blocs
+  // cardio...) en gardant id/day/weekNumber/programId ancrés à leur case de
+  // la grille — un jour "repos" n'est pas draggable (voir DayGridCell,
+  // draggable={!session.isRestDay}) mais peut recevoir le contenu d'une
+  // séance glissée dessus, ce qui la transforme en séance normale.
+  const dragSessionId = useRef<string | null>(null);
+  const [dragOverSessionId, setDragOverSessionId] = useState<string | null>(null);
+
+  function swapSessionContent(sourceId: string, targetId: string) {
+    if (sourceId === targetId) return;
+    setSessions((prev) => {
+      const source = prev.find((s) => s.id === sourceId);
+      const target = prev.find((s) => s.id === targetId);
+      if (!source || !target) return prev;
+      return prev.map((s) => {
+        if (s.id === sourceId) {
+          return {
+            ...s,
+            isRestDay: target.isRestDay,
+            name: target.name,
+            muscleGroup: target.muscleGroup,
+            durationMinutes: target.durationMinutes,
+            warmup: target.warmup,
+            coachNotes: target.coachNotes,
+            exercises: target.exercises,
+            sessionType: target.sessionType,
+            cardioBlocks: target.cardioBlocks,
+          };
+        }
+        if (s.id === targetId) {
+          return {
+            ...s,
+            isRestDay: source.isRestDay,
+            name: source.name,
+            muscleGroup: source.muscleGroup,
+            durationMinutes: source.durationMinutes,
+            warmup: source.warmup,
+            coachNotes: source.coachNotes,
+            exercises: source.exercises,
+            sessionType: source.sessionType,
+            cardioBlocks: source.cardioBlocks,
+          };
+        }
+        return s;
+      });
+    });
     markDirty();
   }
 
@@ -409,6 +483,25 @@ export function ProgramBuilderFullscreen({
                   session={session}
                   isSelected={selectedSessionId === session.id}
                   onSelect={() => setSelectedSessionId(session.id)}
+                  isDropTarget={dragOverSessionId === session.id}
+                  onDragStart={() => {
+                    dragSessionId.current = session.id;
+                  }}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    setDragOverSessionId(session.id);
+                  }}
+                  onDrop={() => {
+                    if (dragSessionId.current && dragSessionId.current !== session.id) {
+                      swapSessionContent(dragSessionId.current, session.id);
+                    }
+                    dragSessionId.current = null;
+                    setDragOverSessionId(null);
+                  }}
+                  onDragEnd={() => {
+                    dragSessionId.current = null;
+                    setDragOverSessionId(null);
+                  }}
                 />
               ))}
             </div>
@@ -432,6 +525,8 @@ export function ProgramBuilderFullscreen({
                 library={library}
                 onUpdate={(updated) => updateSession(selectedSession.id, updated)}
                 onDuplicate={() => duplicateSessionToNextWeek(selectedSession)}
+                templates={templates}
+                onSaveAsTemplate={onSaveAsTemplate}
               />
             ) : (
               <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center text-xs text-muted-foreground">

@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { generateId } from "@/lib/admin";
+import { cloneCardioBlock } from "@/lib/cardio";
 import { buildStudentActivityLink, logActivityEvent } from "@/lib/supabase/activity";
 import type { ProgramBuilderData } from "@/components/admin/ProgramBuilder";
 import type {
@@ -496,6 +498,57 @@ export async function createProgram(supabase: TypedSupabaseClient, data: Program
 
   await insertProgramStructure(supabase, programRow.id, data.sessions);
   return programRow.id;
+}
+
+/**
+ * Duplique un programme complet (toutes ses semaines/séances/exercices/blocs
+ * cardio) en un nouveau programme brouillon nommé "{nom} (copie)" — V3 étape
+ * 4. Ne copie jamais les élèves assignés (`assignments`), pour ne jamais
+ * assigner accidentellement une copie de travail : le coach doit assigner la
+ * copie explicitement une fois prête. `insertProgramStructure` crée de toute
+ * façon de nouvelles lignes `workout_sessions`, donc les ids de séance source
+ * ne sont jamais réutilisés ; on régénère aussi les ids d'exercices/blocs
+ * cardio pour ne jamais partager de référence avec le programme source.
+ */
+export async function duplicateProgram(supabase: TypedSupabaseClient, programId: string): Promise<string | null> {
+  const { data: sourceRow, error: sourceError } = await supabase.from("programs").select("*").eq("id", programId).single();
+  devWarn("duplicateProgram (lecture programme)", sourceError);
+  if (!sourceRow) {
+    return null;
+  }
+
+  const [program] = await loadPrograms(supabase, [sourceRow]);
+  if (!program) {
+    return null;
+  }
+
+  const { data: newProgramRow, error: insertError } = await supabase
+    .from("programs")
+    .insert({
+      name: `${program.name} (copie)`,
+      goal: program.goal,
+      level: program.level,
+      duration_weeks: program.durationWeeks,
+      description: program.description,
+      status: "brouillon",
+    })
+    .select("id")
+    .single();
+  devWarn("duplicateProgram (insertion programme)", insertError);
+  if (!newProgramRow) {
+    return null;
+  }
+
+  const clonedSessions: AdminWorkoutSession[] = program.sessions.map((session) => ({
+    ...session,
+    id: generateId("sess"),
+    programId: newProgramRow.id,
+    exercises: session.exercises.map((ex) => ({ ...ex, id: generateId("ex") })),
+    cardioBlocks: (session.cardioBlocks ?? []).map((block) => cloneCardioBlock(block)),
+  }));
+
+  await insertProgramStructure(supabase, newProgramRow.id, clonedSessions);
+  return newProgramRow.id;
 }
 
 /**

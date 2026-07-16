@@ -1156,6 +1156,45 @@ export interface Database {
         };
         Relationships: [];
       };
+      session_templates: {
+        Row: {
+          id: string;
+          coach_id: string | null;
+          name: string;
+          description: string;
+          session_type: "strength" | "cardio" | "mixed";
+          muscle_group: string;
+          duration_minutes: number | null;
+          content: unknown;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          coach_id?: string | null;
+          name: string;
+          description?: string;
+          session_type?: string;
+          muscle_group?: string;
+          duration_minutes?: number | null;
+          content?: unknown;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          coach_id?: string | null;
+          name?: string;
+          description?: string;
+          session_type?: string;
+          muscle_group?: string;
+          duration_minutes?: number | null;
+          content?: unknown;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       workout_exercises: {
         Row: {
           id: string;

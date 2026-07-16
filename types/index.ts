@@ -897,6 +897,30 @@ export interface AdminWorkoutSession {
 }
 
 /**
+ * Modèle de séance réutilisable (V3 étape 4 — table `session_templates`,
+ * voir lib/supabase/session-templates.ts). Contenu copié par valeur dans la
+ * séance cible au moment de l'application du modèle (mêmes principes que
+ * l'ajout d'un exercice depuis la banque) — une future modification du
+ * modèle n'affecte jamais une séance déjà construite depuis celui-ci.
+ */
+export interface SessionTemplate {
+  id: string;
+  name: string;
+  description: string;
+  sessionType: SessionType;
+  muscleGroup: string;
+  durationMinutes: number | null;
+  content: {
+    warmup: string;
+    coachNotes: string;
+    exercises: AdminExercise[];
+    cardioBlocks: AdminCardioBlock[];
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
  * Programme d'entraînement créé par le coach. Composé depuis les tables
  * Supabase `programs`/`program_weeks`/`workout_sessions`/`workout_exercises`
  * quand elles ont au moins un programme réel (voir lib/supabase/programs.ts),

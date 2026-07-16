@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
-import { ArrowDown, ArrowUp, BarChart3, Copy, Plus, Trash2 } from "lucide-react";
+import { useRef, useState, type DragEvent } from "react";
+import { ArrowDown, ArrowUp, BarChart3, Copy, GripVertical, Layers, Plus, Save, Trash2 } from "lucide-react";
 
 import { Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
 import { ExerciseSearchPicker } from "@/components/admin/ExerciseSearchPicker";
 import { PrimaryButton } from "@/components/admin/Modal";
+import { SessionTemplatePicker } from "@/components/admin/SessionTemplatePicker";
 import {
   AnalysisFilterLabel,
   FilteredExerciseList,
@@ -39,6 +40,7 @@ import type {
   IntensityTargetType,
   MachineType,
   MuscleGroupFilter,
+  SessionTemplate,
   SessionType,
 } from "@/types";
 
@@ -129,6 +131,9 @@ function ExerciseRow({
   onMove,
   isFirst,
   isLast,
+  onDragStart,
+  onDragOver,
+  onDrop,
 }: {
   exercise: AdminExercise;
   onChange: (partial: Partial<AdminExercise>) => void;
@@ -136,11 +141,22 @@ function ExerciseRow({
   onMove: (direction: "up" | "down") => void;
   isFirst: boolean;
   isLast: boolean;
+  onDragStart: () => void;
+  onDragOver: (event: DragEvent<HTMLDivElement>) => void;
+  onDrop: () => void;
 }) {
   return (
-    <div className="border border-border p-4">
+    <div className="border border-border p-4" onDragOver={onDragOver} onDrop={onDrop}>
       <div className="mb-3 flex items-center justify-between gap-2">
         <span className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
+          <span
+            draggable
+            onDragStart={onDragStart}
+            title="Glisser pour réordonner"
+            className="cursor-grab text-muted-foreground hover:text-foreground"
+          >
+            <GripVertical size={14} />
+          </span>
           Exercice #{exercise.order}
           {exercise.libraryExerciseId && (
             <span className="border border-primary/40 px-1.5 py-0.5 text-[10px] normal-case tracking-normal text-primary">
@@ -192,6 +208,9 @@ function CardioSegmentRow({
   onMove,
   isFirst,
   isLast,
+  onDragStart,
+  onDragOver,
+  onDrop,
 }: {
   segment: AdminCardioSegment;
   referenceVmaKmh: number;
@@ -200,6 +219,9 @@ function CardioSegmentRow({
   onMove: (direction: "up" | "down") => void;
   isFirst: boolean;
   isLast: boolean;
+  onDragStart: () => void;
+  onDragOver: (event: DragEvent<HTMLDivElement>) => void;
+  onDrop: () => void;
 }) {
   const isRepeat = segment.segmentType === "repeat_group";
   const preview = segmentIntensityPreview(segment, referenceVmaKmh);
@@ -209,9 +231,19 @@ function CardioSegmentRow({
     segment.intensityTargetType === "pace";
 
   return (
-    <div className="border border-border/60 bg-background/30 p-3">
+    <div className="border border-border/60 bg-background/30 p-3" onDragOver={onDragOver} onDrop={onDrop}>
       <div className="mb-3 flex items-center justify-between gap-2">
-        <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Segment #{segment.order}</span>
+        <span className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+          <span
+            draggable
+            onDragStart={onDragStart}
+            title="Glisser pour réordonner"
+            className="cursor-grab text-muted-foreground hover:text-foreground"
+          >
+            <GripVertical size={12} />
+          </span>
+          Segment #{segment.order}
+        </span>
         <div className="flex items-center gap-2">
           <button type="button" onClick={() => onMove("up")} disabled={isFirst} className="text-muted-foreground hover:text-foreground disabled:opacity-30">
             <ArrowUp size={13} />
@@ -410,6 +442,19 @@ function CardioBlockRow({
     onChange({ ...block, segments: [...block.segments, blankCardioSegment(block.segments.length + 1)] });
   }
 
+  // Réordonnancement par glisser-déposer (en plus des flèches haut/bas
+  // conservées pour l'accessibilité clavier) — l'index source est retenu
+  // dans une ref le temps du drag, sans re-render intermédiaire.
+  const dragSegmentIndex = useRef<number | null>(null);
+
+  function reorderSegments(fromIndex: number, toIndex: number) {
+    if (fromIndex === toIndex) return;
+    const segments = [...block.segments];
+    const [moved] = segments.splice(fromIndex, 1);
+    segments.splice(toIndex, 0, moved);
+    onChange({ ...block, segments: segments.map((s, i) => ({ ...s, order: i + 1 })) });
+  }
+
   return (
     <div className="border border-border p-4">
       <div className="mb-3 flex items-center justify-between gap-2">
@@ -457,6 +502,16 @@ function CardioBlockRow({
             onMove={(dir) => moveSegment(i, dir)}
             isFirst={i === 0}
             isLast={i === block.segments.length - 1}
+            onDragStart={() => {
+              dragSegmentIndex.current = i;
+            }}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={() => {
+              if (dragSegmentIndex.current !== null) {
+                reorderSegments(dragSegmentIndex.current, i);
+                dragSegmentIndex.current = null;
+              }
+            }}
           />
         ))}
         <button
@@ -478,18 +533,32 @@ export function DayCard({
   library,
   onUpdate,
   onDuplicate,
+  templates,
+  onSaveAsTemplate,
 }: {
   session: AdminWorkoutSession;
   nextWeekSession: AdminWorkoutSession | undefined;
   library: ExerciseLibraryItem[];
   onUpdate: (updated: AdminWorkoutSession) => void;
   onDuplicate: () => void;
+  // Optionnels : la banque de séances (V3 étape 4) n'est câblée que depuis
+  // ProgramBuilderFullscreen — le composant ProgramBuilder legacy plus bas
+  // dans ce fichier (mort, non utilisé) continue d'appeler DayCard sans ces
+  // props, ce qui reste valide.
+  templates?: SessionTemplate[];
+  onSaveAsTemplate?: (session: AdminWorkoutSession, name: string, description: string) => Promise<boolean>;
 }) {
   const [selectedMuscleGroup, setSelectedMuscleGroup] = useState<MuscleGroupFilter>("tous");
   // VMA purement indicative pour l'aperçu vitesse/allure des segments cardio
   // (voir lib/cardio.ts) — jamais persistée, seulement un outil d'aide à la
   // rédaction pour le coach pendant la construction du bloc.
   const [referenceVmaKmh, setReferenceVmaKmh] = useState(15);
+
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
+  const [showSaveTemplateForm, setShowSaveTemplateForm] = useState(false);
+  const [templateName, setTemplateName] = useState("");
+  const [templateDescription, setTemplateDescription] = useState("");
+  const [savingTemplate, setSavingTemplate] = useState(false);
 
   // Normalisation : sessionType/cardioBlocks sont optionnels dans le type
   // (compat mock/anciennes séances — voir types/index.ts) mais toujours
@@ -524,6 +593,19 @@ export function DayCard({
     if (targetIndex < 0 || targetIndex >= session.exercises.length) return;
     const exercises = [...session.exercises];
     [exercises[index], exercises[targetIndex]] = [exercises[targetIndex], exercises[index]];
+    onUpdate({ ...session, exercises: exercises.map((ex, i) => ({ ...ex, order: i + 1 })) });
+  }
+
+  // Réordonnancement par glisser-déposer, en complément des flèches
+  // haut/bas (conservées pour l'accessibilité clavier) — même principe que
+  // dans CardioBlockRow pour les segments.
+  const dragExerciseIndex = useRef<number | null>(null);
+
+  function reorderExercises(fromIndex: number, toIndex: number) {
+    if (fromIndex === toIndex) return;
+    const exercises = [...session.exercises];
+    const [moved] = exercises.splice(fromIndex, 1);
+    exercises.splice(toIndex, 0, moved);
     onUpdate({ ...session, exercises: exercises.map((ex, i) => ({ ...ex, order: i + 1 })) });
   }
 
@@ -562,6 +644,38 @@ export function DayCard({
 
   function addCardioBlock() {
     onUpdate({ ...session, cardioBlocks: [...cardioBlocks, blankCardioBlock(cardioBlocks.length + 1)] });
+  }
+
+  // Applique le contenu d'un modèle de la banque de séances à cette séance :
+  // toujours de nouveaux ids (generateId/cloneCardioBlock) pour ne jamais
+  // partager une référence avec le modèle source ou avec une autre séance
+  // déjà construite depuis ce même modèle.
+  function applyTemplate(template: SessionTemplate) {
+    onUpdate({
+      ...session,
+      isRestDay: false,
+      name: session.name.trim() ? session.name : template.name,
+      sessionType: template.sessionType,
+      muscleGroup: template.muscleGroup || session.muscleGroup,
+      durationMinutes: template.durationMinutes ?? session.durationMinutes,
+      warmup: template.content.warmup,
+      coachNotes: template.content.coachNotes,
+      exercises: template.content.exercises.map((ex, i) => ({ ...ex, id: generateId("ex"), order: i + 1 })),
+      cardioBlocks: template.content.cardioBlocks.map((block) => cloneCardioBlock(block)),
+    });
+    setShowTemplatePicker(false);
+  }
+
+  async function saveAsTemplate() {
+    if (!onSaveAsTemplate || !templateName.trim()) return;
+    setSavingTemplate(true);
+    const ok = await onSaveAsTemplate(session, templateName.trim(), templateDescription.trim());
+    setSavingTemplate(false);
+    if (ok) {
+      setTemplateName("");
+      setTemplateDescription("");
+      setShowSaveTemplateForm(false);
+    }
   }
 
   return (
@@ -615,6 +729,65 @@ export function DayCard({
           <TextareaField label="Échauffement" value={session.warmup} onChange={(v) => onUpdate({ ...session, warmup: v })} rows={2} />
           <TextareaField label="Notes coach" value={session.coachNotes} onChange={(v) => onUpdate({ ...session, coachNotes: v })} rows={2} />
 
+          {(templates || onSaveAsTemplate) && (
+            <div className="flex flex-col gap-3 border-t border-border pt-3">
+              <div className="flex flex-wrap items-center gap-4">
+                {templates && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowTemplatePicker((v) => !v);
+                      setShowSaveTemplateForm(false);
+                    }}
+                    className="flex items-center gap-1.5 text-[11px] uppercase tracking-widest text-muted-foreground hover:text-primary"
+                  >
+                    <Layers size={12} />
+                    Utiliser un modèle
+                  </button>
+                )}
+                {onSaveAsTemplate && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowSaveTemplateForm((v) => !v);
+                      setShowTemplatePicker(false);
+                    }}
+                    className="flex items-center gap-1.5 text-[11px] uppercase tracking-widest text-muted-foreground hover:text-primary"
+                  >
+                    <Save size={12} />
+                    Enregistrer comme modèle
+                  </button>
+                )}
+              </div>
+
+              {showTemplatePicker && templates && <SessionTemplatePicker templates={templates} onPick={applyTemplate} />}
+
+              {showSaveTemplateForm && onSaveAsTemplate && (
+                <div className="flex flex-col gap-2 border border-dashed border-border p-3">
+                  <Field label="Nom du modèle" value={templateName} onChange={setTemplateName} placeholder="Ex : Haut du corps - Force" />
+                  <Field label="Description (optionnel)" value={templateDescription} onChange={setTemplateDescription} />
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={saveAsTemplate}
+                      disabled={savingTemplate || !templateName.trim()}
+                      className="border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {savingTemplate ? "Enregistrement..." : "Enregistrer"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowSaveTemplateForm(false)}
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      Annuler
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {showExercises && (
             <>
               <ExerciseSearchPicker library={library} onPick={addExerciseFromLibrary} />
@@ -629,6 +802,16 @@ export function DayCard({
                     onMove={(dir) => moveExercise(i, dir)}
                     isFirst={i === 0}
                     isLast={i === session.exercises.length - 1}
+                    onDragStart={() => {
+                      dragExerciseIndex.current = i;
+                    }}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={() => {
+                      if (dragExerciseIndex.current !== null) {
+                        reorderExercises(dragExerciseIndex.current, i);
+                        dragExerciseIndex.current = null;
+                      }
+                    }}
                   />
                 ))}
                 <button

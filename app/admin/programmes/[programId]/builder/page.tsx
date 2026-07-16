@@ -8,8 +8,11 @@ import { ProgramBuilderFullscreen, type BuilderData } from "@/components/admin/P
 import { useAdminData } from "@/hooks/useAdminData";
 import { useSupabaseExerciseLibrary } from "@/hooks/useSupabaseExerciseLibrary";
 import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
+import { useSupabaseSessionTemplates } from "@/hooks/useSupabaseSessionTemplates";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { updateProgram as updateProgramSupabase } from "@/lib/supabase/programs";
+import { createSessionTemplate } from "@/lib/supabase/session-templates";
+import type { AdminWorkoutSession } from "@/types";
 
 /**
  * Builder plein écran V3 (/admin/programmes/[programId]/builder) : route
@@ -28,6 +31,19 @@ export default function ProgramBuilderPage() {
 
   const supabaseExerciseLibrary = useSupabaseExerciseLibrary();
   const library = supabaseExerciseLibrary.items.length > 0 ? supabaseExerciseLibrary.items : state.exerciseLibrary;
+
+  // Banque de séances (V3 étape 4) — n'existe que côté Supabase (pas de
+  // fallback mock, comme pour la banque d'exercices) : une installation
+  // sans Supabase configuré verra simplement "Utiliser un modèle" absent.
+  const sessionTemplates = useSupabaseSessionTemplates();
+
+  async function handleSaveAsTemplate(session: AdminWorkoutSession, name: string, description: string): Promise<boolean> {
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) return false;
+    const id = await createSessionTemplate(supabase, session, name, description);
+    if (id) await sessionTemplates.refetch();
+    return Boolean(id);
+  }
 
   async function handleSave(data: BuilderData): Promise<boolean> {
     if (!program) return false;
@@ -58,5 +74,13 @@ export default function ProgramBuilderPage() {
     );
   }
 
-  return <ProgramBuilderFullscreen program={program} library={library} onSave={handleSave} />;
+  return (
+    <ProgramBuilderFullscreen
+      program={program}
+      library={library}
+      onSave={handleSave}
+      templates={sessionTemplates.items}
+      onSaveAsTemplate={handleSaveAsTemplate}
+    />
+  );
 }
