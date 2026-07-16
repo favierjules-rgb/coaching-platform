@@ -4,6 +4,7 @@ import { useRef, useState, type DragEvent } from "react";
 import { ArrowDown, ArrowUp, BarChart3, Copy, GripVertical, Layers, Plus, Save, Trash2 } from "lucide-react";
 
 import { Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
+import { BannerUploadField } from "@/components/admin/BannerUploadField";
 import { ExerciseSearchPicker } from "@/components/admin/ExerciseSearchPicker";
 import { PrimaryButton } from "@/components/admin/Modal";
 import { SessionTemplatePicker } from "@/components/admin/SessionTemplatePicker";
@@ -69,6 +70,8 @@ export interface ProgramBuilderData {
   description: string;
   status: AdminContentStatus;
   sessions: AdminWorkoutSession[];
+  /** Photo bannière (chantier module Programmation, étape 4). */
+  bannerUrl?: string | null;
 }
 
 export function blankExercise(order: number): AdminExercise {
@@ -706,6 +709,13 @@ export function DayCard({
 
       {!session.isRestDay && (
         <div className="flex flex-col gap-4 p-4">
+          <BannerUploadField
+            label="Photo bannière de la séance"
+            kind="sessions"
+            entityId={session.id}
+            value={session.bannerUrl}
+            onChange={(bannerUrl) => onUpdate({ ...session, bannerUrl })}
+          />
           <Field label="Nom de la séance" value={session.name} onChange={(v) => onUpdate({ ...session, name: v })} />
           <div className="grid grid-cols-2 gap-4">
             <Field label="Groupe musculaire" value={session.muscleGroup} onChange={(v) => onUpdate({ ...session, muscleGroup: v })} />

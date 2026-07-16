@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 
 import { DayCard, restDaySession } from "@/components/admin/ProgramBuilder";
+import { BannerUploadField } from "@/components/admin/BannerUploadField";
 import { Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
 import { Modal, PrimaryButton } from "@/components/admin/Modal";
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
@@ -49,6 +50,8 @@ export interface BuilderData {
   description: string;
   status: AdminContentStatus;
   sessions: AdminWorkoutSession[];
+  /** Photo bannière (chantier module Programmation, étape 4). */
+  bannerUrl?: string | null;
 }
 
 /**
@@ -147,6 +150,7 @@ export function ProgramBuilderFullscreen({
   const [durationWeeks, setDurationWeeks] = useState(program.durationWeeks);
   const [description, setDescription] = useState(program.description);
   const [status, setStatus] = useState<AdminContentStatus>(program.status);
+  const [bannerUrl, setBannerUrl] = useState<string | null>(program.bannerUrl ?? null);
   const [sessions, setSessions] = useState<AdminWorkoutSession[]>(program.sessions);
 
   const weekNumbers = useMemo(
@@ -178,7 +182,7 @@ export function ProgramBuilderFullscreen({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [name, goal, level, durationWeeks, description, status, sessions]);
+  }, [name, goal, level, durationWeeks, description, status, bannerUrl, sessions]);
 
   function markDirty() {
     setSaveStatus("dirty");
@@ -186,7 +190,7 @@ export function ProgramBuilderFullscreen({
 
   async function handleSave() {
     setSaveStatus("saving");
-    const ok = await onSave({ name, goal, level, durationWeeks, description, status, sessions });
+    const ok = await onSave({ name, goal, level, durationWeeks, description, status, bannerUrl, sessions });
     if (ok) {
       setSaveStatus("saved");
       setSavedAt(new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }));
@@ -280,6 +284,7 @@ export function ProgramBuilderFullscreen({
             exercises: target.exercises,
             sessionType: target.sessionType,
             cardioBlocks: target.cardioBlocks,
+            bannerUrl: target.bannerUrl,
           };
         }
         if (s.id === targetId) {
@@ -294,6 +299,7 @@ export function ProgramBuilderFullscreen({
             exercises: source.exercises,
             sessionType: source.sessionType,
             cardioBlocks: source.cardioBlocks,
+            bannerUrl: source.bannerUrl,
           };
         }
         return s;
@@ -541,6 +547,13 @@ export function ProgramBuilderFullscreen({
       {settingsOpen && (
         <Modal title="Réglages du programme" onClose={() => setSettingsOpen(false)} maxWidth="max-w-lg">
           <div className="flex flex-col gap-4">
+            <BannerUploadField
+              label="Photo bannière du programme"
+              kind="programs"
+              entityId={program.id}
+              value={bannerUrl}
+              onChange={(url) => { setBannerUrl(url); markDirty(); }}
+            />
             <Field label="Nom du programme" value={name} onChange={(v) => { setName(v); markDirty(); }} />
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Objectif" value={goal} onChange={(v) => { setGoal(v); markDirty(); }} />

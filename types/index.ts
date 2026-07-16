@@ -84,6 +84,8 @@ export interface TrainingProgram {
   currentWeek: number;
   progressPercent: number;
   schedule: ProgramScheduleDay[];
+  /** Photo bannière (V3, chantier module Programmation étape 4) — voir AdminProgram.bannerUrl. */
+  bannerUrl?: string | null;
 }
 
 export interface UpcomingSession {
@@ -132,6 +134,8 @@ export interface WorkoutSession {
    */
   sessionType?: SessionType;
   cardioBlocks?: AdminCardioBlock[];
+  /** Photo bannière (V3, chantier module Programmation étape 4) — voir AdminWorkoutSession.bannerUrl. */
+  bannerUrl?: string | null;
 }
 
 /**
@@ -904,6 +908,12 @@ export interface AdminWorkoutSession {
    * normaliser avec `session.cardioBlocks ?? []`.
    */
   cardioBlocks?: AdminCardioBlock[];
+  /**
+   * Photo bannière de la séance (URL publique, bucket Storage "banners" —
+   * chantier module Programmation, étape 4). Optionnel, null/absent = pas de
+   * bannière.
+   */
+  bannerUrl?: string | null;
 }
 
 /**
@@ -948,6 +958,12 @@ export interface AdminProgram {
   sessions: AdminWorkoutSession[];
   createdAt: string;
   updatedAt: string;
+  /**
+   * Photo bannière du programme (URL publique, bucket Storage "banners" —
+   * chantier module Programmation, étape 4). Optionnel, null/absent = pas de
+   * bannière.
+   */
+  bannerUrl?: string | null;
 }
 
 export interface AdminMealFoodItem {

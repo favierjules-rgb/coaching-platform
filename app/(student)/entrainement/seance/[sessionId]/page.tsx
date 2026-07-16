@@ -63,6 +63,11 @@ export default function SessionDetailPage() {
           {realProgramName ?? "Entraînement"}
         </Link>
 
+        {realSession.bannerUrl && (
+          // eslint-disable-next-line @next/next/no-img-element -- bucket Storage public, URL externe
+          <img src={realSession.bannerUrl} alt="" className="mb-6 h-48 w-full border border-border object-cover" />
+        )}
+
         <div className="mb-8">
           <h1 className="font-heading text-3xl font-extrabold uppercase text-foreground md:text-4xl">
             {realSession.name}

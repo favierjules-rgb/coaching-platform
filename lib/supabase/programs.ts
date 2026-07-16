@@ -157,6 +157,7 @@ function mapSessionRow(
     exercises: exercises.slice().sort((a, b) => a.order - b.order),
     sessionType: row.session_type,
     cardioBlocks: cardioBlocks.slice().sort((a, b) => a.order - b.order),
+    bannerUrl: row.banner_url ?? null,
   };
 }
 
@@ -173,6 +174,7 @@ function mapProgramRow(row: ProgramRow, sessions: AdminWorkoutSession[], assigne
     sessions,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    bannerUrl: row.banner_url ?? null,
   };
 }
 
@@ -445,6 +447,7 @@ async function insertProgramStructure(
         warmup: session.warmup,
         coach_notes: session.coachNotes,
         session_type: session.sessionType ?? "strength",
+        banner_url: session.bannerUrl ?? null,
       })
       .select("id")
       .single();
@@ -488,6 +491,7 @@ export async function createProgram(supabase: TypedSupabaseClient, data: Program
       duration_weeks: data.durationWeeks,
       description: data.description,
       status: data.status,
+      banner_url: data.bannerUrl ?? null,
     })
     .select("id")
     .single();
@@ -531,6 +535,7 @@ export async function duplicateProgram(supabase: TypedSupabaseClient, programId:
       duration_weeks: program.durationWeeks,
       description: program.description,
       status: "brouillon",
+      banner_url: program.bannerUrl ?? null,
     })
     .select("id")
     .single();
@@ -672,6 +677,7 @@ async function diffProgramStructure(
         warmup: session.warmup,
         coach_notes: session.coachNotes,
         session_type: session.sessionType ?? "strength",
+        banner_url: session.bannerUrl ?? null,
         updated_at: new Date().toISOString(),
       })
       .eq("id", id);
@@ -695,6 +701,7 @@ async function diffProgramStructure(
         warmup: session.warmup,
         coach_notes: session.coachNotes,
         session_type: session.sessionType ?? "strength",
+        banner_url: session.bannerUrl ?? null,
       })
       .select("id")
       .single();
@@ -861,6 +868,7 @@ export async function updateProgram(
       duration_weeks: data.durationWeeks,
       description: data.description,
       status: data.status,
+      banner_url: data.bannerUrl ?? null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", programId);

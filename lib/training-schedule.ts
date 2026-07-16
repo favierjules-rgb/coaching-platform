@@ -88,6 +88,7 @@ export function toEleveWorkoutSession(session: AdminWorkoutSession): WorkoutSess
     // components/student/CardioBlocksSection.tsx.
     sessionType: session.sessionType,
     cardioBlocks: session.cardioBlocks,
+    bannerUrl: session.bannerUrl,
   };
 }
 
@@ -109,5 +110,6 @@ export function toEleveTrainingProgram(program: AdminProgram, weekNumber: number
     currentWeek: weekNumber,
     progressPercent,
     schedule: buildScheduleForWeek(program, weekNumber),
+    bannerUrl: program.bannerUrl,
   };
 }

@@ -790,6 +790,7 @@ export interface Database {
           duration_weeks: number;
           description: string;
           status: "brouillon" | "actif" | "archivé";
+          banner_url: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -802,6 +803,7 @@ export interface Database {
           duration_weeks?: number;
           description?: string;
           status?: "brouillon" | "actif" | "archivé";
+          banner_url?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -814,6 +816,7 @@ export interface Database {
           duration_weeks?: number;
           description?: string;
           status?: "brouillon" | "actif" | "archivé";
+          banner_url?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -856,6 +859,7 @@ export interface Database {
           warmup: string;
           coach_notes: string;
           session_type: "strength" | "cardio" | "mixed";
+          banner_url: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -871,6 +875,7 @@ export interface Database {
           warmup?: string;
           coach_notes?: string;
           session_type?: "strength" | "cardio" | "mixed";
+          banner_url?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -886,6 +891,7 @@ export interface Database {
           warmup?: string;
           coach_notes?: string;
           session_type?: "strength" | "cardio" | "mixed";
+          banner_url?: string | null;
           created_at?: string;
           updated_at?: string;
         };
