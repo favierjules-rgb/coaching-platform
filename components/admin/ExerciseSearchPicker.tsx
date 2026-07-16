@@ -40,8 +40,8 @@ export function ExerciseSearchPicker({
 
   return (
     <div className="relative border border-dashed border-border p-3">
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <div className="relative flex-1">
+      <div className="flex flex-col gap-2">
+        <div className="relative">
           <Search size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
             type="text"
@@ -51,29 +51,35 @@ export function ExerciseSearchPicker({
             className="w-full border border-border bg-background py-2.5 pl-9 pr-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none"
           />
         </div>
-        <select
-          value={muscleFilter}
-          onChange={(event) => setMuscleFilter(event.target.value as MuscleGroup | "tous")}
-          className="border border-border bg-background px-3 py-2.5 text-xs uppercase tracking-widest text-muted-foreground"
-        >
-          {muscleFilterOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-        <select
-          value={equipmentFilter}
-          onChange={(event) => setEquipmentFilter(event.target.value as ExerciseEquipment | "tous")}
-          className="border border-border bg-background px-3 py-2.5 text-xs uppercase tracking-widest text-muted-foreground"
-        >
-          <option value="tous">Tout matériel</option>
-          {equipmentOptions.map((equipment) => (
-            <option key={equipment} value={equipment}>
-              {exerciseEquipmentLabels[equipment]}
-            </option>
-          ))}
-        </select>
+        {/* Selects sur leur propre ligne, en min-w-0 flex-1 : un <select> natif résiste
+            sinon à tout rétrécissement sous sa largeur de contenu et déborde du panneau
+            parent (ex: panneau 420px du builder plein écran, ou colonne de jour du
+            builder classique) — c'était le bug "icônes qui sortent du cadre". */}
+        <div className="flex flex-wrap gap-2">
+          <select
+            value={muscleFilter}
+            onChange={(event) => setMuscleFilter(event.target.value as MuscleGroup | "tous")}
+            className="min-w-0 flex-1 border border-border bg-background px-3 py-2.5 text-xs uppercase tracking-widest text-muted-foreground"
+          >
+            {muscleFilterOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <select
+            value={equipmentFilter}
+            onChange={(event) => setEquipmentFilter(event.target.value as ExerciseEquipment | "tous")}
+            className="min-w-0 flex-1 border border-border bg-background px-3 py-2.5 text-xs uppercase tracking-widest text-muted-foreground"
+          >
+            <option value="tous">Tout matériel</option>
+            {equipmentOptions.map((equipment) => (
+              <option key={equipment} value={equipment}>
+                {exerciseEquipmentLabels[equipment]}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
       {results.length > 0 && (
         <div className="mt-2 flex flex-col gap-1">
