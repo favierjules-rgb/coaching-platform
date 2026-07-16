@@ -99,6 +99,7 @@ export interface Database {
           status: "active" | "paused" | "completed";
           start_date: string;
           last_login_at: string | null;
+          access_type: "coaching" | "programme_seul";
           created_at: string;
           updated_at: string;
         };
@@ -113,6 +114,7 @@ export interface Database {
           status?: "active" | "paused" | "completed";
           start_date?: string;
           last_login_at?: string | null;
+          access_type?: "coaching" | "programme_seul";
           created_at?: string;
           updated_at?: string;
         };
@@ -127,6 +129,7 @@ export interface Database {
           status?: "active" | "paused" | "completed";
           start_date?: string;
           last_login_at?: string | null;
+          access_type?: "coaching" | "programme_seul";
           created_at?: string;
           updated_at?: string;
         };
@@ -793,6 +796,8 @@ export interface Database {
           banner_url: string | null;
           program_mode: "individuel" | "groupe";
           group_start_date: string | null;
+          is_public: boolean;
+          public_subscription_template_id: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -808,6 +813,8 @@ export interface Database {
           banner_url?: string | null;
           program_mode?: "individuel" | "groupe";
           group_start_date?: string | null;
+          is_public?: boolean;
+          public_subscription_template_id?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -823,6 +830,8 @@ export interface Database {
           banner_url?: string | null;
           program_mode?: "individuel" | "groupe";
           group_start_date?: string | null;
+          is_public?: boolean;
+          public_subscription_template_id?: string | null;
           created_at?: string;
           updated_at?: string;
         };

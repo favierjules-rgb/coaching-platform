@@ -177,6 +177,8 @@ function mapProgramRow(row: ProgramRow, sessions: AdminWorkoutSession[], assigne
     bannerUrl: row.banner_url ?? null,
     programMode: row.program_mode ?? "individuel",
     groupStartDate: row.group_start_date ?? null,
+    isPublic: row.is_public ?? false,
+    publicSubscriptionTemplateId: row.public_subscription_template_id ?? null,
   };
 }
 
@@ -496,6 +498,8 @@ export async function createProgram(supabase: TypedSupabaseClient, data: Program
       banner_url: data.bannerUrl ?? null,
       program_mode: data.programMode ?? "individuel",
       group_start_date: data.programMode === "groupe" ? (data.groupStartDate ?? null) : null,
+      is_public: data.isPublic ?? false,
+      public_subscription_template_id: data.isPublic ? (data.publicSubscriptionTemplateId ?? null) : null,
     })
     .select("id")
     .single();
@@ -545,6 +549,11 @@ export async function duplicateProgram(supabase: TypedSupabaseClient, programId:
       // liée à la même cohorte/date de démarrage, le coach reconfigure si besoin.
       program_mode: "individuel",
       group_start_date: null,
+      // étape 6 : une copie ne repasse jamais publique automatiquement — le
+      // coach republie explicitement une fois la copie prête (évite de
+      // publier accidentellement une copie de travail non finalisée).
+      is_public: false,
+      public_subscription_template_id: null,
     })
     .select("id")
     .single();
@@ -880,6 +889,8 @@ export async function updateProgram(
       banner_url: data.bannerUrl ?? null,
       program_mode: data.programMode ?? "individuel",
       group_start_date: data.programMode === "groupe" ? (data.groupStartDate ?? null) : null,
+      is_public: data.isPublic ?? false,
+      public_subscription_template_id: data.isPublic ? (data.publicSubscriptionTemplateId ?? null) : null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", programId);

@@ -55,6 +55,22 @@ export async function getCurrentStudentId(supabase: TypedSupabaseClient): Promis
   return studentRow.id;
 }
 
+/**
+ * `access_type` du compte connecté (chantier module Programmation, étape 6)
+ * — utilisé côté navigateur (StudentSidebar) pour masquer les entrées de
+ * menu hors périmètre d'un compte "programme_seul". "coaching" par défaut
+ * (aucun compte élève, Supabase non configuré, ou erreur) : ne restreint
+ * jamais un compte par erreur en cas de souci réseau.
+ */
+export async function getCurrentStudentAccessType(supabase: TypedSupabaseClient): Promise<"coaching" | "programme_seul"> {
+  const studentId = await getCurrentStudentId(supabase);
+  if (!studentId) {
+    return "coaching";
+  }
+  const { data } = await supabase.from("students").select("access_type").eq("id", studentId).maybeSingle();
+  return data?.access_type ?? "coaching";
+}
+
 export async function updateCurrentStudentWeight(
   supabase: TypedSupabaseClient,
   studentId: string,

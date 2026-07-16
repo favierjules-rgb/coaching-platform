@@ -26,3 +26,26 @@ body {
   background: var(--background);
   color: var(--foreground);
 }
+
+/* Bandeau auto-défilant du catalogue public de programmes (chantier module
+   Programmation, étape 6, home page) — piste dupliquée en deux exemplaires
+   par PublicProgramsMarquee, translateX de -50% à 0% pour un défilement
+   continu et sans coupure de la gauche vers la droite. */
+@keyframes public-programs-marquee {
+  from {
+    transform: translateX(-50%);
+  }
+  to {
+    transform: translateX(0%);
+  }
+}
+
+.public-programs-marquee-track {
+  animation: public-programs-marquee linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .public-programs-marquee-track {
+    animation: none;
+  }
+}

@@ -21,11 +21,13 @@ import {
 
 import { DayCard, restDaySession } from "@/components/admin/ProgramBuilder";
 import { BannerUploadField } from "@/components/admin/BannerUploadField";
-import { Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
+import { CheckboxField, Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
 import { Modal, PrimaryButton } from "@/components/admin/Modal";
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
 import { contentStatusLabels, generateId, weekDays } from "@/lib/admin";
 import { cloneCardioBlock } from "@/lib/cardio";
+import { useSupabaseSubscriptionTemplates } from "@/hooks/useSupabaseSubscriptionTemplates";
+import { formatAmountCents } from "@/lib/stripe/status";
 import type { AdminContentStatus, AdminProgram, AdminWorkoutSession, ExerciseLibraryItem, SessionTemplate } from "@/types";
 
 const levelOptions = [
@@ -55,6 +57,9 @@ export interface BuilderData {
   /** Mode groupe + date de démarrage fixe (chantier module Programmation, étape 5). */
   programMode?: "individuel" | "groupe";
   groupStartDate?: string | null;
+  /** Catalogue public (chantier module Programmation, étape 6). */
+  isPublic?: boolean;
+  publicSubscriptionTemplateId?: string | null;
 }
 
 const programModeOptions = [
@@ -161,6 +166,16 @@ export function ProgramBuilderFullscreen({
   const [bannerUrl, setBannerUrl] = useState<string | null>(program.bannerUrl ?? null);
   const [programMode, setProgramMode] = useState<"individuel" | "groupe">(program.programMode ?? "individuel");
   const [groupStartDate, setGroupStartDate] = useState<string | null>(program.groupStartDate ?? null);
+  const [isPublic, setIsPublic] = useState<boolean>(program.isPublic ?? false);
+  const [publicSubscriptionTemplateId, setPublicSubscriptionTemplateId] = useState<string | null>(
+    program.publicSubscriptionTemplateId ?? null,
+  );
+  // Formules "achat unique" (chantier module Programmation, étape 6) — seule
+  // la liste active est proposée, cohérent avec la RLS de lecture publique
+  // (subscription_templates_select_active_or_staff n'expose les formules
+  // qu'actives à un visiteur anonyme).
+  const { templates: subscriptionTemplates } = useSupabaseSubscriptionTemplates(true);
+  const oneTimeTemplates = subscriptionTemplates.filter((t) => t.billingInterval === "one_time");
   const [sessions, setSessions] = useState<AdminWorkoutSession[]>(program.sessions);
 
   const weekNumbers = useMemo(
@@ -192,7 +207,20 @@ export function ProgramBuilderFullscreen({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [name, goal, level, durationWeeks, description, status, bannerUrl, programMode, groupStartDate, sessions]);
+  }, [
+    name,
+    goal,
+    level,
+    durationWeeks,
+    description,
+    status,
+    bannerUrl,
+    programMode,
+    groupStartDate,
+    isPublic,
+    publicSubscriptionTemplateId,
+    sessions,
+  ]);
 
   function markDirty() {
     setSaveStatus("dirty");
@@ -200,7 +228,20 @@ export function ProgramBuilderFullscreen({
 
   async function handleSave() {
     setSaveStatus("saving");
-    const ok = await onSave({ name, goal, level, durationWeeks, description, status, bannerUrl, programMode, groupStartDate, sessions });
+    const ok = await onSave({
+      name,
+      goal,
+      level,
+      durationWeeks,
+      description,
+      status,
+      bannerUrl,
+      programMode,
+      groupStartDate,
+      isPublic,
+      publicSubscriptionTemplateId,
+      sessions,
+    });
     if (ok) {
       setSaveStatus("saved");
       setSavedAt(new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }));
@@ -591,6 +632,38 @@ export function ProgramBuilderFullscreen({
                 démarrage, quelle que soit leur date de suivi individuelle.
               </p>
             )}
+            <div className="flex flex-col gap-3 border border-border p-4">
+              <CheckboxField
+                label="Publier sur le catalogue public (home page et /programmes)"
+                checked={isPublic}
+                onChange={(checked) => {
+                  setIsPublic(checked);
+                  if (!checked) setPublicSubscriptionTemplateId(null);
+                  markDirty();
+                }}
+              />
+              {isPublic && (
+                <>
+                  <SelectField
+                    label="Accès"
+                    value={publicSubscriptionTemplateId ?? ""}
+                    onChange={(v) => { setPublicSubscriptionTemplateId(v || null); markDirty(); }}
+                    options={[
+                      { value: "", label: "Gratuit (aucun paiement)" },
+                      ...oneTimeTemplates.map((t) => ({
+                        value: t.id,
+                        label: `${t.name} — ${formatAmountCents(t.amountCents, t.currency)}`,
+                      })),
+                    ]}
+                  />
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    Un visiteur qui achète (ou récupère gratuitement) ce programme obtient un compte élève limité à ce
+                    programme uniquement — pas d&apos;accès nutrition, rendez-vous ou documents. Seules les formules
+                    &laquo;&nbsp;achat unique&nbsp;&raquo; actives apparaissent ici (voir /admin/abonnements).
+                  </p>
+                </>
+              )}
+            </div>
             <Field
               label="Durée (semaines)"
               type="number"

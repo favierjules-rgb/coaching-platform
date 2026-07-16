@@ -122,6 +122,7 @@ function mapStudentRow(row: StudentRow): SupabaseStudent {
     lastLoginAt: row.last_login_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    accessType: row.access_type ?? "coaching",
   };
 }
 
@@ -516,6 +517,7 @@ function toAdminStudent(
     coachNotes: extras.coachNotes,
     createdAt: student.createdAt,
     updatedAt: student.updatedAt,
+    accessType: student.accessType,
   };
 }
 

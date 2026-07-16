@@ -20,6 +20,7 @@ import {
   upsertBillingCustomer,
   upsertSubscription,
 } from "@/lib/supabase/billing";
+import { provisionPublicProgramAccess } from "@/lib/supabase/public-program-provisioning";
 import { getStudentById } from "@/lib/supabase/students";
 import { getSubscriptionTemplateByPriceId } from "@/lib/supabase/subscription-templates";
 import type { Database } from "@/types/supabase";
@@ -105,8 +106,21 @@ async function upsertSubscriptionFromStripeObject(supabase: TypedSupabaseClient,
   return studentId;
 }
 
-/** checkout.session.completed : crée/relie le customer Stripe à l'élève (l'abonnement lui-même arrive via customer.subscription.created juste après). */
+/**
+ * checkout.session.completed : crée/relie le customer Stripe à l'élève
+ * (l'abonnement lui-même arrive via customer.subscription.created juste
+ * après). Branche séparée pour l'achat anonyme d'un programme public
+ * (metadata.public_program_id, chantier module Programmation, étape 6) — ce
+ * chemin ne concerne jamais un studentId déjà existant : le compte élève
+ * est provisionné ici même, voir handlePublicProgramCheckoutCompleted.
+ */
 export async function handleCheckoutSessionCompleted(supabase: TypedSupabaseClient, session: Stripe.Checkout.Session): Promise<void> {
+  const publicProgramId = session.metadata?.public_program_id;
+  if (publicProgramId) {
+    await handlePublicProgramCheckoutCompleted(supabase, session, publicProgramId);
+    return;
+  }
+
   const stripeCustomerId = extractId(session.customer as string | { id: string } | null);
   const studentId = session.client_reference_id || session.metadata?.student_id || null;
   if (!stripeCustomerId || !studentId) {
@@ -117,6 +131,70 @@ export async function handleCheckoutSessionCompleted(supabase: TypedSupabaseClie
     studentId,
     stripeCustomerId,
     email: session.customer_details?.email || session.customer_email || "",
+  });
+}
+
+/**
+ * Achat anonyme d'un programme public en paiement unique (chantier module
+ * Programmation, étape 6) : provisionne le compte élève (nouveau ou
+ * existant, voir lib/supabase/public-program-provisioning.ts — cette
+ * fonction envoie déjà l'email approprié), puis journalise le paiement pour
+ * la visibilité admin (/admin/paiements). Contrairement au mode
+ * "subscription", un Checkout "payment" ne déclenche jamais
+ * invoice.payment_succeeded : ce paiement n'est donc jamais enregistré
+ * ailleurs que dans cette branche.
+ */
+async function handlePublicProgramCheckoutCompleted(
+  supabase: TypedSupabaseClient,
+  session: Stripe.Checkout.Session,
+  programId: string,
+): Promise<void> {
+  const email = session.metadata?.email || session.customer_details?.email || session.customer_email || "";
+  if (!email) {
+    console.error(`[Stripe webhook] checkout.session.completed (programme public) sans email exploitable (session ${session.id}).`);
+    return;
+  }
+  const firstName = session.metadata?.first_name || "";
+  const lastName = session.metadata?.last_name || "";
+  const programName = session.metadata?.program_name || "";
+
+  const { data: programRow } = await supabase.from("programs").select("coach_id").eq("id", programId).maybeSingle();
+
+  const result = await provisionPublicProgramAccess(supabase, {
+    programId,
+    programName,
+    coachId: programRow?.coach_id ?? null,
+    firstName,
+    lastName,
+    email,
+  });
+  if (!result) {
+    console.error(`[Stripe webhook] échec du provisionnement pour l'achat du programme public ${programId} (session ${session.id}).`);
+    return;
+  }
+
+  const stripeCustomerId = extractId(session.customer as string | { id: string } | null);
+  if (stripeCustomerId) {
+    await upsertBillingCustomer(supabase, { studentId: result.studentId, stripeCustomerId, email });
+  }
+  await recordStripePayment(supabase, {
+    studentId: result.studentId,
+    stripeCustomerId,
+    stripePaymentIntentId: extractId(session.payment_intent as string | { id: string } | null),
+    stripeInvoiceId: null,
+    stripeSubscriptionId: null,
+    amountCents: session.amount_total,
+    currency: session.currency ?? "eur",
+    status: "succeeded",
+    paidAt: new Date().toISOString(),
+  });
+  await logActivityEvent(supabase, {
+    studentId: result.studentId,
+    actorType: "system",
+    eventType: "payment_succeeded",
+    title: "Achat programme (accès unique)",
+    description: `${((session.amount_total ?? 0) / 100).toFixed(2)} ${(session.currency ?? "eur").toUpperCase()} — ${programName}`,
+    metadata: buildStudentActivityLink(result.studentId),
   });
 }
 

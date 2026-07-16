@@ -75,6 +75,9 @@ export interface ProgramBuilderData {
   /** Mode groupe + date de démarrage fixe (chantier module Programmation, étape 5). */
   programMode?: "individuel" | "groupe";
   groupStartDate?: string | null;
+  /** Catalogue public (chantier module Programmation, étape 6). */
+  isPublic?: boolean;
+  publicSubscriptionTemplateId?: string | null;
 }
 
 export function blankExercise(order: number): AdminExercise {

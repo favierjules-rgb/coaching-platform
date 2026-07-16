@@ -695,6 +695,14 @@ export interface AdminStudent {
   coachNotes: CoachNote[];
   createdAt: string;
   updatedAt: string;
+  /**
+   * Type d'accès (chantier module Programmation, étape 6) : "coaching"
+   * (défaut, comportement historique — accès complet) ou "programme_seul"
+   * (compte auto-créé après achat/réclamation d'un programme public sur la
+   * home page — accès restreint à /entrainement uniquement, voir
+   * lib/supabase/guards.ts). Optionnel : absent = "coaching" en mock.
+   */
+  accessType?: "coaching" | "programme_seul";
 }
 
 export type StudentAccountStatus = "actif" | "pause" | "terminé";
@@ -977,6 +985,15 @@ export interface AdminProgram {
    * tous les élèves assignés au programme.
    */
   groupStartDate?: string | null;
+  /**
+   * Catalogue public (chantier module Programmation, étape 6) : isPublic
+   * affiche le programme sur /programmes et la home page publique.
+   * publicSubscriptionTemplateId pointe vers une formule "one_time" (prix
+   * Stripe) ; null/absent = programme gratuit (pas de Stripe, compte élève
+   * créé directement, voir lib/supabase/public-programs.ts).
+   */
+  isPublic?: boolean;
+  publicSubscriptionTemplateId?: string | null;
 }
 
 export interface AdminMealFoodItem {
@@ -1422,6 +1439,7 @@ export interface SupabaseStudent {
   lastLoginAt: string | null;
   createdAt: string;
   updatedAt: string;
+  accessType: "coaching" | "programme_seul";
 }
 
 /**
@@ -2186,6 +2204,25 @@ export interface StudentAccessStatus {
  * docs/supabase-stripe-payments-subscriptions-model.md.
  */
 export type BillingInterval = "monthly" | "quarterly" | "yearly" | "one_time";
+
+/**
+ * Programme du catalogue public (chantier module Programmation, étape 6) —
+ * uniquement les champs marketing exposés à un visiteur anonyme sur
+ * /programmes et la home page. Jamais le détail séance/exercice (voir
+ * lib/supabase/public-programs.ts).
+ */
+export interface PublicProgramSummary {
+  id: string;
+  name: string;
+  goal: string;
+  description: string;
+  level: string;
+  durationWeeks: number;
+  bannerUrl: string | null;
+  /** null = programme gratuit (aucune formule liée). */
+  priceCents: number | null;
+  currency: string;
+}
 
 export interface SubscriptionTemplate {
   id: string;

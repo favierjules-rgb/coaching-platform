@@ -203,6 +203,32 @@ export function composeNutritionAssignedEmail(input: { firstName: string; planNa
   };
 }
 
+/* ─── G-bis. Bienvenue — programme public (chantier module Programmation, étape 6) ───
+ * Compte auto-créé après achat/réclamation d'un programme public sur la home
+ * page (accès restreint à /entrainement, voir lib/supabase/guards.ts). Le
+ * bouton pointe vers un lien Supabase (magic link/invite) qui connecte
+ * directement le destinataire et lui permet de définir son mot de passe —
+ * jamais d'email Supabase par défaut, toujours ce template Resend.
+ */
+
+export function composePublicProgramWelcomeEmail(input: { firstName: string; programName: string; setPasswordUrl: string }): ComposedEmail {
+  const name = escapeHtml(input.firstName || "");
+  const bodyHtml = [
+    p(`Bonjour ${name},`),
+    p(`Ton accès au programme <strong>${escapeHtml(input.programName)}</strong> est prêt ! Clique sur le bouton ci-dessous pour définir ton mot de passe et accéder directement à ton programme.`),
+  ].join("");
+  const button: EmailButton = { label: "Définir mon mot de passe et accéder à mon programme", url: input.setPasswordUrl };
+  return {
+    subject: `Ton accès à ${input.programName} est prêt`,
+    html: renderBaseEmailHtml({ preheader: "Ton accès est prêt.", heading: "Bienvenue !", bodyHtml, button }),
+    text: renderBaseEmailText({
+      heading: "Bienvenue !",
+      bodyText: `Bonjour ${input.firstName},\nTon accès au programme "${input.programName}" est prêt ! Définis ton mot de passe pour y accéder.`,
+      button,
+    }),
+  };
+}
+
 /* ─── H. Document attribué ─── */
 
 export function composeDocumentAssignedEmail(input: { firstName: string; documentTitle: string; documentsUrl: string }): ComposedEmail {

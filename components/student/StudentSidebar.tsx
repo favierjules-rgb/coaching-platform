@@ -16,6 +16,7 @@ import {
 
 import { SignOutButton } from "@/components/auth/SignOutButton";
 import { Logo } from "@/components/ui/Logo";
+import { useSupabaseAccessType } from "@/hooks/useSupabaseAccessType";
 import { useSupabaseMyAccess } from "@/hooks/useSupabaseMyAccess";
 
 const studentLinks = [
@@ -27,6 +28,14 @@ const studentLinks = [
   { href: "/documents", label: "Documents", icon: FileText, requiresAccess: true },
   { href: "/profil", label: "Profil", icon: User, requiresAccess: false },
 ];
+
+// Comptes "programme_seul" (chantier module Programmation, étape 6, achat
+// unique depuis la home page) : accès restreint à Entraînement + Profil,
+// jamais Dashboard/Nutrition/Rendez-vous/Progression/Documents — voir
+// lib/supabase/guards.ts (requireCoachingFeature/requireActiveStudentAccess)
+// pour les redirections serveur correspondantes, ce filtrage n'est qu'un
+// masquage de menu côté affichage.
+const programOnlyHrefs = new Set(["/entrainement", "/profil"]);
 
 interface StudentSidebarProps {
   mobile?: boolean;
@@ -44,6 +53,9 @@ export function StudentSidebar({
   // échéant), c'est juste un indice visuel pour comprendre pourquoi.
   const access = useSupabaseMyAccess();
   const isBlocked = access.ready && access.status !== null && !access.status.allowed;
+  const accessType = useSupabaseAccessType();
+  const visibleLinks =
+    accessType === "programme_seul" ? studentLinks.filter((link) => programOnlyHrefs.has(link.href)) : studentLinks;
 
   return (
     <div className="flex h-full w-60 flex-col border-r border-border bg-card">
@@ -62,7 +74,7 @@ export function StudentSidebar({
       </div>
 
       <nav className="flex flex-1 flex-col gap-1 px-3 py-4">
-        {studentLinks.map(({ href, label, icon: Icon, requiresAccess }) => {
+        {visibleLinks.map(({ href, label, icon: Icon, requiresAccess }) => {
           const active = pathname === href;
           const locked = requiresAccess && isBlocked;
           return (

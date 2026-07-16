@@ -10,6 +10,7 @@ import type {
 export const navLinks: NavLink[] = [
   { label: "La méthode", href: "#methode" },
   { label: "Transformations", href: "#transformations" },
+  { label: "Programmes", href: "/programmes" },
   { label: "Newsletter", href: "#newsletter" },
 ];
 
