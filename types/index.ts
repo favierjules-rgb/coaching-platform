@@ -766,6 +766,110 @@ export interface AdminExercise {
   libraryExerciseId?: string;
 }
 
+/** Type de séance (V3 cardio) — voir workout_sessions.session_type. */
+export type SessionType = "strength" | "cardio" | "mixed";
+
+/**
+ * Type de cardio d'un bloc (training_blocks.cardio_type — voir migration
+ * 20260716_training_v3_cardio_foundation.sql pour la liste exacte des 21
+ * valeurs autorisées côté base).
+ */
+export type CardioType =
+  | "continuous_run"
+  | "easy_run"
+  | "long_run"
+  | "tempo_run"
+  | "threshold_intervals"
+  | "vma_intervals"
+  | "short_intervals"
+  | "long_intervals"
+  | "fartlek"
+  | "hill_repeats"
+  | "sprint_repeats"
+  | "run_walk"
+  | "warmup_run"
+  | "cooldown_run"
+  | "race_pace"
+  | "time_trial"
+  | "vma_test"
+  | "luc_leger"
+  | "hyrox_run"
+  | "cardio_machine"
+  | "custom_cardio";
+
+/** Machine cardio de salle (training_blocks.machine_type), pertinent seulement si cardioType = "cardio_machine". */
+export type MachineType = "treadmill" | "bike" | "rower" | "skierg" | "elliptical" | "air_bike" | "stepper" | "other";
+
+/**
+ * Type de segment cardio stocké en base (training_prescriptions.segment_type
+ * autorise aussi "work"/"recovery" pour un usage futur plus fin — voir
+ * migration V3). Ce builder ne génère volontairement que ces 4 valeurs :
+ * un "repeat_group" porte lui-même ses champs travail/récupération
+ * (repetitions + durée/distance de travail + durée/distance de
+ * récupération) plutôt que des lignes enfants "work"/"recovery" séparées,
+ * pour un formulaire simple à éditer côté coach.
+ */
+export type CardioSegmentType = "single" | "repeat_group" | "ramp_up" | "ramp_down";
+
+/** Type d'intensité ciblée d'un segment (training_prescriptions.intensity_target_type). */
+export type IntensityTargetType =
+  | "vma_percentage"
+  | "speed_kmh"
+  | "pace"
+  | "heart_rate_zone"
+  | "heart_rate_percentage"
+  | "rpe"
+  | "power"
+  | "race_pace"
+  | "free"
+  | "custom";
+
+/**
+ * Segment d'un bloc cardio (training_prescriptions avec block_id renseigné
+ * et exercise_id nul — voir lib/supabase/programs.ts). Un segment "single",
+ * "ramp_up" ou "ramp_down" décrit un effort continu (durationSeconds et/ou
+ * distanceMeters) ; un "repeat_group" décrit un fractionné répété
+ * `repetitions` fois : effort (durationSeconds/distanceMeters) puis
+ * récupération (recoveryDurationSeconds/recoveryDistanceMeters).
+ */
+export interface AdminCardioSegment {
+  id: string;
+  order: number;
+  segmentType: CardioSegmentType;
+  title: string;
+  repetitions?: number;
+  durationSeconds?: number;
+  distanceMeters?: number;
+  elevationGainMeters?: number;
+  inclinePercentage?: number;
+  recoveryDurationSeconds?: number;
+  recoveryDistanceMeters?: number;
+  intensityTargetType: IntensityTargetType;
+  targetVmaPercentage?: number;
+  targetSpeedKmh?: number;
+  targetPaceSecondsPerKm?: number;
+  targetHrPercentage?: number;
+  targetHrZone?: string;
+  targetPowerWatts?: number;
+  targetCadence?: number;
+  intensityMin?: number;
+  intensityMax?: number;
+  surface?: string;
+  terrain?: string;
+  equipmentType?: string;
+  coachNotes?: string;
+}
+
+/** Bloc cardio d'une séance (training_blocks avec block_type = "cardio"). */
+export interface AdminCardioBlock {
+  id: string;
+  order: number;
+  title: string;
+  cardioType: CardioType;
+  machineType?: MachineType;
+  segments: AdminCardioSegment[];
+}
+
 export interface AdminWorkoutSession {
   id: string;
   programId: string;
@@ -778,6 +882,18 @@ export interface AdminWorkoutSession {
   warmup: string;
   coachNotes: string;
   exercises: AdminExercise[];
+  /**
+   * Type de séance (V3 cardio). Optionnel pour rester compatible avec les
+   * données mock/anciennes séances qui n'ont pas encore ce champ —
+   * normaliser avec `session.sessionType ?? "strength"` avant utilisation
+   * (voir lib/cardio.ts).
+   */
+  sessionType?: SessionType;
+  /**
+   * Blocs cardio (V3). Optionnel pour la même raison que sessionType —
+   * normaliser avec `session.cardioBlocks ?? []`.
+   */
+  cardioBlocks?: AdminCardioBlock[];
 }
 
 /**

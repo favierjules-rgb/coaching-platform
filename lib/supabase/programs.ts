@@ -2,7 +2,17 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { buildStudentActivityLink, logActivityEvent } from "@/lib/supabase/activity";
 import type { ProgramBuilderData } from "@/components/admin/ProgramBuilder";
-import type { AdminExercise, AdminProgram, AdminWorkoutSession } from "@/types";
+import type {
+  AdminCardioBlock,
+  AdminCardioSegment,
+  AdminExercise,
+  AdminProgram,
+  AdminWorkoutSession,
+  CardioSegmentType,
+  CardioType,
+  IntensityTargetType,
+  MachineType,
+} from "@/types";
 import type { Database } from "@/types/supabase";
 
 /**
@@ -38,6 +48,8 @@ type ProgramRow = Database["public"]["Tables"]["programs"]["Row"];
 type WorkoutSessionRow = Database["public"]["Tables"]["workout_sessions"]["Row"];
 type WorkoutExerciseRow = Database["public"]["Tables"]["workout_exercises"]["Row"];
 type AssignmentRow = Database["public"]["Tables"]["assignments"]["Row"];
+type TrainingBlockRow = Database["public"]["Tables"]["training_blocks"]["Row"];
+type TrainingPrescriptionRow = Database["public"]["Tables"]["training_prescriptions"]["Row"];
 
 function devWarn(context: string, error: { message: string; code?: string; details?: string; hint?: string } | null): void {
   if (error) {
@@ -80,10 +92,54 @@ function mapExerciseRow(row: WorkoutExerciseRow): AdminExercise {
   };
 }
 
+/** Segment cardio (training_prescriptions avec block_id renseigné et exercise_id nul) -> AdminCardioSegment. */
+function mapCardioSegmentRow(row: TrainingPrescriptionRow): AdminCardioSegment {
+  return {
+    id: row.id,
+    order: row.position,
+    segmentType: (row.segment_type ?? "single") as CardioSegmentType,
+    title: row.title ?? "",
+    repetitions: row.repetitions ?? undefined,
+    durationSeconds: row.work_duration_seconds ?? undefined,
+    distanceMeters: row.distance_meters ?? undefined,
+    elevationGainMeters: row.elevation_gain_meters ?? undefined,
+    inclinePercentage: row.incline_percentage ?? undefined,
+    recoveryDurationSeconds: row.recovery_duration_seconds ?? undefined,
+    recoveryDistanceMeters: row.recovery_distance_meters ?? undefined,
+    intensityTargetType: (row.intensity_target_type ?? "free") as IntensityTargetType,
+    targetVmaPercentage: row.target_vma_percentage ?? undefined,
+    targetSpeedKmh: row.target_speed_kmh ?? undefined,
+    targetPaceSecondsPerKm: row.target_pace_seconds_per_km ?? undefined,
+    targetHrPercentage: row.target_hr_percentage ?? undefined,
+    targetHrZone: row.target_hr_zone ?? undefined,
+    targetPowerWatts: row.target_power_watts ?? undefined,
+    targetCadence: row.target_cadence ?? undefined,
+    intensityMin: row.intensity_min ?? undefined,
+    intensityMax: row.intensity_max ?? undefined,
+    surface: row.surface ?? undefined,
+    terrain: row.terrain ?? undefined,
+    equipmentType: row.equipment_type ?? undefined,
+    coachNotes: row.coach_notes ?? undefined,
+  };
+}
+
+/** Bloc cardio (training_blocks, block_type = "cardio") -> AdminCardioBlock, avec ses segments déjà composés. */
+function mapCardioBlockRow(row: TrainingBlockRow, segments: AdminCardioSegment[]): AdminCardioBlock {
+  return {
+    id: row.id,
+    order: row.position,
+    title: row.title ?? "",
+    cardioType: (row.cardio_type ?? "custom_cardio") as CardioType,
+    machineType: (row.machine_type ?? undefined) as MachineType | undefined,
+    segments: segments.slice().sort((a, b) => a.order - b.order),
+  };
+}
+
 function mapSessionRow(
   row: WorkoutSessionRow,
   weekNumber: number,
   exercises: AdminExercise[],
+  cardioBlocks: AdminCardioBlock[],
 ): AdminWorkoutSession {
   return {
     id: row.id,
@@ -97,6 +153,8 @@ function mapSessionRow(
     warmup: row.warmup,
     coachNotes: row.coach_notes,
     exercises: exercises.slice().sort((a, b) => a.order - b.order),
+    sessionType: row.session_type,
+    cardioBlocks: cardioBlocks.slice().sort((a, b) => a.order - b.order),
   };
 }
 
@@ -148,9 +206,26 @@ async function loadPrograms(supabase: TypedSupabaseClient, programRows: ProgramR
   devWarn("loadPrograms (workout_exercises)", exercisesError);
   const exerciseRows = exerciseRowsRaw ?? [];
 
+  const { data: blockRowsRaw, error: blocksError } =
+    sessionIds.length > 0
+      ? await supabase.from("training_blocks").select("*").in("session_id", sessionIds)
+      : { data: [] as TrainingBlockRow[], error: null };
+  devWarn("loadPrograms (training_blocks)", blocksError);
+  const blockRows = blockRowsRaw ?? [];
+
+  const blockIds = blockRows.map((b) => b.id);
+  const { data: segmentRowsRaw, error: segmentsError } =
+    blockIds.length > 0
+      ? await supabase.from("training_prescriptions").select("*").in("block_id", blockIds)
+      : { data: [] as TrainingPrescriptionRow[], error: null };
+  devWarn("loadPrograms (training_prescriptions)", segmentsError);
+  const segmentRows = segmentRowsRaw ?? [];
+
   const weeksByProgram = groupBy(weekRows, (w) => w.program_id);
   const sessionsByWeek = groupBy(sessionRows, (s) => s.program_week_id);
   const exercisesBySession = groupBy(exerciseRows, (e) => e.session_id);
+  const blocksBySession = groupBy(blockRows, (b) => b.session_id);
+  const segmentsByBlock = groupBy(segmentRows, (p) => p.block_id ?? "");
   const assignmentsByProgram = groupBy(assignmentRows, (a) => a.content_id);
 
   return programRows.map((programRow) => {
@@ -158,13 +233,17 @@ async function loadPrograms(supabase: TypedSupabaseClient, programRows: ProgramR
     const weekNumberById = new Map(weeksForProgram.map((w) => [w.id, w.week_number]));
     const sessions = weeksForProgram
       .flatMap((week) => sessionsByWeek.get(week.id) ?? [])
-      .map((sessionRow) =>
-        mapSessionRow(
+      .map((sessionRow) => {
+        const cardioBlocks = (blocksBySession.get(sessionRow.id) ?? []).map((blockRow) =>
+          mapCardioBlockRow(blockRow, (segmentsByBlock.get(blockRow.id) ?? []).map(mapCardioSegmentRow)),
+        );
+        return mapSessionRow(
           sessionRow,
           weekNumberById.get(sessionRow.program_week_id) ?? 0,
           (exercisesBySession.get(sessionRow.id) ?? []).map(mapExerciseRow),
-        ),
-      );
+          cardioBlocks,
+        );
+      });
     const assignedStudentIds = (assignmentsByProgram.get(programRow.id) ?? []).map((a) => a.student_id);
     return mapProgramRow(programRow, sessions, assignedStudentIds);
   });
@@ -260,6 +339,73 @@ export async function getAssignedProgramIdsByStudent(
 
 /* ─── Écriture ─── */
 
+/**
+ * Insère les blocs cardio et leurs segments pour une séance donnée (V3).
+ * Segments stockés dans `training_prescriptions` avec `block_id` renseigné
+ * et `exercise_id` nul — voir mapCardioSegmentRow/AdminCardioSegment.
+ * `set_number` est NOT NULL en base même pour ces lignes cardio ; on y met
+ * l'ordre du segment, sa valeur réelle n'ayant aucun sens hors contexte
+ * musculation (la contrainte UNIQUE(exercise_id, set_number) ne s'applique
+ * de toute façon jamais ici puisque exercise_id est toujours nul).
+ */
+async function insertCardioBlocks(
+  supabase: TypedSupabaseClient,
+  sessionId: string,
+  blocks: AdminCardioBlock[],
+): Promise<void> {
+  for (const block of blocks) {
+    const { data: blockRow, error: blockError } = await supabase
+      .from("training_blocks")
+      .insert({
+        session_id: sessionId,
+        block_type: "cardio",
+        title: block.title || "",
+        position: block.order,
+        cardio_type: block.cardioType,
+        machine_type: block.machineType ?? null,
+      })
+      .select("id")
+      .single();
+    devWarn("insertCardioBlocks (training_blocks)", blockError);
+    if (!blockRow || block.segments.length === 0) continue;
+
+    const { error: segmentsError } = await supabase.from("training_prescriptions").insert(
+      block.segments.map((segment) => ({
+        block_id: blockRow.id,
+        exercise_id: null,
+        set_number: segment.order,
+        set_type: "normal",
+        segment_type: segment.segmentType,
+        title: segment.title || null,
+        repetitions: segment.repetitions ?? null,
+        work_duration_seconds: segment.durationSeconds ?? null,
+        distance_meters: segment.distanceMeters ?? null,
+        elevation_gain_meters: segment.elevationGainMeters ?? null,
+        incline_percentage: segment.inclinePercentage ?? null,
+        recovery_duration_seconds: segment.recoveryDurationSeconds ?? null,
+        recovery_distance_meters: segment.recoveryDistanceMeters ?? null,
+        intensity_target_type: segment.intensityTargetType,
+        target_vma_percentage: segment.targetVmaPercentage ?? null,
+        target_speed_kmh: segment.targetSpeedKmh ?? null,
+        target_pace_seconds_per_km: segment.targetPaceSecondsPerKm ?? null,
+        target_hr_percentage: segment.targetHrPercentage ?? null,
+        target_hr_zone: segment.targetHrZone ?? null,
+        target_power_watts: segment.targetPowerWatts ?? null,
+        target_cadence: segment.targetCadence ?? null,
+        intensity_min: segment.intensityMin ?? null,
+        intensity_max: segment.intensityMax ?? null,
+        surface: segment.surface ?? null,
+        terrain: segment.terrain ?? null,
+        equipment_type: segment.equipmentType ?? null,
+        // NOT NULL (défaut '') côté base — jamais envoyer null ici.
+        coach_notes: segment.coachNotes || "",
+        position: segment.order,
+      })),
+    );
+    devWarn("insertCardioBlocks (training_prescriptions)", segmentsError);
+  }
+}
+
 /** Insère les semaines/séances/exercices d'un programme déjà créé (partagé par create/update). */
 async function insertProgramStructure(
   supabase: TypedSupabaseClient,
@@ -296,6 +442,7 @@ async function insertProgramStructure(
         duration_minutes: session.durationMinutes,
         warmup: session.warmup,
         coach_notes: session.coachNotes,
+        session_type: session.sessionType ?? "strength",
       })
       .select("id")
       .single();
@@ -320,6 +467,10 @@ async function insertProgramStructure(
         })),
       );
       devWarn("insertProgramStructure (workout_exercises)", exercisesError);
+    }
+
+    if (!session.isRestDay && (session.cardioBlocks?.length ?? 0) > 0) {
+      await insertCardioBlocks(supabase, sessionRow.id, session.cardioBlocks ?? []);
     }
   }
 }
@@ -467,6 +618,7 @@ async function diffProgramStructure(
         duration_minutes: session.durationMinutes,
         warmup: session.warmup,
         coach_notes: session.coachNotes,
+        session_type: session.sessionType ?? "strength",
         updated_at: new Date().toISOString(),
       })
       .eq("id", id);
@@ -489,6 +641,7 @@ async function diffProgramStructure(
         duration_minutes: session.durationMinutes,
         warmup: session.warmup,
         coach_notes: session.coachNotes,
+        session_type: session.sessionType ?? "strength",
       })
       .select("id")
       .single();
@@ -596,6 +749,41 @@ async function diffProgramStructure(
       })),
     );
     devWarn("diffProgramStructure (workout_exercises insertion)", error);
+  }
+
+  /*
+   * Blocs cardio (V3) : remplacés en bloc (delete + reinsert) pour chaque
+   * séance plutôt que diffés finement comme les exercices. Contrairement
+   * aux séances/exercices, rien ne référence encore un bloc ou un segment
+   * cardio par id (pas de retour élève, pas de stat calculée dessus) — le
+   * problème qui a motivé le diff fin des exercices (perte du rattachement
+   * workout_feedback.session_id, voir le commentaire au-dessus de cette
+   * fonction) ne se pose donc pas ici. Un delete + reinsert est sûr et bien
+   * plus simple que de reproduire la résolution parent/enfant d'un vrai
+   * diff, pour un gain nul à ce stade.
+   */
+  const allResolvedSessionIds = sessions
+    .map((session) => resolveSessionId(session))
+    .filter((id): id is string => Boolean(id));
+
+  const { data: existingBlocksRaw, error: existingBlocksError } =
+    allResolvedSessionIds.length > 0
+      ? await supabase.from("training_blocks").select("id, session_id").in("session_id", allResolvedSessionIds)
+      : { data: [] as { id: string; session_id: string }[], error: null };
+  devWarn("diffProgramStructure (training_blocks lecture)", existingBlocksError);
+  const existingBlockIds = (existingBlocksRaw ?? []).map((b) => b.id);
+
+  if (existingBlockIds.length > 0) {
+    const { error } = await supabase.from("training_blocks").delete().in("id", existingBlockIds);
+    devWarn("diffProgramStructure (training_blocks suppression)", error);
+  }
+
+  for (const session of sessions) {
+    const sessionId = resolveSessionId(session);
+    if (!sessionId || session.isRestDay) continue;
+    if ((session.cardioBlocks?.length ?? 0) > 0) {
+      await insertCardioBlocks(supabase, sessionId, session.cardioBlocks ?? []);
+    }
   }
 }
 

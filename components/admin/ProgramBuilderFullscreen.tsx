@@ -24,6 +24,7 @@ import { Field, SelectField, TextareaField } from "@/components/admin/AdminFormF
 import { Modal, PrimaryButton } from "@/components/admin/Modal";
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
 import { contentStatusLabels, generateId, weekDays } from "@/lib/admin";
+import { cloneCardioBlock } from "@/lib/cardio";
 import type { AdminContentStatus, AdminProgram, AdminWorkoutSession, ExerciseLibraryItem } from "@/types";
 
 const levelOptions = [
@@ -79,9 +80,16 @@ function DayGridCell({
       ) : (
         <>
           <span className="text-sm font-bold text-foreground">{session.name || "(sans nom)"}</span>
-          <span className="text-[11px] text-muted-foreground">
-            {session.exercises.length} exercice{session.exercises.length > 1 ? "s" : ""}
-          </span>
+          {(session.sessionType ?? "strength") !== "cardio" && (
+            <span className="text-[11px] text-muted-foreground">
+              {session.exercises.length} exercice{session.exercises.length > 1 ? "s" : ""}
+            </span>
+          )}
+          {(session.sessionType ?? "strength") !== "strength" && (
+            <span className="text-[11px] text-muted-foreground">
+              {(session.cardioBlocks ?? []).length} bloc{(session.cardioBlocks ?? []).length > 1 ? "s" : ""} cardio
+            </span>
+          )}
           {session.exercises.length > 0 && (
             <ul className="mt-1 flex flex-col gap-0.5">
               {session.exercises.slice(0, 3).map((ex) => (
@@ -171,6 +179,7 @@ export function ProgramBuilderFullscreen({
         id: generateId("sess"),
         weekNumber: targetWeek,
         exercises: s.exercises.map((ex) => ({ ...ex, id: generateId("ex") })),
+        cardioBlocks: (s.cardioBlocks ?? []).map(cloneCardioBlock),
       }));
   }
 
@@ -206,7 +215,13 @@ export function ProgramBuilderFullscreen({
     setSessions((prev) =>
       prev.map((s) =>
         s.id === target.id
-          ? { ...session, id: target.id, weekNumber: target.weekNumber, exercises: session.exercises.map((ex) => ({ ...ex, id: generateId("ex") })) }
+          ? {
+              ...session,
+              id: target.id,
+              weekNumber: target.weekNumber,
+              exercises: session.exercises.map((ex) => ({ ...ex, id: generateId("ex") })),
+              cardioBlocks: (session.cardioBlocks ?? []).map(cloneCardioBlock),
+            }
           : s,
       ),
     );

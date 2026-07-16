@@ -15,8 +15,32 @@ import {
   UntaggedExercisesAlert,
 } from "@/components/shared/TrainingMetricsSummary";
 import { generateId, weekDays } from "@/lib/admin";
+import {
+  blankCardioBlock,
+  blankCardioSegment,
+  cardioSegmentTypeLabels,
+  cardioTypeLabels,
+  cloneCardioBlock,
+  formatSpeed,
+  intensityTargetTypeLabels,
+  machineTypeLabels,
+  segmentIntensityPreview,
+} from "@/lib/cardio";
 import { calculateSessionMetrics, muscleGroupLabels, muscleGroupOrder } from "@/lib/training-metrics";
-import type { AdminContentStatus, AdminExercise, AdminWorkoutSession, ExerciseLibraryItem, MuscleGroupFilter } from "@/types";
+import type {
+  AdminCardioBlock,
+  AdminCardioSegment,
+  AdminContentStatus,
+  AdminExercise,
+  AdminWorkoutSession,
+  CardioSegmentType,
+  CardioType,
+  ExerciseLibraryItem,
+  IntensityTargetType,
+  MachineType,
+  MuscleGroupFilter,
+  SessionType,
+} from "@/types";
 
 const muscleGroupOptions = [
   { value: "", label: "Hérité de la séance" },
@@ -93,6 +117,8 @@ export function restDaySession(weekNumber: number, day: string): AdminWorkoutSes
     warmup: "",
     coachNotes: "",
     exercises: [],
+    sessionType: "strength",
+    cardioBlocks: [],
   };
 }
 
@@ -158,6 +184,294 @@ function ExerciseRow({
   );
 }
 
+function CardioSegmentRow({
+  segment,
+  referenceVmaKmh,
+  onChange,
+  onRemove,
+  onMove,
+  isFirst,
+  isLast,
+}: {
+  segment: AdminCardioSegment;
+  referenceVmaKmh: number;
+  onChange: (partial: Partial<AdminCardioSegment>) => void;
+  onRemove: () => void;
+  onMove: (direction: "up" | "down") => void;
+  isFirst: boolean;
+  isLast: boolean;
+}) {
+  const isRepeat = segment.segmentType === "repeat_group";
+  const preview = segmentIntensityPreview(segment, referenceVmaKmh);
+  const showPreview =
+    segment.intensityTargetType === "vma_percentage" ||
+    segment.intensityTargetType === "speed_kmh" ||
+    segment.intensityTargetType === "pace";
+
+  return (
+    <div className="border border-border/60 bg-background/30 p-3">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Segment #{segment.order}</span>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => onMove("up")} disabled={isFirst} className="text-muted-foreground hover:text-foreground disabled:opacity-30">
+            <ArrowUp size={13} />
+          </button>
+          <button type="button" onClick={() => onMove("down")} disabled={isLast} className="text-muted-foreground hover:text-foreground disabled:opacity-30">
+            <ArrowDown size={13} />
+          </button>
+          <button type="button" onClick={onRemove} className="text-red-400 hover:text-red-300">
+            <Trash2 size={13} />
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Field label="Titre (optionnel)" value={segment.title} onChange={(v) => onChange({ title: v })} placeholder="Ex : Corps de séance" />
+        <SelectField
+          label="Type"
+          value={segment.segmentType}
+          onChange={(v) => onChange({ segmentType: v as CardioSegmentType })}
+          options={Object.entries(cardioSegmentTypeLabels).map(([value, label]) => ({ value, label }))}
+        />
+
+        {isRepeat && (
+          <Field
+            label="Répétitions"
+            type="number"
+            value={String(segment.repetitions ?? 1)}
+            onChange={(v) => onChange({ repetitions: Number(v) || 1 })}
+          />
+        )}
+
+        <Field
+          label={isRepeat ? "Durée effort (s)" : "Durée (s)"}
+          type="number"
+          value={segment.durationSeconds !== undefined ? String(segment.durationSeconds) : ""}
+          onChange={(v) => onChange({ durationSeconds: v ? Number(v) : undefined })}
+        />
+        <Field
+          label={isRepeat ? "Distance effort (m)" : "Distance (m)"}
+          type="number"
+          value={segment.distanceMeters !== undefined ? String(segment.distanceMeters) : ""}
+          onChange={(v) => onChange({ distanceMeters: v ? Number(v) : undefined })}
+        />
+
+        {isRepeat && (
+          <>
+            <Field
+              label="Durée récup (s)"
+              type="number"
+              value={segment.recoveryDurationSeconds !== undefined ? String(segment.recoveryDurationSeconds) : ""}
+              onChange={(v) => onChange({ recoveryDurationSeconds: v ? Number(v) : undefined })}
+            />
+            <Field
+              label="Distance récup (m)"
+              type="number"
+              value={segment.recoveryDistanceMeters !== undefined ? String(segment.recoveryDistanceMeters) : ""}
+              onChange={(v) => onChange({ recoveryDistanceMeters: v ? Number(v) : undefined })}
+            />
+          </>
+        )}
+
+        <Field
+          label="Dénivelé + (m)"
+          type="number"
+          value={segment.elevationGainMeters !== undefined ? String(segment.elevationGainMeters) : ""}
+          onChange={(v) => onChange({ elevationGainMeters: v ? Number(v) : undefined })}
+        />
+        <Field
+          label="Inclinaison (%)"
+          type="number"
+          value={segment.inclinePercentage !== undefined ? String(segment.inclinePercentage) : ""}
+          onChange={(v) => onChange({ inclinePercentage: v ? Number(v) : undefined })}
+        />
+      </div>
+
+      <div className="mt-3 border-t border-border/60 pt-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <SelectField
+            label="Intensité ciblée"
+            value={segment.intensityTargetType}
+            onChange={(v) => onChange({ intensityTargetType: v as IntensityTargetType })}
+            options={Object.entries(intensityTargetTypeLabels).map(([value, label]) => ({ value, label }))}
+          />
+
+          {segment.intensityTargetType === "vma_percentage" && (
+            <Field
+              label="% VMA"
+              type="number"
+              value={segment.targetVmaPercentage !== undefined ? String(segment.targetVmaPercentage) : ""}
+              onChange={(v) => onChange({ targetVmaPercentage: v ? Number(v) : undefined })}
+            />
+          )}
+          {segment.intensityTargetType === "speed_kmh" && (
+            <Field
+              label="Vitesse (km/h)"
+              type="number"
+              step="0.1"
+              value={segment.targetSpeedKmh !== undefined ? String(segment.targetSpeedKmh) : ""}
+              onChange={(v) => onChange({ targetSpeedKmh: v ? Number(v) : undefined })}
+            />
+          )}
+          {segment.intensityTargetType === "pace" && (
+            <Field
+              label="Allure (s/km)"
+              type="number"
+              value={segment.targetPaceSecondsPerKm !== undefined ? String(segment.targetPaceSecondsPerKm) : ""}
+              onChange={(v) => onChange({ targetPaceSecondsPerKm: v ? Number(v) : undefined })}
+            />
+          )}
+          {segment.intensityTargetType === "heart_rate_percentage" && (
+            <Field
+              label="% FC max"
+              type="number"
+              value={segment.targetHrPercentage !== undefined ? String(segment.targetHrPercentage) : ""}
+              onChange={(v) => onChange({ targetHrPercentage: v ? Number(v) : undefined })}
+            />
+          )}
+          {segment.intensityTargetType === "heart_rate_zone" && (
+            <Field label="Zone FC (ex : Z2)" value={segment.targetHrZone ?? ""} onChange={(v) => onChange({ targetHrZone: v || undefined })} />
+          )}
+          {segment.intensityTargetType === "power" && (
+            <Field
+              label="Puissance (W)"
+              type="number"
+              value={segment.targetPowerWatts !== undefined ? String(segment.targetPowerWatts) : ""}
+              onChange={(v) => onChange({ targetPowerWatts: v ? Number(v) : undefined })}
+            />
+          )}
+          {segment.intensityTargetType === "rpe" && (
+            <Field
+              label="RPE (0-10)"
+              type="number"
+              value={segment.intensityMin !== undefined ? String(segment.intensityMin) : ""}
+              onChange={(v) => onChange({ intensityMin: v ? Number(v) : undefined })}
+            />
+          )}
+        </div>
+
+        {showPreview && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Aperçu (VMA réf. {referenceVmaKmh} km/h) : {formatSpeed(preview.speedKmh)}
+            {preview.paceLabel ? ` — ${preview.paceLabel}` : ""}
+          </p>
+        )}
+      </div>
+
+      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Field
+          label="Cadence cible (spm, optionnel)"
+          type="number"
+          value={segment.targetCadence !== undefined ? String(segment.targetCadence) : ""}
+          onChange={(v) => onChange({ targetCadence: v ? Number(v) : undefined })}
+        />
+        <Field label="Notes" value={segment.coachNotes ?? ""} onChange={(v) => onChange({ coachNotes: v || undefined })} />
+      </div>
+    </div>
+  );
+}
+
+function CardioBlockRow({
+  block,
+  referenceVmaKmh,
+  onChange,
+  onRemove,
+  onMove,
+  isFirst,
+  isLast,
+}: {
+  block: AdminCardioBlock;
+  referenceVmaKmh: number;
+  onChange: (updated: AdminCardioBlock) => void;
+  onRemove: () => void;
+  onMove: (direction: "up" | "down") => void;
+  isFirst: boolean;
+  isLast: boolean;
+}) {
+  function updateSegment(index: number, partial: Partial<AdminCardioSegment>) {
+    const segments = block.segments.map((s, i) => (i === index ? { ...s, ...partial } : s));
+    onChange({ ...block, segments });
+  }
+
+  function removeSegment(index: number) {
+    const segments = block.segments.filter((_, i) => i !== index).map((s, i) => ({ ...s, order: i + 1 }));
+    onChange({ ...block, segments });
+  }
+
+  function moveSegment(index: number, direction: "up" | "down") {
+    const targetIndex = direction === "up" ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= block.segments.length) return;
+    const segments = [...block.segments];
+    [segments[index], segments[targetIndex]] = [segments[targetIndex], segments[index]];
+    onChange({ ...block, segments: segments.map((s, i) => ({ ...s, order: i + 1 })) });
+  }
+
+  function addSegment() {
+    onChange({ ...block, segments: [...block.segments, blankCardioSegment(block.segments.length + 1)] });
+  }
+
+  return (
+    <div className="border border-border p-4">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <span className="text-xs uppercase tracking-wide text-muted-foreground">Bloc cardio #{block.order}</span>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => onMove("up")} disabled={isFirst} className="text-muted-foreground hover:text-foreground disabled:opacity-30">
+            <ArrowUp size={14} />
+          </button>
+          <button type="button" onClick={() => onMove("down")} disabled={isLast} className="text-muted-foreground hover:text-foreground disabled:opacity-30">
+            <ArrowDown size={14} />
+          </button>
+          <button type="button" onClick={onRemove} className="text-red-400 hover:text-red-300">
+            <Trash2 size={14} />
+          </button>
+        </div>
+      </div>
+
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <Field label="Titre du bloc" value={block.title} onChange={(v) => onChange({ ...block, title: v })} placeholder="Ex : Séance VMA" />
+        <SelectField
+          label="Type de cardio"
+          value={block.cardioType}
+          onChange={(v) => onChange({ ...block, cardioType: v as CardioType })}
+          options={Object.entries(cardioTypeLabels).map(([value, label]) => ({ value, label }))}
+        />
+        <SelectField
+          label="Machine (si salle)"
+          value={block.machineType ?? ""}
+          onChange={(v) => onChange({ ...block, machineType: (v || undefined) as MachineType | undefined })}
+          options={[
+            { value: "", label: "Extérieur / course à pied" },
+            ...Object.entries(machineTypeLabels).map(([value, label]) => ({ value, label })),
+          ]}
+        />
+      </div>
+
+      <div className="flex flex-col gap-3">
+        {block.segments.map((segment, i) => (
+          <CardioSegmentRow
+            key={segment.id}
+            segment={segment}
+            referenceVmaKmh={referenceVmaKmh}
+            onChange={(partial) => updateSegment(i, partial)}
+            onRemove={() => removeSegment(i)}
+            onMove={(dir) => moveSegment(i, dir)}
+            isFirst={i === 0}
+            isLast={i === block.segments.length - 1}
+          />
+        ))}
+        <button
+          type="button"
+          onClick={addSegment}
+          className="flex items-center justify-center gap-2 border border-dashed border-border py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+        >
+          <Plus size={13} />
+          Ajouter un segment
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function DayCard({
   session,
   nextWeekSession,
@@ -172,12 +486,24 @@ export function DayCard({
   onDuplicate: () => void;
 }) {
   const [selectedMuscleGroup, setSelectedMuscleGroup] = useState<MuscleGroupFilter>("tous");
+  // VMA purement indicative pour l'aperçu vitesse/allure des segments cardio
+  // (voir lib/cardio.ts) — jamais persistée, seulement un outil d'aide à la
+  // rédaction pour le coach pendant la construction du bloc.
+  const [referenceVmaKmh, setReferenceVmaKmh] = useState(15);
+
+  // Normalisation : sessionType/cardioBlocks sont optionnels dans le type
+  // (compat mock/anciennes séances — voir types/index.ts) mais toujours
+  // définis une fois qu'on écrit via onUpdate.
+  const sessionType: SessionType = session.sessionType ?? "strength";
+  const cardioBlocks = session.cardioBlocks ?? [];
+  const showExercises = sessionType !== "cardio";
+  const showCardio = sessionType !== "strength";
 
   function toggleRest() {
     if (session.isRestDay) {
       onUpdate({ ...session, isRestDay: false, name: "" });
     } else {
-      onUpdate({ ...session, isRestDay: true, name: "Repos", exercises: [] });
+      onUpdate({ ...session, isRestDay: true, name: "Repos", exercises: [], cardioBlocks: [] });
     }
   }
 
@@ -214,6 +540,28 @@ export function DayCard({
       muscleGroup: session.muscleGroup || item.muscleGroup,
       exercises: [...session.exercises, exerciseFromLibrary(session.exercises.length + 1, item)],
     });
+  }
+
+  function updateCardioBlock(index: number, updated: AdminCardioBlock) {
+    const blocks = cardioBlocks.map((b, i) => (i === index ? updated : b));
+    onUpdate({ ...session, cardioBlocks: blocks });
+  }
+
+  function removeCardioBlock(index: number) {
+    const blocks = cardioBlocks.filter((_, i) => i !== index).map((b, i) => ({ ...b, order: i + 1 }));
+    onUpdate({ ...session, cardioBlocks: blocks });
+  }
+
+  function moveCardioBlock(index: number, direction: "up" | "down") {
+    const targetIndex = direction === "up" ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= cardioBlocks.length) return;
+    const blocks = [...cardioBlocks];
+    [blocks[index], blocks[targetIndex]] = [blocks[targetIndex], blocks[index]];
+    onUpdate({ ...session, cardioBlocks: blocks.map((b, i) => ({ ...b, order: i + 1 })) });
+  }
+
+  function addCardioBlock() {
+    onUpdate({ ...session, cardioBlocks: [...cardioBlocks, blankCardioBlock(cardioBlocks.length + 1)] });
   }
 
   return (
@@ -254,61 +602,113 @@ export function DayCard({
               onChange={(v) => onUpdate({ ...session, durationMinutes: Number(v) || 0 })}
             />
           </div>
+          <SelectField
+            label="Type de séance"
+            value={sessionType}
+            onChange={(v) => onUpdate({ ...session, sessionType: v as SessionType })}
+            options={[
+              { value: "strength", label: "Musculation" },
+              { value: "cardio", label: "Cardio" },
+              { value: "mixed", label: "Mixte (muscu + cardio)" },
+            ]}
+          />
           <TextareaField label="Échauffement" value={session.warmup} onChange={(v) => onUpdate({ ...session, warmup: v })} rows={2} />
           <TextareaField label="Notes coach" value={session.coachNotes} onChange={(v) => onUpdate({ ...session, coachNotes: v })} rows={2} />
 
-          <ExerciseSearchPicker library={library} onPick={addExerciseFromLibrary} />
+          {showExercises && (
+            <>
+              <ExerciseSearchPicker library={library} onPick={addExerciseFromLibrary} />
 
-          <div className="flex flex-col gap-3">
-            {session.exercises.map((ex, i) => (
-              <ExerciseRow
-                key={ex.id}
-                exercise={ex}
-                onChange={(partial) => updateExercise(i, partial)}
-                onRemove={() => removeExercise(i)}
-                onMove={(dir) => moveExercise(i, dir)}
-                isFirst={i === 0}
-                isLast={i === session.exercises.length - 1}
-              />
-            ))}
-            <button
-              type="button"
-              onClick={addExercise}
-              className="flex items-center justify-center gap-2 border border-dashed border-border py-3 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
-            >
-              <Plus size={14} />
-              Ajouter un exercice vierge
-            </button>
-          </div>
+              <div className="flex flex-col gap-3">
+                {session.exercises.map((ex, i) => (
+                  <ExerciseRow
+                    key={ex.id}
+                    exercise={ex}
+                    onChange={(partial) => updateExercise(i, partial)}
+                    onRemove={() => removeExercise(i)}
+                    onMove={(dir) => moveExercise(i, dir)}
+                    isFirst={i === 0}
+                    isLast={i === session.exercises.length - 1}
+                  />
+                ))}
+                <button
+                  type="button"
+                  onClick={addExercise}
+                  className="flex items-center justify-center gap-2 border border-dashed border-border py-3 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+                >
+                  <Plus size={14} />
+                  Ajouter un exercice vierge
+                </button>
+              </div>
 
-          {session.exercises.length > 0 && (
-            <div className="border border-border bg-background/40 p-4">
-              <h4 className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-foreground">
-                <BarChart3 size={14} className="text-primary" />
-                Analyse de la séance
-              </h4>
-              {(() => {
-                const metrics = calculateSessionMetrics(session, selectedMuscleGroup);
-                return (
-                  <div className="flex flex-col gap-4">
-                    <MuscleGroupFilterSelect value={selectedMuscleGroup} onChange={setSelectedMuscleGroup} />
-                    <UntaggedExercisesAlert show={metrics.hasUntaggedExercises} />
-                    <AnalysisFilterLabel selected={selectedMuscleGroup} />
-                    <TrainingStatCards
-                      totalSets={metrics.totalSets}
-                      totalVolume={metrics.totalVolume}
-                      totalTonnageKg={metrics.totalTonnageKg}
-                      hasEstimatedValues={metrics.hasEstimatedValues}
-                      hasNotCalculatedValues={metrics.hasNotCalculatedValues}
-                    />
-                    {selectedMuscleGroup === "tous" ? (
-                      <MuscleGroupBars breakdown={metrics.muscleGroupBreakdown} />
-                    ) : (
-                      <FilteredExerciseList exercises={metrics.exercises} />
-                    )}
-                  </div>
-                );
-              })()}
+              {session.exercises.length > 0 && (
+                <div className="border border-border bg-background/40 p-4">
+                  <h4 className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-foreground">
+                    <BarChart3 size={14} className="text-primary" />
+                    Analyse de la séance
+                  </h4>
+                  {(() => {
+                    const metrics = calculateSessionMetrics(session, selectedMuscleGroup);
+                    return (
+                      <div className="flex flex-col gap-4">
+                        <MuscleGroupFilterSelect value={selectedMuscleGroup} onChange={setSelectedMuscleGroup} />
+                        <UntaggedExercisesAlert show={metrics.hasUntaggedExercises} />
+                        <AnalysisFilterLabel selected={selectedMuscleGroup} />
+                        <TrainingStatCards
+                          totalSets={metrics.totalSets}
+                          totalVolume={metrics.totalVolume}
+                          totalTonnageKg={metrics.totalTonnageKg}
+                          hasEstimatedValues={metrics.hasEstimatedValues}
+                          hasNotCalculatedValues={metrics.hasNotCalculatedValues}
+                        />
+                        {selectedMuscleGroup === "tous" ? (
+                          <MuscleGroupBars breakdown={metrics.muscleGroupBreakdown} />
+                        ) : (
+                          <FilteredExerciseList exercises={metrics.exercises} />
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+            </>
+          )}
+
+          {showCardio && (
+            <div className="flex flex-col gap-3 border-t border-border pt-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h4 className="text-xs font-bold uppercase tracking-widest text-foreground">Blocs cardio</h4>
+                <div className="w-40">
+                  <Field
+                    label="VMA réf. aperçu (km/h)"
+                    type="number"
+                    step="0.1"
+                    value={String(referenceVmaKmh)}
+                    onChange={(v) => setReferenceVmaKmh(Number(v) || 0)}
+                  />
+                </div>
+              </div>
+
+              {cardioBlocks.map((block, i) => (
+                <CardioBlockRow
+                  key={block.id}
+                  block={block}
+                  referenceVmaKmh={referenceVmaKmh}
+                  onChange={(updated) => updateCardioBlock(i, updated)}
+                  onRemove={() => removeCardioBlock(i)}
+                  onMove={(dir) => moveCardioBlock(i, dir)}
+                  isFirst={i === 0}
+                  isLast={i === cardioBlocks.length - 1}
+                />
+              ))}
+              <button
+                type="button"
+                onClick={addCardioBlock}
+                className="flex items-center justify-center gap-2 border border-dashed border-border py-3 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+              >
+                <Plus size={14} />
+                Ajouter un bloc cardio
+              </button>
             </div>
           )}
         </div>
@@ -347,6 +747,7 @@ export function ProgramBuilder({
         id: generateId("sess"),
         weekNumber: targetWeek,
         exercises: s.exercises.map((ex) => ({ ...ex, id: generateId("ex") })),
+        cardioBlocks: (s.cardioBlocks ?? []).map(cloneCardioBlock),
       }));
   }
 
@@ -385,7 +786,13 @@ export function ProgramBuilder({
     setSessions((prev) =>
       prev.map((s) =>
         s.id === target.id
-          ? { ...session, id: target.id, weekNumber: target.weekNumber, exercises: session.exercises.map((ex) => ({ ...ex, id: generateId("ex") })) }
+          ? {
+              ...session,
+              id: target.id,
+              weekNumber: target.weekNumber,
+              exercises: session.exercises.map((ex) => ({ ...ex, id: generateId("ex") })),
+              cardioBlocks: (session.cardioBlocks ?? []).map(cloneCardioBlock),
+            }
           : s,
       ),
     );
