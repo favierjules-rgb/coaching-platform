@@ -45,7 +45,7 @@ export interface ProgramBuilderData {
   sessions: AdminWorkoutSession[];
 }
 
-function blankExercise(order: number): AdminExercise {
+export function blankExercise(order: number): AdminExercise {
   return {
     id: generateId("ex"),
     order,
@@ -60,7 +60,7 @@ function blankExercise(order: number): AdminExercise {
   };
 }
 
-function exerciseFromLibrary(order: number, item: ExerciseLibraryItem): AdminExercise {
+export function exerciseFromLibrary(order: number, item: ExerciseLibraryItem): AdminExercise {
   return {
     id: generateId("ex"),
     order,
@@ -80,7 +80,7 @@ function exerciseFromLibrary(order: number, item: ExerciseLibraryItem): AdminExe
   };
 }
 
-function restDaySession(weekNumber: number, day: string): AdminWorkoutSession {
+export function restDaySession(weekNumber: number, day: string): AdminWorkoutSession {
   return {
     id: generateId("sess"),
     programId: "",
@@ -158,7 +158,7 @@ function ExerciseRow({
   );
 }
 
-function DayCard({
+export function DayCard({
   session,
   nextWeekSession,
   library,
