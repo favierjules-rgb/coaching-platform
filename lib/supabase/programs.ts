@@ -348,13 +348,263 @@ export async function createProgram(supabase: TypedSupabaseClient, data: Program
 }
 
 /**
+ * Diffe et applique en place la structure (semaines/séances/exercices) d'un
+ * programme existant, au lieu du delete + reinsert complet précédemment
+ * utilisé par updateProgram (voir V3 — training-builder-v3-running-fullscreen).
+ *
+ * Pourquoi ce changement : le delete + reinsert recréait un nouvel id à
+ * chaque séance/exercice à chaque sauvegarde, ce qui (a) mettait à `null` le
+ * lien `workout_feedback.session_id` de tout retour élève déjà soumis pour
+ * cette séance (ON DELETE SET NULL — le retour survit mais perd son
+ * rattachement direct), et (b) aurait supprimé et fait perdre tout bloc/
+ * prescription cardio (training_blocks/training_prescriptions, ON DELETE
+ * CASCADE sur workout_sessions/workout_exercises) à chaque simple
+ * modification du programme par le coach une fois le builder cardio en
+ * place. Le diff fin préserve les ids existants et donc ces rattachements.
+ *
+ * Stratégie de correspondance (sans nouvelle colonne, juste plus de
+ * requêtes ciblées) :
+ * - Semaine : identifiée par son `week_number` (unique par programme).
+ * - Séance : identifiée par (semaine, `day`) — chaque semaine a toujours
+ *   exactement les 7 jours de weekDays, day est donc une clé stable.
+ * - Exercice : identifié par son `id` — un id déjà présent en base pour
+ *   CETTE séance est mis à jour ; un id absent (placeholder généré
+ *   côté client par generateId(), voir lib/admin.ts) est inséré comme
+ *   nouvel exercice ; un id en base absent du nouveau jeu de données est
+ *   supprimé.
+ */
+async function diffProgramStructure(
+  supabase: TypedSupabaseClient,
+  programId: string,
+  sessions: AdminWorkoutSession[],
+): Promise<void> {
+  const incomingWeekNumbers = Array.from(new Set(sessions.map((s) => s.weekNumber))).sort((a, b) => a - b);
+
+  const { data: existingWeeksRaw, error: existingWeeksError } = await supabase
+    .from("program_weeks")
+    .select("id, week_number")
+    .eq("program_id", programId);
+  devWarn("diffProgramStructure (program_weeks lecture)", existingWeeksError);
+  const existingWeeks = existingWeeksRaw ?? [];
+
+  const weekIdByNumber = new Map<number, string>(existingWeeks.map((w) => [w.week_number, w.id]));
+
+  // Semaines retirées par le coach (plus aucune séance dessus) : suppression,
+  // cascade jusqu'aux séances/exercices/blocs/prescriptions de cette semaine.
+  const weeksToDelete = existingWeeks.filter((w) => !incomingWeekNumbers.includes(w.week_number));
+  if (weeksToDelete.length > 0) {
+    const { error } = await supabase
+      .from("program_weeks")
+      .delete()
+      .in("id", weeksToDelete.map((w) => w.id));
+    devWarn("diffProgramStructure (program_weeks suppression)", error);
+    for (const w of weeksToDelete) weekIdByNumber.delete(w.week_number);
+  }
+
+  // Nouvelles semaines : insertion, on complète weekIdByNumber avec leur id.
+  const weekNumbersToInsert = incomingWeekNumbers.filter((n) => !weekIdByNumber.has(n));
+  for (const weekNumber of weekNumbersToInsert) {
+    const { data: weekRow, error } = await supabase
+      .from("program_weeks")
+      .insert({ program_id: programId, week_number: weekNumber })
+      .select("id")
+      .single();
+    devWarn("diffProgramStructure (program_weeks insertion)", error);
+    if (weekRow) weekIdByNumber.set(weekNumber, weekRow.id);
+  }
+
+  const keptOrNewWeekIds = incomingWeekNumbers.map((n) => weekIdByNumber.get(n)).filter((id): id is string => Boolean(id));
+
+  const { data: existingSessionsRaw, error: existingSessionsError } =
+    keptOrNewWeekIds.length > 0
+      ? await supabase.from("workout_sessions").select("id, program_week_id, day").in("program_week_id", keptOrNewWeekIds)
+      : { data: [] as { id: string; program_week_id: string; day: string }[], error: null };
+  devWarn("diffProgramStructure (workout_sessions lecture)", existingSessionsError);
+  const existingSessions = existingSessionsRaw ?? [];
+
+  // Clé stable "weekId::day" -> session id existante.
+  const existingSessionIdByKey = new Map<string, string>(
+    existingSessions.map((s) => [`${s.program_week_id}::${s.day}`, s.id]),
+  );
+
+  const incomingSessionKeys = new Set<string>();
+  const sessionsToUpdate: { id: string; session: AdminWorkoutSession }[] = [];
+  const sessionsToInsert: AdminWorkoutSession[] = [];
+
+  for (const session of sessions) {
+    const weekId = weekIdByNumber.get(session.weekNumber);
+    if (!weekId) continue;
+    const key = `${weekId}::${session.day}`;
+    incomingSessionKeys.add(key);
+    const existingId = existingSessionIdByKey.get(key);
+    if (existingId) {
+      sessionsToUpdate.push({ id: existingId, session });
+    } else {
+      sessionsToInsert.push(session);
+    }
+  }
+
+  // Séances en base qui n'apparaissent plus du tout dans le nouveau jeu de
+  // données (cas défensif : ne devrait pas arriver via ProgramBuilder, qui
+  // conserve toujours les 7 jours par semaine, mais on ne laisse pas de
+  // séance orpheline si ça change un jour).
+  const sessionsToDelete = existingSessions.filter((s) => !incomingSessionKeys.has(`${s.program_week_id}::${s.day}`));
+  if (sessionsToDelete.length > 0) {
+    const { error } = await supabase
+      .from("workout_sessions")
+      .delete()
+      .in("id", sessionsToDelete.map((s) => s.id));
+    devWarn("diffProgramStructure (workout_sessions suppression)", error);
+  }
+
+  for (const { id, session } of sessionsToUpdate) {
+    const { error } = await supabase
+      .from("workout_sessions")
+      .update({
+        name: session.name,
+        is_rest_day: session.isRestDay,
+        muscle_group: session.muscleGroup,
+        duration_minutes: session.durationMinutes,
+        warmup: session.warmup,
+        coach_notes: session.coachNotes,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id);
+    devWarn("diffProgramStructure (workout_sessions mise à jour)", error);
+  }
+
+  const sessionIdByInsertedKey = new Map<AdminWorkoutSession, string>();
+  for (const session of sessionsToInsert) {
+    const weekId = weekIdByNumber.get(session.weekNumber);
+    if (!weekId) continue;
+    const { data: sessionRow, error } = await supabase
+      .from("workout_sessions")
+      .insert({
+        program_id: programId,
+        program_week_id: weekId,
+        day: session.day,
+        is_rest_day: session.isRestDay,
+        name: session.name,
+        muscle_group: session.muscleGroup,
+        duration_minutes: session.durationMinutes,
+        warmup: session.warmup,
+        coach_notes: session.coachNotes,
+      })
+      .select("id")
+      .single();
+    devWarn("diffProgramStructure (workout_sessions insertion)", error);
+    if (sessionRow) sessionIdByInsertedKey.set(session, sessionRow.id);
+  }
+
+  // Résout l'id de séance (existante ou tout juste créée) pour chaque
+  // séance entrante, pour la passe exercices ci-dessous.
+  function resolveSessionId(session: AdminWorkoutSession): string | undefined {
+    const weekId = weekIdByNumber.get(session.weekNumber);
+    if (!weekId) return undefined;
+    const key = `${weekId}::${session.day}`;
+    return existingSessionIdByKey.get(key) ?? sessionIdByInsertedKey.get(session);
+  }
+
+  // Exercices : uniquement pour les séances déjà existantes (les séances
+  // tout juste insérées n'ont par définition encore aucun exercice en base).
+  const updatedSessionIds = sessionsToUpdate.map((s) => s.id);
+  const { data: existingExercisesRaw, error: existingExercisesError } =
+    updatedSessionIds.length > 0
+      ? await supabase.from("workout_exercises").select("id, session_id").in("session_id", updatedSessionIds)
+      : { data: [] as { id: string; session_id: string }[], error: null };
+  devWarn("diffProgramStructure (workout_exercises lecture)", existingExercisesError);
+  const existingExercises = existingExercisesRaw ?? [];
+
+  const existingExerciseIdsBySession = new Map<string, Set<string>>();
+  for (const ex of existingExercises) {
+    const set = existingExerciseIdsBySession.get(ex.session_id) ?? new Set<string>();
+    set.add(ex.id);
+    existingExerciseIdsBySession.set(ex.session_id, set);
+  }
+
+  const exercisesToInsert: (AdminExercise & { sessionId: string })[] = [];
+  const exerciseIdsToDelete: string[] = [];
+
+  for (const session of sessions) {
+    const sessionId = resolveSessionId(session);
+    if (!sessionId) continue;
+
+    const existingIdsForSession = existingExerciseIdsBySession.get(sessionId) ?? new Set<string>();
+    const incomingIds = new Set<string>();
+
+    if (session.isRestDay) {
+      // Un jour marqué repos ne conserve aucun exercice.
+      for (const existingId of existingIdsForSession) exerciseIdsToDelete.push(existingId);
+      continue;
+    }
+
+    for (const exercise of session.exercises) {
+      if (existingIdsForSession.has(exercise.id)) {
+        incomingIds.add(exercise.id);
+      } else {
+        exercisesToInsert.push({ ...exercise, sessionId });
+      }
+    }
+
+    for (const existingId of existingIdsForSession) {
+      if (!incomingIds.has(existingId)) exerciseIdsToDelete.push(existingId);
+    }
+
+    for (const exercise of session.exercises) {
+      if (!existingIdsForSession.has(exercise.id)) continue;
+      const { error } = await supabase
+        .from("workout_exercises")
+        .update({
+          order_index: exercise.order,
+          name: exercise.name,
+          sets: exercise.sets,
+          reps: exercise.reps,
+          rest_seconds: exercise.restSeconds,
+          tempo: exercise.tempo,
+          recommended_load: exercise.recommendedLoad,
+          video_url: exercise.videoUrl,
+          notes: exercise.notes,
+          muscle_group: exercise.muscleGroup ?? null,
+          exercise_library_id: exercise.libraryExerciseId ?? null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", exercise.id);
+      devWarn("diffProgramStructure (workout_exercises mise à jour)", error);
+    }
+  }
+
+  if (exerciseIdsToDelete.length > 0) {
+    const { error } = await supabase.from("workout_exercises").delete().in("id", exerciseIdsToDelete);
+    devWarn("diffProgramStructure (workout_exercises suppression)", error);
+  }
+
+  if (exercisesToInsert.length > 0) {
+    const { error } = await supabase.from("workout_exercises").insert(
+      exercisesToInsert.map((ex) => ({
+        session_id: ex.sessionId,
+        order_index: ex.order,
+        name: ex.name,
+        sets: ex.sets,
+        reps: ex.reps,
+        rest_seconds: ex.restSeconds,
+        tempo: ex.tempo,
+        recommended_load: ex.recommendedLoad,
+        video_url: ex.videoUrl,
+        notes: ex.notes,
+        muscle_group: ex.muscleGroup ?? null,
+        exercise_library_id: ex.libraryExerciseId ?? null,
+      })),
+    );
+    devWarn("diffProgramStructure (workout_exercises insertion)", error);
+  }
+}
+
+/**
  * Met à jour un programme existant : les champs du programme sont modifiés
- * en place, mais sa structure (semaines/séances/exercices) est entièrement
- * remplacée (delete + reinsert) plutôt que diffée finement — ProgramBuilder
- * renvoie de toute façon systématiquement le jeu complet de séances, et la
- * suppression des program_weeks cascade jusqu'aux séances/exercices (voir
- * supabase/schema.sql). Aussi simple et sûr que le même choix déjà fait pour
- * saveWorkoutFeedback.
+ * en place, et sa structure (semaines/séances/exercices) est diffée
+ * finement (voir diffProgramStructure) plutôt que remplacée par delete +
+ * reinsert, pour préserver les ids existants (retours élève déjà soumis,
+ * futurs blocs/prescriptions cardio V3).
  */
 export async function updateProgram(
   supabase: TypedSupabaseClient,
@@ -375,10 +625,7 @@ export async function updateProgram(
     .eq("id", programId);
   devWarn("updateProgram", updateError);
 
-  const { error: deleteError } = await supabase.from("program_weeks").delete().eq("program_id", programId);
-  devWarn("updateProgram (delete previous structure)", deleteError);
-
-  await insertProgramStructure(supabase, programId, data.sessions);
+  await diffProgramStructure(supabase, programId, data.sessions);
   return !updateError;
 }
 

@@ -203,6 +203,13 @@ export interface Database {
           access_updated_at: string | null;
           access_updated_by: string | null;
           assigned_subscription_template_id: string | null;
+          vma_kmh: number | null;
+          hr_max: number | null;
+          hr_resting: number | null;
+          ftp_watts: number | null;
+          reference_paces: unknown;
+          last_fitness_test_date: string | null;
+          fitness_test_protocol: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -270,6 +277,13 @@ export interface Database {
           access_updated_at?: string | null;
           access_updated_by?: string | null;
           assigned_subscription_template_id?: string | null;
+          vma_kmh?: number | null;
+          hr_max?: number | null;
+          hr_resting?: number | null;
+          ftp_watts?: number | null;
+          reference_paces?: unknown;
+          last_fitness_test_date?: string | null;
+          fitness_test_protocol?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -337,6 +351,13 @@ export interface Database {
           access_updated_at?: string | null;
           access_updated_by?: string | null;
           assigned_subscription_template_id?: string | null;
+          vma_kmh?: number | null;
+          hr_max?: number | null;
+          hr_resting?: number | null;
+          ftp_watts?: number | null;
+          reference_paces?: unknown;
+          last_fitness_test_date?: string | null;
+          fitness_test_protocol?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -834,6 +855,7 @@ export interface Database {
           duration_minutes: number | null;
           warmup: string;
           coach_notes: string;
+          session_type: "strength" | "cardio" | "mixed";
           created_at: string;
           updated_at: string;
         };
@@ -848,6 +870,7 @@ export interface Database {
           duration_minutes?: number | null;
           warmup?: string;
           coach_notes?: string;
+          session_type?: "strength" | "cardio" | "mixed";
           created_at?: string;
           updated_at?: string;
         };
@@ -862,6 +885,272 @@ export interface Database {
           duration_minutes?: number | null;
           warmup?: string;
           coach_notes?: string;
+          session_type?: "strength" | "cardio" | "mixed";
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      training_blocks: {
+        Row: {
+          id: string;
+          session_id: string;
+          block_type:
+            | "standard"
+            | "warmup"
+            | "strength"
+            | "superset"
+            | "tri_set"
+            | "giant_set"
+            | "circuit"
+            | "emom"
+            | "amrap"
+            | "interval"
+            | "cooldown"
+            | "benchmark"
+            | "custom"
+            | "cardio";
+          title: string | null;
+          description: string | null;
+          scoring_type: string | null;
+          color_key: "gray" | "red" | "orange" | "yellow" | "green" | "blue" | "purple";
+          rounds: number | null;
+          time_cap_seconds: number | null;
+          duration_seconds: number | null;
+          work_seconds: number | null;
+          rest_seconds: number | null;
+          rest_between_rounds_seconds: number | null;
+          emom_minutes: number | null;
+          position: number;
+          media_path: string | null;
+          cardio_type: string | null;
+          machine_type: string | null;
+          version_number: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          session_id: string;
+          block_type?: string;
+          title?: string | null;
+          description?: string | null;
+          scoring_type?: string | null;
+          color_key?: string;
+          rounds?: number | null;
+          time_cap_seconds?: number | null;
+          duration_seconds?: number | null;
+          work_seconds?: number | null;
+          rest_seconds?: number | null;
+          rest_between_rounds_seconds?: number | null;
+          emom_minutes?: number | null;
+          position?: number;
+          media_path?: string | null;
+          cardio_type?: string | null;
+          machine_type?: string | null;
+          version_number?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          session_id?: string;
+          block_type?: string;
+          title?: string | null;
+          description?: string | null;
+          scoring_type?: string | null;
+          color_key?: string;
+          rounds?: number | null;
+          time_cap_seconds?: number | null;
+          duration_seconds?: number | null;
+          work_seconds?: number | null;
+          rest_seconds?: number | null;
+          rest_between_rounds_seconds?: number | null;
+          emom_minutes?: number | null;
+          position?: number;
+          media_path?: string | null;
+          cardio_type?: string | null;
+          machine_type?: string | null;
+          version_number?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      training_prescriptions: {
+        Row: {
+          id: string;
+          exercise_id: string | null;
+          block_id: string | null;
+          parent_prescription_id: string | null;
+          set_number: number;
+          set_type: "normal" | "warmup" | "top_set" | "back_off" | "failure" | "optional";
+          segment_type: "single" | "repeat_group" | "work" | "recovery" | "ramp_up" | "ramp_down" | null;
+          title: string | null;
+          target_reps: number | null;
+          reps_min: number | null;
+          reps_max: number | null;
+          duration_seconds: number | null;
+          distance_meters: number | null;
+          elevation_gain_meters: number | null;
+          repetitions: number | null;
+          work_duration_seconds: number | null;
+          recovery_duration_seconds: number | null;
+          recovery_distance_meters: number | null;
+          set_recovery_seconds: number | null;
+          target_load: number | null;
+          load_unit: "kg" | "lb";
+          load_input_mode: "total" | "per_side" | "per_implement";
+          target_percentage: number | null;
+          target_rpe: number | null;
+          target_rir: number | null;
+          bodyweight_percentage: number | null;
+          intensity_target_type:
+            | "vma_percentage"
+            | "speed_kmh"
+            | "pace"
+            | "heart_rate_zone"
+            | "heart_rate_percentage"
+            | "rpe"
+            | "power"
+            | "race_pace"
+            | "free"
+            | "custom"
+            | null;
+          target_vma_percentage: number | null;
+          target_speed_kmh: number | null;
+          target_pace_seconds_per_km: number | null;
+          target_hr_percentage: number | null;
+          target_hr_zone: string | null;
+          target_power_watts: number | null;
+          target_cadence: number | null;
+          incline_percentage: number | null;
+          intensity_min: number | null;
+          intensity_max: number | null;
+          surface: string | null;
+          terrain: string | null;
+          equipment_type: string | null;
+          tempo_eccentric: number | null;
+          tempo_bottom_pause: number | null;
+          tempo_concentric: number | null;
+          tempo_top_pause: number | null;
+          rest_seconds: number | null;
+          coach_notes: string | null;
+          position: number;
+          data_source: "manual" | "garmin" | "apple_health" | "strava" | "coros" | "polar" | "other";
+          external_activity_id: string | null;
+          imported_at: string | null;
+          raw_summary: unknown;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          exercise_id?: string | null;
+          block_id?: string | null;
+          parent_prescription_id?: string | null;
+          set_number: number;
+          set_type?: string;
+          segment_type?: string | null;
+          title?: string | null;
+          target_reps?: number | null;
+          reps_min?: number | null;
+          reps_max?: number | null;
+          duration_seconds?: number | null;
+          distance_meters?: number | null;
+          elevation_gain_meters?: number | null;
+          repetitions?: number | null;
+          work_duration_seconds?: number | null;
+          recovery_duration_seconds?: number | null;
+          recovery_distance_meters?: number | null;
+          set_recovery_seconds?: number | null;
+          target_load?: number | null;
+          load_unit?: string;
+          load_input_mode?: string;
+          target_percentage?: number | null;
+          target_rpe?: number | null;
+          target_rir?: number | null;
+          bodyweight_percentage?: number | null;
+          intensity_target_type?: string | null;
+          target_vma_percentage?: number | null;
+          target_speed_kmh?: number | null;
+          target_pace_seconds_per_km?: number | null;
+          target_hr_percentage?: number | null;
+          target_hr_zone?: string | null;
+          target_power_watts?: number | null;
+          target_cadence?: number | null;
+          incline_percentage?: number | null;
+          intensity_min?: number | null;
+          intensity_max?: number | null;
+          surface?: string | null;
+          terrain?: string | null;
+          equipment_type?: string | null;
+          tempo_eccentric?: number | null;
+          tempo_bottom_pause?: number | null;
+          tempo_concentric?: number | null;
+          tempo_top_pause?: number | null;
+          rest_seconds?: number | null;
+          coach_notes?: string | null;
+          position?: number;
+          data_source?: string;
+          external_activity_id?: string | null;
+          imported_at?: string | null;
+          raw_summary?: unknown;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          exercise_id?: string | null;
+          block_id?: string | null;
+          parent_prescription_id?: string | null;
+          set_number?: number;
+          set_type?: string;
+          segment_type?: string | null;
+          title?: string | null;
+          target_reps?: number | null;
+          reps_min?: number | null;
+          reps_max?: number | null;
+          duration_seconds?: number | null;
+          distance_meters?: number | null;
+          elevation_gain_meters?: number | null;
+          repetitions?: number | null;
+          work_duration_seconds?: number | null;
+          recovery_duration_seconds?: number | null;
+          recovery_distance_meters?: number | null;
+          set_recovery_seconds?: number | null;
+          target_load?: number | null;
+          load_unit?: string;
+          load_input_mode?: string;
+          target_percentage?: number | null;
+          target_rpe?: number | null;
+          target_rir?: number | null;
+          bodyweight_percentage?: number | null;
+          intensity_target_type?: string | null;
+          target_vma_percentage?: number | null;
+          target_speed_kmh?: number | null;
+          target_pace_seconds_per_km?: number | null;
+          target_hr_percentage?: number | null;
+          target_hr_zone?: string | null;
+          target_power_watts?: number | null;
+          target_cadence?: number | null;
+          incline_percentage?: number | null;
+          intensity_min?: number | null;
+          intensity_max?: number | null;
+          surface?: string | null;
+          terrain?: string | null;
+          equipment_type?: string | null;
+          tempo_eccentric?: number | null;
+          tempo_bottom_pause?: number | null;
+          tempo_concentric?: number | null;
+          tempo_top_pause?: number | null;
+          rest_seconds?: number | null;
+          coach_notes?: string | null;
+          position?: number;
+          data_source?: string;
+          external_activity_id?: string | null;
+          imported_at?: string | null;
+          raw_summary?: unknown;
           created_at?: string;
           updated_at?: string;
         };
