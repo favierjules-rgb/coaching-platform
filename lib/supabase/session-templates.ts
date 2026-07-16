@@ -102,3 +102,45 @@ export async function deleteSessionTemplate(supabase: TypedSupabaseClient, id: s
   devWarn("deleteSessionTemplate", error);
   return !error;
 }
+
+/**
+ * Met à jour les métadonnées d'un modèle (nom, description, type, groupe
+ * musculaire, durée) — pas son contenu (exercices/cardio), qui reste
+ * uniquement modifiable en le reconstruisant depuis le builder (voir
+ * "Enregistrer comme modèle"). Utilisé par la page /admin/seances (V3
+ * chantier module Programmation, étape 3).
+ */
+export async function updateSessionTemplateMeta(
+  supabase: TypedSupabaseClient,
+  id: string,
+  partial: { name?: string; description?: string; sessionType?: SessionType; muscleGroup?: string; durationMinutes?: number | null },
+): Promise<boolean> {
+  const payload: Record<string, unknown> = {};
+  if (partial.name !== undefined) payload.name = partial.name;
+  if (partial.description !== undefined) payload.description = partial.description;
+  if (partial.sessionType !== undefined) payload.session_type = partial.sessionType;
+  if (partial.muscleGroup !== undefined) payload.muscle_group = partial.muscleGroup;
+  if (partial.durationMinutes !== undefined) payload.duration_minutes = partial.durationMinutes;
+
+  const { error } = await supabase.from("session_templates").update(payload).eq("id", id);
+  devWarn("updateSessionTemplateMeta", error);
+  return !error;
+}
+
+/** Duplique un modèle (nouveau nom, même contenu copié par valeur avec de nouveaux ids). */
+export async function duplicateSessionTemplate(supabase: TypedSupabaseClient, template: SessionTemplate): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("session_templates")
+    .insert({
+      name: `${template.name} (copie)`,
+      description: template.description,
+      session_type: template.sessionType,
+      muscle_group: template.muscleGroup,
+      duration_minutes: template.durationMinutes,
+      content: template.content,
+    })
+    .select("id")
+    .single();
+  devWarn("duplicateSessionTemplate", error);
+  return data?.id ?? null;
+}
