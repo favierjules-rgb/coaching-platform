@@ -1,62 +1,73 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, CheckCircle } from "lucide-react";
+import { ArrowLeft, ArrowRight } from "lucide-react";
 
-import { AssignStudentsModal } from "@/components/admin/AssignStudentsModal";
-import { ProgramBuilder, type ProgramBuilderData } from "@/components/admin/ProgramBuilder";
+import { Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
+import { PrimaryButton } from "@/components/admin/Modal";
 import { useAdminData } from "@/hooks/useAdminData";
-import { useContentAssignment } from "@/hooks/useContentAssignment";
-import { useSupabaseExerciseLibrary } from "@/hooks/useSupabaseExerciseLibrary";
-import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
-import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { createProgram as createProgramSupabase } from "@/lib/supabase/programs";
 
+const levelOptions = [
+  { value: "Débutant", label: "Débutant" },
+  { value: "Intermédiaire", label: "Intermédiaire" },
+  { value: "Avancé", label: "Avancé" },
+];
+
+/**
+ * Création d'un programme (V3) : ne recueille plus que les informations
+ * générales — la construction semaine/séance/exercice se fait entièrement
+ * dans le builder plein écran, vers lequel on redirige immédiatement après
+ * création (voir spec V3, flux direct sans page intermédiaire). Le
+ * programme est créé en brouillon, sans aucune séance : le builder ajoute
+ * les semaines à la demande.
+ */
 export default function NewProgramPage() {
   const router = useRouter();
-  const { state, createProgram, setAssignment } = useAdminData();
-  const [createdId, setCreatedId] = useState<string | null>(null);
+  const { createProgram } = useAdminData();
 
-  const supabaseExerciseLibrary = useSupabaseExerciseLibrary();
-  const exerciseLibrary = supabaseExerciseLibrary.items.length > 0 ? supabaseExerciseLibrary.items : state.exerciseLibrary;
+  const [name, setName] = useState("");
+  const [goal, setGoal] = useState("");
+  const [level, setLevel] = useState("Intermédiaire");
+  const [durationWeeks, setDurationWeeks] = useState(4);
+  const [description, setDescription] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Priorité Supabase dès qu'au moins un programme/élève réel existe — même
-  // pattern que /admin/programmes. Un nouveau programme est créé en réel dès
-  // que Supabase est configuré (jamais seulement en mock quand disponible),
-  // pour que "Créer programme" produise directement un programme utilisable
-  // par un élève réel.
-  const supabasePrograms = useSupabasePrograms();
-  const supabaseStudents = useSupabaseStudents();
-  const students = supabaseStudents.students.length > 0 ? supabaseStudents.students : state.students;
-  const handleSetAssignment = useContentAssignment(
-    { programme: supabasePrograms.programs.length > 0 && supabaseStudents.students.length > 0 },
-    setAssignment,
-    supabasePrograms.refetch,
-  );
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (!name.trim()) {
+      setError("Le nom du programme est obligatoire.");
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
 
-  async function handleSave(data: ProgramBuilderData) {
+    const data = {
+      name: name.trim(),
+      goal,
+      level,
+      durationWeeks,
+      description,
+      status: "brouillon" as const,
+      sessions: [],
+    };
+
     const supabase = createSupabaseBrowserClient();
     if (supabase) {
       const id = await createProgramSupabase(supabase, data);
       if (id) {
-        await supabasePrograms.refetch();
-        setCreatedId(id);
+        router.push(`/admin/programmes/${id}/builder`);
         return;
       }
     }
-    const id = createProgram({
-      ...data,
-      assignedStudentIds: [],
-      sessions: data.sessions.map((s) => ({ ...s, programId: "" })),
-    });
-    setCreatedId(id);
-  }
 
-  const programs = supabasePrograms.programs.length > 0 ? supabasePrograms.programs : state.programs;
-  const createdProgram = createdId ? programs.find((p) => p.id === createdId) : null;
+    const id = createProgram({ ...data, assignedStudentIds: [] });
+    router.push(`/admin/programmes/${id}/builder`);
+  }
 
   return (
     <div>
@@ -70,52 +81,33 @@ export default function NewProgramPage() {
           Créer un programme
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Construis la structure semaine par semaine, séance par séance, exercice par exercice.
+          Renseigne les informations générales, la construction semaine par semaine se fait ensuite dans le builder.
         </p>
       </div>
 
-      {createdProgram ? (
-        <div className="flex flex-col gap-4">
-          <div className="flex items-center gap-3 border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-400">
-            <CheckCircle size={18} className="flex-shrink-0" />
-            Programme &quot;{createdProgram.name}&quot; enregistré.
-          </div>
-          <div className="flex flex-wrap gap-3">
-            <AssignStudentsModal
-              contentLabel={createdProgram.name}
-              contentType="programme"
-              contentId={createdProgram.id}
-              students={students}
-              assignedStudentIds={createdProgram.assignedStudentIds}
-              onSetAssignment={handleSetAssignment}
-              triggerLabel="Assigner à des élèves"
-              triggerVariant="primary"
-            />
-            <button
-              type="button"
-              onClick={() => router.push(`/admin/programmes/${createdProgram.id}`)}
-              className="border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
-            >
-              Voir le programme
-            </button>
-          </div>
+      <form onSubmit={handleSubmit} className="flex max-w-2xl flex-col gap-4 border border-border bg-card p-6">
+        <Field label="Nom du programme" value={name} onChange={setName} required />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <Field label="Objectif" value={goal} onChange={setGoal} />
+          <SelectField label="Niveau" value={level} onChange={setLevel} options={levelOptions} />
+          <Field
+            label="Durée (semaines)"
+            type="number"
+            value={String(durationWeeks)}
+            onChange={(v) => setDurationWeeks(Number(v) || 0)}
+          />
         </div>
-      ) : (
-        <ProgramBuilder
-          initial={{
-            name: "",
-            goal: "",
-            level: "Intermédiaire",
-            durationWeeks: 4,
-            description: "",
-            status: "brouillon",
-            sessions: [],
-          }}
-          library={exerciseLibrary}
-          onSave={handleSave}
-          saveLabel="Enregistrer le programme"
-        />
-      )}
+        <TextareaField label="Description" value={description} onChange={setDescription} rows={3} />
+
+        {error && <p className="text-xs text-red-400">{error}</p>}
+
+        <PrimaryButton type="submit" disabled={submitting}>
+          <span className="flex items-center justify-center gap-2">
+            Continuer et construire
+            <ArrowRight size={14} />
+          </span>
+        </PrimaryButton>
+      </form>
     </div>
   );
 }

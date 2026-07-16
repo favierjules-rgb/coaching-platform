@@ -1,5 +1,6 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { useState, type CSSProperties, type ReactNode } from "react";
 import { Menu } from "lucide-react";
 
@@ -7,10 +8,28 @@ import { Logo } from "@/components/ui/Logo";
 import { AdminSidebar } from "@/components/admin/AdminSidebar";
 import { useAdminData } from "@/hooks/useAdminData";
 
+// Le builder plein écran (V3, /admin/programmes/[id]/builder) est un
+// "sandbox" volontairement sans sidebar ni menu admin (voir spec V3 —
+// fullscreen builder) : ni scroll de page, ni double barre de défilement.
+// On le détecte par pattern d'URL plutôt que de le sortir de l'arborescence
+// app/admin/** (qui forcerait à déplacer toutes les autres routes admin),
+// donc AdminShell reste le seul point de bascule et le reste de l'admin
+// n'est absolument pas affecté.
+const BUILDER_ROUTE_PATTERN = /^\/admin\/programmes\/[^/]+\/builder(\/.*)?$/;
+
 export function AdminShell({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
   const [sideOpen, setSideOpen] = useState(false);
   const { state } = useAdminData();
   const accentColor = state.appearanceSettings?.accentColor ?? "#d62828";
+
+  if (pathname && BUILDER_ROUTE_PATTERN.test(pathname)) {
+    return (
+      <div className="h-dvh w-full overflow-hidden bg-background" style={{ "--primary": accentColor } as CSSProperties}>
+        {children}
+      </div>
+    );
+  }
 
   return (
     <div

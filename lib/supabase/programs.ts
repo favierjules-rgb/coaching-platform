@@ -1,8 +1,20 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { generateId } from "@/lib/admin";
+import { cloneCardioBlock } from "@/lib/cardio";
 import { buildStudentActivityLink, logActivityEvent } from "@/lib/supabase/activity";
 import type { ProgramBuilderData } from "@/components/admin/ProgramBuilder";
-import type { AdminExercise, AdminProgram, AdminWorkoutSession } from "@/types";
+import type {
+  AdminCardioBlock,
+  AdminCardioSegment,
+  AdminExercise,
+  AdminProgram,
+  AdminWorkoutSession,
+  CardioSegmentType,
+  CardioType,
+  IntensityTargetType,
+  MachineType,
+} from "@/types";
 import type { Database } from "@/types/supabase";
 
 /**
@@ -38,6 +50,8 @@ type ProgramRow = Database["public"]["Tables"]["programs"]["Row"];
 type WorkoutSessionRow = Database["public"]["Tables"]["workout_sessions"]["Row"];
 type WorkoutExerciseRow = Database["public"]["Tables"]["workout_exercises"]["Row"];
 type AssignmentRow = Database["public"]["Tables"]["assignments"]["Row"];
+type TrainingBlockRow = Database["public"]["Tables"]["training_blocks"]["Row"];
+type TrainingPrescriptionRow = Database["public"]["Tables"]["training_prescriptions"]["Row"];
 
 function devWarn(context: string, error: { message: string; code?: string; details?: string; hint?: string } | null): void {
   if (error) {
@@ -80,10 +94,54 @@ function mapExerciseRow(row: WorkoutExerciseRow): AdminExercise {
   };
 }
 
+/** Segment cardio (training_prescriptions avec block_id renseigné et exercise_id nul) -> AdminCardioSegment. */
+function mapCardioSegmentRow(row: TrainingPrescriptionRow): AdminCardioSegment {
+  return {
+    id: row.id,
+    order: row.position,
+    segmentType: (row.segment_type ?? "single") as CardioSegmentType,
+    title: row.title ?? "",
+    repetitions: row.repetitions ?? undefined,
+    durationSeconds: row.work_duration_seconds ?? undefined,
+    distanceMeters: row.distance_meters ?? undefined,
+    elevationGainMeters: row.elevation_gain_meters ?? undefined,
+    inclinePercentage: row.incline_percentage ?? undefined,
+    recoveryDurationSeconds: row.recovery_duration_seconds ?? undefined,
+    recoveryDistanceMeters: row.recovery_distance_meters ?? undefined,
+    intensityTargetType: (row.intensity_target_type ?? "free") as IntensityTargetType,
+    targetVmaPercentage: row.target_vma_percentage ?? undefined,
+    targetSpeedKmh: row.target_speed_kmh ?? undefined,
+    targetPaceSecondsPerKm: row.target_pace_seconds_per_km ?? undefined,
+    targetHrPercentage: row.target_hr_percentage ?? undefined,
+    targetHrZone: row.target_hr_zone ?? undefined,
+    targetPowerWatts: row.target_power_watts ?? undefined,
+    targetCadence: row.target_cadence ?? undefined,
+    intensityMin: row.intensity_min ?? undefined,
+    intensityMax: row.intensity_max ?? undefined,
+    surface: row.surface ?? undefined,
+    terrain: row.terrain ?? undefined,
+    equipmentType: row.equipment_type ?? undefined,
+    coachNotes: row.coach_notes ?? undefined,
+  };
+}
+
+/** Bloc cardio (training_blocks, block_type = "cardio") -> AdminCardioBlock, avec ses segments déjà composés. */
+function mapCardioBlockRow(row: TrainingBlockRow, segments: AdminCardioSegment[]): AdminCardioBlock {
+  return {
+    id: row.id,
+    order: row.position,
+    title: row.title ?? "",
+    cardioType: (row.cardio_type ?? "custom_cardio") as CardioType,
+    machineType: (row.machine_type ?? undefined) as MachineType | undefined,
+    segments: segments.slice().sort((a, b) => a.order - b.order),
+  };
+}
+
 function mapSessionRow(
   row: WorkoutSessionRow,
   weekNumber: number,
   exercises: AdminExercise[],
+  cardioBlocks: AdminCardioBlock[],
 ): AdminWorkoutSession {
   return {
     id: row.id,
@@ -97,6 +155,8 @@ function mapSessionRow(
     warmup: row.warmup,
     coachNotes: row.coach_notes,
     exercises: exercises.slice().sort((a, b) => a.order - b.order),
+    sessionType: row.session_type,
+    cardioBlocks: cardioBlocks.slice().sort((a, b) => a.order - b.order),
   };
 }
 
@@ -148,9 +208,26 @@ async function loadPrograms(supabase: TypedSupabaseClient, programRows: ProgramR
   devWarn("loadPrograms (workout_exercises)", exercisesError);
   const exerciseRows = exerciseRowsRaw ?? [];
 
+  const { data: blockRowsRaw, error: blocksError } =
+    sessionIds.length > 0
+      ? await supabase.from("training_blocks").select("*").in("session_id", sessionIds)
+      : { data: [] as TrainingBlockRow[], error: null };
+  devWarn("loadPrograms (training_blocks)", blocksError);
+  const blockRows = blockRowsRaw ?? [];
+
+  const blockIds = blockRows.map((b) => b.id);
+  const { data: segmentRowsRaw, error: segmentsError } =
+    blockIds.length > 0
+      ? await supabase.from("training_prescriptions").select("*").in("block_id", blockIds)
+      : { data: [] as TrainingPrescriptionRow[], error: null };
+  devWarn("loadPrograms (training_prescriptions)", segmentsError);
+  const segmentRows = segmentRowsRaw ?? [];
+
   const weeksByProgram = groupBy(weekRows, (w) => w.program_id);
   const sessionsByWeek = groupBy(sessionRows, (s) => s.program_week_id);
   const exercisesBySession = groupBy(exerciseRows, (e) => e.session_id);
+  const blocksBySession = groupBy(blockRows, (b) => b.session_id);
+  const segmentsByBlock = groupBy(segmentRows, (p) => p.block_id ?? "");
   const assignmentsByProgram = groupBy(assignmentRows, (a) => a.content_id);
 
   return programRows.map((programRow) => {
@@ -158,13 +235,17 @@ async function loadPrograms(supabase: TypedSupabaseClient, programRows: ProgramR
     const weekNumberById = new Map(weeksForProgram.map((w) => [w.id, w.week_number]));
     const sessions = weeksForProgram
       .flatMap((week) => sessionsByWeek.get(week.id) ?? [])
-      .map((sessionRow) =>
-        mapSessionRow(
+      .map((sessionRow) => {
+        const cardioBlocks = (blocksBySession.get(sessionRow.id) ?? []).map((blockRow) =>
+          mapCardioBlockRow(blockRow, (segmentsByBlock.get(blockRow.id) ?? []).map(mapCardioSegmentRow)),
+        );
+        return mapSessionRow(
           sessionRow,
           weekNumberById.get(sessionRow.program_week_id) ?? 0,
           (exercisesBySession.get(sessionRow.id) ?? []).map(mapExerciseRow),
-        ),
-      );
+          cardioBlocks,
+        );
+      });
     const assignedStudentIds = (assignmentsByProgram.get(programRow.id) ?? []).map((a) => a.student_id);
     return mapProgramRow(programRow, sessions, assignedStudentIds);
   });
@@ -260,6 +341,73 @@ export async function getAssignedProgramIdsByStudent(
 
 /* ─── Écriture ─── */
 
+/**
+ * Insère les blocs cardio et leurs segments pour une séance donnée (V3).
+ * Segments stockés dans `training_prescriptions` avec `block_id` renseigné
+ * et `exercise_id` nul — voir mapCardioSegmentRow/AdminCardioSegment.
+ * `set_number` est NOT NULL en base même pour ces lignes cardio ; on y met
+ * l'ordre du segment, sa valeur réelle n'ayant aucun sens hors contexte
+ * musculation (la contrainte UNIQUE(exercise_id, set_number) ne s'applique
+ * de toute façon jamais ici puisque exercise_id est toujours nul).
+ */
+async function insertCardioBlocks(
+  supabase: TypedSupabaseClient,
+  sessionId: string,
+  blocks: AdminCardioBlock[],
+): Promise<void> {
+  for (const block of blocks) {
+    const { data: blockRow, error: blockError } = await supabase
+      .from("training_blocks")
+      .insert({
+        session_id: sessionId,
+        block_type: "cardio",
+        title: block.title || "",
+        position: block.order,
+        cardio_type: block.cardioType,
+        machine_type: block.machineType ?? null,
+      })
+      .select("id")
+      .single();
+    devWarn("insertCardioBlocks (training_blocks)", blockError);
+    if (!blockRow || block.segments.length === 0) continue;
+
+    const { error: segmentsError } = await supabase.from("training_prescriptions").insert(
+      block.segments.map((segment) => ({
+        block_id: blockRow.id,
+        exercise_id: null,
+        set_number: segment.order,
+        set_type: "normal",
+        segment_type: segment.segmentType,
+        title: segment.title || null,
+        repetitions: segment.repetitions ?? null,
+        work_duration_seconds: segment.durationSeconds ?? null,
+        distance_meters: segment.distanceMeters ?? null,
+        elevation_gain_meters: segment.elevationGainMeters ?? null,
+        incline_percentage: segment.inclinePercentage ?? null,
+        recovery_duration_seconds: segment.recoveryDurationSeconds ?? null,
+        recovery_distance_meters: segment.recoveryDistanceMeters ?? null,
+        intensity_target_type: segment.intensityTargetType,
+        target_vma_percentage: segment.targetVmaPercentage ?? null,
+        target_speed_kmh: segment.targetSpeedKmh ?? null,
+        target_pace_seconds_per_km: segment.targetPaceSecondsPerKm ?? null,
+        target_hr_percentage: segment.targetHrPercentage ?? null,
+        target_hr_zone: segment.targetHrZone ?? null,
+        target_power_watts: segment.targetPowerWatts ?? null,
+        target_cadence: segment.targetCadence ?? null,
+        intensity_min: segment.intensityMin ?? null,
+        intensity_max: segment.intensityMax ?? null,
+        surface: segment.surface ?? null,
+        terrain: segment.terrain ?? null,
+        equipment_type: segment.equipmentType ?? null,
+        // NOT NULL (défaut '') côté base — jamais envoyer null ici.
+        coach_notes: segment.coachNotes || "",
+        position: segment.order,
+      })),
+    );
+    devWarn("insertCardioBlocks (training_prescriptions)", segmentsError);
+  }
+}
+
 /** Insère les semaines/séances/exercices d'un programme déjà créé (partagé par create/update). */
 async function insertProgramStructure(
   supabase: TypedSupabaseClient,
@@ -296,6 +444,7 @@ async function insertProgramStructure(
         duration_minutes: session.durationMinutes,
         warmup: session.warmup,
         coach_notes: session.coachNotes,
+        session_type: session.sessionType ?? "strength",
       })
       .select("id")
       .single();
@@ -320,6 +469,10 @@ async function insertProgramStructure(
         })),
       );
       devWarn("insertProgramStructure (workout_exercises)", exercisesError);
+    }
+
+    if (!session.isRestDay && (session.cardioBlocks?.length ?? 0) > 0) {
+      await insertCardioBlocks(supabase, sessionRow.id, session.cardioBlocks ?? []);
     }
   }
 }
@@ -348,13 +501,351 @@ export async function createProgram(supabase: TypedSupabaseClient, data: Program
 }
 
 /**
+ * Duplique un programme complet (toutes ses semaines/séances/exercices/blocs
+ * cardio) en un nouveau programme brouillon nommé "{nom} (copie)" — V3 étape
+ * 4. Ne copie jamais les élèves assignés (`assignments`), pour ne jamais
+ * assigner accidentellement une copie de travail : le coach doit assigner la
+ * copie explicitement une fois prête. `insertProgramStructure` crée de toute
+ * façon de nouvelles lignes `workout_sessions`, donc les ids de séance source
+ * ne sont jamais réutilisés ; on régénère aussi les ids d'exercices/blocs
+ * cardio pour ne jamais partager de référence avec le programme source.
+ */
+export async function duplicateProgram(supabase: TypedSupabaseClient, programId: string): Promise<string | null> {
+  const { data: sourceRow, error: sourceError } = await supabase.from("programs").select("*").eq("id", programId).single();
+  devWarn("duplicateProgram (lecture programme)", sourceError);
+  if (!sourceRow) {
+    return null;
+  }
+
+  const [program] = await loadPrograms(supabase, [sourceRow]);
+  if (!program) {
+    return null;
+  }
+
+  const { data: newProgramRow, error: insertError } = await supabase
+    .from("programs")
+    .insert({
+      name: `${program.name} (copie)`,
+      goal: program.goal,
+      level: program.level,
+      duration_weeks: program.durationWeeks,
+      description: program.description,
+      status: "brouillon",
+    })
+    .select("id")
+    .single();
+  devWarn("duplicateProgram (insertion programme)", insertError);
+  if (!newProgramRow) {
+    return null;
+  }
+
+  const clonedSessions: AdminWorkoutSession[] = program.sessions.map((session) => ({
+    ...session,
+    id: generateId("sess"),
+    programId: newProgramRow.id,
+    exercises: session.exercises.map((ex) => ({ ...ex, id: generateId("ex") })),
+    cardioBlocks: (session.cardioBlocks ?? []).map((block) => cloneCardioBlock(block)),
+  }));
+
+  await insertProgramStructure(supabase, newProgramRow.id, clonedSessions);
+  return newProgramRow.id;
+}
+
+/**
+ * Diffe et applique en place la structure (semaines/séances/exercices) d'un
+ * programme existant, au lieu du delete + reinsert complet précédemment
+ * utilisé par updateProgram (voir V3 — training-builder-v3-running-fullscreen).
+ *
+ * Pourquoi ce changement : le delete + reinsert recréait un nouvel id à
+ * chaque séance/exercice à chaque sauvegarde, ce qui (a) mettait à `null` le
+ * lien `workout_feedback.session_id` de tout retour élève déjà soumis pour
+ * cette séance (ON DELETE SET NULL — le retour survit mais perd son
+ * rattachement direct), et (b) aurait supprimé et fait perdre tout bloc/
+ * prescription cardio (training_blocks/training_prescriptions, ON DELETE
+ * CASCADE sur workout_sessions/workout_exercises) à chaque simple
+ * modification du programme par le coach une fois le builder cardio en
+ * place. Le diff fin préserve les ids existants et donc ces rattachements.
+ *
+ * Stratégie de correspondance (sans nouvelle colonne, juste plus de
+ * requêtes ciblées) :
+ * - Semaine : identifiée par son `week_number` (unique par programme).
+ * - Séance : identifiée par (semaine, `day`) — chaque semaine a toujours
+ *   exactement les 7 jours de weekDays, day est donc une clé stable.
+ * - Exercice : identifié par son `id` — un id déjà présent en base pour
+ *   CETTE séance est mis à jour ; un id absent (placeholder généré
+ *   côté client par generateId(), voir lib/admin.ts) est inséré comme
+ *   nouvel exercice ; un id en base absent du nouveau jeu de données est
+ *   supprimé.
+ */
+async function diffProgramStructure(
+  supabase: TypedSupabaseClient,
+  programId: string,
+  sessions: AdminWorkoutSession[],
+): Promise<void> {
+  const incomingWeekNumbers = Array.from(new Set(sessions.map((s) => s.weekNumber))).sort((a, b) => a - b);
+
+  const { data: existingWeeksRaw, error: existingWeeksError } = await supabase
+    .from("program_weeks")
+    .select("id, week_number")
+    .eq("program_id", programId);
+  devWarn("diffProgramStructure (program_weeks lecture)", existingWeeksError);
+  const existingWeeks = existingWeeksRaw ?? [];
+
+  const weekIdByNumber = new Map<number, string>(existingWeeks.map((w) => [w.week_number, w.id]));
+
+  // Semaines retirées par le coach (plus aucune séance dessus) : suppression,
+  // cascade jusqu'aux séances/exercices/blocs/prescriptions de cette semaine.
+  const weeksToDelete = existingWeeks.filter((w) => !incomingWeekNumbers.includes(w.week_number));
+  if (weeksToDelete.length > 0) {
+    const { error } = await supabase
+      .from("program_weeks")
+      .delete()
+      .in("id", weeksToDelete.map((w) => w.id));
+    devWarn("diffProgramStructure (program_weeks suppression)", error);
+    for (const w of weeksToDelete) weekIdByNumber.delete(w.week_number);
+  }
+
+  // Nouvelles semaines : insertion, on complète weekIdByNumber avec leur id.
+  const weekNumbersToInsert = incomingWeekNumbers.filter((n) => !weekIdByNumber.has(n));
+  for (const weekNumber of weekNumbersToInsert) {
+    const { data: weekRow, error } = await supabase
+      .from("program_weeks")
+      .insert({ program_id: programId, week_number: weekNumber })
+      .select("id")
+      .single();
+    devWarn("diffProgramStructure (program_weeks insertion)", error);
+    if (weekRow) weekIdByNumber.set(weekNumber, weekRow.id);
+  }
+
+  const keptOrNewWeekIds = incomingWeekNumbers.map((n) => weekIdByNumber.get(n)).filter((id): id is string => Boolean(id));
+
+  const { data: existingSessionsRaw, error: existingSessionsError } =
+    keptOrNewWeekIds.length > 0
+      ? await supabase.from("workout_sessions").select("id, program_week_id, day").in("program_week_id", keptOrNewWeekIds)
+      : { data: [] as { id: string; program_week_id: string; day: string }[], error: null };
+  devWarn("diffProgramStructure (workout_sessions lecture)", existingSessionsError);
+  const existingSessions = existingSessionsRaw ?? [];
+
+  // Clé stable "weekId::day" -> session id existante.
+  const existingSessionIdByKey = new Map<string, string>(
+    existingSessions.map((s) => [`${s.program_week_id}::${s.day}`, s.id]),
+  );
+
+  const incomingSessionKeys = new Set<string>();
+  const sessionsToUpdate: { id: string; session: AdminWorkoutSession }[] = [];
+  const sessionsToInsert: AdminWorkoutSession[] = [];
+
+  for (const session of sessions) {
+    const weekId = weekIdByNumber.get(session.weekNumber);
+    if (!weekId) continue;
+    const key = `${weekId}::${session.day}`;
+    incomingSessionKeys.add(key);
+    const existingId = existingSessionIdByKey.get(key);
+    if (existingId) {
+      sessionsToUpdate.push({ id: existingId, session });
+    } else {
+      sessionsToInsert.push(session);
+    }
+  }
+
+  // Séances en base qui n'apparaissent plus du tout dans le nouveau jeu de
+  // données (cas défensif : ne devrait pas arriver via ProgramBuilder, qui
+  // conserve toujours les 7 jours par semaine, mais on ne laisse pas de
+  // séance orpheline si ça change un jour).
+  const sessionsToDelete = existingSessions.filter((s) => !incomingSessionKeys.has(`${s.program_week_id}::${s.day}`));
+  if (sessionsToDelete.length > 0) {
+    const { error } = await supabase
+      .from("workout_sessions")
+      .delete()
+      .in("id", sessionsToDelete.map((s) => s.id));
+    devWarn("diffProgramStructure (workout_sessions suppression)", error);
+  }
+
+  for (const { id, session } of sessionsToUpdate) {
+    const { error } = await supabase
+      .from("workout_sessions")
+      .update({
+        name: session.name,
+        is_rest_day: session.isRestDay,
+        muscle_group: session.muscleGroup,
+        duration_minutes: session.durationMinutes,
+        warmup: session.warmup,
+        coach_notes: session.coachNotes,
+        session_type: session.sessionType ?? "strength",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id);
+    devWarn("diffProgramStructure (workout_sessions mise à jour)", error);
+  }
+
+  const sessionIdByInsertedKey = new Map<AdminWorkoutSession, string>();
+  for (const session of sessionsToInsert) {
+    const weekId = weekIdByNumber.get(session.weekNumber);
+    if (!weekId) continue;
+    const { data: sessionRow, error } = await supabase
+      .from("workout_sessions")
+      .insert({
+        program_id: programId,
+        program_week_id: weekId,
+        day: session.day,
+        is_rest_day: session.isRestDay,
+        name: session.name,
+        muscle_group: session.muscleGroup,
+        duration_minutes: session.durationMinutes,
+        warmup: session.warmup,
+        coach_notes: session.coachNotes,
+        session_type: session.sessionType ?? "strength",
+      })
+      .select("id")
+      .single();
+    devWarn("diffProgramStructure (workout_sessions insertion)", error);
+    if (sessionRow) sessionIdByInsertedKey.set(session, sessionRow.id);
+  }
+
+  // Résout l'id de séance (existante ou tout juste créée) pour chaque
+  // séance entrante, pour la passe exercices ci-dessous.
+  function resolveSessionId(session: AdminWorkoutSession): string | undefined {
+    const weekId = weekIdByNumber.get(session.weekNumber);
+    if (!weekId) return undefined;
+    const key = `${weekId}::${session.day}`;
+    return existingSessionIdByKey.get(key) ?? sessionIdByInsertedKey.get(session);
+  }
+
+  // Exercices : uniquement pour les séances déjà existantes (les séances
+  // tout juste insérées n'ont par définition encore aucun exercice en base).
+  const updatedSessionIds = sessionsToUpdate.map((s) => s.id);
+  const { data: existingExercisesRaw, error: existingExercisesError } =
+    updatedSessionIds.length > 0
+      ? await supabase.from("workout_exercises").select("id, session_id").in("session_id", updatedSessionIds)
+      : { data: [] as { id: string; session_id: string }[], error: null };
+  devWarn("diffProgramStructure (workout_exercises lecture)", existingExercisesError);
+  const existingExercises = existingExercisesRaw ?? [];
+
+  const existingExerciseIdsBySession = new Map<string, Set<string>>();
+  for (const ex of existingExercises) {
+    const set = existingExerciseIdsBySession.get(ex.session_id) ?? new Set<string>();
+    set.add(ex.id);
+    existingExerciseIdsBySession.set(ex.session_id, set);
+  }
+
+  const exercisesToInsert: (AdminExercise & { sessionId: string })[] = [];
+  const exerciseIdsToDelete: string[] = [];
+
+  for (const session of sessions) {
+    const sessionId = resolveSessionId(session);
+    if (!sessionId) continue;
+
+    const existingIdsForSession = existingExerciseIdsBySession.get(sessionId) ?? new Set<string>();
+    const incomingIds = new Set<string>();
+
+    if (session.isRestDay) {
+      // Un jour marqué repos ne conserve aucun exercice.
+      for (const existingId of existingIdsForSession) exerciseIdsToDelete.push(existingId);
+      continue;
+    }
+
+    for (const exercise of session.exercises) {
+      if (existingIdsForSession.has(exercise.id)) {
+        incomingIds.add(exercise.id);
+      } else {
+        exercisesToInsert.push({ ...exercise, sessionId });
+      }
+    }
+
+    for (const existingId of existingIdsForSession) {
+      if (!incomingIds.has(existingId)) exerciseIdsToDelete.push(existingId);
+    }
+
+    for (const exercise of session.exercises) {
+      if (!existingIdsForSession.has(exercise.id)) continue;
+      const { error } = await supabase
+        .from("workout_exercises")
+        .update({
+          order_index: exercise.order,
+          name: exercise.name,
+          sets: exercise.sets,
+          reps: exercise.reps,
+          rest_seconds: exercise.restSeconds,
+          tempo: exercise.tempo,
+          recommended_load: exercise.recommendedLoad,
+          video_url: exercise.videoUrl,
+          notes: exercise.notes,
+          muscle_group: exercise.muscleGroup ?? null,
+          exercise_library_id: exercise.libraryExerciseId ?? null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", exercise.id);
+      devWarn("diffProgramStructure (workout_exercises mise à jour)", error);
+    }
+  }
+
+  if (exerciseIdsToDelete.length > 0) {
+    const { error } = await supabase.from("workout_exercises").delete().in("id", exerciseIdsToDelete);
+    devWarn("diffProgramStructure (workout_exercises suppression)", error);
+  }
+
+  if (exercisesToInsert.length > 0) {
+    const { error } = await supabase.from("workout_exercises").insert(
+      exercisesToInsert.map((ex) => ({
+        session_id: ex.sessionId,
+        order_index: ex.order,
+        name: ex.name,
+        sets: ex.sets,
+        reps: ex.reps,
+        rest_seconds: ex.restSeconds,
+        tempo: ex.tempo,
+        recommended_load: ex.recommendedLoad,
+        video_url: ex.videoUrl,
+        notes: ex.notes,
+        muscle_group: ex.muscleGroup ?? null,
+        exercise_library_id: ex.libraryExerciseId ?? null,
+      })),
+    );
+    devWarn("diffProgramStructure (workout_exercises insertion)", error);
+  }
+
+  /*
+   * Blocs cardio (V3) : remplacés en bloc (delete + reinsert) pour chaque
+   * séance plutôt que diffés finement comme les exercices. Contrairement
+   * aux séances/exercices, rien ne référence encore un bloc ou un segment
+   * cardio par id (pas de retour élève, pas de stat calculée dessus) — le
+   * problème qui a motivé le diff fin des exercices (perte du rattachement
+   * workout_feedback.session_id, voir le commentaire au-dessus de cette
+   * fonction) ne se pose donc pas ici. Un delete + reinsert est sûr et bien
+   * plus simple que de reproduire la résolution parent/enfant d'un vrai
+   * diff, pour un gain nul à ce stade.
+   */
+  const allResolvedSessionIds = sessions
+    .map((session) => resolveSessionId(session))
+    .filter((id): id is string => Boolean(id));
+
+  const { data: existingBlocksRaw, error: existingBlocksError } =
+    allResolvedSessionIds.length > 0
+      ? await supabase.from("training_blocks").select("id, session_id").in("session_id", allResolvedSessionIds)
+      : { data: [] as { id: string; session_id: string }[], error: null };
+  devWarn("diffProgramStructure (training_blocks lecture)", existingBlocksError);
+  const existingBlockIds = (existingBlocksRaw ?? []).map((b) => b.id);
+
+  if (existingBlockIds.length > 0) {
+    const { error } = await supabase.from("training_blocks").delete().in("id", existingBlockIds);
+    devWarn("diffProgramStructure (training_blocks suppression)", error);
+  }
+
+  for (const session of sessions) {
+    const sessionId = resolveSessionId(session);
+    if (!sessionId || session.isRestDay) continue;
+    if ((session.cardioBlocks?.length ?? 0) > 0) {
+      await insertCardioBlocks(supabase, sessionId, session.cardioBlocks ?? []);
+    }
+  }
+}
+
+/**
  * Met à jour un programme existant : les champs du programme sont modifiés
- * en place, mais sa structure (semaines/séances/exercices) est entièrement
- * remplacée (delete + reinsert) plutôt que diffée finement — ProgramBuilder
- * renvoie de toute façon systématiquement le jeu complet de séances, et la
- * suppression des program_weeks cascade jusqu'aux séances/exercices (voir
- * supabase/schema.sql). Aussi simple et sûr que le même choix déjà fait pour
- * saveWorkoutFeedback.
+ * en place, et sa structure (semaines/séances/exercices) est diffée
+ * finement (voir diffProgramStructure) plutôt que remplacée par delete +
+ * reinsert, pour préserver les ids existants (retours élève déjà soumis,
+ * futurs blocs/prescriptions cardio V3).
  */
 export async function updateProgram(
   supabase: TypedSupabaseClient,
@@ -375,10 +866,7 @@ export async function updateProgram(
     .eq("id", programId);
   devWarn("updateProgram", updateError);
 
-  const { error: deleteError } = await supabase.from("program_weeks").delete().eq("program_id", programId);
-  devWarn("updateProgram (delete previous structure)", deleteError);
-
-  await insertProgramStructure(supabase, programId, data.sessions);
+  await diffProgramStructure(supabase, programId, data.sessions);
   return !updateError;
 }
 

@@ -6,7 +6,6 @@ import Link from "next/link";
 import { ArrowLeft, Archive, Pencil } from "lucide-react";
 
 import { AssignStudentsModal } from "@/components/admin/AssignStudentsModal";
-import { ProgramBuilder, type ProgramBuilderData } from "@/components/admin/ProgramBuilder";
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
 import {
   AnalysisFilterLabel,
@@ -18,19 +17,24 @@ import {
 } from "@/components/shared/TrainingMetricsSummary";
 import { useAdminData } from "@/hooks/useAdminData";
 import { useContentAssignment } from "@/hooks/useContentAssignment";
-import { useSupabaseExerciseLibrary } from "@/hooks/useSupabaseExerciseLibrary";
 import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { contentStatusLabels, fullName, weekDays } from "@/lib/admin";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
-import { updateProgram as updateProgramSupabase, updateProgramStatus as updateProgramStatusSupabase } from "@/lib/supabase/programs";
+import { updateProgramStatus as updateProgramStatusSupabase } from "@/lib/supabase/programs";
 import { calculateTrainingMetrics, calculateWeekMetrics, formatSets, formatTonnage, formatVolume, muscleGroupLabels } from "@/lib/training-metrics";
 import type { MuscleGroupFilter } from "@/types";
 
+/**
+ * Page de détail — reste un aperçu en lecture seule (résumé, analyse,
+ * calendrier, élèves assignés). L'édition se fait désormais exclusivement
+ * dans le builder plein écran (/admin/programmes/[programId]/builder,
+ * voir V3) : "Modifier" y redirige au lieu de basculer un mode d'édition
+ * inline ici.
+ */
 export default function ProgramDetailPage() {
   const params = useParams<{ programId: string }>();
   const { state, updateProgram, setAssignment } = useAdminData();
-  const [editing, setEditing] = useState(false);
   const [selectedMuscleGroup, setSelectedMuscleGroup] = useState<MuscleGroupFilter>("tous");
 
   // Priorité Supabase dès qu'au moins un programme/élève réel existe — même
@@ -46,10 +50,16 @@ export default function ProgramDetailPage() {
     setAssignment,
     supabasePrograms.refetch,
   );
-  const supabaseExerciseLibrary = useSupabaseExerciseLibrary();
-  const exerciseLibrary = supabaseExerciseLibrary.items.length > 0 ? supabaseExerciseLibrary.items : state.exerciseLibrary;
 
   const program = programs.find((p) => p.id === params.programId);
+
+  // Évite un flash "Programme introuvable." pendant la requête Supabase
+  // initiale (mock encore affiché le temps que la vraie liste arrive, dont
+  // les ids ne correspondent jamais à un vrai programme) — même garde que
+  // /admin/programmes/[programId]/builder/page.tsx.
+  if (supabasePrograms.loading && !isSupabaseProgramsActive) {
+    return <div className="text-sm text-muted-foreground">Chargement…</div>;
+  }
 
   if (!program) {
     return (
@@ -70,23 +80,6 @@ export default function ProgramDetailPage() {
     calculateWeekMetrics(program.sessions, weekNumber, selectedMuscleGroup),
   );
 
-  async function handleSave(data: ProgramBuilderData) {
-    if (isSupabaseProgramsActive) {
-      const supabase = createSupabaseBrowserClient();
-      if (supabase) {
-        await updateProgramSupabase(supabase, program!.id, data);
-        await supabasePrograms.refetch();
-        setEditing(false);
-        return;
-      }
-    }
-    updateProgram(program!.id, {
-      ...data,
-      sessions: data.sessions.map((s) => ({ ...s, programId: program!.id })),
-    });
-    setEditing(false);
-  }
-
   async function handleArchive() {
     if (isSupabaseProgramsActive) {
       const supabase = createSupabaseBrowserClient();
@@ -106,31 +99,7 @@ export default function ProgramDetailPage() {
         Programmes
       </Link>
 
-      {editing ? (
-        <>
-          <div className="mb-8">
-            <h1 className="font-heading text-3xl font-extrabold uppercase text-foreground md:text-4xl">
-              Modifier — {program.name}
-            </h1>
-          </div>
-          <ProgramBuilder
-            initial={{
-              name: program.name,
-              goal: program.goal,
-              level: program.level,
-              durationWeeks: program.durationWeeks,
-              description: program.description,
-              status: program.status,
-              sessions: program.sessions,
-            }}
-            library={exerciseLibrary}
-            onSave={handleSave}
-            saveLabel="Enregistrer les modifications"
-          />
-        </>
-      ) : (
-        <>
-          <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
+      <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
             <div>
               <div className="mb-2 flex items-center gap-3">
                 <h1 className="font-heading text-3xl font-extrabold uppercase text-foreground md:text-4xl">
@@ -141,14 +110,13 @@ export default function ProgramDetailPage() {
               <p className="text-sm text-muted-foreground">{program.goal}</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setEditing(true)}
+              <Link
+                href={`/admin/programmes/${program.id}/builder`}
                 className="flex items-center gap-1.5 border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700"
               >
                 <Pencil size={13} />
                 Modifier
-              </button>
+              </Link>
               <AssignStudentsModal
                 contentLabel={program.name}
                 contentType="programme"
@@ -336,8 +304,6 @@ export default function ProgramDetailPage() {
               </div>
             )}
           </div>
-        </>
-      )}
     </div>
   );
 }

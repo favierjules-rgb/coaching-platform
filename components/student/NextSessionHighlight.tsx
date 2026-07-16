@@ -10,6 +10,12 @@ export function NextSessionHighlight({
   session: WorkoutSession;
   dayLabel: string;
 }) {
+  // Séances cardio (V3) : même convention que ProgramWeekCalendar (voir
+  // components/student/ProgramWeekCalendar.tsx) — "X exercices" n'a pas de
+  // sens pour une séance 100% cardio.
+  const sessionType = session.sessionType ?? "strength";
+  const cardioBlocksCount = (session.cardioBlocks ?? []).length;
+
   return (
     <div className="border border-primary bg-primary/10 p-6">
       <div className="mb-4 flex items-center justify-between">
@@ -30,8 +36,11 @@ export function NextSessionHighlight({
             {session.name}
           </div>
           <div className="mt-0.5 text-xs text-muted-foreground">
-            {session.durationMinutes} min · {session.exercises.length}{" "}
-            exercices
+            {session.durationMinutes} min
+            {sessionType !== "cardio" ? ` · ${session.exercises.length} exercices` : ""}
+            {sessionType !== "strength"
+              ? ` · ${cardioBlocksCount} bloc${cardioBlocksCount > 1 ? "s" : ""} cardio`
+              : ""}
           </div>
         </div>
       </div>

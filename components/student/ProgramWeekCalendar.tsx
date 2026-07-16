@@ -41,6 +41,12 @@ export function ProgramWeekCalendar({
           );
         }
 
+        // Séances cardio (V3) : "X exercices" n'a pas de sens pour une séance
+        // 100% cardio (mixed = les deux comptent) — même convention que
+        // DayGridCell dans components/admin/ProgramBuilderFullscreen.tsx.
+        const sessionType = session.sessionType ?? "strength";
+        const cardioBlocksCount = (session.cardioBlocks ?? []).length;
+
         return (
           <Link
             key={day.day}
@@ -53,8 +59,11 @@ export function ProgramWeekCalendar({
                 {session.name}
               </span>
               <span className="text-xs text-muted-foreground">
-                {session.durationMinutes} min · {session.exercises.length}{" "}
-                exercices
+                {session.durationMinutes} min
+                {sessionType !== "cardio" ? ` · ${session.exercises.length} exercices` : ""}
+                {sessionType !== "strength"
+                  ? ` · ${cardioBlocksCount} bloc${cardioBlocksCount > 1 ? "s" : ""} cardio`
+                  : ""}
               </span>
             </div>
           </Link>

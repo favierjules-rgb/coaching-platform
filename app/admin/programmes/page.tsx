@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Dumbbell, Plus } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Copy, Dumbbell, Loader2, Plus } from "lucide-react";
 
 import { AssignStudentsModal } from "@/components/admin/AssignStudentsModal";
 import { ExerciseLibraryManager } from "@/components/admin/ExerciseLibraryManager";
@@ -20,6 +21,7 @@ import {
   setExerciseLibraryStatus,
   updateExerciseLibraryItem,
 } from "@/lib/supabase/exercise-library";
+import { duplicateProgram } from "@/lib/supabase/programs";
 import type { AdminContentStatus, ExerciseLibraryItem } from "@/types";
 
 type StatusFilter = "tous" | AdminContentStatus;
@@ -34,6 +36,7 @@ const statusFilters: { value: StatusFilter; label: string }[] = [
 
 export default function AdminProgramsPage() {
   const { state, setAssignment, createLibraryExercise, updateLibraryExercise } = useAdminData();
+  const router = useRouter();
 
   // Priorité Supabase dès qu'au moins un programme/élève réel existe, sinon
   // repli sur les listes mock — même pattern que /admin/eleves. Les deux
@@ -41,7 +44,26 @@ export default function AdminProgramsPage() {
   // avoir encore créé de programme réel, ou l'inverse) ; l'assignation
   // réelle (table `assignments`) n'est activée que si les deux le sont.
   const supabasePrograms = useSupabasePrograms();
-  const programs = supabasePrograms.programs.length > 0 ? supabasePrograms.programs : state.programs;
+  const isProgramsSupabaseActive = supabasePrograms.programs.length > 0;
+  const programs = isProgramsSupabaseActive ? supabasePrograms.programs : state.programs;
+  // Duplication (V3 étape 4) : Supabase uniquement, pas de repli mock — voir
+  // lib/supabase/programs.ts#duplicateProgram. `duplicatingId` retient le
+  // programme en cours de duplication pour désactiver son bouton le temps de
+  // la requête, sans bloquer le reste de la page.
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
+
+  async function handleDuplicate(programId: string) {
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) return;
+    setDuplicatingId(programId);
+    const newId = await duplicateProgram(supabase, programId);
+    if (newId) {
+      await supabasePrograms.refetch();
+      router.push(`/admin/programmes/${newId}/builder`);
+      return;
+    }
+    setDuplicatingId(null);
+  }
   const supabaseStudents = useSupabaseStudents();
   const students = supabaseStudents.students.length > 0 ? supabaseStudents.students : state.students;
   const handleSetAssignment = useContentAssignment(
@@ -230,6 +252,17 @@ export default function AdminProgramsPage() {
                 >
                   Modifier
                 </Link>
+                {isProgramsSupabaseActive && (
+                  <button
+                    type="button"
+                    onClick={() => void handleDuplicate(program.id)}
+                    disabled={duplicatingId === program.id}
+                    className="flex items-center gap-1.5 border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary disabled:opacity-50"
+                  >
+                    {duplicatingId === program.id ? <Loader2 size={13} className="animate-spin" /> : <Copy size={13} />}
+                    Dupliquer
+                  </button>
+                )}
                 <AssignStudentsModal
                   contentLabel={program.name}
                   contentType="programme"
