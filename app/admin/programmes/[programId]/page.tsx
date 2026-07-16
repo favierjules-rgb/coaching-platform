@@ -53,6 +53,14 @@ export default function ProgramDetailPage() {
 
   const program = programs.find((p) => p.id === params.programId);
 
+  // Évite un flash "Programme introuvable." pendant la requête Supabase
+  // initiale (mock encore affiché le temps que la vraie liste arrive, dont
+  // les ids ne correspondent jamais à un vrai programme) — même garde que
+  // /admin/programmes/[programId]/builder/page.tsx.
+  if (supabasePrograms.loading && !isSupabaseProgramsActive) {
+    return <div className="text-sm text-muted-foreground">Chargement…</div>;
+  }
+
   if (!program) {
     return (
       <div>
