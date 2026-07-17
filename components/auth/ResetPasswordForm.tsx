@@ -1,14 +1,17 @@
 "use client";
 
 import { useEffect, useId, useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { AlertCircle, ArrowLeft, Loader2 } from "lucide-react";
+import type { EmailOtpType } from "@supabase/supabase-js";
 
 import { Logo } from "@/components/ui/Logo";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 type Status = "checking" | "ready" | "invalid";
+
+const VALID_OTP_TYPES: readonly EmailOtpType[] = ["recovery", "invite", "magiclink", "signup", "email_change", "email"];
 
 function redirectPathForRole(role: string): string {
   return role === "student" ? "/dashboard" : "/admin";
@@ -16,26 +19,48 @@ function redirectPathForRole(role: string): string {
 
 /**
  * Formulaire "définir un nouveau mot de passe" (/reinitialiser-mot-de-passe)
- * — destination commune de trois liens Supabase distincts, tous du type
- * "l'utilisateur arrive avec un access_token dans l'URL" : le recovery de
- * /mot-de-passe-oublie, l'invite envoyé aux nouveaux acheteurs de programme
- * public (voir lib/supabase/public-program-provisioning.ts) et le magiclink
- * d'auto-connexion post-paiement (voir
- * app/api/public/programs/checkout-status/route.ts). Dans les trois cas,
- * @supabase/ssr détecte le token dans l'URL au chargement (detectSessionInUrl,
- * activé par défaut) et établit une session avant même que ce composant ne
- * s'affiche — on attend juste que ce soit fait avant de montrer le
- * formulaire. Après confirmation, /dashboard redirige lui-même vers
- * /entrainement pour un compte "programme_seul" (voir lib/supabase/guards.ts)
- * — inutile de le gérer ici.
+ * — destination commune de trois liens Supabase distincts : le recovery de
+ * /mot-de-passe-oublie, l'invite envoyé aux nouveaux élèves (coach ou achat
+ * de programme public, voir lib/supabase/coach-student-provisioning.ts et
+ * lib/supabase/public-program-provisioning.ts) et le magiclink d'auto-
+ * connexion post-paiement (voir app/api/public/programs/checkout-status/route.ts).
+ *
+ * Chemin principal — ?token_hash=...&type=... : on échange nous-mêmes le
+ * jeton contre une session via verifyOtp(). Avant, ces liens pointaient vers
+ * l'URL "action_link" hébergée par Supabase (/auth/v1/verify?...&redirect_to=...),
+ * qui redirige ENSUITE vers cette page avec la session dans le hash — mais
+ * GoTrue tronque silencieusement redirect_to (y compris le chemin
+ * /reinitialiser-mot-de-passe) dès qu'il ne correspond pas EXACTEMENT à une
+ * entrée de la liste "Redirect URLs" du dashboard Supabase (les wildcards
+ * `**` n'ont pas suffi en pratique pour les liens générés côté admin), ce
+ * qui a cassé ce flux en prod (17/07/2026 — mot de passe admin écrasé sans
+ * le vouloir, puis liens de récupération systématiquement "invalides"). En
+ * passant nous-mêmes le hashed_token en paramètre de requête vers CETTE
+ * page et en appelant verifyOtp() ici, on n'a plus jamais besoin de la
+ * redirection hébergée par Supabase ni de sa liste d'URLs autorisées.
+ *
+ * Repli — #access_token=... (detectSessionInUrl, activé par défaut côté
+ * @supabase/ssr) : conservé pour tout ancien lien déjà envoyé/en cache avant
+ * ce correctif.
+ *
+ * Garde anti-collision multi-onglets : le client Supabase stocke la session
+ * dans localStorage, PARTAGÉ par tous les onglets du même navigateur/profil.
+ * Si un autre onglet (ex. une session admin déjà ouverte) réécrit cette
+ * clé entre le moment où le lien est traité et le clic sur "Valider", le
+ * mot de passe pourrait être appliqué au mauvais compte. On mémorise donc
+ * l'utilisateur ciblé dès que la session est prête, et on revérifie juste
+ * avant l'appel updateUser que la session courante correspond toujours à ce
+ * même utilisateur — sinon on refuse plutôt que d'écraser un autre compte.
  */
 export function ResetPasswordForm({ supabaseConfigured }: { supabaseConfigured: boolean }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const passwordId = useId();
   const confirmId = useId();
 
   const [supabase] = useState(() => (supabaseConfigured ? createSupabaseBrowserClient() : null));
   const [status, setStatus] = useState<Status>(supabase ? "checking" : "invalid");
+  const [targetUserId, setTargetUserId] = useState<string | null>(null);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
@@ -45,24 +70,38 @@ export function ResetPasswordForm({ supabaseConfigured }: { supabaseConfigured: 
     if (!supabase) return;
 
     let settled = false;
+    function markReady(userId: string) {
+      if (settled) return;
+      settled = true;
+      setTargetUserId(userId);
+      setStatus("ready");
+    }
+
+    const tokenHash = searchParams.get("token_hash");
+    const typeParam = searchParams.get("type");
+    if (tokenHash && typeParam && (VALID_OTP_TYPES as string[]).includes(typeParam)) {
+      supabase.auth.verifyOtp({ token_hash: tokenHash, type: typeParam as EmailOtpType }).then(({ data, error: verifyError }) => {
+        if (verifyError || !data.session) {
+          if (!settled) setStatus("invalid");
+          return;
+        }
+        markReady(data.session.user.id);
+      });
+    }
 
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
-      if ((event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") && session && !settled) {
-        settled = true;
-        setStatus("ready");
+      if ((event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") && session) {
+        markReady(session.user.id);
       }
     });
 
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session && !settled) {
-        settled = true;
-        setStatus("ready");
-      }
+      if (data.session) markReady(data.session.user.id);
     });
 
-    // Le hash d'auth peut mettre un instant à être traité au premier
-    // chargement — on laisse une marge avant de conclure à un lien
-    // invalide/expiré plutôt que d'afficher l'erreur trop tôt.
+    // L'échange token_hash / le hash d'auth peuvent mettre un instant à être
+    // traités au premier chargement — on laisse une marge avant de conclure
+    // à un lien invalide/expiré plutôt que d'afficher l'erreur trop tôt.
     const timeout = setTimeout(() => {
       if (!settled) setStatus("invalid");
     }, 4000);
@@ -71,7 +110,7 @@ export function ResetPasswordForm({ supabaseConfigured }: { supabaseConfigured: 
       listener.subscription.unsubscribe();
       clearTimeout(timeout);
     };
-  }, [supabase]);
+  }, [supabase, searchParams]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -85,14 +124,26 @@ export function ResetPasswordForm({ supabaseConfigured }: { supabaseConfigured: 
       setError("Les deux mots de passe ne correspondent pas.");
       return;
     }
-
-    const supabase = createSupabaseBrowserClient();
     if (!supabase) {
       setError("Supabase n'est pas configuré sur cet environnement.");
       return;
     }
 
     setLoading(true);
+
+    // Revérification anti-collision : si un autre onglet a réécrit la
+    // session partagée entre-temps, la session courante ne correspond plus
+    // à l'utilisateur détecté à l'ouverture du lien — on refuse plutôt que
+    // de modifier le mot de passe d'un autre compte.
+    const { data: currentSession } = await supabase.auth.getSession();
+    if (!currentSession.session || currentSession.session.user.id !== targetUserId) {
+      setLoading(false);
+      setError(
+        "La session a changé pendant que tu remplissais ce formulaire (un autre onglet connecté dans le même navigateur ?). Réouvre le lien reçu par email dans une fenêtre privée/navigation privée, seule, puis réessaie.",
+      );
+      return;
+    }
+
     const { error: updateError } = await supabase.auth.updateUser({ password });
     if (updateError) {
       setLoading(false);

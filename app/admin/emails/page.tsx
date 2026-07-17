@@ -24,6 +24,7 @@ const emailTypeLabels: Record<EmailType, string> = {
   appointment_reminder: "Rappel de rendez-vous",
   password_reset: "Mot de passe oublié",
   account_expiry_warning: "Fin d'accès (avertissement)",
+  coach_invite: "Invitation élève (coach)",
 };
 
 const emailStatusLabels: Record<EmailStatus, string> = {

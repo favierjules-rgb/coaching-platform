@@ -2259,7 +2259,8 @@ export type EmailType =
   | "appointment_cancelled"
   | "appointment_reminder"
   | "password_reset"
-  | "account_expiry_warning";
+  | "account_expiry_warning"
+  | "coach_invite";
 
 export type EmailStatus = "pending" | "sent" | "failed" | "skipped";
 

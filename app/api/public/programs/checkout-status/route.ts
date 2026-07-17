@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { checkoutStatusQuerySchema } from "@/lib/api/schemas/stripe";
+import { parseParams } from "@/lib/api/validate";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getStripeClient } from "@/lib/stripe/client";
 
@@ -29,10 +31,9 @@ import { getStripeClient } from "@/lib/stripe/client";
  */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const sessionId = searchParams.get("session_id");
-  if (!sessionId) {
-    return NextResponse.json({ error: "session_id manquant." }, { status: 400 });
-  }
+  const parsedParams = parseParams(Object.fromEntries(searchParams), checkoutStatusQuerySchema);
+  if (!parsedParams.success) return parsedParams.response;
+  const { session_id: sessionId } = parsedParams.data;
 
   const stripe = getStripeClient();
   if (!stripe) {

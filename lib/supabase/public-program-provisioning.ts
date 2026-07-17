@@ -134,7 +134,13 @@ async function createProgramOnlyStudent(
   }
 
   const authUserId = linkData.user.id;
-  const actionLink = linkData.properties?.action_link ?? `${appUrl()}/connexion`;
+  // token_hash plutôt que action_link (hébergé par Supabase) : ce dernier
+  // tronque le chemin de redirectTo dès qu'il ne correspond pas exactement
+  // à la liste "Redirect URLs" du dashboard — voir le commentaire détaillé
+  // dans ResetPasswordForm.tsx, qui échange ce jeton via verifyOtp().
+  const actionLink = linkData.properties?.hashed_token
+    ? `${appUrl()}/reinitialiser-mot-de-passe?token_hash=${encodeURIComponent(linkData.properties.hashed_token)}&type=invite`
+    : `${appUrl()}/connexion`;
 
   const { error: profileError } = await supabase.from("profiles").insert({
     user_id: authUserId,

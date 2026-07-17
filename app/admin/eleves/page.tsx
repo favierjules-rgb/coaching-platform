@@ -28,7 +28,7 @@ const statusFilters: { value: StatusFilter; label: string }[] = [
 ];
 
 export default function AdminStudentsPage() {
-  const { state, createStudent, setAssignment } = useAdminData();
+  const { state, setAssignment } = useAdminData();
   const { documents } = state;
 
   // Supabase a la priorité dès qu'il a au moins un élève/programme/plan
@@ -81,7 +81,7 @@ export default function AdminStudentsPage() {
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">{students.length} élèves au total.</p>
         </div>
-        <CreateStudentModal onCreate={createStudent} />
+        <CreateStudentModal onCreated={() => void supabaseStudents.refetch()} />
       </div>
 
       <div className="mb-6 flex flex-col gap-4">

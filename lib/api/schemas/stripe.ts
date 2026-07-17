@@ -37,3 +37,20 @@ export const publicProgramAccessBodySchema = z
     email: z.string().trim().email({ message: "Adresse email invalide." }).max(254),
   })
   .strict();
+
+/**
+ * GET /api/public/programs/checkout-status?session_id=cs_... (chantier
+ * api-zod-validation) — l'id de session Stripe Checkout suit toujours le
+ * prefixe documente `cs_`, longueur bornee par principe plutot qu'un simple
+ * controle de presence.
+ */
+export const checkoutStatusQuerySchema = z
+  .object({
+    session_id: z
+      .string()
+      .trim()
+      .min(1, { message: "session_id manquant." })
+      .max(500)
+      .regex(/^cs_[A-Za-z0-9_]+$/, { message: "session_id invalide." }),
+  })
+  .strict();

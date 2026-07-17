@@ -5,6 +5,7 @@ import { fromSupabaseMeasurementType, toSupabaseMeasurementType } from "@/lib/su
 import { getAssignedDocumentIdsByStudent } from "@/lib/supabase/documents";
 import { getAssignedNutritionPlanIdsByStudent } from "@/lib/supabase/nutrition";
 import { getAssignedProgramIdsByStudent } from "@/lib/supabase/programs";
+import { getSignedProgressPhotoUrl } from "@/lib/supabase/storage-progress-photos";
 import { normalizePaymentProfile } from "@/lib/payments";
 import type { CustomMeasurementInput } from "@/components/student/UpdateMeasurementsModal";
 import type {
@@ -630,7 +631,25 @@ export async function getStudentProgressPhotos(
     .eq("student_id", studentId)
     .order("date", { ascending: true });
   devWarn("getStudentProgressPhotos", error);
-  return (data ?? []).map((row) => toMockProgressPhoto(mapProgressPhotoRow(row)));
+  const photos = (data ?? []).map((row) => toMockProgressPhoto(mapProgressPhotoRow(row)));
+
+  // Correctif : une photo ajoutée via le flux d'upload réel (/progression,
+  // /admin/eleves/[studentId]/progression, chantier
+  // "supabase-progress-photos-before-after-export") n'a jamais d'image_url —
+  // bucket Storage privé, URL signée générée à la demande — seulement
+  // storage_path. L'ancien composant d'affichage partagé ici
+  // (ProgressPhotoGallerySection, utilisé par /profil et la fiche élève
+  // admin principale) ne connaît que imageUrl : sans ce repli, ces photos
+  // n'affichaient qu'un pictogramme appareil photo au lieu de l'image réelle.
+  return Promise.all(
+    photos.map(async (photo) => {
+      if (photo.imageUrl || !photo.storagePath) {
+        return photo;
+      }
+      const signedUrl = await getSignedProgressPhotoUrl(supabase, photo.storagePath);
+      return signedUrl ? { ...photo, imageUrl: signedUrl } : photo;
+    }),
+  );
 }
 
 /** Toujours une fiche paiement exploitable (jamais `null`) — vide si aucun paiement n'existe encore. */

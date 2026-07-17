@@ -169,9 +169,9 @@ function WeeklyNutritionDayCard({
             setCalories(e.target.value);
             setSaved(false);
           }}
-          placeholder="Kcal"
+          placeholder={day.targetCalories !== null ? `${day.targetCalories}kcal` : "Kcal"}
           aria-label={`Calories réelles — ${day.label}`}
-          className="w-full border border-border bg-background px-2 py-2 text-xs text-foreground transition-colors focus:border-primary focus:outline-none"
+          className="w-full border border-border bg-background px-2 py-2 text-xs text-foreground placeholder:text-muted-foreground/50 transition-colors focus:border-primary focus:outline-none"
         />
         <input
           type="number"
@@ -181,9 +181,9 @@ function WeeklyNutritionDayCard({
             setProtein(e.target.value);
             setSaved(false);
           }}
-          placeholder="Prot (g)"
+          placeholder={day.targetProtein !== null ? `${day.targetProtein}g` : "Prot (g)"}
           aria-label={`Protéines réelles — ${day.label}`}
-          className="w-full border border-border bg-background px-2 py-2 text-xs text-foreground transition-colors focus:border-primary focus:outline-none"
+          className="w-full border border-border bg-background px-2 py-2 text-xs text-foreground placeholder:text-muted-foreground/50 transition-colors focus:border-primary focus:outline-none"
         />
         <input
           type="number"
@@ -193,9 +193,9 @@ function WeeklyNutritionDayCard({
             setCarbs(e.target.value);
             setSaved(false);
           }}
-          placeholder="Gluc (g)"
+          placeholder={day.targetCarbs !== null ? `${day.targetCarbs}g` : "Gluc (g)"}
           aria-label={`Glucides réels — ${day.label}`}
-          className="w-full border border-border bg-background px-2 py-2 text-xs text-foreground transition-colors focus:border-primary focus:outline-none"
+          className="w-full border border-border bg-background px-2 py-2 text-xs text-foreground placeholder:text-muted-foreground/50 transition-colors focus:border-primary focus:outline-none"
         />
         <input
           type="number"
@@ -205,9 +205,9 @@ function WeeklyNutritionDayCard({
             setFat(e.target.value);
             setSaved(false);
           }}
-          placeholder="Lip (g)"
+          placeholder={day.targetFat !== null ? `${day.targetFat}g` : "Lip (g)"}
           aria-label={`Lipides réels — ${day.label}`}
-          className="w-full border border-border bg-background px-2 py-2 text-xs text-foreground transition-colors focus:border-primary focus:outline-none"
+          className="w-full border border-border bg-background px-2 py-2 text-xs text-foreground placeholder:text-muted-foreground/50 transition-colors focus:border-primary focus:outline-none"
         />
       </div>
 

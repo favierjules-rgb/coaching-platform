@@ -133,41 +133,47 @@ function BillingRow({
 
   return (
     <div className="flex flex-col gap-4 border border-border bg-card p-6 lg:flex-row lg:items-center lg:justify-between">
+      {/* min-w-0 sur chaque cellule : une grille CSS ne rétrécit jamais une
+          colonne sous la largeur intrinsèque de son contenu par défaut — un
+          badge au libellé long ("Sans abonnement") ou un texte non coupé
+          poussait la colonne suivante et donnait un chevauchement visuel
+          (même classe de bug que le débordement des selects
+          ExerciseSearchPicker, cf. commit 1705e47). */}
       <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-6">
-        <div>
+        <div className="min-w-0">
           <span className="block text-xs uppercase tracking-wide text-muted-foreground">Élève</span>
           <span className="font-heading text-lg font-bold text-foreground">
             {item.studentFirstName} {item.studentLastName}
           </span>
-          <span className="block text-xs text-muted-foreground">{item.studentEmail}</span>
+          <span className="block truncate text-xs text-muted-foreground">{item.studentEmail}</span>
         </div>
-        <div>
+        <div className="min-w-0">
           <span className="block text-xs uppercase tracking-wide text-muted-foreground">Statut abonnement</span>
           <span className="mt-1 block">
             <BillingStatusBadge status={item.status} />
           </span>
         </div>
-        <div>
+        <div className="min-w-0">
           <span className="block text-xs uppercase tracking-wide text-muted-foreground">Accès au site</span>
           <span className="mt-1 block">
             <StatusBadge label={item.access.allowed ? "Autorisé" : "Bloqué"} tone={item.access.allowed ? "green" : "red"} />
           </span>
           <span className="mt-1 block text-xs text-muted-foreground">{accessReasonLabels[item.access.reason]}</span>
         </div>
-        <div>
+        <div className="min-w-0">
           <span className="block text-xs uppercase tracking-wide text-muted-foreground">Formule · Montant</span>
-          <span className="block text-sm text-foreground">{planLabelFor(item)}</span>
+          <span className="block truncate text-sm text-foreground">{planLabelFor(item)}</span>
           <span className="block text-sm text-muted-foreground">
             {item.subscription ? formatAmountCents(item.subscription.amountCents, item.subscription.currency) : "—"}
           </span>
         </div>
-        <div>
+        <div className="min-w-0">
           <span className="block text-xs uppercase tracking-wide text-muted-foreground">Prochaine échéance</span>
           <span className="block text-sm text-foreground">
             {item.subscription?.currentPeriodEnd ? formatDate(item.subscription.currentPeriodEnd) : "—"}
           </span>
         </div>
-        <div>
+        <div className="min-w-0">
           <span className="block text-xs uppercase tracking-wide text-muted-foreground">Dernier paiement</span>
           <span className="block text-sm text-foreground">
             {item.lastPayment

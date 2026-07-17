@@ -1,11 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle, Send, UserPlus } from "lucide-react";
+import { AlertTriangle, CheckCircle, UserPlus } from "lucide-react";
 
 import { Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
-import { Modal, OutlineButton, PrimaryButton } from "@/components/admin/Modal";
-import type { AdminStudent } from "@/types";
+import { Modal, PrimaryButton } from "@/components/admin/Modal";
 
 const levelOptions = [
   { value: "Débutant", label: "Débutant" },
@@ -39,13 +38,19 @@ function emptyForm() {
   };
 }
 
-export function CreateStudentModal({
-  onCreate,
-}: {
-  onCreate: (student: Omit<AdminStudent, "id" | "createdAt" | "updatedAt">) => string;
-}) {
+/**
+ * Création réelle d'un élève (chantier "invitation email à la création
+ * d'un élève") : POST /api/admin/students -> crée un vrai compte Supabase
+ * (auth invite + profiles + students + student_profiles pré-remplie) et
+ * envoie automatiquement l'email d'invitation "Ton espace est prêt" avec un
+ * lien de définition de mot de passe. Remplace l'ancien flux 100% mock
+ * (localStorage, "invitation fictive") — plus besoin d'un second bouton
+ * manuel "Envoyer invitation", l'envoi est désormais automatique et réel.
+ */
+export function CreateStudentModal({ onCreated }: { onCreated: () => void }) {
   const [open, setOpen] = useState(false);
-  const [step, setStep] = useState<"form" | "created" | "invited">("form");
+  const [step, setStep] = useState<"form" | "submitting" | "created" | "error">("form");
+  const [errorMessage, setErrorMessage] = useState("");
   const [form, setForm] = useState(emptyForm);
 
   function setField<K extends keyof ReturnType<typeof emptyForm>>(key: K, value: string) {
@@ -55,70 +60,52 @@ export function CreateStudentModal({
   function close() {
     setOpen(false);
     setStep("form");
+    setErrorMessage("");
     setForm(emptyForm());
   }
 
   const canSubmit = form.firstName.trim() !== "" && form.lastName.trim() !== "" && form.email.trim() !== "";
 
-  function handleCreate() {
+  async function handleCreate() {
     if (!canSubmit) return;
-    const weight = Number(form.currentWeightKg) || 0;
-    onCreate({
-      firstName: form.firstName.trim(),
-      lastName: form.lastName.trim(),
-      email: form.email.trim(),
-      phone: form.phone.trim(),
-      age: Number(form.age) || 0,
-      heightCm: Number(form.heightCm) || 0,
-      currentWeightKg: weight,
-      startWeightKg: weight,
-      targetWeightKg: weight,
-      goal: form.goal.trim() || "Non défini",
-      level: form.level,
-      trainingFrequencyPerWeek: Number(form.trainingFrequencyPerWeek) || 0,
-      trainingLocation: form.trainingLocation,
-      status: "actif",
-      startDate: new Date().toISOString().slice(0, 10),
-      lastLoginAt: null,
-      foodPreferences: {
-        liked: [],
-        disliked: [],
-        intolerances: form.intolerances
-          ? form.intolerances.split(",").map((s) => s.trim()).filter(Boolean)
-          : [],
-        diet: form.foodPreferences.trim() || "Omnivore",
-      },
-      sportPreferences: { sports: [], equipment: [], preferredExercises: [], exercisesToAvoid: [] },
-      injuries: form.injuries.trim() || "Aucune blessure connue.",
-      weightHistory: [{ month: new Date().toLocaleDateString("fr-FR", { month: "short" }), kg: weight }],
-      measurements: [],
-      customMeasurements: [],
-      measurementHistory: [],
-      progressPhotos: [],
-      paymentProfile: {
-        studentId: "",
-        offerName: "",
-        monthlyPriceEuros: 0,
-        durationMonths: 0,
-        totalPriceEuros: 0,
-        paidAmountEuros: 0,
-        status: "en attente",
-        method: "autre",
-        nextPaymentDate: null,
-        installmentsTotal: 0,
-        installmentsPaid: 0,
-        entries: [],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      },
-      assignedProgramIds: [],
-      assignedNutritionPlanIds: [],
-      assignedDocumentIds: [],
-      coachNotes: form.coachNotes.trim()
-        ? [{ id: `note-${Date.now()}`, studentId: "", text: form.coachNotes.trim(), createdAt: new Date().toISOString() }]
-        : [],
-    });
-    setStep("created");
+    setStep("submitting");
+    setErrorMessage("");
+    try {
+      const response = await fetch("/api/admin/students", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          firstName: form.firstName.trim(),
+          lastName: form.lastName.trim(),
+          email: form.email.trim(),
+          phone: form.phone.trim(),
+          age: Number(form.age) || 0,
+          heightCm: Number(form.heightCm) || 0,
+          currentWeightKg: Number(form.currentWeightKg) || 0,
+          goal: form.goal.trim(),
+          level: form.level,
+          trainingFrequencyPerWeek: Number(form.trainingFrequencyPerWeek) || 0,
+          trainingLocation: form.trainingLocation,
+          foodPreferences: form.foodPreferences.trim(),
+          intolerances: form.intolerances
+            ? form.intolerances.split(",").map((s) => s.trim()).filter(Boolean)
+            : [],
+          injuries: form.injuries.trim(),
+          coachNotes: form.coachNotes.trim(),
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        setErrorMessage(data.error || "Échec de la création de l'élève.");
+        setStep("error");
+        return;
+      }
+      setStep("created");
+      onCreated();
+    } catch {
+      setErrorMessage("Échec de la création de l'élève (erreur réseau).");
+      setStep("error");
+    }
   }
 
   return (
@@ -134,7 +121,7 @@ export function CreateStudentModal({
 
       {open && (
         <Modal title="Créer un élève" onClose={close} maxWidth="max-w-lg">
-          {step === "form" && (
+          {(step === "form" || step === "submitting" || step === "error") && (
             <div className="flex flex-col gap-4">
               <div className="grid grid-cols-2 gap-4">
                 <Field label="Prénom" value={form.firstName} onChange={(v) => setField("firstName", v)} required />
@@ -184,8 +171,16 @@ export function CreateStudentModal({
               />
               <TextareaField label="Blessures / contraintes" value={form.injuries} onChange={(v) => setField("injuries", v)} rows={2} />
               <TextareaField label="Notes coach" value={form.coachNotes} onChange={(v) => setField("coachNotes", v)} rows={2} />
-              <PrimaryButton onClick={handleCreate} disabled={!canSubmit}>
-                Créer l&apos;élève
+
+              {step === "error" && (
+                <p className="flex items-center gap-2 text-sm text-red-400">
+                  <AlertTriangle size={16} className="flex-shrink-0" />
+                  {errorMessage}
+                </p>
+              )}
+
+              <PrimaryButton onClick={handleCreate} disabled={!canSubmit || step === "submitting"}>
+                {step === "submitting" ? "Création en cours…" : "Créer l'élève et envoyer l'invitation"}
               </PrimaryButton>
             </div>
           )}
@@ -194,27 +189,13 @@ export function CreateStudentModal({
             <div className="flex flex-col gap-4">
               <div className="flex items-center gap-3 border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-400">
                 <CheckCircle size={18} className="flex-shrink-0" />
-                Élève créé avec succès.
+                Élève créé — l&apos;invitation par email (définition du mot de passe) vient d&apos;être envoyée à{" "}
+                {form.email.trim()}.
               </div>
               <p className="text-sm text-muted-foreground">
-                Tu peux maintenant lui envoyer une invitation (fictive pour le moment) ou fermer cette fenêtre.
+                Une fois connecté, l&apos;élève devra obligatoirement compléter le questionnaire avant d&apos;accéder
+                au reste de son espace.
               </p>
-              <div className="flex gap-3">
-                <PrimaryButton onClick={() => setStep("invited")}>
-                  <span className="flex items-center justify-center gap-2">
-                    <Send size={14} />
-                    Envoyer invitation
-                  </span>
-                </PrimaryButton>
-                <OutlineButton onClick={close}>Fermer</OutlineButton>
-              </div>
-            </div>
-          )}
-
-          {step === "invited" && (
-            <div className="flex items-center gap-3 border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-400">
-              <CheckCircle size={18} className="flex-shrink-0" />
-              Invitation envoyée (fictive). L&apos;élève recevra un accès une fois Supabase connecté.
             </div>
           )}
         </Modal>

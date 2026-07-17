@@ -39,7 +39,7 @@ export async function POST(request: Request) {
     options: { redirectTo: `${appUrl}/reinitialiser-mot-de-passe` },
   });
 
-  if (linkError || !linkData?.properties?.action_link) {
+  if (linkError || !linkData?.properties?.hashed_token) {
     // Cas normal si l'email ne correspond à aucun compte — pas une erreur à
     // signaler côté client.
     if (linkError) {
@@ -48,7 +48,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  const email_ = composePasswordResetEmail({ resetUrl: linkData.properties.action_link });
+  // On construit nous-mêmes l'URL vers /reinitialiser-mot-de-passe plutôt
+  // que d'utiliser linkData.properties.action_link (URL hébergée par
+  // Supabase, /auth/v1/verify?...&redirect_to=...) : ce redirect_to est
+  // tronqué par GoTrue dès qu'il ne correspond pas exactement à une entrée
+  // de la liste "Redirect URLs" du dashboard, ce qui a cassé ce flux en prod
+  // — voir le commentaire détaillé dans ResetPasswordForm.tsx. verifyOtp()
+  // y échange ce jeton contre une session sans dépendre de cette redirection.
+  const resetUrl = `${appUrl}/reinitialiser-mot-de-passe?token_hash=${encodeURIComponent(linkData.properties.hashed_token)}&type=recovery`;
+  const email_ = composePasswordResetEmail({ resetUrl });
   await sendTransactionalEmail(supabase, {
     emailType: "password_reset",
     recipientEmail: email,

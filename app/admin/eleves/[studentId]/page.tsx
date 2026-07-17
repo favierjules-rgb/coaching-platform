@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { Activity, AlertTriangle, ArrowLeft, Archive, History, Lock, Pause, Play, TrendingUp, Unlock } from "lucide-react";
+import { Activity, AlertTriangle, ArrowLeft, Archive, History, Lock, Pause, Play, Trash2, TrendingUp, Unlock } from "lucide-react";
 
 import { ActivityFeed } from "@/components/admin/ActivityFeed";
 import { AddCoachNoteModal } from "@/components/admin/AddCoachNoteModal";
@@ -90,6 +90,8 @@ export default function AdminStudentDetailPage() {
   const { students, feedback, manualDocumentUnlocks } = state;
   const [selectedMuscleGroup, setSelectedMuscleGroup] = useState<MuscleGroupFilter>("tous");
   const [statusActionError, setStatusActionError] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState(false);
 
   // Priorité Supabase dès qu'au moins un programme/plan réel existe — même
   // pattern que /admin/programmes, /admin/nutrition et /admin/eleves.
@@ -455,6 +457,34 @@ export default function AdminStudentDetailPage() {
     unlockAllDocumentsForStudent(student!.id);
   }
 
+  /**
+   * Suppression complète et définitive (chantier "bouton suppression
+   * élève") — fiche, toutes les données liées (cascade FK), fichiers
+   * Storage de progression et compte de connexion. Réservée aux élèves
+   * Supabase réels (isSupabaseStudent) : un élève mock n'a rien à supprimer
+   * côté serveur. window.confirm reprend le même garde-fou que le bouton
+   * "Archiver l'élève" juste au-dessus, en insistant sur l'irréversibilité
+   * (contrairement à l'archivage, qui reste réversible).
+   */
+  async function handleDeleteStudent() {
+    if (
+      !window.confirm(
+        `Supprimer définitivement ${student.firstName} ${student.lastName} ? Cette action est IRRÉVERSIBLE : le profil, l'historique, les photos et l'accès de connexion seront tous supprimés.`,
+      )
+    ) {
+      return;
+    }
+    setDeleteError(false);
+    setDeleting(true);
+    const response = await fetch(`/api/admin/students/${student.id}`, { method: "DELETE" });
+    if (!response.ok) {
+      setDeleting(false);
+      setDeleteError(true);
+      return;
+    }
+    router.push("/admin/eleves");
+  }
+
   const studentFeedback = (isSupabaseStudent ? supabaseDetail.feedback : feedback.filter((f) => f.studentId === student.id))
     .slice()
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -565,11 +595,28 @@ export default function AdminStudentDetailPage() {
             <Archive size={13} />
             Archiver l&apos;élève
           </button>
+          {isSupabaseStudent && (
+            <button
+              type="button"
+              onClick={handleDeleteStudent}
+              disabled={deleting}
+              className="flex items-center gap-1.5 border border-red-500/50 bg-red-500/10 px-4 py-2 text-xs uppercase tracking-widest text-red-400 transition-colors hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Trash2 size={13} />
+              {deleting ? "Suppression…" : "Supprimer définitivement"}
+            </button>
+          )}
         </div>
         {statusActionError && (
           <p className="mt-2 flex w-full items-center gap-2 text-xs text-red-400">
             <AlertTriangle size={14} className="flex-shrink-0" />
             Échec de la mise à jour du statut. Réessaie.
+          </p>
+        )}
+        {deleteError && (
+          <p className="mt-2 flex w-full items-center gap-2 text-xs text-red-400">
+            <AlertTriangle size={14} className="flex-shrink-0" />
+            Échec de la suppression. Réessaie.
           </p>
         )}
       </div>

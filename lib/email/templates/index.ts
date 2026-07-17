@@ -283,6 +283,37 @@ export function composeAccountExpiryWarningEmail(input: { firstName: string; log
   };
 }
 
+/* ─── G-quinquies. Invitation élève créé par le coach (coaching classique) ───
+ * Déclenché à la création d'un élève depuis /admin/eleves
+ * (CreateStudentModal -> lib/supabase/coach-student-provisioning.ts).
+ * Distinct de composePublicProgramWelcomeEmail (achat unique programme
+ * public) : ici l'élève est un compte "coaching" classique, le lien de
+ * définition de mot de passe le ramène sur /reinitialiser-mot-de-passe puis
+ * /dashboard, qui le redirige automatiquement vers /onboarding tant que son
+ * questionnaire n'est pas complété (voir lib/supabase/guards.ts::
+ * requireStudent) — jamais besoin de forcer ce lien explicitement ici.
+ */
+
+export function composeCoachInviteEmail(input: { firstName: string; coachName: string; setPasswordUrl: string }): ComposedEmail {
+  const name = escapeHtml(input.firstName || "");
+  const coach = escapeHtml(input.coachName || "ton coach");
+  const bodyHtml = [
+    p(`Bonjour ${name},`),
+    p(`${coach} vient de créer ton espace sur SETH Préparation Physique. Clique sur le bouton ci-dessous pour définir ton mot de passe et accéder à ton compte.`),
+    p(`Une fois connecté, un court questionnaire te sera demandé pour que ton coach puisse te préparer un programme et un plan nutritionnel adaptés.`),
+  ].join("");
+  const button: EmailButton = { label: "Définir mon mot de passe", url: input.setPasswordUrl };
+  return {
+    subject: "Ton espace SETH Préparation Physique est prêt",
+    html: renderBaseEmailHtml({ preheader: "Définis ton mot de passe pour accéder à ton espace.", heading: "Bienvenue !", bodyHtml, button }),
+    text: renderBaseEmailText({
+      heading: "Bienvenue !",
+      bodyText: `Bonjour ${input.firstName},\n${input.coachName || "Ton coach"} vient de créer ton espace sur SETH Préparation Physique. Définis ton mot de passe pour y accéder : ${input.setPasswordUrl}\nUn court questionnaire te sera ensuite demandé.`,
+      button,
+    }),
+  };
+}
+
 /* ─── H. Document attribué ─── */
 
 export function composeDocumentAssignedEmail(input: { firstName: string; documentTitle: string; documentsUrl: string }): ComposedEmail {
