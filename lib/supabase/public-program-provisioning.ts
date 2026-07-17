@@ -113,7 +113,13 @@ async function createProgramOnlyStudent(
   const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
     type: "invite",
     email: input.email,
-    options: { redirectTo: `${appUrl()}/entrainement` },
+    // Passe par /reinitialiser-mot-de-passe (jamais /entrainement
+    // directement) pour que ce compte ait un vrai mot de passe utilisable
+    // ensuite — un lien d'invite est à usage unique, sans ça l'accès de cet
+    // acheteur ne durerait pas dans le temps. La page redirige elle-même
+    // vers /dashboard une fois le mot de passe défini, qui renvoie vers
+    // /entrainement pour un compte "programme_seul" (voir guards.ts).
+    options: { redirectTo: `${appUrl()}/reinitialiser-mot-de-passe` },
   });
 
   if (linkError || !linkData?.user) {

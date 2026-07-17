@@ -8,10 +8,11 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 /**
  * Section home page "Programmes disponibles" (chantier module
- * Programmation, étape 6), placée juste après Transformations : deux
- * bandeaux auto-défilants (PublicProgramsMarquee) présentant les programmes
- * publics (gratuits ou achat unique), avec une invitation à consulter la
- * bibliothèque complète (/programmes). Ne s'affiche pas tant qu'aucun
+ * Programmation, étape 6), placée juste après Transformations : un seul
+ * bandeau auto-défilant (PublicProgramsMarquee) présentant les programmes
+ * publics (gratuits ou achat unique), aligné à hauteur de l'invitation à
+ * consulter la bibliothèque complète (/programmes) — jamais un second
+ * bandeau qui déborderait sous ce bloc. Ne s'affiche pas tant qu'aucun
  * programme n'est publié (`is_public = true`, réglé depuis le builder
  * admin) — rien à montrer plutôt qu'une section vide.
  */
@@ -36,9 +37,8 @@ export async function PublicPrograms() {
       </div>
 
       <div className="mx-auto flex max-w-7xl flex-col gap-10 px-6 lg:flex-row lg:items-center">
-        <div className="flex min-w-0 flex-1 flex-col gap-6">
+        <div className="min-w-0 flex-1">
           <PublicProgramsMarquee programs={programs} durationSeconds={Math.max(28, programs.length * 9)} />
-          <PublicProgramsMarquee programs={[...programs].reverse()} durationSeconds={Math.max(34, programs.length * 11)} />
         </div>
 
         <div className="flex flex-shrink-0 flex-col items-start gap-4 border border-border bg-zinc-950 p-8 lg:w-72">

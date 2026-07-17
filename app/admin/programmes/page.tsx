@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Copy, Dumbbell, Loader2, Plus } from "lucide-react";
+import { Copy, Dumbbell, Loader2, Plus, Trash2 } from "lucide-react";
 
 import { AssignStudentsModal } from "@/components/admin/AssignStudentsModal";
 import { ExerciseLibraryManager } from "@/components/admin/ExerciseLibraryManager";
@@ -18,10 +18,11 @@ import { contentStatusLabels, matchesTextSearch, totalSessions, totalWeeks } fro
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
   createExerciseLibraryItem,
+  deleteExerciseLibraryItem,
   setExerciseLibraryStatus,
   updateExerciseLibraryItem,
 } from "@/lib/supabase/exercise-library";
-import { duplicateProgram } from "@/lib/supabase/programs";
+import { deleteProgram, duplicateProgram } from "@/lib/supabase/programs";
 import type { AdminContentStatus, ExerciseLibraryItem } from "@/types";
 
 type StatusFilter = "tous" | AdminContentStatus;
@@ -112,6 +113,33 @@ export default function AdminProgramsPage() {
     updateLibraryExercise(id, { status });
   }
 
+  async function handleDeleteExercise(id: string) {
+    if (isLibrarySupabaseActive) {
+      const supabase = createSupabaseBrowserClient();
+      if (supabase) {
+        await deleteExerciseLibraryItem(supabase, id);
+        await supabaseExerciseLibrary.refetch();
+      }
+    }
+  }
+
+  // Suppression définitive d'un programme (pas un archivage) — Supabase
+  // uniquement, même repli que handleDuplicate. deleteProgram nettoie
+  // aussi les lignes `assignments` correspondantes (pas de FK réelle sur
+  // cette table, voir lib/supabase/programs.ts).
+  const [pendingDeleteProgramId, setPendingDeleteProgramId] = useState<string | null>(null);
+  const [deletingProgramId, setDeletingProgramId] = useState<string | null>(null);
+
+  async function handleDeleteProgram(programId: string) {
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) return;
+    setDeletingProgramId(programId);
+    await deleteProgram(supabase, programId);
+    await supabasePrograms.refetch();
+    setDeletingProgramId(null);
+    setPendingDeleteProgramId(null);
+  }
+
   const [tab, setTab] = useState<Tab>("programmes");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("tous");
@@ -175,6 +203,7 @@ export default function AdminProgramsPage() {
           onCreate={handleCreateExercise}
           onUpdate={handleUpdateExercise}
           onSetStatus={handleSetExerciseStatus}
+          onDelete={handleDeleteExercise}
         />
       ) : (
         <>
@@ -271,6 +300,31 @@ export default function AdminProgramsPage() {
                   assignedStudentIds={program.assignedStudentIds}
                   onSetAssignment={handleSetAssignment}
                 />
+                {isProgramsSupabaseActive &&
+                  (pendingDeleteProgramId === program.id ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleDeleteProgram(program.id)}
+                      disabled={deletingProgramId === program.id}
+                      className="flex items-center gap-1.5 border border-red-500 bg-red-500/10 px-4 py-2 text-xs uppercase tracking-widest text-red-400 disabled:opacity-50"
+                    >
+                      {deletingProgramId === program.id ? (
+                        <Loader2 size={13} className="animate-spin" />
+                      ) : (
+                        <Trash2 size={13} />
+                      )}
+                      Confirmer la suppression
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setPendingDeleteProgramId(program.id)}
+                      className="flex items-center gap-1.5 border border-red-500/40 px-4 py-2 text-xs uppercase tracking-widest text-red-400 transition-colors hover:bg-red-500/10"
+                    >
+                      <Trash2 size={13} />
+                      Supprimer
+                    </button>
+                  ))}
               </div>
             </div>
           ))}

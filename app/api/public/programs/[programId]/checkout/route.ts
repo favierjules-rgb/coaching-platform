@@ -33,14 +33,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
 
   const { data: program, error: programError } = await supabase
     .from("programs")
-    .select("id, name, is_public, public_subscription_template_id")
+    .select("id, name, status, is_public, public_subscription_template_id")
     .eq("id", parsedParams.data.id)
     .maybeSingle();
   if (programError) {
     console.error(`[public/programs/checkout] lecture programme : ${programError.message}`);
   }
 
-  if (!program || !program.is_public || !program.public_subscription_template_id) {
+  // status !== "actif" couvre aussi bien un programme archivé après coup
+  // qu'un lien direct vers un brouillon jamais publié (correctif : un
+  // programme archivé restait achetable via un lien déjà partagé).
+  if (!program || !program.is_public || program.status !== "actif" || !program.public_subscription_template_id) {
     return NextResponse.json({ error: "Programme introuvable ou non payant." }, { status: 404 });
   }
 

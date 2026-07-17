@@ -900,6 +900,31 @@ export async function updateProgram(
   return !updateError;
 }
 
+/**
+ * Supprime définitivement un programme et toute sa structure — jamais
+ * juste un archivage. La cascade DB (program_weeks/workout_sessions/
+ * workout_exercises/training_blocks/training_prescriptions/
+ * training_change_history → programs ON DELETE CASCADE) fait le reste ;
+ * `workout_feedback.program_id` passe à null (ON DELETE SET NULL), le
+ * retour élève survit sans rattachement. `assignments` n'a en revanche
+ * aucune FK vers `programs` (content_id est polymorphe, content_type
+ * générique) : on supprime donc explicitement ses lignes en premier pour ne
+ * jamais laisser une assignation orpheline pointer vers un programme
+ * supprimé.
+ */
+export async function deleteProgram(supabase: TypedSupabaseClient, programId: string): Promise<boolean> {
+  const { error: assignmentsError } = await supabase
+    .from("assignments")
+    .delete()
+    .eq("content_type", "programme")
+    .eq("content_id", programId);
+  devWarn("deleteProgram (assignments)", assignmentsError);
+
+  const { error } = await supabase.from("programs").delete().eq("id", programId);
+  devWarn("deleteProgram", error);
+  return !error;
+}
+
 export async function updateProgramStatus(
   supabase: TypedSupabaseClient,
   programId: string,

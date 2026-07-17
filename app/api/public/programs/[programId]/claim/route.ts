@@ -33,14 +33,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
 
   const { data: program, error: programError } = await supabase
     .from("programs")
-    .select("id, name, coach_id, is_public, public_subscription_template_id")
+    .select("id, name, coach_id, status, is_public, public_subscription_template_id")
     .eq("id", parsedParams.data.id)
     .maybeSingle();
   if (programError) {
     console.error(`[public/programs/claim] lecture programme : ${programError.message}`);
   }
 
-  if (!program || !program.is_public) {
+  // status !== "actif" couvre aussi bien un programme archivé après coup
+  // qu'un lien direct vers un brouillon jamais publié.
+  if (!program || !program.is_public || program.status !== "actif") {
     return NextResponse.json({ error: "Programme introuvable." }, { status: 404 });
   }
   if (program.public_subscription_template_id) {

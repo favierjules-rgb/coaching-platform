@@ -11,6 +11,10 @@ import type { PublicProgramSummary } from "@/types";
  * droite. `durationSeconds` varie d'un bandeau à l'autre (voir
  * PublicPrograms.tsx) pour que les deux rangées ne défilent jamais à
  * l'identique.
+ *
+ * Avec un seul programme disponible, dupliquer la piste ferait apparaître
+ * une simple copie côte à côte plutôt qu'un défilement — dans ce cas on
+ * affiche la carte une seule fois, sans animation.
  */
 export function PublicProgramsMarquee({
   programs,
@@ -19,6 +23,16 @@ export function PublicProgramsMarquee({
   programs: PublicProgramSummary[];
   durationSeconds: number;
 }) {
+  if (programs.length <= 1) {
+    return (
+      <div className="flex w-max gap-6">
+        {programs.map((program) => (
+          <PublicProgramCard key={program.id} program={program} />
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className="overflow-hidden">
       <div

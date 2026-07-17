@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Archive, ArchiveRestore, Library, PlayCircle } from "lucide-react";
+import { Archive, ArchiveRestore, Library, PlayCircle, Trash2 } from "lucide-react";
 
 import { ExerciseLibraryItemModal } from "@/components/admin/ExerciseLibraryItemModal";
 import { SearchInput } from "@/components/admin/SearchAndFilters";
@@ -19,14 +19,16 @@ interface ExerciseLibraryManagerProps {
   onCreate: (data: Omit<ExerciseLibraryItem, "id" | "createdAt" | "updatedAt">) => void;
   onUpdate: (id: string, partial: Partial<ExerciseLibraryItem>) => void;
   onSetStatus: (id: string, status: "active" | "archived") => void;
+  onDelete: (id: string) => void | Promise<void>;
 }
 
 function muscleLabel(group: MuscleGroup): string {
   return muscleGroupLabels[group] ?? group;
 }
 
-export function ExerciseLibraryManager({ items, onCreate, onUpdate, onSetStatus }: ExerciseLibraryManagerProps) {
+export function ExerciseLibraryManager({ items, onCreate, onUpdate, onSetStatus, onDelete }: ExerciseLibraryManagerProps) {
   const [query, setQuery] = useState("");
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const filtered = items.filter((item) => matchesExerciseSearch(item, query));
 
   return (
@@ -105,6 +107,28 @@ export function ExerciseLibraryManager({ items, onCreate, onUpdate, onSetStatus 
                   >
                     <ArchiveRestore size={12} />
                     Réactiver
+                  </button>
+                )}
+                {pendingDeleteId === item.id ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onDelete(item.id);
+                      setPendingDeleteId(null);
+                    }}
+                    className="flex items-center gap-1.5 border border-red-500 bg-red-500/10 px-3 py-1.5 text-[11px] uppercase tracking-widest text-red-400"
+                  >
+                    <Trash2 size={12} />
+                    Confirmer la suppression
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setPendingDeleteId(item.id)}
+                    className="flex items-center gap-1.5 border border-red-500/40 px-3 py-1.5 text-[11px] uppercase tracking-widest text-red-400 transition-colors hover:bg-red-500/10"
+                  >
+                    <Trash2 size={12} />
+                    Supprimer
                   </button>
                 )}
               </div>

@@ -229,6 +229,60 @@ export function composePublicProgramWelcomeEmail(input: { firstName: string; pro
   };
 }
 
+/* ─── G-ter. Mot de passe oublié ───
+ * Déclenché par /mot-de-passe-oublie (voir
+ * app/api/public/password-reset/route.ts) — remplace l'email par défaut de
+ * Supabase Auth (anglais, expéditeur "Supabase Auth") par ce template
+ * Resend, cohérent avec composePublicProgramWelcomeEmail. Le bouton pointe
+ * vers un lien Supabase (type "recovery") qui connecte directement le
+ * destinataire sur /reinitialiser-mot-de-passe.
+ */
+
+export function composePasswordResetEmail(input: { resetUrl: string }): ComposedEmail {
+  const bodyHtml = [
+    p(`Bonjour,`),
+    p(`Tu as demandé à réinitialiser ton mot de passe sur ton espace SETH Préparation Physique. Clique sur le bouton ci-dessous pour en choisir un nouveau.`),
+    p(`Si tu n'es pas à l'origine de cette demande, tu peux ignorer cet email — ton mot de passe actuel reste inchangé.`),
+  ].join("");
+  const button: EmailButton = { label: "Choisir un nouveau mot de passe", url: input.resetUrl };
+  return {
+    subject: "Réinitialise ton mot de passe",
+    html: renderBaseEmailHtml({ preheader: "Choisis un nouveau mot de passe.", heading: "Mot de passe oublié", bodyHtml, button }),
+    text: renderBaseEmailText({
+      heading: "Mot de passe oublié",
+      bodyText: `Bonjour,\nTu as demandé à réinitialiser ton mot de passe. Utilise ce lien pour en choisir un nouveau : ${input.resetUrl}\nSi tu n'es pas à l'origine de cette demande, ignore cet email.`,
+      button,
+    }),
+  };
+}
+
+/* ─── G-quater. Avertissement fin d'accès (achat unique, 6 mois) ───
+ * Chantier "suppression auto. comptes programme_seul" — envoyé une seule
+ * fois (`students.deletion_warning_sent_at`), ~14 jours avant la
+ * suppression définitive du compte (voir
+ * app/api/internal/cleanup-expired-accounts/route.ts). Le compte est
+ * réellement supprimé (fiche + connexion) à l'échéance, sans nouvel email.
+ */
+
+export function composeAccountExpiryWarningEmail(input: { firstName: string; loginUrl: string }): ComposedEmail {
+  const name = escapeHtml(input.firstName || "");
+  const bodyHtml = [
+    p(`Bonjour ${name},`),
+    p(`Ton accès à ton programme sur SETH Préparation Physique se termine dans environ 14 jours. Passé ce délai, ton compte et tes données seront définitivement supprimés.`),
+    p(`Si tu souhaites encore profiter de ton programme, connecte-toi dès maintenant.`),
+  ].join("");
+  const button: EmailButton = { label: "Accéder à mon programme", url: input.loginUrl };
+  return {
+    subject: "Ton accès se termine bientôt",
+    html: renderBaseEmailHtml({ preheader: "Ton accès se termine dans environ 14 jours.", heading: "Ton accès se termine bientôt", bodyHtml, button }),
+    text: renderBaseEmailText({
+      heading: "Ton accès se termine bientôt",
+      bodyText: `Bonjour ${input.firstName},\nTon accès à ton programme se termine dans environ 14 jours. Passé ce délai, ton compte et tes données seront définitivement supprimés.\nConnecte-toi dès maintenant pour en profiter : ${input.loginUrl}`,
+      button,
+    }),
+  };
+}
+
 /* ─── H. Document attribué ─── */
 
 export function composeDocumentAssignedEmail(input: { firstName: string; documentTitle: string; documentsUrl: string }): ComposedEmail {

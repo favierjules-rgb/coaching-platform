@@ -10,6 +10,7 @@ import { exerciseCategoryLabels, exerciseEquipmentLabels, exerciseLevelLabels } 
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
   createExerciseLibraryItem,
+  deleteExerciseLibraryItem,
   setExerciseLibraryStatus,
   updateExerciseLibraryItem,
 } from "@/lib/supabase/exercise-library";
@@ -77,6 +78,17 @@ export default function AdminExercicesPage() {
       }
     }
     updateLibraryExercise(id, { status });
+  }
+
+  async function handleDeleteExercise(id: string) {
+    if (isLibrarySupabaseActive) {
+      const supabase = createSupabaseBrowserClient();
+      if (supabase) {
+        await deleteExerciseLibraryItem(supabase, id);
+        await supabaseExerciseLibrary.refetch();
+        return;
+      }
+    }
   }
 
   return (
@@ -162,6 +174,7 @@ export default function AdminExercicesPage() {
           onCreate={handleCreateExercise}
           onUpdate={handleUpdateExercise}
           onSetStatus={handleSetExerciseStatus}
+          onDelete={handleDeleteExercise}
         />
       )}
     </div>

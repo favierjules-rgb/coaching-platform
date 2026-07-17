@@ -58,10 +58,18 @@ export function useSupabaseStudentProfile() {
   const [ready, setReady] = useState(false);
   const [studentId, setStudentId] = useState<string | null>(null);
   const [state, setState] = useState<StudentProfileState | null>(null);
+  // accessType/email : hors StudentProfileState (partagé avec le mock, qui
+  // n'a ni l'un ni l'autre) — utilisés par ProfilPageContent pour afficher la
+  // version "essentiel" d'un compte programme_seul (chantier suppression
+  // auto. 6 mois).
+  const [accessType, setAccessType] = useState<"coaching" | "programme_seul">("coaching");
+  const [email, setEmail] = useState("");
 
   const applyFetchResult = useCallback((student: AdminStudent | null) => {
     setStudentId(student?.id ?? null);
     setState(student ? toProfileState(student) : null);
+    setAccessType(student?.accessType ?? "coaching");
+    setEmail(student?.email ?? "");
     setReady(true);
   }, []);
 
@@ -161,5 +169,5 @@ export function useSupabaseStudentProfile() {
     [refetch],
   );
 
-  return { ready, state, updateProfile, updateWeight, updateMeasurements, addPhoto, removePhoto };
+  return { ready, state, accessType, email, updateProfile, updateWeight, updateMeasurements, addPhoto, removePhoto };
 }

@@ -100,6 +100,7 @@ export interface Database {
           start_date: string;
           last_login_at: string | null;
           access_type: "coaching" | "programme_seul";
+          deletion_warning_sent_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -115,6 +116,7 @@ export interface Database {
           start_date?: string;
           last_login_at?: string | null;
           access_type?: "coaching" | "programme_seul";
+          deletion_warning_sent_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -130,6 +132,7 @@ export interface Database {
           start_date?: string;
           last_login_at?: string | null;
           access_type?: "coaching" | "programme_seul";
+          deletion_warning_sent_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };

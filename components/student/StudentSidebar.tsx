@@ -52,8 +52,15 @@ export function StudentSidebar({
   // (le guard requireActiveStudentAccess redirige vers /acces-limite le cas
   // échéant), c'est juste un indice visuel pour comprendre pourquoi.
   const access = useSupabaseMyAccess();
-  const isBlocked = access.ready && access.status !== null && !access.status.allowed;
   const accessType = useSupabaseAccessType();
+  // Correctif crawl pré-merge (chantier suppression auto. 6 mois) : un
+  // compte "programme_seul" n'est jamais soumis au contrôle d'abonnement
+  // Stripe (voir lib/supabase/guards.ts::requireEntrainementAccess, qui lui
+  // laisse toujours l'accès) — sans ce garde-fou, useSupabaseMyAccess le
+  // trouvait "non abonné" et affichait un cadenas trompeur sur Entraînement
+  // alors que le clic fonctionnait réellement.
+  const isBlocked =
+    accessType !== "programme_seul" && access.ready && access.status !== null && !access.status.allowed;
   const visibleLinks =
     accessType === "programme_seul" ? studentLinks.filter((link) => programOnlyHrefs.has(link.href)) : studentLinks;
 

@@ -2257,7 +2257,9 @@ export type EmailType =
   | "document_assigned"
   | "appointment_created"
   | "appointment_cancelled"
-  | "appointment_reminder";
+  | "appointment_reminder"
+  | "password_reset"
+  | "account_expiry_warning";
 
 export type EmailStatus = "pending" | "sent" | "failed" | "skipped";
 

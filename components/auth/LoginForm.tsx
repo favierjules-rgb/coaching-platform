@@ -112,9 +112,14 @@ export function LoginForm({ supabaseConfigured }: { supabaseConfigured: boolean 
           </div>
 
           <div>
-            <label htmlFor={passwordId} className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
-              Mot de passe
-            </label>
+            <div className="mb-2 flex items-center justify-between">
+              <label htmlFor={passwordId} className="block text-xs uppercase tracking-wide text-muted-foreground">
+                Mot de passe
+              </label>
+              <Link href="/mot-de-passe-oublie" className="text-xs text-muted-foreground transition-colors hover:text-primary">
+                Mot de passe oublié ?
+              </Link>
+            </div>
             <input
               id={passwordId}
               type="password"

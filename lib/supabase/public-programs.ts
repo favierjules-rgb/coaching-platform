@@ -5,12 +5,16 @@ import type { Database } from "@/types/supabase";
 
 /**
  * Lecture du catalogue public de programmes (chantier module Programmation,
- * étape 6) : uniquement les programmes marqués `is_public = true`, avec les
- * champs marketing (nom, objectif, description, niveau, durée, bannière,
- * prix) — jamais le détail séance/exercice, réservé aux élèves assignés +
- * staff (RLS `programs_select_assigned_student` / `programs_manage_staff`,
- * inchangées). Utilisable avec le client anonyme (visiteur non connecté,
- * RLS `programs_select_public` + `subscription_templates_select_active_or_staff`)
+ * étape 6) : uniquement les programmes marqués `is_public = true` ET
+ * `status = 'actif'` (correctif : un programme archivé ou encore en
+ * brouillon ne doit jamais rester achetable depuis la home page, même s'il
+ * a été publié un jour — voir aussi la policy RLS `programs_select_public`,
+ * mise à jour en miroir), avec les champs marketing (nom, objectif,
+ * description, niveau, durée, bannière, prix) — jamais le détail séance/
+ * exercice, réservé aux élèves assignés + staff (RLS
+ * `programs_select_assigned_student` / `programs_manage_staff`, inchangées).
+ * Utilisable avec le client anonyme (visiteur non connecté, RLS
+ * `programs_select_public` + `subscription_templates_select_active_or_staff`)
  * comme avec un client staff.
  */
 
@@ -52,6 +56,7 @@ export async function getPublicPrograms(supabase: TypedSupabaseClient): Promise<
     .from("programs")
     .select(PUBLIC_PROGRAM_SELECT)
     .eq("is_public", true)
+    .eq("status", "actif")
     .order("created_at", { ascending: false });
   if (error) {
     console.error(`[Supabase] getPublicPrograms : ${error.message}`);
@@ -60,9 +65,15 @@ export async function getPublicPrograms(supabase: TypedSupabaseClient): Promise<
   return ((data ?? []) as unknown as PublicProgramRow[]).map(mapPublicProgramRow);
 }
 
-/** Un programme public par id — page détail /programmes/[id]. `null` si introuvable ou non public. */
+/** Un programme public par id — page détail /programmes/[id]. `null` si introuvable, non public ou pas actif. */
 export async function getPublicProgramById(supabase: TypedSupabaseClient, id: string): Promise<PublicProgramSummary | null> {
-  const { data, error } = await supabase.from("programs").select(PUBLIC_PROGRAM_SELECT).eq("id", id).eq("is_public", true).maybeSingle();
+  const { data, error } = await supabase
+    .from("programs")
+    .select(PUBLIC_PROGRAM_SELECT)
+    .eq("id", id)
+    .eq("is_public", true)
+    .eq("status", "actif")
+    .maybeSingle();
   if (error) {
     console.error(`[Supabase] getPublicProgramById : ${error.message}`);
     return null;

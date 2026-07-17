@@ -151,6 +151,19 @@ export async function updateExerciseLibraryItem(
   return !error;
 }
 
+/**
+ * Supprime définitivement un exercice de la banque (jamais un archivage).
+ * `workout_exercises.exercise_library_id` passe à null (ON DELETE SET
+ * NULL) : les séances déjà construites depuis cet exercice conservent
+ * intégralement leur contenu, copié par valeur à l'ajout — seul le lien
+ * vers la fiche de banque source disparaît.
+ */
+export async function deleteExerciseLibraryItem(supabase: TypedSupabaseClient, id: string): Promise<boolean> {
+  const { error } = await supabase.from("exercise_library").delete().eq("id", id);
+  devWarn("deleteExerciseLibraryItem", error);
+  return !error;
+}
+
 /** Archive/désarchive un exercice — jamais de suppression réelle (préserve l'historique des programmes qui le référencent). */
 export async function setExerciseLibraryStatus(
   supabase: TypedSupabaseClient,

@@ -2,6 +2,7 @@
 
 import { RotateCcw } from "lucide-react";
 
+import { ChangePasswordSection } from "@/components/student/ChangePasswordSection";
 import { CoachingSummaryCard } from "@/components/student/CoachingSummaryCard";
 import { EditPersonalInfoModal } from "@/components/student/EditPersonalInfoModal";
 import { GoalsSection } from "@/components/student/GoalsSection";
@@ -50,6 +51,10 @@ export function ProfilPageContent({
   const mockProfile = useStudentProfile(studentId, seed);
   const supabaseProfile = useSupabaseStudentProfile();
   const useSupabase = supabaseProfile.ready && supabaseProfile.state !== null;
+  // Compte "achat unique" (chantier suppression auto. 6 mois) : accès à
+  // /profil réduit à l'essentiel (nom, email, mot de passe) — jamais aux
+  // mensurations/photos/préférences réservées aux vrais clients coaching.
+  const isProgramOnly = useSupabase && supabaseProfile.accessType === "programme_seul";
 
   const state = useSupabase ? supabaseProfile.state! : mockProfile.state;
   const updateProfile = useSupabase ? supabaseProfile.updateProfile : mockProfile.updateProfile;
@@ -67,6 +72,35 @@ export function ProfilPageContent({
 
   if (!supabaseProfile.ready) {
     return <p className="text-sm text-muted-foreground">Chargement du profil…</p>;
+  }
+
+  if (isProgramOnly) {
+    return (
+      <div>
+        <div className="mb-8">
+          <h1 className="font-heading text-3xl font-extrabold uppercase text-foreground md:text-4xl">
+            Profil
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {profile.firstName} {profile.lastName}
+          </p>
+        </div>
+
+        <div className="mb-6">
+          <ProfileSection title="Informations personnelles">
+            <InfoRow label="Prénom" value={profile.firstName} />
+            <InfoRow label="Nom" value={profile.lastName} />
+            <InfoRow label="Email" value={supabaseProfile.email} />
+          </ProfileSection>
+        </div>
+
+        <div className="mb-6">
+          <ChangePasswordSection />
+        </div>
+
+        <NewsletterPreferenceToggle />
+      </div>
+    );
   }
 
   return (
