@@ -314,6 +314,35 @@ export function composeCoachInviteEmail(input: { firstName: string; coachName: s
   };
 }
 
+/* ─── G-sexies. Invitation collaborateur (compte admin/coach) ───
+ * Déclenché à l'ajout d'un collaborateur depuis /admin/parametres
+ * (CoachModal -> lib/supabase/coach-account-provisioning.ts). Distinct de
+ * composeCoachInviteEmail (qui invite un ÉLÈVE) : ici le destinataire
+ * obtient lui-même un accès complet à l'espace admin (voir
+ * is_coach_or_admin() — aucune distinction de droits entre "coach" et
+ * "admin" à ce jour), jamais un compte élève.
+ */
+
+export function composeCollaboratorInviteEmail(input: { firstName: string; ownerName: string; setPasswordUrl: string }): ComposedEmail {
+  const name = escapeHtml(input.firstName || "");
+  const owner = escapeHtml(input.ownerName || "L'équipe");
+  const bodyHtml = [
+    p(`Bonjour ${name},`),
+    p(`${owner} vient de t'ajouter comme collaborateur sur l'espace admin de SETH Préparation Physique. Clique sur le bouton ci-dessous pour définir ton mot de passe et accéder à l'interface.`),
+    p(`Cet accès te donne les mêmes droits que le compte principal (élèves, programmes, plans, paiements...).`),
+  ].join("");
+  const button: EmailButton = { label: "Définir mon mot de passe", url: input.setPasswordUrl };
+  return {
+    subject: "Ton accès admin SETH Préparation Physique est prêt",
+    html: renderBaseEmailHtml({ preheader: "Définis ton mot de passe pour accéder à l'espace admin.", heading: "Bienvenue dans l'équipe !", bodyHtml, button }),
+    text: renderBaseEmailText({
+      heading: "Bienvenue dans l'équipe !",
+      bodyText: `Bonjour ${input.firstName},\n${input.ownerName || "L'équipe"} vient de t'ajouter comme collaborateur sur l'espace admin de SETH Préparation Physique. Définis ton mot de passe pour y accéder : ${input.setPasswordUrl}\nCet accès te donne les mêmes droits que le compte principal.`,
+      button,
+    }),
+  };
+}
+
 /* ─── H. Document attribué ─── */
 
 export function composeDocumentAssignedEmail(input: { firstName: string; documentTitle: string; documentsUrl: string }): ComposedEmail {

@@ -1681,22 +1681,33 @@ export interface SupabaseCoachNote {
   updatedAt: string;
 }
 
-export type CoachRole = "coach" | "admin" | "assistant";
+/**
+ * "admin" = compte principal (jamais attribué via le formulaire d'ajout,
+ * réservé au propriétaire du site) ; "assistant" = collaborateur ajouté
+ * depuis /admin/parametres. N'a aucune incidence sur les droits réels
+ * (voir is_coach_or_admin() : un profil `coach` a le même accès complet
+ * qu'un profil `admin`) — purement un libellé d'organisation affiché dans
+ * la liste. Doit rester synchronisé avec la contrainte CHECK
+ * `coaches_role_check` en base (ANY ['admin','assistant']).
+ */
+export type CoachRole = "admin" | "assistant";
 export type CoachAccountStatus = "actif" | "inactif";
 
 /**
- * Compte coach/assistant listé sur /admin/parametres. Correspond à une
- * future table Supabase `coach_account`.
+ * Collaborateur admin/coach listé sur /admin/parametres — reflète une ligne
+ * réelle de la table Supabase `coaches` (voir lib/supabase/coaches.ts et
+ * lib/supabase/coach-account-provisioning.ts). `id` est l'id de la ligne
+ * `coaches`, pas celui du compte `auth.users` associé (`userId`).
  */
 export interface AdminCoach {
   id: string;
+  userId: string | null;
   firstName: string;
   lastName: string;
   email: string;
   role: CoachRole;
   status: CoachAccountStatus;
   speciality: string;
-  internalNote: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -2260,7 +2271,8 @@ export type EmailType =
   | "appointment_reminder"
   | "password_reset"
   | "account_expiry_warning"
-  | "coach_invite";
+  | "coach_invite"
+  | "collaborator_invite";
 
 export type EmailStatus = "pending" | "sent" | "failed" | "skipped";
 

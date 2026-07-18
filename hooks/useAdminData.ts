@@ -5,7 +5,6 @@ import { useCallback, useSyncExternalStore } from "react";
 import {
   adminAppearanceSettings,
   adminCoachSettings,
-  adminCoaches,
   adminDocuments,
   adminExerciseLibrary,
   adminFeedback,
@@ -19,7 +18,6 @@ import { generateId } from "@/lib/admin";
 import type {
   AdminAppearanceSettings,
   AdminAssignment,
-  AdminCoach,
   AdminCoachSettings,
   AdminDocument,
   AdminNutritionPlan,
@@ -49,7 +47,6 @@ export interface AdminDataState {
   feedback: AdminStudentFeedback[];
   exerciseLibrary: ExerciseLibraryItem[];
   manualDocumentUnlocks: StudentDocumentUnlock[];
-  coaches: AdminCoach[];
   coachSettings: AdminCoachSettings;
   appearanceSettings: AdminAppearanceSettings;
   securitySettings: AdminSecuritySettings;
@@ -66,7 +63,6 @@ const seed: AdminDataState = {
   feedback: adminFeedback,
   exerciseLibrary: adminExerciseLibrary,
   manualDocumentUnlocks: adminManualDocumentUnlocks,
-  coaches: adminCoaches,
   coachSettings: adminCoachSettings,
   appearanceSettings: adminAppearanceSettings,
   securitySettings: adminSecuritySettings,
@@ -97,7 +93,6 @@ function normalizeState(parsed: Partial<AdminDataState> | null | undefined): Adm
     feedback: parsed?.feedback ?? seed.feedback,
     exerciseLibrary: parsed?.exerciseLibrary ?? seed.exerciseLibrary,
     manualDocumentUnlocks: parsed?.manualDocumentUnlocks ?? seed.manualDocumentUnlocks,
-    coaches: parsed?.coaches ?? seed.coaches,
     coachSettings: { ...seed.coachSettings, ...parsed?.coachSettings },
     appearanceSettings: { ...seed.appearanceSettings, ...parsed?.appearanceSettings },
     securitySettings: { ...seed.securitySettings, ...parsed?.securitySettings },
@@ -426,24 +421,6 @@ export function useAdminData() {
     });
   }, []);
 
-  const createCoach = useCallback((coach: Omit<AdminCoach, "id" | "createdAt" | "updatedAt">) => {
-    const current = getSnapshot();
-    const now = new Date().toISOString();
-    const newCoach: AdminCoach = { ...coach, id: generateId("coach"), createdAt: now, updatedAt: now };
-    writeState({ ...current, coaches: [...current.coaches, newCoach] });
-    return newCoach.id;
-  }, []);
-
-  const updateCoach = useCallback((coachId: string, partial: Partial<AdminCoach>) => {
-    const current = getSnapshot();
-    writeState({
-      ...current,
-      coaches: current.coaches.map((c) =>
-        c.id === coachId ? { ...c, ...partial, updatedAt: new Date().toISOString() } : c,
-      ),
-    });
-  }, []);
-
   const unlockDocumentForStudent = useCallback((studentId: string, documentId: string) => {
     const current = getSnapshot();
     const already = current.manualDocumentUnlocks.some(
@@ -505,8 +482,6 @@ export function useAdminData() {
     createLibraryExercise,
     updateLibraryExercise,
     deleteLibraryExercise,
-    createCoach,
-    updateCoach,
     unlockDocumentForStudent,
     unlockAllDocumentsForStudent,
     resetAdminData,

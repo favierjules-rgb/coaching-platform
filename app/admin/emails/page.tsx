@@ -25,6 +25,7 @@ const emailTypeLabels: Record<EmailType, string> = {
   password_reset: "Mot de passe oublié",
   account_expiry_warning: "Fin d'accès (avertissement)",
   coach_invite: "Invitation élève (coach)",
+  collaborator_invite: "Invitation collaborateur (admin)",
 };
 
 const emailStatusLabels: Record<EmailStatus, string> = {

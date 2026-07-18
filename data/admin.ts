@@ -11,7 +11,6 @@ import {
 import { generateId } from "@/lib/admin";
 import type {
   AdminAppearanceSettings,
-  AdminCoach,
   AdminCoachSettings,
   AdminDocument,
   AdminExercise,
@@ -1615,29 +1614,6 @@ export const adminSecuritySettings: AdminSecuritySettings = {
   updatedAt: "2026-01-01T09:00:00.000Z",
 };
 
-export const adminCoaches: AdminCoach[] = [
-  {
-    id: "coach-seth",
-    firstName: "Seth",
-    lastName: "Coach",
-    email: "coach@seth-coaching.mock",
-    role: "admin",
-    status: "actif",
-    speciality: "Préparation physique générale",
-    internalNote: "Compte principal.",
-    createdAt: "2026-01-01T09:00:00.000Z",
-    updatedAt: "2026-01-01T09:00:00.000Z",
-  },
-  {
-    id: "coach-assistant-1",
-    firstName: "Manon",
-    lastName: "Roy",
-    email: "manon.roy@seth-coaching.mock",
-    role: "assistant",
-    status: "actif",
-    speciality: "Nutrition sportive",
-    internalNote: "Gère les plans alimentaires et le suivi nutrition.",
-    createdAt: "2026-03-01T09:00:00.000Z",
-    updatedAt: "2026-03-01T09:00:00.000Z",
-  },
-];
+// adminCoaches (liste mockée) supprimée — /admin/parametres utilise
+// désormais la vraie table Supabase `coaches`, voir
+// hooks/useSupabaseCoaches.ts et lib/supabase/coaches.ts.

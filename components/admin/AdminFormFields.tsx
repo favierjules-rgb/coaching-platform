@@ -14,9 +14,10 @@ interface FieldProps {
   placeholder?: string;
   step?: string;
   required?: boolean;
+  disabled?: boolean;
 }
 
-export function Field({ label, value, onChange, type = "text", placeholder, step, required }: FieldProps) {
+export function Field({ label, value, onChange, type = "text", placeholder, step, required, disabled }: FieldProps) {
   const id = useId();
   return (
     <div>
@@ -28,10 +29,11 @@ export function Field({ label, value, onChange, type = "text", placeholder, step
         type={type}
         step={step}
         required={required}
+        disabled={disabled}
         value={value}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
-        className={inputClass}
+        className={`${inputClass} disabled:cursor-not-allowed disabled:opacity-50`}
       />
     </div>
   );

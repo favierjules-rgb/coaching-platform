@@ -440,7 +440,6 @@ export function appointmentStatusTone(status: AppointmentStatus): "green" | "amb
 /* ─── Coachs ─── */
 
 export const coachRoleLabels: Record<CoachRole, string> = {
-  coach: "Coach",
   admin: "Admin",
   assistant: "Assistant",
 };
