@@ -6,6 +6,7 @@ import { ArrowLeft, ShoppingCart } from "lucide-react";
 
 import { NutritionPlanWorkspace } from "@/components/student/NutritionPlanWorkspace";
 import { StatusBadge } from "@/components/student/StatusBadge";
+import { StatCard } from "@/components/shared/StatCard";
 import { nutritionGoalLabels } from "@/lib/nutrition";
 import { getNutritionPlan, student } from "@/data/student";
 import { useSupabaseNutritionForStudent } from "@/hooks/useSupabaseNutritionForStudent";
@@ -56,29 +57,12 @@ export default function NutritionPlanDetailPage() {
           <StatusBadge status={plan.status} />
         </div>
 
-        <div className="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-5">
-          <div className="border border-border bg-card p-5">
-            <div className="font-heading text-xl font-bold text-foreground">{plan.caloriesPerDay}</div>
-            <div className="text-xs text-muted-foreground">kcal / jour</div>
-          </div>
-          <div className="border border-border bg-card p-5">
-            <div className="font-heading text-xl font-bold text-foreground">{plan.protein}g</div>
-            <div className="text-xs text-muted-foreground">Protéines</div>
-          </div>
-          <div className="border border-border bg-card p-5">
-            <div className="font-heading text-xl font-bold text-foreground">{plan.carbs}g</div>
-            <div className="text-xs text-muted-foreground">Glucides</div>
-          </div>
-          <div className="border border-border bg-card p-5">
-            <div className="font-heading text-xl font-bold text-foreground">{plan.fat}g</div>
-            <div className="text-xs text-muted-foreground">Lipides</div>
-          </div>
-          <div className="border border-border bg-card p-5">
-            <div className="font-heading text-xl font-bold text-foreground">
-              {plan.weeklyTargetCalories.toLocaleString("fr-FR")}
-            </div>
-            <div className="text-xs text-muted-foreground">kcal / semaine</div>
-          </div>
+        <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+          <StatCard label="kcal / jour" value={String(plan.caloriesPerDay)} size="lg" />
+          <StatCard label="Protéines" value={`${plan.protein}g`} size="lg" />
+          <StatCard label="Glucides" value={`${plan.carbs}g`} size="lg" />
+          <StatCard label="Lipides" value={`${plan.fat}g`} size="lg" />
+          <StatCard label="kcal / semaine" value={plan.weeklyTargetCalories.toLocaleString("fr-FR")} size="lg" />
         </div>
 
         {plan.coachNotes && (
@@ -198,37 +182,12 @@ export default function NutritionPlanDetailPage() {
         <StatusBadge status={plan.status} />
       </div>
 
-      <div className="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-5">
-        <div className="border border-border bg-card p-5">
-          <div className="font-heading text-xl font-bold text-foreground">
-            {plan.dailyTarget.calories}
-          </div>
-          <div className="text-xs text-muted-foreground">kcal / jour</div>
-        </div>
-        <div className="border border-border bg-card p-5">
-          <div className="font-heading text-xl font-bold text-foreground">
-            {plan.dailyTarget.protein}g
-          </div>
-          <div className="text-xs text-muted-foreground">Protéines</div>
-        </div>
-        <div className="border border-border bg-card p-5">
-          <div className="font-heading text-xl font-bold text-foreground">
-            {plan.dailyTarget.carbs}g
-          </div>
-          <div className="text-xs text-muted-foreground">Glucides</div>
-        </div>
-        <div className="border border-border bg-card p-5">
-          <div className="font-heading text-xl font-bold text-foreground">
-            {plan.dailyTarget.fat}g
-          </div>
-          <div className="text-xs text-muted-foreground">Lipides</div>
-        </div>
-        <div className="border border-border bg-card p-5">
-          <div className="font-heading text-xl font-bold text-foreground">
-            {plan.weeklyTargetCalories.toLocaleString("fr-FR")}
-          </div>
-          <div className="text-xs text-muted-foreground">kcal / semaine</div>
-        </div>
+      <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+        <StatCard label="kcal / jour" value={String(plan.dailyTarget.calories)} size="lg" />
+        <StatCard label="Protéines" value={`${plan.dailyTarget.protein}g`} size="lg" />
+        <StatCard label="Glucides" value={`${plan.dailyTarget.carbs}g`} size="lg" />
+        <StatCard label="Lipides" value={`${plan.dailyTarget.fat}g`} size="lg" />
+        <StatCard label="kcal / semaine" value={plan.weeklyTargetCalories.toLocaleString("fr-FR")} size="lg" />
       </div>
 
       <div className="mb-8">

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import Link from "next/link";
 import {
+  AlertTriangle,
   ArrowLeft,
   Check,
   ChevronLeft,
@@ -445,6 +446,17 @@ export function ProgramBuilderFullscreen({
         </div>
       </div>
 
+      {/* Garde-fou petit écran — les deux panneaux latéraux ont une largeur
+          fixe (w-56 + w-[420px], voir plus bas), non responsive : sous ce
+          seuil, purement informatif, ne modifie ni la mise en page ni le
+          fonctionnement (repliage manuel des panneaux toujours disponible
+          via les boutons Panel*Open/Close). */}
+      <div className="flex items-center gap-2 border-b border-warning/40 bg-warning/10 px-4 py-2 text-xs text-warning min-[1200px]:hidden">
+        <AlertTriangle size={14} className="flex-shrink-0" />
+        Cet éditeur est optimisé pour les écrans larges (1200px et plus). Sur un écran plus petit, replie les panneaux
+        latéraux ou agrandis la fenêtre pour plus de confort.
+      </div>
+
       <div className="flex min-h-0 flex-1">
         {/* Panneau gauche — navigation semaines (repliable). */}
         {leftOpen && (
@@ -471,6 +483,7 @@ export function ProgramBuilderFullscreen({
                     type="button"
                     onClick={() => duplicateWeek(weekNumber)}
                     title="Dupliquer cette semaine"
+                    aria-label={`Dupliquer la semaine ${weekNumber}`}
                     className="text-muted-foreground hover:text-primary"
                   >
                     <Copy size={13} />
@@ -509,6 +522,7 @@ export function ProgramBuilderFullscreen({
                 type="button"
                 onClick={() => setSelectedWeek((w) => Math.max(weekNumbers[0] ?? 1, w - 1))}
                 disabled={weekNumbers.indexOf(selectedWeek) <= 0}
+                aria-label="Semaine précédente"
                 className="text-muted-foreground hover:text-foreground disabled:opacity-30"
               >
                 <ChevronLeft size={16} />
@@ -518,6 +532,7 @@ export function ProgramBuilderFullscreen({
                 type="button"
                 onClick={() => setSelectedWeek((w) => Math.min(weekNumbers[weekNumbers.length - 1] ?? 1, w + 1))}
                 disabled={weekNumbers.indexOf(selectedWeek) >= weekNumbers.length - 1}
+                aria-label="Semaine suivante"
                 className="text-muted-foreground hover:text-foreground disabled:opacity-30"
               >
                 <ChevronRight size={16} />

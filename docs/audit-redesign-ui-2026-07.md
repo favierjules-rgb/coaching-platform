@@ -253,3 +253,37 @@ Après chaque lot : `npm run lint`, `npx tsc --noEmit`, `npm run build`, vérifi
 - Confirmes-tu que je peux commencer le **Lot 1** tel que décrit ?
 - Pour la banque de séances (§2), l'absence de champ `status` (actif/archivé) est un choix côté schéma de données (`types/index.ts`), pas juste visuel — je ne le change pas sans ton accord explicite. Je me limiterai à harmoniser recherche/filtres/présentation visuelle ; dis-moi si tu veux aussi qu'on discute d'ajouter le statut côté séances (hors périmètre visuel, migration Supabase requise).
 - Le fichier `docs/audit-redesign-ui-2026-07.md` est resté non commité (comme le reste de la branche) — à toi de commiter quand tu veux.
+
+---
+
+## Lot 3 — Rapport d'exécution
+
+Périmètre respecté à la lettre : Training Builder uniquement (`components/admin/ProgramBuilder.tsx` + `components/admin/ProgramBuilderFullscreen.tsx`), aucun changement de logique de calcul, de sauvegarde ou de réordonnancement — uniquement du code mort supprimé et des ajouts additifs (attributs, état de feedback visuel, bandeau conditionnel).
+
+### Fichiers modifiés
+
+- **`components/admin/ProgramBuilder.tsx`**
+  - Suppression du composant `ProgramBuilder` legacy (lignes 919-1118 avant modification, ~200 lignes) : confirmé mort via `grep` sur tout le repo — seuls `ProgramBuilderData` (type), `DayCard` et `restDaySession` sont importés depuis ce fichier (par `ProgramBuilderFullscreen.tsx` et `lib/supabase/programs.ts`), jamais le composant `ProgramBuilder` lui-même. Un commentaire déjà présent dans le code (au-dessus de `DayCard`) confirmait explicitement ce statut mort.
+  - Nettoyage des imports/constantes devenus inutiles après cette suppression : `PrimaryButton` (import), `weekDays` (import — `generateId` reste utilisé et conservé), `statusOptions`, `levelOptions` (constantes locales).
+  - Ajout d'`aria-label` sur les 9 boutons d'action icône-seule qui n'en avaient pas : flèches haut/bas + suppression sur `ExerciseRow`, `CardioSegmentRow` et `CardioBlockRow` (ex. "Déplacer l'exercice vers le haut", "Supprimer le segment", "Supprimer le bloc cardio").
+  - Ajout du feedback visuel de cible de dépôt pendant un glisser-déposer (même pattern que `isDropTarget`/`DayGridCell` déjà existant dans `ProgramBuilderFullscreen.tsx`), pour le réordonnancement des exercices (nouvel état `dragOverExerciseIndex` dans `DayCard`) et des segments cardio (nouvel état `dragOverSegmentIndex` dans `CardioBlockRow`) : bordure en pointillés `border-primary/70` sur la ligne survolée. Le calcul de réordonnancement (`reorderExercises`/`reorderSegments`, la ref `dragExerciseIndex`/`dragSegmentIndex`, la logique de `splice`+réassignation des `order`) n'a pas été touché — uniquement ajout d'un état parallèle purement visuel et d'un `onDragEnd` pour le nettoyer proprement.
+  - Précision : les blocs cardio eux-mêmes (au niveau du bloc, pas de ses segments) n'ont pas de glisser-déposer dans le code existant (seulement les flèches haut/bas) — aucun feedback visuel de dépôt n'a donc été ajouté à ce niveau, pour ne pas introduire une fonctionnalité de drag-and-drop qui n'existait pas.
+
+- **`components/admin/ProgramBuilderFullscreen.tsx`**
+  - Ajout d'`aria-label` sur 3 boutons icône-seule qui n'en avaient pas : bouton "Dupliquer cette semaine" (déjà un `title`, `aria-label` ajouté en complément), flèches "Semaine précédente"/"Semaine suivante" (navigation `ChevronLeft`/`ChevronRight`).
+  - Ajout d'un bandeau d'avertissement petit écran : visible uniquement sous 1200px (`min-[1200px]:hidden`, sans JS, donc aucun risque de flash ou de mismatch d'hydratation), informe que l'éditeur est optimisé pour les écrans larges et suggère de replier les panneaux latéraux (fonctionnalité de repli déjà existante, boutons `PanelLeftClose`/`PanelRightClose`). Purement informatif : n'modifie ni la largeur des panneaux (`w-56`/`w-[420px]`, toujours fixes), ni leur comportement, ni la grille 7 jours.
+
+### Vérifications
+
+- `npm run lint` → 0 erreur, 0 warning.
+- `npx tsc --noEmit` → 0 erreur.
+- `npm run build` → compilation + typecheck + génération des 70 pages statiques réussis. L'échec final (`EPERM: rmdir` sur `.next/export/_next/...`) est le même problème d'environnement sandbox déjà documenté dans les rapports Lots 1 et 2 (filesystem fuse-monté), reproduit à l'identique sur du code non modifié — sans impact sur le code livré.
+- Aucune vérification navigateur live effectuée (pas de serveur de dev lancé dans ce sandbox) — comme pour les Lots 1 et 2, à vérifier visuellement de ton côté (mode sombre et clair, drag-and-drop des exercices/segments, bandeau petit écran en réduisant la fenêtre sous ~1200px).
+
+### Risque de régression
+
+Faible. Aucune ligne de logique métier (calcul de séries/volume/tonnage, sauvegarde Supabase, calcul de réordonnancement) n'a été modifiée — uniquement : suppression de code strictement mort et confirmé comme tel, ajout d'attributs `aria-label`, ajout d'un état React parallèle purement visuel pour le drag-and-drop (n'intervient jamais dans le calcul des index), et un bandeau conditionnel en pur CSS sans état.
+
+### Limitation connue (déjà signalée, toujours pas résolue)
+
+`.git/index.lock` est réapparu une nouvelle fois pendant ce lot (`git status` renvoie un avertissement `unable to unlink`) — à nettoyer de ton côté depuis ton propre terminal, comme évoqué après les Lots 1 et 2.

@@ -169,8 +169,8 @@ export function ProgressPhotosSection({ gallery, defaultWeightKg = null }: Progr
           aria-label="Ajouter une photo de progression"
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
         >
-          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto border border-border bg-card p-6">
-            <div className="mb-4 flex items-start justify-between gap-4">
+          <div className="flex max-h-[90vh] w-full max-w-md flex-col border border-border bg-card">
+            <div className="flex items-center justify-between border-b border-border px-6 py-4">
               <h3 className="font-heading text-lg font-bold uppercase text-foreground">Ajouter une photo</h3>
               <button
                 type="button"
@@ -182,55 +182,57 @@ export function ProgressPhotosSection({ gallery, defaultWeightKg = null }: Progr
               </button>
             </div>
 
-            <div className="flex flex-col gap-4">
-              <div>
-                <label htmlFor={fileInputId} className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
-                  Image (JPEG, PNG ou WebP, 10 Mo max)
-                </label>
-                <input
-                  ref={fileInputRef}
-                  id={fileInputId}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  onChange={handleFileChange}
-                  className="block w-full text-sm text-muted-foreground file:mr-4 file:border file:border-primary file:bg-transparent file:px-4 file:py-2 file:text-xs file:uppercase file:tracking-widest file:text-primary hover:file:bg-primary hover:file:text-primary-foreground"
-                />
-              </div>
-
-              {previewUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element -- prévisualisation locale (blob:) avant upload
-                <img
-                  src={previewUrl}
-                  alt="Prévisualisation de la photo sélectionnée"
-                  className="aspect-[3/4] w-full max-w-[200px] border border-border object-cover"
-                />
-              ) : (
-                <div className="flex aspect-[3/4] w-full max-w-[200px] flex-col items-center justify-center gap-2 border border-dashed border-border text-muted-foreground">
-                  <Camera size={22} aria-hidden="true" />
-                  <span className="text-[11px] uppercase tracking-widest">Aucune image</span>
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              <div className="flex flex-col gap-4">
+                <div>
+                  <label htmlFor={fileInputId} className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                    Image (JPEG, PNG ou WebP, 10 Mo max)
+                  </label>
+                  <input
+                    ref={fileInputRef}
+                    id={fileInputId}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={handleFileChange}
+                    className="block w-full text-sm text-muted-foreground file:mr-4 file:border file:border-primary file:bg-transparent file:px-4 file:py-2 file:text-xs file:uppercase file:tracking-widest file:text-primary hover:file:bg-primary hover:file:text-primary-foreground"
+                  />
                 </div>
-              )}
 
-              <SelectField
-                label="Angle de la photo"
-                value={angle}
-                onChange={(value) => setAngle(value as ProgressPhotoAngle)}
-                options={angleOptions}
-              />
-              <Field label="Date" type="date" value={date} onChange={setDate} />
-              <Field label="Poids associé (kg, optionnel)" type="number" step="0.1" value={weight} onChange={setWeight} />
-              <Field label="Note (optionnel)" value={note} onChange={setNote} placeholder="Ex : bonne évolution ce mois-ci" />
+                {previewUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- prévisualisation locale (blob:) avant upload
+                  <img
+                    src={previewUrl}
+                    alt="Prévisualisation de la photo sélectionnée"
+                    className="aspect-[3/4] w-full max-w-[200px] border border-border object-cover"
+                  />
+                ) : (
+                  <div className="flex aspect-[3/4] w-full max-w-[200px] flex-col items-center justify-center gap-2 border border-dashed border-border text-muted-foreground">
+                    <Camera size={22} aria-hidden="true" />
+                    <span className="text-[11px] uppercase tracking-widest">Aucune image</span>
+                  </div>
+                )}
 
-              {formError && <p className="text-xs text-red-400">{formError}</p>}
+                <SelectField
+                  label="Angle de la photo"
+                  value={angle}
+                  onChange={(value) => setAngle(value as ProgressPhotoAngle)}
+                  options={angleOptions}
+                />
+                <Field label="Date" type="date" value={date} onChange={setDate} />
+                <Field label="Poids associé (kg, optionnel)" type="number" step="0.1" value={weight} onChange={setWeight} />
+                <Field label="Note (optionnel)" value={note} onChange={setNote} placeholder="Ex : bonne évolution ce mois-ci" />
 
-              <button
-                type="button"
-                onClick={handleSubmit}
-                disabled={!file || submitting}
-                className="mt-1 w-full bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
-              >
-                {submitting ? "Envoi en cours…" : "Enregistrer la photo"}
-              </button>
+                {formError && <p className="text-xs text-red-400">{formError}</p>}
+
+                <button
+                  type="button"
+                  onClick={handleSubmit}
+                  disabled={!file || submitting}
+                  className="mt-1 w-full bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
+                >
+                  {submitting ? "Envoi en cours…" : "Enregistrer la photo"}
+                </button>
+              </div>
             </div>
           </div>
         </div>

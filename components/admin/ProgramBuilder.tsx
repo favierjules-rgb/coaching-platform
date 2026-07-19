@@ -6,7 +6,6 @@ import { ArrowDown, ArrowUp, BarChart3, Copy, GripVertical, Layers, Plus, Save, 
 import { Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
 import { BannerUploadField } from "@/components/admin/BannerUploadField";
 import { ExerciseSearchPicker } from "@/components/admin/ExerciseSearchPicker";
-import { PrimaryButton } from "@/components/admin/Modal";
 import { SessionTemplatePicker } from "@/components/admin/SessionTemplatePicker";
 import {
   AnalysisFilterLabel,
@@ -16,7 +15,7 @@ import {
   TrainingStatCards,
   UntaggedExercisesAlert,
 } from "@/components/shared/TrainingMetricsSummary";
-import { generateId, weekDays } from "@/lib/admin";
+import { generateId } from "@/lib/admin";
 import {
   blankCardioBlock,
   blankCardioSegment,
@@ -48,18 +47,6 @@ import type {
 const muscleGroupOptions = [
   { value: "", label: "Hérité de la séance" },
   ...muscleGroupOrder.map((group) => ({ value: group, label: muscleGroupLabels[group] })),
-];
-
-const statusOptions: { value: AdminContentStatus; label: string }[] = [
-  { value: "brouillon", label: "Brouillon" },
-  { value: "actif", label: "Actif" },
-  { value: "archivé", label: "Archivé" },
-];
-
-const levelOptions = [
-  { value: "Débutant", label: "Débutant" },
-  { value: "Intermédiaire", label: "Intermédiaire" },
-  { value: "Avancé", label: "Avancé" },
 ];
 
 export interface ProgramBuilderData {
@@ -143,6 +130,8 @@ function ExerciseRow({
   onDragStart,
   onDragOver,
   onDrop,
+  onDragEnd,
+  isDropTarget = false,
 }: {
   exercise: AdminExercise;
   onChange: (partial: Partial<AdminExercise>) => void;
@@ -153,9 +142,19 @@ function ExerciseRow({
   onDragStart: () => void;
   onDragOver: (event: DragEvent<HTMLDivElement>) => void;
   onDrop: () => void;
+  // Feedback visuel de la cible de dépôt pendant un glisser-déposer
+  // (même principe que DayGridCell dans ProgramBuilderFullscreen.tsx) —
+  // purement additif, n'affecte pas le calcul de réordonnancement.
+  onDragEnd?: () => void;
+  isDropTarget?: boolean;
 }) {
   return (
-    <div className="border border-border p-4" onDragOver={onDragOver} onDrop={onDrop}>
+    <div
+      className={`border p-4 transition-colors ${isDropTarget ? "border-dashed border-primary/70" : "border-border"}`}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
+    >
       <div className="mb-3 flex items-center justify-between gap-2">
         <span className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
           <span
@@ -174,13 +173,25 @@ function ExerciseRow({
           )}
         </span>
         <div className="flex items-center gap-2">
-          <button type="button" onClick={() => onMove("up")} disabled={isFirst} className="text-muted-foreground hover:text-foreground disabled:opacity-30">
+          <button
+            type="button"
+            onClick={() => onMove("up")}
+            disabled={isFirst}
+            aria-label="Déplacer l'exercice vers le haut"
+            className="text-muted-foreground hover:text-foreground disabled:opacity-30"
+          >
             <ArrowUp size={14} />
           </button>
-          <button type="button" onClick={() => onMove("down")} disabled={isLast} className="text-muted-foreground hover:text-foreground disabled:opacity-30">
+          <button
+            type="button"
+            onClick={() => onMove("down")}
+            disabled={isLast}
+            aria-label="Déplacer l'exercice vers le bas"
+            className="text-muted-foreground hover:text-foreground disabled:opacity-30"
+          >
             <ArrowDown size={14} />
           </button>
-          <button type="button" onClick={onRemove} className="text-red-400 hover:text-red-300">
+          <button type="button" onClick={onRemove} aria-label="Supprimer l'exercice" className="text-red-400 hover:text-red-300">
             <Trash2 size={14} />
           </button>
         </div>
@@ -220,6 +231,8 @@ function CardioSegmentRow({
   onDragStart,
   onDragOver,
   onDrop,
+  onDragEnd,
+  isDropTarget = false,
 }: {
   segment: AdminCardioSegment;
   referenceVmaKmh: number;
@@ -231,6 +244,9 @@ function CardioSegmentRow({
   onDragStart: () => void;
   onDragOver: (event: DragEvent<HTMLDivElement>) => void;
   onDrop: () => void;
+  // Feedback visuel additif, voir le même commentaire dans ExerciseRow.
+  onDragEnd?: () => void;
+  isDropTarget?: boolean;
 }) {
   const isRepeat = segment.segmentType === "repeat_group";
   const preview = segmentIntensityPreview(segment, referenceVmaKmh);
@@ -240,7 +256,12 @@ function CardioSegmentRow({
     segment.intensityTargetType === "pace";
 
   return (
-    <div className="border border-border/60 bg-background/30 p-3" onDragOver={onDragOver} onDrop={onDrop}>
+    <div
+      className={`border bg-background/30 p-3 transition-colors ${isDropTarget ? "border-dashed border-primary/70" : "border-border/60"}`}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
+    >
       <div className="mb-3 flex items-center justify-between gap-2">
         <span className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
           <span
@@ -254,13 +275,25 @@ function CardioSegmentRow({
           Segment #{segment.order}
         </span>
         <div className="flex items-center gap-2">
-          <button type="button" onClick={() => onMove("up")} disabled={isFirst} className="text-muted-foreground hover:text-foreground disabled:opacity-30">
+          <button
+            type="button"
+            onClick={() => onMove("up")}
+            disabled={isFirst}
+            aria-label="Déplacer le segment vers le haut"
+            className="text-muted-foreground hover:text-foreground disabled:opacity-30"
+          >
             <ArrowUp size={13} />
           </button>
-          <button type="button" onClick={() => onMove("down")} disabled={isLast} className="text-muted-foreground hover:text-foreground disabled:opacity-30">
+          <button
+            type="button"
+            onClick={() => onMove("down")}
+            disabled={isLast}
+            aria-label="Déplacer le segment vers le bas"
+            className="text-muted-foreground hover:text-foreground disabled:opacity-30"
+          >
             <ArrowDown size={13} />
           </button>
-          <button type="button" onClick={onRemove} className="text-red-400 hover:text-red-300">
+          <button type="button" onClick={onRemove} aria-label="Supprimer le segment" className="text-red-400 hover:text-red-300">
             <Trash2 size={13} />
           </button>
         </div>
@@ -455,6 +488,10 @@ function CardioBlockRow({
   // conservées pour l'accessibilité clavier) — l'index source est retenu
   // dans une ref le temps du drag, sans re-render intermédiaire.
   const dragSegmentIndex = useRef<number | null>(null);
+  // Feedback visuel de la cible de dépôt courante (même principe que
+  // dragOverSessionId dans ProgramBuilderFullscreen.tsx) — purement
+  // additif, n'intervient pas dans le calcul de réordonnancement.
+  const [dragOverSegmentIndex, setDragOverSegmentIndex] = useState<number | null>(null);
 
   function reorderSegments(fromIndex: number, toIndex: number) {
     if (fromIndex === toIndex) return;
@@ -469,13 +506,25 @@ function CardioBlockRow({
       <div className="mb-3 flex items-center justify-between gap-2">
         <span className="text-xs uppercase tracking-wide text-muted-foreground">Bloc cardio #{block.order}</span>
         <div className="flex items-center gap-2">
-          <button type="button" onClick={() => onMove("up")} disabled={isFirst} className="text-muted-foreground hover:text-foreground disabled:opacity-30">
+          <button
+            type="button"
+            onClick={() => onMove("up")}
+            disabled={isFirst}
+            aria-label="Déplacer le bloc cardio vers le haut"
+            className="text-muted-foreground hover:text-foreground disabled:opacity-30"
+          >
             <ArrowUp size={14} />
           </button>
-          <button type="button" onClick={() => onMove("down")} disabled={isLast} className="text-muted-foreground hover:text-foreground disabled:opacity-30">
+          <button
+            type="button"
+            onClick={() => onMove("down")}
+            disabled={isLast}
+            aria-label="Déplacer le bloc cardio vers le bas"
+            className="text-muted-foreground hover:text-foreground disabled:opacity-30"
+          >
             <ArrowDown size={14} />
           </button>
-          <button type="button" onClick={onRemove} className="text-red-400 hover:text-red-300">
+          <button type="button" onClick={onRemove} aria-label="Supprimer le bloc cardio" className="text-red-400 hover:text-red-300">
             <Trash2 size={14} />
           </button>
         </div>
@@ -511,15 +560,24 @@ function CardioBlockRow({
             onMove={(dir) => moveSegment(i, dir)}
             isFirst={i === 0}
             isLast={i === block.segments.length - 1}
+            isDropTarget={dragOverSegmentIndex === i}
             onDragStart={() => {
               dragSegmentIndex.current = i;
             }}
-            onDragOver={(event) => event.preventDefault()}
+            onDragOver={(event) => {
+              event.preventDefault();
+              setDragOverSegmentIndex(i);
+            }}
             onDrop={() => {
               if (dragSegmentIndex.current !== null) {
                 reorderSegments(dragSegmentIndex.current, i);
                 dragSegmentIndex.current = null;
               }
+              setDragOverSegmentIndex(null);
+            }}
+            onDragEnd={() => {
+              dragSegmentIndex.current = null;
+              setDragOverSegmentIndex(null);
             }}
           />
         ))}
@@ -609,6 +667,10 @@ export function DayCard({
   // haut/bas (conservées pour l'accessibilité clavier) — même principe que
   // dans CardioBlockRow pour les segments.
   const dragExerciseIndex = useRef<number | null>(null);
+  // Feedback visuel de la cible de dépôt courante (même principe que
+  // dragOverSessionId dans ProgramBuilderFullscreen.tsx) — purement
+  // additif, n'intervient pas dans le calcul de réordonnancement.
+  const [dragOverExerciseIndex, setDragOverExerciseIndex] = useState<number | null>(null);
 
   function reorderExercises(fromIndex: number, toIndex: number) {
     if (fromIndex === toIndex) return;
@@ -818,15 +880,24 @@ export function DayCard({
                     onMove={(dir) => moveExercise(i, dir)}
                     isFirst={i === 0}
                     isLast={i === session.exercises.length - 1}
+                    isDropTarget={dragOverExerciseIndex === i}
                     onDragStart={() => {
                       dragExerciseIndex.current = i;
                     }}
-                    onDragOver={(event) => event.preventDefault()}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      setDragOverExerciseIndex(i);
+                    }}
                     onDrop={() => {
                       if (dragExerciseIndex.current !== null) {
                         reorderExercises(dragExerciseIndex.current, i);
                         dragExerciseIndex.current = null;
                       }
+                      setDragOverExerciseIndex(null);
+                    }}
+                    onDragEnd={() => {
+                      dragExerciseIndex.current = null;
+                      setDragOverExerciseIndex(null);
                     }}
                   />
                 ))}
@@ -912,207 +983,6 @@ export function DayCard({
           )}
         </div>
       )}
-    </div>
-  );
-}
-
-export function ProgramBuilder({
-  initial,
-  library,
-  onSave,
-  saveLabel,
-}: {
-  initial: ProgramBuilderData;
-  library: ExerciseLibraryItem[];
-  onSave: (data: ProgramBuilderData) => void;
-  saveLabel: string;
-}) {
-  const [name, setName] = useState(initial.name);
-  const [goal, setGoal] = useState(initial.goal);
-  const [level, setLevel] = useState(initial.level);
-  const [durationWeeks, setDurationWeeks] = useState(initial.durationWeeks);
-  const [description, setDescription] = useState(initial.description);
-  const [status, setStatus] = useState<AdminContentStatus>(initial.status);
-  const [sessions, setSessions] = useState<AdminWorkoutSession[]>(initial.sessions);
-  const [weekMessages, setWeekMessages] = useState<Record<number, string>>({});
-
-  const weekNumbers = Array.from(new Set(sessions.map((s) => s.weekNumber))).sort((a, b) => a - b);
-
-  function cloneWeekSessions(sourceWeek: number, targetWeek: number): AdminWorkoutSession[] {
-    return sessions
-      .filter((s) => s.weekNumber === sourceWeek)
-      .map((s) => ({
-        ...s,
-        id: generateId("sess"),
-        weekNumber: targetWeek,
-        exercises: s.exercises.map((ex) => ({ ...ex, id: generateId("ex") })),
-        cardioBlocks: (s.cardioBlocks ?? []).map(cloneCardioBlock),
-      }));
-  }
-
-  function addWeek(copyPrevious: boolean) {
-    const nextWeek = weekNumbers.length > 0 ? Math.max(...weekNumbers) + 1 : 1;
-    if (copyPrevious && weekNumbers.length > 0) {
-      const sourceWeek = Math.max(...weekNumbers);
-      setSessions((prev) => [...prev, ...cloneWeekSessions(sourceWeek, nextWeek)]);
-      setWeekMessages((prev) => ({
-        ...prev,
-        [nextWeek]: `Semaine ${nextWeek} créée à partir de la semaine ${sourceWeek}.`,
-      }));
-    } else {
-      setSessions((prev) => [...prev, ...weekDays.map((day) => restDaySession(nextWeek, day))]);
-    }
-    setDurationWeeks((prev) => Math.max(prev, nextWeek));
-  }
-
-  function duplicateWeek(sourceWeek: number) {
-    const nextWeek = Math.max(...weekNumbers) + 1;
-    setSessions((prev) => [...prev, ...cloneWeekSessions(sourceWeek, nextWeek)]);
-    setWeekMessages((prev) => ({
-      ...prev,
-      [nextWeek]: `Semaine ${nextWeek} créée à partir de la semaine ${sourceWeek} (dupliquée).`,
-    }));
-    setDurationWeeks((prev) => Math.max(prev, nextWeek));
-  }
-
-  function updateSession(sessionId: string, updated: AdminWorkoutSession) {
-    setSessions((prev) => prev.map((s) => (s.id === sessionId ? updated : s)));
-  }
-
-  function duplicateSession(session: AdminWorkoutSession) {
-    const target = sessions.find((s) => s.weekNumber === session.weekNumber + 1 && s.day === session.day);
-    if (!target) return;
-    setSessions((prev) =>
-      prev.map((s) =>
-        s.id === target.id
-          ? {
-              ...session,
-              id: target.id,
-              weekNumber: target.weekNumber,
-              exercises: session.exercises.map((ex) => ({ ...ex, id: generateId("ex") })),
-              cardioBlocks: (session.cardioBlocks ?? []).map(cloneCardioBlock),
-            }
-          : s,
-      ),
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-6">
-      <div className="border border-border bg-card p-6">
-        <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
-          Informations générales
-        </h2>
-        <div className="flex flex-col gap-4">
-          <Field label="Nom du programme" value={name} onChange={setName} />
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <Field label="Objectif" value={goal} onChange={setGoal} />
-            <SelectField label="Niveau" value={level} onChange={setLevel} options={levelOptions} />
-            <Field
-              label="Durée (semaines)"
-              type="number"
-              value={String(durationWeeks)}
-              onChange={(v) => setDurationWeeks(Number(v) || 0)}
-            />
-          </div>
-          <TextareaField label="Description" value={description} onChange={setDescription} rows={3} />
-          <SelectField
-            label="Statut"
-            value={status}
-            onChange={(v) => setStatus(v as AdminContentStatus)}
-            options={statusOptions}
-          />
-        </div>
-      </div>
-
-      <div className="border border-border bg-card p-6">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="font-heading text-lg font-bold uppercase text-foreground">
-            Structure semaine par semaine
-          </h2>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => addWeek(true)}
-              className="flex items-center gap-2 border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700"
-            >
-              <Plus size={14} />
-              Ajouter une semaine
-            </button>
-            <button
-              type="button"
-              onClick={() => addWeek(false)}
-              className="flex items-center gap-2 border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
-            >
-              Créer une semaine vide
-            </button>
-          </div>
-        </div>
-
-        {weekNumbers.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            Aucune semaine pour le moment. Clique sur &quot;Ajouter une semaine&quot; pour commencer.
-          </p>
-        ) : (
-          <div className="flex flex-col gap-8">
-            {weekNumbers.map((weekNumber) => (
-              <div key={weekNumber}>
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="text-sm font-bold uppercase tracking-widest text-primary">
-                    Semaine {weekNumber}
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={() => duplicateWeek(weekNumber)}
-                    className="flex items-center gap-1.5 text-[11px] uppercase tracking-widest text-muted-foreground hover:text-primary"
-                  >
-                    <Copy size={12} />
-                    Dupliquer cette semaine
-                  </button>
-                </div>
-                {weekMessages[weekNumber] && (
-                  <p className="mb-3 border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-primary">
-                    {weekMessages[weekNumber]}
-                  </p>
-                )}
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                  {sessions
-                    .filter((s) => s.weekNumber === weekNumber)
-                    .sort((a, b) => weekDays.indexOf(a.day) - weekDays.indexOf(b.day))
-                    .map((session) => (
-                      <DayCard
-                        key={session.id}
-                        session={session}
-                        nextWeekSession={sessions.find(
-                          (s) => s.weekNumber === weekNumber + 1 && s.day === session.day,
-                        )}
-                        library={library}
-                        onUpdate={(updated) => updateSession(session.id, updated)}
-                        onDuplicate={() => duplicateSession(session)}
-                      />
-                    ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <PrimaryButton
-        onClick={() =>
-          onSave({
-            name,
-            goal,
-            level,
-            durationWeeks,
-            description,
-            status,
-            sessions,
-          })
-        }
-      >
-        {saveLabel}
-      </PrimaryButton>
     </div>
   );
 }

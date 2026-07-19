@@ -34,6 +34,18 @@ export default function RootLayout({
     <html
       lang="fr"
       className={`${barlowCondensed.variable} ${dmSans.variable} h-full`}
+      // Le script anti-flash ci-dessous (voir themeAntiFlashScript) applique
+      // la classe .light sur ce nœud AVANT l'hydratation React, uniquement
+      // si un choix "clair" est mémorisé en localStorage — c'est le seul
+      // moyen d'éviter un flash sombre->clair au chargement sans connaître
+      // le thème côté serveur. Cette classe ne fait jamais partie du rendu
+      // React lui-même (className ci-dessus reste statique, toujours "dark"
+      // par défaut côté serveur), donc React peut légitimement constater une
+      // différence sur CE nœud précis lors de l'hydratation. C'est le
+      // pattern documenté pour ce cas (cf. next-themes) : suppressHydrationWarning
+      // ne masque pas une vraie régression, il évite un avertissement pour
+      // une divergence intentionnelle et contrôlée, exclusivement sur <html>.
+      suppressHydrationWarning
     >
       <head>
         {/* Anti-flash : applique .light avant l'hydratation si mémorisé (voir components/theme/ThemeProvider.tsx). */}

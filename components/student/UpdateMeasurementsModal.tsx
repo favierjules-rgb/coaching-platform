@@ -131,8 +131,8 @@ export function UpdateMeasurementsModal({
           aria-label="Mettre à jour mes mensurations"
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
         >
-          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto border border-border bg-card p-6">
-            <div className="mb-4 flex items-start justify-between gap-4">
+          <div className="flex max-h-[90vh] w-full max-w-2xl flex-col border border-border bg-card">
+            <div className="flex items-center justify-between border-b border-border px-6 py-4">
               <h3 className="font-heading text-lg font-bold uppercase text-foreground">
                 Mettre à jour mes mensurations
               </h3>
@@ -146,103 +146,105 @@ export function UpdateMeasurementsModal({
               </button>
             </div>
 
-            {submitted ? (
-              <div className="flex items-center gap-3 border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-400">
-                <CheckCircle size={18} className="flex-shrink-0" />
-                Mensurations enregistrées. Ton coach pourra les consulter.
-              </div>
-            ) : (
-              <div className="flex flex-col gap-5">
-                <p className="text-sm leading-relaxed text-muted-foreground">
-                  Renseigne uniquement les mesures que tu as prises
-                  aujourd&apos;hui. Cette action est une démonstration :
-                  aucune donnée n&apos;est encore enregistrée.
-                </p>
-
-                <Field label="Date de la mesure" type="date" value={date} onChange={setDate} />
-
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  {measurementOrder.map((type) => {
-                    const current = measurementByType.get(type);
-                    const unit = current?.unit ?? (type === "poids" ? "kg" : "cm");
-                    return (
-                      <Field
-                        key={type}
-                        label={`${bodyMeasurementLabels[type]} (${unit})`}
-                        type="number"
-                        step="0.1"
-                        value={values[type] ?? ""}
-                        onChange={(v) => setValues((prev) => ({ ...prev, [type]: v }))}
-                        placeholder={
-                          current ? `Actuel : ${current.currentValue}` : undefined
-                        }
-                      />
-                    );
-                  })}
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              {submitted ? (
+                <div className="flex items-center gap-3 border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-400">
+                  <CheckCircle size={18} className="flex-shrink-0" />
+                  Mensurations enregistrées. Ton coach pourra les consulter.
                 </div>
+              ) : (
+                <div className="flex flex-col gap-5">
+                  <p className="text-sm leading-relaxed text-muted-foreground">
+                    Renseigne uniquement les mesures que tu as prises
+                    aujourd&apos;hui. Cette action est une démonstration :
+                    aucune donnée n&apos;est encore enregistrée.
+                  </p>
 
-                <Field
-                  label="Note (optionnel)"
-                  value={note}
-                  onChange={setNote}
-                  placeholder="Ex : mesures prises le matin à jeun"
-                />
+                  <Field label="Date de la mesure" type="date" value={date} onChange={setDate} />
 
-                <div className="border-t border-border pt-4">
-                  {!showCustom ? (
-                    <button
-                      type="button"
-                      onClick={() => setShowCustom(true)}
-                      className="flex items-center gap-2 text-xs uppercase tracking-widest text-primary transition-colors hover:text-red-400"
-                    >
-                      <Plus size={14} />
-                      Ajouter une mesure personnalisée
-                    </button>
-                  ) : (
-                    <div className="flex flex-col gap-4">
-                      <span className="text-xs uppercase tracking-wide text-muted-foreground">
-                        Mesure personnalisée
-                      </span>
-                      <Field
-                        label="Nom de la mesure"
-                        value={customName}
-                        onChange={setCustomName}
-                        placeholder="Ex : Tour de cheville"
-                      />
-                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    {measurementOrder.map((type) => {
+                      const current = measurementByType.get(type);
+                      const unit = current?.unit ?? (type === "poids" ? "kg" : "cm");
+                      return (
                         <Field
-                          label="Valeur"
+                          key={type}
+                          label={`${bodyMeasurementLabels[type]} (${unit})`}
                           type="number"
                           step="0.1"
-                          value={customValue}
-                          onChange={setCustomValue}
+                          value={values[type] ?? ""}
+                          onChange={(v) => setValues((prev) => ({ ...prev, [type]: v }))}
+                          placeholder={
+                            current ? `Actuel : ${current.currentValue}` : undefined
+                          }
                         />
-                        <SelectField
-                          label="Unité"
-                          value={customUnit}
-                          onChange={setCustomUnit}
-                          options={customUnitOptions}
+                      );
+                    })}
+                  </div>
+
+                  <Field
+                    label="Note (optionnel)"
+                    value={note}
+                    onChange={setNote}
+                    placeholder="Ex : mesures prises le matin à jeun"
+                  />
+
+                  <div className="border-t border-border pt-4">
+                    {!showCustom ? (
+                      <button
+                        type="button"
+                        onClick={() => setShowCustom(true)}
+                        className="flex items-center gap-2 text-xs uppercase tracking-widest text-primary transition-colors hover:text-red-400"
+                      >
+                        <Plus size={14} />
+                        Ajouter une mesure personnalisée
+                      </button>
+                    ) : (
+                      <div className="flex flex-col gap-4">
+                        <span className="text-xs uppercase tracking-wide text-muted-foreground">
+                          Mesure personnalisée
+                        </span>
+                        <Field
+                          label="Nom de la mesure"
+                          value={customName}
+                          onChange={setCustomName}
+                          placeholder="Ex : Tour de cheville"
+                        />
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                          <Field
+                            label="Valeur"
+                            type="number"
+                            step="0.1"
+                            value={customValue}
+                            onChange={setCustomValue}
+                          />
+                          <SelectField
+                            label="Unité"
+                            value={customUnit}
+                            onChange={setCustomUnit}
+                            options={customUnitOptions}
+                          />
+                        </div>
+                        <Field
+                          label="Note (optionnel)"
+                          value={customNote}
+                          onChange={setCustomNote}
                         />
                       </div>
-                      <Field
-                        label="Note (optionnel)"
-                        value={customNote}
-                        onChange={setCustomNote}
-                      />
-                    </div>
-                  )}
-                </div>
+                    )}
+                  </div>
 
-                <button
-                  type="button"
-                  onClick={handleSubmit}
-                  disabled={!canSubmit}
-                  className="mt-1 w-full bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
-                >
-                  Enregistrer les mensurations
-                </button>
-              </div>
-            )}
+                  <button
+                    type="button"
+                    onClick={handleSubmit}
+                    disabled={!canSubmit}
+                    className="mt-1 w-full bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
+                  >
+                    Enregistrer les mensurations
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

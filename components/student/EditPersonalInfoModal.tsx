@@ -87,8 +87,8 @@ export function EditPersonalInfoModal({ profile, onSave }: EditPersonalInfoModal
           aria-label="Modifier mes informations"
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
         >
-          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto border border-border bg-card p-6">
-            <div className="mb-4 flex items-start justify-between gap-4">
+          <div className="flex max-h-[90vh] w-full max-w-md flex-col border border-border bg-card">
+            <div className="flex items-center justify-between border-b border-border px-6 py-4">
               <h3 className="font-heading text-lg font-bold uppercase text-foreground">
                 Modifier mes informations
               </h3>
@@ -102,76 +102,78 @@ export function EditPersonalInfoModal({ profile, onSave }: EditPersonalInfoModal
               </button>
             </div>
 
-            {submitted ? (
-              <div className="flex items-center gap-3 border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-400">
-                <CheckCircle size={18} className="flex-shrink-0" />
-                Informations mises à jour sur toute la page profil.
-              </div>
-            ) : (
-              <div className="flex flex-col gap-4">
-                <p className="text-sm leading-relaxed text-muted-foreground">
-                  Ces champs sont pré-remplis avec tes valeurs actuelles :
-                  modifie uniquement ce que tu veux changer. Cette action
-                  est une démonstration : les données sont conservées en
-                  local (localStorage).
-                </p>
-                <Field
-                  label="Prénom"
-                  value={form.firstName}
-                  onChange={(v) => setField("firstName", v)}
-                />
-                <Field
-                  label="Nom"
-                  value={form.lastName}
-                  onChange={(v) => setField("lastName", v)}
-                />
-                <div className="grid grid-cols-2 gap-4">
-                  <Field
-                    label="Âge"
-                    type="number"
-                    value={form.age}
-                    onChange={(v) => setField("age", v)}
-                  />
-                  <Field
-                    label="Taille (cm)"
-                    type="number"
-                    value={form.heightCm}
-                    onChange={(v) => setField("heightCm", v)}
-                  />
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              {submitted ? (
+                <div className="flex items-center gap-3 border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-400">
+                  <CheckCircle size={18} className="flex-shrink-0" />
+                  Informations mises à jour sur toute la page profil.
                 </div>
-                <Field
-                  label="Objectif principal"
-                  value={form.goal}
-                  onChange={(v) => setField("goal", v)}
-                />
-                <Field
-                  label="Niveau sportif"
-                  value={form.level}
-                  onChange={(v) => setField("level", v)}
-                />
-                <div className="grid grid-cols-2 gap-4">
+              ) : (
+                <div className="flex flex-col gap-4">
+                  <p className="text-sm leading-relaxed text-muted-foreground">
+                    Ces champs sont pré-remplis avec tes valeurs actuelles :
+                    modifie uniquement ce que tu veux changer. Cette action
+                    est une démonstration : les données sont conservées en
+                    local (localStorage).
+                  </p>
                   <Field
-                    label="Fréquence (x/semaine)"
-                    type="number"
-                    value={form.trainingFrequencyPerWeek}
-                    onChange={(v) => setField("trainingFrequencyPerWeek", v)}
+                    label="Prénom"
+                    value={form.firstName}
+                    onChange={(v) => setField("firstName", v)}
                   />
                   <Field
-                    label="Lieu d'entraînement"
-                    value={form.trainingLocation}
-                    onChange={(v) => setField("trainingLocation", v)}
+                    label="Nom"
+                    value={form.lastName}
+                    onChange={(v) => setField("lastName", v)}
                   />
+                  <div className="grid grid-cols-2 gap-4">
+                    <Field
+                      label="Âge"
+                      type="number"
+                      value={form.age}
+                      onChange={(v) => setField("age", v)}
+                    />
+                    <Field
+                      label="Taille (cm)"
+                      type="number"
+                      value={form.heightCm}
+                      onChange={(v) => setField("heightCm", v)}
+                    />
+                  </div>
+                  <Field
+                    label="Objectif principal"
+                    value={form.goal}
+                    onChange={(v) => setField("goal", v)}
+                  />
+                  <Field
+                    label="Niveau sportif"
+                    value={form.level}
+                    onChange={(v) => setField("level", v)}
+                  />
+                  <div className="grid grid-cols-2 gap-4">
+                    <Field
+                      label="Fréquence (x/semaine)"
+                      type="number"
+                      value={form.trainingFrequencyPerWeek}
+                      onChange={(v) => setField("trainingFrequencyPerWeek", v)}
+                    />
+                    <Field
+                      label="Lieu d'entraînement"
+                      value={form.trainingLocation}
+                      onChange={(v) => setField("trainingLocation", v)}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSubmit}
+                    disabled={!canSubmit}
+                    className="mt-1 w-full bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
+                  >
+                    Enregistrer les modifications
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleSubmit}
-                  disabled={!canSubmit}
-                  className="mt-1 w-full bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
-                >
-                  Enregistrer les modifications
-                </button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       )}
