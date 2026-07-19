@@ -287,3 +287,49 @@ Faible. Aucune ligne de logique métier (calcul de séries/volume/tonnage, sauve
 ### Limitation connue (déjà signalée, toujours pas résolue)
 
 `.git/index.lock` est réapparu une nouvelle fois pendant ce lot (`git status` renvoie un avertissement `unable to unlink`) — à nettoyer de ton côté depuis ton propre terminal, comme évoqué après les Lots 1 et 2.
+
+---
+
+## Correctif hors-lot — hydratation du thème (entre Lot 3 et Lot 4)
+
+Bug réel signalé par toi en local (`app/layout.tsx:34:5`, mismatch de `className` sur `<html>`) : le script anti-flash (`themeAntiFlashScript`, exécuté avant l'hydratation React) pose la classe `.light` directement sur `document.documentElement` quand le thème clair est mémorisé, alors que le rendu React de `<html>` reste statique (jamais `.light`). Corrigé par l'ajout de `suppressHydrationWarning` sur `<html>` uniquement (`app/layout.tsx`), en complément de l'implémentation déjà correcte (aucune lecture de `localStorage` pendant le rendu serveur, thème sombre par défaut inchangé, choix persisté inchangé, `ThemeProvider` ne touche jamais `document.documentElement` pendant son rendu). Vérifié en navigateur (extension Chrome) : aucune erreur d'hydratation ni erreur console au premier chargement, à l'actualisation en clair, à l'actualisation en sombre, sur la landing, l'admin et l'espace élève. Seul fichier modifié : `app/layout.tsx`.
+
+---
+
+## Lot 4 — Rapport d'exécution
+
+**Note sur l'état Git** : ce lot a commencé avant que tu crées un commit séparé pour le Lot 3 + le correctif d'hydratation — le commit `499776e` ("Redesign lots 3-4 en cours + correctif hydratation") contient donc, en plus du Lot 3 et du correctif d'hydratation, les 5 premiers fichiers du Lot 4 listés ci-dessous. Les 2 fichiers restants (`app/globals.css`, `components/student/SessionFeedbackSection.tsx`) sont encore non commités au moment de ce rapport. Aucun historique Git n'a été réécrit ni réinitialisé — cette note sert uniquement à documenter précisément la frontière entre lots pour ton prochain commit.
+
+Périmètre réalisé : `StatCard` unifié sur la page nutrition élève (dernière page encore non consolidée), grilles à 5 tuiles rééquilibrées, généralisation du pattern "header fixe + corps scrollable" à 4 modales élève, animation de confirmation sur le retour de séance. **Aucune modification métier/Supabase/Stripe/Brevo/Resend/API.** Le Training Builder n'a pas été retouché dans ce lot (seuls les fichiers listés ci-dessous ont changé).
+
+### Fichiers modifiés — déjà présents dans le commit `499776e`
+
+- **`app/(student)/nutrition/[planId]/page.tsx`** — les deux grilles de "chiffres clés" (kcal/jour, protéines, glucides, lipides, kcal/semaine — 5 tuiles, présentes dans la branche Supabase active et dans la branche de repli mock) remplacées par `<StatCard size="lg" />` (`@/components/shared/StatCard`, déjà créé au Lot 2), avec passage de `grid-cols-2 lg:grid-cols-5` à `grid-cols-2 sm:grid-cols-3 lg:grid-cols-5` — élimine l'orphelin en fin de ligne entre les breakpoints `sm` et `lg`, même correctif que celui déjà appliqué à `ProgressNutritionSection.tsx` et `/admin/seances` (confirmé déjà conforme, aucun changement nécessaire là). C'était la dernière page à réimplémenter manuellement ce motif au lieu d'utiliser `StatCard`.
+- **`components/student/EditPersonalInfoModal.tsx`**, **`components/student/UpdateMeasurementsModal.tsx`**, **`components/student/AddProgressPhotoModal.tsx`**, **`components/shared/ProgressPhotosSection.tsx`** (modale d'upload de photo) — même correctif structurel sur les 4 : le conteneur unique `max-h-[90vh] overflow-y-auto p-6` (en-tête + corps + bouton "Fermer" dans la même zone de scroll) remplacé par `flex max-h-[90vh] flex-col` avec un en-tête `border-b px-6 py-4` fixe (hors zone de scroll) et un corps `flex-1 overflow-y-auto px-6 py-4` — reprend exactement le pattern déjà correct de `StudentOnboardingDetailModal.tsx` (cité dans l'audit comme la seule modale élève déjà bien construite). Sur un formulaire long (`UpdateMeasurementsModal.tsx` a 15 champs de mensuration) et petit écran, le bouton de fermeture ne peut plus sortir de vue au scroll. Aucun changement de logique de soumission/validation/upload — uniquement la structure de conteneur. `components/student/UpdateWeightModal.tsx` vérifié à part : seulement 2 champs, jamais assez long pour scroller, non concerné par ce bug — volontairement non touché.
+
+### Fichiers modifiés — encore non commités
+
+- **`app/globals.css`** — ajout d'un keyframe `fade-in` (opacity 0→1, 180ms ease-out) + classe utilitaire `.animate-fade-in`, avec désactivation sous `prefers-reduced-motion: reduce` (même convention exacte que le bandeau `public-programs-marquee-track` déjà présent dans ce fichier).
+- **`components/student/SessionFeedbackSection.tsx`** — classe `animate-fade-in` ajoutée sur le conteneur de l'état "Retour envoyé" (opportunité d'animation #2 de l'audit). Comme le formulaire et la confirmation sont deux branches de rendu distinctes (React démonte l'un, monte l'autre), un cross-fade avec les deux éléments simultanément visibles aurait demandé une machinerie d'état supplémentaire pour un gain visuel marginal ; le fade-in à l'apparition de la confirmation adoucit la bascule avec un changement minimal. Aucune ligne de logique de soumission/persistance touchée.
+
+### StatCard — duplication résiduelle, décision documentée (aucun changement)
+
+`components/student/StatCard.tsx` (fichier mort signalé au Lot 2) n'existe déjà plus — tu l'as supprimé toi-même entre-temps. Le `StatCard` interne à `components/shared/TrainingMetricsSummary.tsx` (utilisé par `TrainingStatCards`) reste volontairement **non fusionné** : il est rendu à la fois par des fichiers élève (`SessionFeedbackSection.tsx`, `SessionAnalysisSection.tsx`, `WeekAnalysisSection.tsx`) et par `components/admin/ProgramBuilder.tsx` (Training Builder). Le fusionner aurait changé visuellement le panneau "Analyse de la séance" du builder (fond, padding, ordre libellé/valeur différents du `StatCard` partagé) — un changement visuel du Training Builder hors périmètre explicite du Lot 4 ("Espace élève"). Repoussé à un lot où le Training Builder est explicitement au périmètre, ou à valider avec toi séparément.
+
+### `StudentSidebar.tsx` — déjà conforme, aucun changement
+
+Vérifié : `hover:bg-white/[0.04]` déjà remplacé par `hover:bg-foreground/5` et `ThemeToggle` déjà rendu, tous deux faits au Lot 1. Seule couleur encore codée en dur : `text-amber-400` sur l'icône de cadenas (ligne 102) — même catégorie que les couleurs `red-400`/`amber-400`/`green-400` explicitement réservées au Lot 6 dans le plan (§6), non touchée ici.
+
+### Vérifications
+
+- **`npm run lint`** : 0 erreur, 0 warning.
+- **`npx tsc --noEmit`** : 0 erreur.
+- **`npm run build`** : compilation ✅, typecheck ✅, génération des 70 pages statiques ✅. Échoue ensuite sur le même `EPERM: rmdir` d'environnement sandbox déjà rencontré et vérifié indépendant du code à chaque lot précédent.
+- **Non-régression Lots 1-3** : `git status` confirme qu'aucun fichier du Training Builder (`ProgramBuilder.tsx`, `ProgramBuilderFullscreen.tsx`), du thème (`ThemeProvider.tsx`, `ThemeToggle.tsx`, `app/layout.tsx`) ni des Lots 1-2 n'a été modifié par ce lot — seuls les 7 fichiers listés ci-dessus ont changé. Le build compile et typecheck l'intégralité du repo (donc Lots 1 à 3 inclus) sans erreur.
+- Vérification navigateur live non refaite spécifiquement pour ce lot (au-delà de ce qui a déjà été vérifié pour le correctif d'hydratation) — à faire de ton côté : les 4 modales (ouverture, scroll sur mensurations avec beaucoup de champs, bouton Fermer toujours visible), la page nutrition élève (5 tuiles bien réparties en largeur moyenne), et le fade à l'envoi d'un retour de séance.
+
+### Résumé des risques de régression
+
+Très faible. Un remplacement mécanique de markup par un composant déjà existant et déjà utilisé ailleurs (`StatCard`), une restructuration de conteneur identique sur 4 modales reprenant un pattern déjà validé dans le repo, et l'ajout d'une classe CSS d'animation optionnelle (désactivable, sans état). Aucune fonction de calcul, de soumission ou d'upload modifiée.
+
+**Arrêt obligatoire avant le Lot 5 — en attente de ta validation.**

@@ -270,7 +270,7 @@ export function SessionFeedbackSection({
 
   if (existingFeedback) {
     return (
-      <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-6 animate-fade-in">
         <div className="border border-primary/30 bg-card p-8 text-center">
           <CheckCircle size={32} className="mx-auto mb-3 text-primary" />
           <h3 className="mb-1 font-heading text-base font-bold uppercase text-foreground">
