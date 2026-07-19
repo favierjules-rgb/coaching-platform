@@ -4,7 +4,7 @@ import { useId, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { ArrowLeft, MailCheck } from "lucide-react";
 
-import { Logo } from "@/components/ui/Logo";
+import { AuthCardLayout } from "@/components/shared/AuthCardLayout";
 
 /**
  * Formulaire "mot de passe oublié" (/mot-de-passe-oublie) — passe par
@@ -42,78 +42,62 @@ export function ForgotPasswordForm({ supabaseConfigured }: { supabaseConfigured:
     setSent(true);
   }
 
+  const backToLoginFooter = (
+    <Link
+      href="/connexion"
+      className="mt-6 flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary"
+    >
+      <ArrowLeft size={14} />
+      Retour à la connexion
+    </Link>
+  );
+
   if (sent) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4 py-12">
-        <div className="mb-8">
-          <Logo />
-        </div>
-        <div className="w-full max-w-md border border-border bg-card p-8 text-center">
-          <MailCheck size={28} className="mx-auto mb-4 text-primary" />
-          <h1 className="mb-2 font-heading text-2xl font-extrabold uppercase text-foreground">Email envoyé</h1>
-          <p className="text-sm leading-relaxed text-muted-foreground">
-            Si un compte existe pour {email.trim()}, un lien pour réinitialiser ton mot de passe vient de t&apos;être
-            envoyé.
-          </p>
-        </div>
-        <Link
-          href="/connexion"
-          className="mt-6 flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary"
-        >
-          <ArrowLeft size={14} />
-          Retour à la connexion
-        </Link>
-      </div>
+      <AuthCardLayout cardClassName="text-center" footer={backToLoginFooter}>
+        <MailCheck size={28} className="mx-auto mb-4 text-primary" />
+        <h1 className="mb-2 font-heading text-2xl font-extrabold uppercase text-foreground">Email envoyé</h1>
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          Si un compte existe pour {email.trim()}, un lien pour réinitialiser ton mot de passe vient de t&apos;être
+          envoyé.
+        </p>
+      </AuthCardLayout>
     );
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4 py-12">
-      <div className="mb-8">
-        <Logo />
-      </div>
+    <AuthCardLayout footer={backToLoginFooter}>
+      <h1 className="mb-1 font-heading text-2xl font-extrabold uppercase text-foreground">Mot de passe oublié</h1>
+      <p className="mb-6 text-sm text-muted-foreground">
+        Indique ton email, on t&apos;envoie un lien pour en choisir un nouveau.
+      </p>
 
-      <div className="w-full max-w-md border border-border bg-card p-8">
-        <h1 className="mb-1 font-heading text-2xl font-extrabold uppercase text-foreground">Mot de passe oublié</h1>
-        <p className="mb-6 text-sm text-muted-foreground">
-          Indique ton email, on t&apos;envoie un lien pour en choisir un nouveau.
-        </p>
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <div>
+          <label htmlFor={emailId} className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+            Email
+          </label>
+          <input
+            id={emailId}
+            type="email"
+            autoComplete="email"
+            required
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            className="w-full border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none"
+          />
+        </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          <div>
-            <label htmlFor={emailId} className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
-              Email
-            </label>
-            <input
-              id={emailId}
-              type="email"
-              autoComplete="email"
-              required
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              className="w-full border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none"
-            />
-          </div>
+        {error && <p className="text-sm text-red-400">{error}</p>}
 
-          {error && <p className="text-sm text-red-400">{error}</p>}
-
-          <button
-            type="submit"
-            disabled={loading || !supabaseConfigured}
-            className="mt-2 bg-primary py-3 text-center text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
-          >
-            {loading ? "Envoi..." : "Envoyer le lien"}
-          </button>
-        </form>
-      </div>
-
-      <Link
-        href="/connexion"
-        className="mt-6 flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary"
-      >
-        <ArrowLeft size={14} />
-        Retour à la connexion
-      </Link>
-    </div>
+        <button
+          type="submit"
+          disabled={loading || !supabaseConfigured}
+          className="mt-2 bg-primary py-3 text-center text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
+        >
+          {loading ? "Envoi..." : "Envoyer le lien"}
+        </button>
+      </form>
+    </AuthCardLayout>
   );
 }

@@ -333,3 +333,47 @@ Vérifié : `hover:bg-white/[0.04]` déjà remplacé par `hover:bg-foreground/5`
 Très faible. Un remplacement mécanique de markup par un composant déjà existant et déjà utilisé ailleurs (`StatCard`), une restructuration de conteneur identique sur 4 modales reprenant un pattern déjà validé dans le repo, et l'ajout d'une classe CSS d'animation optionnelle (désactivable, sans état). Aucune fonction de calcul, de soumission ou d'upload modifiée.
 
 **Arrêt obligatoire avant le Lot 5 — en attente de ta validation.**
+
+## Lot 5 — Rapport d'exécution
+
+Périmètre réalisé : composant `AuthCardLayout` partagé (élimine la duplication "Logo + carte centrée" recopiée dans 6 fichiers), entrée animée du Hero (opportunité #5), transitions entre étapes du wizard d'onboarding (opportunité #1), icône de confirmation sur le succès du paiement (opportunité #6). **Aucune modification métier/Supabase/Stripe/Brevo/Resend/API** — seuls les wrappers visuels et des classes CSS d'animation ont changé ; tous les handlers, appels Supabase, redirections et validations sont restés intacts (vérifiés fichier par fichier avant et après modification).
+
+### `AuthCardLayout` — nouveau composant + 6 migrations
+
+- **`components/shared/AuthCardLayout.tsx`** (nouveau) — extrait la structure "logo centré + carte" identifiée en double dans l'audit (§Constat, "MEDIUM-HIGH — Duplication"). Deux variantes existaient dans le code, préservées via des props plutôt qu'unifiées de force pour garantir zéro changement visuel :
+  - variante "formulaire" (Login/ForgotPassword/ResetPassword/Inscription) : logo dans un `mb-8`, lien de retour optionnel sous la carte (`footer`) ;
+  - variante "résultat" (AccessDenied/PaymentResultCard) : conteneur `gap-6 text-center`, logo non enveloppé, pas de lien de retour (les actions vivent dans la carte).
+  Props supplémentaires : `cardClassName` (ex. `text-center` sur les états de confirmation/erreur), `card={false}` (état "chargement" de ResetPasswordForm, spinner seul sans carte).
+- **Fichiers migrés** (uniquement le JSX de rendu ; aucun état, hook, appel Supabase ou logique de redirection touché) : `components/auth/LoginForm.tsx`, `components/auth/ForgotPasswordForm.tsx` (2 états), `components/auth/ResetPasswordForm.tsx` (3 états), `components/auth/AccessDenied.tsx`, `components/shared/PaymentResultCard.tsx`, `app/inscription/page.tsx`.
+
+### Entrée animée du Hero (opportunité #5)
+
+- **`app/globals.css`** — keyframe `hero-fade-slide-in` (opacity 0→1 + translateY(12px)→0, 500ms ease-out), classes `.hero-fade-slide-in-delay-1` (80ms) et `-delay-2` (160ms), désactivées sous `prefers-reduced-motion: reduce`.
+- **`components/sections/Hero.tsx`** — classe appliquée au bloc kicker + au `<h1>` (délai 0, lus comme un seul bloc "titre"), délai 1 sur le sous-titre, délai 2 sur les CTA — reprend le stagger 80ms demandé par l'audit entre titre/sous-titre/CTA.
+
+### Transitions du wizard d'onboarding (opportunité #1)
+
+- **`app/globals.css`** — keyframe `step-fade-slide-in` (opacity 0→1 + translateX(8px)→0, 200ms ease-out), désactivé sous `prefers-reduced-motion`.
+- **`components/onboarding/OnboardingWizard.tsx`** — `key={step}` ajouté sur le conteneur du contenu d'étape (force React à remonter le nœud à chaque changement d'étape, ce qui relance l'animation CSS) + classe `step-fade-slide-in`. Un seul sens de glissement (pas d'inversion suivant/précédent) pour rester simple, conforme à la formulation de l'opportunité #1. Aucune logique de validation (`canProceedFromStep`) ni de state du formulaire touchée.
+
+### Icône de confirmation paiement (opportunité #6)
+
+- **`app/globals.css`** — keyframe `payment-icon-bounce-in` (scale 0.9 → dépassement à 1.15 à 60% → 1 à 100%, opacity 0→1, 300ms ease-out) pour un effet ressort léger sans dépendance JS, désactivé sous `prefers-reduced-motion`.
+- **`components/shared/PaymentResultCard.tsx`** — animation appliquée uniquement quand `iconTone` vaut `"primary"` (valeur par défaut, utilisée exclusivement par `PaymentSuccessContent.tsx`, l'état "succès" visé par l'opportunité #6) — pas sur `iconTone="amber"` (annulation `PaymentCancelContent.tsx`, accès limité `AccessLimitedContent.tsx`), pour rester fidèle au "moment à forte charge émotionnelle : achat confirmé" de l'audit et ne pas ajouter de rebond sur un message d'échec/annulation.
+
+### Vérifications
+
+- **`npm run lint`** : 0 erreur, 0 warning.
+- **`npx tsc --noEmit`** : 0 erreur.
+- **`npm run build`** non relancé ce lot (conformément à ce qu'on s'était dit : éviter de manipuler `.next` pendant que ton `npm run dev` tourne, sauf demande explicite de ta part).
+- **Vérification live via l'extension Chrome** : `/connexion`, `/inscription`, `/mot-de-passe-oublie`, `/acces-refuse`, `/acces-limite`, `/paiement/success`, `/paiement/cancel` et `/` (landing) — toutes rendues correctement, structure logo/carte identique à avant migration, icône de succès avec rebond visible, entrée animée du Hero visible au chargement (stagger observé). Console vérifiée propre après rechargement (les 2 erreurs de parsing JSX vues en cours de route étaient un résidu de Fast Refresh sur un état intermédiaire pendant l'édition de `LoginForm.tsx`, plus présentes après rechargement — confirmé par relecture du fichier final et par `tsc`/`lint` propres).
+
+### Constat annexe (hors périmètre du Lot 5, à traiter au Lot 6)
+
+En testant le Hero, j'ai remarqué que `text-foreground` sur le `<h1>` (déjà présent avant ce lot, non introduit par l'animation) devient quasi invisible sur le fond sombre de la landing dès que le thème clair a été choisi ailleurs sur le site (le script anti-flash pose `.light` sur `<html>` globalement, y compris sur les pages publiques qui, elles, sont censées garder un fond sombre fixe en couleurs codées en dur). Confirmé en retirant temporairement la classe `.light` en direct : le texte redevient blanc normalement. Je n'ai rien modifié — c'est exactement la catégorie de correctif déjà prévue au Lot 6 ("suppression des couleurs Tailwind brutes restantes" / tokens sur la landing), je le signale pour que tu l'aies dans le radar plutôt que de le corriger sans validation.
+
+### Résumé des risques de régression
+
+Faible. `AuthCardLayout` reproduit avec des props explicites les deux variantes de markup qui existaient déjà à l'identique (mêmes classes Tailwind, mêmes conditions d'affichage), sans toucher aux handlers/appels Supabase des 6 fichiers migrés. Les 3 animations sont des classes CSS pures, désactivables via `prefers-reduced-motion`, sans nouvel état React (à l'exception du `key={step}` du wizard, qui ne change que le remontage DOM, pas la logique de progression).
+
+**Arrêt obligatoire avant le Lot 6 — en attente de ta validation.**

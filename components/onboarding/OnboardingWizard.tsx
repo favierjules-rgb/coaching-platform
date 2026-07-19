@@ -115,7 +115,7 @@ export function OnboardingWizard() {
           </div>
         )}
 
-        <div className="flex flex-col gap-4">
+        <div key={step} className="step-fade-slide-in flex flex-col gap-4">
           {step === 1 && (
             <>
               <div className="grid grid-cols-2 gap-4">

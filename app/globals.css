@@ -130,3 +130,94 @@ body {
     animation: none;
   }
 }
+
+/* Entrée animée de la landing (chantier redesign UI, Lot 5, opportunité
+   d'animation #5) — kicker+titre, sous-titre puis CTA du Hero apparaissent
+   en fondu avec une légère translation verticale, avec un léger décalage
+   entre chaque bloc pour guider la lecture. */
+@keyframes hero-fade-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.hero-fade-slide-in {
+  animation: hero-fade-slide-in 500ms ease-out;
+}
+
+.hero-fade-slide-in-delay-1 {
+  animation-delay: 80ms;
+}
+
+.hero-fade-slide-in-delay-2 {
+  animation-delay: 160ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-fade-slide-in {
+    animation: none;
+  }
+}
+
+/* Transition entre étapes du wizard d'onboarding (chantier redesign UI,
+   Lot 5, opportunité d'animation #1) — le contenu de chaque étape est un
+   bloc JSX conditionnel distinct (step === N && ...), remonté à chaque
+   changement d'étape via `key={step}` sur son conteneur : un simple fondu +
+   légère translation horizontale au montage suffit, sans dépendre du sens
+   de navigation (suivant/précédent). */
+@keyframes step-fade-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.step-fade-slide-in {
+  animation: step-fade-slide-in 200ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .step-fade-slide-in {
+    animation: none;
+  }
+}
+
+/* Icône de confirmation de paiement réussi (chantier redesign UI, Lot 5,
+   opportunité d'animation #6) — uniquement l'état succès de
+   PaymentResultCard (iconTone "primary" par défaut, voir
+   PaymentSuccessContent.tsx), pas l'état annulé/limité (iconTone "amber").
+   Léger rebond : dépassement à 1.15 avant de se stabiliser à l'échelle 1,
+   pour un effet "spring" (bounce ≈0.15) sans bibliothèque d'animation. */
+@keyframes payment-icon-bounce-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.payment-icon-bounce-in {
+  animation: payment-icon-bounce-in 300ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .payment-icon-bounce-in {
+    animation: none;
+  }
+}

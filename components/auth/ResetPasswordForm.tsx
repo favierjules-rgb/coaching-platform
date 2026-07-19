@@ -6,7 +6,7 @@ import Link from "next/link";
 import { AlertCircle, ArrowLeft, Loader2 } from "lucide-react";
 import type { EmailOtpType } from "@supabase/supabase-js";
 
-import { Logo } from "@/components/ui/Logo";
+import { AuthCardLayout } from "@/components/shared/AuthCardLayout";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 type Status = "checking" | "ready" | "invalid";
@@ -162,98 +162,88 @@ export function ResetPasswordForm({ supabaseConfigured }: { supabaseConfigured: 
 
   if (status === "checking") {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4 py-12">
-        <div className="mb-8">
-          <Logo />
-        </div>
+      <AuthCardLayout card={false}>
         <Loader2 size={24} className="animate-spin text-primary" />
-      </div>
+      </AuthCardLayout>
     );
   }
 
   if (status === "invalid") {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4 py-12">
-        <div className="mb-8">
-          <Logo />
-        </div>
-        <div className="w-full max-w-md border border-border bg-card p-8 text-center">
-          <AlertCircle size={28} className="mx-auto mb-4 text-red-400" />
-          <h1 className="mb-2 font-heading text-2xl font-extrabold uppercase text-foreground">Lien invalide</h1>
-          <p className="text-sm leading-relaxed text-muted-foreground">
-            Ce lien est invalide ou a expiré. Redemande un lien pour définir ton mot de passe.
-          </p>
-        </div>
-        <Link
-          href="/mot-de-passe-oublie"
-          className="mt-6 flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary"
-        >
-          <ArrowLeft size={14} />
-          Redemander un lien
-        </Link>
-      </div>
+      <AuthCardLayout
+        cardClassName="text-center"
+        footer={
+          <Link
+            href="/mot-de-passe-oublie"
+            className="mt-6 flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary"
+          >
+            <ArrowLeft size={14} />
+            Redemander un lien
+          </Link>
+        }
+      >
+        <AlertCircle size={28} className="mx-auto mb-4 text-red-400" />
+        <h1 className="mb-2 font-heading text-2xl font-extrabold uppercase text-foreground">Lien invalide</h1>
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          Ce lien est invalide ou a expiré. Redemande un lien pour définir ton mot de passe.
+        </p>
+      </AuthCardLayout>
     );
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4 py-12">
-      <div className="mb-8">
-        <Logo />
-      </div>
+    <AuthCardLayout>
+      <h1 className="mb-1 font-heading text-2xl font-extrabold uppercase text-foreground">
+        Ton mot de passe
+      </h1>
+      <p className="mb-6 text-sm text-muted-foreground">Choisis un mot de passe pour ton espace coaching.</p>
 
-      <div className="w-full max-w-md border border-border bg-card p-8">
-        <h1 className="mb-1 font-heading text-2xl font-extrabold uppercase text-foreground">
-          Ton mot de passe
-        </h1>
-        <p className="mb-6 text-sm text-muted-foreground">Choisis un mot de passe pour ton espace coaching.</p>
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <div>
+          <label htmlFor={passwordId} className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+            Nouveau mot de passe
+          </label>
+          <input
+            id={passwordId}
+            type="password"
+            autoComplete="new-password"
+            required
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            className="w-full border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none"
+          />
+        </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          <div>
-            <label htmlFor={passwordId} className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
-              Nouveau mot de passe
-            </label>
-            <input
-              id={passwordId}
-              type="password"
-              autoComplete="new-password"
-              required
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="w-full border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none"
-            />
+        <div>
+          <label htmlFor={confirmId} className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+            Confirme-le
+          </label>
+          <input
+            id={confirmId}
+            type="password"
+            autoComplete="new-password"
+            required
+            value={confirm}
+            onChange={(event) => setConfirm(event.target.value)}
+            className="w-full border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none"
+          />
+        </div>
+
+        {error && (
+          <div className="flex items-start gap-2 border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+            <AlertCircle size={16} className="mt-0.5 flex-shrink-0" />
+            {error}
           </div>
+        )}
 
-          <div>
-            <label htmlFor={confirmId} className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
-              Confirme-le
-            </label>
-            <input
-              id={confirmId}
-              type="password"
-              autoComplete="new-password"
-              required
-              value={confirm}
-              onChange={(event) => setConfirm(event.target.value)}
-              className="w-full border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none"
-            />
-          </div>
-
-          {error && (
-            <div className="flex items-start gap-2 border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-              <AlertCircle size={16} className="mt-0.5 flex-shrink-0" />
-              {error}
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="mt-2 bg-primary py-3 text-center text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
-          >
-            {loading ? "Enregistrement..." : "Valider et accéder à mon espace"}
-          </button>
-        </form>
-      </div>
-    </div>
+        <button
+          type="submit"
+          disabled={loading}
+          className="mt-2 bg-primary py-3 text-center text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
+        >
+          {loading ? "Enregistrement..." : "Valider et accéder à mon espace"}
+        </button>
+      </form>
+    </AuthCardLayout>
   );
 }
