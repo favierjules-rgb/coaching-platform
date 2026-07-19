@@ -17,19 +17,43 @@
  * bg-zinc-*...) dans l'espace admin/élève — toujours ces tokens sémantiques.
  */
 :root {
-  --background: #0a0a0a;
-  --foreground: #f5f5f4;
+  --background: #050505;
+  --foreground: #f5f5f5;
   --card: #121212;
   --card-hover: rgba(255, 255, 255, 0.04);
-  --border: rgba(255, 255, 255, 0.08);
-  --muted-foreground: #8f8f8f;
-  --primary: #d62828;
-  --primary-foreground: #ffffff;
-  /* --primary-hover : valeur identique à l'ancien hover:bg-red-700 codé en
-     dur (#b91c1c) — reprise telle quelle pour garantir zéro changement
-     visuel lors du remplacement des classes, seule la source devient un
-     token (voir docs/audit-redesign-ui-2026-07.md, Lot 1). */
-  --primary-hover: #b91c1c;
+  --border: rgba(255, 255, 255, 0.12);
+  --muted-foreground: #9a9a9a;
+
+  /*
+   * Identité monochrome (chantier "identité visuelle SETH", Lot 6 Bis,
+   * Groupe B1 v2 — changement de direction validé le 2026-07-19,
+   * remplace intégralement la tentative rose/cyan/violet/vert acide du
+   * B1 v1, qui n'avait migré aucun composant et est donc retirée sans
+   * impact). Effet négatif noir/blanc : plus de couleur de marque, un
+   * seul token --primary par thème, quasi blanc en sombre / quasi noir
+   * en clair, avec un texte de bouton dans la couleur opposée — ce
+   * schéma inversé donne naturellement un contraste énorme (>=10:1)
+   * dans les deux thèmes, donc pas besoin d'un éclatement en plusieurs
+   * rôles comme pour le rose (voir audit précédent : ratios calculés,
+   * tous largement AAA).
+   * --surface / --surface-elevated / --surface-soft / --border-strong :
+   * nouveaux tokens additifs, pas encore consommés par les composants
+   * (qui utilisent toujours --card / --border) — préparent une future
+   * migration, sans "remplacement massif de classes" ce round.
+   */
+  --surface: #0d0d0d;
+  --surface-elevated: #171717;
+  --surface-soft: #222222;
+  --border-strong: rgba(255, 255, 255, 0.24);
+
+  --primary: #f5f5f5;
+  --primary-hover: #d9d9d9;
+  --primary-active: #bdbdbd;
+  --primary-foreground: #050505;
+
+  /* États système — inchangés, restent distincts de l'identité de marque
+     (conservent leurs couleurs fonctionnelles uniquement là où elles sont
+     nécessaires à la compréhension). */
   --destructive: #f87171;
   --destructive-foreground: #ffffff;
   --warning: #fbbf24;
@@ -39,15 +63,23 @@
 }
 
 .light {
-  --background: #f4f3f1;
-  --foreground: #17171a;
+  --background: #f4f4f2;
+  --foreground: #111111;
   --card: #ffffff;
   --card-hover: rgba(10, 10, 10, 0.03);
-  --border: rgba(10, 10, 10, 0.1);
-  --muted-foreground: #6b6b6f;
-  --primary: #d62828;
+  --border: rgba(0, 0, 0, 0.12);
+  --muted-foreground: #666666;
+
+  --surface: #ffffff;
+  --surface-elevated: #ececea;
+  --surface-soft: #dededb;
+  --border-strong: rgba(0, 0, 0, 0.24);
+
+  --primary: #111111;
+  --primary-hover: #2a2a2a;
+  --primary-active: #444444;
   --primary-foreground: #ffffff;
-  --primary-hover: #b91c1c;
+
   --destructive: #dc2626;
   --destructive-foreground: #ffffff;
   --warning: #d97706;
@@ -62,10 +94,15 @@
   --color-card: var(--card);
   --color-card-hover: var(--card-hover);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-muted-foreground: var(--muted-foreground);
+  --color-surface: var(--surface);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-surface-soft: var(--surface-soft);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary-hover: var(--primary-hover);
+  --color-primary-active: var(--primary-active);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-warning: var(--warning);
@@ -80,6 +117,20 @@ body {
   background: var(--background);
   color: var(--foreground);
   transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+/*
+ * Tokens de mouvement centralisés (Lot 6, Groupe F — cf. .agents/skills/
+ * animation-vocabulary, improve-animations/AUDIT.md, apple-design,
+ * emil-design-eng). Un seul easing d'entrée UI (courbe forte, les easings
+ * CSS natifs sont jugés trop faibles) + deux durées sous la barre des 300ms
+ * recommandée pour toute animation d'interface. Réutilisables par les lots
+ * suivants plutôt que de coder ces valeurs en dur à chaque nouvel usage.
+ */
+:root {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --duration-fast: 160ms; /* petits éléments fréquents : sous-menu, overlay */
+  --duration-modal: 220ms; /* modales/drawers (budget recommandé 200-500ms) */
 }
 
 /* Bandeau auto-défilant du catalogue public de programmes (chantier module
@@ -218,6 +269,89 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .payment-icon-bounce-in {
+    animation: none;
+  }
+}
+
+/*
+ * Entrée de la modale admin partagée (chantier redesign UI, Lot 6, Groupe F
+ * — components/admin/Modal.tsx, 17 consommateurs). Overlay : fondu simple.
+ * Contenu : fondu + léger scale-in (jamais scale(0), départ à 0.97 comme
+ * recommandé par .agents/skills/apple-design et emil-design-eng) sur
+ * --ease-out. Entrée uniquement : Modal.tsx est démonté immédiatement par
+ * chaque consommateur à la fermeture (pas de state "closing" partagé), donc
+ * une sortie animée nécessiterait de retoucher les 17 call sites — hors
+ * périmètre de ce groupe (voir consigne). transform-origin reste "center"
+ * (valeur par défaut) : les modales sont l'exception documentée à la règle
+ * "origin-aware", elles ne sont pas ancrées à un déclencheur.
+ */
+@keyframes modal-overlay-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.modal-overlay-fade-in {
+  animation: modal-overlay-fade-in var(--duration-fast) ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-overlay-fade-in {
+    animation: none;
+  }
+}
+
+@keyframes modal-content-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.modal-content-scale-in {
+  animation: modal-content-scale-in var(--duration-modal) var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-content-scale-in {
+    animation: none;
+  }
+}
+
+/*
+ * Transition d'ouverture du sous-menu "Programmation" (chantier redesign UI,
+ * Lot 6, Groupe F — components/admin/AdminSidebar.tsx). Le chevron indique
+ * déjà l'état ouvert/fermé (rotate-180 existant, inchangé). Uniquement
+ * opacity + transform (léger décalage vertical), pas d'animation de hauteur
+ * (coûteuse, hors des propriétés transform/opacity autorisées). Entrée
+ * uniquement, même limite qu'au-dessus : le sous-menu est démonté
+ * immédiatement à la fermeture (`{programmationOpen && (...)}`), cohérent
+ * avec le pattern déjà utilisé ailleurs dans l'app (Lots 3-5).
+ */
+@keyframes sidebar-submenu-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.sidebar-submenu-fade-in {
+  animation: sidebar-submenu-fade-in var(--duration-fast) var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-submenu-fade-in {
     animation: none;
   }
 }

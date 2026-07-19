@@ -849,7 +849,7 @@ export function DayCard({
                       type="button"
                       onClick={saveAsTemplate}
                       disabled={savingTemplate || !templateName.trim()}
-                      className="border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+                      className="border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       {savingTemplate ? "Enregistrement..." : "Enregistrer"}
                     </button>

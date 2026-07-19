@@ -54,7 +54,7 @@ export function Modal({ title, onClose, children, maxWidth = "max-w-md" }: Modal
       role="dialog"
       aria-modal="true"
       aria-label={title}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+      className="modal-overlay-fade-in fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
       onClick={(event) => {
         // Ferme au clic sur l'overlay uniquement (pas sur le contenu de la
         // modale) — comparaison de cible stricte, pas de stopPropagation
@@ -65,9 +65,9 @@ export function Modal({ title, onClose, children, maxWidth = "max-w-md" }: Modal
       <div
         ref={dialogRef}
         tabIndex={-1}
-        className={`max-h-[90vh] w-full ${maxWidth} overflow-y-auto border border-border bg-card p-6 outline-none`}
+        className={`modal-content-scale-in flex max-h-[90vh] w-full ${maxWidth} flex-col border border-border bg-card outline-none`}
       >
-        <div className="mb-4 flex items-start justify-between gap-4">
+        <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-4">
           <h3 className="font-heading text-lg font-bold uppercase text-foreground">{title}</h3>
           <button
             type="button"
@@ -78,7 +78,7 @@ export function Modal({ title, onClose, children, maxWidth = "max-w-md" }: Modal
             <X size={18} />
           </button>
         </div>
-        {children}
+        <div className="flex-1 overflow-y-auto px-6 py-4">{children}</div>
       </div>
     </div>
   );

@@ -38,14 +38,14 @@ export function WeightChart({ data }: { data: WeightEntry[] }) {
       >
         <defs>
           <linearGradient id="weightGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#d62828" stopOpacity="0.35" />
-            <stop offset="100%" stopColor="#d62828" stopOpacity="0" />
+            <stop offset="0%" stopColor="var(--primary)" stopOpacity="0.35" />
+            <stop offset="100%" stopColor="var(--primary)" stopOpacity="0" />
           </linearGradient>
         </defs>
         <path d={areaPath} fill="url(#weightGradient)" />
-        <path d={linePath} fill="none" stroke="#d62828" strokeWidth={2} />
+        <path d={linePath} fill="none" stroke="var(--primary)" strokeWidth={2} />
         {points.map((point, index) => (
-          <circle key={`${point.x}-${index}`} cx={point.x} cy={point.y} r={3} fill="#d62828" />
+          <circle key={`${point.x}-${index}`} cx={point.x} cy={point.y} r={3} fill="var(--primary)" />
         ))}
       </svg>
       <div className="mt-2 flex justify-between text-xs text-muted-foreground">

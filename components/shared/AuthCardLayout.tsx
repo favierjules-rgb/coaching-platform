@@ -34,6 +34,13 @@ interface AuthCardLayoutProps {
  * fichiers. Ne contient aucune logique métier/auth : uniquement le wrapper
  * visuel, chaque appelant garde l'intégralité de ses handlers, appels
  * Supabase et redirections.
+ *
+ * Racine en `<main>` (Lot 6, Groupe C — landmarks) : ces pages sont des
+ * écrans autonomes exclus de SiteChrome (voir PRIVATE_PREFIXES) et ne sont
+ * enveloppées par aucun autre `<main>` (AdminShell/StudentShell), donc sans
+ * ce tag elles n'exposaient aucun repère de navigation "contenu principal"
+ * pour les lecteurs d'écran. Changement de balise uniquement, aucun style
+ * ni comportement modifié.
  */
 export function AuthCardLayout({
   children,
@@ -44,7 +51,7 @@ export function AuthCardLayout({
   card = true,
 }: AuthCardLayoutProps) {
   return (
-    <div
+    <main
       className={
         outerClassName
           ? `flex min-h-screen flex-col items-center justify-center bg-background px-4 py-12 ${outerClassName}`
@@ -74,6 +81,6 @@ export function AuthCardLayout({
       )}
 
       {footer}
-    </div>
+    </main>
   );
 }

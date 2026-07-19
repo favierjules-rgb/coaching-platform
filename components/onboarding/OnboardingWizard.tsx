@@ -87,7 +87,11 @@ export function OnboardingWizard() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center bg-background px-4 py-10">
+    // Racine en `<main>` (Lot 6, Groupe C — landmarks) : page autonome sans
+    // StudentShell (voir commentaire du composant page), donc sans ce tag
+    // aucun repère "contenu principal" n'était exposé aux lecteurs d'écran.
+    // Changement de balise uniquement, aucun style ni comportement modifié.
+    <main className="flex min-h-screen flex-col items-center bg-background px-4 py-10">
       <div className="mb-6">
         <Logo />
       </div>
@@ -498,6 +502,6 @@ export function OnboardingWizard() {
           </div>
         )}
       </div>
-    </div>
+    </main>
   );
 }

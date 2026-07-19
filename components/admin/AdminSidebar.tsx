@@ -116,7 +116,7 @@ export function AdminSidebar({ mobile = false, onNavigate }: AdminSidebarProps) 
             <ChevronDown size={16} className={`transition-transform ${programmationOpen ? "rotate-180" : ""}`} />
           </button>
           {programmationOpen && (
-            <div className="mt-1 flex flex-col gap-1 pl-[38px]">
+            <div className="sidebar-submenu-fade-in mt-1 flex flex-col gap-1 pl-[38px]">
               {programmationChildren.map((child) => {
                 const childActive = pathname?.startsWith(child.href);
                 return (

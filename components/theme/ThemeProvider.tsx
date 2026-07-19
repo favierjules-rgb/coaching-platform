@@ -1,6 +1,15 @@
 "use client";
 
-import { createContext, useCallback, useContext, useSyncExternalStore, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
+import { usePathname } from "next/navigation";
 
 /**
  * Bascule clair/sombre (chantier "redesign clair/sombre", juillet 2026) —
@@ -24,6 +33,46 @@ import { createContext, useCallback, useContext, useSyncExternalStore, type Reac
 export type Theme = "dark" | "light";
 
 const STORAGE_KEY = "seth-theme";
+
+/**
+ * Source de vérité UNIQUE des routes où le choix clair/sombre s'applique
+ * (chantier Lot 6, correctif "isolation des thèmes") — espace admin et
+ * espace élève. Toute route hors de cette liste (landing, catalogue public
+ * /programmes, pages d'authentification, paiement, désinscription
+ * newsletter...) reste verrouillée en sombre, quel que soit le thème
+ * mémorisé. Utilisée à deux endroits qui doivent impérativement rester en
+ * accord :
+ * 1. `themeAntiFlashScript` (pré-hydratation, voir plus bas) ;
+ * 2. l'effet de synchronisation au changement de route dans
+ *    `ThemeProvider` (post-hydratation, navigation client-side).
+ * Ne jamais dupliquer cette liste ailleurs — l'importer.
+ */
+export const THEME_ENABLED_PREFIXES = [
+  "/admin",
+  "/dashboard",
+  "/entrainement",
+  "/nutrition",
+  "/documents",
+  "/profil",
+  "/progression",
+  "/rendez-vous",
+  "/onboarding",
+] as const;
+
+function isThemeableRoute(pathname: string | null): boolean {
+  if (!pathname) return false;
+  return THEME_ENABLED_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+}
+
+// useLayoutEffect n'a aucun effet côté serveur (juste un avertissement React
+// dans la console) : sur le rendu serveur on retombe silencieusement sur
+// useEffect (no-op pour cet usage, la classe .light n'a de toute façon pas
+// de sens sans DOM). Côté client, useLayoutEffect s'exécute de façon
+// synchrone AVANT que le navigateur peigne le nouveau contenu de route — le
+// seul moyen d'éviter un flash visible (clair puis sombre, ou l'inverse) au
+// moment précis d'une navigation client-side (App Router ne recharge pas
+// <html>/<body>, seul le sous-arbre routé change).
+const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 interface ThemeContextValue {
   theme: Theme;
@@ -67,14 +116,32 @@ function getServerThemeSnapshot(): Theme {
 /**
  * Script anti-flash injecté dans <head> par app/layout.tsx, exécuté avant
  * l'hydratation React : applique la classe `.light` immédiatement si un
- * choix "clair" est mémorisé, pour éviter un flash sombre->clair au
- * chargement. Volontairement une simple chaîne (pas d'import), pour rester
- * exécutable comme script inline sans dépendre du bundle client.
+ * choix "clair" est mémorisé ET que la route courante fait partie des
+ * espaces thémables (THEME_ENABLED_PREFIXES ci-dessus), pour éviter un
+ * flash sombre->clair au chargement — SANS jamais l'appliquer sur une page
+ * publique verrouillée en sombre. Volontairement une simple chaîne (pas
+ * d'import), pour rester exécutable comme script inline sans dépendre du
+ * bundle client ; la liste de préfixes est sérialisée depuis
+ * THEME_ENABLED_PREFIXES pour ne jamais diverger de la version utilisée
+ * côté React.
  */
-export const themeAntiFlashScript = `(function(){try{var t=window.localStorage.getItem('${STORAGE_KEY}');if(t==='light'){document.documentElement.classList.add('light');}}catch(e){}})();`;
+export const themeAntiFlashScript = `(function(){try{var t=window.localStorage.getItem('${STORAGE_KEY}');if(t!=='light')return;var prefixes=${JSON.stringify(THEME_ENABLED_PREFIXES)};var path=window.location.pathname;for(var i=0;i<prefixes.length;i++){if(path.indexOf(prefixes[i])===0){document.documentElement.classList.add('light');break;}}}catch(e){}})();`;
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const theme = useSyncExternalStore(subscribeToTheme, getThemeSnapshot, getServerThemeSnapshot);
+  const pathname = usePathname();
+
+  // Synchronise la classe .light à chaque changement de route (navigation
+  // client-side, sans rechargement complet) — le script anti-flash ci-dessus
+  // ne s'exécute qu'au chargement initial d'une page ; sans cet effet, une
+  // navigation en SPA depuis une route privée en clair vers une route
+  // publique (ou l'inverse) laisserait .light collé sur <html>. Ne lit
+  // jamais localStorage pendant le rendu serveur : cet effet ne s'exécute
+  // que côté client, après montage/mise à jour.
+  useIsomorphicLayoutEffect(() => {
+    const shouldBeLight = isThemeableRoute(pathname) && readStoredTheme() === "light";
+    document.documentElement.classList.toggle("light", shouldBeLight);
+  }, [pathname]);
 
   const setTheme = useCallback((next: Theme) => {
     applyThemeClass(next);

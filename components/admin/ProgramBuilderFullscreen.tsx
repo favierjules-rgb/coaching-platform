@@ -430,7 +430,7 @@ export function ProgramBuilderFullscreen({
               setStatus((prev) => (prev === "actif" ? "brouillon" : "actif"));
               markDirty();
             }}
-            className="flex items-center gap-1.5 border border-primary bg-primary px-3 py-1.5 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700"
+            className="flex items-center gap-1.5 border border-primary bg-primary px-3 py-1.5 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
           >
             {status === "actif" ? "Repasser en brouillon" : "Publier"}
           </button>
@@ -494,7 +494,7 @@ export function ProgramBuilderFullscreen({
             <button
               type="button"
               onClick={() => addWeek(true)}
-              className="flex items-center justify-center gap-1.5 border border-primary bg-primary px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700"
+              className="flex items-center justify-center gap-1.5 border border-primary bg-primary px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
             >
               <Plus size={13} />
               Semaine

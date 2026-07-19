@@ -1598,7 +1598,19 @@ export const adminCoachSettings: AdminCoachSettings = {
 };
 
 export const adminAppearanceSettings: AdminAppearanceSettings = {
-  accentColor: "#d62828",
+  // Réaligné sur le nouveau --primary monochrome (chantier identité SETH,
+  // Lot 6 Bis, 2026-07-19) — valeur du mode sombre uniquement : ce réglage
+  // s'applique via un style inline theme-agnostique (AdminShell.tsx),
+  // donc identique en clair/sombre comme c'était déjà le cas avec
+  // l'ancien rouge #d62828 (identique dans .light avant ce chantier).
+  // Limite connue, non traitée ici (périmètre = valeur par défaut
+  // uniquement) : en mode clair, cette valeur claire (#f5f5f5) sur un
+  // fond quasi blanc réduit fortement le contraste des éléments
+  // "accent color" personnalisés. Ne concerne pas le --primary global
+  // (correct dans les deux thèmes), seulement ce réglage d'accent
+  // personnalisable par coach — fonctionnalité dont le maintien est
+  // remis en question (voir échanges Lot 6 Bis).
+  accentColor: "#f5f5f5",
   secondaryColor: "#1f6feb",
   darkMode: "sombre",
   cardStyle: "angulaire",

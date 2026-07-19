@@ -1,12 +1,11 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { useState, type CSSProperties, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Menu } from "lucide-react";
 
 import { Logo } from "@/components/ui/Logo";
 import { AdminSidebar } from "@/components/admin/AdminSidebar";
-import { useAdminData } from "@/hooks/useAdminData";
 
 // Le builder plein écran (V3, /admin/programmes/[id]/builder) est un
 // "sandbox" volontairement sans sidebar ni menu admin (voir spec V3 —
@@ -17,25 +16,36 @@ import { useAdminData } from "@/hooks/useAdminData";
 // n'est absolument pas affecté.
 const BUILDER_ROUTE_PATTERN = /^\/admin\/programmes\/[^/]+\/builder(\/.*)?$/;
 
+// Ancienne "couleur d'accent" personnalisable par coach (chantier identité
+// SETH, Lot 6 Bis, 2026-07-19) : appliquait state.appearanceSettings.
+// accentColor en style inline sur --primary, donc identique quel que soit
+// le thème clair/sombre — problématique avec la nouvelle identité
+// monochrome où --primary s'inverse volontairement entre les deux thèmes
+// (voir app/globals.css). Retirée : aucune page /admin/parametres ne
+// permet aujourd'hui de modifier ce réglage (scaffolding jamais relié à
+// une UI), son seul effet vivant était donc de casser --primary en clair.
+// state.appearanceSettings.accentColor reste défini dans data/admin.ts et
+// les types (fonctionnalité en sursis, décision produit à venir) — plus
+// consommé ici. --primary suit désormais normalement la cascade
+// :root/.light comme partout ailleurs dans l'app.
 export function AdminShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [sideOpen, setSideOpen] = useState(false);
-  const { state } = useAdminData();
-  const accentColor = state.appearanceSettings?.accentColor ?? "#d62828";
 
   if (pathname && BUILDER_ROUTE_PATTERN.test(pathname)) {
+    // Racine en `<main>` (Lot 6, Groupe C — landmarks) : ce sandbox
+    // fullscreen n'a ni sidebar ni le <main> de la branche normale
+    // ci-dessous, donc aucun repère "contenu principal" n'existait pour les
+    // lecteurs d'écran. Changement de balise uniquement, layout inchangé.
     return (
-      <div className="h-dvh w-full overflow-hidden bg-background" style={{ "--primary": accentColor } as CSSProperties}>
+      <main className="h-dvh w-full overflow-hidden bg-background">
         {children}
-      </div>
+      </main>
     );
   }
 
   return (
-    <div
-      className="flex min-h-screen bg-background"
-      style={{ "--primary": accentColor } as CSSProperties}
-    >
+    <div className="flex min-h-screen bg-background">
       <div className="hidden lg:flex">
         <AdminSidebar />
       </div>
