@@ -1,12 +1,15 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { Layers } from "lucide-react";
 
-import { SessionTemplateLibraryManager } from "@/components/admin/SessionTemplateLibraryManager";
+import { SessionTemplateLibraryManager, sessionTypeLabels } from "@/components/admin/SessionTemplateLibraryManager";
 import { useSupabaseSessionTemplates } from "@/hooks/useSupabaseSessionTemplates";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { deleteSessionTemplate, duplicateSessionTemplate, updateSessionTemplateMeta } from "@/lib/supabase/session-templates";
 import type { SessionTemplate, SessionType } from "@/types";
+
+type SessionTypeFilter = "tous" | SessionType;
 
 /**
  * Banque de séances dédiée (V3 chantier module Programmation, étape 3) —
@@ -14,9 +17,21 @@ import type { SessionTemplate, SessionType } from "@/types";
  * (`session_templates`). L'authoring du contenu (exercices, blocs cardio)
  * reste dans le builder ("Enregistrer comme modèle") ; cette page gère la
  * banque déjà constituée : recherche, métadonnées, duplication, suppression.
+ *
+ * Filtre "type de séance" ajouté ici (audit design juillet 2026, Lot 2) pour
+ * la parité visuelle avec /admin/exercices — c'est le seul champ typé
+ * (enum) disponible côté séances : `muscleGroup` y est du texte libre
+ * (`session_templates.muscle_group: string`, pas un enum comme côté
+ * exercices), donc pas de filtre muscle équivalent sans changer le schéma.
  */
 export default function AdminSeancesPage() {
   const { loading, items, refetch } = useSupabaseSessionTemplates();
+  const [sessionTypeFilter, setSessionTypeFilter] = useState<SessionTypeFilter>("tous");
+
+  const filtered = useMemo(
+    () => (sessionTypeFilter === "tous" ? items : items.filter((t) => t.sessionType === sessionTypeFilter)),
+    [items, sessionTypeFilter],
+  );
 
   async function handleUpdate(
     id: string,
@@ -51,13 +66,33 @@ export default function AdminSeancesPage() {
         </p>
       </div>
 
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <select
+          value={sessionTypeFilter}
+          onChange={(e) => setSessionTypeFilter(e.target.value as SessionTypeFilter)}
+          className="border border-border bg-background px-3 py-2.5 text-xs uppercase tracking-widest text-muted-foreground"
+        >
+          <option value="tous">Tous les types</option>
+          {Object.entries(sessionTypeLabels).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </div>
+
       {loading ? (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <Layers size={16} />
           Chargement…
         </p>
+      ) : filtered.length === 0 ? (
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Layers size={16} />
+          Aucun modèle ne correspond à ces filtres.
+        </p>
       ) : (
-        <SessionTemplateLibraryManager templates={items} onUpdate={handleUpdate} onDuplicate={handleDuplicate} onDelete={handleDelete} />
+        <SessionTemplateLibraryManager templates={filtered} onUpdate={handleUpdate} onDuplicate={handleDuplicate} onDelete={handleDelete} />
       )}
     </div>
   );

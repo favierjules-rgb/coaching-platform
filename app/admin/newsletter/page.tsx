@@ -7,25 +7,26 @@ export default async function AdminNewsletterPage() {
   const subscribers = await listSubscribersForStaff();
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-10">
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="font-heading text-2xl font-bold uppercase text-foreground">
-          Newsletter
-        </h1>
+    <div>
+      <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="font-heading text-3xl font-extrabold uppercase text-foreground md:text-4xl">
+            Newsletter
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Les campagnes se créent et s&apos;envoient directement depuis Brevo. Cette page sert uniquement à
+            consulter et gérer les abonnés synchronisés avec Brevo.
+          </p>
+        </div>
         <a
           href="https://app.brevo.com"
           target="_blank"
           rel="noopener noreferrer"
-          className="border border-border px-4 py-2 text-sm font-bold uppercase text-foreground transition hover:bg-foreground hover:text-background"
+          className="flex items-center gap-2 border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
         >
           Ouvrir Brevo
         </a>
       </div>
-      <p className="mb-6 text-sm text-muted-foreground">
-        Les campagnes se créent et s&apos;envoient directement depuis Brevo.
-        Cette page sert uniquement à consulter et gérer les abonnés
-        synchronisés avec Brevo.
-      </p>
       <NewsletterAdminTable subscribers={subscribers} />
     </div>
   );

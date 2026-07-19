@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Bell, CalendarDays, Dumbbell, Flame, Scale, Target, TrendingUp } from "lucide-react";
 
-import { StatCard } from "@/components/student/StatCard";
+import { StatCard } from "@/components/shared/StatCard";
 import { WeightChart } from "@/components/student/WeightChart";
 import { useStudentProfile, type StudentProfileState } from "@/hooks/useStudentProfile";
 import { useSupabaseAppointmentsForStudent } from "@/hooks/useSupabaseAppointmentsForStudent";
@@ -127,7 +127,7 @@ export function DashboardContent({
           value={evolution.hasData ? `${evolution.currentWeightKg} kg` : "Non renseigné"}
         />
         <StatCard icon={Target} label="Objectif" value={profile.goal || "Non renseigné"} />
-        <StatCard icon={TrendingUp} label="Progression" value={weightDeltaLabel} accent />
+        <StatCard icon={TrendingUp} label="Progression" value={weightDeltaLabel} tone="positive" />
       </div>
 
       <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-3">

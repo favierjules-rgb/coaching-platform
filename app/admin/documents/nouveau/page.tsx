@@ -7,7 +7,6 @@ import { ArrowLeft, CheckCircle, FileUp } from "lucide-react";
 
 import { CheckboxField, Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
 import { DocumentFileUploadField } from "@/components/admin/DocumentFileUploadField";
-import { PrimaryButton } from "@/components/admin/Modal";
 import { useAdminData } from "@/hooks/useAdminData";
 import { useContentAssignment } from "@/hooks/useContentAssignment";
 import { useSupabaseDocuments } from "@/hooks/useSupabaseDocuments";
@@ -376,7 +375,13 @@ export default function NewDocumentPage() {
         </div>
 
         <div className="flex flex-wrap gap-3">
-          <PrimaryButton onClick={() => handleCreate(false)}>Enregistrer document</PrimaryButton>
+          <button
+            type="button"
+            onClick={() => handleCreate(false)}
+            className="border border-primary bg-primary px-4 py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
+          >
+            Enregistrer document
+          </button>
           <button
             type="button"
             onClick={() => handleCreate(true)}

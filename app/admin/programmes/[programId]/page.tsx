@@ -7,6 +7,7 @@ import { ArrowLeft, Archive, Pencil } from "lucide-react";
 
 import { AssignStudentsModal } from "@/components/admin/AssignStudentsModal";
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
+import { StatCard } from "@/components/shared/StatCard";
 import {
   AnalysisFilterLabel,
   FilteredExerciseList,
@@ -137,28 +138,17 @@ export default function ProgramDetailPage() {
             </div>
           </div>
 
-          <div className="mb-6 border border-border bg-card p-6">
-            <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">Résumé</h2>
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-              <div>
-                <span className="block text-xs uppercase tracking-wide text-muted-foreground">Niveau</span>
-                <span className="text-sm text-foreground">{program.level}</span>
-              </div>
-              <div>
-                <span className="block text-xs uppercase tracking-wide text-muted-foreground">Durée</span>
-                <span className="text-sm text-foreground">{program.durationWeeks} semaines</span>
-              </div>
-              <div>
-                <span className="block text-xs uppercase tracking-wide text-muted-foreground">Séances planifiées</span>
-                <span className="text-sm text-foreground">{program.sessions.filter((s) => !s.isRestDay).length}</span>
-              </div>
-              <div>
-                <span className="block text-xs uppercase tracking-wide text-muted-foreground">Élèves assignés</span>
-                <span className="text-sm text-foreground">{assignedStudents.length}</span>
-              </div>
-            </div>
-            {program.description && <p className="mt-4 text-sm text-muted-foreground">{program.description}</p>}
+          <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <StatCard label="Niveau" value={program.level} size="lg" />
+            <StatCard label="Durée" value={`${program.durationWeeks} semaines`} size="lg" />
+            <StatCard
+              label="Séances planifiées"
+              value={String(program.sessions.filter((s) => !s.isRestDay).length)}
+              size="lg"
+            />
+            <StatCard label="Élèves assignés" value={String(assignedStudents.length)} size="lg" />
           </div>
+          {program.description && <p className="mb-6 text-sm text-muted-foreground">{program.description}</p>}
 
           <div className="mb-6 border border-border bg-card p-6">
             <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">Analyse du programme</h2>

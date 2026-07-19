@@ -1,13 +1,6 @@
+import { StatusBadge } from "@/components/admin/StatusBadge";
 import { appointmentStatusLabels, appointmentStatusTone, formatDateTime } from "@/lib/admin";
 import type { StudentAppointmentStats } from "@/lib/supabase/progress";
-
-const toneClass: Record<string, string> = {
-  green: "border-green-500/50 text-green-400",
-  amber: "border-amber-500/50 text-amber-400",
-  muted: "border-border text-muted-foreground",
-  red: "border-red-500/50 text-red-400",
-  primary: "border-primary text-primary",
-};
 
 /** Rendez-vous (section 6) — basé sur appointments, jamais de rendez-vous inventé si aucun n'a été réservé. */
 export function ProgressAppointmentsSection({ appointments }: { appointments: StudentAppointmentStats }) {
@@ -49,10 +42,7 @@ export function ProgressAppointmentsSection({ appointments }: { appointments: St
                 <span className="text-foreground">
                   {a.appointmentType} · {formatDateTime(a.startAt)}
                 </span>
-                <span className={`inline-flex items-center gap-1.5 border px-2.5 py-1 text-[11px] uppercase tracking-widest ${toneClass[appointmentStatusTone(a.status)]}`}>
-                  <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true" />
-                  {appointmentStatusLabels[a.status]}
-                </span>
+                <StatusBadge label={appointmentStatusLabels[a.status]} tone={appointmentStatusTone(a.status)} />
               </div>
             ))}
           </div>

@@ -7,7 +7,7 @@ import { SessionTemplateEditModal } from "@/components/admin/SessionTemplateEdit
 import { SearchInput } from "@/components/admin/SearchAndFilters";
 import type { SessionTemplate, SessionType } from "@/types";
 
-const sessionTypeLabels: Record<SessionType, string> = {
+export const sessionTypeLabels: Record<SessionType, string> = {
   strength: "Musculation",
   cardio: "Cardio",
   mixed: "Mixte",

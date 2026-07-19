@@ -8,6 +8,7 @@ import { ArrowLeft, Archive, Pencil } from "lucide-react";
 import { AssignStudentsModal } from "@/components/admin/AssignStudentsModal";
 import { NutritionPlanBuilder, type NutritionPlanBuilderData } from "@/components/admin/NutritionPlanBuilder";
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
+import { StatCard } from "@/components/shared/StatCard";
 import { useAdminData } from "@/hooks/useAdminData";
 import { useContentAssignment } from "@/hooks/useContentAssignment";
 import { useSupabaseNutritionPlans } from "@/hooks/useSupabaseNutritionPlans";
@@ -186,22 +187,10 @@ export default function NutritionPlanDetailPage() {
           </div>
 
           <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <div className="border border-border bg-card p-5">
-              <span className="block text-xs uppercase tracking-wide text-muted-foreground">Kcal / jour</span>
-              <span className="font-heading text-2xl font-bold text-foreground">{plan.caloriesPerDay}</span>
-            </div>
-            <div className="border border-border bg-card p-5">
-              <span className="block text-xs uppercase tracking-wide text-muted-foreground">Protéines</span>
-              <span className="font-heading text-2xl font-bold text-foreground">{plan.protein}g</span>
-            </div>
-            <div className="border border-border bg-card p-5">
-              <span className="block text-xs uppercase tracking-wide text-muted-foreground">Glucides</span>
-              <span className="font-heading text-2xl font-bold text-foreground">{plan.carbs}g</span>
-            </div>
-            <div className="border border-border bg-card p-5">
-              <span className="block text-xs uppercase tracking-wide text-muted-foreground">Lipides</span>
-              <span className="font-heading text-2xl font-bold text-foreground">{plan.fat}g</span>
-            </div>
+            <StatCard label="Kcal / jour" value={String(plan.caloriesPerDay)} size="lg" />
+            <StatCard label="Protéines" value={`${plan.protein}g`} size="lg" />
+            <StatCard label="Glucides" value={`${plan.carbs}g`} size="lg" />
+            <StatCard label="Lipides" value={`${plan.fat}g`} size="lg" />
           </div>
 
           <div className="mb-6 border border-border bg-card p-6">

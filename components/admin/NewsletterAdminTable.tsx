@@ -117,12 +117,12 @@ export function NewsletterAdminTable({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
-        <label className="flex items-center gap-2 text-sm text-foreground">
+        <label className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
           Statut
           <select
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value)}
-            className="border border-border bg-background px-2 py-1 text-sm"
+            className="border border-border bg-background px-3 py-2 text-xs uppercase tracking-widest text-muted-foreground"
           >
             <option value="all">Tous</option>
             {Object.entries(STATUS_LABELS).map(([value, label]) => (
@@ -133,12 +133,12 @@ export function NewsletterAdminTable({
           </select>
         </label>
 
-        <label className="flex items-center gap-2 text-sm text-foreground">
+        <label className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
           Source
           <select
             value={sourceFilter}
             onChange={(event) => setSourceFilter(event.target.value)}
-            className="border border-border bg-background px-2 py-1 text-sm"
+            className="border border-border bg-background px-3 py-2 text-xs uppercase tracking-widest text-muted-foreground"
           >
             <option value="all">Toutes</option>
             {sources.map((source) => (
@@ -152,7 +152,7 @@ export function NewsletterAdminTable({
         <button
           type="button"
           onClick={handleExportCsv}
-          className="ml-auto border border-border px-3 py-1.5 text-sm font-bold uppercase text-foreground transition hover:bg-foreground hover:text-background"
+          className="ml-auto flex items-center gap-1.5 border border-border px-3 py-1.5 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
         >
           Exporter en CSV
         </button>
@@ -200,7 +200,7 @@ export function NewsletterAdminTable({
                       type="button"
                       onClick={() => handleResync(row.id)}
                       disabled={resyncingId === row.id}
-                      className="border border-border px-2 py-1 text-xs font-bold uppercase text-foreground transition hover:bg-foreground hover:text-background disabled:cursor-not-allowed disabled:opacity-60"
+                      className="border border-border px-2 py-1 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {resyncingId === row.id ? "…" : "Resync"}
                     </button>

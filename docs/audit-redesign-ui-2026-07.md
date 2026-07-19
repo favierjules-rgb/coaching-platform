@@ -51,6 +51,53 @@ Mes tentatives de `npm run build` dans ce sandbox ont laissé 3 dossiers `.next-
 
 **Arrêt obligatoire avant le Lot 2 — en attente de ta validation.**
 
+---
+
+## Lot 2 — Rapport d'exécution
+
+Périmètre réalisé : `StatusBadge` partagé, `StatCard` partagé, unification des "chiffres clés" programme/nutrition, filtre "type de séance" sur la banque de séances, réalignement de la page admin Newsletter, correctif du bug de layout `documents/nouveau`. **Training Builder et landing page non touchés. Aucune modification métier/Supabase/Stripe/Brevo/Resend/API, aucun champ de schéma ajouté.**
+
+### Fichiers modifiés (11) et créé (1)
+
+`app/admin/documents/nouveau/page.tsx`, `app/admin/newsletter/page.tsx`, `app/admin/nutrition/[planId]/page.tsx`, `app/admin/programmes/[programId]/page.tsx`, `app/admin/seances/page.tsx`, `components/admin/NewsletterAdminTable.tsx`, `components/admin/SessionTemplateLibraryManager.tsx`, `components/shared/ProgressAppointmentsSection.tsx`, `components/shared/ProgressSummaryCards.tsx`, `components/student/AppointmentCard.tsx`, `components/student/DashboardContent.tsx`. Créé : `components/shared/StatCard.tsx`.
+
+### Composants partagés créés/consolidés
+
+- **`components/shared/StatCard.tsx`** (nouveau) — fusionne `components/student/StatCard.tsx` et le `SummaryCard` interne de `ProgressSummaryCards.tsx`. Prop `tone` (`default`/`positive`/`negative`) utilisant désormais les tokens `--success`/`--destructive` du Lot 1 au lieu de `green-400`/`red-400` en dur. Prop `size` (`md`/`lg`) pour couvrir à la fois les listes compactes (dashboard, progression) et les lignes de chiffres clés en tête de page de détail (programme, plan nutrition), au lieu d'une taille de texte arbitraire par page. **Le `StatCard` de `components/shared/TrainingMetricsSummary.tsx` n'a volontairement pas été fusionné** : il est aussi rendu depuis `components/admin/ProgramBuilder.tsx` (Training Builder), donc laissé de côté jusqu'au Lot 3.
+- **`StatusBadge`** (`components/admin/StatusBadge.tsx`, déjà existant) — désormais réellement partagé : `components/shared/ProgressAppointmentsSection.tsx` et `components/student/AppointmentCard.tsx` recopiaient chacun le même mapping `toneClass`, les deux utilisent maintenant le composant importé (3ᵉ consommateur, `components/admin/AppointmentCard.tsx`, l'utilisait déjà correctement).
+
+### Cartes "chiffres clés" unifiées
+
+`programmes/[programId]` (Niveau/Durée/Séances/Élèves, auparavant texte nu `text-sm` sans carte) et `nutrition/[planId]` (Kcal/Protéines/Glucides/Lipides) utilisent maintenant le même `StatCard size="lg"`. `NutritionWeekSummaryCard.tsx` volontairement laissé tel quel : après vérification, ses stats en `text-lg` sont un bloc imbriqué dans une carte déjà bordée (contexte différent, pas une page de détail), et ce `text-lg` est déjà celui utilisé par `ProgressAppointmentsSection` pour le même type de bloc imbriqué — ce n'était donc pas une 3ᵉ taille incohérente mais deux blocs déjà cohérents entre eux.
+
+### Banque exercices/séances
+
+Ajout d'un filtre "Type de séance" (Musculation/Cardio/Mixte/Tous) sur `/admin/seances`, même emplacement/style que les 5 filtres de `/admin/exercices`. **Le filtre "statut actif/archivé" n'a volontairement pas été ajouté** : `SessionTemplate` n'a pas de champ `status` en base (`session_templates` n'en a jamais eu), l'ajouter demanderait une migration Supabase — hors périmètre visuel, nécessite ta décision explicite (déjà signalé dans le Lot 1). Le filtre "muscle" n'a pas non plus été ajouté côté séances : `muscle_group` y est un champ texte libre, pas un enum comme côté exercices — un filtre par égalité exacte serait trompeur sur du texte libre.
+
+### Bug corrigé — `documents/nouveau/page.tsx`
+
+`PrimaryButton` (de `components/admin/Modal.tsx`, conçu pour occuper toute la largeur d'un pied de modale) était placé à côté du bouton "Publier" dans une rangée `flex` — le `w-full` interne du composant cassait la mise en page. Remplacé par un bouton simple avec les classes `bg-primary` standard, plus aucune dépendance à un composant de modale sur une page qui n'en est pas une.
+
+### Newsletter admin réalignée
+
+`app/admin/newsletter/page.tsx` avait son propre wrapper `mx-auto max-w-6xl px-4 py-10` (aucune autre page admin n'en a — le layout `AdminShell` fournit déjà le padding via `<main className="p-6 lg:p-10">`) et un titre `text-2xl font-bold` au lieu du `text-3xl font-extrabold ... md:text-4xl` standard. Basculé sur la structure d'en-tête standard (titre + sous-titre + bouton d'action, comme `/admin/programmes`). Dans `NewsletterAdminTable.tsx`, les boutons "Exporter en CSV"/"Resync" et les selects de filtre utilisaient une convention propre à ce fichier (`hover:bg-foreground hover:text-background`, tailles de texte différentes) — alignés sur la convention bouton secondaire standard (`hover:border-primary hover:text-primary`, `text-[11px] uppercase tracking-widest`).
+
+### Vérifications
+
+- **`npm run lint`** : **0 erreur, 0 warning.**
+- **`npx tsc --noEmit`** : **0 erreur.**
+- **`npm run build`** : compilation ✅, typecheck ✅, génération des 70 pages statiques ✅. Échoue ensuite sur le même `EPERM: rmdir` d'environnement déjà rencontré et vérifié indépendant du code lors du Lot 1 (reproduit à l'identique).
+
+### Limitation connue (hors Git, filesystem)
+
+**`components/student/StatCard.tsx` est maintenant un fichier mort** (plus aucun import ne le référence, remplacé par `components/shared/StatCard.tsx`) mais je n'ai pas pu le supprimer — même erreur `EPERM` que le `.git/index.lock` et les dossiers `.next-broken-*` déjà signalés. Le `.git/index.lock` s'est d'ailleurs reformé (probablement recréé par mes propres commandes `git status` dans ce sandbox). À faire toi-même : `rm .git/index.lock` puis `git rm components/student/StatCard.tsx` (ou `rm` + laisser Git détecter la suppression).
+
+### Résumé des risques de régression
+
+Faible. Consolidations de composants avec le même rendu visuel final (mêmes classes Tailwind reprises dans le composant partagé), un ajout de filtre non-destructif (les séances existantes restent toutes visibles par défaut, "Tous les types"), un correctif de bug de layout isolé, et un réalignement de page qui ne change aucune donnée ni logique — seulement la présentation. Point à vérifier visuellement en priorité : la page Newsletter (nouvelle disposition d'en-tête) et le filtre de la banque de séances.
+
+**Arrêt obligatoire avant le Lot 3 — en attente de ta validation.**
+
 ## 0. À traiter avant tout le reste
 
 - **`.git/index.lock` présent** (0 octet, créé lors du `git checkout -b ui-redesign-seth-v2`). Le checkout a réussi mais ce fichier résiduel bloquera ton prochain `git add`/`commit` tant qu'il n'est pas supprimé. À faire toi-même depuis ton terminal : `rm .git/index.lock` (à la racine du repo), après avoir vérifié qu'aucune opération git n'est en cours.

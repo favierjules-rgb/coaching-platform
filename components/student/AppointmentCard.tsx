@@ -3,17 +3,10 @@
 import { useState } from "react";
 import { Calendar, Download, MapPin, Video, XCircle } from "lucide-react";
 
+import { StatusBadge } from "@/components/admin/StatusBadge";
 import { appointmentStatusLabels, appointmentStatusTone, formatDateTime } from "@/lib/admin";
 import { buildConfirmationIcs, downloadIcsFile } from "@/lib/ics";
 import type { AdminAppointment } from "@/types";
-
-const toneClass: Record<string, string> = {
-  green: "border-green-500/50 text-green-400",
-  amber: "border-amber-500/50 text-amber-400",
-  muted: "border-border text-muted-foreground",
-  red: "border-red-500/50 text-red-400",
-  primary: "border-primary text-primary",
-};
 
 export function StudentAppointmentCard({
   appointment,
@@ -54,12 +47,7 @@ export function StudentAppointmentCard({
     <div className="flex flex-col gap-3 border border-border bg-card p-5">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <h3 className="font-heading text-sm font-bold uppercase text-foreground">{appointment.title}</h3>
-        <span
-          className={`inline-flex items-center gap-1.5 border px-2.5 py-1 text-[11px] uppercase tracking-widest ${toneClass[appointmentStatusTone(appointment.status)]}`}
-        >
-          <span className="h-1.5 w-1.5 rounded-full bg-current" />
-          {appointmentStatusLabels[appointment.status]}
-        </span>
+        <StatusBadge label={appointmentStatusLabels[appointment.status]} tone={appointmentStatusTone(appointment.status)} />
       </div>
 
       <p className="flex items-center gap-2 text-xs text-foreground">
