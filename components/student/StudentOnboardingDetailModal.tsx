@@ -265,7 +265,7 @@ export function StudentOnboardingDetailModal({ student }: { student: OnboardingP
                   <button
                     type="button"
                     onClick={startEdit}
-                    className="mt-2 flex items-center justify-center gap-1.5 border border-primary bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700"
+                    className="mt-2 flex items-center justify-center gap-1.5 border border-primary bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
                   >
                     <Pencil size={13} />
                     Modifier mes informations
@@ -389,7 +389,7 @@ export function StudentOnboardingDetailModal({ student }: { student: OnboardingP
                       type="button"
                       onClick={handleSave}
                       disabled={saving}
-                      className="flex-1 bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
+                      className="flex-1 bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
                     >
                       {saving ? "Enregistrement…" : "Enregistrer"}
                     </button>

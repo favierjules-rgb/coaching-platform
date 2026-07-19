@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Barlow_Condensed, DM_Sans } from "next/font/google";
 
 import { SiteChrome } from "@/components/layout/SiteChrome";
+import { ThemeProvider, themeAntiFlashScript } from "@/components/theme/ThemeProvider";
 
 import "./globals.css";
 
@@ -34,8 +35,14 @@ export default function RootLayout({
       lang="fr"
       className={`${barlowCondensed.variable} ${dmSans.variable} h-full`}
     >
+      <head>
+        {/* Anti-flash : applique .light avant l'hydratation si mémorisé (voir components/theme/ThemeProvider.tsx). */}
+        <script dangerouslySetInnerHTML={{ __html: themeAntiFlashScript }} />
+      </head>
       <body className="flex min-h-full flex-col bg-background font-body text-foreground antialiased">
-        <SiteChrome>{children}</SiteChrome>
+        <ThemeProvider>
+          <SiteChrome>{children}</SiteChrome>
+        </ThemeProvider>
       </body>
     </html>
   );

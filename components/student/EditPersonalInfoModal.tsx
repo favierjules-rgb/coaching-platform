@@ -75,7 +75,7 @@ export function EditPersonalInfoModal({ profile, onSave }: EditPersonalInfoModal
           setForm(formFromProfile(profile));
           setOpen(true);
         }}
-        className="border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700"
+        className="border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
       >
         Modifier mes informations
       </button>
@@ -166,7 +166,7 @@ export function EditPersonalInfoModal({ profile, onSave }: EditPersonalInfoModal
                   type="button"
                   onClick={handleSubmit}
                   disabled={!canSubmit}
-                  className="mt-1 w-full bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
+                  className="mt-1 w-full bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
                 >
                   Enregistrer les modifications
                 </button>

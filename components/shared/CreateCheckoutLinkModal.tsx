@@ -107,7 +107,7 @@ export function CreateCheckoutLinkModal({ triggerLabel, mode, offers, onCreateCh
                   href={checkoutUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-2 border border-primary bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700"
+                  className="flex items-center justify-center gap-2 border border-primary bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
                 >
                   <ExternalLink size={14} aria-hidden="true" />
                   Ouvrir le lien Stripe
@@ -139,7 +139,7 @@ export function CreateCheckoutLinkModal({ triggerLabel, mode, offers, onCreateCh
                   type="button"
                   onClick={handleCreate}
                   disabled={loading}
-                  className="w-full bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="w-full bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {loading ? "Création…" : "Créer le lien de paiement"}
                 </button>

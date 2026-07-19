@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   ArrowLeft,
   CalendarDays,
@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 
 import { SignOutButton } from "@/components/auth/SignOutButton";
+import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { Logo } from "@/components/ui/Logo";
 
 // "Programmation" (V3 chantier module Programmation, étape 2) regroupe les 3
@@ -52,14 +53,12 @@ interface AdminSidebarProps {
 export function AdminSidebar({ mobile = false, onNavigate }: AdminSidebarProps) {
   const pathname = usePathname();
   const programmationActive = programmationChildren.some((child) => pathname?.startsWith(child.href));
-  const [programmationOpen, setProgrammationOpen] = useState(programmationActive);
-
-  // Ouvre automatiquement le sous-menu si on navigue vers l'une de ses pages
-  // (ex: lien direct, retour depuis une autre page) — ne le referme jamais
-  // automatiquement, seul le clic sur "Programmation" bascule l'état.
-  useEffect(() => {
-    if (programmationActive) setProgrammationOpen(true);
-  }, [programmationActive]);
+  // État manuel du sous-menu (bascule au clic), indépendant de la route
+  // active — pas de synchronisation via effet. L'état affiché est dérivé au
+  // rendu : ouvert dès qu'on est sur une page du groupe, sinon piloté par le
+  // clic (mêmes deux comportements qu'avant, sans setState dans un effet).
+  const [programmationManualOpen, setProgrammationManualOpen] = useState(false);
+  const programmationOpen = programmationActive || programmationManualOpen;
 
   return (
     <div className="flex h-full w-60 flex-col border-r border-border bg-card">
@@ -92,7 +91,7 @@ export function AdminSidebar({ mobile = false, onNavigate }: AdminSidebarProps) 
               className={`flex items-center gap-3 px-4 py-3 text-sm transition-colors ${
                 active
                   ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-white/5 hover:text-foreground"
+                  : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
               }`}
             >
               <Icon size={18} />
@@ -104,12 +103,12 @@ export function AdminSidebar({ mobile = false, onNavigate }: AdminSidebarProps) 
         <div>
           <button
             type="button"
-            onClick={() => setProgrammationOpen((v) => !v)}
+            onClick={() => setProgrammationManualOpen((v) => !v)}
             aria-expanded={programmationOpen}
             className={`flex w-full items-center gap-3 px-4 py-3 text-sm transition-colors ${
               programmationActive
                 ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:bg-white/5 hover:text-foreground"
+                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
             }`}
           >
             <Dumbbell size={18} />
@@ -149,7 +148,7 @@ export function AdminSidebar({ mobile = false, onNavigate }: AdminSidebarProps) 
               className={`flex items-center gap-3 px-4 py-3 text-sm transition-colors ${
                 active
                   ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-white/5 hover:text-foreground"
+                  : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
               }`}
             >
               <Icon size={18} />
@@ -160,17 +159,18 @@ export function AdminSidebar({ mobile = false, onNavigate }: AdminSidebarProps) 
       </nav>
 
       <div className="border-t border-border px-3 py-4">
+        <ThemeToggle />
         <Link
           href="/dashboard"
           onClick={onNavigate}
-          className="flex items-center gap-3 px-4 py-3 text-sm text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"
+          className="flex items-center gap-3 px-4 py-3 text-sm text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
         >
           <ArrowLeft size={18} />
           Espace élève
         </Link>
         <SignOutButton
           onBeforeNavigate={onNavigate}
-          className="flex w-full items-center gap-3 px-4 py-3 text-sm text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"
+          className="flex w-full items-center gap-3 px-4 py-3 text-sm text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
         />
       </div>
     </div>

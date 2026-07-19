@@ -390,7 +390,7 @@ export function SessionFeedbackSection({
 
           <button
             type="submit"
-            className="mt-2 bg-primary py-4 text-center text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700"
+            className="mt-2 bg-primary py-4 text-center text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
           >
             Envoyer le retour
           </button>

@@ -22,7 +22,7 @@ export function PaymentCancelContent() {
         <>
           <Link
             href={resolveRetryHref(role)}
-            className="border border-primary bg-primary px-4 py-3 text-center text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700"
+            className="border border-primary bg-primary px-4 py-3 text-center text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
           >
             Réessayer
           </Link>

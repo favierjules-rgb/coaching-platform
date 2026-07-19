@@ -142,7 +142,7 @@ export function SubscriptionSection() {
               type="button"
               onClick={handlePay}
               disabled={paying}
-              className="flex items-center gap-1.5 border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex items-center gap-1.5 border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40"
             >
               <CreditCard size={14} aria-hidden="true" />
               {paying ? "Redirection…" : "Activer mon abonnement"}

@@ -109,7 +109,7 @@ export default async function DocumentDetailPage({
       </div>
 
       {document.type === "vidéo" && (
-        <div className="mb-8 flex flex-col items-center justify-center gap-4 border border-border bg-black p-12 text-center">
+        <div className="mb-8 flex flex-col items-center justify-center gap-4 border border-border bg-background p-12 text-center">
           <PlayCircle size={40} className="text-primary" />
           <p className="text-sm text-muted-foreground">
             Vidéo hébergée par ton coach.

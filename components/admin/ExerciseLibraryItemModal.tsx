@@ -111,7 +111,7 @@ export function ExerciseLibraryItemModal({ item, onSave }: ExerciseLibraryItemMo
         className={
           item
             ? "flex items-center gap-1.5 border border-border px-3 py-1.5 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
-            : "flex items-center gap-2 border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700"
+            : "flex items-center gap-2 border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
         }
       >
         {item ? <Pencil size={12} /> : <Plus size={14} />}

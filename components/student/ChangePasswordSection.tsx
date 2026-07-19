@@ -95,7 +95,7 @@ export function ChangePasswordSection() {
         <button
           type="submit"
           disabled={loading}
-          className="self-start bg-primary px-6 py-3 text-center text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+          className="self-start bg-primary px-6 py-3 text-center text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40"
         >
           {loading ? "Mise à jour..." : "Changer le mot de passe"}
         </button>

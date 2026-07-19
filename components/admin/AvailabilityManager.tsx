@@ -86,7 +86,7 @@ function NewAvailabilityForm({
       <button
         type="button"
         onClick={submit}
-        className="flex items-center justify-center gap-2 border border-primary bg-primary py-2.5 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700"
+        className="flex items-center justify-center gap-2 border border-primary bg-primary py-2.5 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
       >
         <Plus size={14} />
         Ajouter cette disponibilité
@@ -125,7 +125,7 @@ function NewUnavailabilityForm({ onCreate }: { onCreate: (data: { startAt: strin
       <button
         type="button"
         onClick={submit}
-        className="flex items-center justify-center gap-2 border border-primary bg-primary py-2.5 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700"
+        className="flex items-center justify-center gap-2 border border-primary bg-primary py-2.5 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
       >
         <Plus size={14} />
         Bloquer ce créneau

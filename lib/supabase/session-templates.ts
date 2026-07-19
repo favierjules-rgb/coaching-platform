@@ -21,6 +21,7 @@ import type { Database } from "@/types/supabase";
 
 type TypedSupabaseClient = SupabaseClient<Database>;
 type SessionTemplateRow = Database["public"]["Tables"]["session_templates"]["Row"];
+type SessionTemplateUpdate = Database["public"]["Tables"]["session_templates"]["Update"];
 
 function devWarn(context: string, error: { message: string; code?: string; details?: string; hint?: string } | null): void {
   if (error) {
@@ -115,7 +116,7 @@ export async function updateSessionTemplateMeta(
   id: string,
   partial: { name?: string; description?: string; sessionType?: SessionType; muscleGroup?: string; durationMinutes?: number | null },
 ): Promise<boolean> {
-  const payload: Record<string, unknown> = {};
+  const payload: SessionTemplateUpdate = {};
   if (partial.name !== undefined) payload.name = partial.name;
   if (partial.description !== undefined) payload.description = partial.description;
   if (partial.sessionType !== undefined) payload.session_type = partial.sessionType;

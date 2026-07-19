@@ -20,6 +20,15 @@ const PRIVATE_PREFIXES = [
   "/inscription",
   "/acces-refuse",
   "/acces-limite",
+  // Écrans autonomes (Logo centré + carte, sans nav marketing) oubliés de
+  // cette liste (audit design juillet 2026, Lot 1) : ils recevaient à tort
+  // le Header/Footer marketing en plus de leur propre layout, avec un
+  // recouvrement visuel confirmé sur /onboarding (le Header fixe passe
+  // par-dessus le contenu) et une nav vers des ancres inexistantes.
+  "/mot-de-passe-oublie",
+  "/reinitialiser-mot-de-passe",
+  "/onboarding",
+  "/newsletter/desinscription",
 ];
 
 export function SiteChrome({ children }: { children: ReactNode }) {

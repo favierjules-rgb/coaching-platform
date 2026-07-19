@@ -149,7 +149,7 @@ export function LoginForm({ supabaseConfigured }: { supabaseConfigured: boolean 
           <button
             type="submit"
             disabled={loading || !supabaseConfigured}
-            className="mt-2 bg-primary py-3 text-center text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
+            className="mt-2 bg-primary py-3 text-center text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
           >
             {loading ? "Connexion..." : "Connexion"}
           </button>

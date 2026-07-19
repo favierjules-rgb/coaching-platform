@@ -40,3 +40,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# outillage local skills (npx skills) — cache d'installation, pas du code projet
+.agents/
+agent/
+skills-lock.json
+
+# débris de build .next issus d'un bug d'environnement (voir rapport Lot 1) —
+# à supprimer manuellement depuis le Finder/Terminal, `rm` échoue dessus ici
+.next-broken-*/
+.next-old-*/

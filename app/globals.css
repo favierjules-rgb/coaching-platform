@@ -1,23 +1,77 @@
 @import "tailwindcss";
 
+/*
+ * Thème clair/sombre (chantier "redesign clair/sombre", juillet 2026) —
+ * espace admin + espace élève uniquement. La page d'accueil publique et le
+ * catalogue /programmes gardent volontairement leur identité sombre fixe
+ * (non concernés par le bouton de bascule, voir components/theme/) : ils
+ * n'utilisent quasiment aucun de ces tokens (fonds bg-black/bg-zinc-950 en
+ * dur, assumé).
+ *
+ * Mécanique : `:root` porte les valeurs du mode sombre par défaut (identique
+ * au comportement historique du site, donc aucune régression si le JS du
+ * ThemeProvider ne tourne pas encore) ; la classe `.light` sur <html> (posée
+ * par components/theme/ThemeProvider.tsx, mémorisée en localStorage)
+ * surcharge ces mêmes variables avec la palette claire. Aucun composant ne
+ * doit jamais coder une couleur de surface en dur (bg-black, bg-white,
+ * bg-zinc-*...) dans l'espace admin/élève — toujours ces tokens sémantiques.
+ */
 :root {
   --background: #0a0a0a;
   --foreground: #f5f5f4;
   --card: #121212;
+  --card-hover: rgba(255, 255, 255, 0.04);
   --border: rgba(255, 255, 255, 0.08);
   --muted-foreground: #8f8f8f;
   --primary: #d62828;
   --primary-foreground: #ffffff;
+  /* --primary-hover : valeur identique à l'ancien hover:bg-red-700 codé en
+     dur (#b91c1c) — reprise telle quelle pour garantir zéro changement
+     visuel lors du remplacement des classes, seule la source devient un
+     token (voir docs/audit-redesign-ui-2026-07.md, Lot 1). */
+  --primary-hover: #b91c1c;
+  --destructive: #f87171;
+  --destructive-foreground: #ffffff;
+  --warning: #fbbf24;
+  --warning-foreground: #1a1200;
+  --success: #4ade80;
+  --success-foreground: #052e12;
+}
+
+.light {
+  --background: #f4f3f1;
+  --foreground: #17171a;
+  --card: #ffffff;
+  --card-hover: rgba(10, 10, 10, 0.03);
+  --border: rgba(10, 10, 10, 0.1);
+  --muted-foreground: #6b6b6f;
+  --primary: #d62828;
+  --primary-foreground: #ffffff;
+  --primary-hover: #b91c1c;
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+  --warning: #d97706;
+  --warning-foreground: #1a1200;
+  --success: #16a34a;
+  --success-foreground: #ffffff;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
+  --color-card-hover: var(--card-hover);
   --color-border: var(--border);
   --color-muted-foreground: var(--muted-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-hover: var(--primary-hover);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
   --font-heading: var(--font-barlow);
   --font-body: var(--font-dm-sans);
 }
@@ -25,6 +79,7 @@
 body {
   background: var(--background);
   color: var(--foreground);
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 /* Bandeau auto-défilant du catalogue public de programmes (chantier module

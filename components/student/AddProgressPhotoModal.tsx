@@ -200,7 +200,7 @@ export function AddProgressPhotoModal({
                   type="button"
                   onClick={handleSubmit}
                   disabled={!previewUrl}
-                  className="mt-1 w-full bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
+                  className="mt-1 w-full bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
                 >
                   Enregistrer la photo
                 </button>

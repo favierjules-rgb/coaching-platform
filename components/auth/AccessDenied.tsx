@@ -21,7 +21,7 @@ export function AccessDenied() {
         <div className="flex flex-col gap-2">
           <Link
             href="/dashboard"
-            className="border border-primary bg-primary px-4 py-3 text-center text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700"
+            className="border border-primary bg-primary px-4 py-3 text-center text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
           >
             Retour au dashboard
           </Link>

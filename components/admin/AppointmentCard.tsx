@@ -145,7 +145,7 @@ export function AppointmentCard({
           <button
             type="button"
             onClick={submitReschedule}
-            className="border border-primary bg-primary px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700"
+            className="border border-primary bg-primary px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
           >
             Confirmer le report
           </button>

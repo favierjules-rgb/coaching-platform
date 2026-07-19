@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 import { SignOutButton } from "@/components/auth/SignOutButton";
+import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { Logo } from "@/components/ui/Logo";
 import { useSupabaseAccessType } from "@/hooks/useSupabaseAccessType";
 import { useSupabaseMyAccess } from "@/hooks/useSupabaseMyAccess";
@@ -93,7 +94,7 @@ export function StudentSidebar({
               className={`flex items-center gap-3 px-4 py-3 text-sm transition-colors ${
                 active
                   ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-white/[0.04] hover:text-foreground"
+                  : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
               }`}
             >
               <Icon size={18} />
@@ -105,6 +106,7 @@ export function StudentSidebar({
       </nav>
 
       <div className="border-t border-border p-3">
+        <ThemeToggle />
         <SignOutButton
           onBeforeNavigate={onNavigate}
           className="flex w-full items-center gap-3 px-4 py-3 text-sm text-muted-foreground transition-colors hover:text-primary"

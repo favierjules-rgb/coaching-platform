@@ -190,7 +190,7 @@ export default function NewProgramPage() {
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
           {poles.map(({ id, icon: Icon, title, badge, bullets, cta }) => (
             <div key={id} className="flex flex-col border border-border bg-card p-6">
-              <div className="mb-6 flex h-28 items-center justify-center border border-border bg-black/30">
+              <div className="mb-6 flex h-28 items-center justify-center border border-border bg-background/30">
                 <Icon size={32} className="text-primary" />
               </div>
               <div className="mb-3 flex items-center justify-between gap-2">

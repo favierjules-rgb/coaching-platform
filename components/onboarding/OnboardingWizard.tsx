@@ -466,7 +466,7 @@ export function OnboardingWizard() {
                 type="button"
                 onClick={handleValidate}
                 disabled={saving}
-                className="mt-2 flex items-center justify-center gap-2 bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
+                className="mt-2 flex items-center justify-center gap-2 bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
               >
                 <CheckCircle size={16} />
                 {saving ? "Enregistrement…" : "Valider mon profil"}
@@ -490,7 +490,7 @@ export function OnboardingWizard() {
               type="button"
               onClick={() => setStep((s) => Math.min(TOTAL_STEPS, s + 1))}
               disabled={!canProceedFromStep(step, form)}
-              className="flex items-center gap-1.5 bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
+              className="flex items-center gap-1.5 bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
             >
               Suivant
               <ArrowRight size={13} />

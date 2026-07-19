@@ -86,7 +86,7 @@ export function AppointmentModal({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex items-center gap-2 border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700"
+        className="flex items-center gap-2 border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
       >
         <Plus size={14} />
         Créer un rendez-vous

@@ -292,7 +292,7 @@ function StudentSubscriptionForm({
                 type="button"
                 onClick={handleSaveAccess}
                 disabled={savingAccess}
-                className="border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+                className="border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {savingAccess ? "Enregistrement…" : "Enregistrer"}
               </button>
@@ -326,7 +326,7 @@ function StudentSubscriptionForm({
                 type="button"
                 onClick={handleAssignTemplate}
                 disabled={assigning}
-                className="border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+                className="border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {assigning ? "Attribution…" : "Attribuer"}
               </button>
