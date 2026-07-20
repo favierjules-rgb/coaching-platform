@@ -355,3 +355,45 @@ body {
     animation: none;
   }
 }
+
+/* Carrousel auto-défilant de la section Transformations (chantier pages
+ * publiques, juillet 2026) — même technique que
+ * .public-programs-marquee-track (piste dupliquée en deux exemplaires,
+ * translateX -50% -> 0%, linear infinite pour un défilement continu et sans
+ * coupure), mais gardé comme classe distincte pour ne pas toucher au
+ * bandeau Programmes déjà validé. `linear` : mouvement constant, jamais
+ * ease-out (réservé aux entrées/sorties ponctuelles — voir
+ * .agents/skills/animation-vocabulary et review-animations/STANDARDS.md,
+ * "constant motion (marquee) -> linear").
+ */
+@keyframes transformations-marquee {
+  from {
+    transform: translateX(-50%);
+  }
+  to {
+    transform: translateX(0%);
+  }
+}
+
+.transformations-marquee-track {
+  animation: transformations-marquee linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .transformations-marquee-track {
+    animation: none;
+  }
+}
+
+/* Pause au survol pour tout bandeau auto-défilant (générique, réutilisable)
+ * — laisse le temps de lire un nom/poids sans course contre le défilement.
+ * Gardé derrière (hover: hover) and (pointer: fine) : sur tactile, le
+ * survol n'existe pas et ne doit pas geler l'animation de façon inattendue
+ * (voir .agents/skills/review-animations, "hover animations gated behind
+ * hover-capable devices").
+ */
+@media (hover: hover) and (pointer: fine) {
+  .marquee-pausable:hover .transformations-marquee-track {
+    animation-play-state: paused;
+  }
+}

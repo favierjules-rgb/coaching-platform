@@ -19,6 +19,22 @@ export interface Transformation {
   quote: string;
 }
 
+/**
+ * Photo avant/après réelle (chantier pages publiques, section Transformations
+ * — juillet 2026) : distinct de `Transformation` ci-dessus, qui reste réservé
+ * aux témoignages écrits (citation/durée/objectif), à réintégrer ailleurs sur
+ * le site dans un chantier séparé. Ici : uniquement image + prénom + poids
+ * avant/après, sans texte inventé.
+ */
+export interface TransformationPhoto {
+  id: string;
+  name: string;
+  weightBefore: string;
+  weightAfter: string;
+  image: string;
+  alt: string;
+}
+
 export interface NewsletterGoalOption {
   value: string;
   label: string;
