@@ -1,4 +1,4 @@
-import { Apple, Dumbbell, Target, TrendingUp } from "lucide-react";
+import { Apple, Dumbbell, GraduationCap, Target } from "lucide-react";
 
 import type {
   MethodPillar,
@@ -24,30 +24,35 @@ export const navLinks: NavLink[] = [
   { label: "Newsletter", href: "/#newsletter" },
 ];
 
+// Contenu des 4 piliers mis à jour par Jules (20/07/2026) — titres 1 à 3
+// inchangés (seules les descriptions ont été fournies), pilier 4 remplacé
+// entièrement (nouveau titre « Apprentissage », nouvelle icône, nouveau
+// texte) : l'ancien pilier 4 (« Suivi, ajustements et progression »,
+// icône TrendingUp) est retiré.
 export const methodPillars: MethodPillar[] = [
   {
     icon: Target,
     title: "Analyse du profil",
     description:
-      "Bilan complet : morphologie, objectifs, historique sportif et préférences alimentaires. Chaque plan part de toi.",
+      "Bilan complet : morphologie, objectifs, problèmes rencontrés, habitudes. Un chemin construit pour toi.",
   },
   {
     icon: Dumbbell,
     title: "Plan d'entraînement personnalisé",
     description:
-      "Un programme sur-mesure, semaine après semaine, adapté à ton matériel, ton niveau et ton emploi du temps.",
+      "Un programme sur-mesure, ajustement constant semaine après semaine, adapté à ton planning.",
   },
   {
     icon: Apple,
     title: "Plan nutritionnel adapté",
     description:
-      "Une alimentation calibrée pour ton objectif : macros, repas structurés, liste de courses et conseils du coach.",
+      "Une alimentation calibrée pour ton mode de vie : macronutrition, micronutrition, liste de courses, compléments alimentaires.",
   },
   {
-    icon: TrendingUp,
-    title: "Suivi, ajustements et progression",
+    icon: GraduationCap,
+    title: "Apprentissage",
     description:
-      "Retours réguliers, ajustements en temps réel et photos de progression. Rien n'est laissé au hasard.",
+      "Intègre une école : notions d'hypertrophie, RIR, RPE et physiologie de l'entraînement.",
   },
 ];
 
