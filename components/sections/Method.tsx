@@ -3,7 +3,7 @@ import { methodPillars } from "@/data/mock";
 
 export function Method() {
   return (
-    <section id="methode" className="bg-background py-24">
+    <section id="methode" className="scroll-mt-24 bg-background py-24">
       <div className="mx-auto max-w-7xl px-6">
         <SectionLabel>Ma méthode</SectionLabel>
         <h2 className="mb-16 font-heading text-4xl font-extrabold uppercase text-foreground md:text-6xl">

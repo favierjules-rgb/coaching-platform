@@ -2251,6 +2251,18 @@ export interface PublicProgramSummary {
   currency: string;
 }
 
+/**
+ * Résultat typé de la récupération du catalogue public de programmes
+ * (correctif chantier /programmes, juillet 2026) — distingue explicitement
+ * un succès (avec ou sans programme publié) d'un échec de récupération.
+ * Avant ce type, toute erreur Supabase était silencieusement transformée en
+ * tableau vide, indiscernable d'un catalogue réellement vide (voir
+ * lib/supabase/public-programs.ts).
+ */
+export type PublicProgramsResult =
+  | { status: "success"; programs: PublicProgramSummary[] }
+  | { status: "error"; message: string };
+
 export interface SubscriptionTemplate {
   id: string;
   name: string;

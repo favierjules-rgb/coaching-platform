@@ -13,7 +13,7 @@ import { transformationPhotos } from "@/data/transformationPhotos";
  */
 export function Transformations() {
   return (
-    <section id="transformations" className="overflow-hidden bg-black py-24">
+    <section id="transformations" className="scroll-mt-24 overflow-hidden bg-black py-24">
       <div className="mx-auto max-w-7xl px-6">
         <SectionLabel>Résultats réels</SectionLabel>
         <h2 className="mb-4 font-heading text-4xl font-extrabold uppercase text-foreground md:text-6xl">

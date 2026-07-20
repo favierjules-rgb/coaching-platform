@@ -120,6 +120,21 @@ body {
 }
 
 /*
+ * Scroll vers les ancres de section (#methode, #transformations,
+ * #newsletter — correctif chantier /programmes, juillet 2026). Le décalage
+ * sous le header fixe est géré par `scroll-mt-24` directement sur chaque
+ * `<section>` concernée (Method.tsx, Transformations.tsx, Newsletter.tsx).
+ *
+ * Pas de `scroll-behavior: smooth` global ici : Next.js App Router ne
+ * scrolle pas de façon fiable vers l'ancre présente dans l'URL au premier
+ * chargement d'un document (accès direct, ou lien <a> classique depuis une
+ * autre page) — voir components/layout/SiteChrome.tsx, qui gère ce scroll
+ * explicitement via `scrollIntoView({ behavior })`, fluide uniquement sous
+ * prefers-reduced-motion: no-preference. `scroll-mt-24` reste utile même
+ * pour ce scroll géré en JS (`scrollIntoView` respecte `scroll-margin-top`).
+ */
+
+/*
  * Tokens de mouvement centralisés (Lot 6, Groupe F — cf. .agents/skills/
  * animation-vocabulary, improve-animations/AUDIT.md, apple-design,
  * emil-design-eng). Un seul easing d'entrée UI (courbe forte, les easings

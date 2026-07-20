@@ -15,14 +15,25 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
  * bandeau qui déborderait sous ce bloc. Ne s'affiche pas tant qu'aucun
  * programme n'est publié (`is_public = true`, réglé depuis le builder
  * admin) — rien à montrer plutôt qu'une section vide.
+ *
+ * Correctif chantier /programmes (juillet 2026) : en cas d'erreur de
+ * récupération (voir lib/supabase/public-programs.ts), ce bandeau
+ * secondaire de la home reste également masqué — ce n'est pas la source de
+ * vérité du catalogue, la page dédiée /programmes (app/programmes/page.tsx)
+ * est seule responsable d'afficher l'état d'erreur explicite.
  */
 export async function PublicPrograms() {
   const supabase = await createSupabaseServerClient();
-  const programs = supabase ? await getPublicPrograms(supabase) : [];
-
-  if (programs.length === 0) {
+  if (!supabase) {
     return null;
   }
+
+  const result = await getPublicPrograms(supabase);
+  if (result.status === "error" || result.programs.length === 0) {
+    return null;
+  }
+
+  const { programs } = result;
 
   return (
     <section id="programmes" className="overflow-hidden bg-black py-24">

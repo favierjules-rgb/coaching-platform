@@ -3,7 +3,7 @@ import { NewsletterSignupForm } from "@/components/marketing/NewsletterSignupFor
 
 export function Newsletter() {
   return (
-    <section id="newsletter" className="border-t border-border bg-card py-24">
+    <section id="newsletter" className="scroll-mt-24 border-t border-border bg-card py-24">
       <div className="mx-auto max-w-7xl px-6">
         <div className="grid grid-cols-1 gap-16 lg:grid-cols-2">
           <div className="max-w-xl">

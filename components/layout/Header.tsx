@@ -27,7 +27,7 @@ export function Header() {
       }`}
     >
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
-        <Logo />
+        <Logo variant="header" />
 
         <nav className="hidden items-center gap-8 lg:flex">
           {navLinks.map((link) => (
@@ -42,12 +42,12 @@ export function Header() {
         </nav>
 
         <div className="hidden items-center gap-3 lg:flex">
-          <a
-            href="#newsletter"
+          <Link
+            href="/#methode"
             className="border border-primary px-4 py-2 text-sm tracking-wide text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
           >
             En savoir plus sur la méthode
-          </a>
+          </Link>
           <Link
             href="/connexion"
             className="bg-foreground px-4 py-2 text-sm tracking-wide text-background transition-colors hover:bg-foreground/90"
@@ -79,13 +79,13 @@ export function Header() {
               {link.label}
             </a>
           ))}
-          <a
-            href="#newsletter"
+          <Link
+            href="/#methode"
             onClick={() => setMenuOpen(false)}
             className="mt-2 border border-primary px-4 py-3 text-center text-sm tracking-wide text-primary"
           >
             En savoir plus sur la méthode
-          </a>
+          </Link>
           <Link
             href="/connexion"
             onClick={() => setMenuOpen(false)}

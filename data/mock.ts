@@ -7,11 +7,21 @@ import type {
   Transformation,
 } from "@/types";
 
+/**
+ * Ancres préfixées par `/` (correctif chantier /programmes, juillet 2026) —
+ * indispensable car le Header (voir components/layout/Header.tsx) est
+ * partagé par toutes les pages publiques (SiteChrome), pas seulement la
+ * home : un simple `#methode` ne fonctionne que si on est déjà sur `/`,
+ * alors que `/#methode` navigue d'abord vers la home puis scrolle. Ce
+ * comportement est correct même depuis la home elle-même (même chemin,
+ * pas de rechargement). "Programmes" reste un lien de page classique
+ * (`/programmes`, bibliothèque complète), volontairement pas une ancre.
+ */
 export const navLinks: NavLink[] = [
-  { label: "La méthode", href: "#methode" },
-  { label: "Transformations", href: "#transformations" },
+  { label: "La méthode", href: "/#methode" },
+  { label: "Transformations", href: "/#transformations" },
   { label: "Programmes", href: "/programmes" },
-  { label: "Newsletter", href: "#newsletter" },
+  { label: "Newsletter", href: "/#newsletter" },
 ];
 
 export const methodPillars: MethodPillar[] = [
