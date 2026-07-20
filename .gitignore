@@ -50,3 +50,10 @@ skills-lock.json
 # à supprimer manuellement depuis le Finder/Terminal, `rm` échoue dessus ici
 .next-broken-*/
 .next-old-*/
+
+# Sources visuelles locales — non versionnées
+brand/images/
+brand/transformations/approved/
+# Fichiers macOS
+.DS_Store
+**/.DS_Store
