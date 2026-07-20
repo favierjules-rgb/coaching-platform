@@ -26,10 +26,10 @@ export function Header() {
           : "border-b border-transparent bg-transparent"
       }`}
     >
-      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
+      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4">
         <Logo variant="header" />
 
-        <nav className="hidden items-center gap-8 lg:flex">
+        <nav className="mt-5 hidden items-center gap-8 lg:flex">
           {navLinks.map((link) => (
             <a
               key={link.href}

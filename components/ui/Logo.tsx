@@ -42,7 +42,7 @@ export function Logo({ variant = "compact" }: LogoProps) {
             height={438}
             unoptimized
             priority
-            className="h-10 w-auto shrink-0 object-contain lg:h-12"
+            className="mt-0 h-10 w-auto shrink-0 object-contain lg:h-12"
           />
           <span
             aria-hidden="true"

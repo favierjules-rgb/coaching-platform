@@ -4,12 +4,9 @@ import { transformationPhotos } from "@/data/transformationPhotos";
 
 /**
  * Section home page "Transformations" (chantier pages publiques, juillet
- * 2026) — remplace l'ancienne grille statique à 4 témoignages fictifs par
- * un bandeau auto-défilant des 13 vraies photos avant/après (voir
- * data/transformationPhotos.ts). Volontairement image + prénom + poids
- * uniquement : les témoignages écrits (citation/durée/objectif, type
- * `Transformation` dans types/index.ts) sont réservés à une autre partie du
- * site, dans un chantier séparé — aucun contenu inventé ici.
+ * 2026, témoignages ajoutés le 20/07/2026) — bandeau auto-défilant des 15
+ * vraies photos avant/après avec témoignage rédigé par Jules pour chacune
+ * (voir data/transformationPhotos.ts). Aucun contenu inventé.
  */
 export function Transformations() {
   return (
@@ -20,15 +17,15 @@ export function Transformations() {
           Transformations
         </h2>
         <p className="mb-16 max-w-xl text-muted-foreground">
-          Avant / Après. Des vrais résultats, des vrais élèves. Aucune
-          retouche.
+          Les résultats d&apos;une partie de mes élèves qui ont suivi la
+          méthode.
         </p>
       </div>
 
       <div className="mx-auto max-w-7xl px-6">
         <TransformationsMarquee
           transformations={transformationPhotos}
-          durationSeconds={Math.max(40, transformationPhotos.length * 6)}
+          durationSeconds={Math.max(60, transformationPhotos.length * 9)}
         />
       </div>
     </section>

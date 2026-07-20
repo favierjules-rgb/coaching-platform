@@ -4,7 +4,7 @@ import { TransformationPhotoCard } from "@/components/sections/TransformationPho
 import type { TransformationPhoto } from "@/types";
 
 /**
- * Bandeau auto-défilant des 13 photos de transformation (chantier pages
+ * Bandeau auto-défilant des photos de transformation (chantier pages
  * publiques, juillet 2026) — même technique que PublicProgramsMarquee.tsx
  * (piste dupliquée en deux exemplaires, voir .transformations-marquee-track
  * dans app/globals.css) : défilement continu, sans coupure visible au

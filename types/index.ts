@@ -21,16 +21,19 @@ export interface Transformation {
 
 /**
  * Photo avant/après réelle (chantier pages publiques, section Transformations
- * — juillet 2026) : distinct de `Transformation` ci-dessus, qui reste réservé
- * aux témoignages écrits (citation/durée/objectif), à réintégrer ailleurs sur
- * le site dans un chantier séparé. Ici : uniquement image + prénom + poids
- * avant/après, sans texte inventé.
+ * — juillet 2026, témoignages ajoutés le 20/07/2026) : distinct de
+ * `Transformation` ci-dessus, qui reste un type de mock non utilisé ici.
+ * `image` pointe vers le collage avant/après complet (une seule photo par
+ * entrée, pas de recadrage), `quote` est le témoignage rédigé par Jules pour
+ * cette personne — identique sur les deux entrées d'une même personne quand
+ * elle apparaît avec deux photos, exactement comme weightBefore/weightAfter.
  */
 export interface TransformationPhoto {
   id: string;
   name: string;
   weightBefore: string;
   weightAfter: string;
+  quote: string;
   image: string;
   alt: string;
 }

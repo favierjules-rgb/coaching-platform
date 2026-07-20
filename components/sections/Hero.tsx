@@ -25,7 +25,7 @@ export function Hero() {
         <div>
           <div className="hero-fade-slide-in mb-6 flex items-center gap-3">
             {/* eslint-disable-next-line @next/next/no-img-element -- SVG vectoriel, l'optimiseur next/image n'apporte rien ici */}
-            <img src="/brand/logo/seth-logo-primary.svg" alt="" className="h-5 w-auto" />
+            <img src="/brand/logo/seth-logo-secondary.svg" alt="" className="h-5 w-auto" />
             <span className="h-0.5 w-8 bg-primary" />
             <span className="font-heading text-xs font-semibold uppercase tracking-[0.4em] text-primary">
               Seth · Préparation Physique
