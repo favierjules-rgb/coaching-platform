@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 
 import { PublicProgramCard } from "@/components/sections/PublicProgramCard";
 import { PublicProgramsRetry } from "@/components/sections/PublicProgramsRetry";
@@ -32,8 +33,32 @@ export default async function ProgrammesPage() {
     : { status: "success", programs: [] };
 
   return (
-    <section className="bg-black py-24">
-      <div className="mx-auto max-w-7xl px-6">
+    <section className="relative min-h-[700px] overflow-hidden bg-black py-24">
+      {/*
+        Fond photo (chantier "backgrounds", juillet 2026) — page unique,
+        pas besoin d'un prop opt-in. Même pattern qu'AuthCardLayout/Hero :
+        fond en `absolute inset-0` sans z-index, contenu en `relative z-10`.
+        Colonne droite plus étroite (au lieu du plein cadre initial) : la
+        photo source (941×1672) est modeste en résolution native — affichée
+        sur ~45% de la largeur plutôt que 100%, elle demande moins
+        d'agrandissement et reste nette. Dégradé horizontal noir qui la
+        fond dans le reste de la section (masque aussi la jonction gauche).
+        `hidden lg:block` : masquée sous lg pour ne pas comprimer le
+        contenu sur mobile/tablette, même choix que l'ancien Hero.
+      */}
+      <div className="absolute inset-y-0 right-0 hidden w-[45%] lg:block">
+        <Image
+          src="/brand/backgrounds/programmes.webp"
+          alt=""
+          fill
+          sizes="45vw"
+          className="object-cover object-[center_45%] grayscale"
+        />
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(0,0,0,1)_0%,rgba(0,0,0,1)_12%,rgba(0,0,0,0.4)_50%,rgba(0,0,0,0.2)_100%)]" />
+        <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(0,0,0,0.25)_0%,rgba(0,0,0,0)_30%,rgba(0,0,0,0.5)_100%)]" />
+      </div>
+
+      <div className="relative z-10 mx-auto max-w-7xl px-6">
         <SectionLabel>Bibliothèque</SectionLabel>
         <h1 className="mb-4 font-heading text-4xl font-extrabold uppercase text-foreground md:text-6xl">Programmes</h1>
         <p className="mb-16 max-w-xl text-muted-foreground">

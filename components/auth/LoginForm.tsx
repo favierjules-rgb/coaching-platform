@@ -83,6 +83,7 @@ export function LoginForm({ supabaseConfigured }: { supabaseConfigured: boolean 
 
   return (
     <AuthCardLayout
+      backgroundImage="/brand/backgrounds/connexion.webp"
       footer={
         <Link
           href="/"

@@ -1,31 +1,48 @@
 import Image from "next/image";
 import { ArrowRight } from "lucide-react";
 
+import { SethStarsMark } from "@/components/brand/SethStarsMark";
+
 /**
- * Hero de la page d'accueil (chantier pages publiques, juillet 2026) —
- * ajout de la photo (running-01, seule ressource de brand/ sans marque
- * tierce ni tiers identifiable, voir audit brand/) en visuel de premier
- * plan cadré à droite, et du logo SVG réel au-dessus du kicker. Le dégradé
- * rouge décoratif (rgba(214,40,40,...) = ancien #d62828) et le
- * hover:bg-red-700 du CTA, hérités d'avant le redesign monochrome et hors
- * périmètre du Lot 6 (pages publiques exclues), sont retirés ici : dégradé
- * radial neutre (blanc à faible opacité) à la place, hover:bg-primary-hover
- * sur le CTA (même token que Lot 6, Groupe E). Photo en grayscale : aucune
- * couleur décorative, conformément à l'identité noir/blanc/gris.
+ * Hero de la page d'accueil (chantier pages publiques, juillet 2026 ;
+ * fond plein cadre le 20/07/2026 sur demande de Jules — Backhero.jpg,
+ * brand/images/backgrounds/, remplace l'ancien visuel cadré à droite
+ * running-01, retiré). Photo de fond en grayscale : aucune couleur
+ * décorative, conformément à l'identité noir/blanc/gris. Dégradé sombre
+ * renforcé (0.55→0.75→noir plein) par rapport à l'ancien fond neutre, la
+ * photo étant plus chargée visuellement qu'un simple dégradé — nécessaire
+ * pour garder le texte lisible par-dessus. Le dégradé rouge décoratif
+ * (rgba(214,40,40,...) = ancien #d62828) et le hover:bg-red-700 du CTA,
+ * hérités d'avant le redesign monochrome et hors périmètre du Lot 6 (pages
+ * publiques exclues), restent retirés : hover:bg-primary-hover sur le CTA
+ * (même token que Lot 6, Groupe E). Icône étoiles du kicker (20/07/2026) :
+ * `SethStarsMark` (composant existant du chantier storytelling) au lieu du
+ * `<img src="/brand/logo/seth-logo-secondary.svg">` — le fichier SVG source
+ * contient un 3e tracé (contour complet) sans classe CSS, donc rempli en
+ * noir par défaut, visible en cadre derrière les étoiles blanches.
+ * SethStarsMark ne dessine que les 2 tracés blancs ; fichier SVG source
+ * non modifié.
  */
 export function Hero() {
   return (
     <section className="relative flex min-h-screen items-center overflow-hidden bg-black">
       <div className="absolute inset-0">
+        <Image
+          src="/brand/backgrounds/hero.webp"
+          alt=""
+          fill
+          priority
+          sizes="100vw"
+          className="object-cover object-[center_22%] grayscale"
+        />
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.08),transparent_55%)]" />
-        <div className="absolute inset-0 bg-[linear-gradient(to_bottom,transparent_30%,rgba(10,10,10,0.75)_70%,#0a0a0a_100%)]" />
+        <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(10,10,10,0.1)_0%,rgba(10,10,10,0.35)_55%,rgba(10,10,10,0.75)_100%)]" />
       </div>
 
-      <div className="relative z-10 mx-auto grid w-full max-w-7xl gap-12 px-6 pb-16 pt-32 lg:grid-cols-[1.15fr_0.85fr] lg:items-center lg:pb-24 lg:pt-40">
-        <div>
+      <div className="relative z-10 mx-auto w-full max-w-7xl px-6 pb-16 pt-32 lg:pb-24 lg:pt-40">
+        <div className="max-w-2xl">
           <div className="hero-fade-slide-in mb-6 flex items-center gap-3">
-            {/* eslint-disable-next-line @next/next/no-img-element -- SVG vectoriel, l'optimiseur next/image n'apporte rien ici */}
-            <img src="/brand/logo/seth-logo-secondary.svg" alt="" className="h-5 w-auto" />
+            <SethStarsMark className="h-5 w-auto" />
             <span className="h-0.5 w-8 bg-primary" />
             <span className="font-heading text-xs font-semibold uppercase tracking-[0.4em] text-primary">
               Seth · Préparation Physique
@@ -58,18 +75,6 @@ export function Hero() {
               Voir les transformations
             </a>
           </div>
-        </div>
-
-        <div className="hero-fade-slide-in hero-fade-slide-in-delay-1 relative hidden aspect-[3/4] w-full overflow-hidden border border-white/10 lg:block">
-          <Image
-            src="/brand/hero-running.webp"
-            alt="Seth, préparateur physique, sur une piste d'athlétisme"
-            fill
-            sizes="(min-width: 1024px) 35vw, 0px"
-            priority
-            className="object-cover grayscale"
-          />
-          <div className="absolute inset-0 bg-[linear-gradient(to_top,rgba(10,10,10,0.55),transparent_45%)]" />
         </div>
       </div>
     </section>
