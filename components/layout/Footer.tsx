@@ -4,9 +4,11 @@ import { Logo } from "@/components/ui/Logo";
 
 /**
  * Liens légaux (chantier conformité juridique/RGPD — juillet 2026) :
- * /mentions-legales (Lot A) et /confidentialite (Lot B). Ne pas ajouter de
- * lien vers cookies/CGV/CGU/rétractation/résiliation tant que ces pages
- * n'existent pas (lots C à G, à venir).
+ * /mentions-legales (Lot A), /confidentialite (Lot B), /cookies (Lot C).
+ * Intitulé "Cookies" et non "Gérer mes cookies" : aucun traceur non
+ * essentiel n'existe à ce stade, donc rien à gérer (voir app/cookies).
+ * Ne pas ajouter de lien vers CGV/CGU/rétractation/résiliation tant que
+ * ces pages n'existent pas (lots D à G, à venir).
  */
 export function Footer() {
   return (
@@ -25,6 +27,12 @@ export function Footer() {
             className="text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary"
           >
             Confidentialité
+          </Link>
+          <Link
+            href="/cookies"
+            className="text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary"
+          >
+            Cookies
           </Link>
         </nav>
         <p className="text-xs text-muted-foreground">
