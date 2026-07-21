@@ -36,7 +36,7 @@ export default function MentionsLegalesPage() {
           </h2>
           <div className="space-y-3 text-sm leading-relaxed text-muted-foreground">
             <p>
-              Ce site est édité par Jules Favier, exerçant sous le nom commercial{" "}
+              Ce site (sethcoaching.fr) est édité par Jules Favier, exerçant sous le nom commercial{" "}
               <strong className="font-semibold text-foreground">SETH</strong>, entrepreneur individuel relevant du
               régime de la micro-entreprise.
             </p>
@@ -69,12 +69,18 @@ export default function MentionsLegalesPage() {
           <div className="space-y-3 text-sm leading-relaxed text-muted-foreground">
             <p>SETH propose des prestations de coaching sportif et de préparation physique.</p>
             <p>
+              Diplôme : Licence STAPS (Sciences et Techniques des Activités Physiques et Sportives).
+              <br />
               Carte professionnelle d&apos;éducateur sportif n° 08324ED0421, délivrée par la préfecture du Var
               (ministère chargé des Sports).
             </p>
             <p>
               Assurance responsabilité civile professionnelle souscrite auprès d&apos;Inter Mutuelles Entreprises
               (IME), contrat n° 971 0002 76014 P 30.
+              <br />
+              Garantie de responsabilité civile : 10 000 000 € pour les dommages corporels, matériels et
+              immatériels consécutifs, dans la limite de 2 000 000 € pour les dommages matériels et de
+              1 000 000 € pour les dommages immatériels consécutifs à un dommage corporel ou matériel.
             </p>
           </div>
         </section>
@@ -99,7 +105,7 @@ export default function MentionsLegalesPage() {
           </p>
         </section>
 
-        <section>
+        <section id="credits">
           <h2 className="mb-4 font-heading text-xl font-bold uppercase tracking-wide text-foreground">
             Crédits photographiques et audiovisuels
           </h2>
