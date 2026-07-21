@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { idParamSchema } from "@/lib/api/schemas/common";
 import { publicProgramAccessBodySchema } from "@/lib/api/schemas/stripe";
 import { parseJsonBody, parseParams } from "@/lib/api/validate";
+import { CGV_PROGRAMME_CONSENT_TEXT_VERSION } from "@/lib/legal-consents";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { provisionPublicProgramAccess } from "@/lib/supabase/public-program-provisioning";
 
@@ -56,6 +57,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     firstName: parsedBody.data.firstName,
     lastName: parsedBody.data.lastName,
     email: parsedBody.data.email,
+    cgvConsentTextVersion: CGV_PROGRAMME_CONSENT_TEXT_VERSION,
   });
 
   if (!result) {

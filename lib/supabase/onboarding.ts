@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { HEALTH_DATA_CONSENT_TEXT_VERSION, insertLegalConsent } from "@/lib/legal-consents";
 import { buildStudentActivityLink, logActivityEvent } from "@/lib/supabase/activity";
 import { addWeightEntry, getStudentProfile } from "@/lib/supabase/students";
 import type { Database } from "@/types/supabase";
@@ -163,11 +164,20 @@ async function writeStudentProfile(
  * `onboarding_completed = true` + `onboarding_completed_at = now()`. Les
  * champs sensibles laissés vides par l'élève sont sauvegardés tels quels
  * (chaîne/tableau vide) — jamais bloquant.
+ *
+ * `options.healthDataConsent` (chantier conformité juridique/RGPD, lot
+ * technique — juillet 2026) : si `true`, écrit une preuve de consentement
+ * séparée dans `legal_consents` (voir lib/legal-consents.ts). N'écrit rien
+ * si `false`/absent — n'échoue jamais la sauvegarde du reste du
+ * questionnaire pour autant, l'absence de consentement n'est pas bloquante
+ * ici (le blocage éventuel, si des données de santé sont renseignées, est
+ * géré côté UI dans OnboardingWizard.tsx avant même d'arriver ici).
  */
 export async function submitOnboarding(
   supabase: TypedSupabaseClient,
   studentId: string,
   submission: StudentOnboardingSubmission,
+  options: { healthDataConsent?: boolean } = {},
 ): Promise<boolean> {
   const studentUpdate: Database["public"]["Tables"]["students"]["Update"] = {
     first_name: submission.firstName,
@@ -199,6 +209,15 @@ export async function submitOnboarding(
       description: `${submission.firstName} ${submission.lastName}`.trim() + " a terminé son questionnaire d'onboarding.",
       metadata: buildStudentActivityLink(studentId),
     });
+    if (options.healthDataConsent) {
+      // Ne bloque jamais la sauvegarde de l'onboarding : une erreur ici est
+      // déjà journalisée par insertLegalConsent lui-même.
+      await insertLegalConsent(supabase, {
+        studentId,
+        consentType: "sante_onboarding",
+        consentTextVersion: HEALTH_DATA_CONSENT_TEXT_VERSION,
+      });
+    }
   }
   return success;
 }

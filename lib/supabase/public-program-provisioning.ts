@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { composeProgramAssignedEmail, composePublicProgramWelcomeEmail } from "@/lib/email/templates";
 import { sendTransactionalEmail } from "@/lib/email/send-transactional-email";
+import { insertLegalConsent } from "@/lib/legal-consents";
 import { setProgramAssignment } from "@/lib/supabase/programs";
 import type { Database } from "@/types/supabase";
 
@@ -44,6 +45,15 @@ export interface ProvisionPublicProgramAccessInput {
   firstName: string;
   lastName: string;
   email: string;
+  /**
+   * Preuve de consentement CGV (chantier conformité juridique/RGPD, lot
+   * technique — juillet 2026) : présente pour les deux appelants (checkout
+   * payant, via metadata Stripe ; claim gratuit, transmise directement),
+   * puisque `publicProgramAccessBodySchema` rend `cgvAccepted` obligatoire
+   * dans les deux cas. `undefined` uniquement en théorie (défensif) — voir
+   * insertConsentIfProvided ci-dessous, qui n'écrit alors simplement rien.
+   */
+  cgvConsentTextVersion?: string;
 }
 
 export interface ProvisionPublicProgramAccessResult {
@@ -69,6 +79,26 @@ async function findStudentByEmail(supabase: TypedSupabaseClient, email: string):
   return { id: data.id, userId: data.user_id, firstName: data.first_name };
 }
 
+/**
+ * Écrit la preuve de consentement CGV si une version a été transmise —
+ * n'échoue jamais l'appelant (voir insertLegalConsent), commun aux deux
+ * chemins ci-dessous puisqu'un achat reste un achat, que le compte soit
+ * neuf ou déjà existant.
+ */
+async function insertCgvConsentIfProvided(
+  supabase: TypedSupabaseClient,
+  studentId: string,
+  input: ProvisionPublicProgramAccessInput,
+): Promise<void> {
+  if (!input.cgvConsentTextVersion) return;
+  await insertLegalConsent(supabase, {
+    studentId,
+    consentType: "cgv_programme",
+    consentTextVersion: input.cgvConsentTextVersion,
+    metadata: { program_id: input.programId },
+  });
+}
+
 /** Chemin "email déjà connu" : assigne le programme au compte existant, envoie l'email "programme attribué". */
 async function grantExistingStudent(
   supabase: TypedSupabaseClient,
@@ -76,6 +106,7 @@ async function grantExistingStudent(
   input: ProvisionPublicProgramAccessInput,
 ): Promise<ProvisionPublicProgramAccessResult> {
   await setProgramAssignment(supabase, student.id, input.programId, true);
+  await insertCgvConsentIfProvided(supabase, student.id, input);
 
   const { data: studentRow } = await supabase.from("students").select("email").eq("id", student.id).maybeSingle();
   const recipientEmail = studentRow?.email || input.email;
@@ -171,6 +202,7 @@ async function createProgramOnlyStudent(
   }
 
   await setProgramAssignment(supabase, studentRow.id, input.programId, true);
+  await insertCgvConsentIfProvided(supabase, studentRow.id, input);
 
   const email = composePublicProgramWelcomeEmail({
     firstName: input.firstName,

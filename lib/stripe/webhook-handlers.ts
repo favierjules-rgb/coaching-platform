@@ -157,6 +157,10 @@ async function handlePublicProgramCheckoutCompleted(
   const firstName = session.metadata?.first_name || "";
   const lastName = session.metadata?.last_name || "";
   const programName = session.metadata?.program_name || "";
+  // Preuve de consentement CGV posée côté route de checkout (voir
+  // app/api/public/programs/[programId]/checkout/route.ts) — reportée ici
+  // dans legal_consents une fois le student_id connu.
+  const cgvConsentTextVersion = session.metadata?.cgv_accepted === "true" ? session.metadata?.cgv_version : undefined;
 
   const { data: programRow } = await supabase.from("programs").select("coach_id").eq("id", programId).maybeSingle();
 
@@ -167,6 +171,7 @@ async function handlePublicProgramCheckoutCompleted(
     firstName,
     lastName,
     email,
+    cgvConsentTextVersion,
   });
   if (!result) {
     console.error(`[Stripe webhook] échec du provisionnement pour l'achat du programme public ${programId} (session ${session.id}).`);

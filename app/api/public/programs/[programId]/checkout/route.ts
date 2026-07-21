@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { idParamSchema } from "@/lib/api/schemas/common";
 import { publicProgramAccessBodySchema } from "@/lib/api/schemas/stripe";
 import { parseJsonBody, parseParams } from "@/lib/api/validate";
+import { CGV_PROGRAMME_CONSENT_TEXT_VERSION } from "@/lib/legal-consents";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getStripeClient } from "@/lib/stripe/client";
 
@@ -71,6 +72,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     first_name: parsedBody.data.firstName,
     last_name: parsedBody.data.lastName,
     email: parsedBody.data.email,
+    // Preuve de consentement CGV (chantier conformité juridique/RGPD, lot
+    // technique — juillet 2026) : la metadata Stripe est le seul support
+    // qui traverse le paiement anonyme jusqu'au webhook, où elle est
+    // reportée dans legal_consents une fois le compte élève créé — voir
+    // lib/stripe/webhook-handlers.ts et
+    // lib/supabase/public-program-provisioning.ts.
+    cgv_accepted: "true",
+    cgv_version: CGV_PROGRAMME_CONSENT_TEXT_VERSION,
   };
 
   try {

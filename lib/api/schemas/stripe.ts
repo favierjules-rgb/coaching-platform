@@ -29,12 +29,20 @@ export const createCustomerPortalSessionBodySchema = z
  * étape 6) — formulaire public anonyme, aucun studentId : l'identité vient
  * entièrement de ce body (résolu/dédupliqué par email côté serveur, voir
  * lib/supabase/public-program-provisioning.ts).
+ *
+ * `cgvAccepted` (chantier conformité juridique/RGPD, lot technique — juillet
+ * 2026) : `z.literal(true)` plutôt qu'un simple boolean — un boolean
+ * accepterait `false` comme valeur de forme valide, alors que seule `true`
+ * doit pouvoir passer la validation ; la case n'est jamais précochée côté
+ * formulaire (PublicProgramPurchaseForm.tsx), donc omettre le champ ou
+ * envoyer `false` doit être rejeté ici, pas seulement désactivé côté UI.
  */
 export const publicProgramAccessBodySchema = z
   .object({
     firstName: z.string().trim().min(1).max(100),
     lastName: z.string().trim().min(1).max(100),
     email: z.string().trim().email({ message: "Adresse email invalide." }).max(254),
+    cgvAccepted: z.literal(true, { message: "Tu dois accepter les conditions générales de vente pour continuer." }),
   })
   .strict();
 

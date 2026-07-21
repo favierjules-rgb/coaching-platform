@@ -7,6 +7,7 @@ import { AlertTriangle, ArrowLeft, ArrowRight, CheckCircle } from "lucide-react"
 
 import { Field, SelectField, TextareaField, CheckboxField } from "@/components/admin/AdminFormFields";
 import { Logo } from "@/components/ui/Logo";
+import { HEALTH_DATA_CONSENT_TEXT } from "@/lib/legal-consents";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { getCurrentStudentId } from "@/lib/supabase/current-student";
 import { submitOnboarding } from "@/lib/supabase/onboarding";
@@ -40,12 +41,23 @@ export function OnboardingWizard() {
   const router = useRouter();
   const [step, setStep] = useState(1);
   const [form, setForm] = useState<OnboardingFormState>(emptyOnboardingForm);
+  const [healthDataConsent, setHealthDataConsent] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(false);
 
   function setField<K extends keyof OnboardingFormState>(key: K, value: OnboardingFormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
+
+  // Étape 5 : la case de consentement n'est exigée que si l'élève a
+  // effectivement renseigné une information de santé (traitement,
+  // médicaments, note libre) — pas un blocage systématique de l'étape
+  // puisque tout y est par ailleurs optionnel. Reste local à ce composant
+  // (pas dans lib/onboarding-form.ts) : canProceedFromStep n'est utilisé
+  // qu'ici, pas par les parcours d'édition (/profil, admin).
+  const healthDataProvided =
+    form.medicalTreatments.trim() !== "" || form.medications.trim() !== "" || form.healthNotes.trim() !== "";
+  const canProceedFromStep5 = !healthDataProvided || healthDataConsent;
 
   function toggleEquipment(option: string, checked: boolean) {
     setForm((prev) => ({
@@ -72,7 +84,9 @@ export function OnboardingWizard() {
       setError(true);
       return;
     }
-    const success = await submitOnboarding(supabase, studentId, onboardingFormToSubmission(form));
+    const success = await submitOnboarding(supabase, studentId, onboardingFormToSubmission(form), {
+      healthDataConsent,
+    });
     setSaving(false);
     if (!success) {
       setError(true);
@@ -319,6 +333,18 @@ export function OnboardingWizard() {
                 value={form.healthNotes}
                 onChange={(v) => setField("healthNotes", v)}
               />
+              <div className="mt-2 border-t border-border pt-4">
+                <CheckboxField
+                  label={HEALTH_DATA_CONSENT_TEXT}
+                  checked={healthDataConsent}
+                  onChange={setHealthDataConsent}
+                />
+                {healthDataProvided && !healthDataConsent && (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Coche cette case pour continuer, puisque tu as renseigné une information de santé ci-dessus.
+                  </p>
+                )}
+              </div>
             </>
           )}
 
@@ -503,7 +529,7 @@ export function OnboardingWizard() {
             <button
               type="button"
               onClick={() => setStep((s) => Math.min(TOTAL_STEPS, s + 1))}
-              disabled={!canProceedFromStep(step, form)}
+              disabled={!canProceedFromStep(step, form) || (step === 5 && !canProceedFromStep5)}
               className="flex items-center gap-1.5 bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
             >
               Suivant

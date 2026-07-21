@@ -2087,3 +2087,51 @@ create policy "newsletter_subscribers_delete_staff"
 -- Intentionally no insert policy for anon/authenticated roles: the only way
 -- to create a row is through the secured POST /api/newsletter/subscribe
 -- route, which uses the service-role client and therefore bypasses RLS.
+
+-- ============================================================================
+-- 36. legal_consents — preuve horodatée d'un consentement RGPD explicite
+--     (chantier conformité juridique/RGPD, lots D/E — juillet 2026). Une
+--     ligne par consentement donné, jamais mise à jour ni supprimée (preuve
+--     immuable) : aucune policy update/delete, ni pour l'élève ni pour le
+--     staff — une correction éventuelle passe directement par le client
+--     service role. Deux types aujourd'hui — 'sante_onboarding' (étape 5 du
+--     questionnaire /onboarding) et 'cgv_programme' (achat d'un programme
+--     numérique, avant paiement) — voir lib/legal-consents.ts pour le texte
+--     exact et la version versionnée de chaque consentement (même logique
+--     que newsletter_subscribers.consent_text_version ci-dessus).
+--
+--     Écriture : soit l'élève lui-même pour son propre consentement santé
+--     (session élève, RLS ci-dessous), soit le client service role lors du
+--     provisionnement d'un compte après achat (contourne RLS, voir
+--     lib/supabase/public-program-provisioning.ts). Le `with check` empêche
+--     explicitement un élève d'insérer lui-même une ligne 'cgv_programme'.
+-- ============================================================================
+create table if not exists public.legal_consents (
+  id uuid primary key default gen_random_uuid(),
+  student_id uuid not null references public.students (id) on delete cascade,
+  consent_type text not null check (consent_type in ('cgv_programme', 'sante_onboarding')),
+  consent_text_version text not null,
+  consent_at timestamptz not null default now(),
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists legal_consents_student_id_idx
+  on public.legal_consents (student_id);
+
+alter table public.legal_consents enable row level security;
+
+drop policy if exists "legal_consents_select_self_or_staff" on public.legal_consents;
+create policy "legal_consents_select_self_or_staff"
+  on public.legal_consents
+  for select
+  using (student_id = public.current_student_id() or public.is_coach_or_admin());
+
+drop policy if exists "legal_consents_insert_own_health_or_staff" on public.legal_consents;
+create policy "legal_consents_insert_own_health_or_staff"
+  on public.legal_consents
+  for insert
+  with check (
+    (student_id = public.current_student_id() and consent_type = 'sante_onboarding')
+    or public.is_coach_or_admin()
+  );

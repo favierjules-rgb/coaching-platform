@@ -3,6 +3,7 @@
 import { useId, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { CGV_PROGRAMME_CONSENT_TEXT } from "@/lib/legal-consents";
 import { isValidEmail } from "@/lib/newsletter/validation";
 import { formatAmountCents } from "@/lib/stripe/status";
 
@@ -36,10 +37,12 @@ export function PublicProgramPurchaseForm({
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
+  const [cgvAccepted, setCgvAccepted] = useState(false);
   const [status, setStatus] = useState<Status>("idle");
   const [message, setMessage] = useState<string | null>(null);
 
-  const canSubmit = firstName.trim() !== "" && lastName.trim() !== "" && isValidEmail(email) && status !== "loading";
+  const canSubmit =
+    firstName.trim() !== "" && lastName.trim() !== "" && isValidEmail(email) && cgvAccepted && status !== "loading";
   const isPaid = Boolean(priceCents);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -53,7 +56,12 @@ export function PublicProgramPurchaseForm({
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ firstName: firstName.trim(), lastName: lastName.trim(), email: email.trim() }),
+        body: JSON.stringify({
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          email: email.trim(),
+          cgvAccepted: true,
+        }),
       });
       const data = (await response.json().catch(() => ({}))) as { url?: string; error?: string };
       if (!response.ok) {
@@ -123,6 +131,26 @@ export function PublicProgramPurchaseForm({
           className="w-full border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground"
         />
       </div>
+
+      <label className="flex cursor-pointer items-start gap-3 text-xs leading-relaxed text-muted-foreground">
+        <input
+          type="checkbox"
+          checked={cgvAccepted}
+          onChange={(event) => setCgvAccepted(event.target.checked)}
+          className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
+        />
+        <span>
+          {CGV_PROGRAMME_CONSENT_TEXT}{" "}
+          <a
+            href="/cgv"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-foreground underline underline-offset-4"
+          >
+            Consulter les CGV
+          </a>
+        </span>
+      </label>
 
       {status === "error" && message ? (
         <p role="alert" className="text-sm text-destructive">
