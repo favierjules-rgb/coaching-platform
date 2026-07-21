@@ -6,3 +6,4 @@
 alter table public.programs
   add column if not exists program_mode text not null default 'individuel' check (program_mode in ('individuel', 'groupe')),
   add column if not exists group_start_date date;
+;

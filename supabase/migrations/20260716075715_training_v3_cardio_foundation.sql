@@ -1,10 +1,3 @@
--- Migration V3 "Training Builder — Running/Fullscreen" — Étape 1
--- 100% additive, idempotent (IF NOT EXISTS partout où possible), aucune
--- suppression de colonne/table/donnée, aucune contrainte NOT NULL ajoutée
--- sur une colonne existante. Ne touche à aucune table hors du module
--- Entraînement (nutrition, documents, rendez-vous, Stripe, Resend, Brevo,
--- newsletter, abonnements : intouchés).
-
 begin;
 
 -- ────────────────────────────────────────────────────────────────────────
@@ -24,9 +17,6 @@ comment on column public.workout_sessions.session_type is
 
 -- ────────────────────────────────────────────────────────────────────────
 -- 2. training_blocks : ajout du type "cardio" + colonnes cardio nullables
---    (table déjà existante mais jamais utilisée par le code actuel — on
---    l'étend au lieu d'en créer une nouvelle, conformément à la décision
---    prise avec Jules)
 -- ────────────────────────────────────────────────────────────────────────
 alter table public.training_blocks
   drop constraint if exists training_blocks_block_type_check;
@@ -69,12 +59,6 @@ comment on column public.training_blocks.machine_type is
 
 -- ────────────────────────────────────────────────────────────────────────
 -- 3. training_prescriptions : extension pour porter les segments cardio
---    (au lieu d'une nouvelle table "segments" — même décision qu'au 2)
---    - exercise_id devient nullable : une prescription peut être rattachée
---      SOIT à un exercice (musculation, comportement actuel inchangé)
---      SOIT directement à un bloc (segment cardio)
---    - parent_prescription_id permet de représenter un groupe de
---      répétitions (ex: 8×400m) comme parent de ses segments enfants
 -- ────────────────────────────────────────────────────────────────────────
 alter table public.training_prescriptions
   alter column exercise_id drop not null;
@@ -105,8 +89,6 @@ alter table public.training_prescriptions
   add column if not exists terrain text,
   add column if not exists equipment_type text;
 
--- Une prescription doit toujours être rattachée à quelque chose (comme
--- avant : un exercice ; ou nouveau : un bloc directement pour le cardio).
 alter table public.training_prescriptions
   drop constraint if exists training_prescriptions_exercise_or_block_check;
 alter table public.training_prescriptions
@@ -135,15 +117,13 @@ comment on column public.training_prescriptions.block_id is
 comment on column public.training_prescriptions.parent_prescription_id is
   'V3 cardio : segment parent (ex: groupe de répétitions 8×400m). NULL = segment de premier niveau.';
 
--- Index pour les nouvelles requêtes par bloc / hiérarchie de segments.
 create index if not exists idx_training_prescriptions_block_id
   on public.training_prescriptions(block_id);
 create index if not exists idx_training_prescriptions_parent
   on public.training_prescriptions(parent_prescription_id);
 
 -- ────────────────────────────────────────────────────────────────────────
--- 4. Profil physiologique élève (student_profiles) — nouveaux champs,
---    aucun champ existant modifié ni dupliqué
+-- 4. Profil physiologique élève (student_profiles)
 -- ────────────────────────────────────────────────────────────────────────
 alter table public.student_profiles
   add column if not exists vma_kmh numeric,
@@ -160,8 +140,7 @@ comment on column public.student_profiles.reference_paces is
   'Allures de référence libres (ex: {"10km": "4:30", "semi": "4:50"}), jsonb pour rester extensible sans migration ultérieure.';
 
 -- ────────────────────────────────────────────────────────────────────────
--- 5. Préparation future import montre/app (aucune intégration réelle
---    développée dans cette branche — champs de préparation seulement)
+-- 5. Préparation future import montre/app (aucune intégration réelle)
 -- ────────────────────────────────────────────────────────────────────────
 alter table public.training_prescriptions
   add column if not exists data_source text not null default 'manual',
@@ -180,4 +159,4 @@ alter table public.training_prescriptions
 comment on column public.training_prescriptions.data_source is
   'Origine de la donnée (prep future import montre — aucune intégration Garmin/Apple Watch/Strava développée dans cette branche). Défaut manual = comportement actuel inchangé.';
 
-commit;
+commit;;

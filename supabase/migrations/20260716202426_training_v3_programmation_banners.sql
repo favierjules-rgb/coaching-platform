@@ -20,3 +20,4 @@ create policy "banners_bucket_update_staff" on storage.objects
 drop policy if exists "banners_bucket_delete_staff" on storage.objects;
 create policy "banners_bucket_delete_staff" on storage.objects
   for delete using (bucket_id = 'banners' and public.is_coach_or_admin());
+;

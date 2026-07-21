@@ -19,3 +19,4 @@ create policy "programs_select_public" on public.programs
 -- public — accès restreint à /entrainement uniquement).
 alter table public.students
   add column if not exists access_type text not null default 'coaching' check (access_type in ('coaching', 'programme_seul'));
+;

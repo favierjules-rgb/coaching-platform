@@ -6,3 +6,4 @@
 drop policy if exists "banners_bucket_select_staff" on storage.objects;
 create policy "banners_bucket_select_staff" on storage.objects
   for select using (bucket_id = 'banners' and public.is_coach_or_admin());
+;
