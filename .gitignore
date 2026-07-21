@@ -57,3 +57,6 @@ brand/transformations/approved/
 # Fichiers macOS
 .DS_Store
 **/.DS_Store
+
+# Supabase CLI local state
+supabase/.temp/
