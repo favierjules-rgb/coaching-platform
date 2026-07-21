@@ -42,17 +42,63 @@ export const CGV_PROGRAMME_CONSENT_TEXT_VERSION = "2026-07-fr-v1";
 export const CGV_PROGRAMME_CONSENT_TEXT = "J'ai lu et j'accepte les conditions générales de vente.";
 
 /**
- * Textes exacts des deux cases de rétractation, formulaire d'achat payant
- * d'un programme public (PublicProgramPurchaseForm.tsx, réservé au chemin
- * payant — un programme gratuit n'a pas de paiement à rétracter). Texte
- * fourni et validé par Jules (brief initial du chantier conformité
- * juridique/RGPD) — ne pas reformuler sans repasser par lui.
+ * Registre immuable des versions passées du texte de consentement "accès
+ * immédiat + perte du droit de rétractation" (consent_type toujours
+ * 'retractation_programme' en base — ce nom de colonne n'a pas changé,
+ * seul le texte/la version affichés au moment de l'achat évoluent). Ne
+ * jamais modifier ni supprimer une entrée existante : chaque ligne déjà
+ * écrite dans legal_consents référence sa version par ce texte exact, c'est
+ * la seule façon de retrouver a posteriori ce qu'un acheteur a réellement
+ * accepté à une date donnée. N'ajouter que de nouvelles entrées.
  */
-export const RETRACTATION_WAIVER_CONSENT_TEXT_VERSION = "2026-07-fr-v1";
-export const IMMEDIATE_ACCESS_CONSENT_TEXT =
-  "Je demande expressément à accéder immédiatement au programme numérique avant l'expiration du délai légal de rétractation.";
-export const WITHDRAWAL_RIGHT_WAIVER_CONSENT_TEXT =
-  "Je reconnais qu'en demandant l'accès immédiat au contenu numérique, je perdrai mon droit de rétractation dans les conditions prévues par le Code de la consommation.";
+export const IMMEDIATE_ACCESS_AND_WAIVER_CONSENT_TEXT_HISTORY: Readonly<Record<string, string>> = {
+  // v1 (juillet 2026, Lot E) : deux cases distinctes affichées séparément
+  // dans le formulaire d'achat, fusionnées ici en une seule entrée
+  // d'archive à des fins de traçabilité — le formulaire de l'époque
+  // affichait réellement ces deux textes comme deux checkboxes.
+  "2026-07-fr-v1":
+    "[Case 1/2] Je demande expressément à accéder immédiatement au programme numérique avant l'expiration du délai légal de rétractation. " +
+    "[Case 2/2] Je reconnais qu'en demandant l'accès immédiat au contenu numérique, je perdrai mon droit de rétractation dans les conditions prévues par le Code de la consommation.",
+};
+
+/**
+ * Version et texte actuellement affichés au moment de l'achat (case unique
+ * fusionnée, Lot E-bis — juillet 2026). Texte fourni et validé par Jules —
+ * ne pas reformuler sans repasser par lui. Toute évolution de ce texte doit
+ * s'accompagner d'une nouvelle entrée dans IMMEDIATE_ACCESS_AND_WAIVER_CONSENT_TEXT_HISTORY
+ * ci-dessus et d'un incrément de version ici, jamais d'une réécriture sur place.
+ */
+export const IMMEDIATE_ACCESS_AND_WAIVER_CONSENT_TEXT_VERSION = "2026-07-fr-v2";
+export const IMMEDIATE_ACCESS_AND_WAIVER_CONSENT_TEXT =
+  "Je demande expressément l'accès immédiat au programme numérique avant l'expiration du délai légal de rétractation et je reconnais qu'à compter du début de la fourniture du contenu, je perdrai mon droit de rétractation conformément à l'article L. 221-28 du Code de la consommation.";
+
+/**
+ * `true` si une ligne `legal_consents` existe déjà pour cette session de
+ * paiement Stripe et ce type de consentement (chantier conformité
+ * juridique/RGPD, Lot E-bis technique — juillet 2026) — dédoublonnage par
+ * commande, utilisé avant d'insérer pour qu'un retry du webhook Stripe ne
+ * crée jamais deux preuves de consentement pour le même achat (voir
+ * lib/supabase/public-program-provisioning.ts). N'a de sens que pour le
+ * chemin payant (checkout, qui a un `checkout_session_id`) ; jamais appelée
+ * pour le chemin gratuit (claim), qui insère toujours directement.
+ */
+export async function hasLegalConsentForCheckoutSession(
+  supabase: SupabaseClient,
+  checkoutSessionId: string,
+  consentType: LegalConsentType,
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("legal_consents")
+    .select("id")
+    .eq("consent_type", consentType)
+    .eq("metadata->>checkout_session_id", checkoutSessionId)
+    .maybeSingle();
+  if (error) {
+    console.error(`[legal-consents] hasLegalConsentForCheckoutSession (${consentType}) : ${error.message}`);
+    return false;
+  }
+  return Boolean(data);
+}
 
 /**
  * Insère une ligne de preuve de consentement. Utilisable aussi bien avec un

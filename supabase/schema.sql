@@ -2130,6 +2130,42 @@ alter table public.legal_consents add constraint legal_consents_consent_type_che
 create index if not exists legal_consents_student_id_idx
   on public.legal_consents (student_id);
 
+-- Migration additive (chantier conformité juridique/RGPD, Lot E-bis
+-- technique — correctif verrou concurrent/garanties DB réelles, juillet
+-- 2026 ; voir la vraie migration horodatée
+-- supabase/migrations/20260721154347_add_legal_consents_checkout_unique_index.sql,
+-- source de vérité pour l'application réelle — ce bloc reflète seulement
+-- l'état final attendu du schéma) : ferme la fenêtre de course résiduelle
+-- du dédoublonnage applicatif (hasLegalConsentForCheckoutSession,
+-- lookup-avant-insert) en imposant l'unicité au niveau Postgres lui-même,
+-- pour les deux seuls consent_type concernés par un achat de programme
+-- public payant. Index fonctionnel partiel : aucune nouvelle colonne,
+-- réutilise metadata (jsonb déjà existant), aucune contrainte sur les
+-- autres consent_type (ex. sante_onboarding, qui n'a pas de
+-- checkout_session_id).
+--
+-- Vérification préalable (2026-07-21, avant application) : recherche de
+-- doublons existants sur (consent_type, metadata->>'checkout_session_id')
+-- pour 'cgv_programme'/'retractation_programme' — AUCUN doublon trouvé (la
+-- table ne contient encore aucune ligne pour ces deux types à cette date,
+-- projet pré-lancement). La migration horodatée ci-dessus revérifie
+-- elle-même cette absence de doublons à l'exécution (bloc do $$ ... end $$,
+-- raise exception si violée) — garde-fou indépendant de cette vérification
+-- manuelle, pour toute exécution future (autre environnement, replay...).
+--
+-- PAS de `if not exists` ici, contrairement au reste de ce fichier
+-- (décision explicite de Jules) : cette instruction est une vraie migration
+-- à appliquer UNE SEULE FOIS, pas une réexécution silencieusement ignorée à
+-- chaque replay du schéma.
+create unique index legal_consents_program_checkout_unique_idx
+on public.legal_consents (
+  consent_type,
+  (metadata ->> 'checkout_session_id')
+)
+where
+  metadata ->> 'checkout_session_id' is not null
+  and consent_type in ('cgv_programme', 'retractation_programme');
+
 alter table public.legal_consents enable row level security;
 
 drop policy if exists "legal_consents_select_self_or_staff" on public.legal_consents;

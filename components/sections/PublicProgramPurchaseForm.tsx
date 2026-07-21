@@ -3,11 +3,7 @@
 import { useId, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import {
-  CGV_PROGRAMME_CONSENT_TEXT,
-  IMMEDIATE_ACCESS_CONSENT_TEXT,
-  WITHDRAWAL_RIGHT_WAIVER_CONSENT_TEXT,
-} from "@/lib/legal-consents";
+import { CGV_PROGRAMME_CONSENT_TEXT, IMMEDIATE_ACCESS_AND_WAIVER_CONSENT_TEXT } from "@/lib/legal-consents";
 import { isValidEmail } from "@/lib/newsletter/validation";
 import { formatAmountCents } from "@/lib/stripe/status";
 
@@ -42,12 +38,14 @@ export function PublicProgramPurchaseForm({
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [cgvAccepted, setCgvAccepted] = useState(false);
-  // Réservées au chemin payant (Lot E) : un programme gratuit n'a pas de
-  // paiement à rétracter, ces deux cases n'ont pas de sens pour lui — voir
+  // Réservée au chemin payant (Lot E-bis) : un programme gratuit n'a pas de
+  // paiement à rétracter, cette case n'a pas de sens pour lui — voir
   // publicProgramCheckoutBodySchema (lib/api/schemas/stripe.ts), utilisé
-  // uniquement par /checkout, jamais par /claim.
-  const [immediateAccessRequested, setImmediateAccessRequested] = useState(false);
-  const [withdrawalRightWaived, setWithdrawalRightWaived] = useState(false);
+  // uniquement par /checkout, jamais par /claim. N'est jamais rendue pour un
+  // abonnement de coaching non plus : ce formulaire ne gère que les
+  // programmes numériques (voir docblock ci-dessus), les abonnements
+  // passent par un tout autre flux authentifié (create-checkout-session).
+  const [immediateAccessAndWaiverAccepted, setImmediateAccessAndWaiverAccepted] = useState(false);
   const [status, setStatus] = useState<Status>("idle");
   const [message, setMessage] = useState<string | null>(null);
 
@@ -57,7 +55,7 @@ export function PublicProgramPurchaseForm({
     lastName.trim() !== "" &&
     isValidEmail(email) &&
     cgvAccepted &&
-    (!isPaid || (immediateAccessRequested && withdrawalRightWaived)) &&
+    (!isPaid || immediateAccessAndWaiverAccepted) &&
     status !== "loading";
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -77,9 +75,9 @@ export function PublicProgramPurchaseForm({
           email: email.trim(),
           cgvAccepted: true,
           // Uniquement pour /checkout — publicProgramAccessBodySchema (chemin
-          // /claim, gratuit) est `.strict()` et rejetterait ces champs
-          // inconnus, donc on ne les envoie jamais sur le chemin gratuit.
-          ...(isPaid ? { immediateAccessRequested: true, withdrawalRightWaived: true } : {}),
+          // /claim, gratuit) est `.strict()` et rejetterait ce champ inconnu,
+          // donc on ne l'envoie jamais sur le chemin gratuit.
+          ...(isPaid ? { immediateAccessAndWaiverAccepted: true } : {}),
         }),
       });
       const data = (await response.json().catch(() => ({}))) as { url?: string; error?: string };
@@ -172,26 +170,15 @@ export function PublicProgramPurchaseForm({
       </label>
 
       {isPaid && (
-        <>
-          <label className="flex cursor-pointer items-start gap-3 text-xs leading-relaxed text-muted-foreground">
-            <input
-              type="checkbox"
-              checked={immediateAccessRequested}
-              onChange={(event) => setImmediateAccessRequested(event.target.checked)}
-              className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
-            />
-            <span>{IMMEDIATE_ACCESS_CONSENT_TEXT}</span>
-          </label>
-          <label className="flex cursor-pointer items-start gap-3 text-xs leading-relaxed text-muted-foreground">
-            <input
-              type="checkbox"
-              checked={withdrawalRightWaived}
-              onChange={(event) => setWithdrawalRightWaived(event.target.checked)}
-              className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
-            />
-            <span>{WITHDRAWAL_RIGHT_WAIVER_CONSENT_TEXT}</span>
-          </label>
-        </>
+        <label className="flex cursor-pointer items-start gap-3 text-xs leading-relaxed text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={immediateAccessAndWaiverAccepted}
+            onChange={(event) => setImmediateAccessAndWaiverAccepted(event.target.checked)}
+            className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
+          />
+          <span>{IMMEDIATE_ACCESS_AND_WAIVER_CONSENT_TEXT}</span>
+        </label>
       )}
 
       {status === "error" && message ? (

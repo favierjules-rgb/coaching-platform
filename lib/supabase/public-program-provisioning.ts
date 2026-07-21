@@ -4,9 +4,27 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { composeProgramAssignedEmail, composePublicProgramWelcomeEmail } from "@/lib/email/templates";
 import { sendTransactionalEmail } from "@/lib/email/send-transactional-email";
-import { insertLegalConsent } from "@/lib/legal-consents";
+import { hasLegalConsentForCheckoutSession, insertLegalConsent } from "@/lib/legal-consents";
 import { setProgramAssignment } from "@/lib/supabase/programs";
 import type { Database } from "@/types/supabase";
+
+/**
+ * Levée uniquement par le chemin checkout payant (jamais par /claim, voir
+ * plus bas) quand une étape correctness-critique échoue réellement —
+ * consentement non écrit, email de confirmation non envoyé, ou activation
+ * non effectuée (chantier conformité juridique/RGPD, Lot E-bis technique —
+ * juillet 2026). Se propage volontairement jusqu'à
+ * app/api/stripe/webhook/route.ts, qui répond 500 (Stripe programme
+ * automatiquement un nouvel essai) SANS marquer l'évènement "processed" —
+ * voir acquirePublicProgramPurchaseEventLock / markPublicProgramPurchaseEventFailed
+ * dans lib/supabase/billing.ts.
+ */
+export class RetryablePublicProgramProvisioningError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RetryablePublicProgramProvisioningError";
+  }
+}
 
 /**
  * Provisionnement de compte élève après achat/réclamation d'un programme
@@ -55,12 +73,43 @@ export interface ProvisionPublicProgramAccessInput {
    */
   cgvConsentTextVersion?: string;
   /**
-   * Preuve des deux consentements de rétractation (Lot E) — présente
-   * uniquement pour l'appelant checkout payant (publicProgramCheckoutBodySchema
-   * les rend obligatoires) ; toujours `undefined` côté claim gratuit, qui
-   * n'a pas de paiement à rétracter.
+   * Preuve du consentement "accès immédiat + perte du droit de
+   * rétractation" (Lot E-bis, case unique) — présente uniquement pour
+   * l'appelant checkout payant (publicProgramCheckoutBodySchema la rend
+   * obligatoire) ; toujours `undefined` côté claim gratuit, qui n'a pas de
+   * paiement à rétracter et ne concerne jamais un abonnement de coaching
+   * (flux entièrement séparé, voir create-checkout-session).
    */
-  retractationConsentTextVersion?: string;
+  immediateAccessAndWaiverConsentTextVersion?: string;
+  /**
+   * Identifiant de la session Stripe Checkout à l'origine de l'achat — sert
+   * de référence de commande dans le `metadata` des lignes `legal_consents`
+   * (voir insertCgvConsentIfProvided / insertImmediateAccessAndWaiverConsentIfProvided
+   * ci-dessous). `undefined` côté claim gratuit, qui n'a pas de session
+   * Stripe.
+   */
+  checkoutSessionId?: string;
+  /**
+   * Hook optionnel invoqué juste après l'écriture des lignes de
+   * consentement, et strictement avant `setProgramAssignment` (activation
+   * de l'accès) — utilisé exclusivement par le webhook Stripe pour envoyer
+   * l'email de confirmation de commande "sur support durable" à ce point
+   * précis de la séquence (consentements enregistrés → confirmation
+   * envoyée → accès activé). `undefined` côté claim gratuit.
+   *
+   * Depuis la correction de la fenêtre d'échec (Lot E-bis, suite audit) :
+   * l'implémentation fournie par le webhook (voir webhook-handlers.ts) REJETTE
+   * explicitement si `sendTransactionalEmail` renvoie `status: "failed"` — ce
+   * rejet n'est volontairement PAS intercepté ici, il se propage jusqu'à
+   * `grantExistingStudent`/`createProgramOnlyStudent`, empêchant
+   * `setProgramAssignment` de s'exécuter, jusqu'au webhook Stripe qui répond
+   * 500 (retry automatique, évènement jamais marqué "processed"). Un
+   * `status: "skipped"` (EMAILS_ENABLED=false, ou Resend non configuré —
+   * état délibéré, pas une panne) n'est PAS traité comme un échec : bloquer
+   * l'accès d'un client qui a payé parce qu'un environnement a
+   * volontairement désactivé l'envoi serait pire que l'inverse.
+   */
+  onConsentsRecorded?: (studentId: string) => Promise<void>;
 }
 
 export interface ProvisionPublicProgramAccessResult {
@@ -98,38 +147,127 @@ async function insertCgvConsentIfProvided(
   input: ProvisionPublicProgramAccessInput,
 ): Promise<void> {
   if (!input.cgvConsentTextVersion) return;
-  await insertLegalConsent(supabase, {
+  // Dédoublonnage par commande (chantier conformité juridique/RGPD, Lot
+  // E-bis technique) : n'a de sens que côté payant (checkoutSessionId
+  // présent) — un retry du webhook Stripe rejouant cette fonction ne doit
+  // jamais écrire une seconde ligne pour le même achat. Le chemin gratuit
+  // (/claim, checkoutSessionId absent) insère toujours directement, comme
+  // avant : il n'est jamais rejoué par un webhook.
+  if (input.checkoutSessionId) {
+    const alreadyRecorded = await hasLegalConsentForCheckoutSession(supabase, input.checkoutSessionId, "cgv_programme");
+    if (alreadyRecorded) return;
+  }
+  const inserted = await insertLegalConsent(supabase, {
     studentId,
     consentType: "cgv_programme",
     consentTextVersion: input.cgvConsentTextVersion,
-    metadata: { program_id: input.programId },
+    metadata: {
+      checkout_session_id: input.checkoutSessionId ?? null,
+      program_id: input.programId,
+      consent_text_version: input.cgvConsentTextVersion,
+      consent_type: "cgv_programme",
+    },
   });
+  if (inserted) return;
+
+  // Échec de l'insert : avant de le traiter comme une vraie panne, on
+  // revérifie si une insertion CONCURRENTE vient de gagner la course entre
+  // le hasLegalConsentForCheckoutSession ci-dessus et cet insert (fenêtre de
+  // course résiduelle du lookup-avant-insert, vérification des garanties DB
+  // réelles suite audit). Si la ligne existe maintenant, ce n'est pas un
+  // échec : idempotent, ne pas lever d'erreur retryable.
+  //
+  // IMPORTANT — cette relecture ne ferme la fenêtre que lorsque la table
+  // `legal_consents` possède réellement une contrainte d'unicité sur
+  // (consent_type, metadata->>'checkout_session_id'), ce qui N'EST PAS
+  // encore le cas aujourd'hui (voir supabase/schema.sql : seul un index sur
+  // student_id existe). Sans cette contrainte, deux insertions concurrentes
+  // peuvent toutes les deux réussir (rien ne les en empêche côté DB), donc
+  // toutes les deux passer `inserted === true` plus haut sans jamais
+  // atteindre ce code — un doublon resterait possible. La migration
+  // minimale nécessaire pour fermer complètement cette fenêtre est présentée
+  // (non appliquée) dans le rapport à Jules ; ce code est déjà prêt à la
+  // recevoir : dès qu'elle existe, l'insert perdant échouera réellement (23505)
+  // et sera correctement absorbé ici.
+  if (input.checkoutSessionId) {
+    const nowRecorded = await hasLegalConsentForCheckoutSession(supabase, input.checkoutSessionId, "cgv_programme");
+    if (nowRecorded) return;
+    throw new RetryablePublicProgramProvisioningError(
+      `Échec de l'enregistrement du consentement CGV (session ${input.checkoutSessionId}).`,
+    );
+  }
+  // N'échoue le provisionnement QUE côté payant : c'est là que la preuve de
+  // consentement doit exister avant d'activer l'accès. Côté gratuit,
+  // insertLegalConsent garde son contrat historique ("ne fait jamais
+  // échouer l'appelant") — comportement inchangé, hors périmètre de cette
+  // correction.
 }
 
-/** Même logique que ci-dessus, pour le consentement de rétractation (Lot E). */
-async function insertRetractationConsentIfProvided(
+/**
+ * Même logique que ci-dessus, pour le consentement "accès immédiat + perte
+ * du droit de rétractation" (Lot E-bis, case unique — le nom de fonction et
+ * le consent_type restent volontairement "retractation" côté base pour ne
+ * jamais renommer une valeur déjà écrite dans des lignes historiques ;
+ * seuls le texte affiché et le champ applicatif ont changé de nom, voir
+ * lib/legal-consents.ts).
+ */
+async function insertImmediateAccessAndWaiverConsentIfProvided(
   supabase: TypedSupabaseClient,
   studentId: string,
   input: ProvisionPublicProgramAccessInput,
 ): Promise<void> {
-  if (!input.retractationConsentTextVersion) return;
-  await insertLegalConsent(supabase, {
+  if (!input.immediateAccessAndWaiverConsentTextVersion) return;
+  // Même dédoublonnage par commande que insertCgvConsentIfProvided ci-dessus.
+  if (input.checkoutSessionId) {
+    const alreadyRecorded = await hasLegalConsentForCheckoutSession(supabase, input.checkoutSessionId, "retractation_programme");
+    if (alreadyRecorded) return;
+  }
+  const inserted = await insertLegalConsent(supabase, {
     studentId,
     consentType: "retractation_programme",
-    consentTextVersion: input.retractationConsentTextVersion,
-    metadata: { program_id: input.programId },
+    consentTextVersion: input.immediateAccessAndWaiverConsentTextVersion,
+    metadata: {
+      checkout_session_id: input.checkoutSessionId ?? null,
+      program_id: input.programId,
+      consent_text_version: input.immediateAccessAndWaiverConsentTextVersion,
+      consent_type: "retractation_programme",
+    },
   });
+  if (inserted) return;
+
+  // Même relecture après échec que insertCgvConsentIfProvided ci-dessus —
+  // voir son commentaire pour le détail (course concurrente possible /
+  // migration de contrainte unique présentée mais pas encore appliquée).
+  if (input.checkoutSessionId) {
+    const nowRecorded = await hasLegalConsentForCheckoutSession(supabase, input.checkoutSessionId, "retractation_programme");
+    if (nowRecorded) return;
+    throw new RetryablePublicProgramProvisioningError(
+      `Échec de l'enregistrement du consentement accès immédiat/rétractation (session ${input.checkoutSessionId}).`,
+    );
+  }
 }
 
-/** Chemin "email déjà connu" : assigne le programme au compte existant, envoie l'email "programme attribué". */
+/**
+ * Chemin "email déjà connu" : enregistre les consentements, déclenche la
+ * confirmation de commande (webhook uniquement, via onConsentsRecorded),
+ * PUIS assigne le programme (activation) et envoie l'email "programme
+ * attribué" — ordre imposé par Jules (preuve + confirmation avant accès).
+ * Chaque étape correctness-critique est vérifiée : côté payant
+ * (checkoutSessionId présent), un échec lève RetryablePublicProgramProvisioningError
+ * et n'active JAMAIS l'accès — voir le docblock de cette classe plus haut.
+ */
 async function grantExistingStudent(
   supabase: TypedSupabaseClient,
   student: { id: string; firstName: string },
   input: ProvisionPublicProgramAccessInput,
 ): Promise<ProvisionPublicProgramAccessResult> {
-  await setProgramAssignment(supabase, student.id, input.programId, true);
   await insertCgvConsentIfProvided(supabase, student.id, input);
-  await insertRetractationConsentIfProvided(supabase, student.id, input);
+  await insertImmediateAccessAndWaiverConsentIfProvided(supabase, student.id, input);
+  await input.onConsentsRecorded?.(student.id);
+  const assigned = await setProgramAssignment(supabase, student.id, input.programId, true);
+  if (!assigned && input.checkoutSessionId) {
+    throw new RetryablePublicProgramProvisioningError(`Échec de l'activation de l'accès au programme (session ${input.checkoutSessionId}).`);
+  }
 
   const { data: studentRow } = await supabase.from("students").select("email").eq("id", student.id).maybeSingle();
   const recipientEmail = studentRow?.email || input.email;
@@ -224,9 +362,17 @@ async function createProgramOnlyStudent(
     return null;
   }
 
-  await setProgramAssignment(supabase, studentRow.id, input.programId, true);
+  // Ordre imposé par Jules : consentements enregistrés puis confirmation de
+  // commande envoyée (onConsentsRecorded, webhook uniquement) avant
+  // d'activer l'accès au programme — même séquence, mêmes vérifications
+  // explicites, que grantExistingStudent ci-dessus.
   await insertCgvConsentIfProvided(supabase, studentRow.id, input);
-  await insertRetractationConsentIfProvided(supabase, studentRow.id, input);
+  await insertImmediateAccessAndWaiverConsentIfProvided(supabase, studentRow.id, input);
+  await input.onConsentsRecorded?.(studentRow.id);
+  const assigned = await setProgramAssignment(supabase, studentRow.id, input.programId, true);
+  if (!assigned && input.checkoutSessionId) {
+    throw new RetryablePublicProgramProvisioningError(`Échec de l'activation de l'accès au programme (session ${input.checkoutSessionId}).`);
+  }
 
   const email = composePublicProgramWelcomeEmail({
     firstName: input.firstName,

@@ -25,11 +25,13 @@ export const metadata: Metadata = {
  * La case à cocher d'acceptation des CGV au moment de la commande est
  * réellement branchée (voir PublicProgramPurchaseForm.tsx,
  * lib/api/schemas/stripe.ts, lib/legal-consents.ts — chantier technique
- * réalisé après ce lot). Les deux cases spécifiques à la rétractation d'un
- * programme numérique ("demande d'accès immédiat" / "reconnaissance de la
- * perte du droit") sont elles aussi branchées depuis le chantier technique
- * du Lot E, avec le texte validé explicitement par Jules — voir
- * app/retractation/page.tsx pour la procédure complète.
+ * réalisé après ce lot). La case spécifique à la rétractation d'un
+ * programme numérique ("accès immédiat + perte du droit de rétractation",
+ * citant l'article L. 221-28 du Code de la consommation) est elle aussi
+ * branchée, avec le texte validé explicitement par Jules — voir
+ * app/retractation/page.tsx pour la procédure complète. À l'origine deux
+ * cases distinctes (Lot E), fusionnées en une seule (Lot E-bis) sans
+ * changer le fond du consentement demandé.
  */
 export default function CgvPage() {
   return (
@@ -114,10 +116,10 @@ export default function CgvPage() {
               <strong className="font-semibold text-foreground">Programme numérique.</strong> Un programme numérique
               accessible immédiatement constitue un contenu numérique fourni sans support matériel. Si tu demandes
               expressément à y accéder avant l&apos;expiration du délai légal de rétractation de quatorze jours, et
-              que tu reconnais explicitement perdre ton droit de rétractation en conséquence, tu ne pourras plus
-              exercer ce droit une fois l&apos;accès accordé. En l&apos;absence d&apos;une telle demande expresse et
-              de cette reconnaissance, le droit de rétractation de quatorze jours s&apos;applique dans les conditions
-              prévues par le Code de la consommation.
+              que tu reconnais explicitement perdre ton droit de rétractation en conséquence, tu perds ce droit à
+              compter du début de la fourniture du contenu, conformément à l&apos;article L. 221-28 du Code de la
+              consommation. En l&apos;absence d&apos;une telle demande expresse et de cette reconnaissance, le droit
+              de rétractation de quatorze jours s&apos;applique dans les conditions prévues par ce même code.
             </p>
             <p>
               <strong className="font-semibold text-foreground">Abonnement de coaching.</strong> L&apos;abonnement de

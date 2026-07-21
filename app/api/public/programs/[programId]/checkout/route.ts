@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { idParamSchema } from "@/lib/api/schemas/common";
 import { publicProgramCheckoutBodySchema } from "@/lib/api/schemas/stripe";
 import { parseJsonBody, parseParams } from "@/lib/api/validate";
-import { CGV_PROGRAMME_CONSENT_TEXT_VERSION, RETRACTATION_WAIVER_CONSENT_TEXT_VERSION } from "@/lib/legal-consents";
+import { CGV_PROGRAMME_CONSENT_TEXT_VERSION, IMMEDIATE_ACCESS_AND_WAIVER_CONSENT_TEXT_VERSION } from "@/lib/legal-consents";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getStripeClient } from "@/lib/stripe/client";
 
@@ -80,10 +80,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     // lib/supabase/public-program-provisioning.ts.
     cgv_accepted: "true",
     cgv_version: CGV_PROGRAMME_CONSENT_TEXT_VERSION,
-    // Idem pour les deux consentements de rétractation (Lot E) — obligatoires
-    // ici (publicProgramCheckoutBodySchema), jamais sur le chemin gratuit.
-    retractation_waiver_accepted: "true",
-    retractation_waiver_version: RETRACTATION_WAIVER_CONSENT_TEXT_VERSION,
+    // Idem pour le consentement "accès immédiat + perte du droit de
+    // rétractation" (Lot E-bis, case unique) — obligatoire ici
+    // (publicProgramCheckoutBodySchema), jamais sur le chemin gratuit.
+    immediate_access_and_waiver_accepted: "true",
+    immediate_access_and_waiver_version: IMMEDIATE_ACCESS_AND_WAIVER_CONSENT_TEXT_VERSION,
   };
 
   try {

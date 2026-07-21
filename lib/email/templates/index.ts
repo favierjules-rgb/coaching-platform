@@ -1,6 +1,7 @@
 import "server-only";
 
 import { escapeHtml, renderBaseEmailHtml, renderBaseEmailText, type EmailButton } from "@/lib/email/templates/base";
+import { IMMEDIATE_ACCESS_AND_WAIVER_CONSENT_TEXT } from "@/lib/legal-consents";
 import { billingIntervalFrequencyLabels } from "@/lib/stripe/plans";
 import { formatAmountCents } from "@/lib/stripe/status";
 import type { BillingInterval } from "@/types";
@@ -230,14 +231,17 @@ export function composePublicProgramWelcomeEmail(input: { firstName: string; pro
 }
 
 /* ─── G-bis-bis. Confirmation de commande — programme public payant (chantier
- * conformité juridique/RGPD, Lot E — juillet 2026) ───
+ * conformité juridique/RGPD, Lot E-bis — juillet 2026) ───
  * Distincte de composePublicProgramWelcomeEmail : celle-ci ne sert qu'à
  * définir le mot de passe, elle ne contient aucun récapitulatif de commande.
  * Envoyée en plus (jamais à la place) après un achat payant confirmé
  * (checkout.session.completed), jamais pour une réclamation gratuite — voir
- * lib/stripe/webhook-handlers.ts. Sert de confirmation "sur support
- * durable" au sens du Code de la consommation : produit, prix, CGV
- * acceptées et preuve des cases cochées au moment de l'achat.
+ * lib/stripe/webhook-handlers.ts, qui l'envoie désormais AVANT d'activer
+ * l'accès au programme (ordre imposé par Jules). Sert de confirmation "sur
+ * support durable" au sens du Code de la consommation : produit, prix, CGV
+ * acceptées, et texte exact + version du consentement "accès immédiat/perte
+ * du droit de rétractation" reproduits tels qu'acceptés au moment de
+ * l'achat (jamais reformulés ici).
  */
 
 export function composePublicProgramOrderConfirmationEmail(input: {
@@ -247,14 +251,15 @@ export function composePublicProgramOrderConfirmationEmail(input: {
   currency: string;
   purchasedAtIso: string;
   cgvVersion: string;
-  immediateAccessRequested: boolean;
+  /** `undefined` uniquement en théorie défensive — publicProgramCheckoutBodySchema la rend obligatoire pour tout achat payant. */
+  immediateAccessAndWaiverVersion?: string;
 }): ComposedEmail {
   const name = escapeHtml(input.firstName || "");
   const price = formatAmountCents(input.priceCents, input.currency);
   const purchasedAt = formatDateFr(input.purchasedAtIso);
-  const retractationNote = input.immediateAccessRequested
-    ? "Tu as demandé à accéder immédiatement au contenu et reconnu perdre ton droit de rétractation en conséquence."
-    : "Tu disposes de 14 jours à compter de cet achat pour exercer ton droit de rétractation.";
+  const retractationNote = input.immediateAccessAndWaiverVersion
+    ? `Tu as accepté, au moment de l'achat (version ${escapeHtml(input.immediateAccessAndWaiverVersion)}) : « ${escapeHtml(IMMEDIATE_ACCESS_AND_WAIVER_CONSENT_TEXT)} »`
+    : escapeHtml("Tu disposes de 14 jours à compter de cet achat pour exercer ton droit de rétractation.");
   const bodyHtml = [
     p(`Bonjour ${name},`),
     p(`Voici la confirmation de ta commande, à conserver.`),
@@ -264,17 +269,20 @@ export function composePublicProgramOrderConfirmationEmail(input: {
         `Date de la commande : ${escapeHtml(purchasedAt)}<br />` +
         `Conditions générales de vente acceptées : version ${escapeHtml(input.cgvVersion)}.`,
     ),
-    p(escapeHtml(retractationNote)),
+    p(retractationNote),
     p(
       `Retrouve nos <a href="${process.env.NEXT_PUBLIC_APP_URL || ""}/cgv">conditions générales de vente</a> et notre page <a href="${process.env.NEXT_PUBLIC_APP_URL || ""}/retractation">droit de rétractation</a> à tout moment.`,
     ),
   ].join("");
+  const retractationNoteText = input.immediateAccessAndWaiverVersion
+    ? `Tu as accepté, au moment de l'achat (version ${input.immediateAccessAndWaiverVersion}) : « ${IMMEDIATE_ACCESS_AND_WAIVER_CONSENT_TEXT} »`
+    : "Tu disposes de 14 jours à compter de cet achat pour exercer ton droit de rétractation.";
   return {
     subject: `Confirmation de ta commande — ${input.programName}`,
     html: renderBaseEmailHtml({ preheader: "Voici la confirmation de ta commande.", heading: "Commande confirmée", bodyHtml }),
     text: renderBaseEmailText({
       heading: "Commande confirmée",
-      bodyText: `Bonjour ${input.firstName},\nProgramme : ${input.programName}\nPrix payé : ${price} (TVA non applicable, article 293 B du CGI)\nDate de la commande : ${purchasedAt}\nCGV acceptées : version ${input.cgvVersion}\n${retractationNote}`,
+      bodyText: `Bonjour ${input.firstName},\nProgramme : ${input.programName}\nPrix payé : ${price} (TVA non applicable, article 293 B du CGI)\nDate de la commande : ${purchasedAt}\nCGV acceptées : version ${input.cgvVersion}\n${retractationNoteText}`,
     }),
   };
 }

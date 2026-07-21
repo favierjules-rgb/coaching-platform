@@ -230,6 +230,243 @@ export async function recordBillingEventIfNew(
   return false;
 }
 
+/**
+ * Durée du "bail" (lease) d'un évènement resté à "processing" (chantier
+ * conformité juridique/RGPD, Lot E-bis technique — correctif verrou
+ * concurrent, suite audit). Un traitement normal (consentements + email +
+ * activation) se compte en secondes ; 5 minutes à "processing" sans jamais
+ * atteindre "processed" ni "failed" signifie presque certainement un
+ * processus mort (crash serveur, redéploiement en plein traitement) plutôt
+ * qu'un traitement réellement en cours — seul ce cas autorise une reprise
+ * automatique, voir acquirePublicProgramPurchaseEventLock ci-dessous.
+ */
+const PUBLIC_PROGRAM_PURCHASE_LOCK_LEASE_MS = 5 * 60 * 1000;
+
+export type PublicProgramPurchaseEventLockResult = "proceed" | "already_processed" | "already_processing" | "lock_error";
+
+/**
+ * Verrou d'évènement "reprenable" (chantier conformité juridique/RGPD, Lot
+ * E-bis technique — juillet 2026 ; corrigé suite audit pour une acquisition
+ * réellement atomique) — RÉSERVÉ à checkout.session.completed pour l'achat
+ * d'un programme public payant (voir app/api/stripe/webhook/route.ts, qui
+ * choisit cette fonction plutôt que recordBillingEventIfNew UNIQUEMENT pour
+ * ce cas précis ; tous les autres types d'évènements — abonnements,
+ * factures, et même checkout.session.completed pour un abonnement —
+ * continuent d'utiliser recordBillingEventIfNew ci-dessus, strictement
+ * inchangé).
+ *
+ * États stockés dans `_seth_status`, À L'INTÉRIEUR de la colonne `payload`
+ * jsonb déjà existante (aucune migration SQL : `payload` est déjà une
+ * colonne libre, `_seth_status`/`_seth_lease_started_at`/`_seth_error`/
+ * `_seth_failed_at` sont des clés internes préfixées pour ne jamais entrer
+ * en collision avec les clés réelles de l'évènement Stripe brut) :
+ * - "processing" : traitement en cours (ou précédemment interrompu, voir
+ *   _seth_lease_started_at) ;
+ * - "processed"  : traitement terminé avec succès, plus jamais rejoué ;
+ * - "failed"     : dernier essai en échec explicite, un nouvel essai est
+ *   autorisé.
+ *
+ * ACQUISITION ATOMIQUE (correctif suite audit — un read-then-write simple
+ * est explicitement interdit ici) :
+ * 1. INSERT direct avec _seth_status="processing" — gagne si l'évènement
+ *    est réellement nouveau, grâce à la contrainte `unique` déjà existante
+ *    sur billing_events.stripe_event_id (schema.sql, aucune migration
+ *    nécessaire). Deux requêtes concurrentes pour le même évènement : Postgres
+ *    lui-même arbitre la course — une seule réussit, l'autre reçoit une
+ *    violation d'unicité (23505), jamais les deux.
+ * 2. En cas de conflit (la ligne existe déjà), tentative de récupération par
+ *    UPDATE CONDITIONNEL — une seule instruction SQL, condition de reprise
+ *    dans la clause WHERE elle-même (jamais un SELECT séparé suivi d'une
+ *    décision côté JS). Sous PostgreSQL, un `UPDATE ... WHERE` verrouille la
+ *    ligne ciblée : si deux requêtes tentent ce même UPDATE en même temps, la
+ *    seconde attend que la première commit puis réévalue son WHERE sur la
+ *    ligne déjà mise à jour — si la première a fait passer le statut à
+ *    "processing", la seconde ne matche plus rien et affecte 0 ligne. C'est
+ *    cette combinaison "comparaison + écriture" en une seule instruction qui
+ *    rend la récupération atomique. Récupération autorisée dans deux cas
+ *    seulement : _seth_status="failed", ou _seth_status="processing" ET
+ *    _seth_lease_started_at antérieur au lease ci-dessus (traitement
+ *    précédent probablement mort). Les timestamps ISO-8601 se comparent
+ *    correctement de façon purement lexicale, aucun cast SQL nécessaire.
+ * 3. Si ni l'insertion ni la récupération n'ont abouti, une unique lecture
+ *    (purement informative — aucune décision de concurrence n'est prise ici,
+ *    elle a déjà eu lieu atomiquement à l'étape 2) distingue "already_processed"
+ *    de "already_processing" pour la valeur de retour.
+ *
+ * Retourne "proceed" si le handler doit (re)tourner ; "already_processed" ou
+ * "already_processing" s'il ne doit surtout pas être rejoué (aucun effet
+ * métier côté appelant dans les deux cas) ; "lock_error" si l'acquisition
+ * elle-même a échoué pour une raison inattendue (panne DB) — l'appelant doit
+ * alors répondre en erreur pour que Stripe réessaie, sans jamais supposer
+ * l'évènement acquis.
+ */
+export async function acquirePublicProgramPurchaseEventLock(
+  supabase: TypedSupabaseClient,
+  stripeEventId: string,
+  eventType: string,
+  payload: Record<string, unknown>,
+): Promise<PublicProgramPurchaseEventLockResult> {
+  const nowIso = new Date().toISOString();
+  const leaseCutoffIso = new Date(Date.now() - PUBLIC_PROGRAM_PURCHASE_LOCK_LEASE_MS).toISOString();
+
+  const { error: insertError } = await supabase.from("billing_events").insert({
+    stripe_event_id: stripeEventId,
+    event_type: eventType,
+    payload: { ...payload, _seth_status: "processing", _seth_lease_started_at: nowIso },
+  });
+
+  if (!insertError) {
+    return "proceed";
+  }
+
+  if (insertError.code !== "23505") {
+    devWarn("acquirePublicProgramPurchaseEventLock (insert)", insertError);
+    return "lock_error";
+  }
+
+  const { data: recovered, error: updateError } = await supabase
+    .from("billing_events")
+    .update({ payload: { ...payload, _seth_status: "processing", _seth_lease_started_at: nowIso } })
+    .eq("stripe_event_id", stripeEventId)
+    .or(`payload->>_seth_status.eq.failed,and(payload->>_seth_status.eq.processing,payload->>_seth_lease_started_at.lt.${leaseCutoffIso})`)
+    .select("id");
+  devWarn("acquirePublicProgramPurchaseEventLock (recovery update)", updateError);
+
+  if (updateError) {
+    return "lock_error";
+  }
+  if (recovered && recovered.length > 0) {
+    return "proceed";
+  }
+
+  const { data: existing, error: lookupError } = await supabase
+    .from("billing_events")
+    .select("payload")
+    .eq("stripe_event_id", stripeEventId)
+    .maybeSingle();
+  devWarn("acquirePublicProgramPurchaseEventLock (status lookup)", lookupError);
+  const status = (existing?.payload as Record<string, unknown> | null)?._seth_status;
+  return status === "processed" ? "already_processed" : "already_processing";
+}
+
+/** À appeler UNIQUEMENT après la réussite complète de toutes les étapes (consentements + email + activation) — voir acquirePublicProgramPurchaseEventLock ci-dessus. */
+export async function markPublicProgramPurchaseEventProcessed(supabase: TypedSupabaseClient, stripeEventId: string): Promise<void> {
+  const { data: existing, error: lookupError } = await supabase
+    .from("billing_events")
+    .select("payload")
+    .eq("stripe_event_id", stripeEventId)
+    .maybeSingle();
+  devWarn("markPublicProgramPurchaseEventProcessed (lookup)", lookupError);
+  const currentPayload = (existing?.payload as Record<string, unknown> | null) ?? {};
+  const { error } = await supabase
+    .from("billing_events")
+    .update({ payload: { ...currentPayload, _seth_status: "processed", _seth_error: null } })
+    .eq("stripe_event_id", stripeEventId);
+  devWarn("markPublicProgramPurchaseEventProcessed (update)", error);
+}
+
+/** Journalise un échec (n'importe quelle étape) — laisse `_seth_status` à "failed" pour qu'un prochain retry Stripe soit autorisé par acquirePublicProgramPurchaseEventLock. Purement informatif, jamais bloquant. */
+export async function markPublicProgramPurchaseEventFailed(
+  supabase: TypedSupabaseClient,
+  stripeEventId: string,
+  errorMessage: string,
+): Promise<void> {
+  const { data: existing, error: lookupError } = await supabase
+    .from("billing_events")
+    .select("payload")
+    .eq("stripe_event_id", stripeEventId)
+    .maybeSingle();
+  devWarn("markPublicProgramPurchaseEventFailed (lookup)", lookupError);
+  const currentPayload = (existing?.payload as Record<string, unknown> | null) ?? {};
+  const { error } = await supabase
+    .from("billing_events")
+    .update({ payload: { ...currentPayload, _seth_status: "failed", _seth_error: errorMessage, _seth_failed_at: new Date().toISOString() } })
+    .eq("stripe_event_id", stripeEventId);
+  devWarn("markPublicProgramPurchaseEventFailed (update)", error);
+}
+
+export interface PublicProgramPurchaseConfirmationEmailState {
+  status: "sent" | "failed" | "skipped";
+  emailId: string | null;
+  sentAt: string | null;
+}
+
+/**
+ * État persisté de l'email de confirmation de commande pour CET évènement
+ * Stripe précis (chantier conformité juridique/RGPD, Lot E-bis technique —
+ * renforcement demandé pour couvrir un retry au-delà des 24h pendant
+ * lesquelles Resend garantit lui-même l'idempotence de sa clé). Stocké dans
+ * `billing_events.payload`, mêmes clés préfixées `_seth_` que le verrou
+ * ci-dessus :
+ * - `_seth_confirmation_email_status`  : "sent" | "failed" | "skipped" ;
+ * - `_seth_confirmation_email_id`      : id de la ligne `email_logs`
+ *   correspondante (le `logId` renvoyé par sendTransactionalEmail — pas l'id
+ *   Resend brut, déjà consultable via `email_logs.resend_email_id` si besoin,
+ *   pour éviter une seconde extension du contrat public de
+ *   sendTransactionalEmail) ;
+ * - `_seth_confirmation_email_sent_at` : horodatage de CET enregistrement
+ *   (pas forcément l'horodatage Resend réel, purement notre propre trace).
+ *
+ * `null` si aucune tentative d'envoi n'a encore été journalisée pour cet
+ * évènement (jamais tenté).
+ */
+export async function getPublicProgramPurchaseConfirmationEmailState(
+  supabase: TypedSupabaseClient,
+  stripeEventId: string,
+): Promise<PublicProgramPurchaseConfirmationEmailState | null> {
+  const { data, error } = await supabase.from("billing_events").select("payload").eq("stripe_event_id", stripeEventId).maybeSingle();
+  devWarn("getPublicProgramPurchaseConfirmationEmailState", error);
+  const payload = data?.payload as Record<string, unknown> | null;
+  const status = payload?._seth_confirmation_email_status;
+  if (status !== "sent" && status !== "failed" && status !== "skipped") {
+    return null;
+  }
+  return {
+    status,
+    emailId: (payload?._seth_confirmation_email_id as string | null | undefined) ?? null,
+    sentAt: (payload?._seth_confirmation_email_sent_at as string | null | undefined) ?? null,
+  };
+}
+
+/**
+ * Persiste IMMÉDIATEMENT le résultat d'une tentative d'envoi, avant toute
+ * décision d'activation du programme — pour qu'un crash juste après ne
+ * perde jamais la trace d'un envoi qui a réellement réussi (voir l'appelant
+ * dans lib/stripe/webhook-handlers.ts).
+ *
+ * Lecture-modification-écriture simple ici, PAS l'update conditionnel de
+ * acquirePublicProgramPurchaseEventLock ci-dessus : sans danger de
+ * concurrence, puisque seul le détenteur du verrou d'évènement (garanti
+ * unique par acquirePublicProgramPurchaseEventLock) exécute jamais ce code
+ * pour un `stripeEventId` donné — la mutuelle exclusion a déjà eu lieu en
+ * amont, elle n'a pas besoin d'être répétée ici.
+ */
+export async function recordPublicProgramPurchaseConfirmationEmailResult(
+  supabase: TypedSupabaseClient,
+  stripeEventId: string,
+  result: { status: "sent" | "failed" | "skipped"; emailId: string | null },
+): Promise<void> {
+  const { data: existing, error: lookupError } = await supabase
+    .from("billing_events")
+    .select("payload")
+    .eq("stripe_event_id", stripeEventId)
+    .maybeSingle();
+  devWarn("recordPublicProgramPurchaseConfirmationEmailResult (lookup)", lookupError);
+  const currentPayload = (existing?.payload as Record<string, unknown> | null) ?? {};
+  const { error } = await supabase
+    .from("billing_events")
+    .update({
+      payload: {
+        ...currentPayload,
+        _seth_confirmation_email_status: result.status,
+        _seth_confirmation_email_id: result.emailId,
+        _seth_confirmation_email_sent_at: new Date().toISOString(),
+      },
+    })
+    .eq("stripe_event_id", stripeEventId);
+  devWarn("recordPublicProgramPurchaseConfirmationEmailResult (update)", error);
+}
+
 export interface UpsertBillingCustomerInput {
   studentId: string;
   stripeCustomerId: string;

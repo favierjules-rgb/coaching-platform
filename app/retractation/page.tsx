@@ -9,17 +9,18 @@ export const metadata: Metadata = {
 
 /**
  * Page rétractation (chantier conformité juridique/RGPD, Lot E — juillet
- * 2026). Complète /cgv, qui renvoie ici pour le détail de la procédure et le
- * modèle de formulaire.
+ * 2026 ; case fusionnée au Lot E-bis). Complète /cgv, qui renvoie ici pour
+ * le détail de la procédure et le modèle de formulaire.
  *
- * Le mécanisme technique décrit ici existe réellement (chantier technique du
- * Lot E, réalisé dans la foulée du contenu) : les deux cases de consentement
- * "demande d'accès immédiat" / "reconnaissance de la perte du droit" sont
- * branchées sur le formulaire d'achat payant (voir
- * PublicProgramPurchaseForm.tsx, lib/legal-consents.ts, texte validé
- * explicitement par Jules), tracées dans legal_consents, et rappelées dans
- * l'email de confirmation de commande envoyé après achat (voir
- * composePublicProgramOrderConfirmationEmail).
+ * Le mécanisme technique décrit ici existe réellement : une case unique
+ * "accès immédiat + perte du droit de rétractation" (article L. 221-28 du
+ * Code de la consommation) est branchée sur le formulaire d'achat payant
+ * (voir PublicProgramPurchaseForm.tsx, lib/legal-consents.ts, texte validé
+ * explicitement par Jules), tracée dans legal_consents (avec référence de
+ * commande), et son texte + version exacts sont reproduits dans l'email de
+ * confirmation de commande envoyé après achat, avant activation de l'accès
+ * (voir composePublicProgramOrderConfirmationEmail et
+ * lib/stripe/webhook-handlers.ts).
  */
 export default function RetractationPage() {
   return (
@@ -54,8 +55,8 @@ export default function RetractationPage() {
               Tu disposes en principe de quatorze jours à compter de ton achat pour te rétracter, sans avoir à te
               justifier. Ce délai ne s&apos;applique pas si, au moment de l&apos;achat, tu as expressément demandé à
               accéder immédiatement au programme et reconnu perdre ton droit de rétractation en conséquence : dans ce
-              cas, l&apos;accès immédiat au contenu numérique vaut renonciation à ce droit, conformément au Code de la
-              consommation.
+              cas, tu perds ce droit à compter du début de la fourniture du contenu numérique, conformément à
+              l&apos;article L. 221-28 du Code de la consommation.
             </p>
             <p>
               Si tu n&apos;as pas fait cette demande expresse, tu peux te rétracter dans les quatorze jours en nous le

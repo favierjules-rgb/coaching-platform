@@ -979,6 +979,20 @@ export async function setProgramAssignment(
     content_type: "programme",
     content_id: programId,
   });
+  // Violation d'unicité (23505, chantier conformité juridique/RGPD, Lot
+  // E-bis technique — vérification des garanties DB réelles, suite audit) :
+  // la table `assignments` a déjà `unique (student_id, content_type,
+  // content_id)` (voir supabase/schema.sql) — deux affectations concurrentes
+  // pour le même élève/programme ne peuvent donc jamais toutes les deux
+  // réussir cet insert, c'est Postgres qui arbitre la course, pas le
+  // lookup-avant-insert ci-dessus (qui reste une optimisation pour l'appel
+  // séquentiel courant, mais ne suffirait pas seul en cas de vraie
+  // concurrence). Une violation d'unicité ici signifie que l'affectation
+  // existe déjà (créée par la requête concurrente qui a gagné la course) :
+  // c'est un succès idempotent, pas un échec.
+  if (insertError && insertError.code === "23505") {
+    return true;
+  }
   devWarn("setProgramAssignment (insert)", insertError);
   if (!insertError) {
     const { data: program } = await supabase.from("programs").select("name").eq("id", programId).maybeSingle();

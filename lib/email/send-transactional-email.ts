@@ -36,6 +36,18 @@ export interface SendTransactionalEmailInput {
   relatedEntityId?: string | null;
   metadata?: Record<string, unknown>;
   attachments?: EmailAttachment[];
+  /**
+   * Clé d'idempotence Resend (chantier conformité juridique/RGPD, Lot E-bis
+   * technique — juillet 2026). Par défaut `logId` (un UUID frais à CHAQUE
+   * appel, donc sans effet réel entre deux appels distincts — c'est le
+   * comportement historique, inchangé pour tous les appelants existants).
+   * Un appelant qui a besoin qu'un retry (webhook Stripe par ex.) ne
+   * déclenche jamais un second envoi Resend du même email doit fournir ici
+   * une clé STABLE et déterministe, dérivée d'un identifiant métier qui ne
+   * change pas d'un retry à l'autre (ex : `program-purchase-confirmation/${session.id}`
+   * — voir lib/stripe/webhook-handlers.ts).
+   */
+  idempotencyKey?: string;
 }
 
 export interface SendTransactionalEmailResult {
@@ -142,7 +154,7 @@ export async function sendTransactionalEmail(
           contentType: a.contentType,
         })),
       },
-      { idempotencyKey: logId },
+      { idempotencyKey: input.idempotencyKey ?? logId },
     );
 
     if (error) {
