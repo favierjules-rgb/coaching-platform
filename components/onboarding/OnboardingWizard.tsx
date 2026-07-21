@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, ArrowLeft, ArrowRight, CheckCircle } from "lucide-react";
 
@@ -292,7 +293,16 @@ export function OnboardingWizard() {
             <>
               <p className="text-sm leading-relaxed text-muted-foreground">
                 Ces informations sont optionnelles. Elles servent uniquement à adapter ton
-                accompagnement. Tu peux aussi en parler directement avec ton coach.
+                accompagnement. Tu peux aussi en parler directement avec ton coach.{" "}
+                <Link
+                  href="/confidentialite#donnees-de-sante"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-foreground underline underline-offset-4"
+                >
+                  En savoir plus sur l&apos;utilisation de ces données
+                </Link>
+                .
               </p>
               <TextareaField
                 label="Traitements en cours / contraintes médicales connues"
