@@ -26,6 +26,7 @@ const emailTypeLabels: Record<EmailType, string> = {
   account_expiry_warning: "Fin d'accès (avertissement)",
   coach_invite: "Invitation élève (coach)",
   collaborator_invite: "Invitation collaborateur (admin)",
+  order_confirmation: "Confirmation de commande",
 };
 
 const emailStatusLabels: Record<EmailStatus, string> = {

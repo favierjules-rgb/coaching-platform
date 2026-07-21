@@ -5,14 +5,14 @@ import { Logo } from "@/components/ui/Logo";
 /**
  * Liens légaux (chantier conformité juridique/RGPD — juillet 2026) :
  * /mentions-legales (Lot A), /confidentialite (Lot B), /cookies (Lot C),
- * /cgv + /cgu (Lot D). Intitulé "Cookies" et non "Gérer mes cookies" :
- * aucun traceur non essentiel n'existe à ce stade, donc rien à gérer (voir
- * app/cookies). Ne pas ajouter de lien vers rétractation/résiliation tant
- * que ces pages n'existent pas (lots E à G, à venir).
+ * /cgv + /cgu (Lot D), /retractation (Lot E). Intitulé "Cookies" et non
+ * "Gérer mes cookies" : aucun traceur non essentiel n'existe à ce stade,
+ * donc rien à gérer (voir app/cookies). Ne pas ajouter de lien vers
+ * résiliation tant que cette page n'existe pas (lot F, à venir).
  *
- * `flex-wrap` sur la nav (Lot D) : 5 liens ne tiennent plus systématiquement
- * sur une seule ligne selon la largeur — évite un débordement horizontal
- * plutôt que d'attendre que ça casse visuellement.
+ * `flex-wrap` sur la nav (Lot D) : les liens ne tiennent plus
+ * systématiquement sur une seule ligne selon la largeur — évite un
+ * débordement horizontal plutôt que d'attendre que ça casse visuellement.
  */
 export function Footer() {
   return (
@@ -49,6 +49,12 @@ export function Footer() {
             className="text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary"
           >
             CGU
+          </Link>
+          <Link
+            href="/retractation"
+            className="text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary"
+          >
+            Rétractation
           </Link>
         </nav>
         <p className="text-xs text-muted-foreground">

@@ -13,7 +13,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  * localement plutôt que d'étendre ce générique partagé.
  */
 
-export type LegalConsentType = "sante_onboarding" | "cgv_programme";
+export type LegalConsentType = "sante_onboarding" | "cgv_programme" | "retractation_programme";
 
 export interface LegalConsentRow {
   id: string;
@@ -40,6 +40,19 @@ export const HEALTH_DATA_CONSENT_TEXT =
 /** Texte exact de la case à cocher CGV, formulaire d'achat d'un programme public (PublicProgramPurchaseForm.tsx). */
 export const CGV_PROGRAMME_CONSENT_TEXT_VERSION = "2026-07-fr-v1";
 export const CGV_PROGRAMME_CONSENT_TEXT = "J'ai lu et j'accepte les conditions générales de vente.";
+
+/**
+ * Textes exacts des deux cases de rétractation, formulaire d'achat payant
+ * d'un programme public (PublicProgramPurchaseForm.tsx, réservé au chemin
+ * payant — un programme gratuit n'a pas de paiement à rétracter). Texte
+ * fourni et validé par Jules (brief initial du chantier conformité
+ * juridique/RGPD) — ne pas reformuler sans repasser par lui.
+ */
+export const RETRACTATION_WAIVER_CONSENT_TEXT_VERSION = "2026-07-fr-v1";
+export const IMMEDIATE_ACCESS_CONSENT_TEXT =
+  "Je demande expressément à accéder immédiatement au programme numérique avant l'expiration du délai légal de rétractation.";
+export const WITHDRAWAL_RIGHT_WAIVER_CONSENT_TEXT =
+  "Je reconnais qu'en demandant l'accès immédiat au contenu numérique, je perdrai mon droit de rétractation dans les conditions prévues par le Code de la consommation.";
 
 /**
  * Insère une ligne de preuve de consentement. Utilisable aussi bien avec un

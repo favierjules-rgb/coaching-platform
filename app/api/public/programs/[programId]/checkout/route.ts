@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 
 import { idParamSchema } from "@/lib/api/schemas/common";
-import { publicProgramAccessBodySchema } from "@/lib/api/schemas/stripe";
+import { publicProgramCheckoutBodySchema } from "@/lib/api/schemas/stripe";
 import { parseJsonBody, parseParams } from "@/lib/api/validate";
-import { CGV_PROGRAMME_CONSENT_TEXT_VERSION } from "@/lib/legal-consents";
+import { CGV_PROGRAMME_CONSENT_TEXT_VERSION, RETRACTATION_WAIVER_CONSENT_TEXT_VERSION } from "@/lib/legal-consents";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getStripeClient } from "@/lib/stripe/client";
 
@@ -24,7 +24,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
   const parsedParams = parseParams({ id: routeParams.programId }, idParamSchema);
   if (!parsedParams.success) return parsedParams.response;
 
-  const parsedBody = await parseJsonBody(request, publicProgramAccessBodySchema);
+  const parsedBody = await parseJsonBody(request, publicProgramCheckoutBodySchema);
   if (!parsedBody.success) return parsedBody.response;
 
   const supabase = createSupabaseAdminClient();
@@ -80,6 +80,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     // lib/supabase/public-program-provisioning.ts.
     cgv_accepted: "true",
     cgv_version: CGV_PROGRAMME_CONSENT_TEXT_VERSION,
+    // Idem pour les deux consentements de rétractation (Lot E) — obligatoires
+    // ici (publicProgramCheckoutBodySchema), jamais sur le chemin gratuit.
+    retractation_waiver_accepted: "true",
+    retractation_waiver_version: RETRACTATION_WAIVER_CONSENT_TEXT_VERSION,
   };
 
   try {

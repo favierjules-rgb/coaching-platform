@@ -2094,10 +2094,12 @@ create policy "newsletter_subscribers_delete_staff"
 --     ligne par consentement donné, jamais mise à jour ni supprimée (preuve
 --     immuable) : aucune policy update/delete, ni pour l'élève ni pour le
 --     staff — une correction éventuelle passe directement par le client
---     service role. Deux types aujourd'hui — 'sante_onboarding' (étape 5 du
---     questionnaire /onboarding) et 'cgv_programme' (achat d'un programme
---     numérique, avant paiement) — voir lib/legal-consents.ts pour le texte
---     exact et la version versionnée de chaque consentement (même logique
+--     service role. Trois types aujourd'hui — 'sante_onboarding' (étape 5 du
+--     questionnaire /onboarding), 'cgv_programme' (achat d'un programme
+--     numérique, avant paiement) et 'retractation_programme' (ajouté au Lot
+--     E : les deux cases accès immédiat/perte du droit, achat payant
+--     uniquement) — voir lib/legal-consents.ts pour le texte exact et la
+--     version versionnée de chaque consentement (même logique
 --     que newsletter_subscribers.consent_text_version ci-dessus).
 --
 --     Écriture : soit l'élève lui-même pour son propre consentement santé
@@ -2115,6 +2117,15 @@ create table if not exists public.legal_consents (
   metadata jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
+
+-- Migration additive (Lot E, chantier conformité juridique/RGPD — juillet
+-- 2026) : ajoute 'retractation_programme' (les deux cases accès
+-- immédiat/perte du droit, achat payant d'un programme numérique) à la
+-- liste autorisée. Rejouable : le nom de contrainte par défaut Postgres
+-- pour une check inline sur une seule colonne est `<table>_<colonne>_check`.
+alter table public.legal_consents drop constraint if exists legal_consents_consent_type_check;
+alter table public.legal_consents add constraint legal_consents_consent_type_check
+  check (consent_type in ('cgv_programme', 'sante_onboarding', 'retractation_programme'));
 
 create index if not exists legal_consents_student_id_idx
   on public.legal_consents (student_id);

@@ -54,6 +54,13 @@ export interface ProvisionPublicProgramAccessInput {
    * insertConsentIfProvided ci-dessous, qui n'écrit alors simplement rien.
    */
   cgvConsentTextVersion?: string;
+  /**
+   * Preuve des deux consentements de rétractation (Lot E) — présente
+   * uniquement pour l'appelant checkout payant (publicProgramCheckoutBodySchema
+   * les rend obligatoires) ; toujours `undefined` côté claim gratuit, qui
+   * n'a pas de paiement à rétracter.
+   */
+  retractationConsentTextVersion?: string;
 }
 
 export interface ProvisionPublicProgramAccessResult {
@@ -99,6 +106,21 @@ async function insertCgvConsentIfProvided(
   });
 }
 
+/** Même logique que ci-dessus, pour le consentement de rétractation (Lot E). */
+async function insertRetractationConsentIfProvided(
+  supabase: TypedSupabaseClient,
+  studentId: string,
+  input: ProvisionPublicProgramAccessInput,
+): Promise<void> {
+  if (!input.retractationConsentTextVersion) return;
+  await insertLegalConsent(supabase, {
+    studentId,
+    consentType: "retractation_programme",
+    consentTextVersion: input.retractationConsentTextVersion,
+    metadata: { program_id: input.programId },
+  });
+}
+
 /** Chemin "email déjà connu" : assigne le programme au compte existant, envoie l'email "programme attribué". */
 async function grantExistingStudent(
   supabase: TypedSupabaseClient,
@@ -107,6 +129,7 @@ async function grantExistingStudent(
 ): Promise<ProvisionPublicProgramAccessResult> {
   await setProgramAssignment(supabase, student.id, input.programId, true);
   await insertCgvConsentIfProvided(supabase, student.id, input);
+  await insertRetractationConsentIfProvided(supabase, student.id, input);
 
   const { data: studentRow } = await supabase.from("students").select("email").eq("id", student.id).maybeSingle();
   const recipientEmail = studentRow?.email || input.email;
@@ -203,6 +226,7 @@ async function createProgramOnlyStudent(
 
   await setProgramAssignment(supabase, studentRow.id, input.programId, true);
   await insertCgvConsentIfProvided(supabase, studentRow.id, input);
+  await insertRetractationConsentIfProvided(supabase, studentRow.id, input);
 
   const email = composePublicProgramWelcomeEmail({
     firstName: input.firstName,

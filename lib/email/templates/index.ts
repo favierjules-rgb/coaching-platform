@@ -229,6 +229,56 @@ export function composePublicProgramWelcomeEmail(input: { firstName: string; pro
   };
 }
 
+/* ─── G-bis-bis. Confirmation de commande — programme public payant (chantier
+ * conformité juridique/RGPD, Lot E — juillet 2026) ───
+ * Distincte de composePublicProgramWelcomeEmail : celle-ci ne sert qu'à
+ * définir le mot de passe, elle ne contient aucun récapitulatif de commande.
+ * Envoyée en plus (jamais à la place) après un achat payant confirmé
+ * (checkout.session.completed), jamais pour une réclamation gratuite — voir
+ * lib/stripe/webhook-handlers.ts. Sert de confirmation "sur support
+ * durable" au sens du Code de la consommation : produit, prix, CGV
+ * acceptées et preuve des cases cochées au moment de l'achat.
+ */
+
+export function composePublicProgramOrderConfirmationEmail(input: {
+  firstName: string;
+  programName: string;
+  priceCents: number | null;
+  currency: string;
+  purchasedAtIso: string;
+  cgvVersion: string;
+  immediateAccessRequested: boolean;
+}): ComposedEmail {
+  const name = escapeHtml(input.firstName || "");
+  const price = formatAmountCents(input.priceCents, input.currency);
+  const purchasedAt = formatDateFr(input.purchasedAtIso);
+  const retractationNote = input.immediateAccessRequested
+    ? "Tu as demandé à accéder immédiatement au contenu et reconnu perdre ton droit de rétractation en conséquence."
+    : "Tu disposes de 14 jours à compter de cet achat pour exercer ton droit de rétractation.";
+  const bodyHtml = [
+    p(`Bonjour ${name},`),
+    p(`Voici la confirmation de ta commande, à conserver.`),
+    p(
+      `Programme : <strong>${escapeHtml(input.programName)}</strong><br />` +
+        `Prix payé : <strong>${escapeHtml(price)}</strong> — TVA non applicable, article 293 B du Code général des impôts.<br />` +
+        `Date de la commande : ${escapeHtml(purchasedAt)}<br />` +
+        `Conditions générales de vente acceptées : version ${escapeHtml(input.cgvVersion)}.`,
+    ),
+    p(escapeHtml(retractationNote)),
+    p(
+      `Retrouve nos <a href="${process.env.NEXT_PUBLIC_APP_URL || ""}/cgv">conditions générales de vente</a> et notre page <a href="${process.env.NEXT_PUBLIC_APP_URL || ""}/retractation">droit de rétractation</a> à tout moment.`,
+    ),
+  ].join("");
+  return {
+    subject: `Confirmation de ta commande — ${input.programName}`,
+    html: renderBaseEmailHtml({ preheader: "Voici la confirmation de ta commande.", heading: "Commande confirmée", bodyHtml }),
+    text: renderBaseEmailText({
+      heading: "Commande confirmée",
+      bodyText: `Bonjour ${input.firstName},\nProgramme : ${input.programName}\nPrix payé : ${price} (TVA non applicable, article 293 B du CGI)\nDate de la commande : ${purchasedAt}\nCGV acceptées : version ${input.cgvVersion}\n${retractationNote}`,
+    }),
+  };
+}
+
 /* ─── G-ter. Mot de passe oublié ───
  * Déclenché par /mot-de-passe-oublie (voir
  * app/api/public/password-reset/route.ts) — remplace l'email par défaut de

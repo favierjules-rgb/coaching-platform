@@ -6,6 +6,7 @@ import type Stripe from "stripe";
 import {
   composePaymentFailedEmail,
   composePaymentSucceededEmail,
+  composePublicProgramOrderConfirmationEmail,
   composeSubscriptionCancelledEmail,
 } from "@/lib/email/templates";
 import { sendTransactionalEmail } from "@/lib/email/send-transactional-email";
@@ -157,10 +158,12 @@ async function handlePublicProgramCheckoutCompleted(
   const firstName = session.metadata?.first_name || "";
   const lastName = session.metadata?.last_name || "";
   const programName = session.metadata?.program_name || "";
-  // Preuve de consentement CGV posée côté route de checkout (voir
-  // app/api/public/programs/[programId]/checkout/route.ts) — reportée ici
-  // dans legal_consents une fois le student_id connu.
+  // Preuve de consentement CGV et rétractation posées côté route de
+  // checkout (voir app/api/public/programs/[programId]/checkout/route.ts) —
+  // reportées ici dans legal_consents une fois le student_id connu.
   const cgvConsentTextVersion = session.metadata?.cgv_accepted === "true" ? session.metadata?.cgv_version : undefined;
+  const retractationConsentTextVersion =
+    session.metadata?.retractation_waiver_accepted === "true" ? session.metadata?.retractation_waiver_version : undefined;
 
   const { data: programRow } = await supabase.from("programs").select("coach_id").eq("id", programId).maybeSingle();
 
@@ -172,10 +175,37 @@ async function handlePublicProgramCheckoutCompleted(
     lastName,
     email,
     cgvConsentTextVersion,
+    retractationConsentTextVersion,
   });
   if (!result) {
     console.error(`[Stripe webhook] échec du provisionnement pour l'achat du programme public ${programId} (session ${session.id}).`);
     return;
+  }
+
+  // Confirmation de commande "sur support durable" (Lot E, chantier
+  // conformité juridique/RGPD) — en plus de l'email de bienvenue/programme
+  // attribué déjà envoyé par provisionPublicProgramAccess, jamais à sa
+  // place : celui-ci ne contient aucun récapitulatif de commande.
+  if (cgvConsentTextVersion) {
+    const orderEmail = composePublicProgramOrderConfirmationEmail({
+      firstName,
+      programName,
+      priceCents: session.amount_total,
+      currency: session.currency ?? "eur",
+      purchasedAtIso: new Date().toISOString(),
+      cgvVersion: cgvConsentTextVersion,
+      immediateAccessRequested: Boolean(retractationConsentTextVersion),
+    });
+    await sendTransactionalEmail(supabase, {
+      emailType: "order_confirmation",
+      recipientEmail: email,
+      subject: orderEmail.subject,
+      html: orderEmail.html,
+      text: orderEmail.text,
+      relatedEntityType: "program",
+      relatedEntityId: programId,
+      metadata: { source: "public_program_purchase" },
+    });
   }
 
   const stripeCustomerId = extractId(session.customer as string | { id: string } | null);

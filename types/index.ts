@@ -2303,7 +2303,8 @@ export type EmailType =
   | "password_reset"
   | "account_expiry_warning"
   | "coach_invite"
-  | "collaborator_invite";
+  | "collaborator_invite"
+  | "order_confirmation";
 
 export type EmailStatus = "pending" | "sent" | "failed" | "skipped";
 

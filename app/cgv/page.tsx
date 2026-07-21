@@ -20,11 +20,16 @@ export const metadata: Metadata = {
  * - médiation de la consommation : pas de coordonnées publiées tant que
  *   l'adhésion CM2C n'est pas confirmée active (Lot G) ;
  * - fonctionnalité de résiliation dédiée : n'existe pas encore, seul le
- *   portail client Stripe est disponible aujourd'hui (Lot F) ;
- * - case à cocher d'acceptation des CGV au moment de la commande : partie
- *   technique du chantier volontairement reportée (implique une évolution
- *   du schéma Zod et de la route API de checkout), en attente de
- *   validation explicite de Jules avant implémentation.
+ *   portail client Stripe est disponible aujourd'hui (Lot F).
+ *
+ * La case à cocher d'acceptation des CGV au moment de la commande est
+ * réellement branchée (voir PublicProgramPurchaseForm.tsx,
+ * lib/api/schemas/stripe.ts, lib/legal-consents.ts — chantier technique
+ * réalisé après ce lot). Les deux cases spécifiques à la rétractation d'un
+ * programme numérique ("demande d'accès immédiat" / "reconnaissance de la
+ * perte du droit") sont elles aussi branchées depuis le chantier technique
+ * du Lot E, avec le texte validé explicitement par Jules — voir
+ * app/retractation/page.tsx pour la procédure complète.
  */
 export default function CgvPage() {
   return (
@@ -121,7 +126,11 @@ export default function CgvPage() {
               ce cas, en cas de rétractation, le service déjà exécuté peut donner lieu à une facturation au prorata.
             </p>
             <p>
-              Le détail de la procédure et le formulaire de rétractation seront publiés séparément.
+              Le détail de la procédure et un modèle de formulaire sont disponibles sur notre page{" "}
+              <a href="/retractation" className="text-foreground underline underline-offset-4">
+                droit de rétractation
+              </a>
+              .
             </p>
           </div>
         </section>

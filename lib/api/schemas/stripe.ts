@@ -47,6 +47,30 @@ export const publicProgramAccessBodySchema = z
   .strict();
 
 /**
+ * POST /api/public/programs/[programId]/checkout uniquement (jamais
+ * /claim, réservé au gratuit) — chantier conformité juridique/RGPD, Lot E.
+ * Un programme numérique payant impose deux consentements distincts et non
+ * précochés en plus de l'acceptation des CGV : la demande expresse d'accès
+ * immédiat et la reconnaissance de la perte du droit de rétractation qui en
+ * découle (Code de la consommation). Texte exact fourni et validé par
+ * Jules — voir lib/legal-consents.ts, ne pas reformuler ici.
+ */
+export const publicProgramCheckoutBodySchema = z
+  .object({
+    firstName: z.string().trim().min(1).max(100),
+    lastName: z.string().trim().min(1).max(100),
+    email: z.string().trim().email({ message: "Adresse email invalide." }).max(254),
+    cgvAccepted: z.literal(true, { message: "Tu dois accepter les conditions générales de vente pour continuer." }),
+    immediateAccessRequested: z.literal(true, {
+      message: "Tu dois demander expressément l'accès immédiat pour continuer.",
+    }),
+    withdrawalRightWaived: z.literal(true, {
+      message: "Tu dois reconnaître la perte du droit de rétractation pour continuer.",
+    }),
+  })
+  .strict();
+
+/**
  * GET /api/public/programs/checkout-status?session_id=cs_... (chantier
  * api-zod-validation) — l'id de session Stripe Checkout suit toujours le
  * prefixe documente `cs_`, longueur bornee par principe plutot qu'un simple
