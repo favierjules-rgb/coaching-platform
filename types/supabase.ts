@@ -2050,13 +2050,23 @@ export interface Database {
         };
         Relationships: [];
       };
+      // Lot W1 (juillet 2026) : colonnes de suivi du traitement ajoutées par
+      // supabase/migrations/20260721180920_billing_events_processing_status.sql.
+      // `processed_at` est désormais NULLABLE et sans défaut : il n'est
+      // renseigné qu'après la réussite complète du handler.
       billing_events: {
         Row: {
           id: string;
           stripe_event_id: string;
           event_type: string;
           payload: Record<string, unknown>;
-          processed_at: string;
+          status: string;
+          processing_started_at: string | null;
+          processed_at: string | null;
+          failed_at: string | null;
+          error_message: string | null;
+          attempts_count: number;
+          last_attempt_at: string | null;
           created_at: string;
         };
         Insert: {
@@ -2064,7 +2074,13 @@ export interface Database {
           stripe_event_id: string;
           event_type: string;
           payload?: Record<string, unknown>;
-          processed_at?: string;
+          status?: string;
+          processing_started_at?: string | null;
+          processed_at?: string | null;
+          failed_at?: string | null;
+          error_message?: string | null;
+          attempts_count?: number;
+          last_attempt_at?: string | null;
           created_at?: string;
         };
         Update: {
@@ -2072,7 +2088,13 @@ export interface Database {
           stripe_event_id?: string;
           event_type?: string;
           payload?: Record<string, unknown>;
-          processed_at?: string;
+          status?: string;
+          processing_started_at?: string | null;
+          processed_at?: string | null;
+          failed_at?: string | null;
+          error_message?: string | null;
+          attempts_count?: number;
+          last_attempt_at?: string | null;
           created_at?: string;
         };
         Relationships: [];

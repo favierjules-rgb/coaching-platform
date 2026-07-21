@@ -1732,14 +1732,40 @@ create unique index if not exists stripe_payments_invoice_id_idx on public.strip
 --     traités, pour rendre le webhook idempotent (Stripe peut renvoyer le
 --     même évènement plusieurs fois).
 -- ----------------------------------------------------------------------------
+--     Lot W1 (juillet 2026) : colonnes de suivi du traitement. Avant ce
+--     lot, la ligne était insérée AVANT l'exécution du handler et
+--     `processed_at` avait `default now()` — tout évènement reçu était donc
+--     marqué "traité" à la réception, même si le handler échouait ensuite,
+--     ce qui empêchait définitivement tout rejeu par Stripe. `processed_at`
+--     est désormais nullable et renseigné UNIQUEMENT après la réussite
+--     complète du handler. Migration de référence (source de vérité) :
+--     supabase/migrations/20260721180920_billing_events_processing_status.sql
 create table if not exists public.billing_events (
   id uuid primary key default gen_random_uuid(),
   stripe_event_id text not null unique,
   event_type text not null,
   payload jsonb not null default '{}'::jsonb,
-  processed_at timestamptz not null default now(),
-  created_at timestamptz not null default now()
+  -- 'unknown_legacy' : lignes antérieures au Lot W1, réussite du handler
+  -- inconnue (aucune trace n'existait) — ne déclenche aucun rejeu.
+  status text not null default 'processing'
+    check (status in ('processing', 'processed', 'failed', 'unknown_legacy')),
+  processing_started_at timestamptz,
+  processed_at timestamptz,
+  failed_at timestamptz,
+  error_message text,
+  attempts_count integer not null default 0 check (attempts_count >= 0),
+  last_attempt_at timestamptz,
+  created_at timestamptz not null default now(),
+  constraint billing_events_processed_at_check
+    check ((status = 'processed') = (processed_at is not null))
 );
+
+create index if not exists billing_events_status_idx
+  on public.billing_events (status)
+  where status in ('processing', 'failed');
+create index if not exists billing_events_processing_started_idx
+  on public.billing_events (processing_started_at)
+  where status = 'processing';
 
 -- ----------------------------------------------------------------------------
 -- Triggers updated_at pour les nouvelles tables.

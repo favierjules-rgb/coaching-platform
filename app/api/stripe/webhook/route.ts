@@ -4,17 +4,22 @@ import type Stripe from "stripe";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import {
   acquirePublicProgramPurchaseEventLock,
+  acquireStripeEventLock,
   markPublicProgramPurchaseEventFailed,
   markPublicProgramPurchaseEventProcessed,
-  recordBillingEventIfNew,
+  markStripeEventFailed,
+  markStripeEventProcessed,
 } from "@/lib/supabase/billing";
 import { getStripeClient } from "@/lib/stripe/client";
+import { checkStripeLivemode, describeLivemodeRejection } from "@/lib/stripe/livemode";
 import {
   handleCheckoutSessionCompleted,
   handleInvoicePaymentFailed,
   handleInvoicePaymentSucceeded,
   handleSubscriptionDeleted,
   handleSubscriptionUpsert,
+  IGNORED_UNRELATED_STRIPE_OBJECT,
+  StripeUnrelatedObjectError,
 } from "@/lib/stripe/webhook-handlers";
 
 /**
@@ -51,11 +56,39 @@ import {
  *    nouvel essai.
  *
  * 2. Tout le reste (abonnements, factures, checkout.session.completed pour
- *    un ABONNEMENT — pas un programme public) : recordBillingEventIfNew,
- *    comportement historique inchangé — un évènement déjà vu renvoie 200
- *    immédiatement sans ré-exécuter les écritures. Ces handlers n'ont pas
- *    la même problématique (pas de séquence consentement → email →
- *    activation à protéger) et restent donc sur le mécanisme simple.
+ *    un ABONNEMENT — pas un programme public) : acquireStripeEventLock
+ *    (Lot W1 — juillet 2026), qui REMPLACE recordBillingEventIfNew.
+ *
+ *    Ce que faisait l'ancien mécanisme, et pourquoi il était cassé :
+ *    la ligne billing_events était insérée AVANT l'exécution du handler,
+ *    et processed_at avait `default now()`. Un handler en échec renvoyait
+ *    500, Stripe réessayait — mais l'évènement existait déjà, la route
+ *    répondait alors 200 "deduplicated" et le handler n'était PLUS JAMAIS
+ *    rejoué. Tout échec transitoire (timeout Supabase, redéploiement en
+ *    plein traitement) devenait une perte définitive et silencieuse.
+ *    Second défaut : le SELECT puis INSERT n'étaient pas atomiques et la
+ *    violation 23505 était avalée, si bien que deux livraisons simultanées
+ *    recevaient toutes deux "nouveau, traite-le" et exécutaient le handler
+ *    deux fois.
+ *
+ *    acquireStripeEventLock applique la stratégie d'acquisition atomique
+ *    déjà validée au Lot E-bis pour les programmes publics, mais sur les
+ *    vraies colonnes status/processing_started_at/… créées par la
+ *    migration 20260721180920. Le verrou programme public (point 1) n'est
+ *    PAS remplacé : il conserve sa logique propre `_seth_*` et ses 17
+ *    tests, et se contente désormais de renseigner AUSSI les colonnes
+ *    réelles pour ne pas laisser de lignes incohérentes.
+ *
+ * ORDRE DE TRAITEMENT OBLIGATOIRE (Lot W1) :
+ *   1. vérifier la signature Stripe ;
+ *   2. vérifier event.livemode contre STRIPE_EXPECTED_LIVEMODE ;
+ *   3. acquérir atomiquement l'évènement ;
+ *   4. exécuter le handler ;
+ *   5. vérifier explicitement sa réussite (toute exception remonte ici) ;
+ *   6. marquer "processed" UNIQUEMENT après réussite complète ;
+ *   7. répondre 200.
+ * En cas d'erreur : status="failed" + failed_at + error_message, jamais de
+ * processed_at, réponse 500 pour que Stripe reprogramme un essai.
  */
 export async function POST(request: Request) {
   const stripe = getStripeClient();
@@ -78,6 +111,20 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("[Stripe webhook] Signature invalide", error);
     return NextResponse.json({ error: "Signature invalide." }, { status: 400 });
+  }
+
+  // Étape 2 — garde test/live (Lot W1). Placée APRÈS la vérification de
+  // signature (on ne fait confiance au champ livemode qu'une fois
+  // l'authenticité établie) et AVANT toute écriture : un évènement rejeté
+  // ici ne laisse AUCUNE trace dans billing_events, sans quoi il
+  // polluerait l'idempotence de l'environnement légitime. Réponse 403,
+  // non-2xx et volontairement non retryable côté métier : Stripe
+  // réessaiera, mais la réponse reste identifiable dans ses logs comme un
+  // refus de mode, pas comme une panne.
+  const livemodeCheck = checkStripeLivemode(event.livemode);
+  if (!livemodeCheck.ok) {
+    console.error(describeLivemodeRejection(livemodeCheck, event.type));
+    return NextResponse.json({ error: "Mode Stripe incompatible." }, { status: 403 });
   }
 
   const supabase = createSupabaseAdminClient();
@@ -136,11 +183,46 @@ export async function POST(request: Request) {
     return NextResponse.json({ received: true });
   }
 
-  const alreadyProcessed = await recordBillingEventIfNew(supabase, event.id, event.type, event as unknown as Record<string, unknown>);
-  if (alreadyProcessed) {
+  // Étape 3 — acquisition atomique.
+  const lockResult = await acquireStripeEventLock(supabase, event.id, event.type, event as unknown as Record<string, unknown>);
+
+  if (lockResult === "already_processed") {
+    // Traitement réellement terminé avec succès (ou ligne "unknown_legacy"
+    // antérieure au Lot W1, jamais rejouée par prudence) : aucun effet
+    // métier à reproduire, on acquitte normalement.
     return NextResponse.json({ received: true, deduplicated: true });
   }
 
+  if (lockResult === "already_processing") {
+    // Un autre traitement est en cours et son lease n'a pas expiré. Aucun
+    // effet métier ici, MAIS on ignore encore si l'autre va réussir :
+    // répondre 200 acquitterait prématurément CETTE livraison et Stripe ne
+    // la retenterait jamais. 409 est retryable — un essai ultérieur verra
+    // soit "already_processed", soit un lease expiré et pourra reprendre.
+    // Même raisonnement que la branche programme public ci-dessus.
+    return NextResponse.json({ received: true, deduplicated: true, inFlight: true }, { status: 409 });
+  }
+
+  if (lockResult === "lock_error") {
+    // L'acquisition elle-même a échoué : on ne détient aucun verrou, donc
+    // on ne marque surtout rien. 500 pour que Stripe réessaie.
+    console.error(`[Stripe webhook] Échec d'acquisition du verrou pour ${event.type} (${event.id}).`);
+    return NextResponse.json({ error: "Verrou indisponible." }, { status: 500 });
+  }
+
+  // Étape 4 — exécution du handler.
+  // `ignoredReason` distingue TROIS issues, jamais confondues :
+  //   - undefined            → évènement réellement traité ;
+  //   - "ignored_unhandled_event_type"    → type non géré par ce chantier ;
+  //   - "ignored_unrelated_stripe_object" → objet démontrablement étranger
+  //     à SETH (aucune metadata, aucun billing_customer, aucun price connu).
+  // Un objet qui APPARTIENT à SETH mais dont le rattachement n'est pas
+  // encore résolu n'entre dans AUCUNE de ces catégories : il lève
+  // StripeCustomerMappingUnresolvedError, tombe dans le catch, et repart
+  // en "failed" + 500 pour être rejoué. Stripe ne garantissant pas l'ordre
+  // de livraison, c'est la seule façon de ne pas perdre un abonnement dont
+  // le Checkout arrive après.
+  let ignoredReason: string | undefined;
   try {
     switch (event.type) {
       case "checkout.session.completed":
@@ -160,13 +242,39 @@ export async function POST(request: Request) {
         await handleInvoicePaymentFailed(supabase, event.data.object as Stripe.Invoice);
         break;
       default:
-        // Évènement reçu mais non géré par ce chantier — ignoré volontairement.
+        // Évènement reçu mais non géré par ce chantier (charge.*,
+        // payment_intent.*, customer.created…). Ce N'EST PAS une erreur :
+        // le marquer "processed" avec une raison explicite évite un retry
+        // Stripe inutile tout en gardant la décision traçable.
+        ignoredReason = "ignored_unhandled_event_type";
         break;
     }
   } catch (error) {
+    // CAS A — objet démontrablement étranger à SETH. Le rejouer
+    // n'aboutirait jamais : on acquitte proprement, sans effet métier,
+    // avec la raison persistée. C'est la SEULE situation où un
+    // rattachement absent vaut succès.
+    if (error instanceof StripeUnrelatedObjectError) {
+      console.warn(`[Stripe webhook] ${event.type} (${event.id}) ignoré — ${error.context}`);
+      await markStripeEventProcessed(supabase, event.id, { ignoredReason: IGNORED_UNRELATED_STRIPE_OBJECT });
+      return NextResponse.json({ received: true, ignored: true, reason: IGNORED_UNRELATED_STRIPE_OBJECT });
+    }
+
+    // Étape 5/6 (échec) — inclut CAS B
+    // (StripeCustomerMappingUnresolvedError, dont le message vaut
+    // "customer_or_student_mapping_unresolved"). L'erreur est persistée et
+    // processed_at reste NULL, ce qui autorise explicitement un rejeu au
+    // prochain essai de Stripe. C'est précisément ce qui était impossible
+    // avant le Lot W1.
+    const message = error instanceof Error ? error.message : "Erreur inconnue.";
     console.error(`[Stripe webhook] Échec du traitement de ${event.type} (${event.id})`, error);
+    await markStripeEventFailed(supabase, event.id, message);
     return NextResponse.json({ error: "Échec du traitement." }, { status: 500 });
   }
 
-  return NextResponse.json({ received: true });
+  // Étape 6 — marquage "processed" APRÈS la réussite complète, jamais avant.
+  await markStripeEventProcessed(supabase, event.id, ignoredReason ? { ignoredReason } : undefined);
+
+  // Étape 7.
+  return NextResponse.json({ received: true, ignored: ignoredReason ? true : undefined });
 }

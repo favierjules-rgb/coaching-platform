@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:webhook-idempotency": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/webhook-idempotency.mts"
+    "test:webhook-idempotency": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/webhook-idempotency.mts",
+    "test:webhook-event-lock": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/webhook-event-lock.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

@@ -212,22 +212,186 @@ export async function getAdminBillingList(supabase: TypedSupabaseClient): Promis
 
 /* ─── Écriture (routes API uniquement, client service role) ─── */
 
-/** `true` si déjà traité (idempotence webhook) ; insère la trace sinon. Une violation d'unicité pendant l'insertion (double traitement concurrent) est traitée comme "déjà traité", jamais comme une erreur. */
-export async function recordBillingEventIfNew(
+/**
+ * Durée du bail d'un évènement resté à "processing" pour le verrou
+ * GÉNÉRIQUE ci-dessous (Lot W1). Volontairement identique au lease du
+ * verrou programme public (5 min) : un traitement d'abonnement ou de
+ * facture se compte en secondes, 5 minutes sans conclusion signifie un
+ * processus mort (crash, redéploiement) et non un traitement en cours.
+ * Une valeur plus courte risquerait de faire reprendre un traitement
+ * réellement vivant ; une valeur plus longue laisserait un évènement
+ * bloqué trop longtemps hors de portée de tout rejeu.
+ */
+export const STRIPE_EVENT_LOCK_LEASE_MS = 5 * 60 * 1000;
+
+export type StripeEventLockResult = "proceed" | "already_processed" | "already_processing" | "lock_error";
+
+/**
+ * Verrou d'évènement GÉNÉRIQUE (Lot W1 — juillet 2026). Remplace
+ * `recordBillingEventIfNew`, qui souffrait de deux défauts prouvés par
+ * l'audit :
+ *
+ * 1. SELECT puis INSERT non atomiques : deux livraisons simultanées
+ *    passaient toutes deux le SELECT, et la violation 23505 de la seconde
+ *    était avalée (`error.code !== "23505"`) — la fonction renvoyait donc
+ *    `false` (= "nouveau, traite-le") AUX DEUX APPELANTS, exécutant le
+ *    handler deux fois.
+ * 2. La ligne était insérée avant l'exécution du handler, et
+ *    `processed_at` avait `default now()` : un handler en échec renvoyait
+ *    500, Stripe réessayait, mais l'évènement existait déjà — la route
+ *    répondait 200 "deduplicated" et le handler n'était PLUS JAMAIS
+ *    rejoué. Perte définitive et silencieuse.
+ *
+ * Cette fonction applique la même stratégie d'acquisition atomique que
+ * `acquirePublicProgramPurchaseEventLock` (validée au Lot E-bis), mais sur
+ * les VRAIES colonnes créées par la migration
+ * 20260721180920_billing_events_processing_status.sql au lieu des clés
+ * `_seth_*` dans `payload` :
+ *
+ * 1. INSERT direct avec status="processing" — gagne si l'évènement est
+ *    réellement nouveau, grâce à la contrainte `unique` sur
+ *    `stripe_event_id`. Deux requêtes concurrentes : Postgres arbitre,
+ *    une seule réussit, l'autre reçoit 23505. Jamais les deux.
+ * 2. En cas de conflit, UPDATE CONDITIONNEL en UNE SEULE instruction
+ *    (jamais un SELECT séparé suivi d'une décision côté JS) : la
+ *    condition de reprise est dans le WHERE. Sous PostgreSQL, `UPDATE
+ *    ... WHERE` verrouille la ligne ; si deux requêtes tentent le même
+ *    UPDATE, la seconde attend le commit de la première puis réévalue son
+ *    WHERE sur la ligne déjà modifiée — elle n'affecte alors aucune ligne.
+ *    Reprise autorisée dans deux cas SEULEMENT :
+ *      - status = "failed" (échec explicite, rejeu légitime) ;
+ *      - status = "processing" ET processing_started_at antérieur au lease
+ *        (traitement précédent probablement mort).
+ *    "unknown_legacy" n'est PAS repris : ces lignes datent d'avant le Lot
+ *    W1, leur réussite est inconnue, et les rejouer produirait des effets
+ *    métier non désirés sur des évènements potentiellement déjà traités.
+ * 3. Si ni l'insertion ni la reprise n'ont abouti, une unique lecture
+ *    purement informative (la décision de concurrence a déjà été prise
+ *    atomiquement en 2) distingue "already_processed" d'"already_processing".
+ *
+ * `attempts_count` est incrémenté à chaque acquisition réussie, et
+ * l'erreur précédente est nettoyée lors d'une reprise.
+ */
+export async function acquireStripeEventLock(
   supabase: TypedSupabaseClient,
   stripeEventId: string,
   eventType: string,
   payload: Record<string, unknown>,
-): Promise<boolean> {
-  const { data: existing } = await supabase.from("billing_events").select("id").eq("stripe_event_id", stripeEventId).maybeSingle();
-  if (existing) {
-    return true;
+): Promise<StripeEventLockResult> {
+  const nowIso = new Date().toISOString();
+  const leaseCutoffIso = new Date(Date.now() - STRIPE_EVENT_LOCK_LEASE_MS).toISOString();
+
+  const { error: insertError } = await supabase.from("billing_events").insert({
+    stripe_event_id: stripeEventId,
+    event_type: eventType,
+    payload,
+    status: "processing",
+    processing_started_at: nowIso,
+    processed_at: null,
+    failed_at: null,
+    error_message: null,
+    attempts_count: 1,
+    last_attempt_at: nowIso,
+  });
+
+  if (!insertError) {
+    return "proceed";
   }
-  const { error } = await supabase.from("billing_events").insert({ stripe_event_id: stripeEventId, event_type: eventType, payload });
-  if (error && error.code !== "23505") {
-    devWarn("recordBillingEventIfNew", error);
+
+  if (insertError.code !== "23505") {
+    devWarn("acquireStripeEventLock (insert)", insertError);
+    return "lock_error";
   }
-  return false;
+
+  // Reprise conditionnelle atomique. `attempts_count` n'est pas incrémenté
+  // ici (Supabase JS ne permet pas `col = col + 1` dans un update simple) :
+  // il l'est par la lecture-écriture ciblée ci-dessous, uniquement après
+  // que la course a déjà été tranchée par cet UPDATE.
+  const { data: recovered, error: updateError } = await supabase
+    .from("billing_events")
+    .update({
+      status: "processing",
+      processing_started_at: nowIso,
+      last_attempt_at: nowIso,
+      processed_at: null,
+      failed_at: null,
+      error_message: null,
+    })
+    .eq("stripe_event_id", stripeEventId)
+    .or(`status.eq.failed,and(status.eq.processing,processing_started_at.lt.${leaseCutoffIso})`)
+    .select("id, attempts_count");
+
+  if (updateError) {
+    devWarn("acquireStripeEventLock (recovery update)", updateError);
+    return "lock_error";
+  }
+
+  if (recovered && recovered.length > 0) {
+    const previousAttempts = (recovered[0] as { attempts_count?: number | null }).attempts_count ?? 0;
+    const { error: bumpError } = await supabase
+      .from("billing_events")
+      .update({ attempts_count: previousAttempts + 1 })
+      .eq("stripe_event_id", stripeEventId);
+    devWarn("acquireStripeEventLock (attempts bump)", bumpError);
+    return "proceed";
+  }
+
+  const { data: existing, error: lookupError } = await supabase
+    .from("billing_events")
+    .select("status")
+    .eq("stripe_event_id", stripeEventId)
+    .maybeSingle();
+  devWarn("acquireStripeEventLock (status lookup)", lookupError);
+  const status = (existing as { status?: string } | null)?.status;
+  return status === "processed" || status === "unknown_legacy" ? "already_processed" : "already_processing";
+}
+
+/**
+ * À appeler UNIQUEMENT après la réussite complète du handler (Lot W1).
+ * C'est le seul endroit qui renseigne `processed_at` — la contrainte
+ * `billing_events_processed_at_check` garantit en base que les deux
+ * restent cohérents.
+ */
+export async function markStripeEventProcessed(
+  supabase: TypedSupabaseClient,
+  stripeEventId: string,
+  extra?: { ignoredReason?: string },
+): Promise<void> {
+  const nowIso = new Date().toISOString();
+  const { error } = await supabase
+    .from("billing_events")
+    .update({
+      status: "processed",
+      processed_at: nowIso,
+      failed_at: null,
+      error_message: extra?.ignoredReason ?? null,
+    })
+    .eq("stripe_event_id", stripeEventId);
+  devWarn("markStripeEventProcessed", error);
+}
+
+/**
+ * Persiste un échec de handler (Lot W1). `processed_at` reste NULL et le
+ * statut passe à "failed", ce qui autorise explicitement un rejeu par
+ * `acquireStripeEventLock` lors du prochain essai de Stripe — c'est
+ * exactement ce qui était impossible avant ce lot.
+ */
+export async function markStripeEventFailed(
+  supabase: TypedSupabaseClient,
+  stripeEventId: string,
+  errorMessage: string,
+): Promise<void> {
+  const nowIso = new Date().toISOString();
+  const { error } = await supabase
+    .from("billing_events")
+    .update({
+      status: "failed",
+      failed_at: nowIso,
+      error_message: errorMessage.slice(0, 2000),
+      processed_at: null,
+    })
+    .eq("stripe_event_id", stripeEventId);
+  devWarn("markStripeEventFailed", error);
 }
 
 /**
@@ -249,11 +413,16 @@ export type PublicProgramPurchaseEventLockResult = "proceed" | "already_processe
  * E-bis technique — juillet 2026 ; corrigé suite audit pour une acquisition
  * réellement atomique) — RÉSERVÉ à checkout.session.completed pour l'achat
  * d'un programme public payant (voir app/api/stripe/webhook/route.ts, qui
- * choisit cette fonction plutôt que recordBillingEventIfNew UNIQUEMENT pour
- * ce cas précis ; tous les autres types d'évènements — abonnements,
- * factures, et même checkout.session.completed pour un abonnement —
- * continuent d'utiliser recordBillingEventIfNew ci-dessus, strictement
- * inchangé).
+ * choisit cette fonction UNIQUEMENT pour ce cas précis ; tous les autres
+ * types d'évènements — abonnements, factures, et même
+ * checkout.session.completed pour un abonnement — passent depuis le Lot W1
+ * par `acquireStripeEventLock` ci-dessus, qui remplace l'ancien
+ * `recordBillingEventIfNew`, supprimé).
+ *
+ * Ce verrou-ci n'a PAS été réécrit par le Lot W1 : sa logique `_seth_*` et
+ * ses valeurs de retour sont strictement inchangées (17 tests existants
+ * toujours verts) ; seules des écritures miroir sur les nouvelles colonnes
+ * réelles ont été ajoutées, pour ne pas laisser de lignes incohérentes.
  *
  * États stockés dans `_seth_status`, À L'INTÉRIEUR de la colonne `payload`
  * jsonb déjà existante (aucune migration SQL : `payload` est déjà une
@@ -309,10 +478,22 @@ export async function acquirePublicProgramPurchaseEventLock(
   const nowIso = new Date().toISOString();
   const leaseCutoffIso = new Date(Date.now() - PUBLIC_PROGRAM_PURCHASE_LOCK_LEASE_MS).toISOString();
 
+  // Lot W1 : les colonnes réelles (status/processing_started_at/…) sont
+  // renseignées EN PLUS des clés `_seth_*`, qui restent la source de
+  // vérité de CE verrou (aucun changement de logique ni de valeur de
+  // retour — les 17 tests existants restent valides). Objectif : ne pas
+  // laisser les lignes du chemin programme public à un statut de colonne
+  // incohérent avec leur `_seth_status` réel, maintenant que les colonnes
+  // existent et servent au balayage des évènements bloqués.
   const { error: insertError } = await supabase.from("billing_events").insert({
     stripe_event_id: stripeEventId,
     event_type: eventType,
     payload: { ...payload, _seth_status: "processing", _seth_lease_started_at: nowIso },
+    status: "processing",
+    processing_started_at: nowIso,
+    processed_at: null,
+    attempts_count: 1,
+    last_attempt_at: nowIso,
   });
 
   if (!insertError) {
@@ -360,7 +541,15 @@ export async function markPublicProgramPurchaseEventProcessed(supabase: TypedSup
   const currentPayload = (existing?.payload as Record<string, unknown> | null) ?? {};
   const { error } = await supabase
     .from("billing_events")
-    .update({ payload: { ...currentPayload, _seth_status: "processed", _seth_error: null } })
+    .update({
+      payload: { ...currentPayload, _seth_status: "processed", _seth_error: null },
+      // Lot W1 : miroir sur les colonnes réelles (voir commentaire dans
+      // acquirePublicProgramPurchaseEventLock).
+      status: "processed",
+      processed_at: new Date().toISOString(),
+      failed_at: null,
+      error_message: null,
+    })
     .eq("stripe_event_id", stripeEventId);
   devWarn("markPublicProgramPurchaseEventProcessed (update)", error);
 }
@@ -380,7 +569,14 @@ export async function markPublicProgramPurchaseEventFailed(
   const currentPayload = (existing?.payload as Record<string, unknown> | null) ?? {};
   const { error } = await supabase
     .from("billing_events")
-    .update({ payload: { ...currentPayload, _seth_status: "failed", _seth_error: errorMessage, _seth_failed_at: new Date().toISOString() } })
+    .update({
+      payload: { ...currentPayload, _seth_status: "failed", _seth_error: errorMessage, _seth_failed_at: new Date().toISOString() },
+      // Lot W1 : miroir sur les colonnes réelles.
+      status: "failed",
+      failed_at: new Date().toISOString(),
+      error_message: errorMessage.slice(0, 2000),
+      processed_at: null,
+    })
     .eq("stripe_event_id", stripeEventId);
   devWarn("markPublicProgramPurchaseEventFailed (update)", error);
 }
