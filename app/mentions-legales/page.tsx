@@ -101,6 +101,18 @@ export default function MentionsLegalesPage() {
 
         <section>
           <h2 className="mb-4 font-heading text-xl font-bold uppercase tracking-wide text-foreground">
+            Crédits photographiques et audiovisuels
+          </h2>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            Les photographies et vidéos réalisées dans le cadre de la collaboration avec SETH ont été produites par
+            Dorian Brianchon — Zaion Production.
+            <br />
+            Crédit photo et vidéo : © Dorian Brianchon — Zaion Production.
+          </p>
+        </section>
+
+        <section>
+          <h2 className="mb-4 font-heading text-xl font-bold uppercase tracking-wide text-foreground">
             Données personnelles
           </h2>
           <p className="text-sm leading-relaxed text-muted-foreground">
