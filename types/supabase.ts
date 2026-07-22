@@ -1234,6 +1234,12 @@ export interface Database {
           notes: string;
           muscle_group: string | null;
           exercise_library_id: string | null;
+          // Rattachement optionnel à un bloc `training_blocks` (chantier
+          // multi-blocs) — présent dans la vraie table, absent des types
+          // générés jusqu'au Lot 2. `null` = exercice hérité non encore
+          // rattaché à un bloc.
+          block_id: string | null;
+          superset_label: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -1251,6 +1257,8 @@ export interface Database {
           notes?: string;
           muscle_group?: string | null;
           exercise_library_id?: string | null;
+          block_id?: string | null;
+          superset_label?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -1268,6 +1276,8 @@ export interface Database {
           notes?: string;
           muscle_group?: string | null;
           exercise_library_id?: string | null;
+          block_id?: string | null;
+          superset_label?: string | null;
           created_at?: string;
           updated_at?: string;
         };

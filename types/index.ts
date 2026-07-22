@@ -911,6 +911,75 @@ export interface AdminCardioBlock {
   segments: AdminCardioSegment[];
 }
 
+/* ─────────────────────────────────────────────────────────────────────
+ * Modèle « multi-blocs » (chantier feature/multi-block-training-sessions,
+ * Lot 1 — juillet 2026).
+ *
+ * Une séance est une LISTE UNIQUE ET ORDONNÉE de blocs (`blocks[]`), chaque
+ * bloc portant sa `category` et son `position` dans la MÊME séquence —
+ * c'est ce qui autorise l'ordre libre (cardio → muscu → cardio…),
+ * contrairement aux deux tableaux séparés `exercises[]` / `cardioBlocks[]`
+ * qui imposaient mécaniquement muscu-puis-cardio.
+ *
+ * Deux catégories seulement (décision Jules — pas de Hyrox) : "strength" et
+ * "cardio". Le type GLOBAL de séance n'est JAMAIS saisi : il est DÉRIVÉ des
+ * blocs (deriveSessionType, lib/training-blocks.ts).
+ *
+ * Lot 1 = modèle + lecture compatible UNIQUEMENT. Ces types sont additifs,
+ * `blocks?` reste optionnel, et à ce stade RIEN n'écrit ces blocs en base
+ * ni ne change l'interface : la projection depuis les données existantes
+ * (`exercises[]` + `cardioBlocks[]`) vit dans lib/training-blocks.ts.
+ * ───────────────────────────────────────────────────────────────────── */
+
+/** Catégorie d'un bloc (décision Jules : 2 catégories, pas de Hyrox). */
+export type TrainingBlockCategory = "strength" | "cardio";
+
+/** Exercice de musculation d'un bloc `strength` — alias de la forme existante `AdminExercise`. */
+export type StrengthExercise = AdminExercise;
+
+/**
+ * Ligne cardio d'un bloc `cardio` — alias de la forme existante
+ * `AdminCardioSegment`. Nommée « prescription » dans le modèle multi-blocs
+ * pour coller à la table `training_prescriptions` (source de vérité).
+ */
+export type CardioPrescription = AdminCardioSegment;
+
+/** Bloc de musculation dans la liste ordonnée d'une séance. */
+export interface StrengthTrainingBlock {
+  id: string;
+  sessionId?: string;
+  category: "strength";
+  position: number;
+  title: string | null;
+  colorKey: string;
+  exercises: StrengthExercise[];
+}
+
+/** Bloc cardio dans la liste ordonnée d'une séance. */
+export interface CardioTrainingBlock {
+  id: string;
+  sessionId?: string;
+  category: "cardio";
+  position: number;
+  title: string | null;
+  colorKey: string;
+  cardioType: CardioType;
+  machineType?: MachineType;
+  prescriptions: CardioPrescription[];
+}
+
+/** Bloc d'entraînement — union discriminée par `category`. */
+export type TrainingBlock = StrengthTrainingBlock | CardioTrainingBlock;
+
+/**
+ * Type global d'une séance — toujours DÉRIVÉ des blocs, jamais saisi :
+ * - aucun bloc            → "rest"
+ * - blocs `strength` seuls → "strength"
+ * - blocs `cardio` seuls   → "cardio"
+ * - au moins un de chaque   → "mixed"
+ */
+export type DerivedSessionType = "strength" | "cardio" | "mixed" | "rest";
+
 export interface AdminWorkoutSession {
   id: string;
   programId: string;
@@ -941,6 +1010,15 @@ export interface AdminWorkoutSession {
    * bannière.
    */
   bannerUrl?: string | null;
+  /**
+   * Liste unique et ordonnée des blocs de la séance (chantier multi-blocs,
+   * Lot 1). Optionnel et ADDITIF : tant que la lecture/écriture Supabase
+   * n'est pas basculée (lots suivants), ce champ est peuplé à la demande par
+   * `toOrderedBlocks(session)` (lib/training-blocks.ts) à partir de
+   * `exercises[]` + `cardioBlocks[]`. Ne pas encore le considérer comme la
+   * source de vérité persistée.
+   */
+  blocks?: TrainingBlock[];
 }
 
 /**

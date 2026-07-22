@@ -4,6 +4,7 @@ import { generateId } from "@/lib/admin";
 import { cloneCardioBlock } from "@/lib/cardio";
 import { buildStudentActivityLink, logActivityEvent } from "@/lib/supabase/activity";
 import type { ProgramBuilderData } from "@/components/admin/ProgramBuilder";
+import { makeLegacyStrengthBlockId, renumberBlockPositions } from "@/lib/training-blocks";
 import type {
   AdminCardioBlock,
   AdminCardioSegment,
@@ -11,9 +12,12 @@ import type {
   AdminProgram,
   AdminWorkoutSession,
   CardioSegmentType,
+  CardioTrainingBlock,
   CardioType,
   IntensityTargetType,
   MachineType,
+  StrengthTrainingBlock,
+  TrainingBlock,
 } from "@/types";
 import type { Database } from "@/types/supabase";
 
@@ -137,11 +141,89 @@ function mapCardioBlockRow(row: TrainingBlockRow, segments: AdminCardioSegment[]
   };
 }
 
+/**
+ * Compose la liste unique et ordonnée `blocks[]` d'une séance (chantier
+ * multi-blocs, Lot 2 — LECTURE uniquement) à partir des lignes réelles :
+ *  - `training_blocks` (bloc + type + position + couleur) ;
+ *  - `workout_exercises` groupés par `block_id` (contenu strength) ;
+ *  - `training_prescriptions` groupés par `block_id` (contenu cardio).
+ *
+ * Rétro-compatibilité : les exercices strength hérités n'ont pas encore de
+ * `block_id` (aucun bloc `strength` n'a été écrit avant ce chantier). Ils
+ * sont regroupés dans UN bloc `strength` synthétique placé en tête, pour
+ * rester sans perte — la bascule d'écriture (Lot 3) leur donnera un vrai
+ * bloc `training_blocks`. Les positions finales sont renormalisées en 1..n.
+ *
+ * Cette fonction NE modifie AUCUNE donnée : elle projette les lignes déjà
+ * lues. `exercises[]` / `cardioBlocks[]` restent produits en parallèle et
+ * inchangés (rétro-compat du reste de l'app le temps de la bascule).
+ */
+function composeSessionBlocks(
+  sessionId: string,
+  blockRows: TrainingBlockRow[],
+  exerciseRows: WorkoutExerciseRow[],
+  segmentRows: TrainingPrescriptionRow[],
+): TrainingBlock[] {
+  const composed: TrainingBlock[] = [];
+
+  // Bloc strength hérité : exercices jamais rattachés à un bloc (block_id null).
+  const orphanExercises = exerciseRows.filter((e) => !e.block_id);
+  if (orphanExercises.length > 0) {
+    composed.push({
+      id: makeLegacyStrengthBlockId(sessionId),
+      sessionId,
+      category: "strength",
+      position: 0,
+      title: null,
+      colorKey: "gray",
+      exercises: orphanExercises.map(mapExerciseRow).sort((a, b) => a.order - b.order),
+    } satisfies StrengthTrainingBlock);
+  }
+
+  // Blocs réels, dans leur ordre `position`. Le type de bloc est porté par
+  // `block_type` ("cardio" → bloc cardio ; tout le reste → bloc strength).
+  const orderedBlockRows = blockRows.slice().sort((a, b) => a.position - b.position);
+  for (const row of orderedBlockRows) {
+    if (row.block_type === "cardio") {
+      composed.push({
+        id: row.id,
+        sessionId,
+        category: "cardio",
+        position: row.position,
+        title: row.title ? row.title : null,
+        colorKey: row.color_key ?? "gray",
+        cardioType: (row.cardio_type ?? "custom_cardio") as CardioType,
+        machineType: (row.machine_type ?? undefined) as MachineType | undefined,
+        prescriptions: segmentRows
+          .filter((s) => s.block_id === row.id)
+          .map(mapCardioSegmentRow)
+          .sort((a, b) => a.order - b.order),
+      } satisfies CardioTrainingBlock);
+    } else {
+      composed.push({
+        id: row.id,
+        sessionId,
+        category: "strength",
+        position: row.position,
+        title: row.title ? row.title : null,
+        colorKey: row.color_key ?? "gray",
+        exercises: exerciseRows
+          .filter((e) => e.block_id === row.id)
+          .map(mapExerciseRow)
+          .sort((a, b) => a.order - b.order),
+      } satisfies StrengthTrainingBlock);
+    }
+  }
+
+  return renumberBlockPositions(composed);
+}
+
 function mapSessionRow(
   row: WorkoutSessionRow,
   weekNumber: number,
   exercises: AdminExercise[],
   cardioBlocks: AdminCardioBlock[],
+  blocks: TrainingBlock[],
 ): AdminWorkoutSession {
   return {
     id: row.id,
@@ -158,6 +240,7 @@ function mapSessionRow(
     sessionType: row.session_type,
     cardioBlocks: cardioBlocks.slice().sort((a, b) => a.order - b.order),
     bannerUrl: row.banner_url ?? null,
+    blocks,
   };
 }
 
@@ -242,14 +325,27 @@ async function loadPrograms(supabase: TypedSupabaseClient, programRows: ProgramR
     const sessions = weeksForProgram
       .flatMap((week) => sessionsByWeek.get(week.id) ?? [])
       .map((sessionRow) => {
-        const cardioBlocks = (blocksBySession.get(sessionRow.id) ?? []).map((blockRow) =>
-          mapCardioBlockRow(blockRow, (segmentsByBlock.get(blockRow.id) ?? []).map(mapCardioSegmentRow)),
-        );
+        const sessionBlockRows = blocksBySession.get(sessionRow.id) ?? [];
+        const sessionExerciseRows = exercisesBySession.get(sessionRow.id) ?? [];
+        const sessionSegmentRows = sessionBlockRows.flatMap((b) => segmentsByBlock.get(b.id) ?? []);
+        // Rétro-compat inchangée : `cardioBlocks[]` reste alimenté depuis les
+        // blocs de type "cardio" uniquement (filtre défensif — aujourd'hui
+        // tous les blocs sont "cardio", donc no-op, mais un futur bloc
+        // "strength" ne doit pas y atterrir).
+        const cardioBlocks = sessionBlockRows
+          .filter((blockRow) => blockRow.block_type === "cardio")
+          .map((blockRow) =>
+            mapCardioBlockRow(blockRow, (segmentsByBlock.get(blockRow.id) ?? []).map(mapCardioSegmentRow)),
+          );
+        // Lot 2 : liste unique et ordonnée `blocks[]`, composée en parallèle
+        // sans rien modifier des sorties existantes.
+        const blocks = composeSessionBlocks(sessionRow.id, sessionBlockRows, sessionExerciseRows, sessionSegmentRows);
         return mapSessionRow(
           sessionRow,
           weekNumberById.get(sessionRow.program_week_id) ?? 0,
-          (exercisesBySession.get(sessionRow.id) ?? []).map(mapExerciseRow),
+          sessionExerciseRows.map(mapExerciseRow),
           cardioBlocks,
+          blocks,
         );
       });
     const assignedStudentIds = (assignmentsByProgram.get(programRow.id) ?? []).map((a) => a.student_id);
