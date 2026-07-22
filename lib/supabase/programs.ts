@@ -5,6 +5,7 @@ import { cloneCardioBlock } from "@/lib/cardio";
 import { buildStudentActivityLink, logActivityEvent } from "@/lib/supabase/activity";
 import type { ProgramBuilderData } from "@/components/admin/ProgramBuilder";
 import { makeLegacyStrengthBlockId, renumberBlockPositions } from "@/lib/training-blocks";
+import { buildLegacySessionBlocksInput, saveTrainingSessionBlocks } from "@/lib/supabase/training-session-blocks";
 import type {
   AdminCardioBlock,
   AdminCardioSegment,
@@ -241,6 +242,7 @@ function mapSessionRow(
     cardioBlocks: cardioBlocks.slice().sort((a, b) => a.order - b.order),
     bannerUrl: row.banner_url ?? null,
     blocks,
+    updatedAt: row.updated_at,
   };
 }
 
@@ -443,72 +445,6 @@ export async function getAssignedProgramIdsByStudent(
 
 /* ─── Écriture ─── */
 
-/**
- * Insère les blocs cardio et leurs segments pour une séance donnée (V3).
- * Segments stockés dans `training_prescriptions` avec `block_id` renseigné
- * et `exercise_id` nul — voir mapCardioSegmentRow/AdminCardioSegment.
- * `set_number` est NOT NULL en base même pour ces lignes cardio ; on y met
- * l'ordre du segment, sa valeur réelle n'ayant aucun sens hors contexte
- * musculation (la contrainte UNIQUE(exercise_id, set_number) ne s'applique
- * de toute façon jamais ici puisque exercise_id est toujours nul).
- */
-async function insertCardioBlocks(
-  supabase: TypedSupabaseClient,
-  sessionId: string,
-  blocks: AdminCardioBlock[],
-): Promise<void> {
-  for (const block of blocks) {
-    const { data: blockRow, error: blockError } = await supabase
-      .from("training_blocks")
-      .insert({
-        session_id: sessionId,
-        block_type: "cardio",
-        title: block.title || "",
-        position: block.order,
-        cardio_type: block.cardioType,
-        machine_type: block.machineType ?? null,
-      })
-      .select("id")
-      .single();
-    devWarn("insertCardioBlocks (training_blocks)", blockError);
-    if (!blockRow || block.segments.length === 0) continue;
-
-    const { error: segmentsError } = await supabase.from("training_prescriptions").insert(
-      block.segments.map((segment) => ({
-        block_id: blockRow.id,
-        exercise_id: null,
-        set_number: segment.order,
-        set_type: "normal",
-        segment_type: segment.segmentType,
-        title: segment.title || null,
-        repetitions: segment.repetitions ?? null,
-        work_duration_seconds: segment.durationSeconds ?? null,
-        distance_meters: segment.distanceMeters ?? null,
-        elevation_gain_meters: segment.elevationGainMeters ?? null,
-        incline_percentage: segment.inclinePercentage ?? null,
-        recovery_duration_seconds: segment.recoveryDurationSeconds ?? null,
-        recovery_distance_meters: segment.recoveryDistanceMeters ?? null,
-        intensity_target_type: segment.intensityTargetType,
-        target_vma_percentage: segment.targetVmaPercentage ?? null,
-        target_speed_kmh: segment.targetSpeedKmh ?? null,
-        target_pace_seconds_per_km: segment.targetPaceSecondsPerKm ?? null,
-        target_hr_percentage: segment.targetHrPercentage ?? null,
-        target_hr_zone: segment.targetHrZone ?? null,
-        target_power_watts: segment.targetPowerWatts ?? null,
-        target_cadence: segment.targetCadence ?? null,
-        intensity_min: segment.intensityMin ?? null,
-        intensity_max: segment.intensityMax ?? null,
-        surface: segment.surface ?? null,
-        terrain: segment.terrain ?? null,
-        equipment_type: segment.equipmentType ?? null,
-        // NOT NULL (défaut '') côté base — jamais envoyer null ici.
-        coach_notes: segment.coachNotes || "",
-        position: segment.order,
-      })),
-    );
-    devWarn("insertCardioBlocks (training_prescriptions)", segmentsError);
-  }
-}
 
 /** Insère les semaines/séances/exercices d'un programme déjà créé (partagé par create/update). */
 async function insertProgramStructure(
@@ -549,33 +485,29 @@ async function insertProgramStructure(
         session_type: session.sessionType ?? "strength",
         banner_url: session.bannerUrl ?? null,
       })
-      .select("id")
+      .select("id, updated_at")
       .single();
     devWarn("insertProgramStructure (workout_sessions)", sessionError);
     if (!sessionRow) continue;
 
-    if (!session.isRestDay && session.exercises.length > 0) {
-      const { error: exercisesError } = await supabase.from("workout_exercises").insert(
-        session.exercises.map((ex) => ({
-          session_id: sessionRow.id,
-          order_index: ex.order,
-          name: ex.name,
-          sets: ex.sets,
-          reps: ex.reps,
-          rest_seconds: ex.restSeconds,
-          tempo: ex.tempo,
-          recommended_load: ex.recommendedLoad,
-          video_url: ex.videoUrl,
-          notes: ex.notes,
-          muscle_group: ex.muscleGroup ?? null,
-          exercise_library_id: ex.libraryExerciseId ?? null,
-        })),
+    // Persistance du contenu (muscu + cardio) par l'UNIQUE moteur canonique
+    // transactionnel (RPC), via l'adaptateur legacy. Les jours de repos / sans
+    // contenu n'ont aucun bloc à écrire : la ligne workout_sessions vient
+    // d'être insérée avec son is_rest_day. Une erreur RPC (ex. STALE) remonte.
+    const hasContent =
+      !session.isRestDay && (session.exercises.length > 0 || (session.cardioBlocks?.length ?? 0) > 0);
+    if (hasContent) {
+      // Source LEGACY explicite : la ligne séance vient d'être insérée avec ses
+      // champs, donc pas de session_patch ; expectedUpdatedAt = updated_at exact
+      // retourné par l'INSERT (la ligne n'existait pas auparavant).
+      await saveTrainingSessionBlocks(
+        supabase,
+        buildLegacySessionBlocksInput({
+          session,
+          sessionId: sessionRow.id,
+          expectedUpdatedAt: sessionRow.updated_at,
+        }),
       );
-      devWarn("insertProgramStructure (workout_exercises)", exercisesError);
-    }
-
-    if (!session.isRestDay && (session.cardioBlocks?.length ?? 0) > 0) {
-      await insertCardioBlocks(supabase, sessionRow.id, session.cardioBlocks ?? []);
     }
   }
 }
@@ -751,7 +683,6 @@ async function diffProgramStructure(
   );
 
   const incomingSessionKeys = new Set<string>();
-  const sessionsToUpdate: { id: string; session: AdminWorkoutSession }[] = [];
   const sessionsToInsert: AdminWorkoutSession[] = [];
 
   for (const session of sessions) {
@@ -759,12 +690,9 @@ async function diffProgramStructure(
     if (!weekId) continue;
     const key = `${weekId}::${session.day}`;
     incomingSessionKeys.add(key);
-    const existingId = existingSessionIdByKey.get(key);
-    if (existingId) {
-      sessionsToUpdate.push({ id: existingId, session });
-    } else {
-      sessionsToInsert.push(session);
-    }
+    // Séance existante : gérée plus bas via son SNAPSHOT (session.updatedAt) +
+    // session_patch, SANS UPDATE préalable de la ligne. Séance nouvelle : INSERT.
+    if (!existingSessionIdByKey.has(key)) sessionsToInsert.push(session);
   }
 
   // Séances en base qui n'apparaissent plus du tout dans le nouveau jeu de
@@ -780,25 +708,9 @@ async function diffProgramStructure(
     devWarn("diffProgramStructure (workout_sessions suppression)", error);
   }
 
-  for (const { id, session } of sessionsToUpdate) {
-    const { error } = await supabase
-      .from("workout_sessions")
-      .update({
-        name: session.name,
-        is_rest_day: session.isRestDay,
-        muscle_group: session.muscleGroup,
-        duration_minutes: session.durationMinutes,
-        warmup: session.warmup,
-        coach_notes: session.coachNotes,
-        session_type: session.sessionType ?? "strength",
-        banner_url: session.bannerUrl ?? null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", id);
-    devWarn("diffProgramStructure (workout_sessions mise à jour)", error);
-  }
-
-  const sessionIdByInsertedKey = new Map<AdminWorkoutSession, string>();
+  // Nouvelles séances : la ligne n'existe pas encore → INSERT (avec ses champs),
+  // en récupérant l'updated_at EXACT retourné pour le passer à la RPC.
+  const insertedByKey = new Map<AdminWorkoutSession, { id: string; updatedAt: string }>();
   for (const session of sessionsToInsert) {
     const weekId = weekIdByNumber.get(session.weekNumber);
     if (!weekId) continue;
@@ -817,146 +729,83 @@ async function diffProgramStructure(
         session_type: session.sessionType ?? "strength",
         banner_url: session.bannerUrl ?? null,
       })
-      .select("id")
+      .select("id, updated_at")
       .single();
     devWarn("diffProgramStructure (workout_sessions insertion)", error);
-    if (sessionRow) sessionIdByInsertedKey.set(session, sessionRow.id);
+    if (sessionRow) insertedByKey.set(session, { id: sessionRow.id, updatedAt: sessionRow.updated_at });
   }
 
-  // Résout l'id de séance (existante ou tout juste créée) pour chaque
-  // séance entrante, pour la passe exercices ci-dessous.
-  function resolveSessionId(session: AdminWorkoutSession): string | undefined {
+  function resolveExistingId(session: AdminWorkoutSession): string | undefined {
     const weekId = weekIdByNumber.get(session.weekNumber);
     if (!weekId) return undefined;
-    const key = `${weekId}::${session.day}`;
-    return existingSessionIdByKey.get(key) ?? sessionIdByInsertedKey.get(session);
+    return existingSessionIdByKey.get(`${weekId}::${session.day}`);
   }
 
-  // Exercices : uniquement pour les séances déjà existantes (les séances
-  // tout juste insérées n'ont par définition encore aucun exercice en base).
-  const updatedSessionIds = sessionsToUpdate.map((s) => s.id);
-  const { data: existingExercisesRaw, error: existingExercisesError } =
-    updatedSessionIds.length > 0
-      ? await supabase.from("workout_exercises").select("id, session_id").in("session_id", updatedSessionIds)
-      : { data: [] as { id: string; session_id: string }[], error: null };
-  devWarn("diffProgramStructure (workout_exercises lecture)", existingExercisesError);
-  const existingExercises = existingExercisesRaw ?? [];
-
-  const existingExerciseIdsBySession = new Map<string, Set<string>>();
-  for (const ex of existingExercises) {
-    const set = existingExerciseIdsBySession.get(ex.session_id) ?? new Set<string>();
-    set.add(ex.id);
-    existingExerciseIdsBySession.set(ex.session_id, set);
-  }
-
-  const exercisesToInsert: (AdminExercise & { sessionId: string })[] = [];
-  const exerciseIdsToDelete: string[] = [];
-
-  for (const session of sessions) {
-    const sessionId = resolveSessionId(session);
-    if (!sessionId) continue;
-
-    const existingIdsForSession = existingExerciseIdsBySession.get(sessionId) ?? new Set<string>();
-    const incomingIds = new Set<string>();
-
-    if (session.isRestDay) {
-      // Un jour marqué repos ne conserve aucun exercice.
-      for (const existingId of existingIdsForSession) exerciseIdsToDelete.push(existingId);
-      continue;
-    }
-
-    for (const exercise of session.exercises) {
-      if (existingIdsForSession.has(exercise.id)) {
-        incomingIds.add(exercise.id);
-      } else {
-        exercisesToInsert.push({ ...exercise, sessionId });
-      }
-    }
-
-    for (const existingId of existingIdsForSession) {
-      if (!incomingIds.has(existingId)) exerciseIdsToDelete.push(existingId);
-    }
-
-    for (const exercise of session.exercises) {
-      if (!existingIdsForSession.has(exercise.id)) continue;
-      const { error } = await supabase
-        .from("workout_exercises")
-        .update({
-          order_index: exercise.order,
-          name: exercise.name,
-          sets: exercise.sets,
-          reps: exercise.reps,
-          rest_seconds: exercise.restSeconds,
-          tempo: exercise.tempo,
-          recommended_load: exercise.recommendedLoad,
-          video_url: exercise.videoUrl,
-          notes: exercise.notes,
-          muscle_group: exercise.muscleGroup ?? null,
-          exercise_library_id: exercise.libraryExerciseId ?? null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", exercise.id);
-      devWarn("diffProgramStructure (workout_exercises mise à jour)", error);
-    }
-  }
-
-  if (exerciseIdsToDelete.length > 0) {
-    const { error } = await supabase.from("workout_exercises").delete().in("id", exerciseIdsToDelete);
-    devWarn("diffProgramStructure (workout_exercises suppression)", error);
-  }
-
-  if (exercisesToInsert.length > 0) {
-    const { error } = await supabase.from("workout_exercises").insert(
-      exercisesToInsert.map((ex) => ({
-        session_id: ex.sessionId,
-        order_index: ex.order,
-        name: ex.name,
-        sets: ex.sets,
-        reps: ex.reps,
-        rest_seconds: ex.restSeconds,
-        tempo: ex.tempo,
-        recommended_load: ex.recommendedLoad,
-        video_url: ex.videoUrl,
-        notes: ex.notes,
-        muscle_group: ex.muscleGroup ?? null,
-        exercise_library_id: ex.libraryExerciseId ?? null,
-      })),
-    );
-    devWarn("diffProgramStructure (workout_exercises insertion)", error);
-  }
-
-  /*
-   * Blocs cardio (V3) : remplacés en bloc (delete + reinsert) pour chaque
-   * séance plutôt que diffés finement comme les exercices. Contrairement
-   * aux séances/exercices, rien ne référence encore un bloc ou un segment
-   * cardio par id (pas de retour élève, pas de stat calculée dessus) — le
-   * problème qui a motivé le diff fin des exercices (perte du rattachement
-   * workout_feedback.session_id, voir le commentaire au-dessus de cette
-   * fonction) ne se pose donc pas ici. Un delete + reinsert est sûr et bien
-   * plus simple que de reproduire la résolution parent/enfant d'un vrai
-   * diff, pour un gain nul à ce stade.
-   */
-  const allResolvedSessionIds = sessions
-    .map((session) => resolveSessionId(session))
+  // Id du bloc musculation déjà persisté par séance EXISTANTE : le fournir à
+  // l'adaptateur le met à jour en place (id conservé). Le modèle legacy ne
+  // produit qu'un seul bloc muscu par séance.
+  const existingSessionIds = sessions
+    .map((session) => resolveExistingId(session))
     .filter((id): id is string => Boolean(id));
-
-  const { data: existingBlocksRaw, error: existingBlocksError } =
-    allResolvedSessionIds.length > 0
-      ? await supabase.from("training_blocks").select("id, session_id").in("session_id", allResolvedSessionIds)
-      : { data: [] as { id: string; session_id: string }[], error: null };
-  devWarn("diffProgramStructure (training_blocks lecture)", existingBlocksError);
-  const existingBlockIds = (existingBlocksRaw ?? []).map((b) => b.id);
-
-  if (existingBlockIds.length > 0) {
-    const { error } = await supabase.from("training_blocks").delete().in("id", existingBlockIds);
-    devWarn("diffProgramStructure (training_blocks suppression)", error);
+  const strengthBlockIdBySession = new Map<string, string>();
+  if (existingSessionIds.length > 0) {
+    const { data: blockRows, error: blocksError } = await supabase
+      .from("training_blocks")
+      .select("id, session_id, block_type")
+      .in("session_id", existingSessionIds);
+    devWarn("diffProgramStructure (training_blocks lecture)", blocksError);
+    for (const row of blockRows ?? []) {
+      if (row.block_type !== "cardio") strengthBlockIdBySession.set(row.session_id, row.id);
+    }
   }
 
+  // ── Persistance canonique + métadonnées, atomique par séance via la RPC ───
+  // Séance EXISTANTE : expected_updated_at = SNAPSHOT chargé (session.updatedAt),
+  // AUCUNE écriture préalable sur workout_sessions ; les métadonnées passent en
+  // session_patch (UPDATE final unique, côté RPC, après le contrôle STALE).
+  // Séance NOUVELLE : verrou sur l'updated_at exact de l'INSERT ; ses champs
+  // sont déjà posés par l'INSERT. Toute erreur (ex. STALE) remonte à l'appelant.
   for (const session of sessions) {
-    const sessionId = resolveSessionId(session);
-    if (!sessionId || session.isRestDay) continue;
-    if ((session.cardioBlocks?.length ?? 0) > 0) {
-      await insertCardioBlocks(supabase, sessionId, session.cardioBlocks ?? []);
+    const existingId = resolveExistingId(session);
+    if (existingId) {
+      if (!session.updatedAt) {
+        // Défensif : une séance chargée porte toujours son updatedAt (snapshot).
+        // Sans version fiable, on NE devine PAS via une relecture (cela romprait
+        // le verrou) : on saute cette séance en le signalant.
+        devWarn("diffProgramStructure (séance existante sans updatedAt de snapshot)", {
+          message: `séance ${existingId} ignorée`,
+        });
+        continue;
+      }
+      await saveTrainingSessionBlocks(
+        supabase,
+        buildLegacySessionBlocksInput({
+          session,
+          sessionId: existingId,
+          expectedUpdatedAt: session.updatedAt,
+          strengthBlockId: strengthBlockIdBySession.get(existingId),
+          sessionPatch: {
+            day: session.day,
+            name: session.name,
+            muscleGroup: session.muscleGroup,
+            durationMinutes: session.durationMinutes,
+            warmup: session.warmup,
+            coachNotes: session.coachNotes,
+            bannerUrl: session.bannerUrl ?? null,
+          },
+        }),
+      );
+    } else {
+      const inserted = insertedByKey.get(session);
+      if (!inserted) continue;
+      await saveTrainingSessionBlocks(
+        supabase,
+        buildLegacySessionBlocksInput({
+          session,
+          sessionId: inserted.id,
+          expectedUpdatedAt: inserted.updatedAt,
+        }),
+      );
     }
   }
 }

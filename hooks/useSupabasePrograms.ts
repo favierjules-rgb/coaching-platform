@@ -18,16 +18,20 @@ export function useSupabasePrograms() {
   const [loading, setLoading] = useState(true);
   const [programs, setPrograms] = useState<AdminProgram[]>([]);
 
-  const refetch = useCallback(async () => {
+  // Retourne la liste FRAÎCHE (pas seulement setState) : l'appelant peut ainsi
+  // exploiter le snapshot à jour immédiatement, sans dépendre du prochain
+  // render React ni d'une valeur d'état capturée (périmée) dans sa closure.
+  const refetch = useCallback(async (): Promise<AdminProgram[]> => {
     const supabase = createSupabaseBrowserClient();
     if (!supabase) {
       setPrograms([]);
       setLoading(false);
-      return;
+      return [];
     }
     const list = await getPrograms(supabase);
     setPrograms(list);
     setLoading(false);
+    return list;
   }, []);
 
   useEffect(() => {
