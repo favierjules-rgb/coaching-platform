@@ -26,7 +26,7 @@
 -- ============================================================================
 
 begin;
-select plan(56);
+select plan(65);
 
 create temp table _facts(k text primary key, v text);
 do $$ declare s text; begin
@@ -55,7 +55,9 @@ insert into public.workout_sessions (id,program_id,program_week_id,day,session_t
  ('00000000-0000-4000-8000-0000000000ad','00000000-0000-4000-8000-000000000090','00000000-0000-4000-8000-00000000008e','ad','strength'),
  ('00000000-0000-4000-8000-0000000000b1','00000000-0000-4000-8000-000000000090','00000000-0000-4000-8000-00000000008e','b1','mixed');
 insert into public.workout_sessions (id,program_id,program_week_id,day,session_type,updated_at) values
- ('00000000-0000-4000-8000-0000000000a9','00000000-0000-4000-8000-000000000090','00000000-0000-4000-8000-00000000008e','a9','strength','2020-01-01T00:00:00+00');
+ ('00000000-0000-4000-8000-0000000000a9','00000000-0000-4000-8000-000000000090','00000000-0000-4000-8000-00000000008e','a9','strength','2020-01-01T00:00:00+00'),
+ ('00000000-0000-4000-8000-0000000000f1','00000000-0000-4000-8000-000000000090','00000000-0000-4000-8000-00000000008e','f1','strength','2020-01-01T00:00:00+00'),
+ ('00000000-0000-4000-8000-0000000000f2','00000000-0000-4000-8000-000000000090','00000000-0000-4000-8000-00000000008e','f2','strength','2020-01-01T00:00:00+00');
 insert into public.workout_exercises (id,session_id,order_index,name,sets,reps) values
  ('00000000-0000-4000-8000-0000000000e1','00000000-0000-4000-8000-00000000005e',0,'Développé',4,'8'),
  ('00000000-0000-4000-8000-0000000000e2','00000000-0000-4000-8000-00000000005e',1,'Rowing',4,'10');
@@ -282,6 +284,48 @@ select is((select count(*)::text from public.training_prescriptions where block_
 select is((select session_type from public.workout_sessions where id='00000000-0000-4000-8000-0000000000b1'),(select v from _facts where k='rb_stype'),'RB session_type inchangé');
 select is((select is_rest_day::text from public.workout_sessions where id='00000000-0000-4000-8000-0000000000b1'),(select v from _facts where k='rb_rest'),'RB is_rest_day inchangé');
 select is((select updated_at::text from public.workout_sessions where id='00000000-0000-4000-8000-0000000000b1'),(select v from _facts where k='rb_upd'),'RB updated_at inchangé');
+
+-- ===== SP : session_patch écrit ATOMIQUEMENT par la RPC (v2) =============
+set local role authenticated;
+select set_config('request.jwt.claims', json_build_object('sub','00000000-0000-4000-8000-0000000000c0')::text, true);
+do $$ declare j jsonb; u0 timestamptz; begin
+  u0 := (select updated_at from public.workout_sessions where id='00000000-0000-4000-8000-0000000000f1');
+  j := public.save_training_session_blocks(jsonb_build_object('session_id','00000000-0000-4000-8000-0000000000f1','expected_updated_at',u0,
+    'session_patch', jsonb_build_object('name','Nouveau','muscle_group','jambes','duration_minutes',45,'warmup','éch','coach_notes','note','banner_url',null),
+    'blocks', jsonb_build_array(jsonb_build_object('id','legacy-strength:00000000-0000-4000-8000-0000000000f1','category','strength','color_key','gray','exercises',jsonb_build_array(
+      jsonb_build_object('id','new-exercise:f1f1f1f1-1111-4111-8111-111111110001','name','ExSP','sets',4,'reps','8'))))));
+  insert into _facts values ('sp_name',(select name from public.workout_sessions where id='00000000-0000-4000-8000-0000000000f1'));
+  insert into _facts values ('sp_mg',(select muscle_group from public.workout_sessions where id='00000000-0000-4000-8000-0000000000f1'));
+  insert into _facts values ('sp_dur',(select duration_minutes::text from public.workout_sessions where id='00000000-0000-4000-8000-0000000000f1'));
+  insert into _facts values ('sp_type', j->>'session_type');
+  insert into _facts values ('sp_changed', case when (select updated_at from public.workout_sessions where id='00000000-0000-4000-8000-0000000000f1') is distinct from u0 then 'true' else 'false' end);
+  insert into _facts values ('sp_ex',(select count(*)::text from public.workout_exercises where session_id='00000000-0000-4000-8000-0000000000f1'));
+end $$;
+select is((select v from _facts where k='sp_name'),'Nouveau','SP name patché atomiquement');
+select is((select v from _facts where k='sp_mg'),'jambes','SP muscle_group patché');
+select is((select v from _facts where k='sp_dur'),'45','SP duration_minutes patché');
+select is((select v from _facts where k='sp_type'),'strength','SP session_type dérivé (non piloté par le patch)');
+select is((select v from _facts where k='sp_changed'),'true','SP updated_at changé');
+select is((select v from _facts where k='sp_ex'),'1','SP contenu + patch écrits atomiquement (1 exercice)');
+-- ===== CF : conflit deux snapshots — verrou optimiste RÉEL ================
+do $$ declare j jsonb; u0 timestamptz; begin
+  u0 := (select updated_at from public.workout_sessions where id='00000000-0000-4000-8000-0000000000f2');
+  insert into _facts values ('cf_u0', u0::text);
+  j := public.save_training_session_blocks(jsonb_build_object('session_id','00000000-0000-4000-8000-0000000000f2','expected_updated_at',u0,
+    'session_patch', jsonb_build_object('name','A'),
+    'blocks', jsonb_build_array(jsonb_build_object('id','legacy-strength:00000000-0000-4000-8000-0000000000f2','category','strength','color_key','gray','exercises',jsonb_build_array(
+      jsonb_build_object('id','new-exercise:f2f2f2f2-1111-4111-8111-111111110001','name','AAA','sets',4,'reps','8'))))));
+  insert into _facts values ('cf_u1', (j->>'updated_at'));
+end $$;
+select is((select name from public.workout_sessions where id='00000000-0000-4000-8000-0000000000f2'),'A','CF snapshot A appliqué (name=A)');
+select throws_ok($$ select public.save_training_session_blocks(jsonb_build_object('session_id','00000000-0000-4000-8000-0000000000f2','expected_updated_at',(select v from _facts where k='cf_u0')::timestamptz,'session_patch',jsonb_build_object('name','B'),'blocks',jsonb_build_array(jsonb_build_object('id','legacy-strength:00000000-0000-4000-8000-0000000000f2','category','strength','color_key','gray','exercises',jsonb_build_array(jsonb_build_object('id','new-exercise:f2f2f2f2-2222-4222-8222-222222220002','name','BBB','sets',4,'reps','8')))))) $$,'STALE_TRAINING_SESSION','CF snapshot B périmé rejeté (verrou réel)');
+select is(
+  (select (case when name='A' then 1 else 0 end
+        + case when not exists(select 1 from public.workout_exercises e join public.training_blocks b on b.id=e.block_id where b.session_id='00000000-0000-4000-8000-0000000000f2' and e.name='BBB') then 1 else 0 end
+        + case when updated_at = (select v from _facts where k='cf_u1')::timestamptz then 1 else 0 end)::text
+   from public.workout_sessions where id='00000000-0000-4000-8000-0000000000f2'),
+  '3','CF snapshot B non enregistré (name A, BBB absent, updated_at=u1)');
+reset role;
 
 select * from finish();
 rollback;

@@ -1,7 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { isUuid, parseTrainingBlockId, parseTrainingExerciseId } from "@/lib/training-blocks";
-import type { DerivedSessionType, TrainingBlock } from "@/types";
+import {
+  isLegacyStrengthBlockId,
+  isUuid,
+  makeLegacyStrengthBlockId,
+  parseTrainingBlockId,
+  parseTrainingExerciseId,
+  toOrderedBlocks,
+} from "@/lib/training-blocks";
+import type { AdminWorkoutSession, DerivedSessionType, TrainingBlock } from "@/types";
 import type { Database } from "@/types/supabase";
 
 /**
@@ -19,12 +26,32 @@ import type { Database } from "@/types/supabase";
 
 type TypedSupabaseClient = SupabaseClient<Database>;
 
+/**
+ * Métadonnées éditables d'une séance, appliquées ATOMIQUEMENT par la RPC dans
+ * l'unique UPDATE final de `workout_sessions` (même transaction que les blocs).
+ * Fourni par `updateProgram` pour une séance existante — ce qui supprime le
+ * besoin d'un UPDATE préalable de la ligne (lequel neutraliserait le verrou
+ * optimiste). Absent en création (la ligne vient d'être insérée avec ses
+ * champs).
+ */
+export interface SessionPatch {
+  day?: string;
+  name?: string;
+  muscleGroup?: string;
+  durationMinutes?: number | null;
+  warmup?: string;
+  coachNotes?: string;
+  bannerUrl?: string | null;
+}
+
 export interface SaveTrainingSessionBlocksInput {
   sessionId: string;
   /** Version attendue de la séance (optimistic lock). Obligatoire. */
   expectedUpdatedAt: string;
   /** Liste ORDONNÉE des blocs ; la position est dérivée de l'ordre du tableau. */
   blocks: TrainingBlock[];
+  /** Métadonnées de séance à écrire atomiquement (update d'une séance existante). */
+  sessionPatch?: SessionPatch;
 }
 
 export interface SaveTrainingSessionBlocksResult {
@@ -112,7 +139,7 @@ export async function saveTrainingSessionBlocks(
   supabase: TypedSupabaseClient,
   input: SaveTrainingSessionBlocksInput,
 ): Promise<SaveTrainingSessionBlocksResult> {
-  const { sessionId, expectedUpdatedAt, blocks } = input;
+  const { sessionId, expectedUpdatedAt, blocks, sessionPatch } = input;
 
   if (!isUuid(sessionId)) {
     throw new Error(`saveTrainingSessionBlocks : sessionId invalide "${sessionId}".`);
@@ -142,11 +169,22 @@ export async function saveTrainingSessionBlocks(
     }
   }
 
-  const payload = {
+  const payload: Record<string, unknown> = {
     session_id: sessionId,
     expected_updated_at: expectedUpdatedAt,
     blocks: blocks.map(serializeBlock),
   };
+  if (sessionPatch) {
+    payload.session_patch = {
+      day: sessionPatch.day,
+      name: sessionPatch.name,
+      muscle_group: sessionPatch.muscleGroup,
+      duration_minutes: sessionPatch.durationMinutes,
+      warmup: sessionPatch.warmup,
+      coach_notes: sessionPatch.coachNotes,
+      banner_url: sessionPatch.bannerUrl,
+    };
+  }
 
   // UN SEUL appel réseau de mutation. La RPC n'est pas déclarée dans les types
   // générés (`Functions: Record<string, never>`) — la typer là-bas perturbait
@@ -189,4 +227,86 @@ function parseRpcResult(data: unknown): SaveTrainingSessionBlocksResult {
       detachedExerciseFeedbackCount: Number(warnings.detached_exercise_feedback_count ?? 0),
     },
   };
+}
+
+/**
+ * Adaptateur LEGACY → canonique (Lot 3B). Frontière de conversion EXPLICITE
+ * entre le modèle historique du builder (`exercises[]` + `cardioBlocks[]`) et
+ * le modèle canonique `blocks[]` consommé par la RPC.
+ *
+ * IGNORE délibérément `session.blocks` (le type d'entrée ne l'expose même pas) :
+ * ce champ peut rester présent mais OBSOLÈTE — il est rempli par la lecture
+ * Lot 2 et jamais réédité par le builder legacy, qui n'édite que
+ * `exercises[]` / `cardioBlocks[]`. S'appuyer dessus ignorerait les
+ * modifications du builder. La sélection de source n'est donc JAMAIS implicite.
+ *
+ * Normalisation stricte des ids (UUID réel conservé · bloc muscu →
+ * `strengthBlockId` réel existant ou `legacy-strength:<sessionId>` · id client
+ * `generateId` non-UUID → `new-block:` / `new-exercise:`). Préserve les ids
+ * existants (feedback + blocs cardio) et ne convertit que le vraiment nouveau.
+ * `expectedUpdatedAt` transmis en CHAÎNE exacte (jamais un Date JS).
+ */
+export function buildLegacySessionBlocksInput(args: {
+  session: Pick<AdminWorkoutSession, "exercises" | "cardioBlocks">;
+  sessionId: string;
+  expectedUpdatedAt: string;
+  /**
+   * UUID réel du bloc musculation DÉJÀ persisté, s'il existe : le fournir met
+   * ce bloc à jour en place (id conservé). Absent (création / pas de bloc
+   * muscu) → id synthétique `legacy-strength:<sessionId>`.
+   */
+  strengthBlockId?: string;
+  sessionPatch?: SessionPatch;
+}): SaveTrainingSessionBlocksInput {
+  const ordered = toOrderedBlocks(
+    { id: args.sessionId, exercises: args.session.exercises, cardioBlocks: args.session.cardioBlocks },
+    { strengthBlockId: args.strengthBlockId ?? makeLegacyStrengthBlockId(args.sessionId) },
+  );
+  return {
+    sessionId: args.sessionId,
+    expectedUpdatedAt: args.expectedUpdatedAt,
+    blocks: ordered.map(normalizeBlockIds),
+    sessionPatch: args.sessionPatch,
+  };
+}
+
+/**
+ * Adaptateur CANONIQUE — RÉSERVÉ AU LOT 4 (builder multi-blocs éditant
+ * directement `blocks[]`). Ne jamais l'appeler depuis le câblage legacy
+ * (create/update/duplicate) du Lot 3B : la source est ici explicitement
+ * `blocks`, jamais dérivée de `exercises[]`/`cardioBlocks[]`.
+ */
+export function buildCanonicalSessionBlocksInput(args: {
+  sessionId: string;
+  expectedUpdatedAt: string;
+  blocks: TrainingBlock[];
+  sessionPatch?: SessionPatch;
+}): SaveTrainingSessionBlocksInput {
+  return {
+    sessionId: args.sessionId,
+    expectedUpdatedAt: args.expectedUpdatedAt,
+    blocks: args.blocks.map(normalizeBlockIds),
+    sessionPatch: args.sessionPatch,
+  };
+}
+
+function normalizeBlockId(id: string): string {
+  if (isUuid(id) || isLegacyStrengthBlockId(id) || id.startsWith("new-block:")) return id;
+  return `new-block:${crypto.randomUUID()}`;
+}
+
+function normalizeExerciseId(id: string): string {
+  if (isUuid(id) || id.startsWith("new-exercise:")) return id;
+  return `new-exercise:${crypto.randomUUID()}`;
+}
+
+function normalizeBlockIds(block: TrainingBlock): TrainingBlock {
+  if (block.category === "strength") {
+    return {
+      ...block,
+      id: normalizeBlockId(block.id),
+      exercises: block.exercises.map((ex) => ({ ...ex, id: normalizeExerciseId(ex.id) })),
+    };
+  }
+  return { ...block, id: normalizeBlockId(block.id) };
 }

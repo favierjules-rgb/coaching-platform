@@ -1019,6 +1019,14 @@ export interface AdminWorkoutSession {
    * source de vérité persistée.
    */
   blocks?: TrainingBlock[];
+  /**
+   * Version de la séance au moment du chargement (chaîne timestamptz PostgreSQL
+   * EXACTE, jamais convertie en Date JS). Sert de `expectedUpdatedAt` pour
+   * l'optimistic lock de la RPC (Lot 3B) : la sauvegarde compare cette version
+   * du SNAPSHOT à la version en base, sans relecture après écriture. Absent
+   * pour une séance nouvellement créée dans le builder (pas encore persistée).
+   */
+  updatedAt?: string;
 }
 
 /**
