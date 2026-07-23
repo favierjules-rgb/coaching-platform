@@ -34,7 +34,7 @@ interface StatCardProps {
 export function StatCard({ icon: Icon, label, value, hint, tone = "default", size = "md" }: StatCardProps) {
   const valueSizeClass = size === "lg" ? "text-2xl" : "text-xl";
   return (
-    <div className="border border-border bg-card p-5">
+    <div className="rounded-card border border-border bg-card p-5 shadow-soft">
       {Icon && (
         <Icon
           size={18}

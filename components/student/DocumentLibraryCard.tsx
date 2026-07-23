@@ -39,7 +39,7 @@ export function DocumentLibraryCard({
   const locked = !availability.available;
 
   return (
-    <div className={`flex flex-col gap-4 border border-border bg-card p-6 ${locked ? "opacity-70" : ""}`}>
+    <div className={`flex flex-col gap-4 rounded-card border border-border bg-card p-6 shadow-soft ${locked ? "bg-surface-soft/40 opacity-80" : ""}`}>
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2">
           <Icon size={22} className="text-primary" />
@@ -50,7 +50,7 @@ export function DocumentLibraryCard({
         <div className="flex items-center gap-2">
           {document.important && <ImportantBadge />}
           {locked && (
-            <span className="flex items-center gap-1 border border-border px-2 py-0.5 text-[10px] uppercase tracking-widest text-muted-foreground">
+            <span className="flex items-center gap-1 rounded-full border border-warning/30 bg-warning/5 px-2 py-0.5 text-[10px] uppercase tracking-widest text-warning">
               <Lock size={10} />
               Bientôt disponible
             </span>
@@ -81,21 +81,21 @@ export function DocumentLibraryCard({
 
       <div className="flex gap-2">
         {locked ? (
-          <span className="flex-1 border border-border py-2 text-center text-xs uppercase tracking-widest text-muted-foreground">
+          <span className="flex min-h-[44px] flex-1 items-center justify-center rounded-control border border-border py-2 text-center text-xs uppercase tracking-widest text-muted-foreground">
             Verrouillé
           </span>
         ) : (
           <>
             <Link
               href={`/documents/${document.id}`}
-              className="flex-1 border border-primary py-2 text-center text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+              className="pressable flex min-h-[44px] flex-1 items-center justify-center rounded-control border border-primary text-center text-xs uppercase tracking-widest text-primary hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             >
               Ouvrir
             </Link>
             {document.type === "pdf" && (
               <button
                 type="button"
-                className="flex-1 border border-border py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
+                className="pressable flex min-h-[44px] flex-1 items-center justify-center rounded-control border border-border text-xs uppercase tracking-widest text-muted-foreground hover:border-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
               >
                 Télécharger
               </button>

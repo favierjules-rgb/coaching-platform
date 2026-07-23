@@ -16,7 +16,7 @@ import { buildTransformationRecapInput } from "@/lib/pdf/transformation-recap";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="mb-6 border border-border bg-card p-6">
+    <section className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
       <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">{title}</h2>
       {children}
     </section>

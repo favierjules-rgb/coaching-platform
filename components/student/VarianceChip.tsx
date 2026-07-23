@@ -1,15 +1,15 @@
 import { getVarianceSeverity } from "@/lib/nutrition";
 
 const severityStyles = {
-  green: "border-green-500/40 bg-green-500/10 text-green-400",
-  orange: "border-amber-500/40 bg-amber-500/10 text-amber-400",
-  red: "border-red-500/40 bg-red-500/10 text-red-400",
+  green: "border-success/40 bg-success/10 text-success",
+  orange: "border-warning/40 bg-warning/10 text-warning",
+  red: "border-destructive/40 bg-destructive/10 text-destructive",
 };
 
 export function VarianceChip({ deltaKcal }: { deltaKcal: number | null }) {
   if (deltaKcal === null) {
     return (
-      <span className="inline-block border border-border px-2 py-0.5 text-xs text-muted-foreground">
+      <span className="inline-block rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
         —
       </span>
     );
@@ -20,7 +20,7 @@ export function VarianceChip({ deltaKcal }: { deltaKcal: number | null }) {
 
   return (
     <span
-      className={`inline-block border px-2 py-0.5 text-xs font-medium ${severityStyles[severity]}`}
+      className={`inline-block rounded-full border px-2 py-0.5 text-xs font-medium ${severityStyles[severity]}`}
     >
       {sign}
       {Math.round(deltaKcal)} kcal

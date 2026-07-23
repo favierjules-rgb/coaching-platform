@@ -1,4 +1,4 @@
-import { WeightChart } from "@/components/student/WeightChart";
+import { WeightChart } from "@/components/shared/WeightChart";
 import { formatDate } from "@/lib/admin";
 import type { StudentWeightProgress } from "@/lib/supabase/progress";
 

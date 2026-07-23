@@ -35,13 +35,13 @@ function PhotoTile({
   onDelete?: (photoId: string) => void;
 }) {
   return (
-    <div className="group relative flex flex-col border border-border">
+    <div className="group relative flex flex-col overflow-hidden rounded-panel border border-border">
       {onDelete && (
         <button
           type="button"
           onClick={() => onDelete(photo.id)}
           aria-label="Supprimer cette photo"
-          className="absolute right-2 top-2 z-10 flex items-center justify-center border border-border bg-black/70 p-1.5 text-muted-foreground opacity-0 transition-opacity hover:border-red-500/50 hover:text-red-400 group-hover:opacity-100"
+          className="absolute right-2 top-2 z-10 flex h-9 w-9 items-center justify-center rounded-control border border-border bg-foreground/75 text-background opacity-0 transition-opacity hover:border-destructive/60 hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 group-hover:opacity-100"
         >
           <Trash2 size={14} />
         </button>
@@ -54,7 +54,7 @@ function PhotoTile({
           className="aspect-[3/4] w-full border-b border-border object-cover"
         />
       ) : (
-        <div className="flex aspect-[3/4] flex-col items-center justify-center gap-2 border-b border-border bg-gradient-to-br from-zinc-900 to-black">
+        <div className="flex aspect-[3/4] flex-col items-center justify-center gap-2 border-b border-border bg-surface-soft">
           {photo.pending ? (
             <Target size={22} className="text-primary" />
           ) : (
@@ -111,7 +111,7 @@ export function ProgressPhotos({
 
   if (safePhotos.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center gap-2 border border-dashed border-border py-10 text-center">
+      <div className="flex flex-col items-center justify-center gap-2 rounded-card border border-dashed border-border bg-surface-soft/40 py-10 text-center">
         <ImageOff size={22} className="text-muted-foreground" />
         <p className="text-sm text-muted-foreground">
           Aucune photo de progression pour le moment.

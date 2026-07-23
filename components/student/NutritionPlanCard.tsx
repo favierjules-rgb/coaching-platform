@@ -16,7 +16,7 @@ export function NutritionPlanCard({ plan, days }: NutritionPlanCardProps) {
   const progressPercent = Math.round((daysValidated / trackedDays.length) * 100);
 
   return (
-    <div className="flex flex-col gap-4 border border-border bg-card p-6">
+    <div className="flex flex-col gap-4 rounded-card border border-border bg-card p-6 shadow-soft">
       <div className="flex items-start justify-between gap-3">
         <h3 className="font-heading text-lg font-bold uppercase text-foreground">
           {plan.name}
@@ -28,9 +28,9 @@ export function NutritionPlanCard({ plan, days }: NutritionPlanCardProps) {
         {nutritionGoalLabels[plan.goalType]}
       </p>
 
-      <div className="grid grid-cols-4 gap-2 border-t border-border pt-4 text-center">
+      <div className="grid grid-cols-2 gap-3 border-t border-border pt-4 text-center sm:grid-cols-4">
         <div>
-          <div className="font-heading text-base font-bold text-foreground">
+          <div className="font-heading text-lg font-bold text-foreground">
             {plan.dailyTarget.calories}
           </div>
           <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
@@ -38,7 +38,7 @@ export function NutritionPlanCard({ plan, days }: NutritionPlanCardProps) {
           </div>
         </div>
         <div>
-          <div className="font-heading text-base font-bold text-foreground">
+          <div className="font-heading text-lg font-bold text-foreground">
             {plan.dailyTarget.protein}g
           </div>
           <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
@@ -46,7 +46,7 @@ export function NutritionPlanCard({ plan, days }: NutritionPlanCardProps) {
           </div>
         </div>
         <div>
-          <div className="font-heading text-base font-bold text-foreground">
+          <div className="font-heading text-lg font-bold text-foreground">
             {plan.dailyTarget.carbs}g
           </div>
           <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
@@ -54,7 +54,7 @@ export function NutritionPlanCard({ plan, days }: NutritionPlanCardProps) {
           </div>
         </div>
         <div>
-          <div className="font-heading text-base font-bold text-foreground">
+          <div className="font-heading text-lg font-bold text-foreground">
             {plan.dailyTarget.fat}g
           </div>
           <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
@@ -75,7 +75,7 @@ export function NutritionPlanCard({ plan, days }: NutritionPlanCardProps) {
 
       <Link
         href={`/nutrition/${plan.id}`}
-        className="mt-2 block border border-primary py-3 text-center text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+        className="pressable mt-2 flex min-h-[44px] items-center justify-center rounded-control border border-primary text-center text-xs uppercase tracking-widest text-primary hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
       >
         Voir le plan
       </Link>

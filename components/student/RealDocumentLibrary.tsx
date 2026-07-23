@@ -41,8 +41,8 @@ function unlockLabel(unlockDate: string | null): string {
 
 const statusDotTone: Record<AdminDocumentStatus, string> = {
   brouillon: "bg-muted-foreground",
-  publié: "bg-green-500",
-  archivé: "bg-red-500",
+  publié: "bg-success",
+  archivé: "bg-destructive",
 };
 
 /**
@@ -82,13 +82,13 @@ function StorageFileButton({ storagePath, label, icon: Icon }: { storagePath: st
         type="button"
         onClick={() => void handleOpen()}
         disabled={loading}
-        className="flex items-center gap-1.5 border border-primary px-3 py-2 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground disabled:opacity-50"
+        className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-primary px-3 py-2 text-xs uppercase tracking-widest text-primary hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-50"
       >
         {loading ? <Loader2 size={14} className="animate-spin" /> : <Icon size={14} />}
         {label}
       </button>
       {error && (
-        <p className="flex items-center gap-1.5 text-[11px] text-red-400">
+        <p className="flex items-center gap-1.5 text-[11px] text-destructive">
           <AlertTriangle size={12} className="flex-shrink-0" />
           Impossible d&apos;ouvrir ce fichier.
         </p>
@@ -101,7 +101,7 @@ function DocumentCard({ item }: { item: StudentDocumentWithAvailability }) {
   const { document, availability } = item;
 
   return (
-    <div className="flex flex-col gap-3 border border-border bg-card p-6">
+    <div className={`flex flex-col gap-3 rounded-card border border-border bg-card p-6 shadow-soft ${!availability.available ? "bg-surface-soft/40" : ""}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2">
           <span className={`h-1.5 w-1.5 rounded-full ${statusDotTone[document.status]}`} />
@@ -115,7 +115,7 @@ function DocumentCard({ item }: { item: StudentDocumentWithAvailability }) {
       {document.shortDescription && <p className="text-sm text-foreground">{document.shortDescription}</p>}
 
       {!availability.available ? (
-        <p className="flex items-center gap-2 text-xs text-amber-400">
+        <p className="flex items-center gap-2 rounded-control border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning">
           <Lock size={13} className="flex-shrink-0" />
           {unlockLabel(availability.unlockDate)}
         </p>
@@ -133,7 +133,7 @@ function DocumentCard({ item }: { item: StudentDocumentWithAvailability }) {
                   href={document.videoUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 border border-primary px-3 py-2 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+                  className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-primary px-3 py-2 text-xs uppercase tracking-widest text-primary hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                 >
                   <PlayCircle size={14} />
                   Voir la vidéo
@@ -149,7 +149,7 @@ function DocumentCard({ item }: { item: StudentDocumentWithAvailability }) {
                   href={document.externalUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 border border-primary px-3 py-2 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+                  className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-primary px-3 py-2 text-xs uppercase tracking-widest text-primary hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                 >
                   <Download size={14} />
                   Télécharger
@@ -167,7 +167,7 @@ function DocumentCard({ item }: { item: StudentDocumentWithAvailability }) {
                   href={document.externalUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 border border-primary px-3 py-2 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+                  className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-primary px-3 py-2 text-xs uppercase tracking-widest text-primary hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                 >
                   <ExternalLink size={14} />
                   Ouvrir
@@ -213,7 +213,7 @@ export function RealDocumentLibrary({ documents }: { documents: StudentDocumentW
         value={query}
         onChange={(event) => setQuery(event.target.value)}
         placeholder="Rechercher par titre ou description…"
-        className="mb-6 w-full border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none"
+        className="mb-6 w-full rounded-control border border-border bg-surface-soft px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
       />
 
       <div className="mb-8 flex flex-wrap gap-2">
@@ -222,7 +222,8 @@ export function RealDocumentLibrary({ documents }: { documents: StudentDocumentW
             key={filter.key}
             type="button"
             onClick={() => setActiveFilter(filter.key)}
-            className={`border px-4 py-2 text-xs uppercase tracking-widest transition-colors ${
+            aria-pressed={activeFilter === filter.key}
+            className={`pressable min-h-[40px] rounded-full border px-4 py-2 text-xs uppercase tracking-widest focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
               activeFilter === filter.key
                 ? "border-primary bg-primary text-primary-foreground"
                 : "border-border text-muted-foreground hover:border-foreground hover:text-foreground"

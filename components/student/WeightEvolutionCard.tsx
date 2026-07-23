@@ -1,7 +1,7 @@
 import { TrendingDown, TrendingUp } from "lucide-react";
 
 import { UpdateWeightModal } from "@/components/student/UpdateWeightModal";
-import { WeightChart } from "@/components/student/WeightChart";
+import { WeightChart } from "@/components/shared/WeightChart";
 import { computeWeightEvolution } from "@/lib/profile";
 import type { StudentProfile, WeightEntry } from "@/types";
 
@@ -22,7 +22,7 @@ export function WeightEvolutionCard({
   const evolution = computeWeightEvolution(safeHistory, profile);
 
   return (
-    <div className="border border-border bg-card p-6">
+    <div className="rounded-card border border-border bg-card p-6 shadow-soft">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h2 className="font-heading text-lg font-bold uppercase text-foreground">
           Évolution du poids
@@ -90,9 +90,9 @@ export function WeightEvolutionCard({
             <span>Progression vers l&apos;objectif</span>
             <span className="text-foreground">{evolution.progressPercent}%</span>
           </div>
-          <div className="mb-6 h-2 w-full border border-border bg-background">
+          <div className="mb-6 h-2 w-full overflow-hidden rounded-full border border-border bg-background">
             <div
-              className="h-full bg-primary transition-all"
+              className="h-full rounded-full bg-primary transition-[width] duration-500 ease-out motion-reduce:transition-none"
               style={{ width: `${evolution.progressPercent}%` }}
             />
           </div>

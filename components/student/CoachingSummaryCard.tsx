@@ -3,7 +3,7 @@ import type { StudentProfile } from "@/types";
 
 export function CoachingSummaryCard({ profile }: { profile: StudentProfile }) {
   return (
-    <div className="mb-6 border border-border bg-card p-6">
+    <div className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h2 className="font-heading text-lg font-bold uppercase text-foreground">
           Résumé du coaching

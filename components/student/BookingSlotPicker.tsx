@@ -134,7 +134,7 @@ export function BookingSlotPicker({
             onClick={() => canGoPrev && setViewMonth(new Date(year, monthIndex - 1, 1))}
             disabled={!canGoPrev}
             aria-label="Mois précédent"
-            className="border border-border p-1.5 text-muted-foreground transition-colors hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:border-border disabled:hover:text-muted-foreground"
+            className="pressable flex h-11 w-11 items-center justify-center rounded-control border border-border text-muted-foreground hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:border-border disabled:hover:text-muted-foreground"
           >
             <ChevronLeft size={16} />
           </button>
@@ -146,7 +146,7 @@ export function BookingSlotPicker({
             onClick={() => canGoNext && setViewMonth(new Date(year, monthIndex + 1, 1))}
             disabled={!canGoNext}
             aria-label="Mois suivant"
-            className="border border-border p-1.5 text-muted-foreground transition-colors hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:border-border disabled:hover:text-muted-foreground"
+            className="pressable flex h-11 w-11 items-center justify-center rounded-control border border-border text-muted-foreground hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:border-border disabled:hover:text-muted-foreground"
           >
             <ChevronRight size={16} />
           </button>
@@ -170,7 +170,7 @@ export function BookingSlotPicker({
                 disabled={!cell.hasSlots}
                 onClick={() => setSelectedDay(cell.key)}
                 aria-pressed={isSelected}
-                className={`relative aspect-square text-sm transition-colors ${
+                className={`relative aspect-square rounded-panel text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
                   isSelected
                     ? "bg-primary font-bold text-primary-foreground"
                     : cell.hasSlots
@@ -201,7 +201,7 @@ export function BookingSlotPicker({
                 key={slot.startAt}
                 type="button"
                 onClick={() => onBook(slot)}
-                className="flex flex-col items-center gap-1 border border-border px-3 py-3 text-sm text-foreground transition-colors hover:border-primary hover:bg-primary/5"
+                className="pressable flex min-h-[44px] flex-col items-center justify-center gap-1 rounded-panel border border-border px-3 py-3 text-sm text-foreground hover:border-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
               >
                 <span className="font-bold">
                   {new Date(slot.startAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}

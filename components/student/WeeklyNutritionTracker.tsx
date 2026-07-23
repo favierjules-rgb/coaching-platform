@@ -29,7 +29,7 @@ export function WeeklyNutritionTracker({ studentId, planId, target }: WeeklyNutr
 
   if (loading || !adjustment) {
     return (
-      <div className="mb-8 border border-border bg-card p-6">
+      <div className="mb-8 rounded-card border border-border bg-card p-6 shadow-soft">
         <p className="text-sm text-muted-foreground">Chargement du suivi de la semaine…</p>
       </div>
     );
@@ -42,41 +42,41 @@ export function WeeklyNutritionTracker({ studentId, planId, target }: WeeklyNutr
       <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">Suivi de la semaine</h2>
 
       <div
-        className={`mb-6 border p-6 ${
-          adjustment.overBudget ? "border-red-500/50 bg-red-500/5" : "border-border bg-card"
+        className={`mb-6 rounded-card border p-6 shadow-soft ${
+          adjustment.overBudget ? "border-destructive/40 bg-destructive/5" : "border-border bg-card"
         }`}
       >
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <div>
-            <div className="font-heading text-xl font-bold text-foreground">{formatKcal(calories.weeklyTarget)}</div>
-            <div className="text-xs text-muted-foreground">Objectif semaine (kcal)</div>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-5 lg:grid-cols-4">
+          <div className="flex flex-col gap-1">
+            <div className="font-heading text-2xl font-bold leading-none text-foreground">{formatKcal(calories.weeklyTarget)}</div>
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Objectif semaine (kcal)</div>
           </div>
-          <div>
-            <div className="font-heading text-xl font-bold text-foreground">{formatKcal(calories.consumed)}</div>
-            <div className="text-xs text-muted-foreground">Consommé cette semaine</div>
+          <div className="flex flex-col gap-1">
+            <div className="font-heading text-2xl font-bold leading-none text-foreground">{formatKcal(calories.consumed)}</div>
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Consommé cette semaine</div>
           </div>
-          <div>
-            <div className="font-heading text-xl font-bold text-foreground">
+          <div className="flex flex-col gap-1">
+            <div className="font-heading text-2xl font-bold leading-none text-foreground">
               {adjustment.overBudget ? "0" : formatKcal(calories.remaining)}
             </div>
-            <div className="text-xs text-muted-foreground">Reste sur la semaine</div>
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Reste sur la semaine</div>
           </div>
-          <div>
-            <div className="font-heading text-xl font-bold text-foreground">
+          <div className="flex flex-col gap-1">
+            <div className="font-heading text-2xl font-bold leading-none text-foreground">
               {calories.adjustedDaily !== null ? `${formatKcal(calories.adjustedDaily)} kcal` : "—"}
             </div>
-            <div className="text-xs text-muted-foreground">Objectif ajusté jours restants</div>
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Objectif ajusté jours restants</div>
           </div>
         </div>
 
         {adjustment.overBudget && (
-          <p className="mt-4 flex items-center gap-2 text-sm text-red-400">
+          <p className="mt-5 flex items-center gap-2 text-sm text-destructive">
             <AlertTriangle size={16} className="flex-shrink-0" />
             Objectif hebdomadaire déjà dépassé de {formatKcal(Math.abs(calories.remaining))} kcal.
           </p>
         )}
         {!adjustment.overBudget && adjustment.lowCalorieWarning && (
-          <p className="mt-4 flex items-center gap-2 text-sm text-amber-400">
+          <p className="mt-5 flex items-center gap-2 text-sm text-warning">
             <AlertTriangle size={16} className="flex-shrink-0" />
             L&apos;objectif ajusté sur les jours restants est très bas — reste attentif, ce n&apos;est qu&apos;une
             recommandation.
@@ -134,7 +134,7 @@ function WeeklyNutritionDayCard({
   }
 
   return (
-    <div className={`flex flex-col gap-3 border p-4 ${day.isToday ? "border-primary bg-primary/5" : "border-border bg-card"}`}>
+    <div className={`flex flex-col gap-3 rounded-panel border p-4 ${day.isToday ? "border-primary/40 bg-primary/5" : "border-border bg-card"}`}>
       <div className="flex items-center justify-between gap-2">
         <span
           className={`font-heading text-xs font-semibold uppercase tracking-widest ${
@@ -143,7 +143,12 @@ function WeeklyNutritionDayCard({
         >
           {day.label}
         </span>
-        {day.filled && <span className="text-[10px] uppercase tracking-widest text-green-400">Rempli</span>}
+        {day.filled && (
+          <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-widest text-success/80">
+            <CheckCircle size={11} className="flex-shrink-0" />
+            Rempli
+          </span>
+        )}
       </div>
 
       <div className="text-xs text-muted-foreground">
@@ -171,7 +176,7 @@ function WeeklyNutritionDayCard({
           }}
           placeholder={day.targetCalories !== null ? `${day.targetCalories}kcal` : "Kcal"}
           aria-label={`Calories réelles — ${day.label}`}
-          className="w-full border border-border bg-background px-2 py-2 text-xs text-foreground placeholder:text-muted-foreground/50 transition-colors focus:border-primary focus:outline-none"
+          className="w-full rounded-control border border-border bg-surface-soft px-2.5 py-2.5 text-xs text-foreground placeholder:text-muted-foreground/50 transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
         />
         <input
           type="number"
@@ -183,7 +188,7 @@ function WeeklyNutritionDayCard({
           }}
           placeholder={day.targetProtein !== null ? `${day.targetProtein}g` : "Prot (g)"}
           aria-label={`Protéines réelles — ${day.label}`}
-          className="w-full border border-border bg-background px-2 py-2 text-xs text-foreground placeholder:text-muted-foreground/50 transition-colors focus:border-primary focus:outline-none"
+          className="w-full rounded-control border border-border bg-surface-soft px-2.5 py-2.5 text-xs text-foreground placeholder:text-muted-foreground/50 transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
         />
         <input
           type="number"
@@ -195,7 +200,7 @@ function WeeklyNutritionDayCard({
           }}
           placeholder={day.targetCarbs !== null ? `${day.targetCarbs}g` : "Gluc (g)"}
           aria-label={`Glucides réels — ${day.label}`}
-          className="w-full border border-border bg-background px-2 py-2 text-xs text-foreground placeholder:text-muted-foreground/50 transition-colors focus:border-primary focus:outline-none"
+          className="w-full rounded-control border border-border bg-surface-soft px-2.5 py-2.5 text-xs text-foreground placeholder:text-muted-foreground/50 transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
         />
         <input
           type="number"
@@ -207,7 +212,7 @@ function WeeklyNutritionDayCard({
           }}
           placeholder={day.targetFat !== null ? `${day.targetFat}g` : "Lip (g)"}
           aria-label={`Lipides réels — ${day.label}`}
-          className="w-full border border-border bg-background px-2 py-2 text-xs text-foreground placeholder:text-muted-foreground/50 transition-colors focus:border-primary focus:outline-none"
+          className="w-full rounded-control border border-border bg-surface-soft px-2.5 py-2.5 text-xs text-foreground placeholder:text-muted-foreground/50 transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
         />
       </div>
 
@@ -219,22 +224,22 @@ function WeeklyNutritionDayCard({
         }}
         placeholder="Note du jour (optionnel)"
         aria-label={`Note — ${day.label}`}
-        className="w-full border border-border bg-background px-2 py-2 text-xs text-foreground transition-colors focus:border-primary focus:outline-none"
+        className="w-full rounded-control border border-border bg-surface-soft px-2.5 py-2.5 text-xs text-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
       />
 
-      {error && <p className="text-xs text-red-400">{error}</p>}
+      {error && <p className="text-xs text-destructive">{error}</p>}
 
       <button
         type="button"
         onClick={handleSave}
         disabled={saving}
-        className="flex items-center justify-center gap-1.5 border border-primary py-2 text-[11px] uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground disabled:opacity-50"
+        className="pressable flex min-h-[44px] items-center justify-center gap-1.5 rounded-control border border-primary py-2.5 text-[11px] uppercase tracking-widest text-primary hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-50"
       >
         {saved ? (
-          <>
-            <CheckCircle size={12} />
+          <span className="animate-fade-in flex items-center gap-1.5">
+            <CheckCircle size={12} className="text-success" />
             Enregistré
-          </>
+          </span>
         ) : saving ? (
           "Enregistrement…"
         ) : (

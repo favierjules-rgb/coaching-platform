@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
+import { MuscleHeatmapSection } from "@/components/student/MuscleHeatmapSection";
 import { NextSessionHighlight } from "@/components/student/NextSessionHighlight";
 import { ProgramWeekCalendar } from "@/components/student/ProgramWeekCalendar";
 import { ProgressBar } from "@/components/student/ProgressBar";
@@ -112,6 +113,15 @@ export default function ProgramDetailPage() {
         </div>
 
         {metricsSessions.length > 0 && <WeekAnalysisSection sessions={metricsSessions} />}
+
+        {currentWeekSessions.some((s) => (s.blocks ?? []).length > 0) && (
+          <div className="mb-8">
+            <MuscleHeatmapSection
+              blocks={currentWeekSessions.flatMap((s) => s.blocks ?? [])}
+              title="Intensité musculaire de la semaine"
+            />
+          </div>
+        )}
 
         {highlightedSession && highlightedDay && (
           <div className="mb-8">

@@ -111,6 +111,22 @@
   --color-success-foreground: var(--success-foreground);
   --font-heading: var(--font-barlow);
   --font-body: var(--font-dm-sans);
+
+  /*
+   * Tokens de forme (chantier "expérience élève, polish Apple", Lot E —
+   * juillet 2026). Échelle de RAYONS sémantique alignée sur la famille déjà
+   * employée par le Training Builder (rounded-2xl / xl / lg) pour garder une
+   * seule identité entre builder et espace élève, plutôt que des `rounded-*`
+   * arbitraires par composant. Générés en utilitaires Tailwind
+   * `rounded-card` / `rounded-panel` / `rounded-control`. Appliqués UNIQUEMENT
+   * sur les écrans du chantier (ajout de classe explicite) — aucun restyle
+   * global implicite. Ombre douce = profondeur discrète des grandes cartes
+   * (subtile en clair, quasi nulle en sombre où la bordure suffit).
+   */
+  --radius-card: 1rem; /* grandes cartes (≡ rounded-2xl builder) */
+  --radius-panel: 0.75rem; /* cartes internes / jours (≡ rounded-xl) */
+  --radius-control: 0.5rem; /* champs, boutons, pastilles (≡ rounded-lg) */
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px -12px rgba(0, 0, 0, 0.14);
 }
 
 body {
@@ -193,6 +209,64 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .animate-fade-in {
+    animation: none;
+  }
+}
+
+/*
+ * Feedback de pression (chantier polish Apple, Lot E) — retour INSTANTANÉ sur
+ * les éléments pressables des écrans élève (boutons, cartes de séance
+ * cliquables). Scale subtil sur :active seulement, transform uniquement (GPU),
+ * sous le budget de durée. But = « l'interface écoute » (feedback, apple-design
+ * §1). Sous prefers-reduced-motion : aucun mouvement (scale retiré), l'action
+ * reste parfaitement fonctionnelle.
+ */
+.pressable {
+  transition: transform var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+
+.pressable:active {
+  transform: scale(0.98);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pressable {
+    transition: background-color var(--duration-fast) var(--ease-out),
+      color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out);
+  }
+  .pressable:active {
+    transform: none;
+  }
+}
+
+/*
+ * Tooltip de la courbe de poids (Lot E) — matérialisation douce : opacity +
+ * léger scale depuis 0.97 (jamais scale(0), cf. emil-design-eng), ancrée au
+ * point actif via translate(-50%, -130%). ~160ms ease-out, remonté depuis le
+ * point. `both` conserve la transformée de repos après l'animation. Sous
+ * reduced-motion : fondu d'opacité seul, sans scale ni déplacement.
+ */
+@keyframes weight-tooltip-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -130%) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -130%) scale(1);
+  }
+}
+
+.weight-tooltip {
+  transform: translate(-50%, -130%);
+  animation: weight-tooltip-in 160ms var(--ease-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .weight-tooltip {
     animation: none;
   }
 }
@@ -411,4 +485,37 @@ body {
   .marquee-pausable:hover .transformations-marquee-track {
     animation-play-state: paused;
   }
+}
+
+/*
+ * Zones de la carte de chaleur musculaire (chantier expérience élève, Lot B —
+ * components/shared/BodyMap.tsx). Transition douce du remplissage quand les
+ * données changent (changement de séance/semaine) et de la bordure au
+ * survol/focus. Uniquement `fill`/`stroke` (peu coûteux sur une petite figure),
+ * durées sous 300ms. `fill` n'est pas une propriété composée par le GPU mais le
+ * schéma est minuscule et statique : aucun risque de jank, et c'est la seule
+ * façon d'animer une couleur SVG. Coupée sous prefers-reduced-motion.
+ */
+.muscle-zone {
+  transition: fill 200ms var(--ease-out), stroke 120ms var(--ease-out), stroke-width 120ms var(--ease-out);
+}
+
+.muscle-zone:focus-visible {
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .muscle-zone {
+    transition: none;
+  }
+}
+
+/*
+ * Désaturation de l'image anatomique premium (components/shared/PremiumBodyMap.tsx).
+ * Faite en CSS (réglable, non destructive) plutôt que cuite dans l'asset : la
+ * base musculaire réaliste devient neutre pour que la surcouche rouge de la
+ * heatmap ressorte nettement. Filtre statique (aucune animation).
+ */
+.anatomy-desat {
+  filter: saturate(0.32) brightness(1.05) contrast(1.02);
 }

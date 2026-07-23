@@ -140,7 +140,7 @@ export default function RendezVousPage() {
         </div>
       )}
 
-      <div className="mb-8 border border-border bg-card p-6">
+      <div className="mb-8 rounded-card border border-border bg-card p-6 shadow-soft">
         <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">Réserver un créneau</h2>
         <BookingSlotPicker slots={booking ? [] : supabaseAppointments.availableSlots} onBook={handleBook} />
       </div>

@@ -6,7 +6,7 @@ import type { TrainingProgram } from "@/types";
 
 export function TrainingProgramCard({ program }: { program: TrainingProgram }) {
   return (
-    <div className="flex flex-col gap-4 border border-border bg-card">
+    <div className="flex flex-col gap-4 overflow-hidden rounded-card border border-border bg-card shadow-soft">
       {program.bannerUrl && (
         // eslint-disable-next-line @next/next/no-img-element -- bucket Storage public, URL externe
         <img src={program.bannerUrl} alt="" className="h-32 w-full object-cover" />
@@ -37,7 +37,7 @@ export function TrainingProgramCard({ program }: { program: TrainingProgram }) {
 
         <Link
           href={`/entrainement/${program.id}`}
-          className="mt-2 block border border-primary py-3 text-center text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+          className="pressable mt-2 flex min-h-[44px] items-center justify-center rounded-control border border-primary text-center text-xs uppercase tracking-widest text-primary hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         >
           Voir le programme
         </Link>

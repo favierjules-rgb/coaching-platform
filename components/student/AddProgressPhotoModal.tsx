@@ -101,7 +101,7 @@ export function AddProgressPhotoModal({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+        className="pressable inline-flex min-h-[44px] items-center rounded-control border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
       >
         Ajouter une photo
       </button>
@@ -113,7 +113,7 @@ export function AddProgressPhotoModal({
           aria-label="Ajouter une photo"
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
         >
-          <div className="flex max-h-[90vh] w-full max-w-md flex-col border border-border bg-card">
+          <div className="animate-fade-in flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-card border border-border bg-card shadow-soft">
             <div className="flex items-center justify-between border-b border-border px-6 py-4">
               <h3 className="font-heading text-lg font-bold uppercase text-foreground">
                 Ajouter une photo
@@ -130,7 +130,7 @@ export function AddProgressPhotoModal({
 
             <div className="flex-1 overflow-y-auto px-6 py-4">
               {submitted ? (
-                <div className="flex items-center gap-3 border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-400">
+                <div className="animate-fade-in flex items-center gap-3 rounded-control border border-success/40 bg-success/10 px-4 py-3 text-sm text-success">
                   <CheckCircle size={18} className="flex-shrink-0" />
                   Photo ajoutée à ta galerie de progression.
                 </div>
@@ -201,7 +201,7 @@ export function AddProgressPhotoModal({
                     type="button"
                     onClick={handleSubmit}
                     disabled={!previewUrl}
-                    className="mt-1 w-full bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
+                    className="pressable mt-1 min-h-[44px] w-full rounded-control bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
                   >
                     Enregistrer la photo
                   </button>

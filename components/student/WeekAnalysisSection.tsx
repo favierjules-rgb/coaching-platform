@@ -21,7 +21,7 @@ export function WeekAnalysisSection({ sessions }: { sessions: MetricsSessionInpu
     .sort((a, b) => b.sets - a.sets);
 
   return (
-    <div className="mb-8 border border-border bg-card p-6">
+    <div className="mb-8 rounded-card border border-border bg-card p-6 shadow-soft">
       <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">Analyse de la semaine</h2>
       <div className="flex flex-col gap-6">
         <MuscleGroupFilterSelect value={selectedMuscleGroup} onChange={setSelectedMuscleGroup} />
@@ -52,7 +52,7 @@ export function WeekAnalysisSection({ sessions }: { sessions: MetricsSessionInpu
             </h3>
             <div className="flex flex-wrap gap-2">
               {dayLoad.map((d) => (
-                <span key={d.day} className="border border-border px-3 py-1.5 text-xs text-foreground">
+                <span key={d.day} className="rounded-full border border-border bg-surface-soft/50 px-3 py-1.5 text-xs text-foreground">
                   {d.day} · {formatSets(d.sets)}
                 </span>
               ))}

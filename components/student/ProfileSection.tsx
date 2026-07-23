@@ -10,7 +10,7 @@ export function ProfileSection({
   children: ReactNode;
 }) {
   return (
-    <div className="border border-border bg-card p-6">
+    <div className="rounded-card border border-border bg-card p-6 shadow-soft">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h2 className="font-heading text-lg font-bold uppercase text-foreground">
           {title}
@@ -43,7 +43,7 @@ export function TagList({ items }: { items: string[] }) {
       {safeItems.map((item) => (
         <span
           key={item}
-          className="border border-border px-3 py-1 text-xs text-muted-foreground"
+          className="rounded-full border border-border bg-surface-soft/50 px-3 py-1 text-xs text-muted-foreground"
         >
           {item}
         </span>

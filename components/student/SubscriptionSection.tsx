@@ -61,7 +61,7 @@ export function SubscriptionSection() {
     return (
       <div className="flex flex-col gap-4">
         {access.status && (
-          <div className="flex flex-wrap items-center gap-3 border border-border bg-background p-4">
+          <div className="flex flex-wrap items-center gap-3 rounded-panel border border-border bg-surface-soft p-4">
             <StatusBadge label={access.status.allowed ? "Accès au site autorisé" : "Accès au site bloqué"} tone={access.status.allowed ? "green" : "red"} />
             <span className="text-xs text-muted-foreground">{accessReasonLabels[access.status.reason]}</span>
           </div>
@@ -131,7 +131,7 @@ export function SubscriptionSection() {
           <button
             type="button"
             onClick={handleOpenPortal}
-            className="flex items-center gap-1.5 border border-primary px-4 py-2 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+            className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-primary px-4 py-2 text-xs uppercase tracking-widest text-primary hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             <CreditCard size={14} aria-hidden="true" />
             Gérer mon abonnement
@@ -142,14 +142,14 @@ export function SubscriptionSection() {
               type="button"
               onClick={handlePay}
               disabled={paying}
-              className="flex items-center gap-1.5 border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40"
+              className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <CreditCard size={14} aria-hidden="true" />
               {paying ? "Redirection…" : "Activer mon abonnement"}
             </button>
           )
         )}
-        {payError && <span className="text-xs text-red-400">{payError}</span>}
+        {payError && <span className="text-xs text-destructive">{payError}</span>}
       </div>
     </div>
   );
