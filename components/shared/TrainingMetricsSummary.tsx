@@ -6,9 +6,9 @@ import { formatSets, formatTonnage, formatVolume, muscleGroupLabels, muscleGroup
 import type { ExerciseMetrics, MuscleGroupFilter, MuscleGroupVolume } from "@/types";
 
 export function StatCard({ label, value, tone = "default" }: { label: string; value: string; tone?: "default" | "positive" | "negative" }) {
-  const toneClass = tone === "positive" ? "text-green-400" : tone === "negative" ? "text-red-400" : "text-foreground";
+  const toneClass = tone === "positive" ? "text-success" : tone === "negative" ? "text-destructive" : "text-foreground";
   return (
-    <div className="border border-border bg-background p-4">
+    <div className="rounded-panel border border-border bg-surface-soft p-4">
       <span className="block text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
       <span className={`mt-1 block font-heading text-xl font-extrabold ${toneClass}`}>{value}</span>
     </div>
@@ -72,7 +72,7 @@ export function MuscleGroupBars({ breakdown, alertThreshold = 1.8 }: MuscleGroup
   return (
     <div className="flex flex-col gap-3">
       {showImbalanceAlert && (
-        <div className="flex items-center gap-2 border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+        <div className="flex items-center gap-2 rounded-control border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
           <AlertTriangle size={14} className="flex-shrink-0" />
           {muscleGroupLabels[sorted[0].muscleGroup]} reçoit beaucoup plus de séries que les autres groupes musculaires.
         </div>
@@ -84,9 +84,9 @@ export function MuscleGroupBars({ breakdown, alertThreshold = 1.8 }: MuscleGroup
               <span className="uppercase tracking-wide text-foreground">{muscleGroupLabels[entry.muscleGroup]}</span>
               <span className="text-muted-foreground">{formatSets(entry.sets)}</span>
             </div>
-            <div className="h-2 w-full bg-border">
+            <div className="h-2 w-full overflow-hidden rounded-full bg-border">
               <div
-                className="h-2 bg-primary transition-all"
+                className="h-2 rounded-full bg-primary transition-[width] duration-500 ease-out motion-reduce:transition-none"
                 style={{ width: `${max > 0 ? Math.max(4, (entry.sets / max) * 100) : 0}%` }}
               />
             </div>
@@ -113,7 +113,7 @@ export function MuscleGroupFilterSelect({
       <select
         value={value}
         onChange={(event) => onChange(event.target.value as MuscleGroupFilter)}
-        className="w-full appearance-none border border-border bg-background px-4 py-2.5 text-sm text-foreground transition-colors focus:border-primary focus:outline-none sm:w-64"
+        className="w-full appearance-none rounded-control border border-border bg-surface-soft px-4 py-2.5 text-sm text-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30 sm:w-64"
       >
         <option value="tous">Tous les groupes</option>
         {muscleGroupOrder.map((group) => (
@@ -130,7 +130,7 @@ export function MuscleGroupFilterSelect({
 export function UntaggedExercisesAlert({ show }: { show: boolean }) {
   if (!show) return null;
   return (
-    <div className="flex items-center gap-2 border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+    <div className="flex items-center gap-2 rounded-control border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
       <AlertTriangle size={14} className="flex-shrink-0" />
       Certains exercices n&apos;ont pas de groupe musculaire renseigné.
     </div>
@@ -159,7 +159,7 @@ export function FilteredExerciseList({ exercises }: { exercises: ExerciseMetrics
         {exercises.map((ex) => (
           <li
             key={ex.exerciseId}
-            className="flex flex-wrap items-center justify-between gap-2 border border-border px-3 py-2 text-sm text-foreground"
+            className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-border px-3 py-2 text-sm text-foreground"
           >
             <span>{ex.name}</span>
             <span className="text-xs text-muted-foreground">

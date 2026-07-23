@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Bell, CalendarDays, Dumbbell, Flame, Scale, Target, TrendingUp } from "lucide-react";
 
 import { StatCard } from "@/components/shared/StatCard";
-import { WeightChart } from "@/components/student/WeightChart";
+import { WeightChart } from "@/components/shared/WeightChart";
 import { useStudentProfile, type StudentProfileState } from "@/hooks/useStudentProfile";
 import { useSupabaseAppointmentsForStudent } from "@/hooks/useSupabaseAppointmentsForStudent";
 import { useSupabaseNutritionForStudent } from "@/hooks/useSupabaseNutritionForStudent";
@@ -14,6 +14,8 @@ import { formatDateTime } from "@/lib/admin";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { coachingStatusLabels, computeWeightEvolution } from "@/lib/profile";
 import { getHighlightedScheduleDay } from "@/data/student";
+import { derivedSessionTypeLabel } from "@/lib/session-summary";
+import { deriveSessionType } from "@/lib/training-blocks";
 import { computeCurrentWeekNumber, toEleveTrainingProgram, toEleveWorkoutSession } from "@/lib/training-schedule";
 import type {
   CoachNotification,
@@ -103,6 +105,11 @@ export function DashboardContent({
   const realHighlightedSession = realHighlightedDay?.sessionId
     ? realWeekSessions.find((s) => s.id === realHighlightedDay.sessionId)
     : undefined;
+  // Résumé dérivé du modèle canonique blocks[] (jamais exercises[]/cardioBlocks[]).
+  const realHighlightBlocks = realHighlightedSession?.blocks ?? [];
+  const realHighlightMeta = realHighlightBlocks.length
+    ? derivedSessionTypeLabel(deriveSessionType(realHighlightBlocks))
+    : null;
 
   return (
     <div>
@@ -131,7 +138,7 @@ export function DashboardContent({
       </div>
 
       <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="border border-border bg-card p-6 lg:col-span-2">
+        <div className="rounded-card border border-border bg-card p-6 shadow-soft lg:col-span-2">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="font-heading text-lg font-bold uppercase text-foreground">
               Évolution du poids
@@ -143,7 +150,7 @@ export function DashboardContent({
           <WeightChart data={weightHistory} />
         </div>
 
-        <div className="border border-border bg-card p-6">
+        <div className="rounded-card border border-border bg-card p-6 shadow-soft">
           <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
             Notifications
           </h2>
@@ -174,7 +181,7 @@ export function DashboardContent({
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <div className="border border-border bg-card p-6">
+        <div className="rounded-card border border-border bg-card p-6 shadow-soft">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="font-heading text-lg font-bold uppercase text-foreground">
               Prochaine séance
@@ -189,7 +196,7 @@ export function DashboardContent({
             <p className="mb-4 text-sm text-muted-foreground">Aucun programme attribué pour le moment.</p>
           ) : (
             <div className="mb-4 flex items-center gap-4">
-              <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center bg-primary">
+              <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-panel bg-primary">
                 <Dumbbell size={20} className="text-primary-foreground" />
               </div>
               <div>
@@ -198,7 +205,7 @@ export function DashboardContent({
                 </div>
                 <div className="mt-0.5 text-xs text-muted-foreground">
                   {useSupabase
-                    ? `${realHighlightedDay?.isToday ? "Aujourd'hui" : realHighlightedDay?.day} · ${realHighlightedSession!.durationMinutes} min · ${realHighlightedSession!.exercises.length} exercices`
+                    ? `${realHighlightedDay?.isToday ? "Aujourd'hui" : realHighlightedDay?.day} · ${realHighlightedSession!.durationMinutes} min${realHighlightMeta ? ` · ${realHighlightMeta}` : ""}`
                     : `${upcomingSession.day} · ${upcomingSession.time} · ${upcomingSession.durationMinutes} min · ${upcomingSession.exerciseCount} exercices`}
                 </div>
               </div>
@@ -206,13 +213,13 @@ export function DashboardContent({
           )}
           <Link
             href="/entrainement"
-            className="block border border-primary py-3 text-center text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+            className="pressable flex min-h-[44px] items-center justify-center rounded-control border border-primary text-center text-xs uppercase tracking-widest text-primary hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             Voir la séance
           </Link>
         </div>
 
-        <div className="border border-border bg-card p-6">
+        <div className="rounded-card border border-border bg-card p-6 shadow-soft">
           <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
             Plan alimentaire actif
           </h2>
@@ -232,7 +239,7 @@ export function DashboardContent({
           )}
           <Link
             href="/nutrition"
-            className="block border border-primary py-3 text-center text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+            className="pressable flex min-h-[44px] items-center justify-center rounded-control border border-primary text-center text-xs uppercase tracking-widest text-primary hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             Voir le plan
           </Link>
@@ -245,7 +252,7 @@ export function DashboardContent({
             .filter((a) => (a.status === "pending" || a.status === "confirmed") && new Date(a.startAt).getTime() >= new Date().getTime())
             .sort((a, b) => a.startAt.localeCompare(b.startAt))[0];
           return (
-            <div className="mt-6 border border-border bg-card p-6">
+            <div className="mt-6 rounded-card border border-border bg-card p-6 shadow-soft">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="font-heading text-lg font-bold uppercase text-foreground">Prochain rendez-vous</h2>
                 <Link href="/rendez-vous" className="text-xs uppercase tracking-wide text-primary hover:underline">
@@ -256,7 +263,7 @@ export function DashboardContent({
                 <p className="text-sm text-muted-foreground">Aucun rendez-vous à venir.</p>
               ) : (
                 <div className="flex items-center gap-4">
-                  <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center bg-primary">
+                  <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-panel bg-primary">
                     <CalendarDays size={20} className="text-primary-foreground" />
                   </div>
                   <div>
@@ -269,7 +276,7 @@ export function DashboardContent({
           );
         })()}
 
-      <div className="mt-6 border border-border bg-card p-6">
+      <div className="mt-6 rounded-card border border-border bg-card p-6 shadow-soft">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-heading text-lg font-bold uppercase text-foreground">
             Documents récents

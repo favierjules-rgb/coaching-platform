@@ -52,7 +52,7 @@ export function DocumentLibrary({
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Rechercher par titre, description ou catégorie…"
-          className="w-full border border-border bg-background py-3 pl-11 pr-4 text-sm text-foreground transition-colors focus:border-primary focus:outline-none"
+          className="w-full rounded-control border border-border bg-surface-soft py-3 pl-11 pr-4 text-sm text-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
         />
       </div>
 
@@ -62,7 +62,8 @@ export function DocumentLibrary({
             key={filter.key}
             type="button"
             onClick={() => setActiveFilter(filter.key)}
-            className={`border px-4 py-2 text-xs uppercase tracking-widest transition-colors ${
+            aria-pressed={activeFilter === filter.key}
+            className={`pressable min-h-[40px] rounded-full border px-4 py-2 text-xs uppercase tracking-widest focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
               activeFilter === filter.key
                 ? "border-primary bg-primary text-primary-foreground"
                 : "border-border text-muted-foreground hover:border-foreground hover:text-foreground"

@@ -12,7 +12,12 @@
     "test:training-blocks": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/training-blocks.mts",
     "test:training-block-editing": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/training-block-editing.mts",
     "test:block-view-model": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/block-view-model.mts",
-    "test:session-templates": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/session-templates.mts"
+    "test:session-templates": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/session-templates.mts",
+    "test:muscle-heatmap": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/muscle-heatmap.mts",
+    "test:muscle-overlays": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/muscle-overlays.mts",
+    "test:weight-chart": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/weight-chart.mts",
+    "test:session-summary": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/session-summary.mts",
+    "test:student-session-blocks": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/student-session-blocks.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

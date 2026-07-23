@@ -23,7 +23,7 @@ function formatWeightDelta(kg: number): string {
 
 function PhotoColumn({ photo, label }: { photo: ProgressPhoto; label: string }) {
   return (
-    <figure className="flex flex-col border border-border">
+    <figure className="flex flex-col overflow-hidden rounded-panel border border-border">
       {photo.imageUrl ? (
         // eslint-disable-next-line @next/next/no-img-element -- URL signée Supabase Storage, non compatible next/image (domaine dynamique)
         <img
@@ -32,7 +32,7 @@ function PhotoColumn({ photo, label }: { photo: ProgressPhoto; label: string }) 
           className="aspect-[3/4] w-full border-b border-border object-cover"
         />
       ) : (
-        <div className="flex aspect-[3/4] w-full flex-col items-center justify-center gap-2 border-b border-border bg-gradient-to-br from-zinc-900 to-black text-muted-foreground">
+        <div className="flex aspect-[3/4] w-full flex-col items-center justify-center gap-2 border-b border-border bg-surface-soft text-muted-foreground">
           <ImageOff size={22} aria-hidden="true" />
           <span className="text-[11px] uppercase tracking-widest">Image indisponible</span>
         </div>
@@ -60,7 +60,7 @@ export function BeforeAfterComparison({ before, after, coachComment }: BeforeAft
         <PhotoColumn photo={before} label="Avant" />
         <PhotoColumn photo={after} label="Après" />
       </div>
-      <div role="list" aria-label="Résumé de la comparaison" className="flex flex-wrap gap-x-6 gap-y-2 border border-border bg-background p-4 text-sm">
+      <div role="list" aria-label="Résumé de la comparaison" className="flex flex-wrap gap-x-6 gap-y-2 rounded-panel border border-border bg-surface-soft p-4 text-sm">
         {duration !== null && (
           <p role="listitem">
             <span className="text-muted-foreground">Durée : </span>
@@ -82,7 +82,7 @@ export function BeforeAfterComparison({ before, after, coachComment }: BeforeAft
         )}
       </div>
       {coachComment && (
-        <div className="border border-border bg-background p-4 text-sm">
+        <div className="rounded-panel border border-border bg-surface-soft p-4 text-sm">
           <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">Commentaire du coach</p>
           <p className="leading-relaxed text-foreground">{coachComment}</p>
         </div>

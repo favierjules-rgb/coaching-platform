@@ -153,6 +153,16 @@ export interface WorkoutSession {
    */
   sessionType?: SessionType;
   cardioBlocks?: AdminCardioBlock[];
+  /**
+   * Liste canonique ordonnée des blocs de la séance (chantier multi-blocs).
+   * Propagée telle quelle depuis AdminWorkoutSession.blocks — déjà composée par
+   * lib/supabase/programs.ts (couleurs, ordre, exercices/prescriptions réels).
+   * SOURCE d'affichage élève (cartes de séance, carte de chaleur musculaire) :
+   * les composants ne reconstruisent JAMAIS l'affichage depuis
+   * exercises[]/cardioBlocks[]. Optionnel pour rester compatible avec les
+   * séances mock/anciennes.
+   */
+  blocks?: TrainingBlock[];
   /** Photo bannière (V3, chantier module Programmation étape 4) — voir AdminWorkoutSession.bannerUrl. */
   bannerUrl?: string | null;
 }

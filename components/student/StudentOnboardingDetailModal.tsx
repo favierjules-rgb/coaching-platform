@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, ChevronDown, Info, Pencil, X } from "lucide-react";
 
 import { Field, SelectField, TextareaField, CheckboxField } from "@/components/admin/AdminFormFields";
@@ -28,10 +28,10 @@ function val(value: string): string {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <details className="group border border-border" open>
-      <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-xs font-bold uppercase tracking-wide text-foreground">
+    <details className="group overflow-hidden rounded-panel border border-border" open>
+      <summary className="flex min-h-[44px] cursor-pointer list-none items-center justify-between px-4 py-3 text-xs font-bold uppercase tracking-wide text-foreground transition-colors hover:bg-surface-soft/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40">
         {title}
-        <ChevronDown size={14} className="transition-transform group-open:rotate-180" />
+        <ChevronDown size={14} className="transition-transform group-open:rotate-180 motion-reduce:transition-none" />
       </summary>
       <div className="border-t border-border px-4 py-3">{children}</div>
     </details>
@@ -47,6 +47,23 @@ export function StudentOnboardingDetailModal({ student }: { student: OnboardingP
   const [form, setForm] = useState<OnboardingFormState>(emptyOnboardingForm);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  // Accessibilité dialogue : Échap ferme la modale (le focus retourne au
+  // déclencheur via close()). Aucun effet sur les données.
+  useEffect(() => {
+    if (!open) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpen(false);
+        setEditing(false);
+        setError(false);
+        triggerRef.current?.focus();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -123,14 +140,16 @@ export function StudentOnboardingDetailModal({ student }: { student: OnboardingP
     setOpen(false);
     setEditing(false);
     setError(false);
+    triggerRef.current?.focus();
   }
 
   return (
     <>
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen(true)}
-        className="border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+        className="pressable inline-flex min-h-[44px] items-center rounded-control border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
       >
         Voir mes informations complètes
       </button>
@@ -139,19 +158,19 @@ export function StudentOnboardingDetailModal({ student }: { student: OnboardingP
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Informations complètes"
+          aria-labelledby="onboarding-detail-title"
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
         >
-          <div className="flex max-h-[90vh] w-full max-w-2xl flex-col border border-border bg-card">
+          <div className="animate-fade-in flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-card border border-border bg-card shadow-soft">
             <div className="flex items-center justify-between border-b border-border px-6 py-4">
-              <h3 className="font-heading text-lg font-bold uppercase text-foreground">
+              <h3 id="onboarding-detail-title" className="font-heading text-lg font-bold uppercase text-foreground">
                 {editing ? "Modifier mes informations" : "Informations complètes"}
               </h3>
               <button
                 type="button"
                 onClick={close}
                 aria-label="Fermer"
-                className="text-muted-foreground transition-colors hover:text-foreground"
+                className="flex h-11 w-11 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-surface-soft hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
               >
                 <X size={18} />
               </button>
@@ -161,7 +180,7 @@ export function StudentOnboardingDetailModal({ student }: { student: OnboardingP
               {loading ? (
                 <p className="text-sm text-muted-foreground">Chargement…</p>
               ) : error ? (
-                <div className="mb-4 flex items-center gap-3 border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+                <div className="mb-4 flex items-center gap-3 rounded-control border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
                   <AlertTriangle size={18} className="flex-shrink-0" />
                   Échec de l&apos;enregistrement. Réessaie.
                 </div>
@@ -265,7 +284,7 @@ export function StudentOnboardingDetailModal({ student }: { student: OnboardingP
                   <button
                     type="button"
                     onClick={startEdit}
-                    className="mt-2 flex items-center justify-center gap-1.5 border border-primary bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
+                    className="pressable mt-2 flex min-h-[44px] items-center justify-center gap-1.5 rounded-control border border-primary bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                   >
                     <Pencil size={13} />
                     Modifier mes informations
@@ -381,7 +400,7 @@ export function StudentOnboardingDetailModal({ student }: { student: OnboardingP
                     <button
                       type="button"
                       onClick={() => setEditing(false)}
-                      className="flex-1 border border-border py-3 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+                      className="pressable min-h-[44px] flex-1 rounded-control border border-border py-3 text-xs uppercase tracking-widest text-muted-foreground hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                     >
                       Annuler
                     </button>
@@ -389,7 +408,7 @@ export function StudentOnboardingDetailModal({ student }: { student: OnboardingP
                       type="button"
                       onClick={handleSave}
                       disabled={saving}
-                      className="flex-1 bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
+                      className="pressable min-h-[44px] flex-1 rounded-control bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
                     >
                       {saving ? "Enregistrement…" : "Enregistrer"}
                     </button>

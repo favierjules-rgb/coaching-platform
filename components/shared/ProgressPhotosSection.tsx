@@ -122,7 +122,7 @@ export function ProgressPhotosSection({ gallery, defaultWeightKg = null }: Progr
         <button
           type="button"
           onClick={() => setUploadOpen(true)}
-          className="border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+          className="pressable inline-flex min-h-[44px] items-center rounded-control border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         >
           Ajouter une photo
         </button>
@@ -131,13 +131,13 @@ export function ProgressPhotosSection({ gallery, defaultWeightKg = null }: Progr
       {loading ? (
         <p className="text-sm text-muted-foreground">Chargement…</p>
       ) : sorted.length === 0 ? (
-        <div className="flex flex-col items-center justify-center gap-3 border border-dashed border-border py-10 text-center">
+        <div className="flex flex-col items-center justify-center gap-3 rounded-card border border-dashed border-border bg-surface-soft/40 py-10 text-center">
           <ImageOff size={22} className="text-muted-foreground" aria-hidden="true" />
           <p className="text-sm text-muted-foreground">Aucune photo de progression pour le moment.</p>
           <button
             type="button"
             onClick={() => setUploadOpen(true)}
-            className="border border-primary px-4 py-2 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+            className="pressable inline-flex min-h-[44px] items-center rounded-control border border-primary px-4 py-2 text-xs uppercase tracking-widest text-primary hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             Ajouter une photo
           </button>
@@ -169,7 +169,7 @@ export function ProgressPhotosSection({ gallery, defaultWeightKg = null }: Progr
           aria-label="Ajouter une photo de progression"
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
         >
-          <div className="flex max-h-[90vh] w-full max-w-md flex-col border border-border bg-card">
+          <div className="animate-fade-in flex max-h-[90vh] w-full max-w-md flex-col rounded-card border border-border bg-card shadow-soft">
             <div className="flex items-center justify-between border-b border-border px-6 py-4">
               <h3 className="font-heading text-lg font-bold uppercase text-foreground">Ajouter une photo</h3>
               <button
@@ -194,7 +194,7 @@ export function ProgressPhotosSection({ gallery, defaultWeightKg = null }: Progr
                     type="file"
                     accept="image/jpeg,image/png,image/webp"
                     onChange={handleFileChange}
-                    className="block w-full text-sm text-muted-foreground file:mr-4 file:border file:border-primary file:bg-transparent file:px-4 file:py-2 file:text-xs file:uppercase file:tracking-widest file:text-primary hover:file:bg-primary hover:file:text-primary-foreground"
+                    className="block w-full text-sm text-muted-foreground file:mr-4 file:rounded-control file:border file:border-primary file:bg-transparent file:px-4 file:py-2 file:text-xs file:uppercase file:tracking-widest file:text-primary hover:file:bg-primary hover:file:text-primary-foreground"
                   />
                 </div>
 
@@ -203,10 +203,10 @@ export function ProgressPhotosSection({ gallery, defaultWeightKg = null }: Progr
                   <img
                     src={previewUrl}
                     alt="Prévisualisation de la photo sélectionnée"
-                    className="aspect-[3/4] w-full max-w-[200px] border border-border object-cover"
+                    className="aspect-[3/4] w-full max-w-[200px] rounded-panel border border-border object-cover"
                   />
                 ) : (
-                  <div className="flex aspect-[3/4] w-full max-w-[200px] flex-col items-center justify-center gap-2 border border-dashed border-border text-muted-foreground">
+                  <div className="flex aspect-[3/4] w-full max-w-[200px] flex-col items-center justify-center gap-2 rounded-panel border border-dashed border-border text-muted-foreground">
                     <Camera size={22} aria-hidden="true" />
                     <span className="text-[11px] uppercase tracking-widest">Aucune image</span>
                   </div>
@@ -222,13 +222,13 @@ export function ProgressPhotosSection({ gallery, defaultWeightKg = null }: Progr
                 <Field label="Poids associé (kg, optionnel)" type="number" step="0.1" value={weight} onChange={setWeight} />
                 <Field label="Note (optionnel)" value={note} onChange={setNote} placeholder="Ex : bonne évolution ce mois-ci" />
 
-                {formError && <p className="text-xs text-red-400">{formError}</p>}
+                {formError && <p className="text-xs text-destructive">{formError}</p>}
 
                 <button
                   type="button"
                   onClick={handleSubmit}
                   disabled={!file || submitting}
-                  className="mt-1 w-full bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
+                  className="pressable mt-1 min-h-[44px] w-full rounded-control bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
                 >
                   {submitting ? "Envoi en cours…" : "Enregistrer la photo"}
                 </button>
@@ -247,7 +247,7 @@ export function ProgressPhotosSection({ gallery, defaultWeightKg = null }: Progr
           onClick={() => setViewingPhoto(null)}
         >
           <div
-            className="max-h-[90vh] w-full max-w-lg overflow-y-auto border border-border bg-card p-4"
+            className="animate-fade-in max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-card border border-border bg-card p-4 shadow-soft"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="mb-3 flex items-start justify-between gap-4">
@@ -269,7 +269,7 @@ export function ProgressPhotosSection({ gallery, defaultWeightKg = null }: Progr
               <img
                 src={viewingPhoto.imageUrl}
                 alt={`Photo de progression du ${formatDate(viewingPhoto.date)}`}
-                className="w-full object-contain"
+                className="rounded-panel w-full object-contain"
               />
             ) : (
               <p className="text-sm text-muted-foreground">Image indisponible.</p>
@@ -298,15 +298,15 @@ function PhotoCard({
   onDelete: () => void;
 }) {
   return (
-    <div className="group relative flex flex-col border border-border">
+    <div className="group relative flex flex-col overflow-hidden rounded-panel border border-border">
       <div className="absolute left-2 top-2 z-10 flex flex-wrap gap-1">
         {photo.isBeforeCandidate && (
-          <span className="border border-primary bg-black/80 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-primary">
+          <span className="rounded-full bg-foreground px-2 py-0.5 text-[10px] uppercase tracking-widest text-background shadow-sm">
             Avant
           </span>
         )}
         {photo.isAfterCandidate && (
-          <span className="border border-primary bg-black/80 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-primary">
+          <span className="rounded-full bg-foreground px-2 py-0.5 text-[10px] uppercase tracking-widest text-background shadow-sm">
             Après
           </span>
         )}
@@ -319,7 +319,7 @@ function PhotoCard({
           className="aspect-[3/4] w-full border-b border-border object-cover"
         />
       ) : (
-        <div className="flex aspect-[3/4] flex-col items-center justify-center gap-2 border-b border-border bg-gradient-to-br from-zinc-900 to-black text-muted-foreground">
+        <div className="flex aspect-[3/4] flex-col items-center justify-center gap-2 border-b border-border bg-surface-soft text-muted-foreground">
           <Camera size={22} aria-hidden="true" />
         </div>
       )}
@@ -335,7 +335,7 @@ function PhotoCard({
           <button
             type="button"
             onClick={onView}
-            className="border border-border px-2 py-1 text-[10px] uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+            className="pressable rounded-control border border-border px-2 py-1.5 text-[10px] uppercase tracking-widest text-muted-foreground hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             Voir
           </button>
@@ -343,7 +343,7 @@ function PhotoCard({
             type="button"
             onClick={onSelectBefore}
             aria-pressed={photo.isBeforeCandidate ?? false}
-            className={`flex items-center gap-1 border px-2 py-1 text-[10px] uppercase tracking-widest transition-colors ${
+            className={`pressable flex items-center gap-1 rounded-control border px-2 py-1.5 text-[10px] uppercase tracking-widest focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
               photo.isBeforeCandidate
                 ? "border-primary text-primary"
                 : "border-border text-muted-foreground hover:border-primary hover:text-primary"
@@ -356,7 +356,7 @@ function PhotoCard({
             type="button"
             onClick={onSelectAfter}
             aria-pressed={photo.isAfterCandidate ?? false}
-            className={`flex items-center gap-1 border px-2 py-1 text-[10px] uppercase tracking-widest transition-colors ${
+            className={`pressable flex items-center gap-1 rounded-control border px-2 py-1.5 text-[10px] uppercase tracking-widest focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
               photo.isAfterCandidate
                 ? "border-primary text-primary"
                 : "border-border text-muted-foreground hover:border-primary hover:text-primary"
@@ -369,7 +369,7 @@ function PhotoCard({
             type="button"
             onClick={onArchive}
             aria-label="Archiver cette photo"
-            className="border border-border p-1.5 text-muted-foreground transition-colors hover:border-amber-500/50 hover:text-amber-400"
+            className="pressable flex h-9 w-9 items-center justify-center rounded-control border border-border text-muted-foreground hover:border-warning/50 hover:text-warning focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             <Archive size={12} />
           </button>
@@ -377,7 +377,7 @@ function PhotoCard({
             type="button"
             onClick={onDelete}
             aria-label="Supprimer cette photo"
-            className="border border-border p-1.5 text-muted-foreground transition-colors hover:border-red-500/50 hover:text-red-400"
+            className="pressable flex h-9 w-9 items-center justify-center rounded-control border border-border text-muted-foreground hover:border-destructive/50 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40"
           >
             <Trash2 size={12} />
           </button>

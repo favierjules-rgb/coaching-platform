@@ -99,6 +99,11 @@ export function toEleveWorkoutSession(session: AdminWorkoutSession): WorkoutSess
     // components/student/CardioBlocksSection.tsx.
     sessionType: session.sessionType,
     cardioBlocks: session.cardioBlocks,
+    // Multi-blocs : liste canonique déjà composée par lib/supabase/programs.ts
+    // (couleurs/ordre réels). Propagée au bord élève pour l'affichage des cartes
+    // de séance et de la carte de chaleur musculaire — jamais recomposée depuis
+    // exercises[]/cardioBlocks[] dans les composants.
+    blocks: session.blocks,
     bannerUrl: session.bannerUrl,
   };
 }

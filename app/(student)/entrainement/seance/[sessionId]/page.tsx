@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft, Flame, MessageSquare } from "lucide-react";
 
-import { CardioBlocksSection } from "@/components/student/CardioBlocksSection";
+import { MuscleHeatmapSection } from "@/components/student/MuscleHeatmapSection";
 import { SessionAnalysisSection } from "@/components/student/SessionAnalysisSection";
 import { SessionFeedbackSection } from "@/components/student/SessionFeedbackSection";
 import {
@@ -43,7 +43,7 @@ export default function SessionDetailPage() {
         <div>
           <Link
             href="/entrainement"
-            className="mb-6 inline-flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-foreground"
+            className="mb-6 inline-flex min-h-[44px] w-fit items-center gap-2 rounded-control text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             <ArrowLeft size={14} />
             Entraînement
@@ -57,7 +57,7 @@ export default function SessionDetailPage() {
       <div>
         <Link
           href={realProgramId ? `/entrainement/${realProgramId}` : "/entrainement"}
-          className="mb-6 inline-flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-foreground"
+          className="mb-6 inline-flex min-h-[44px] w-fit items-center gap-2 rounded-control text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         >
           <ArrowLeft size={14} />
           {realProgramName ?? "Entraînement"}
@@ -65,7 +65,7 @@ export default function SessionDetailPage() {
 
         {realSession.bannerUrl && (
           // eslint-disable-next-line @next/next/no-img-element -- bucket Storage public, URL externe
-          <img src={realSession.bannerUrl} alt="" className="mb-6 h-48 w-full border border-border object-cover" />
+          <img src={realSession.bannerUrl} alt="" className="mb-6 h-48 w-full rounded-card border border-border object-cover" />
         )}
 
         <div className="mb-8">
@@ -83,8 +83,12 @@ export default function SessionDetailPage() {
 
         <SessionAnalysisSection session={{ ...realSession, muscleGroup: realSession.muscleGroups }} />
 
+        <div className="mb-8">
+          <MuscleHeatmapSection blocks={realSession.blocks ?? []} />
+        </div>
+
         {realSession.warmup && (
-          <div className="mb-8 flex items-start gap-4 border border-border bg-card p-6">
+          <div className="mb-8 flex items-start gap-4 rounded-card border border-border bg-card p-6 shadow-soft">
             <Flame size={20} className="mt-0.5 flex-shrink-0 text-primary" />
             <div>
               <h2 className="mb-1 font-heading text-sm font-bold uppercase text-foreground">Échauffement</h2>
@@ -94,7 +98,7 @@ export default function SessionDetailPage() {
         )}
 
         {realSession.coachNotes && (
-          <div className="mb-8 flex items-start gap-4 border border-border bg-card p-6">
+          <div className="mb-8 flex items-start gap-4 rounded-card border border-border bg-card p-6 shadow-soft">
             <MessageSquare size={20} className="mt-0.5 flex-shrink-0 text-primary" />
             <div>
               <h2 className="mb-1 font-heading text-sm font-bold uppercase text-foreground">Notes du coach</h2>
@@ -103,14 +107,14 @@ export default function SessionDetailPage() {
           </div>
         )}
 
-        <CardioBlocksSection blocks={realSession.cardioBlocks ?? []} />
-
         <SessionFeedbackSection
           studentId={supabaseTraining.studentId ?? ""}
           sessionId={realSession.id}
           programId={realProgramId}
           sessionRefLabel={realSession.name}
+          blocks={realSession.blocks}
           exercises={realSession.exercises}
+          cardioBlocks={realSession.cardioBlocks}
           sessionMuscleGroup={realSession.muscleGroups}
         />
       </div>
@@ -124,7 +128,7 @@ export default function SessionDetailPage() {
       <div>
         <Link
           href="/entrainement"
-          className="mb-6 inline-flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-foreground"
+          className="mb-6 inline-flex min-h-[44px] w-fit items-center gap-2 rounded-control text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         >
           <ArrowLeft size={14} />
           Entraînement
@@ -158,7 +162,7 @@ export default function SessionDetailPage() {
 
       <SessionAnalysisSection session={{ ...session, muscleGroup: session.muscleGroups }} />
 
-      <div className="mb-8 flex items-start gap-4 border border-border bg-card p-6">
+      <div className="mb-8 flex items-start gap-4 rounded-card border border-border bg-card p-6 shadow-soft">
         <Flame size={20} className="mt-0.5 flex-shrink-0 text-primary" />
         <div>
           <h2 className="mb-1 font-heading text-sm font-bold uppercase text-foreground">
@@ -170,7 +174,7 @@ export default function SessionDetailPage() {
         </div>
       </div>
 
-      <div className="mb-8 flex items-start gap-4 border border-border bg-card p-6">
+      <div className="mb-8 flex items-start gap-4 rounded-card border border-border bg-card p-6 shadow-soft">
         <MessageSquare size={20} className="mt-0.5 flex-shrink-0 text-primary" />
         <div>
           <h2 className="mb-1 font-heading text-sm font-bold uppercase text-foreground">
@@ -187,7 +191,9 @@ export default function SessionDetailPage() {
         sessionId={session.id}
         programId={program?.id ?? null}
         sessionRefLabel={session.name}
+        blocks={session.blocks}
         exercises={session.exercises}
+        cardioBlocks={session.cardioBlocks}
         sessionMuscleGroup={session.muscleGroups}
       />
     </div>

@@ -4,18 +4,22 @@ import { useState, type FormEvent } from "react";
 import { CheckCircle } from "lucide-react";
 
 import { ExerciseFeedbackCard } from "@/components/student/ExerciseFeedbackCard";
+import { StudentSessionBlockList } from "@/components/student/StudentSessionBlockList";
 import { TrainingStatCards } from "@/components/shared/TrainingMetricsSummary";
 import { useAdminData } from "@/hooks/useAdminData";
 import { useSupabaseWorkoutFeedback } from "@/hooks/useSupabaseWorkoutFeedback";
+import { orderedStrengthExercises, orderedStudentSessionBlocks } from "@/lib/student-session-blocks";
 import { calculatePlannedVsActualMetrics, formatTonnage } from "@/lib/training-metrics";
 import { isUuid } from "@/lib/uuid";
 import type {
   ActualSetEntry,
+  AdminCardioBlock,
   AdminExerciseFeedbackEntry,
   AdminStudentFeedback,
   Exercise,
   ExerciseFeedback,
   ExerciseFeedbackPayload,
+  TrainingBlock,
 } from "@/types";
 
 const rpeOptions = Array.from({ length: 10 }, (_, index) => index + 1);
@@ -104,7 +108,7 @@ function PlannedVsActualSummary({
         <p className="mt-4 text-sm text-foreground">
           Tonnage réalisé : {formatTonnage(plannedVsActual.actual.totalTonnageKg)} / prévu :{" "}
           {formatTonnage(plannedVsActual.planned.totalTonnageKg)}{" "}
-          <span className={plannedVsActual.tonnageDeltaKg >= 0 ? "text-green-400" : "text-red-400"}>
+          <span className={plannedVsActual.tonnageDeltaKg >= 0 ? "text-success" : "text-destructive"}>
             ({plannedVsActual.tonnageDeltaKg >= 0 ? "+" : ""}
             {Math.round(plannedVsActual.tonnageDeltaKg).toLocaleString("fr-FR")} kg)
           </span>
@@ -119,7 +123,11 @@ interface SessionFeedbackSectionProps {
   sessionId: string;
   programId: string | null;
   sessionRefLabel: string;
-  exercises: Exercise[];
+  /** Source CANONIQUE du rendu du détail : liste ordonnée de blocs (`session.blocks[]`). */
+  blocks?: TrainingBlock[];
+  /** Legacy — utilisé UNE seule fois si `blocks[]` est absent (ancienne séance). */
+  exercises?: Exercise[];
+  cardioBlocks?: AdminCardioBlock[];
   sessionMuscleGroup: string;
 }
 
@@ -137,9 +145,17 @@ export function SessionFeedbackSection({
   sessionId,
   programId,
   sessionRefLabel,
+  blocks,
   exercises,
+  cardioBlocks,
   sessionMuscleGroup,
 }: SessionFeedbackSectionProps) {
+  // Normalisation UNIQUE à la frontière : `blocks[]` si présent, sinon legacy.
+  // Le rendu (liste ordonnée + état de retour + analyse) ne manipule ensuite
+  // QUE `blockViews` / `strengthExercises`.
+  const blockViews = orderedStudentSessionBlocks({ blocks, exercises, cardioBlocks });
+  const strengthExercises = orderedStrengthExercises(blockViews);
+
   const { state, addFeedback } = useAdminData();
   const mockExistingFeedback = state.feedback.find(
     (f) => f.studentId === studentId && f.sessionId === sessionId && f.type === "entrainement",
@@ -153,7 +169,7 @@ export function SessionFeedbackSection({
   const existingFeedback = supabaseFeedback.active ? supabaseFeedback.existingFeedback : mockExistingFeedback;
 
   const [exerciseFeedback, setExerciseFeedback] = useState(() =>
-    buildInitialFeedback(exercises, studentId, sessionId),
+    buildInitialFeedback(strengthExercises, studentId, sessionId),
   );
   const [completed, setCompleted] = useState(false);
   const [globalRpe, setGlobalRpe] = useState("");
@@ -283,7 +299,7 @@ export function SessionFeedbackSection({
         </div>
 
         <PlannedVsActualSummary
-          exercises={exercises}
+          exercises={strengthExercises}
           sessionId={sessionId}
           sessionMuscleGroup={sessionMuscleGroup}
           exerciseEntries={existingFeedback.exerciseEntries}
@@ -294,26 +310,22 @@ export function SessionFeedbackSection({
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-6">
-      <div>
-        <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
-          Exercices
-        </h2>
-        <div className="flex flex-col gap-4">
-          {exercises.map((exercise, index) => (
-            <ExerciseFeedbackCard
-              key={exercise.id}
-              exercise={exercise}
-              index={index}
-              feedback={exerciseFeedback[exercise.id]}
-              onSetChange={(setNumber, field, value) =>
-                handleSetChange(exercise.id, setNumber, field, value)
-              }
-              onRpeChange={(value) => handleRpeChange(exercise.id, value)}
-              onCommentChange={(value) => handleCommentChange(exercise.id, value)}
-            />
-          ))}
-        </div>
-      </div>
+      {/* SEULE source de rendu : la liste ordonnée de blocs. Chaque bloc
+          Strength affiche ses propres exercices (ordre canonique) ; chaque bloc
+          Cardio est rendu à sa position. Jamais de liste globale aplatie. */}
+      <StudentSessionBlockList
+        blocks={blockViews}
+        renderStrengthExercise={(exercise, index) => (
+          <ExerciseFeedbackCard
+            exercise={exercise}
+            index={index}
+            feedback={exerciseFeedback[exercise.id]}
+            onSetChange={(setNumber, field, value) => handleSetChange(exercise.id, setNumber, field, value)}
+            onRpeChange={(value) => handleRpeChange(exercise.id, value)}
+            onCommentChange={(value) => handleCommentChange(exercise.id, value)}
+          />
+        )}
+      />
 
       <div className="border border-border bg-card p-6">
         <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">

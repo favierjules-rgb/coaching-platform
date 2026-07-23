@@ -134,8 +134,8 @@ function MeasurementTile({
     progressing === null
       ? "text-foreground"
       : progressing
-        ? "text-green-400"
-        : "text-red-400";
+        ? "text-success"
+        : "text-destructive";
 
   const entries = history
     .filter((entry) => entry.key === measurementKey)

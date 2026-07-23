@@ -8,7 +8,7 @@ const statusStyles: Record<DocumentStatus, string> = {
 export function DocumentStatusBadge({ status }: { status: DocumentStatus }) {
   return (
     <span
-      className={`inline-block whitespace-nowrap border px-2.5 py-1 text-[10px] uppercase tracking-widest ${statusStyles[status]}`}
+      className={`inline-block whitespace-nowrap rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-widest ${statusStyles[status]}`}
     >
       {status}
     </span>

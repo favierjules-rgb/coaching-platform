@@ -19,7 +19,7 @@ export function SessionAnalysisSection({ session }: { session: MetricsSessionInp
   const plannedMetrics = calculateSessionMetrics(session, selectedMuscleGroup);
 
   return (
-    <div className="mb-8 border border-border bg-card p-6">
+    <div className="mb-8 rounded-card border border-border bg-card p-6 shadow-soft">
       <h2 className="mb-4 flex items-center gap-2 font-heading text-sm font-bold uppercase text-foreground">
         <BarChart3 size={16} className="text-primary" />
         Analyse de la séance (prévu)
