@@ -190,10 +190,20 @@ export async function saveTrainingSessionBlocks(
   // générés (`Functions: Record<string, never>`) — la typer là-bas perturbait
   // l'inférence de relations de supabase-js ailleurs. On type donc localement
   // ce seul appel, sans toucher aux types globaux.
-  const rpc = supabase.rpc as unknown as (
-    fn: "save_training_session_blocks",
-    args: { p_payload: Record<string, unknown> },
-  ) => Promise<{ data: unknown; error: { message: string } | null }>;
+  //
+  // `.bind(supabase)` est OBLIGATOIRE : `SupabaseClient.rpc` est une méthode qui
+  // s'appuie sur `this` (elle délègue à `this.rest`). L'extraire dans une
+  // variable puis l'appeler « nue » (`const rpc = supabase.rpc; rpc(...)`)
+  // détache `this` → `this.rest` devient `undefined` et lève
+  // « Cannot read properties of undefined (reading 'rest') » AVANT tout réseau.
+  // Le double appelant (create/update via ce wrapper) passe donc toujours par
+  // une fonction correctement liée au client.
+  const rpc = (
+    supabase.rpc as unknown as (
+      fn: "save_training_session_blocks",
+      args: { p_payload: Record<string, unknown> },
+    ) => Promise<{ data: unknown; error: { message: string } | null }>
+  ).bind(supabase);
   const { data, error } = await rpc("save_training_session_blocks", { p_payload: payload });
   if (error) {
     throw new Error(`saveTrainingSessionBlocks : ${error.message}`);

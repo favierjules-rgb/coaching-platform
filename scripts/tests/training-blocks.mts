@@ -715,6 +715,91 @@ async function runAsync() {
     assert.equal(nextBuilderState(before, outcome).revision, 2, "aucun remount sur échec");
   });
 
+  // ── Non-régression : liaison `this` de supabase.rpc ─────────────────────────
+  // Bug détecté en validation navigateur : `const rpc = supabase.rpc; rpc(...)`
+  // détache `this` → supabase-js lit `this.rest` sur `undefined` et lève AVANT
+  // tout réseau. Le fake makeFakeSupabase ci-dessus a un `rpc` qui n'utilise PAS
+  // `this` : il ne pouvait donc PAS révéler le bug. Ces cas utilisent un client
+  // dont `rpc` DÉPEND de `this` (lecture de this.rest, comme le vrai client).
+  class ThisBoundRpcClient {
+    readonly rest = { url: "https://fake.local" };
+    received: { fn: string; payload: Record<string, unknown> } | null = null;
+    constructor(
+      private readonly result: unknown,
+      private readonly error: { message: string } | null = null,
+    ) {}
+    rpc(fn: string, args: { p_payload: Record<string, unknown> }) {
+      void this.rest.url; // dépend de `this` AVANT tout traitement (this perdu → lève ici)
+      this.received = { fn, payload: args.p_payload };
+      return Promise.resolve({ data: this.result, error: this.error });
+    }
+  }
+
+  const rpcBindInput = {
+    sessionId: SESSION_UUID,
+    expectedUpdatedAt: "2026-07-22T10:00:00.000Z",
+    blocks: [strengthBlock(`new-block:${CLIENT_UUID}`, 0)],
+  };
+
+  await atest("liaison RPC — ancienne impl (méthode détachée) : this perdu → échec avant réseau", async () => {
+    const client = new ThisBoundRpcClient(RPC_OK);
+    // Reproduit `const rpc = supabase.rpc` en passant par un type structurel
+    // (fonction plain, pas une méthode de classe) pour ne pas dépendre d'une règle lint.
+    const asPlain = client as unknown as { rpc: (fn: string, args: unknown) => unknown };
+    const detached = asPlain.rpc;
+    assert.throws(
+      () => detached("save_training_session_blocks", { p_payload: {} }),
+      /Cannot read properties of undefined/,
+      "l'appel détaché DOIT échouer (preuve que le fake dépend réellement de this)",
+    );
+    // Le MÊME client, lié, fonctionne → isole bien la cause (perte de this).
+    const bound = asPlain.rpc.bind(client);
+    const out = (await bound("save_training_session_blocks", { p_payload: { ok: true } })) as { error: unknown };
+    assert.equal(out.error, null);
+  });
+
+  await atest("liaison RPC — nouvelle impl : saveTrainingSessionBlocks lie this → succès sur client this-dépendant", async () => {
+    const client = new ThisBoundRpcClient(RPC_OK);
+    const res = await saveTrainingSessionBlocks(client as unknown as SupabaseClient<Database>, rpcBindInput);
+    assert.equal(res.sessionId, SESSION_UUID);
+    assert.equal(res.updatedAt, "2026-07-22T10:00:00.000Z");
+    assert.equal(res.sessionType, "mixed");
+    assert.ok(client.received, "la RPC a bien été atteinte (this conservé)");
+  });
+
+  await atest("liaison RPC — payload transmis SANS modification", async () => {
+    const client = new ThisBoundRpcClient(RPC_OK);
+    await saveTrainingSessionBlocks(client as unknown as SupabaseClient<Database>, rpcBindInput);
+    assert.equal(client.received?.fn, "save_training_session_blocks");
+    assert.deepEqual(client.received?.payload, {
+      session_id: SESSION_UUID,
+      expected_updated_at: "2026-07-22T10:00:00.000Z",
+      blocks: [{ id: `new-block:${CLIENT_UUID}`, category: "strength", title: null, color_key: "gray", exercises: [] }],
+    });
+  });
+
+  await atest("liaison RPC — erreur métier RPC (STALE) propagée à travers l'appel lié", async () => {
+    const client = new ThisBoundRpcClient(null, { message: "STALE_TRAINING_SESSION" });
+    await assert.rejects(
+      () => saveTrainingSessionBlocks(client as unknown as SupabaseClient<Database>, rpcBindInput),
+      /STALE_TRAINING_SESSION/,
+    );
+  });
+
+  await atest("liaison RPC — exception synchrone du client propagée (aucun try/catch ne la masque)", async () => {
+    class ThrowingRpcClient {
+      readonly rest = { url: "x" };
+      rpc(): Promise<{ data: unknown; error: { message: string } | null }> {
+        throw new Error("BOOM_RPC");
+      }
+    }
+    await assert.rejects(
+      () => saveTrainingSessionBlocks(new ThrowingRpcClient() as unknown as SupabaseClient<Database>, rpcBindInput),
+      /BOOM_RPC/,
+      "l'exception du client doit remonter telle quelle",
+    );
+  });
+
   console.log(`\n${passed} test(s) réussi(s), ${failed} échec(s).`);
   if (failed > 0) process.exit(1);
 }
