@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import Link from "next/link";
 import {
-  AlertTriangle,
   ArrowLeft,
   Check,
   ChevronLeft,
@@ -20,13 +19,20 @@ import {
   Settings,
 } from "lucide-react";
 
-import { DayCard, restDaySession } from "@/components/admin/ProgramBuilder";
+import { restDaySession } from "@/components/admin/ProgramBuilder";
+import { SessionBlockPanel } from "@/components/admin/blocks/SessionBlockPanel";
+import { BLOCK_COLOR_STYLES, blockCategoryLabel } from "@/components/admin/blocks/block-view-model";
 import { BannerUploadField } from "@/components/admin/BannerUploadField";
 import { CheckboxField, Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
 import { Modal, PrimaryButton } from "@/components/admin/Modal";
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
 import { contentStatusLabels, generateId, weekDays } from "@/lib/admin";
-import { cloneCardioBlock } from "@/lib/cardio";
+import {
+  normalizeBuilderSession,
+  normalizeColorKey,
+  regenerateBlockIdsForDuplication,
+  type BuilderWorkoutSession,
+} from "@/lib/training-block-editing";
 import { useSupabaseSubscriptionTemplates } from "@/hooks/useSupabaseSubscriptionTemplates";
 import { formatAmountCents } from "@/lib/stripe/status";
 import type { AdminContentStatus, AdminProgram, AdminWorkoutSession, ExerciseLibraryItem, SessionTemplate } from "@/types";
@@ -84,7 +90,7 @@ function DayGridCell({
   onDragEnd,
   isDropTarget,
 }: {
-  session: AdminWorkoutSession;
+  session: BuilderWorkoutSession;
   isSelected: boolean;
   onSelect: () => void;
   // Glisser-déposer entre jours de la semaine affichée (voir
@@ -117,25 +123,25 @@ function DayGridCell({
       ) : (
         <>
           <span className="text-sm font-bold text-foreground">{session.name || "(sans nom)"}</span>
-          {(session.sessionType ?? "strength") !== "cardio" && (
-            <span className="text-[11px] text-muted-foreground">
-              {session.exercises.length} exercice{session.exercises.length > 1 ? "s" : ""}
-            </span>
-          )}
-          {(session.sessionType ?? "strength") !== "strength" && (
-            <span className="text-[11px] text-muted-foreground">
-              {(session.cardioBlocks ?? []).length} bloc{(session.cardioBlocks ?? []).length > 1 ? "s" : ""} cardio
-            </span>
-          )}
-          {session.exercises.length > 0 && (
-            <ul className="mt-1 flex flex-col gap-0.5">
-              {session.exercises.slice(0, 3).map((ex) => (
-                <li key={ex.id} className="truncate text-[11px] text-muted-foreground">
-                  {ex.name || "(sans nom)"}
-                </li>
-              ))}
-              {session.exercises.length > 3 && (
-                <li className="text-[11px] text-muted-foreground">+{session.exercises.length - 3} autre(s)</li>
+          <span className="text-[11px] text-muted-foreground">
+            {session.blocks.length} bloc{session.blocks.length > 1 ? "s" : ""}
+          </span>
+          {session.blocks.length > 0 && (
+            <ul className="mt-1 flex flex-col gap-1">
+              {session.blocks.slice(0, 3).map((block) => {
+                const c = BLOCK_COLOR_STYLES[normalizeColorKey(block.colorKey, block.category === "cardio" ? "blue" : "gray")];
+                return (
+                  <li
+                    key={block.id}
+                    className={`flex items-center gap-1.5 rounded-md border border-border border-l-2 ${c.borderLeft} ${c.softBg} px-1.5 py-1`}
+                  >
+                    <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${c.dot}`} aria-hidden="true" />
+                    <span className="truncate text-[10px] font-medium text-foreground">{blockCategoryLabel(block.category)}</span>
+                  </li>
+                );
+              })}
+              {session.blocks.length > 3 && (
+                <li className="pl-1 text-[10px] text-muted-foreground">+{session.blocks.length - 3} autre(s)</li>
               )}
             </ul>
           )}
@@ -155,6 +161,9 @@ export function ProgramBuilderFullscreen({
   program: AdminProgram;
   library: ExerciseLibraryItem[];
   onSave: (data: BuilderData) => Promise<boolean>;
+  // Modèles de séance CANONIQUES (dernière passe Lot 4) : le picker et
+  // « Enregistrer comme modèle » sont câblés dans SessionBlockPanel ; le contenu
+  // est stocké/lu en blocks[] (voir lib/session-template-content.ts).
   templates?: SessionTemplate[];
   onSaveAsTemplate?: (session: AdminWorkoutSession, name: string, description: string) => Promise<boolean>;
 }) {
@@ -177,7 +186,11 @@ export function ProgramBuilderFullscreen({
   // qu'actives à un visiteur anonyme).
   const { templates: subscriptionTemplates } = useSupabaseSubscriptionTemplates(true);
   const oneTimeTemplates = subscriptionTemplates.filter((t) => t.billingInterval === "one_time");
-  const [sessions, setSessions] = useState<AdminWorkoutSession[]>(program.sessions);
+  // État canonique du builder : chaque séance est normalisée UNE FOIS vers
+  // `blocks[]` à l'initialisation (Lot 4.1). À partir d'ici, le builder vit
+  // exclusivement en `blocks[]` — `exercises[]`/`cardioBlocks[]` ne sont plus la
+  // source de vérité et ne sont plus édités.
+  const [sessions, setSessions] = useState<BuilderWorkoutSession[]>(() => program.sessions.map((s) => normalizeBuilderSession(s)));
 
   const weekNumbers = useMemo(
     () => Array.from(new Set(sessions.map((s) => s.weekNumber))).sort((a, b) => a - b),
@@ -251,15 +264,19 @@ export function ProgramBuilderFullscreen({
     }
   }
 
-  function cloneWeekSessions(sourceWeek: number, targetWeek: number): AdminWorkoutSession[] {
+  function cloneWeekSessions(sourceWeek: number, targetWeek: number): BuilderWorkoutSession[] {
     return sessions
       .filter((s) => s.weekNumber === sourceWeek)
       .map((s) => ({
         ...s,
         id: generateId("sess"),
         weekNumber: targetWeek,
-        exercises: s.exercises.map((ex) => ({ ...ex, id: generateId("ex") })),
-        cardioBlocks: (s.cardioBlocks ?? []).map(cloneCardioBlock),
+        // Duplication canonique : nouveaux ids temporaires stricts pour tous les
+        // blocs/exercices (source intacte). Les tableaux hérités ne portent pas
+        // le contenu du builder.
+        blocks: regenerateBlockIdsForDuplication(s.blocks),
+        exercises: [],
+        cardioBlocks: [],
       }));
   }
 
@@ -269,7 +286,7 @@ export function ProgramBuilderFullscreen({
       const sourceWeek = Math.max(...weekNumbers);
       setSessions((prev) => [...prev, ...cloneWeekSessions(sourceWeek, nextWeek)]);
     } else {
-      setSessions((prev) => [...prev, ...weekDays.map((day) => restDaySession(nextWeek, day))]);
+      setSessions((prev) => [...prev, ...weekDays.map((day) => normalizeBuilderSession(restDaySession(nextWeek, day)))]);
     }
     setDurationWeeks((prev) => Math.max(prev, nextWeek));
     setSelectedWeek(nextWeek);
@@ -284,12 +301,12 @@ export function ProgramBuilderFullscreen({
     markDirty();
   }
 
-  function updateSession(sessionId: string, updated: AdminWorkoutSession) {
+  function updateSession(sessionId: string, updated: BuilderWorkoutSession) {
     setSessions((prev) => prev.map((s) => (s.id === sessionId ? updated : s)));
     markDirty();
   }
 
-  function duplicateSessionToNextWeek(session: AdminWorkoutSession) {
+  function duplicateSessionToNextWeek(session: BuilderWorkoutSession) {
     const target = sessions.find((s) => s.weekNumber === session.weekNumber + 1 && s.day === session.day);
     if (!target) return;
     setSessions((prev) =>
@@ -299,8 +316,10 @@ export function ProgramBuilderFullscreen({
               ...session,
               id: target.id,
               weekNumber: target.weekNumber,
-              exercises: session.exercises.map((ex) => ({ ...ex, id: generateId("ex") })),
-              cardioBlocks: (session.cardioBlocks ?? []).map(cloneCardioBlock),
+              // Duplication canonique : nouveaux ids temporaires stricts, source intacte.
+              blocks: regenerateBlockIdsForDuplication(session.blocks),
+              exercises: [],
+              cardioBlocks: [],
             }
           : s,
       ),
@@ -333,9 +352,9 @@ export function ProgramBuilderFullscreen({
             durationMinutes: target.durationMinutes,
             warmup: target.warmup,
             coachNotes: target.coachNotes,
-            exercises: target.exercises,
-            sessionType: target.sessionType,
-            cardioBlocks: target.cardioBlocks,
+            // Modèle canonique : on échange les blocs (source de vérité). Les
+            // tableaux hérités ne sont plus lus par le builder.
+            blocks: target.blocks,
             bannerUrl: target.bannerUrl,
           };
         }
@@ -348,9 +367,7 @@ export function ProgramBuilderFullscreen({
             durationMinutes: source.durationMinutes,
             warmup: source.warmup,
             coachNotes: source.coachNotes,
-            exercises: source.exercises,
-            sessionType: source.sessionType,
-            cardioBlocks: source.cardioBlocks,
+            blocks: source.blocks,
             bannerUrl: source.bannerUrl,
           };
         }
@@ -374,7 +391,7 @@ export function ProgramBuilderFullscreen({
   }
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
+    <div className="flex min-h-dvh flex-col bg-background text-foreground lg:h-dvh lg:overflow-hidden">
       {/* Barre du haut — jamais de sidebar admin ni de menu tableau de bord ici (voir AdminShell). */}
       <div className="flex h-14 flex-shrink-0 items-center justify-between gap-3 border-b border-border bg-card px-4">
         <div className="flex min-w-0 items-center gap-3">
@@ -446,21 +463,13 @@ export function ProgramBuilderFullscreen({
         </div>
       </div>
 
-      {/* Garde-fou petit écran — les deux panneaux latéraux ont une largeur
-          fixe (w-56 + w-[420px], voir plus bas), non responsive : sous ce
-          seuil, purement informatif, ne modifie ni la mise en page ni le
-          fonctionnement (repliage manuel des panneaux toujours disponible
-          via les boutons Panel*Open/Close). */}
-      <div className="flex items-center gap-2 border-b border-warning/40 bg-warning/10 px-4 py-2 text-xs text-warning min-[1200px]:hidden">
-        <AlertTriangle size={14} className="flex-shrink-0" />
-        Cet éditeur est optimisé pour les écrans larges (1200px et plus). Sur un écran plus petit, replie les panneaux
-        latéraux ou agrandis la fenêtre pour plus de confort.
-      </div>
-
-      <div className="flex min-h-0 flex-1">
+      {/* Shell responsive (Lot 4 dernière passe) : colonne unique sur mobile/
+          tablette (la page défile), disposition 3 panneaux à largeur fixe sur
+          desktop (lg+, chaque panneau défile indépendamment). */}
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         {/* Panneau gauche — navigation semaines (repliable). */}
         {leftOpen && (
-          <div className="flex w-56 flex-shrink-0 flex-col gap-3 overflow-y-auto border-r border-border bg-card p-3">
+          <div className="flex w-full flex-shrink-0 flex-col gap-3 border-b border-border bg-card p-3 lg:w-56 lg:border-b-0 lg:border-r lg:overflow-y-auto">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Semaines</span>
               <button type="button" onClick={() => setLeftOpen(false)} aria-label="Masquer le panneau" className="text-muted-foreground hover:text-foreground">
@@ -510,7 +519,7 @@ export function ProgramBuilderFullscreen({
         )}
 
         {/* Zone centrale — grille 7 jours, jamais de scroll horizontal (voir spec V3). */}
-        <div className="flex min-w-0 flex-1 flex-col overflow-y-auto p-4">
+        <div className="flex min-w-0 flex-1 flex-col p-4 lg:overflow-y-auto">
           <div className="mb-3 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               {!leftOpen && (
@@ -582,7 +591,7 @@ export function ProgramBuilderFullscreen({
 
         {/* Panneau droit — édition détaillée de la séance sélectionnée (repliable). */}
         {rightOpen && (
-          <div className="flex w-[420px] flex-shrink-0 flex-col overflow-y-auto border-l border-border bg-card p-3">
+          <div className="flex w-full flex-shrink-0 flex-col border-t border-border bg-card p-3 lg:w-[420px] lg:border-t-0 lg:border-l lg:overflow-y-auto">
             <div className="mb-2 flex items-center justify-between">
               <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Édition de la séance</span>
               <button type="button" onClick={() => setRightOpen(false)} aria-label="Masquer le panneau" className="text-muted-foreground hover:text-foreground">
@@ -590,13 +599,15 @@ export function ProgramBuilderFullscreen({
               </button>
             </div>
             {selectedSession ? (
-              <DayCard
+              <SessionBlockPanel
                 key={selectedSession.id}
                 session={selectedSession}
-                nextWeekSession={sessions.find((s) => s.weekNumber === selectedSession.weekNumber + 1 && s.day === selectedSession.day)}
                 library={library}
-                onUpdate={(updated) => updateSession(selectedSession.id, updated)}
+                onChange={(updated) => updateSession(selectedSession.id, updated)}
                 onDuplicate={() => duplicateSessionToNextWeek(selectedSession)}
+                canDuplicate={Boolean(
+                  sessions.find((s) => s.weekNumber === selectedSession.weekNumber + 1 && s.day === selectedSession.day)?.isRestDay,
+                )}
                 templates={templates}
                 onSaveAsTemplate={onSaveAsTemplate}
               />

@@ -120,7 +120,7 @@ export function restDaySession(weekNumber: number, day: string): AdminWorkoutSes
   };
 }
 
-function ExerciseRow({
+export function ExerciseRow({
   exercise,
   onChange,
   onRemove,
@@ -161,7 +161,7 @@ function ExerciseRow({
             draggable
             onDragStart={onDragStart}
             title="Glisser pour réordonner"
-            className="cursor-grab text-muted-foreground hover:text-foreground"
+            className="inline-flex min-h-11 min-w-11 cursor-grab items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
           >
             <GripVertical size={14} />
           </span>
@@ -178,7 +178,7 @@ function ExerciseRow({
             onClick={() => onMove("up")}
             disabled={isFirst}
             aria-label="Déplacer l'exercice vers le haut"
-            className="text-muted-foreground hover:text-foreground disabled:opacity-30"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-30"
           >
             <ArrowUp size={14} />
           </button>
@@ -187,11 +187,16 @@ function ExerciseRow({
             onClick={() => onMove("down")}
             disabled={isLast}
             aria-label="Déplacer l'exercice vers le bas"
-            className="text-muted-foreground hover:text-foreground disabled:opacity-30"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-30"
           >
             <ArrowDown size={14} />
           </button>
-          <button type="button" onClick={onRemove} aria-label="Supprimer l'exercice" className="text-red-400 hover:text-red-300">
+          <button
+            type="button"
+            onClick={onRemove}
+            aria-label="Supprimer l'exercice"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-red-400 hover:text-red-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          >
             <Trash2 size={14} />
           </button>
         </div>
@@ -220,7 +225,7 @@ function ExerciseRow({
   );
 }
 
-function CardioSegmentRow({
+export function CardioSegmentRow({
   segment,
   referenceVmaKmh,
   onChange,
@@ -280,7 +285,7 @@ function CardioSegmentRow({
             onClick={() => onMove("up")}
             disabled={isFirst}
             aria-label="Déplacer le segment vers le haut"
-            className="text-muted-foreground hover:text-foreground disabled:opacity-30"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-30"
           >
             <ArrowUp size={13} />
           </button>
@@ -289,7 +294,7 @@ function CardioSegmentRow({
             onClick={() => onMove("down")}
             disabled={isLast}
             aria-label="Déplacer le segment vers le bas"
-            className="text-muted-foreground hover:text-foreground disabled:opacity-30"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-30"
           >
             <ArrowDown size={13} />
           </button>
@@ -445,7 +450,7 @@ function CardioSegmentRow({
   );
 }
 
-function CardioBlockRow({
+export function CardioBlockRow({
   block,
   referenceVmaKmh,
   onChange,
@@ -453,14 +458,22 @@ function CardioBlockRow({
   onMove,
   isFirst,
   isLast,
+  // Chantier multi-blocs (Lot 4.2) : quand ce bloc cardio est édité DANS une
+  // carte multi-blocs (TrainingBlockCard), la carte fournit déjà titre, numéro
+  // d'ordre et actions Monter/Descendre/Supprimer. `showBlockChrome={false}`
+  // masque alors l'en-tête et le champ Titre de CE composant, sans dupliquer la
+  // logique des segments (prescriptions). Défaut `true` : l'usage legacy
+  // (DayCard) reste strictement inchangé.
+  showBlockChrome = true,
 }: {
   block: AdminCardioBlock;
   referenceVmaKmh: number;
   onChange: (updated: AdminCardioBlock) => void;
-  onRemove: () => void;
-  onMove: (direction: "up" | "down") => void;
-  isFirst: boolean;
-  isLast: boolean;
+  onRemove?: () => void;
+  onMove?: (direction: "up" | "down") => void;
+  isFirst?: boolean;
+  isLast?: boolean;
+  showBlockChrome?: boolean;
 }) {
   function updateSegment(index: number, partial: Partial<AdminCardioSegment>) {
     const segments = block.segments.map((s, i) => (i === index ? { ...s, ...partial } : s));
@@ -503,35 +516,39 @@ function CardioBlockRow({
 
   return (
     <div className="border border-border p-4">
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <span className="text-xs uppercase tracking-wide text-muted-foreground">Bloc cardio #{block.order}</span>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => onMove("up")}
-            disabled={isFirst}
-            aria-label="Déplacer le bloc cardio vers le haut"
-            className="text-muted-foreground hover:text-foreground disabled:opacity-30"
-          >
-            <ArrowUp size={14} />
-          </button>
-          <button
-            type="button"
-            onClick={() => onMove("down")}
-            disabled={isLast}
-            aria-label="Déplacer le bloc cardio vers le bas"
-            className="text-muted-foreground hover:text-foreground disabled:opacity-30"
-          >
-            <ArrowDown size={14} />
-          </button>
-          <button type="button" onClick={onRemove} aria-label="Supprimer le bloc cardio" className="text-red-400 hover:text-red-300">
-            <Trash2 size={14} />
-          </button>
+      {showBlockChrome && (
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <span className="text-xs uppercase tracking-wide text-muted-foreground">Bloc cardio #{block.order}</span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onMove?.("up")}
+              disabled={isFirst}
+              aria-label="Déplacer le bloc cardio vers le haut"
+              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-30"
+            >
+              <ArrowUp size={14} />
+            </button>
+            <button
+              type="button"
+              onClick={() => onMove?.("down")}
+              disabled={isLast}
+              aria-label="Déplacer le bloc cardio vers le bas"
+              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-30"
+            >
+              <ArrowDown size={14} />
+            </button>
+            <button type="button" onClick={() => onRemove?.()} aria-label="Supprimer le bloc cardio" className="text-red-400 hover:text-red-300">
+              <Trash2 size={14} />
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
-      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <Field label="Titre du bloc" value={block.title} onChange={(v) => onChange({ ...block, title: v })} placeholder="Ex : Séance VMA" />
+      <div className={`mb-4 grid grid-cols-1 gap-3 ${showBlockChrome ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
+        {showBlockChrome && (
+          <Field label="Titre du bloc" value={block.title} onChange={(v) => onChange({ ...block, title: v })} placeholder="Ex : Séance VMA" />
+        )}
         <SelectField
           label="Type de cardio"
           value={block.cardioType}

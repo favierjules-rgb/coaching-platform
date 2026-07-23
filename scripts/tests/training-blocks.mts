@@ -28,7 +28,7 @@ import {
   buildLegacySessionBlocksInput,
   saveTrainingSessionBlocks,
 } from "@/lib/supabase/training-session-blocks";
-import { createProgram, updateProgram } from "@/lib/supabase/programs";
+import { createProgram, duplicateProgram, updateProgram } from "@/lib/supabase/programs";
 import { nextBuilderState, orchestrateBuilderSave } from "@/lib/admin-builder-save";
 import type { ProgramBuilderData } from "@/components/admin/ProgramBuilder";
 import type { AdminProgram } from "@/types";
@@ -461,6 +461,7 @@ function adminSession(over: Partial<AdminWorkoutSession> & { weekNumber: number;
     sessionType: over.sessionType,
     cardioBlocks: over.cardioBlocks ?? [],
     bannerUrl: over.bannerUrl ?? null,
+    blocks: over.blocks,
     updatedAt: over.updatedAt,
   };
 }
@@ -570,20 +571,28 @@ async function runAsync() {
     assert.equal(typeof p.expected_updated_at, "string");
   });
 
-  await atest("updateProgram — lock SNAPSHOT, session_patch, AUCUN update préalable, 0 écriture de contenu", async () => {
+  const SESS1 = "55555555-5555-4555-8555-555555555501";
+  const SESS2 = "55555555-5555-4555-8555-555555555502";
+  const B_STRENGTH = "55555555-5555-4555-8555-5555555555b1";
+  const strengthWith = (id: string, position: number, exerciseId: string, colorKey = "gray") => ({
+    ...strengthBlock(id, position),
+    colorKey,
+    exercises: [adminEx(exerciseId, 0)],
+  });
+
+  await atest("updateProgram (canonique) — lock SNAPSHOT, session_patch, blocks[] source, 0 écriture, AUCUN update préalable", async () => {
     const store = {
       program_weeks: [{ id: "week-1", program_id: "prog", week_number: 1 }],
-      workout_sessions: [{ id: "55555555-5555-4555-8555-555555555501", program_week_id: "week-1", day: "lundi", updated_at: "u0-snapshot" }],
-      training_blocks: [{ id: "55555555-5555-4555-8555-5555555555b1", session_id: "55555555-5555-4555-8555-555555555501", block_type: "strength" }],
+      workout_sessions: [{ id: SESS1, program_week_id: "week-1", day: "lundi", updated_at: "u0-snapshot" }],
     };
     const { db, writes, rpcPayloads } = makeProgramsFake({ store });
     const session = adminSession({
-      id: "55555555-5555-4555-8555-555555555501",
+      id: SESS1,
       weekNumber: 1,
       day: "lundi",
       updatedAt: "u0-snapshot",
       name: "Modifié",
-      exercises: [adminEx(OTHER_UUID, 0)],
+      blocks: [strengthWith(B_STRENGTH, 0, OTHER_UUID)],
     });
     const ok = await updateProgram(db, "prog", baseProgramData([session]));
     assert.equal(ok, true);
@@ -592,8 +601,8 @@ async function runAsync() {
     assert.equal(p.expected_updated_at, "u0-snapshot", "expectedUpdatedAt vient du SNAPSHOT (pas d'une relecture)");
     assert.ok(p.session_patch, "session_patch envoyé");
     assert.equal(p.session_patch.name, "Modifié");
-    assert.equal(p.blocks[0].id, "55555555-5555-4555-8555-5555555555b1", "bloc muscu existant conservé");
-    assert.equal(p.blocks[0].exercises[0].id, OTHER_UUID, "exercice existant conservé");
+    assert.equal(p.blocks[0].id, B_STRENGTH, "UUID de bloc conservé (source blocks[])");
+    assert.equal(p.blocks[0].exercises[0].id, OTHER_UUID, "UUID d'exercice conservé");
     assert.equal(contentWrites(writes).length, 0, "aucune écriture directe des tables de contenu");
     assert.equal(
       writes.some((w) => w.table === "workout_sessions" && w.op === "update"),
@@ -602,55 +611,151 @@ async function runAsync() {
     );
   });
 
-  await atest("updateProgram — STALE propagé, écritures des séances suivantes stoppées", async () => {
+  await atest("updateProgram (canonique) — C/S/C/S transmis tel quel, aucun tri par catégorie, session_patch", async () => {
+    const store = {
+      program_weeks: [{ id: "week-1", program_id: "prog", week_number: 1 }],
+      workout_sessions: [{ id: SESS1, program_week_id: "week-1", day: "lundi", updated_at: "u0" }],
+    };
+    const { db, writes, rpcPayloads } = makeProgramsFake({ store });
+    const blocks = [
+      cardioBlock("55555555-5555-4555-8555-5555555555c1", 0),
+      strengthWith("55555555-5555-4555-8555-5555555555s1", 1, "55555555-5555-4555-8555-5555555555e1"),
+      cardioBlock("55555555-5555-4555-8555-5555555555c2", 2),
+      strengthBlock("55555555-5555-4555-8555-5555555555s2", 3),
+    ];
+    await updateProgram(db, "prog", baseProgramData([adminSession({ id: SESS1, weekNumber: 1, day: "lundi", updatedAt: "u0", blocks })]));
+    const p = rpcPayloads[0];
+    assert.deepEqual(
+      p.blocks.map((b: { category: string }) => b.category),
+      ["cardio", "strength", "cardio", "strength"],
+      "ordre C/S/C/S transmis, aucun regroupement par catégorie",
+    );
+    assert.ok(p.session_patch, "session_patch canonique");
+    assert.equal(contentWrites(writes).length, 0, "aucune écriture directe");
+  });
+
+  await atest("updateProgram (canonique) — tableaux legacy CONTRADICTOIRES ignorés (payload = blocks[])", async () => {
+    const store = {
+      program_weeks: [{ id: "week-1", program_id: "prog", week_number: 1 }],
+      workout_sessions: [{ id: SESS1, program_week_id: "week-1", day: "lundi", updated_at: "u0" }],
+    };
+    const { db, rpcPayloads } = makeProgramsFake({ store });
+    await updateProgram(
+      db,
+      "prog",
+      baseProgramData([
+        adminSession({
+          id: SESS1,
+          weekNumber: 1,
+          day: "lundi",
+          updatedAt: "u0",
+          // Source = blocks[] (1 cardio) ; exercises[]/cardioBlocks[] legacy VOLONTAIREMENT différents.
+          blocks: [cardioBlock("55555555-5555-4555-8555-5555555555c1", 0)],
+          exercises: [adminEx("99999999-9999-4999-8999-999999999999", 0)],
+          cardioBlocks: [{ id: "88888888-8888-4888-8888-888888888888", order: 1, title: "X", cardioType: "easy_run", segments: [] }],
+        }),
+      ]),
+    );
+    const p = rpcPayloads[0];
+    assert.equal(p.blocks.length, 1, "un seul bloc = blocks[] canonique");
+    assert.equal(p.blocks[0].category, "cardio");
+    assert.equal(p.blocks[0].id, "55555555-5555-4555-8555-5555555555c1", "vient de blocks[], jamais de exercises[]/cardioBlocks[]");
+  });
+
+  await atest("updateProgram (canonique) — nouvelle séance : INSERT workout_sessions + RPC, 0 insert direct de contenu, pas de session_patch", async () => {
+    const store = { program_weeks: [{ id: "week-1", program_id: "prog", week_number: 1 }], workout_sessions: [] as Record<string, unknown>[] };
+    const { db, writes, rpcPayloads } = makeProgramsFake({ store });
+    await updateProgram(
+      db,
+      "prog",
+      baseProgramData([adminSession({ id: "sess-new", weekNumber: 1, day: "lundi", blocks: [strengthWith(`new-block:${CLIENT_UUID}`, 0, `new-exercise:${OTHER_UUID}`)] })]),
+    );
+    assert.equal(writes.some((w) => w.table === "workout_sessions" && w.op === "insert"), true, "INSERT de la nouvelle séance");
+    assert.equal(contentWrites(writes).length, 0, "aucun insert direct de contenu");
+    assert.equal(rpcPayloads.length, 1, "RPC canonique appelée");
+    assert.equal(rpcPayloads[0].session_patch, undefined, "pas de session_patch (champs posés par l'INSERT)");
+    assert.equal((rpcPayloads[0].blocks[0].id as string).startsWith("new-block:"), true);
+  });
+
+  await atest("updateProgram (canonique) — STALE propagé, écritures des séances suivantes stoppées", async () => {
     const store = {
       program_weeks: [{ id: "week-1", program_id: "prog", week_number: 1 }],
       workout_sessions: [
-        { id: "55555555-5555-4555-8555-555555555501", program_week_id: "week-1", day: "lundi", updated_at: "u0" },
-        { id: "55555555-5555-4555-8555-555555555502", program_week_id: "week-1", day: "mardi", updated_at: "u0" },
+        { id: SESS1, program_week_id: "week-1", day: "lundi", updated_at: "u0" },
+        { id: SESS2, program_week_id: "week-1", day: "mardi", updated_at: "u0" },
       ],
-      training_blocks: [],
     };
     const { db, rpcPayloads } = makeProgramsFake({ store, rpcError: "STALE_TRAINING_SESSION" });
     const sessions = [
-      adminSession({ id: "55555555-5555-4555-8555-555555555501", weekNumber: 1, day: "lundi", updatedAt: "u0", exercises: [adminEx("ex-x", 0)] }),
-      adminSession({ id: "55555555-5555-4555-8555-555555555502", weekNumber: 1, day: "mardi", updatedAt: "u0", exercises: [adminEx("ex-y", 0)] }),
+      adminSession({ id: SESS1, weekNumber: 1, day: "lundi", updatedAt: "u0", blocks: [strengthWith("55555555-5555-4555-8555-5555555555a1", 0, "55555555-5555-4555-8555-5555555555a2")] }),
+      adminSession({ id: SESS2, weekNumber: 1, day: "mardi", updatedAt: "u0", blocks: [strengthWith("55555555-5555-4555-8555-5555555555a3", 0, "55555555-5555-4555-8555-5555555555a4")] }),
     ];
     await assert.rejects(() => updateProgram(db, "prog", baseProgramData(sessions)), /STALE_TRAINING_SESSION/);
     assert.equal(rpcPayloads.length, 1, "arrêt au premier STALE (2e séance non sauvegardée)");
   });
 
-  await atest("updateProgram — double sauvegarde avec rechargement : ids stables, aucune recréation", async () => {
+  await atest("updateProgram (canonique) — double sauvegarde : ids temporaires → UUID réels, aucune recréation", async () => {
     const store = {
       program_weeks: [{ id: "week-1", program_id: "prog", week_number: 1 }],
-      workout_sessions: [{ id: "55555555-5555-4555-8555-555555555501", program_week_id: "week-1", day: "lundi", updated_at: "u0" }],
-      training_blocks: [],
+      workout_sessions: [{ id: SESS1, program_week_id: "week-1", day: "lundi", updated_at: "u0" }],
     };
     const { db, rpcPayloads, store: st } = makeProgramsFake({ store });
-    // save1 : exercice NOUVEAU (placeholder)
+    // save1 : bloc + exercice NOUVEAUX (ids temporaires stricts)
     await updateProgram(
       db,
       "prog",
-      baseProgramData([adminSession({ id: "55555555-5555-4555-8555-555555555501", weekNumber: 1, day: "lundi", updatedAt: "u0", exercises: [adminEx("ex-1721-1", 0)] })]),
+      baseProgramData([adminSession({ id: SESS1, weekNumber: 1, day: "lundi", updatedAt: "u0", blocks: [strengthWith(`new-block:${CLIENT_UUID}`, 0, `new-exercise:${OTHER_UUID}`)] })]),
     );
-    assert.equal((rpcPayloads[0].blocks[0].exercises[0].id as string).startsWith("new-exercise:"), true, "save1 : id temporaire");
-    // rechargement : la RPC fake a persisté les ids réels + bumpé updated_at
-    const persistedEx = st.workout_exercises!.find((e) => e.session_id === "55555555-5555-4555-8555-555555555501")!;
-    const persistedBlock = st.training_blocks!.find((b) => b.session_id === "55555555-5555-4555-8555-555555555501")!;
-    const freshUpdatedAt = st.workout_sessions!.find((s) => s.id === "55555555-5555-4555-8555-555555555501")!.updated_at as string;
-    // save2 : depuis l'état RECHARGÉ (ids réels + nouvel updatedAt)
+    assert.equal((rpcPayloads[0].blocks[0].id as string).startsWith("new-block:"), true, "save1 : bloc temporaire");
+    assert.equal((rpcPayloads[0].blocks[0].exercises[0].id as string).startsWith("new-exercise:"), true, "save1 : exercice temporaire");
+    // rechargement : la RPC fake a persisté les UUID réels + bumpé updated_at
+    const persistedBlock = st.training_blocks!.find((b) => b.session_id === SESS1)!;
+    const persistedEx = st.workout_exercises!.find((e) => e.session_id === SESS1)!;
+    const freshUpdatedAt = st.workout_sessions!.find((s) => s.id === SESS1)!.updated_at as string;
+    // save2 : depuis l'état RECHARGÉ (UUID réels)
     await updateProgram(
       db,
       "prog",
-      baseProgramData([
-        adminSession({ id: "55555555-5555-4555-8555-555555555501", weekNumber: 1, day: "lundi", updatedAt: freshUpdatedAt, exercises: [adminEx(persistedEx.id as string, 0)] }),
-      ]),
+      baseProgramData([adminSession({ id: SESS1, weekNumber: 1, day: "lundi", updatedAt: freshUpdatedAt, blocks: [strengthWith(persistedBlock.id as string, 0, persistedEx.id as string)] })]),
     );
     const p2 = rpcPayloads[1];
     assert.equal(p2.expected_updated_at, freshUpdatedAt, "save2 utilise le nouvel updatedAt (aucun STALE)");
-    assert.equal(p2.blocks[0].id, persistedBlock.id, "save2 : bloc muscu réutilisé (pas recréé)");
+    assert.equal(p2.blocks[0].id, persistedBlock.id, "save2 : bloc réutilisé (pas recréé)");
     assert.equal(p2.blocks[0].exercises[0].id, persistedEx.id, "save2 : exercice réutilisé (id stable)");
-    assert.equal((p2.blocks[0].exercises[0].id as string).startsWith("new-exercise:"), false, "aucun id temporaire au 2e save");
+    assert.equal((p2.blocks[0].id as string).startsWith("new-block:"), false, "aucun id temporaire au 2e save");
+  });
+
+  await atest("duplicateProgram (canonique) — nouveaux ids stricts, blocks[] source, ordre/couleurs, source intacte", async () => {
+    const SRC_SESS = "77777777-7777-4777-8777-777777777701";
+    const SRC_BS = "77777777-7777-4777-8777-7777777777b1";
+    const SRC_BC = "77777777-7777-4777-8777-7777777777b2";
+    const SRC_EX = "77777777-7777-4777-8777-7777777777e1";
+    const store = {
+      programs: [{ id: "prog-src", name: "P", goal: "", level: "", duration_weeks: 1, description: "", status: "brouillon", created_at: "2020-01-01T00:00:00Z", updated_at: "u0", banner_url: null, program_mode: "individuel", group_start_date: null, is_public: false, public_subscription_template_id: null }],
+      program_weeks: [{ id: "w1", program_id: "prog-src", week_number: 1 }],
+      workout_sessions: [{ id: SRC_SESS, program_id: "prog-src", program_week_id: "w1", day: "lundi", is_rest_day: false, name: "S", muscle_group: "", duration_minutes: 60, warmup: "", coach_notes: "", session_type: "mixed", banner_url: null, updated_at: "u0" }],
+      training_blocks: [
+        { id: SRC_BS, session_id: SRC_SESS, block_type: "strength", position: 0, title: "Force", color_key: "green", cardio_type: null, machine_type: null },
+        { id: SRC_BC, session_id: SRC_SESS, block_type: "cardio", position: 1, title: "Run", color_key: "blue", cardio_type: "easy_run", machine_type: null },
+      ],
+      workout_exercises: [{ id: SRC_EX, session_id: SRC_SESS, block_id: SRC_BS, order_index: 0, name: "Squat", sets: 3, reps: "8-10", rest_seconds: 60, tempo: "2-0-1-0", recommended_load: "", video_url: "", notes: "", muscle_group: null, exercise_library_id: null }],
+      training_prescriptions: [] as Record<string, unknown>[],
+    };
+    const { db, writes, rpcPayloads } = makeProgramsFake({ store });
+    const newId = await duplicateProgram(db, "prog-src");
+    assert.ok(newId, "copie créée");
+    assert.equal(rpcPayloads.length, 1, "une séance à contenu");
+    const p = rpcPayloads[0];
+    assert.deepEqual(p.blocks.map((b: { category: string }) => b.category), ["strength", "cardio"], "ordre source conservé (blocks[])");
+    assert.equal((p.blocks[0].id as string).startsWith("new-block:"), true);
+    assert.notEqual(p.blocks[0].id, SRC_BS, "UUID de bloc source jamais réutilisé");
+    assert.equal((p.blocks[0].exercises[0].id as string).startsWith("new-exercise:"), true);
+    assert.notEqual(p.blocks[0].exercises[0].id, SRC_EX, "UUID d'exercice source jamais réutilisé");
+    assert.notEqual(p.blocks[1].id, SRC_BC);
+    assert.equal(p.blocks[0].color_key, "green", "couleur conservée");
+    assert.equal(p.blocks[1].color_key, "blue", "couleur conservée");
+    assert.equal(contentWrites(writes).length, 0, "aucune écriture directe de contenu");
+    assert.ok(store.training_blocks.find((b) => b.id === SRC_BS), "bloc source intact (non muté)");
   });
 
   // ── Orchestrateur de remount du builder (page, Lot 3B correction) ─────────

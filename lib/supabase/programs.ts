@@ -1,11 +1,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { generateId } from "@/lib/admin";
-import { cloneCardioBlock } from "@/lib/cardio";
 import { buildStudentActivityLink, logActivityEvent } from "@/lib/supabase/activity";
 import type { ProgramBuilderData } from "@/components/admin/ProgramBuilder";
 import { makeLegacyStrengthBlockId, renumberBlockPositions } from "@/lib/training-blocks";
-import { buildLegacySessionBlocksInput, saveTrainingSessionBlocks } from "@/lib/supabase/training-session-blocks";
+import { regenerateBlockIdsForDuplication, toCanonicalSessionSaveData } from "@/lib/training-block-editing";
+import {
+  buildCanonicalSessionBlocksInput,
+  buildLegacySessionBlocksInput,
+  saveTrainingSessionBlocks,
+} from "@/lib/supabase/training-session-blocks";
 import type {
   AdminCardioBlock,
   AdminCardioSegment,
@@ -15,11 +19,29 @@ import type {
   CardioSegmentType,
   CardioTrainingBlock,
   CardioType,
+  DerivedSessionType,
   IntensityTargetType,
   MachineType,
+  SessionType,
   StrengthTrainingBlock,
   TrainingBlock,
 } from "@/types";
+
+/**
+ * Mode de persistance du contenu d'une séance, IMPOSÉ EXPLICITEMENT par
+ * l'appelant (Lot 4.4) — jamais déduit de la présence de `blocks[]`, de
+ * `exercises[]`, du `sessionType`, ni d'un repli automatique.
+ *  - `"canonical"` : le nouveau builder multi-blocs — source = `blocks[]`,
+ *    adaptateur `buildCanonicalSessionBlocksInput`.
+ *  - `"legacy"`    : parcours n'émettant pas encore `blocks[]` (p. ex. /nouveau)
+ *    — source = `exercises[]`/`cardioBlocks[]`, adaptateur legacy.
+ */
+type ProgramContentMode = "legacy" | "canonical";
+
+/** Type de séance pour la COLONNE `workout_sessions.session_type` (pas de "rest" : le repos = `is_rest_day`). */
+function sessionTypeForColumn(derived: DerivedSessionType): SessionType {
+  return derived === "rest" ? "strength" : derived;
+}
 import type { Database } from "@/types/supabase";
 
 /**
@@ -451,6 +473,7 @@ async function insertProgramStructure(
   supabase: TypedSupabaseClient,
   programId: string,
   sessions: AdminWorkoutSession[],
+  mode: ProgramContentMode,
 ): Promise<void> {
   const weekNumbers = Array.from(new Set(sessions.map((s) => s.weekNumber))).sort((a, b) => a - b);
   const weekIdByNumber = new Map<number, string>();
@@ -470,19 +493,23 @@ async function insertProgramStructure(
   for (const session of sessions) {
     const weekId = weekIdByNumber.get(session.weekNumber);
     if (!weekId) continue;
+
+    // En mode CANONIQUE, is_rest_day/session_type sont DÉRIVÉS des blocs (jamais
+    // saisis) ; en LEGACY, on conserve les champs fournis par la séance.
+    const canonical = mode === "canonical" ? toCanonicalSessionSaveData(session) : null;
     const { data: sessionRow, error: sessionError } = await supabase
       .from("workout_sessions")
       .insert({
         program_id: programId,
         program_week_id: weekId,
         day: session.day,
-        is_rest_day: session.isRestDay,
+        is_rest_day: canonical ? canonical.isRestDay : session.isRestDay,
         name: session.name,
         muscle_group: session.muscleGroup,
         duration_minutes: session.durationMinutes,
         warmup: session.warmup,
         coach_notes: session.coachNotes,
-        session_type: session.sessionType ?? "strength",
+        session_type: canonical ? sessionTypeForColumn(canonical.sessionType) : (session.sessionType ?? "strength"),
         banner_url: session.bannerUrl ?? null,
       })
       .select("id, updated_at")
@@ -490,24 +517,37 @@ async function insertProgramStructure(
     devWarn("insertProgramStructure (workout_sessions)", sessionError);
     if (!sessionRow) continue;
 
-    // Persistance du contenu (muscu + cardio) par l'UNIQUE moteur canonique
-    // transactionnel (RPC), via l'adaptateur legacy. Les jours de repos / sans
-    // contenu n'ont aucun bloc à écrire : la ligne workout_sessions vient
-    // d'être insérée avec son is_rest_day. Une erreur RPC (ex. STALE) remonte.
-    const hasContent =
-      !session.isRestDay && (session.exercises.length > 0 || (session.cardioBlocks?.length ?? 0) > 0);
-    if (hasContent) {
-      // Source LEGACY explicite : la ligne séance vient d'être insérée avec ses
-      // champs, donc pas de session_patch ; expectedUpdatedAt = updated_at exact
-      // retourné par l'INSERT (la ligne n'existait pas auparavant).
-      await saveTrainingSessionBlocks(
-        supabase,
-        buildLegacySessionBlocksInput({
-          session,
-          sessionId: sessionRow.id,
-          expectedUpdatedAt: sessionRow.updated_at,
-        }),
-      );
+    // Persistance du contenu par l'UNIQUE moteur transactionnel (RPC). La ligne
+    // vient d'être insérée avec ses champs → pas de session_patch ;
+    // expectedUpdatedAt = updated_at EXACT de l'INSERT. Une erreur (ex. STALE)
+    // remonte. Aucune écriture directe des tables de contenu.
+    if (canonical) {
+      // Source CANONIQUE explicite : blocks[] uniquement (jamais exercises[]/
+      // cardioBlocks[]). Une séance repos (aucun bloc) n'appelle pas la RPC.
+      if (canonical.blocks.length > 0) {
+        await saveTrainingSessionBlocks(
+          supabase,
+          buildCanonicalSessionBlocksInput({
+            sessionId: sessionRow.id,
+            expectedUpdatedAt: sessionRow.updated_at,
+            blocks: canonical.blocks,
+          }),
+        );
+      }
+    } else {
+      // Source LEGACY explicite : projection depuis exercises[]/cardioBlocks[].
+      const hasContent =
+        !session.isRestDay && (session.exercises.length > 0 || (session.cardioBlocks?.length ?? 0) > 0);
+      if (hasContent) {
+        await saveTrainingSessionBlocks(
+          supabase,
+          buildLegacySessionBlocksInput({
+            session,
+            sessionId: sessionRow.id,
+            expectedUpdatedAt: sessionRow.updated_at,
+          }),
+        );
+      }
     }
   }
 }
@@ -536,7 +576,11 @@ export async function createProgram(supabase: TypedSupabaseClient, data: Program
     return null;
   }
 
-  await insertProgramStructure(supabase, programRow.id, data.sessions);
+  // Le parcours /admin/programmes/nouveau ne monte PAS encore le builder
+  // multi-blocs canonique (assistant `pole`) : la création initiale reste
+  // explicitement LEGACY. L'édition ultérieure dans le builder (updateProgram)
+  // est, elle, canonique.
+  await insertProgramStructure(supabase, programRow.id, data.sessions, "legacy");
   return programRow.id;
 }
 
@@ -590,15 +634,22 @@ export async function duplicateProgram(supabase: TypedSupabaseClient, programId:
     return null;
   }
 
+  // Duplication CANONIQUE : la lecture (loadPrograms) a déjà composé blocks[]
+  // avec les vrais UUID. On régénère TOUS les ids de contenu vers de nouveaux
+  // ids temporaires stricts (new-block: / new-exercise:), sans jamais réutiliser
+  // un UUID source ; l'ordre et les couleurs sont conservés, la source intacte.
+  // Les tableaux hérités ne portent pas le contenu de la copie.
   const clonedSessions: AdminWorkoutSession[] = program.sessions.map((session) => ({
     ...session,
     id: generateId("sess"),
     programId: newProgramRow.id,
-    exercises: session.exercises.map((ex) => ({ ...ex, id: generateId("ex") })),
-    cardioBlocks: (session.cardioBlocks ?? []).map((block) => cloneCardioBlock(block)),
+    updatedAt: undefined,
+    blocks: regenerateBlockIdsForDuplication(session.blocks ?? []),
+    exercises: [],
+    cardioBlocks: [],
   }));
 
-  await insertProgramStructure(supabase, newProgramRow.id, clonedSessions);
+  await insertProgramStructure(supabase, newProgramRow.id, clonedSessions, "canonical");
   return newProgramRow.id;
 }
 
@@ -632,6 +683,7 @@ async function diffProgramStructure(
   supabase: TypedSupabaseClient,
   programId: string,
   sessions: AdminWorkoutSession[],
+  mode: ProgramContentMode,
 ): Promise<void> {
   const incomingWeekNumbers = Array.from(new Set(sessions.map((s) => s.weekNumber))).sort((a, b) => a - b);
 
@@ -714,19 +766,21 @@ async function diffProgramStructure(
   for (const session of sessionsToInsert) {
     const weekId = weekIdByNumber.get(session.weekNumber);
     if (!weekId) continue;
+    // En canonique, is_rest_day/session_type DÉRIVÉS des blocs (jamais saisis).
+    const canonical = mode === "canonical" ? toCanonicalSessionSaveData(session) : null;
     const { data: sessionRow, error } = await supabase
       .from("workout_sessions")
       .insert({
         program_id: programId,
         program_week_id: weekId,
         day: session.day,
-        is_rest_day: session.isRestDay,
+        is_rest_day: canonical ? canonical.isRestDay : session.isRestDay,
         name: session.name,
         muscle_group: session.muscleGroup,
         duration_minutes: session.durationMinutes,
         warmup: session.warmup,
         coach_notes: session.coachNotes,
-        session_type: session.sessionType ?? "strength",
+        session_type: canonical ? sessionTypeForColumn(canonical.sessionType) : (session.sessionType ?? "strength"),
         banner_url: session.bannerUrl ?? null,
       })
       .select("id, updated_at")
@@ -747,8 +801,11 @@ async function diffProgramStructure(
   const existingSessionIds = sessions
     .map((session) => resolveExistingId(session))
     .filter((id): id is string => Boolean(id));
+  // Bloc muscu déjà persisté par séance — nécessaire UNIQUEMENT au chemin legacy
+  // (un seul bloc muscu par séance). En canonique, les ids de blocs viennent
+  // directement de blocks[], donc pas de lecture.
   const strengthBlockIdBySession = new Map<string, string>();
-  if (existingSessionIds.length > 0) {
+  if (mode === "legacy" && existingSessionIds.length > 0) {
     const { data: blockRows, error: blocksError } = await supabase
       .from("training_blocks")
       .select("id, session_id, block_type")
@@ -767,11 +824,54 @@ async function diffProgramStructure(
   // sont déjà posés par l'INSERT. Toute erreur (ex. STALE) remonte à l'appelant.
   for (const session of sessions) {
     const existingId = resolveExistingId(session);
+
+    // ── Chemin CANONIQUE (nouveau builder multi-blocs) : source = blocks[] ────
+    if (mode === "canonical") {
+      const data = toCanonicalSessionSaveData(session);
+      if (existingId) {
+        if (!session.updatedAt) {
+          // Défensif : une séance chargée porte toujours son updatedAt (snapshot).
+          // Sans version fiable, on NE devine PAS via une relecture (cela romprait
+          // le verrou) : on saute cette séance en le signalant.
+          devWarn("diffProgramStructure (séance existante sans updatedAt de snapshot)", {
+            message: `séance ${existingId} ignorée`,
+          });
+          continue;
+        }
+        // Verrou = SNAPSHOT chargé ; blocks[] + session_patch atomique (UPDATE
+        // final unique côté RPC après le contrôle STALE). blocks vide (repos) :
+        // la RPC efface le contenu et pose l'état repos, patch inclus.
+        await saveTrainingSessionBlocks(
+          supabase,
+          buildCanonicalSessionBlocksInput({
+            sessionId: existingId,
+            expectedUpdatedAt: session.updatedAt,
+            blocks: data.blocks,
+            sessionPatch: data.sessionPatch,
+          }),
+        );
+      } else {
+        const inserted = insertedByKey.get(session);
+        if (!inserted) continue;
+        // Nouvelle séance : champs déjà posés par l'INSERT (pas de session_patch) ;
+        // verrou = updated_at exact de l'INSERT ; repos (aucun bloc) → pas de RPC.
+        if (data.blocks.length > 0) {
+          await saveTrainingSessionBlocks(
+            supabase,
+            buildCanonicalSessionBlocksInput({
+              sessionId: inserted.id,
+              expectedUpdatedAt: inserted.updatedAt,
+              blocks: data.blocks,
+            }),
+          );
+        }
+      }
+      continue;
+    }
+
+    // ── Chemin LEGACY (parcours n'émettant pas encore blocks[]) ───────────────
     if (existingId) {
       if (!session.updatedAt) {
-        // Défensif : une séance chargée porte toujours son updatedAt (snapshot).
-        // Sans version fiable, on NE devine PAS via une relecture (cela romprait
-        // le verrou) : on saute cette séance en le signalant.
         devWarn("diffProgramStructure (séance existante sans updatedAt de snapshot)", {
           message: `séance ${existingId} ignorée`,
         });
@@ -841,7 +941,10 @@ export async function updateProgram(
     .eq("id", programId);
   devWarn("updateProgram", updateError);
 
-  await diffProgramStructure(supabase, programId, data.sessions);
+  // updateProgram est l'entrée du BUILDER multi-blocs (seul appelant) : mode
+  // CANONIQUE explicite — la persistance vient de blocks[], jamais de
+  // exercises[]/cardioBlocks[]/sessionType.
+  await diffProgramStructure(supabase, programId, data.sessions, "canonical");
   return !updateError;
 }
 

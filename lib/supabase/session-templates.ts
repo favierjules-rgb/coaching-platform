@@ -1,6 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import type { AdminWorkoutSession, SessionTemplate, SessionType } from "@/types";
+import { deriveSessionType } from "@/lib/training-blocks";
+import { strengthExercisesFromBlocks } from "@/lib/training-block-editing";
+import {
+  cardioBlocksFromBlocks,
+  isCanonicalTemplateContent,
+  templateBlocksFromContent,
+  toCanonicalTemplateContent,
+} from "@/lib/session-template-content";
+import type { AdminWorkoutSession, SessionTemplate, SessionType, TrainingBlock } from "@/types";
 import type { Database } from "@/types/supabase";
 
 /**
@@ -48,7 +56,27 @@ function asContent(value: unknown): SessionTemplateContent {
   };
 }
 
+/**
+ * Vue LEGACY du contenu (affichage uniquement). Pour un modèle canonique, elle
+ * est DÉRIVÉE des blocs (exercices agrégés des blocs strength, cardio reconstruit
+ * des blocs cardio) — jamais persistée. Pour un ancien modèle legacy, elle est
+ * lue telle quelle.
+ */
+function toDisplayContent(raw: unknown, blocks: TrainingBlock[]): SessionTemplate["content"] {
+  if (isCanonicalTemplateContent(raw)) {
+    return {
+      warmup: raw.metadata.warmup ?? "",
+      coachNotes: raw.metadata.coachNotes ?? "",
+      exercises: strengthExercisesFromBlocks(blocks),
+      cardioBlocks: cardioBlocksFromBlocks(blocks),
+    };
+  }
+  return asContent(raw);
+}
+
 function mapSessionTemplateRow(row: SessionTemplateRow): SessionTemplate {
+  // Discrimination EXPLICITE legacy/canonique (jamais `blocks ?? legacy`).
+  const blocks = templateBlocksFromContent(row.content);
   return {
     id: row.id,
     name: row.name,
@@ -56,7 +84,8 @@ function mapSessionTemplateRow(row: SessionTemplateRow): SessionTemplate {
     sessionType: (row.session_type ?? "strength") as SessionType,
     muscleGroup: row.muscle_group ?? "",
     durationMinutes: row.duration_minutes,
-    content: asContent(row.content),
+    content: toDisplayContent(row.content, blocks),
+    blocks,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -76,20 +105,27 @@ export async function createSessionTemplate(
   name: string,
   description: string,
 ): Promise<string | null> {
+  // Enregistrement CANONIQUE (dernière passe Lot 4) : lecture EXCLUSIVE de
+  // session.blocks[] — jamais exercises[]/cardioBlocks[]. Le session_type colonne
+  // est DÉRIVÉ des blocs. Le contenu stocké porte blocks[] (format versionné).
+  const blocks = session.blocks ?? [];
+  const derivedType = deriveSessionType(blocks);
   const { data, error } = await supabase
     .from("session_templates")
     .insert({
       name,
       description,
-      session_type: session.sessionType ?? "strength",
+      session_type: derivedType === "rest" ? "strength" : derivedType,
       muscle_group: session.muscleGroup,
       duration_minutes: session.durationMinutes || null,
-      content: {
+      content: toCanonicalTemplateContent({
+        blocks,
         warmup: session.warmup,
         coachNotes: session.coachNotes,
-        exercises: session.exercises,
-        cardioBlocks: session.cardioBlocks ?? [],
-      },
+        muscleGroup: session.muscleGroup,
+        durationMinutes: session.durationMinutes,
+        name,
+      }),
     })
     .select("id")
     .single();

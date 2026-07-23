@@ -1043,12 +1043,25 @@ export interface SessionTemplate {
   sessionType: SessionType;
   muscleGroup: string;
   durationMinutes: number | null;
+  /**
+   * Vue LEGACY du contenu (affichage uniquement — compteurs de la banque de
+   * séances). Pour un modèle canonique, dérivée en lecture depuis `blocks[]` ;
+   * jamais la source de vérité persistée.
+   */
   content: {
     warmup: string;
     coachNotes: string;
     exercises: AdminExercise[];
     cardioBlocks: AdminCardioBlock[];
   };
+  /**
+   * Blocs canoniques du modèle (dernière passe Lot 4). Source de vérité pour
+   * l'application d'un modèle dans le builder : un modèle canonique les porte
+   * directement ; un ancien modèle legacy est normalisé UNE fois à la lecture
+   * (voir lib/session-template-content.ts). Les ids sont régénérés à
+   * l'application (`templateBlocksForApply`).
+   */
+  blocks: TrainingBlock[];
   createdAt: string;
   updatedAt: string;
 }
