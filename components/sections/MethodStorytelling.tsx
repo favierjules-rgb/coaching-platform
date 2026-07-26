@@ -3,6 +3,7 @@
 import { SethStarsMark } from "@/components/brand/SethStarsMark";
 import { SectionLabel } from "@/components/ui/SectionLabel";
 import { methodPillars } from "@/data/mock";
+import { usePinnedSceneViewport } from "@/hooks/usePinnedSceneViewport";
 import { useSectionScrollProgress } from "@/hooks/useSectionScrollProgress";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { easeOut } from "@/lib/easing";
@@ -59,11 +60,82 @@ const CONTENT_END = 0.5;
 // `SethStarsIntro.tsx`) — inchangée ici pour la cohérence du motif.
 const STAR_OPACITY = 0.88;
 
-// Hauteur de la section ancrée, en vh. Distance de scroll réellement
-// « capturée » = cette valeur moins 100vh (la hauteur du viewport) — ici
-// 120vh de scroll utile, suffisant pour lire le geste sans être
-// interminable.
-const SECTION_HEIGHT_VH = 220;
+// Hauteur de la scène ancrée : 220 hauteurs d'écran, définies par les
+// classes `.pinned-scene-track` / `.pinned-scene-viewport` (app/globals.css)
+// en `svh` avec repli `vh`. Distance de scroll réellement « capturée » =
+// 220 − 100 = 120 hauteurs d'écran de scroll utile, suffisant pour lire le
+// geste sans être interminable. En `svh` plutôt qu'en `vh` : sur mobile,
+// `vh` ignore les barres du navigateur et la scène déborderait de la zone
+// visible, rognant le premier et le dernier pilier.
+
+/**
+ * Titre + grille des 4 piliers — markup unique, partagé par la scène
+ * ancrée (desktop) et le rendu en flux normal (mobile, tablette,
+ * `prefers-reduced-motion`). Extrait pour garantir que les deux variantes
+ * ne divergent jamais : mêmes textes, mêmes icônes, même ordre 01→04.
+ */
+function PillarsContent() {
+  return (
+    <>
+      <SectionLabel>Ma méthode</SectionLabel>
+      {/* text-3xl en dessous de `sm` : « 1 transformation. » dépasse la
+          colonne sur un écran de 320px en text-4xl, ce qui créerait un
+          défilement horizontal. Tailles `sm:`/`md:` d'origine inchangées.
+          Marge basse resserrée sous `lg` pour dégager de la hauteur au
+          profit des piliers. */}
+      <h2 className="mb-3 font-heading text-[1.6rem] font-extrabold uppercase leading-[1.05] text-foreground sm:mb-5 sm:text-4xl sm:leading-tight lg:mb-12 md:text-6xl">
+        4 piliers.
+        <br />1 transformation.
+      </h2>
+
+      {/* Densité compacte sous `lg` (padding, marges, tailles de texte et
+          d'icône) pour que les 4 piliers empilés tiennent dans la hauteur
+          d'un téléphone et que la scène ancrée reste possible. Toutes les
+          valeurs desktop sont reprises telles quelles derrière `lg:`. */}
+      <div className="grid grid-cols-1 gap-px bg-border sm:grid-cols-2 lg:grid-cols-4">
+        {methodPillars.map(({ icon: Icon, title, description }, index) => (
+          <div key={title} className="bg-card p-3.5 sm:p-5 lg:p-8">
+            <div className="mb-1.5 font-heading text-[10px] font-semibold uppercase tracking-[0.3em] text-primary sm:text-xs lg:mb-6">
+              0{index + 1}
+            </div>
+            <Icon size={28} className="mb-1.5 h-5 w-5 text-primary lg:mb-4 lg:h-7 lg:w-7" />
+            <h3 className="mb-1 font-heading text-base font-bold uppercase leading-tight text-foreground sm:text-lg lg:mb-3 lg:text-xl lg:leading-normal">
+              {title}
+            </h3>
+            <p className="text-xs leading-snug text-muted-foreground lg:text-sm lg:leading-relaxed">{description}</p>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+/**
+ * Rendu en FLUX NORMAL : hauteur déterminée par le contenu, aucune scène
+ * ancrée, aucun rognage. Sert `prefers-reduced-motion` et les écrans trop
+ * courts pour la scène (voir `usePinnedSceneViewport`).
+ *
+ * Correction du 26/07/2026 : sur téléphone, la grille des piliers s'empile
+ * et devenait bien plus haute que le viewport. Enfermée dans la scène
+ * ancrée (`h-screen` + `overflow-hidden` + `justify-center`), elle
+ * débordait des deux côtés à la fois : le titre et le haut du pilier 01
+ * rognés en haut, la fin du pilier 04 en bas, et la section suivante
+ * semblait « remonter ». Les étoiles restent présentes en décoration,
+ * assemblées comme au repos.
+ */
+function MethodPillarsFlow() {
+  return (
+    <section id="methode" className="scroll-mt-24 bg-background py-24">
+      <div className="mx-auto max-w-7xl px-6">
+        <div className="mb-12 flex justify-center">
+          <SethStarsMark className="h-40 w-auto max-w-[70vw] opacity-90" />
+        </div>
+
+        <PillarsContent />
+      </div>
+    </section>
+  );
+}
 
 /**
  * Storytelling scroll « 4 piliers SETH » — nouvelle version (20/07/2026).
@@ -76,6 +148,16 @@ const SECTION_HEIGHT_VH = 220;
  * transformation. » et les 4 cartes de méthode (contenu déjà existant,
  * `methodPillars` de `data/mock.ts` — repris tel quel, aucun texte
  * inventé pour ce chantier visuel).
+ *
+ * L'animation est conservée sur téléphone (demande de Jules, 26/07/2026) :
+ * les piliers y adoptent une densité compacte — padding, marges, tailles de
+ * texte et d'icône réduits sous `lg` — pour tenir dans une hauteur d'écran,
+ * et la scène est mesurée en `svh` afin de rester dans la zone réellement
+ * visible. `usePinnedSceneViewport` ne l'active que si le viewport peut
+ * l'accueillir sans rogner : sous ce seuil (iPhone SE et assimilés), le
+ * contenu passe en flux normal (voir `MethodPillarsFlow`) — conformément à
+ * la hiérarchie de remède de `.agents/skills/review-animations` : mieux
+ * vaut retirer l'animation d'un contexte que d'y contraindre le contenu.
  *
  * Skills appliquées (cf. `.agents/skills/emil-design-eng/SKILL.md`,
  * `.agents/skills/animation-vocabulary/SKILL.md`) :
@@ -94,40 +176,26 @@ const SECTION_HEIGHT_VH = 220;
  */
 export function MethodStorytelling() {
   const reducedMotion = usePrefersReducedMotion();
-  const { ref, progress } = useSectionScrollProgress<HTMLDivElement>();
+  const canPinScene = usePinnedSceneViewport();
 
-  if (reducedMotion) {
-    return (
-      <section id="methode" className="scroll-mt-24 bg-background py-24">
-        <div className="mx-auto max-w-7xl px-6">
-          <div className="mb-12 flex justify-center">
-            <SethStarsMark className="h-40 w-auto max-w-[70vw] opacity-90" />
-          </div>
-
-          <SectionLabel>Ma méthode</SectionLabel>
-          <h2 className="mb-16 font-heading text-4xl font-extrabold uppercase text-foreground md:text-6xl">
-            4 piliers.
-            <br />1 transformation.
-          </h2>
-
-          <div className="grid grid-cols-1 gap-px bg-border sm:grid-cols-2 lg:grid-cols-4">
-            {methodPillars.map(({ icon: Icon, title, description }, index) => (
-              <div key={title} className="bg-card p-8">
-                <div className="mb-6 font-heading text-xs font-semibold uppercase tracking-[0.3em] text-primary">
-                  0{index + 1}
-                </div>
-                <Icon size={28} className="mb-4 text-primary" />
-                <h3 className="mb-3 font-heading text-xl font-bold uppercase text-foreground">
-                  {title}
-                </h3>
-                <p className="text-sm leading-relaxed text-muted-foreground">{description}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-    );
+  // La scène ancrée est un composant à part, monté UNIQUEMENT sur desktop :
+  // `useSectionScrollProgress` attache son écouteur de scroll dans un effet à
+  // dépendances vides, donc au montage de son composant. Appelé depuis ce
+  // composant-ci, il se serait exécuté au tout premier rendu — celui du flux
+  // normal, où son `ref` n'est attaché à aucun nœud — et n'aurait jamais été
+  // rejoué au passage en desktop : l'écouteur n'aurait jamais existé, la
+  // progression serait restée à 0 et le contenu à `opacity: 0`. Monter la
+  // scène séparément garantit que le ref est en place avant l'effet.
+  if (reducedMotion || !canPinScene) {
+    return <MethodPillarsFlow />;
   }
+
+  return <MethodPillarsScene />;
+}
+
+/** Scène ancrée desktop — markup et calculs strictement identiques à l'existant. */
+function MethodPillarsScene() {
+  const { ref, progress } = useSectionScrollProgress<HTMLDivElement>();
 
   const sepT = Math.min(1, progress / SEPARATION_END);
   const starATransform = `translate(-50%, -50%) translate(calc(-${REST_OFFSET_X_VH}vh - ${sepT * GROWTH_X_VW}vw), calc(-${REST_OFFSET_Y_VH}vh - ${sepT * GROWTH_Y_VH}vh))`;
@@ -139,36 +207,17 @@ export function MethodStorytelling() {
 
   return (
     <section id="methode" className="scroll-mt-24 bg-background">
-      <div ref={ref} style={{ height: `${SECTION_HEIGHT_VH}vh` }} className="relative">
-        <div className="sticky top-0 h-screen w-full overflow-hidden">
+      <div ref={ref} className="pinned-scene-track relative">
+        <div className="pinned-scene-viewport sticky top-0 w-full overflow-hidden">
           <div
-            className="mx-auto flex h-full max-w-7xl flex-col justify-center px-6"
+            className="mx-auto flex h-full max-w-7xl flex-col justify-center px-6 py-6 lg:py-0"
             style={{
               opacity: contentT,
               transform: `scale(${0.96 + 0.04 * contentT})`,
               willChange: "transform, opacity",
             }}
           >
-            <SectionLabel>Ma méthode</SectionLabel>
-            <h2 className="mb-12 font-heading text-4xl font-extrabold uppercase text-foreground md:text-6xl">
-              4 piliers.
-              <br />1 transformation.
-            </h2>
-
-            <div className="grid grid-cols-1 gap-px bg-border sm:grid-cols-2 lg:grid-cols-4">
-              {methodPillars.map(({ icon: Icon, title, description }, index) => (
-                <div key={title} className="bg-card p-8">
-                  <div className="mb-6 font-heading text-xs font-semibold uppercase tracking-[0.3em] text-primary">
-                    0{index + 1}
-                  </div>
-                  <Icon size={28} className="mb-4 text-primary" />
-                  <h3 className="mb-3 font-heading text-xl font-bold uppercase text-foreground">
-                    {title}
-                  </h3>
-                  <p className="text-sm leading-relaxed text-muted-foreground">{description}</p>
-                </div>
-              ))}
-            </div>
+            <PillarsContent />
           </div>
 
           <div
