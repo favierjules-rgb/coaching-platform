@@ -10,7 +10,7 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
   cancelAppointment,
   createAppointment,
-  getPrimaryCoachInfo,
+  getMyCoachPublicInfo,
   notifyAppointmentCancellation,
   notifyAppointmentConfirmation,
 } from "@/lib/supabase/appointments";
@@ -26,7 +26,10 @@ export default function RendezVousPage() {
     let cancelled = false;
     const supabase = createSupabaseBrowserClient();
     if (!supabase) return;
-    getPrimaryCoachInfo(supabase).then((info) => {
+    // RPC dédiée, jamais un `select` sur `coaches` : la policy
+    // `coaches_select_staff` (migration 20260726220000) réserve cette table au
+    // staff, un élève y lirait zéro ligne.
+    getMyCoachPublicInfo(supabase).then((info) => {
       if (!cancelled) setCoachInfo(info);
     });
     return () => {

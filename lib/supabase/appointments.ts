@@ -125,7 +125,35 @@ function mapBookingSettingsRow(row: BookingSettingsRow): BookingSettings {
 const DEFAULT_BOOKING_SETTINGS: BookingSettings = { id: null, minLeadMinutes: 120, maxDaysAhead: 30, defaultDurationMinutes: 60 };
 const DEFAULT_COACH_INFO = { name: "Ton coach", email: "" };
 
-/** Coach principal (première fiche `coaches` créée) — utilisé comme organisateur des invitations .ics/emails, faute d'un vrai modèle multi-coach dans l'app (voir docs/supabase-calendar-booking-model.md). */
+/**
+ * Identité du coach telle qu'un ÉLÈVE peut la connaître.
+ *
+ * Passe par la RPC `get_my_coach_public_profile()` (migration 20260726220000)
+ * et jamais par un `select` sur `coaches` : depuis l'audit du 26/07/2026, la
+ * policy `coaches_select_staff` réserve la lecture de cette table aux coachs
+ * et aux administrateurs, un élève y lit zéro ligne.
+ *
+ * Deux différences assumées avec `getPrimaryCoachInfo` :
+ *   - la RPC renvoie le coach RÉELLEMENT associé à l'élève (students.coach_id),
+ *     et non la première fiche créée — c'est plus juste ;
+ *   - l'email n'est pas exposé. Il ne servait côté élève qu'à remplir
+ *     `ORGANIZER` dans le .ics, ligne désormais omise (lib/ics.ts). Les emails
+ *     transactionnels, eux, rechargent le coach côté serveur en service role
+ *     (app/api/email/appointment-notification/route.ts) : ce chemin est intact.
+ */
+export async function getMyCoachPublicInfo(supabase: TypedSupabaseClient): Promise<{ name: string; email: string }> {
+  // RPC ajoutée par la migration 20260726220000, pas encore dans les types
+  // générés (`Functions: Record<string, never>`) : `data` arrive en `never`,
+  // d'où la normalisation explicite ci-dessous.
+  const { data, error } = await supabase.rpc("get_my_coach_public_profile");
+  devWarn("getMyCoachPublicInfo", error as { message: string } | null);
+  const ligne = (Array.isArray(data) ? data[0] : data) as { first_name?: string | null; last_name?: string | null } | null | undefined;
+  if (!ligne) return DEFAULT_COACH_INFO;
+  const nom = [ligne.first_name, ligne.last_name].filter(Boolean).join(" ").trim();
+  return { name: nom || DEFAULT_COACH_INFO.name, email: "" };
+}
+
+/** Coach principal (première fiche `coaches` créée) — utilisé comme organisateur des invitations .ics/emails, faute d'un vrai modèle multi-coach dans l'app (voir docs/supabase-calendar-booking-model.md). RÉSERVÉ au staff et au serveur : un élève lit zéro ligne dans `coaches` depuis la migration 20260726220000, il doit appeler `getMyCoachPublicInfo`. */
 export async function getPrimaryCoachInfo(supabase: TypedSupabaseClient): Promise<{ name: string; email: string }> {
   const { data, error } = await supabase.from("coaches").select("*").order("created_at", { ascending: true }).limit(1).maybeSingle();
   devWarn("getPrimaryCoachInfo", error);
