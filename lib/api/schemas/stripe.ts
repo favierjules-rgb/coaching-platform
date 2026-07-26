@@ -41,8 +41,15 @@ export const publicProgramAccessBodySchema = z
   .object({
     firstName: z.string().trim().min(1).max(100),
     lastName: z.string().trim().min(1).max(100),
-    email: z.string().trim().email({ message: "Adresse email invalide." }).max(254),
+    email: z.string().trim().toLowerCase().max(254).pipe(z.string().email({ message: "Adresse email invalide." })),
     cgvAccepted: z.literal(true, { message: "Tu dois accepter les conditions générales de vente pour continuer." }),
+    /**
+     * Piège à robots (audit de sécurité, juillet 2026) : champ masqué que
+     * seul un automate remplit. Accepté par le schéma — c'est la route qui
+     * décide quoi en faire, afin de renvoyer une réponse NEUTRE plutôt
+     * qu'une erreur de validation qui apprendrait au robot comment passer.
+     */
+    website: z.string().max(200).optional().or(z.literal("")),
   })
   .strict();
 

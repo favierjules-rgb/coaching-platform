@@ -60,7 +60,13 @@ function buildEvent(input: IcsAppointmentInput, status: "CONFIRMED" | "CANCELLED
     `DESCRIPTION:${escapeIcsText(input.description)}`,
     input.location ? `LOCATION:${escapeIcsText(input.location)}` : null,
     input.meetingUrl ? `URL:${escapeIcsText(input.meetingUrl)}` : null,
-    `ORGANIZER;CN=${escapeIcsText(input.organizerName)}:mailto:${input.organizerEmail}`,
+    // ORGANIZER est facultatif en RFC 5545, mais un `mailto:` vide produit une
+    // ligne invalide que certains clients rejettent. Côté élève, l'email du
+    // coach n'est volontairement plus exposé (RLS `coaches`, audit 26/07/2026)
+    // : la ligne est alors omise plutôt que tronquée.
+    input.organizerEmail
+      ? `ORGANIZER;CN=${escapeIcsText(input.organizerName)}:mailto:${input.organizerEmail}`
+      : null,
     `ATTENDEE;CN=${escapeIcsText(input.attendeeName)};RSVP=TRUE:mailto:${input.attendeeEmail}`,
     `STATUS:${status}`,
     `SEQUENCE:${input.sequence ?? 0}`,

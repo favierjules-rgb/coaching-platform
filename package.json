@@ -33,7 +33,9 @@
     "test:business-inquiry-page": "npx tsx scripts/tests/business-inquiry-page.mts",
     "test:business-inquiry-email": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/business-inquiry-email.mts",
     "test:free-assessment-email": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/free-assessment-email.mts",
-    "test:free-assessment-page": "npx tsx scripts/tests/free-assessment-page.mts"
+    "test:free-assessment-page": "npx tsx scripts/tests/free-assessment-page.mts",
+    "test:security-hardening": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/security-hardening.mts",
+    "db:local:init": "bash scripts/db-local-init.sh"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

@@ -1,0 +1,52 @@
+{
+  "$commentaire": [
+    "Instantané du schéma Supabase distant, PLACÉ HORS DE supabase/migrations/ À DESSEIN.",
+    "supabase db push ne pousse que les fichiers de supabase/migrations/ : tant que le",
+    "baseline reste ici, il est structurellement impossible de le rejouer sur la",
+    "production, où le schéma existe déjà. Ne JAMAIS déplacer ces fichiers dans",
+    "supabase/migrations/.",
+    "",
+    "Utilisé uniquement par scripts/db-local-init.sh pour reconstruire une base LOCALE."
+  ],
+  "source": {
+    "commit": "5bafc50",
+    "branche": "chore/billing-baseline",
+    "message": "chore: establish reproducible Supabase billing baseline",
+    "date_instantane": "2026-07-24",
+    "origine": "supabase db dump du projet distant, sans données"
+  },
+  "fichiers": {
+    "00_baseline_remote_schema.sql": {
+      "sha256": "01d03c8000fc51b1e07fd39f2866eadcfa7b462e9ab6b860920ecd6421fcaf16",
+      "lignes": 3714,
+      "contenu": "45 tables, 107 policies, 5 fonctions, contraintes, index, triggers"
+    },
+    "01_post_baseline_storage.sql": {
+      "sha256": "abd5754809001ca5c0bd65227578529c7289f7982d0998bdd04bad68c5ae3fec",
+      "lignes": 87,
+      "contenu": "buckets Storage et leurs policies"
+    }
+  },
+  "borne": {
+    "derniere_migration_incluse": "20260722120000_save_training_session_blocks_session_patch",
+    "premiere_migration_a_rejouer": "20260724214500_delete_unused_subscription_template_rpc",
+    "migrations_incluses_dans_le_baseline": 25,
+    "methode_de_determination": "vérification objet par objet (tables, colonnes, fonctions, policies, contraintes, buckets) et non par le nom du fichier ; voir le rapport d'audit du 26/07/2026"
+  },
+  "migrations_post_baseline_attendues": [
+    "20260724214500_delete_unused_subscription_template_rpc.sql",
+    "20260726120000_calendar_coach_events.sql",
+    "20260726120500_calendar_privacy_busy_ranges.sql",
+    "20260726121000_calendar_atomic_booking.sql",
+    "20260726220000_fix_profiles_role_escalation.sql"
+  ],
+  "garanties_de_contenu": {
+    "insert_de_donnees_metier": 0,
+    "comptes_utilisateurs": 0,
+    "emails_reels": 0,
+    "identifiants_stripe": 0,
+    "secrets": 0,
+    "fichiers_storage": 0,
+    "note": "Les trois INSERT du fichier 00 se trouvent DANS le corps de la fonction save_training_session_blocks : ce sont des instructions de la fonction, pas des données insérées à l'exécution du baseline."
+  }
+}

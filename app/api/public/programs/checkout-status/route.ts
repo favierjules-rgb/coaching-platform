@@ -2,6 +2,13 @@ import { NextResponse } from "next/server";
 
 import { checkoutStatusQuerySchema } from "@/lib/api/schemas/stripe";
 import { parseParams } from "@/lib/api/validate";
+import {
+  consumeRateLimit,
+  getTrustedClientIp,
+  rateLimitHeaders,
+  rateLimitKey,
+} from "@/lib/security/rate-limit";
+import { CHECKOUT_STATUS_IP } from "@/lib/security/rules";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getStripeClient } from "@/lib/stripe/client";
 
@@ -30,6 +37,18 @@ import { getStripeClient } from "@/lib/stripe/client";
  * redemander.
  */
 export async function GET(request: Request) {
+  // Quota large : la page /programmes/merci interroge cette route en boucle
+  // courte. Il borne malgré tout les appels à Stripe et la génération de
+  // magiclinks, qui ne peuvent pas rester libres (audit H-2).
+  const ip = getTrustedClientIp(request);
+  const parIp = await consumeRateLimit(rateLimitKey([ip]), CHECKOUT_STATUS_IP);
+  if (!parIp.allowed) {
+    return NextResponse.json(
+      { error: "Trop de requêtes. Réessaie dans un instant." },
+      { status: 429, headers: rateLimitHeaders(parIp) },
+    );
+  }
+
   const { searchParams } = new URL(request.url);
   const parsedParams = parseParams(Object.fromEntries(searchParams), checkoutStatusQuerySchema);
   if (!parsedParams.success) return parsedParams.response;

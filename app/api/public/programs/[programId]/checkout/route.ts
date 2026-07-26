@@ -4,6 +4,13 @@ import { idParamSchema } from "@/lib/api/schemas/common";
 import { publicProgramCheckoutBodySchema } from "@/lib/api/schemas/stripe";
 import { parseJsonBody, parseParams } from "@/lib/api/validate";
 import { CGV_PROGRAMME_CONSENT_TEXT_VERSION, IMMEDIATE_ACCESS_AND_WAIVER_CONSENT_TEXT_VERSION } from "@/lib/legal-consents";
+import {
+  consumeRateLimit,
+  getTrustedClientIp,
+  rateLimitHeaders,
+  rateLimitKey,
+} from "@/lib/security/rate-limit";
+import { DOUBLE_SUBMIT, PROGRAM_CHECKOUT_IP } from "@/lib/security/rules";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getStripeClient } from "@/lib/stripe/client";
 
@@ -19,13 +26,45 @@ import { getStripeClient } from "@/lib/stripe/client";
  * lib/supabase/public-program-provisioning.ts. `customer_creation: "always"`
  * garantit un Customer Stripe même sans compte élève préexistant.
  */
+/** ~4 Ko : identité courte et deux consentements. */
+const MAX_BODY_BYTES = 4 * 1024;
+
 export async function POST(request: Request, { params }: { params: Promise<{ programId: string }> }) {
+  const contentLength = Number(request.headers.get("content-length") ?? "0");
+  if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
+    return NextResponse.json({ error: "Requête trop volumineuse." }, { status: 413 });
+  }
+
+  // Chaque appel crée une session Stripe : facturé au projet, donc borné
+  // avant tout travail (audit H-2).
+  const ip = getTrustedClientIp(request);
+  const parIp = await consumeRateLimit(rateLimitKey([ip]), PROGRAM_CHECKOUT_IP);
+  if (!parIp.allowed) {
+    return NextResponse.json(
+      { error: "Trop de demandes. Réessaie plus tard." },
+      { status: 429, headers: rateLimitHeaders(parIp) },
+    );
+  }
+
   const routeParams = await params;
   const parsedParams = parseParams({ id: routeParams.programId }, idParamSchema);
   if (!parsedParams.success) return parsedParams.response;
 
   const parsedBody = await parseJsonBody(request, publicProgramCheckoutBodySchema);
   if (!parsedBody.success) return parsedBody.response;
+
+  // Double-clic ou rejeu : une seule session Stripe pour le même couple
+  // (programme, email) sur une courte fenêtre.
+  const antiRejeu = await consumeRateLimit(
+    rateLimitKey([ip, parsedParams.data.id, parsedBody.data.email]),
+    DOUBLE_SUBMIT,
+  );
+  if (!antiRejeu.allowed) {
+    return NextResponse.json(
+      { error: "Demande déjà en cours de traitement." },
+      { status: 429, headers: rateLimitHeaders(antiRejeu) },
+    );
+  }
 
   const supabase = createSupabaseAdminClient();
   if (!supabase) {
