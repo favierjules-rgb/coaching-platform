@@ -73,9 +73,9 @@ export function StudentSubscriptionSection({
 
 function Subsection({ title, defaultOpen, children }: { title: string; defaultOpen?: boolean; children: ReactNode }) {
   return (
-    <details className="group border border-border" open={defaultOpen}>
-      <summary className="cursor-pointer list-none px-4 py-3 text-xs font-bold uppercase tracking-widest text-foreground transition-colors hover:text-primary [&::-webkit-details-marker]:hidden">
-        <span className="mr-2 inline-block transition-transform group-open:rotate-90">›</span>
+    <details className="group rounded-panel border border-border" open={defaultOpen}>
+      <summary className="flex min-h-[44px] cursor-pointer list-none items-center rounded-panel px-4 py-3 text-xs font-bold uppercase tracking-widest text-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 [&::-webkit-details-marker]:hidden">
+        <span className="mr-2 inline-block transition-transform group-open:rotate-90 motion-reduce:transition-none">›</span>
         {title}
       </summary>
       <div className="border-t border-border p-4">{children}</div>
@@ -198,7 +198,7 @@ function StudentSubscriptionForm({
   return (
     <div className="flex flex-col gap-6">
       {/* Résumé */}
-      <div className="flex flex-col gap-3 border border-border bg-background/40 p-4">
+      <div className="flex flex-col gap-3 rounded-panel border border-border bg-surface-soft/40 p-4">
         <div className="flex flex-wrap items-center gap-3">
           <StatusBadge label={status.allowed ? "Accès autorisé" : "Accès bloqué"} tone={status.allowed ? "green" : "red"} />
           <span className="text-sm text-muted-foreground">{accessReasonLabels[status.reason]}</span>
@@ -235,7 +235,7 @@ function StudentSubscriptionForm({
                 type="button"
                 onClick={handleDeleteSubscription}
                 disabled={deletingSubscription}
-                className="text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex min-h-[44px] items-center rounded-control text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {deletingSubscription ? "Suppression…" : "Supprimer l'abonnement (Supabase)"}
               </button>
@@ -245,7 +245,7 @@ function StudentSubscriptionForm({
                 type="button"
                 onClick={handleDeletePayment}
                 disabled={deletingPayment}
-                className="text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex min-h-[44px] items-center rounded-control text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {deletingPayment ? "Suppression…" : "Supprimer le dernier paiement (Supabase)"}
               </button>
@@ -265,7 +265,7 @@ function StudentSubscriptionForm({
                 id={modeSelectId}
                 value={mode}
                 onChange={(event) => setMode(event.target.value as BillingAccessMode)}
-                className="w-full border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none sm:max-w-sm"
+                className="w-full rounded-control border border-border bg-surface-soft px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30 sm:max-w-sm"
               >
                 {accessModeOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -284,7 +284,7 @@ function StudentSubscriptionForm({
                 value={note}
                 onChange={(event) => setNote(event.target.value)}
                 placeholder="Ex : élève offert, accès test, ancien élève..."
-                className="w-full border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none"
+                className="w-full rounded-control border border-border bg-surface-soft px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
               />
             </div>
             <div className="flex flex-wrap items-center gap-3">
@@ -292,11 +292,11 @@ function StudentSubscriptionForm({
                 type="button"
                 onClick={handleSaveAccess}
                 disabled={savingAccess}
-                className="border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40"
+                className="pressable min-h-[44px] rounded-control border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {savingAccess ? "Enregistrement…" : "Enregistrer"}
               </button>
-              {savedAccess && <span className="text-xs text-green-400">Enregistré.</span>}
+              {savedAccess && <span className="text-xs text-success">Enregistré.</span>}
             </div>
           </div>
         </Subsection>
@@ -311,7 +311,7 @@ function StudentSubscriptionForm({
                 id={templateSelectId}
                 value={templateId}
                 onChange={(event) => setTemplateId(event.target.value)}
-                className="w-full border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none sm:max-w-sm"
+                className="w-full rounded-control border border-border bg-surface-soft px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30 sm:max-w-sm"
               >
                 <option value="">Aucun</option>
                 {templates.map((template) => (
@@ -326,11 +326,11 @@ function StudentSubscriptionForm({
                 type="button"
                 onClick={handleAssignTemplate}
                 disabled={assigning}
-                className="border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40"
+                className="pressable min-h-[44px] rounded-control border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {assigning ? "Attribution…" : "Attribuer"}
               </button>
-              {assigned && <span className="text-xs text-green-400">Modèle attribué.</span>}
+              {assigned && <span className="text-xs text-success">Modèle attribué.</span>}
               <CreateCheckoutLinkModal
                 triggerLabel="Créer lien de paiement Stripe"
                 mode="admin"
@@ -345,7 +345,7 @@ function StudentSubscriptionForm({
                 <button
                   type="button"
                   onClick={handleOpenPortal}
-                  className="flex items-center gap-1.5 border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+                  className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                 >
                   <CreditCard size={14} aria-hidden="true" />
                   Ouvrir le portail client
@@ -354,7 +354,7 @@ function StudentSubscriptionForm({
                   href={`https://dashboard.stripe.com/customers/${billingSummary.customer.stripeCustomerId}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+                  className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                 >
                   <ExternalLink size={14} aria-hidden="true" />
                   Voir dans Stripe
