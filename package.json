@@ -28,7 +28,8 @@
     "test:calendar-events": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/calendar-events.mts",
     "test:booking-conflicts": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/booking-conflicts.mts",
     "test:calendar-render": "npx tsx scripts/tests/calendar-render.mts",
-    "test:time-reference": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/time-reference.mts"
+    "test:time-reference": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/time-reference.mts",
+    "test:home-method-pillars": "npx tsx scripts/tests/home-method-pillars.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

@@ -535,3 +535,30 @@ body {
     color-mix(in srgb, var(--foreground) 8%, transparent) 6px
   );
 }
+
+/*
+ * Scène ancrée « 4 piliers » (components/sections/MethodStorytelling.tsx).
+ *
+ * `svh` = small viewport height : sur mobile, `vh` vaut la hauteur SANS les
+ * barres du navigateur, donc une scène en `100vh` déborde de la zone
+ * réellement visible tant que la barre d'URL est déployée — et rogne son
+ * contenu. `svh` correspond à la plus petite zone visible : la scène tient
+ * toujours. Repli en `vh` d'abord pour les moteurs qui ignorent `svh`.
+ */
+.pinned-scene-track {
+  height: 220vh;
+}
+
+.pinned-scene-viewport {
+  height: 100vh;
+}
+
+@supports (height: 100svh) {
+  .pinned-scene-track {
+    height: 220svh;
+  }
+
+  .pinned-scene-viewport {
+    height: 100svh;
+  }
+}
