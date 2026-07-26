@@ -1,3 +1,4 @@
+import { FreeAssessment } from "@/components/sections/FreeAssessment";
 import { Hero } from "@/components/sections/Hero";
 import { MethodStorytelling } from "@/components/sections/MethodStorytelling";
 import { Newsletter } from "@/components/sections/Newsletter";
@@ -18,6 +19,11 @@ export default function HomePage() {
       <Hero />
       <MethodStorytelling />
       <Transformations />
+      {/* « Mon bilan offert » s'intercale entre les résultats et les offres :
+          le visiteur vient de voir des transformations réelles, c'est le
+          moment où il se demande ce que ça donnerait pour lui. L'ordre
+          Transformations → bilan → programmes est intentionnel. */}
+      <FreeAssessment />
       <PublicPrograms />
       <Newsletter />
     </>

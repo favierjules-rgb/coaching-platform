@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+import {
+  firstIncompleteQuestion as firstIncompleteQuestionShared,
+  type ProgressiveQuestionsConfig,
+} from "@/lib/forms/progressive-questions";
+
 /**
  * Demande de contact « Services aux entreprises » (page publique
  * /services-entreprises) — schéma UNIQUE, partagé par le formulaire client
@@ -172,38 +177,29 @@ export const QUESTION_FIELDS: readonly (readonly string[])[] = [
 export const QUESTION_COUNT = QUESTION_FIELDS.length;
 
 /**
+ * Configuration de progression de CE questionnaire. La mécanique elle-même
+ * vit dans `lib/forms/progressive-questions.ts`, partagée avec les autres
+ * formulaires progressifs — comportement strictement identique, seule la
+ * description des questions change.
+ *
+ * Les champs facultatifs (téléphone, détails du projet) ne produisent aucune
+ * erreur lorsqu'ils sont vides : ils ne bloquent donc pas la progression. La
+ * ville, elle, retient la question 6 tant qu'un format en présentiel est
+ * choisi sans localisation — c'est la règle du schéma.
+ */
+const progressionConfig: ProgressiveQuestionsConfig = {
+  schema: businessInquirySchema,
+  questionFields: QUESTION_FIELDS,
+  // Le consentement n'appartient à aucune question et se coche en dernier.
+  neutralize: { privacyAccepted: true },
+};
+
+/**
  * Numéro (1-indexé) de la première question encore incomplète, ou
  * `QUESTION_COUNT + 1` si toutes le sont.
- *
- * La complétude est DÉDUITE du schéma, jamais réécrite : on valide l'état
- * courant et on regarde si une erreur porte sur l'un des champs de la
- * question. Impossible qu'une question soit jugée « remplie » ici et refusée
- * à l'envoi. Les champs facultatifs (téléphone, détails du projet) ne
- * produisent aucune erreur lorsqu'ils sont vides : ils ne bloquent donc pas
- * la progression. La ville, elle, bloque la question 6 tant qu'un format en
- * présentiel est choisi sans localisation — c'est la règle du schéma.
  */
 export function firstIncompleteQuestion(values: unknown): number {
-  /**
-   * Le consentement est posé à `true` pour cette évaluation : il n'appartient
-   * à aucune des sept questions, et surtout il est coché en DERNIER. Le
-   * laisser à `false` ferait échouer le schéma au niveau objet, ce qui
-   * empêcherait le `superRefine` de s'exécuter — les règles conditionnelles
-   * (ville obligatoire en présentiel, précision exigée par « autre ») ne
-   * seraient alors jamais évaluées pendant la progression, et ces questions
-   * passeraient pour remplies.
-   */
-  const pourEvaluation =
-    typeof values === "object" && values !== null ? { ...values, privacyAccepted: true } : values;
-
-  const result = businessInquirySchema.safeParse(pourEvaluation);
-  if (result.success) return QUESTION_COUNT + 1;
-
-  const champsEnErreur = new Set(result.error.issues.map((issue) => String(issue.path[0])));
-  for (let index = 0; index < QUESTION_COUNT; index += 1) {
-    if (QUESTION_FIELDS[index].some((champ) => champsEnErreur.has(champ))) return index + 1;
-  }
-  return QUESTION_COUNT + 1;
+  return firstIncompleteQuestionShared(values, progressionConfig);
 }
 
 /** Les sept questions sont-elles toutes remplies ? (Le consentement est à part.) */
