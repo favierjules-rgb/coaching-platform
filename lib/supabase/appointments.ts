@@ -63,12 +63,29 @@ function mapAvailabilityRow(row: AvailabilityRow): CoachAvailability {
 }
 
 function mapUnavailabilityRow(row: UnavailabilityRow): CoachUnavailability {
+  // Colonnes du chantier "admin-apple-calendar" (category/title/notes/
+  // location/all_day) : replis sûrs tant que la migration n'est pas
+  // appliquée sur l'environnement courant (select("*") renvoie alors
+  // simplement des champs absents).
+  const extended = row as UnavailabilityRow & {
+    category?: string | null;
+    title?: string | null;
+    notes?: string | null;
+    location?: string | null;
+    all_day?: boolean | null;
+  };
+  const category = extended.category === "personal" || extended.category === "professional" ? extended.category : "unavailability";
   return {
     id: row.id,
     coachId: row.coach_id,
     startAt: row.start_at,
     endAt: row.end_at,
     reason: row.reason ?? "",
+    category,
+    title: extended.title ?? "",
+    notes: extended.notes ?? "",
+    location: extended.location ?? "",
+    allDay: extended.all_day ?? false,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -180,17 +197,130 @@ export async function getCoachUnavailabilities(supabase: TypedSupabaseClient): P
   return (data ?? []).map(mapUnavailabilityRow);
 }
 
+/** Événements du coach (toutes catégories) intersectant [from, to) — calendrier admin, période affichée uniquement. */
+export async function getCoachEventsInRange(
+  supabase: TypedSupabaseClient,
+  from: Date,
+  to: Date,
+): Promise<CoachUnavailability[]> {
+  const { data, error } = await supabase
+    .from("coach_unavailabilities")
+    .select("*")
+    .lt("start_at", to.toISOString())
+    .gt("end_at", from.toISOString())
+    .order("start_at", { ascending: true });
+  devWarn("getCoachEventsInRange", error);
+  return (data ?? []).map(mapUnavailabilityRow);
+}
+
+/** La RPC calendrier n'existe pas encore sur l'environnement (migrations "admin-apple-calendar" non appliquées). */
+function isMissingRpc(error: { code?: string; message: string } | null): boolean {
+  return Boolean(error && (error.code === "PGRST202" || /could not find the function/i.test(error.message)));
+}
+
+/** L'écriture a été refusée pour cause de chevauchement (RPC ou contrainte d'exclusion). */
+function isConflictError(error: { code?: string; message: string } | null): boolean {
+  return Boolean(error && (error.code === "23P01" || error.message.includes("calendar_conflict")));
+}
+
+/**
+ * Indisponibilité simple (onglet Disponibilités — comportement préservé, y
+ * compris le droit de se bloquer par-dessus un RDV existant) : passe par la
+ * RPC atomique avec p_allow_overlap, avec repli sur l'INSERT historique tant
+ * que les migrations calendrier ne sont pas appliquées.
+ */
 export async function createCoachUnavailability(
   supabase: TypedSupabaseClient,
   data: { startAt: string; endAt: string; reason: string },
 ): Promise<string | null> {
-  const { data: row, error } = await supabase
+  // @ts-expect-error — RPC ajoutée par la migration 20260726121000, pas encore dans les types générés.
+  const { data: rpcId, error } = await supabase.rpc("create_coach_event_atomic", {
+    p_category: "unavailability",
+    p_title: "",
+    p_notes: "",
+    p_location: "",
+    p_all_day: false,
+    p_start_at: data.startAt,
+    p_end_at: data.endAt,
+    p_reason: data.reason,
+    p_allow_overlap: true,
+  });
+  if (!error) return (rpcId as string | null) ?? null;
+  if (!isMissingRpc(error)) {
+    devWarn("createCoachUnavailability", error);
+    return null;
+  }
+  // Repli pré-migration (sera inerte après application : RLS sans policy INSERT).
+  const { data: row, error: insertError } = await supabase
     .from("coach_unavailabilities")
     .insert({ start_at: data.startAt, end_at: data.endAt, reason: data.reason })
     .select("id")
     .single();
-  devWarn("createCoachUnavailability", error);
+  devWarn("createCoachUnavailability (repli pré-migration)", insertError);
   return row?.id ?? null;
+}
+
+export interface CoachEventInput {
+  category: "personal" | "professional";
+  title: string;
+  notes: string;
+  location: string;
+  allDay: boolean;
+  startAt: string;
+  endAt: string;
+}
+
+export interface AtomicWriteResult {
+  id: string | null;
+  /** true si l'écriture a été refusée parce que la période chevauche une période occupée. */
+  conflict: boolean;
+}
+
+/** Événement personnel/professionnel de l'admin — contrôle de conflit STRICT côté serveur. */
+export async function createCoachEventAtomic(
+  supabase: TypedSupabaseClient,
+  input: CoachEventInput,
+): Promise<AtomicWriteResult> {
+  // @ts-expect-error — RPC ajoutée par la migration 20260726121000, pas encore dans les types générés.
+  const { data, error } = await supabase.rpc("create_coach_event_atomic", {
+    p_category: input.category,
+    p_title: input.title,
+    p_notes: input.notes,
+    p_location: input.location,
+    p_all_day: input.allDay,
+    p_start_at: input.startAt,
+    p_end_at: input.endAt,
+    p_reason: "",
+    p_allow_overlap: false,
+  });
+  if (error) {
+    if (!isConflictError(error)) devWarn("createCoachEventAtomic", error);
+    return { id: null, conflict: isConflictError(error) };
+  }
+  return { id: (data as string | null) ?? null, conflict: false };
+}
+
+/** Modification (déplacement/durée/contenu) d'un événement du coach — même contrôle strict. */
+export async function updateCoachEventAtomic(
+  supabase: TypedSupabaseClient,
+  id: string,
+  input: Omit<CoachEventInput, "category">,
+): Promise<AtomicWriteResult> {
+  // @ts-expect-error — RPC ajoutée par la migration 20260726121000, pas encore dans les types générés.
+  const { data, error } = await supabase.rpc("update_coach_event_atomic", {
+    p_id: id,
+    p_title: input.title,
+    p_notes: input.notes,
+    p_location: input.location,
+    p_all_day: input.allDay,
+    p_start_at: input.startAt,
+    p_end_at: input.endAt,
+  });
+  if (error) {
+    if (!isConflictError(error)) devWarn("updateCoachEventAtomic", error);
+    return { id: null, conflict: isConflictError(error) };
+  }
+  return { id: data === true ? id : null, conflict: false };
 }
 
 export async function deleteCoachUnavailability(supabase: TypedSupabaseClient, id: string): Promise<boolean> {
@@ -237,6 +367,67 @@ export async function getAllAppointments(supabase: TypedSupabaseClient): Promise
   return (data ?? []).map(mapAppointmentRow);
 }
 
+/**
+ * Rendez-vous intersectant [from, to) — vue calendrier admin : on ne charge
+ * QUE la période affichée (directive §11), jamais tout l'historique.
+ */
+export async function getAppointmentsInRange(
+  supabase: TypedSupabaseClient,
+  from: Date,
+  to: Date,
+): Promise<AdminAppointment[]> {
+  const { data, error } = await supabase
+    .from("appointments")
+    .select("*")
+    .lt("start_at", to.toISOString())
+    .gt("end_at", from.toISOString())
+    .order("start_at", { ascending: true });
+  devWarn("getAppointmentsInRange", error);
+  return (data ?? []).map(mapAppointmentRow);
+}
+
+/**
+ * Périodes occupées [from, to) via la RPC neutre `get_busy_ranges`
+ * (bornes anonymes uniquement — aucun titre/motif/identité). Repli
+ * pré-migration : lectures directes historiques (mêmes données que
+ * l'ancien calcul).
+ */
+export async function getBusyRanges(
+  supabase: TypedSupabaseClient,
+  from: Date,
+  to: Date,
+): Promise<{ startAt: string; endAt: string }[]> {
+  // @ts-expect-error — RPC ajoutée par la migration 20260726120500, pas encore dans les types générés.
+  const { data, error } = await supabase.rpc("get_busy_ranges", {
+    p_from: from.toISOString(),
+    p_to: to.toISOString(),
+  });
+  if (!error) {
+    return ((data ?? []) as { start_at: string; end_at: string }[]).map((r) => ({ startAt: r.start_at, endAt: r.end_at }));
+  }
+  if (!isMissingRpc(error)) {
+    devWarn("getBusyRanges", error);
+    return [];
+  }
+  // Repli pré-migration : mêmes sources que l'ancien getAvailableSlots.
+  const [{ data: bookedRows, error: bookedError }, unavailabilities] = await Promise.all([
+    supabase
+      .from("appointments")
+      .select("start_at, end_at, status")
+      .in("status", BLOCKING_STATUSES)
+      .lt("start_at", to.toISOString())
+      .gt("end_at", from.toISOString()),
+    getCoachUnavailabilities(supabase),
+  ]);
+  devWarn("getBusyRanges (repli pré-migration)", bookedError);
+  return [
+    ...(bookedRows ?? []).map((r) => ({ startAt: r.start_at, endAt: r.end_at })),
+    ...unavailabilities
+      .filter((u) => new Date(u.startAt).getTime() < to.getTime() && new Date(u.endAt).getTime() > from.getTime())
+      .map((u) => ({ startAt: u.startAt, endAt: u.endAt })),
+  ];
+}
+
 /** Rendez-vous d'un élève précis (vue élève), plus proches en premier. */
 export async function getAppointmentsForStudent(supabase: TypedSupabaseClient, studentId: string): Promise<AdminAppointment[]> {
   const { data, error } = await supabase
@@ -248,22 +439,26 @@ export async function getAppointmentsForStudent(supabase: TypedSupabaseClient, s
   return (data ?? []).map(mapAppointmentRow);
 }
 
-/** Calcule les créneaux disponibles pour les prochains jours à partir des disponibilités/indisponibilités/réservations réelles. */
+/**
+ * Calcule les créneaux disponibles pour les prochains jours.
+ *
+ * Depuis le chantier "admin-apple-calendar", les périodes occupées viennent
+ * de la RPC neutre `get_busy_ranges` (RDV bloquants de TOUS les élèves +
+ * événements du coach, sans aucune donnée privée) — même calcul pur
+ * (computeAvailableSlots), mêmes règles, même rendu côté élève. Corrige au
+ * passage l'angle mort où l'élève ne « voyait » que ses propres RDV comme
+ * réservés (RLS) et pouvait donc croire libre un créneau déjà pris.
+ */
 export async function getAvailableSlots(supabase: TypedSupabaseClient): Promise<AvailableSlot[]> {
-  const [availabilities, unavailabilities, settings] = await Promise.all([
+  const [availabilities, settings] = await Promise.all([
     getCoachAvailabilities(supabase),
-    getCoachUnavailabilities(supabase),
     getBookingSettings(supabase),
   ]);
 
+  const windowStart = new Date();
   const windowEnd = new Date();
   windowEnd.setDate(windowEnd.getDate() + settings.maxDaysAhead + 1);
-  const { data: bookedRows, error: bookedError } = await supabase
-    .from("appointments")
-    .select("start_at, end_at, status")
-    .in("status", BLOCKING_STATUSES)
-    .lte("start_at", windowEnd.toISOString());
-  devWarn("getAvailableSlots (appointments)", bookedError);
+  const busy = await getBusyRanges(supabase, windowStart, windowEnd);
 
   return computeAvailableSlots({
     availabilities: availabilities.map((a) => ({
@@ -275,8 +470,8 @@ export async function getAvailableSlots(supabase: TypedSupabaseClient): Promise<
       location: a.location,
       isActive: a.isActive,
     })),
-    unavailabilities: unavailabilities.map((u) => ({ startAt: u.startAt, endAt: u.endAt })),
-    bookedRanges: (bookedRows ?? []).map((r) => ({ startAt: r.start_at, endAt: r.end_at })),
+    unavailabilities: [],
+    bookedRanges: busy,
     minLeadMinutes: settings.minLeadMinutes,
     maxDaysAhead: settings.maxDaysAhead,
   });
@@ -296,27 +491,60 @@ export interface CreateAppointmentInput {
   actorType?: ActivityActorType;
 }
 
-/** Crée un rendez-vous (réservation élève ou création manuelle admin) et renvoie l'id créé, ou null en cas d'échec. */
-export async function createAppointment(supabase: TypedSupabaseClient, input: CreateAppointmentInput): Promise<string | null> {
+/**
+ * Crée un rendez-vous via la RPC transactionnelle `create_appointment_atomic`
+ * (verrou consultatif + contrôle de chevauchement inter-tables + contrainte
+ * d'exclusion en filet) : deux réservations simultanées du même intervalle ne
+ * peuvent jamais réussir toutes les deux. Renvoie l'id créé et, en cas de
+ * refus, si la cause est un conflit de créneau.
+ */
+export async function createAppointmentAtomic(
+  supabase: TypedSupabaseClient,
+  input: CreateAppointmentInput,
+): Promise<AtomicWriteResult> {
   const icsUid = `${crypto.randomUUID()}@seth-coaching`;
-  const { data: row, error } = await supabase
-    .from("appointments")
-    .insert({
-      student_id: input.studentId,
-      title: input.title,
-      description: input.description,
-      appointment_type: input.appointmentType,
-      start_at: input.startAt,
-      end_at: input.endAt,
-      location: input.location,
-      meeting_url: input.meetingUrl,
-      status: input.status ?? "confirmed",
-      ics_uid: icsUid,
-    })
-    .select("id")
-    .single();
-  devWarn("createAppointment", error);
-  if (row) {
+  // @ts-expect-error — RPC ajoutée par la migration 20260726121000, pas encore dans les types générés.
+  const { data, error } = await supabase.rpc("create_appointment_atomic", {
+    p_student_id: input.studentId,
+    p_title: input.title,
+    p_description: input.description,
+    p_appointment_type: input.appointmentType,
+    p_start_at: input.startAt,
+    p_end_at: input.endAt,
+    p_location: input.location,
+    p_meeting_url: input.meetingUrl,
+    p_ics_uid: icsUid,
+    p_status: input.status ?? "confirmed",
+  });
+  let id: string | null = (data as string | null) ?? null;
+  if (error) {
+    if (isConflictError(error)) return { id: null, conflict: true };
+    if (!isMissingRpc(error)) {
+      devWarn("createAppointmentAtomic", error);
+      return { id: null, conflict: false };
+    }
+    // Repli pré-migration : INSERT historique (deviendra inerte après
+    // application — plus aucune policy INSERT sur appointments).
+    const { data: row, error: insertError } = await supabase
+      .from("appointments")
+      .insert({
+        student_id: input.studentId,
+        title: input.title,
+        description: input.description,
+        appointment_type: input.appointmentType,
+        start_at: input.startAt,
+        end_at: input.endAt,
+        location: input.location,
+        meeting_url: input.meetingUrl,
+        status: input.status ?? "confirmed",
+        ics_uid: icsUid,
+      })
+      .select("id")
+      .single();
+    devWarn("createAppointment (repli pré-migration)", insertError);
+    id = row?.id ?? null;
+  }
+  if (id) {
     await logActivityEvent(supabase, {
       studentId: input.studentId,
       actorType: input.actorType ?? "student",
@@ -326,7 +554,12 @@ export async function createAppointment(supabase: TypedSupabaseClient, input: Cr
       metadata: buildStudentActivityLink(input.studentId),
     });
   }
-  return row?.id ?? null;
+  return { id, conflict: false };
+}
+
+/** Compat : même signature qu'avant le chantier calendrier (réservation élève, page /rendez-vous inchangée). */
+export async function createAppointment(supabase: TypedSupabaseClient, input: CreateAppointmentInput): Promise<string | null> {
+  return (await createAppointmentAtomic(supabase, input)).id;
 }
 
 export async function cancelAppointment(
@@ -336,10 +569,23 @@ export async function cancelAppointment(
   studentId: string | null = null,
   actorType: ActivityActorType = "student",
 ): Promise<boolean> {
-  const { error } = await supabase
-    .from("appointments")
-    .update({ status: "cancelled", cancellation_reason: reason, updated_at: new Date().toISOString() })
-    .eq("id", id);
+  // @ts-expect-error — RPC ajoutée par la migration 20260726121000, pas encore dans les types générés.
+  const { data, error: rpcError } = await supabase.rpc("cancel_appointment_atomic", { p_appointment_id: id, p_reason: reason });
+  let error: { message: string; code?: string } | null = null;
+  if (rpcError) {
+    if (!isMissingRpc(rpcError)) {
+      error = rpcError;
+    } else {
+      // Repli pré-migration : UPDATE historique.
+      const { error: updateError } = await supabase
+        .from("appointments")
+        .update({ status: "cancelled", cancellation_reason: reason, updated_at: new Date().toISOString() })
+        .eq("id", id);
+      error = updateError;
+    }
+  } else if (data !== true) {
+    error = { message: "cancel_appointment_atomic : rendez-vous introuvable" };
+  }
   devWarn("cancelAppointment", error);
   if (!error && studentId) {
     await logActivityEvent(supabase, {
@@ -368,6 +614,22 @@ export async function rescheduleAppointment(
   newEndAt: string,
 ): Promise<string | null> {
   const icsUid = `${crypto.randomUUID()}@seth-coaching`;
+  // RPC transactionnelle : annulation de l'original + contrôle de conflit +
+  // création du nouveau dans UNE transaction (l'implémentation historique en
+  // deux requêtes séparées pouvait laisser un état incohérent).
+  // @ts-expect-error — RPC ajoutée par la migration 20260726121000, pas encore dans les types générés.
+  const { data, error } = await supabase.rpc("reschedule_appointment_atomic", {
+    p_appointment_id: appointment.id,
+    p_new_start_at: newStartAt,
+    p_new_end_at: newEndAt,
+    p_ics_uid: icsUid,
+  });
+  if (!error) return (data as string | null) ?? null;
+  if (!isMissingRpc(error)) {
+    if (!isConflictError(error)) devWarn("rescheduleAppointment", error);
+    return null;
+  }
+  // Repli pré-migration : séquence historique.
   const { data: row, error: insertError } = await supabase
     .from("appointments")
     .insert({
@@ -385,7 +647,7 @@ export async function rescheduleAppointment(
     })
     .select("id")
     .single();
-  devWarn("rescheduleAppointment (insert)", insertError);
+  devWarn("rescheduleAppointment (repli insert)", insertError);
   if (!row) {
     return null;
   }
@@ -393,7 +655,7 @@ export async function rescheduleAppointment(
     .from("appointments")
     .update({ status: "cancelled", cancellation_reason: "Reporté", updated_at: new Date().toISOString() })
     .eq("id", appointment.id);
-  devWarn("rescheduleAppointment (cancel original)", cancelError);
+  devWarn("rescheduleAppointment (repli cancel original)", cancelError);
   return row.id;
 }
 
