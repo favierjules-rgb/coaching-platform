@@ -1,4 +1,23 @@
 -- ============================================================================
+-- ⚠️  FICHIER HISTORIQUE — NE PAS EXÉCUTER
+-- ============================================================================
+-- Ce fichier n'est PAS le baseline du projet et ne permet pas de reconstruire
+-- une base : il a été mis à jour partiellement au fil des chantiers (il
+-- contient email_logs, newsletter_subscribers, subscription_templates et
+-- coach_unavailabilities, créées par des migrations ultérieures, mais ignore
+-- session_templates et training_blocks). Ce n'est donc ni le schéma d'origine,
+-- ni le schéma courant : le rejouer produirait des conflits.
+--
+-- Pour reconstruire une base LOCALE, utiliser :
+--     npm run db:local:init
+-- qui applique supabase/baseline/ (instantané vérifié du 24/07/2026) puis les
+-- seules migrations postérieures. Voir supabase/baseline/manifest.json.
+--
+-- Conservé pour la mémoire du projet : les commentaires ci-dessous
+-- documentent les intentions d'origine du modèle de données.
+-- ============================================================================
+
+-- ============================================================================
 -- Seth — Préparation Physique — schéma Supabase initial
 -- ============================================================================
 -- Étape "supabase-setup" : ce fichier prépare la structure de base de données
