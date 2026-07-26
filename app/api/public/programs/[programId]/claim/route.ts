@@ -4,6 +4,13 @@ import { idParamSchema } from "@/lib/api/schemas/common";
 import { publicProgramAccessBodySchema } from "@/lib/api/schemas/stripe";
 import { parseJsonBody, parseParams } from "@/lib/api/validate";
 import { CGV_PROGRAMME_CONSENT_TEXT_VERSION } from "@/lib/legal-consents";
+import {
+  consumeRateLimit,
+  getTrustedClientIp,
+  rateLimitHeaders,
+  rateLimitKey,
+} from "@/lib/security/rate-limit";
+import { CLAIM_PROGRAM_EMAIL, CLAIM_PROGRAM_IP, DOUBLE_SUBMIT } from "@/lib/security/rules";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { provisionPublicProgramAccess } from "@/lib/supabase/public-program-provisioning";
 
@@ -19,13 +26,54 @@ import { provisionPublicProgramAccess } from "@/lib/supabase/public-program-prov
  * réellement gratuit" est donc entièrement portée par cette route, jamais
  * déléguée à une RLS.
  */
+/** ~4 Ko : trois champs courts, rien de plus. */
+const MAX_BODY_BYTES = 4 * 1024;
+
+/** Message unique de refus : ne révèle jamais pourquoi la demande est bloquée. */
+const TROP_DE_DEMANDES = "Trop de demandes. Réessaie plus tard.";
+
 export async function POST(request: Request, { params }: { params: Promise<{ programId: string }> }) {
+  const contentLength = Number(request.headers.get("content-length") ?? "0");
+  if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
+    return NextResponse.json({ error: "Requête trop volumineuse." }, { status: 413 });
+  }
+
+  // Quota par IP AVANT tout travail : cette route crée un compte Supabase Auth
+  // et envoie un email à chaque appel réussi (audit H-2).
+  const ip = getTrustedClientIp(request);
+  const parIp = await consumeRateLimit(rateLimitKey([ip]), CLAIM_PROGRAM_IP);
+  if (!parIp.allowed) {
+    return NextResponse.json({ error: TROP_DE_DEMANDES }, { status: 429, headers: rateLimitHeaders(parIp) });
+  }
+
   const routeParams = await params;
   const parsedParams = parseParams({ id: routeParams.programId }, idParamSchema);
   if (!parsedParams.success) return parsedParams.response;
 
   const parsedBody = await parseJsonBody(request, publicProgramAccessBodySchema);
   if (!parsedBody.success) return parsedBody.response;
+
+  // Honeypot : un robot remplit tous les champs, y compris celui que le
+  // formulaire masque. Réponse de SUCCÈS neutre, sans rien provisionner —
+  // même convention que /api/business-inquiry et /api/free-assessment.
+  if (parsedBody.data.website && parsedBody.data.website.trim().length > 0) {
+    return NextResponse.json({ ok: true });
+  }
+
+  // Idempotence métier : le même couple (programme, email) n'a pas de raison
+  // d'être réclamé en boucle. Bloque aussi le double-clic.
+  const cleRessource = rateLimitKey([parsedParams.data.id, parsedBody.data.email]);
+  const parEmail = await consumeRateLimit(cleRessource, CLAIM_PROGRAM_EMAIL);
+  if (!parEmail.allowed) {
+    // Succès neutre : la première réclamation est déjà partie, et on ne
+    // confirme pas à un tiers qu'une adresse a réclamé ce programme.
+    return NextResponse.json({ ok: true });
+  }
+
+  const antiRejeu = await consumeRateLimit(rateLimitKey([ip, cleRessource]), DOUBLE_SUBMIT);
+  if (!antiRejeu.allowed) {
+    return NextResponse.json({ ok: true });
+  }
 
   const supabase = createSupabaseAdminClient();
   if (!supabase) {
