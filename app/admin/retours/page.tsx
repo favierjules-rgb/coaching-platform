@@ -3,13 +3,13 @@
 import { useState } from "react";
 import { AlertTriangle, CheckCheck, MessageSquare, RotateCcw } from "lucide-react";
 
-import { FeedbackDetailModal } from "@/components/admin/FeedbackDetailModal";
+import { FeedbackDetailModal, feedbackTypeDisplayLabel } from "@/components/admin/FeedbackDetailModal";
 import { FilterButtons, SearchInput } from "@/components/admin/SearchAndFilters";
 import { StatusBadge, feedbackStatusTone } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
 import { useSupabaseAdminFeedback } from "@/hooks/useSupabaseAdminFeedback";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
-import { feedbackStatusLabels, feedbackTypeLabels, formatDate, fullName, matchesTextSearch } from "@/lib/admin";
+import { feedbackStatusLabels, formatDate, fullName, matchesTextSearch } from "@/lib/admin";
 import type { FeedbackStatus, FeedbackType } from "@/types";
 
 type StatusFilter = "tous" | FeedbackStatus;
@@ -77,7 +77,8 @@ export default function AdminFeedbackPage() {
           <select
             value={studentFilter}
             onChange={(e) => setStudentFilter(e.target.value)}
-            className="border border-border bg-background px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground"
+            aria-label="Filtrer par élève"
+            className="min-h-[44px] max-w-full rounded-control border border-border bg-surface-soft px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             <option value="tous">Tous les élèves</option>
             {students.map((s) => (
@@ -90,8 +91,8 @@ export default function AdminFeedbackPage() {
       </div>
 
       {filtered.length === 0 ? (
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <MessageSquare size={16} />
+        <p className="flex items-center gap-2 rounded-card border border-border bg-card p-6 text-sm text-muted-foreground shadow-soft">
+          <MessageSquare size={16} aria-hidden="true" />
           {feedback.length === 0 ? "Aucun retour pour le moment." : "Aucun retour ne correspond à ta recherche."}
         </p>
       ) : (
@@ -99,34 +100,38 @@ export default function AdminFeedbackPage() {
           {filtered.map((f) => {
             const student = students.find((s) => s.id === f.studentId);
             return (
-              <div
-                key={f.id}
-                className="flex flex-col gap-4 border border-border bg-card p-6 lg:flex-row lg:items-center lg:justify-between"
-              >
-                <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                  <div>
+              // Infos en grille (min-w-0 partout), actions sur une LIGNE
+              // DÉDIÉE sous un séparateur — jamais côte à côte avec le
+              // contenu, donc aucune collision possible de 1024 à 1440 px
+              // (leçon de l'audit). Mobile : tout s'empile, boutons pleine
+              // largeur.
+              <div key={f.id} className="flex flex-col gap-4 rounded-card border border-border bg-card p-6 shadow-soft transition-colors hover:border-border-strong">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="min-w-0">
                     <span className="block text-xs uppercase tracking-wide text-muted-foreground">Élève</span>
-                    <span className="text-sm font-bold text-foreground">
+                    <span className="break-words text-sm font-bold text-foreground">
                       {student ? fullName(student) : "Élève non identifié"}
                     </span>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <span className="block text-xs uppercase tracking-wide text-muted-foreground">Type · Concerné</span>
-                    <span className="text-sm text-foreground">
-                      {feedbackTypeLabels[f.type]} — {f.refLabel}
+                    <span className="break-words text-sm text-foreground">
+                      {feedbackTypeDisplayLabel(f)} — {f.refLabel}
                     </span>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <span className="block text-xs uppercase tracking-wide text-muted-foreground">Date</span>
                     <span className="text-sm text-foreground">{formatDate(f.date)}</span>
                     {f.rpe !== null && <span className="block text-xs text-muted-foreground">RPE {f.rpe}/10</span>}
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <span className="block text-xs uppercase tracking-wide text-muted-foreground">Statut</span>
-                    <StatusBadge label={feedbackStatusLabels[f.status]} tone={feedbackStatusTone(f.status)} />
+                    <span className="mt-1 block">
+                      <StatusBadge label={feedbackStatusLabels[f.status]} tone={feedbackStatusTone(f.status)} />
+                    </span>
                   </div>
                 </div>
-                <div className="flex flex-shrink-0 flex-wrap gap-2">
+                <div className="flex flex-col gap-2 border-t border-border pt-4 sm:flex-row sm:flex-wrap">
                   <FeedbackDetailModal
                     feedback={f}
                     student={student}
@@ -138,9 +143,9 @@ export default function AdminFeedbackPage() {
                       onClick={() =>
                         useSupabase ? supabaseFeedback.updateStatus(f.id, "important") : setFeedbackStatus(f.id, "important")
                       }
-                      className="flex items-center gap-1.5 border border-amber-500/50 px-4 py-2 text-xs uppercase tracking-widest text-amber-400 transition-colors hover:bg-amber-500/10"
+                      className="pressable flex min-h-[44px] items-center justify-center gap-1.5 rounded-control border border-warning/50 px-4 py-2 text-xs uppercase tracking-widest text-warning transition-colors hover:bg-warning/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning/40 sm:justify-start"
                     >
-                      <AlertTriangle size={13} />
+                      <AlertTriangle size={13} aria-hidden="true" />
                       Marquer important
                     </button>
                   )}
@@ -150,9 +155,9 @@ export default function AdminFeedbackPage() {
                       onClick={() =>
                         useSupabase ? supabaseFeedback.updateStatus(f.id, "traité") : setFeedbackStatus(f.id, "traité")
                       }
-                      className="flex items-center gap-1.5 border border-green-500/50 px-4 py-2 text-xs uppercase tracking-widest text-green-400 transition-colors hover:bg-green-500/10"
+                      className="pressable flex min-h-[44px] items-center justify-center gap-1.5 rounded-control border border-success/50 px-4 py-2 text-xs uppercase tracking-widest text-success transition-colors hover:bg-success/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-success/40 sm:justify-start"
                     >
-                      <CheckCheck size={13} />
+                      <CheckCheck size={13} aria-hidden="true" />
                       Marquer traité
                     </button>
                   )}
@@ -164,9 +169,9 @@ export default function AdminFeedbackPage() {
                           ? supabaseFeedback.updateStatus(f.id, "a-traiter")
                           : setFeedbackStatus(f.id, "a-traiter")
                       }
-                      className="flex items-center gap-1.5 border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+                      className="pressable flex min-h-[44px] items-center justify-center gap-1.5 rounded-control border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 sm:justify-start"
                     >
-                      <RotateCcw size={13} />
+                      <RotateCcw size={13} aria-hidden="true" />
                       Remettre à traiter
                     </button>
                   )}
