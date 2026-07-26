@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
 
 import { getCurrentUser, getCurrentUserRole } from "@/lib/supabase/auth";
-import { isSupabaseConfigured } from "@/lib/supabase/env";
+import { isMockModeAllowed, isSupabaseConfigured } from "@/lib/supabase/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getCurrentStudentId } from "@/lib/supabase/current-student";
 import { getOnboardingCompleted } from "@/lib/supabase/onboarding";
@@ -27,15 +27,34 @@ async function getStudentAccessType(
 }
 
 /**
- * Guards à appeler en tête d'un layout/page Server Component protégé. Tant
- * que Supabase n'est pas configuré, toutes les guards deviennent des
- * no-op — le mode mock actuel (accès libre) est préservé pendant la
- * transition, comme demandé.
+ * Guards à appeler en tête d'un layout/page Server Component protégé.
+ *
+ * Hors production, si Supabase n'est pas configuré, les guards deviennent
+ * des no-op : le mode mock/localStorage reste utilisable en développement.
+ *
+ * En PRODUCTION, ce repli n'existe plus (audit de sécurité, juillet 2026,
+ * point M-4) : une configuration absente refuse l'accès au lieu de
+ * l'ouvrir. Une variable d'environnement oubliée lors d'un déploiement
+ * provoquait sinon l'ouverture complète de l'espace administrateur —
+ * l'échec doit fermer la porte, jamais l'ouvrir.
  */
+
+/**
+ * `true` si le guard doit laisser passer sans vérifier (mock local), `false`
+ * s'il doit poursuivre les contrôles. En production avec une configuration
+ * absente, redirige plutôt que de rendre la main.
+ */
+function shouldSkipGuards(): boolean {
+  if (isSupabaseConfigured()) return false;
+  if (isMockModeAllowed()) return true;
+  // Production sans Supabase : panne de configuration, on refuse.
+  console.error("[Guards] Supabase non configuré en production : accès refusé (fail-closed).");
+  redirect("/acces-refuse");
+}
 
 /** Élève connecté requis. Redirige vers /connexion si personne n'est connecté. */
 export async function requireAuth(): Promise<void> {
-  if (!isSupabaseConfigured()) {
+  if (shouldSkipGuards()) {
     return;
   }
   const user = await getCurrentUser();
@@ -51,7 +70,7 @@ export async function requireAuth(): Promise<void> {
  * traité comme non autorisé, jamais laissé passer par défaut.
  */
 export async function requireAdminOrCoach(): Promise<void> {
-  if (!isSupabaseConfigured()) {
+  if (shouldSkipGuards()) {
     return;
   }
   await requireAuth();
@@ -77,7 +96,7 @@ export async function requireAdminOrCoach(): Promise<void> {
  */
 export async function requireStudent(): Promise<void> {
   await requireAuth();
-  if (!isSupabaseConfigured()) {
+  if (shouldSkipGuards()) {
     return;
   }
   const role = await getCurrentUserRole();
@@ -119,7 +138,7 @@ export async function requireStudent(): Promise<void> {
  */
 export async function requireActiveStudentAccess(): Promise<void> {
   await requireAuth();
-  if (!isSupabaseConfigured()) {
+  if (shouldSkipGuards()) {
     return;
   }
   const role = await getCurrentUserRole();
@@ -155,7 +174,7 @@ export async function requireActiveStudentAccess(): Promise<void> {
  */
 export async function requireEntrainementAccess(): Promise<void> {
   await requireAuth();
-  if (!isSupabaseConfigured()) {
+  if (shouldSkipGuards()) {
     return;
   }
   const role = await getCurrentUserRole();
@@ -188,7 +207,7 @@ export async function requireEntrainementAccess(): Promise<void> {
  */
 export async function requireCoachingFeature(): Promise<void> {
   await requireAuth();
-  if (!isSupabaseConfigured()) {
+  if (shouldSkipGuards()) {
     return;
   }
   const role = await getCurrentUserRole();
@@ -218,7 +237,7 @@ export async function requireCoachingFeature(): Promise<void> {
  */
 export async function requireOnboarding(): Promise<void> {
   await requireAuth();
-  if (!isSupabaseConfigured()) {
+  if (shouldSkipGuards()) {
     return;
   }
   const role = await getCurrentUserRole();

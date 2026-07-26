@@ -39,3 +39,20 @@ export function getSupabaseEnv(): SupabaseEnv | null {
 export function isSupabaseConfigured(): boolean {
   return getSupabaseEnv() !== null;
 }
+
+/**
+ * Le mode « mock » (Supabase absent ⇒ accès libre) est-il tolérable ?
+ *
+ * Audit de sécurité, juillet 2026, point M-4 : les guards de page
+ * (`lib/supabase/guards.ts`) devenaient des no-op dès que Supabase n'était
+ * pas configuré. Pratique en développement, mais « fail-open » en ligne :
+ * une variable d'environnement oubliée lors d'un déploiement ouvrait
+ * l'espace administrateur à tout visiteur.
+ *
+ * Désormais, ce repli n'existe QUE hors production. En production, une
+ * configuration absente est une panne — et une panne se traduit par un
+ * refus d'accès, jamais par une porte ouverte.
+ */
+export function isMockModeAllowed(): boolean {
+  return process.env.NODE_ENV !== "production";
+}
