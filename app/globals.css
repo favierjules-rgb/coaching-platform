@@ -519,3 +519,19 @@ body {
 .anatomy-desat {
   filter: saturate(0.32) brightness(1.05) contrast(1.02);
 }
+
+/*
+ * Hachures diagonales des indisponibilités dans le calendrier admin
+ * (components/admin/calendar/CalendarEventChip.tsx) : distinction par la
+ * FORME plutôt que par la couleur, cohérente avec l'identité monochrome.
+ * Motif statique — aucune animation.
+ */
+.calendar-hatched {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 5px,
+    color-mix(in srgb, var(--foreground) 8%, transparent) 5px,
+    color-mix(in srgb, var(--foreground) 8%, transparent) 6px
+  );
+}
