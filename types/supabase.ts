@@ -1749,6 +1749,11 @@ export interface Database {
           start_at: string;
           end_at: string;
           reason: string;
+          category: string;
+          title: string;
+          notes: string;
+          location: string;
+          all_day: boolean;
           created_at: string;
           updated_at: string;
         };
@@ -1758,6 +1763,11 @@ export interface Database {
           start_at: string;
           end_at: string;
           reason?: string;
+          category?: string;
+          title?: string;
+          notes?: string;
+          location?: string;
+          all_day?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -1767,6 +1777,11 @@ export interface Database {
           start_at?: string;
           end_at?: string;
           reason?: string;
+          category?: string;
+          title?: string;
+          notes?: string;
+          location?: string;
+          all_day?: boolean;
           created_at?: string;
           updated_at?: string;
         };

@@ -2158,12 +2158,31 @@ export interface CoachAvailability {
   updatedAt: string;
 }
 
+/**
+ * Catégorie d'un événement du coach (chantier "admin-apple-calendar") :
+ * la table `coach_unavailabilities` reste la source des périodes qui
+ * bloquent les créneaux élèves ; `personal`/`professional` sont des
+ * événements privés de l'admin (titre/notes/lieu JAMAIS exposés aux
+ * élèves), `unavailability` la valeur historique par défaut.
+ */
+export type CoachEventCategory = "unavailability" | "personal" | "professional";
+
 export interface CoachUnavailability {
   id: string;
   coachId: string | null;
   startAt: string;
   endAt: string;
   reason: string;
+  /** Défaut "unavailability" tant que la migration calendrier n'est pas appliquée. */
+  category: CoachEventCategory;
+  /** Titre privé (événements personnels/professionnels) — vide pour une indisponibilité simple. */
+  title: string;
+  /** Notes privées, visibles admin uniquement. */
+  notes: string;
+  /** Lieu facultatif, privé. */
+  location: string;
+  /** Événement sur toute la journée. */
+  allDay: boolean;
   createdAt: string;
   updatedAt: string;
 }
