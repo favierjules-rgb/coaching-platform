@@ -27,6 +27,22 @@ export interface EmailButton {
   url: string;
 }
 
+/**
+ * Personnalisation du pied de page (juillet 2026). Sans cet objet, le pied
+ * de page reste EXACTEMENT celui d'origine : les emails transactionnels
+ * destinés aux élèves ne changent pas d'un caractère.
+ *
+ * Introduit pour les notifications INTERNES (demandes entreprise), où la
+ * mention « suite à une action sur ton compte » est fausse : le destinataire
+ * est le coach, et l'action vient d'un prospect via un formulaire public.
+ */
+export interface EmailFooterOptions {
+  /** Remplace la mention de bas de page par un texte adapté au contexte. */
+  note?: string;
+  /** `false` : masque la ligne « Réponds directement à cet email ». */
+  showReplyTo?: boolean;
+}
+
 export interface BaseEmailInput {
   /** Texte d'aperçu caché (affiché par les clients mail à côté du sujet), jamais visible dans le corps rendu. */
   preheader?: string;
@@ -37,6 +53,43 @@ export interface BaseEmailInput {
   secondaryButton?: EmailButton;
   /** Bloc additionnel optionnel (ex : détails d'une formule) inséré après bodyHtml, avant le(s) bouton(s). */
   detailsHtml?: string;
+  footer?: EmailFooterOptions;
+}
+
+/** Mention par défaut — celle des emails transactionnels adressés aux élèves. */
+export const DEFAULT_FOOTER_NOTE =
+  "Cet email transactionnel t'a été envoyé suite à une action sur ton compte SETH Préparation Physique.";
+
+/**
+ * URL publique du site, ou `null` si elle est absente ou pointe sur la
+ * machine locale.
+ *
+ * Un email part vers une vraie boîte : un lien `localhost:3000` y est au
+ * mieux inutile, au pire suspect. On préfère donc n'afficher aucun lien
+ * plutôt qu'une adresse inexploitable — et on ne devine JAMAIS une URL de
+ * production, qui doit venir de la configuration.
+ */
+export function getPublicAppUrl(): string | null {
+  const raw = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  if (!raw) return null;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return null; // Valeur mal formée : on n'affiche rien.
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+
+  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  const estLocal =
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host === "127.0.0.1" ||
+    host.startsWith("127.") ||
+    host === "0.0.0.0" ||
+    host === "::1";
+  return estLocal ? null : raw;
 }
 
 /** Échappe une valeur avant de l'insérer dans du HTML — toute donnée provenant de Supabase (nom, titre...) doit passer par ici avant d'être concaténée dans un template. */
@@ -67,8 +120,10 @@ function renderButton(button: EmailButton, primary: boolean): string {
 }
 
 export function renderBaseEmailHtml(input: BaseEmailInput): string {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
-  const replyTo = process.env.RESEND_REPLY_TO || "";
+  // Lien affiché seulement s'il mène quelque part depuis une boîte mail.
+  const appUrl = getPublicAppUrl() ?? "";
+  const replyTo = input.footer?.showReplyTo === false ? "" : process.env.RESEND_REPLY_TO || "";
+  const footerNote = input.footer?.note ?? DEFAULT_FOOTER_NOTE;
 
   return `<!doctype html>
 <html lang="fr">
@@ -122,7 +177,7 @@ export function renderBaseEmailHtml(input: BaseEmailInput): string {
                 </p>
                 ${replyTo ? `<p style="margin: 0 0 4px 0; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: ${COLORS.muted};">Une question ? Réponds directement à cet email${replyTo ? ` (${escapeHtml(replyTo)})` : ""}.</p>` : ""}
                 <p style="margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: ${COLORS.muted};">
-                  Cet email transactionnel t'a été envoyé suite à une action sur ton compte SETH Préparation Physique.
+                  ${escapeHtml(footerNote)}
                 </p>
               </td>
             </tr>
@@ -139,6 +194,7 @@ export interface BaseEmailTextInput {
   bodyText: string;
   button?: EmailButton;
   secondaryButton?: EmailButton;
+  footer?: EmailFooterOptions;
 }
 
 /** Version texte brut en complément du HTML (RFC 2183 multipart/alternative) — mêmes informations, sans mise en forme. */
@@ -146,7 +202,18 @@ export function renderBaseEmailText(input: BaseEmailTextInput): string {
   const lines = [`SETH PRÉPARATION PHYSIQUE`, ``, input.heading.toUpperCase(), ``, input.bodyText];
   if (input.button) lines.push(``, `${input.button.label} : ${input.button.url}`);
   if (input.secondaryButton) lines.push(``, `${input.secondaryButton.label} : ${input.secondaryButton.url}`);
-  const replyTo = process.env.RESEND_REPLY_TO;
-  lines.push(``, `---`, replyTo ? `Une question ? Réponds à cet email (${replyTo}).` : `SETH Préparation Physique`);
+  lines.push(``, `---`);
+
+  // Pied de page personnalisé (notification interne) : la mention remplace
+  // la ligne de réponse, et le lien du site n'est ajouté que s'il est public.
+  if (input.footer?.note) {
+    lines.push(input.footer.note);
+    const appUrl = getPublicAppUrl();
+    if (appUrl) lines.push(appUrl);
+    return lines.join("\n");
+  }
+
+  const replyTo = input.footer?.showReplyTo === false ? undefined : process.env.RESEND_REPLY_TO;
+  lines.push(replyTo ? `Une question ? Réponds à cet email (${replyTo}).` : `SETH Préparation Physique`);
   return lines.join("\n");
 }

@@ -331,6 +331,34 @@ body {
   }
 }
 
+/* Dévoilement d'une question du formulaire « Services aux entreprises »
+   (juillet 2026) — chaque question apparaît une fois la précédente remplie.
+   Le mouvement vient d'en haut vers le bas, dans le sens de lecture et du
+   flux qui pousse le contenu suivant : une translation verticale courte
+   (8px) plutôt qu'horizontale comme le wizard d'onboarding, qui lui navigue
+   latéralement entre étapes. Durée volontairement brève : l'apparition se
+   déclenche pendant la frappe, elle doit accompagner sans retenir. */
+@keyframes question-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.question-reveal {
+  animation: question-reveal 220ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .question-reveal {
+    animation: none;
+  }
+}
+
 /* Icône de confirmation de paiement réussi (chantier redesign UI, Lot 5,
    opportunité d'animation #6) — uniquement l'état succès de
    PaymentResultCard (iconTone "primary" par défaut, voir
