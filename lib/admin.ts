@@ -1,3 +1,4 @@
+import { currentDate } from "@/lib/clock";
 import { normalizePaymentProfile } from "@/lib/payments";
 import type {
   AdminContentStatus,
@@ -218,20 +219,28 @@ export const mealSlots = [
 ] as const;
 
 /**
- * "Aujourd'hui" fictif utilisé pour calculer les listes de suivi du
- * dashboard admin (dernière connexion, dernier retour...), pour que la
- * démo reste cohérente indépendamment de la date réelle du test. À
- * remplacer par des requêtes réelles une fois Supabase connecté.
+ * "Aujourd'hui" fictif des FIXTURES de démonstration et des tests.
+ *
+ * ⚠️ Ne doit JAMAIS servir de date courante en production : elle l'a été
+ * jusqu'au 26/07/2026 (valeur par défaut de `daysBetween` et de
+ * `computeDocumentAvailability`), ce qui gelait le déblocage automatique des
+ * documents et la progression des semaines de programme. Les calculs
+ * dépendant du temps utilisent désormais `currentDate()` par défaut et
+ * acceptent une `reference` explicite pour rester déterministes en test.
  */
 export const ADMIN_REFERENCE_DATE = new Date("2026-07-02T12:00:00.000Z");
 
-export function daysBetween(dateIso: string, reference = ADMIN_REFERENCE_DATE): number {
+export function daysBetween(dateIso: string, reference: Date = currentDate()): number {
   return Math.floor((reference.getTime() - new Date(dateIso).getTime()) / 86_400_000);
 }
 
-export function studentsWithoutRecentLogin(students: AdminStudent[], thresholdDays = 14): AdminStudent[] {
+export function studentsWithoutRecentLogin(
+  students: AdminStudent[],
+  thresholdDays = 14,
+  reference: Date = currentDate(),
+): AdminStudent[] {
   return students.filter(
-    (s) => s.status === "actif" && (s.lastLoginAt === null || daysBetween(s.lastLoginAt) > thresholdDays),
+    (s) => s.status === "actif" && (s.lastLoginAt === null || daysBetween(s.lastLoginAt, reference) > thresholdDays),
   );
 }
 
@@ -243,9 +252,10 @@ export function studentsWithRecentFeedback(
   students: AdminStudent[],
   feedback: AdminStudentFeedback[],
   withinDays = 2,
+  reference: Date = currentDate(),
 ): AdminStudent[] {
   const recentStudentIds = new Set(
-    feedback.filter((f) => daysBetween(f.date) <= withinDays).map((f) => f.studentId),
+    feedback.filter((f) => daysBetween(f.date, reference) <= withinDays).map((f) => f.studentId),
   );
   return students.filter((s) => recentStudentIds.has(s.id));
 }
@@ -256,10 +266,11 @@ function studentsMissingRecentFeedback(
   type: FeedbackType,
   assignedIdsKey: "assignedProgramIds" | "assignedNutritionPlanIds",
   withinDays = 2,
+  reference: Date = currentDate(),
 ): AdminStudent[] {
   const recentIds = new Set(
     feedback
-      .filter((f) => f.type === type && daysBetween(f.date) <= withinDays)
+      .filter((f) => f.type === type && daysBetween(f.date, reference) <= withinDays)
       .map((f) => f.studentId),
   );
   return students.filter(
@@ -270,15 +281,17 @@ function studentsMissingRecentFeedback(
 export function studentsWithUnvalidatedSession(
   students: AdminStudent[],
   feedback: AdminStudentFeedback[],
+  reference: Date = currentDate(),
 ): AdminStudent[] {
-  return studentsMissingRecentFeedback(students, feedback, "entrainement", "assignedProgramIds");
+  return studentsMissingRecentFeedback(students, feedback, "entrainement", "assignedProgramIds", 2, reference);
 }
 
 export function studentsWithUnvalidatedNutritionDay(
   students: AdminStudent[],
   feedback: AdminStudentFeedback[],
+  reference: Date = currentDate(),
 ): AdminStudent[] {
-  return studentsMissingRecentFeedback(students, feedback, "nutrition", "assignedNutritionPlanIds");
+  return studentsMissingRecentFeedback(students, feedback, "nutrition", "assignedNutritionPlanIds", 2, reference);
 }
 
 /* ─── Documents : niveaux et déblocage progressif ─── */
@@ -332,7 +345,7 @@ export function computeDocumentAvailability(
   student: { startDate: string },
   document: AdminDocument,
   manualUnlocks: StudentDocumentUnlock[],
-  reference = ADMIN_REFERENCE_DATE,
+  reference: Date = currentDate(),
 ): DocumentAvailability {
   const manuallyUnlocked = manualUnlocks.some((u) => u.documentId === document.id);
   if (manuallyUnlocked) {

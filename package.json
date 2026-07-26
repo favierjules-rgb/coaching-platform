@@ -23,7 +23,8 @@
     "test:subscription-template-deletion": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/subscription-template-deletion.mts",
     "test:feedback-reply-draft": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/feedback-reply-draft.mts",
     "test:cardio-feedback": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/cardio-feedback.mts",
-    "test:cardio-block-form-render": "npx tsx scripts/tests/cardio-block-form-render.mts"
+    "test:cardio-block-form-render": "npx tsx scripts/tests/cardio-block-form-render.mts",
+    "test:time-reference": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/time-reference.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

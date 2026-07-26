@@ -1,4 +1,5 @@
-import { ADMIN_REFERENCE_DATE, daysBetween, weekDays } from "@/lib/admin";
+import { daysBetween, weekDays } from "@/lib/admin";
+import { currentDate } from "@/lib/clock";
 import type {
   AdminContentStatus,
   AdminProgram,
@@ -18,9 +19,12 @@ import type {
  * composants (TrainingProgramCard, NextSessionHighlight, ProgramWeekCalendar,
  * WeekAnalysisSection) — ces composants n'ont donc rien à changer.
  *
- * Utilise ADMIN_REFERENCE_DATE (même date de référence figée que le reste de
- * l'admin, voir lib/admin.ts) plutôt que `new Date()`, pour rester cohérent
- * avec le calcul de semaine déjà utilisé côté admin (/admin/eleves/[studentId]).
+ * Les calculs dépendant du temps (semaine actuelle, repère « aujourd'hui »)
+ * utilisent la date RÉELLE via `currentDate()` — correction du 26/07/2026 :
+ * ils s'appuyaient jusqu'ici sur ADMIN_REFERENCE_DATE, une date de démo figée
+ * au 2 juillet 2026, ce qui gelait la progression des semaines en production.
+ * Le paramètre `reference` reste injectable pour garder les tests
+ * déterministes.
  */
 
 const STATUS_ADMIN_TO_STUDENT: Record<AdminContentStatus, ProgramStatus> = {
@@ -35,7 +39,11 @@ const STATUS_ADMIN_TO_STUDENT: Record<AdminContentStatus, ProgramStatus> = {
  * démarrage fixe du programme partagée par toute la cohorte (mode groupe —
  * chantier module Programmation, étape 5).
  */
-export function computeCurrentWeekNumber(program: AdminProgram, student: AdminStudent | null): number {
+export function computeCurrentWeekNumber(
+  program: AdminProgram,
+  student: AdminStudent | null,
+  reference: Date = currentDate(),
+): number {
   if (program.status !== "actif") {
     return 1;
   }
@@ -45,7 +53,7 @@ export function computeCurrentWeekNumber(program: AdminProgram, student: AdminSt
     return 1;
   }
 
-  const daysSinceStart = daysBetween(referenceDate);
+  const daysSinceStart = daysBetween(referenceDate, reference);
   if (!Number.isFinite(daysSinceStart) || daysSinceStart < 0) {
     return 1;
   }
@@ -53,10 +61,14 @@ export function computeCurrentWeekNumber(program: AdminProgram, student: AdminSt
   return Math.min(Math.max(program.durationWeeks, 1), Math.max(1, weekNumber));
 }
 
-/** Planning des 7 jours d'une semaine donnée du programme, avec `isToday` calculé sur ADMIN_REFERENCE_DATE. */
-export function buildScheduleForWeek(program: AdminProgram, weekNumber: number): ProgramScheduleDay[] {
+/** Planning des 7 jours d'une semaine donnée du programme, `isToday` calculé sur la date réelle (injectable). */
+export function buildScheduleForWeek(
+  program: AdminProgram,
+  weekNumber: number,
+  reference: Date = currentDate(),
+): ProgramScheduleDay[] {
   // getDay() : 0 = dimanche .. 6 = samedi -> réindexé pour matcher weekDays (0 = lundi .. 6 = dimanche).
-  const jsWeekday = ADMIN_REFERENCE_DATE.getDay();
+  const jsWeekday = reference.getDay();
   const todayIndex = (jsWeekday + 6) % 7;
   const sessionsForWeek = program.sessions.filter((s) => s.weekNumber === weekNumber);
 
@@ -108,7 +120,11 @@ export function toEleveWorkoutSession(session: AdminWorkoutSession): WorkoutSess
   };
 }
 
-export function toEleveTrainingProgram(program: AdminProgram, weekNumber: number): TrainingProgram {
+export function toEleveTrainingProgram(
+  program: AdminProgram,
+  weekNumber: number,
+  reference: Date = currentDate(),
+): TrainingProgram {
   const weekNumbers = Array.from(new Set(program.sessions.map((s) => s.weekNumber))).sort((a, b) => a - b);
   const referenceWeek = weekNumbers.includes(weekNumber) ? weekNumber : (weekNumbers[0] ?? weekNumber);
   const sessionsPerWeek = program.sessions.filter((s) => s.weekNumber === referenceWeek && !s.isRestDay).length;
@@ -125,7 +141,7 @@ export function toEleveTrainingProgram(program: AdminProgram, weekNumber: number
     sessionsPerWeek,
     currentWeek: weekNumber,
     progressPercent,
-    schedule: buildScheduleForWeek(program, weekNumber),
+    schedule: buildScheduleForWeek(program, weekNumber, reference),
     bannerUrl: program.bannerUrl,
   };
 }
