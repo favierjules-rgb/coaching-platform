@@ -1,9 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Search } from "lucide-react";
 
-import { CheckboxField } from "@/components/admin/AdminFormFields";
 import { fullName, matchesStudentSearch } from "@/lib/admin";
 import type { AdminStudent, StudentAccountStatus } from "@/types";
 
@@ -57,13 +56,13 @@ export function StudentPickerList({ students, selectedIds, onToggle }: StudentPi
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Rechercher par prénom, nom ou email..."
-            className="w-full border border-border bg-background py-2 pl-8 pr-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none"
+            className="w-full rounded-control border border-border bg-surface-soft py-2 pl-8 pr-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
           />
         </div>
         <select
           value={statusFilter}
           onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
-          className="border border-border bg-background px-3 py-2 text-xs uppercase tracking-widest text-muted-foreground"
+          className="rounded-control border border-border bg-surface-soft px-3 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
         >
           {statusFilterOptions.map((option) => (
             <option key={option.value} value={option.value}>
@@ -78,21 +77,29 @@ export function StudentPickerList({ students, selectedIds, onToggle }: StudentPi
           {selectedIds.length} élève{selectedIds.length > 1 ? "s" : ""} sélectionné{selectedIds.length > 1 ? "s" : ""}
         </span>
         <div className="flex gap-3">
-          <button type="button" onClick={selectAllResults} className="text-primary hover:underline">
+          <button
+            type="button"
+            onClick={selectAllResults}
+            className="rounded-control text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          >
             Tout sélectionner les résultats
           </button>
-          <button type="button" onClick={deselectAll} className="text-muted-foreground hover:text-foreground hover:underline">
+          <button
+            type="button"
+            onClick={deselectAll}
+            className="rounded-control text-muted-foreground hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          >
             Tout désélectionner
           </button>
         </div>
       </div>
 
-      <div className="flex max-h-64 flex-col gap-3 overflow-y-auto border border-border p-4">
+      <div className="flex max-h-64 flex-col gap-3 overflow-y-auto rounded-panel border border-border p-4">
         {filtered.length === 0 ? (
           <p className="text-sm text-muted-foreground">Aucun élève trouvé.</p>
         ) : (
           filtered.map((student) => (
-            <CheckboxField
+            <StudentPickerRow
               key={student.id}
               label={`${fullName(student)} · ${student.email}`}
               checked={selectedIds.includes(student.id)}
@@ -102,5 +109,41 @@ export function StudentPickerList({ students, selectedIds, onToggle }: StudentPi
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Ligne d'élève sélectionnable : le `<label>` lui-même est la cible cliquable
+ * (min 44 px de haut, toute la largeur), tandis que la case native reste à
+ * 16 px (non agrandie, comme demandé). Le clic sur n'importe quelle partie de
+ * la ligne (case ou nom) coche/décoche ; le focus clavier de la case affiche
+ * un anneau visible sur toute la ligne (`focus-within`). Composant local à
+ * StudentPickerList — n'affecte pas le `CheckboxField` partagé (utilisé par le
+ * builder, intouchable).
+ */
+function StudentPickerRow({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  const id = useId();
+  return (
+    <label
+      htmlFor={id}
+      className="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-control px-2 py-1.5 text-sm text-foreground transition-colors hover:bg-surface-soft/60 focus-within:outline-none focus-within:ring-2 focus-within:ring-primary/40"
+    >
+      <input
+        id={id}
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        className="h-4 w-4 flex-shrink-0 accent-primary"
+      />
+      <span>{label}</span>
+    </label>
   );
 }

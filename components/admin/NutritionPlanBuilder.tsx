@@ -83,10 +83,15 @@ function MealEditor({
   const [itemsText, setItemsText] = useState(() => itemsToText(meal.items));
 
   return (
-    <div className="border border-border p-4">
+    <div className="rounded-panel border border-border bg-surface-soft/40 p-4">
       <div className="mb-3 flex items-center justify-between gap-2">
         <span className="text-xs uppercase tracking-wide text-muted-foreground">Repas</span>
-        <button type="button" onClick={onRemove} className="text-red-400 hover:text-red-300">
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label="Supprimer ce repas"
+          className="pressable flex h-11 w-11 items-center justify-center rounded-control text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40"
+        >
           <Trash2 size={14} />
         </button>
       </div>
@@ -108,7 +113,7 @@ function MealEditor({
           rows={3}
           placeholder={"Blanc de poulet - 150 g\nRiz basmati - 200 g"}
         />
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Field label="Kcal" type="number" value={String(meal.calories)} onChange={(v) => onChange({ calories: Number(v) || 0 })} />
           <Field label="Prot (g)" type="number" value={String(meal.protein)} onChange={(v) => onChange({ protein: Number(v) || 0 })} />
           <Field label="Gluc (g)" type="number" value={String(meal.carbs)} onChange={(v) => onChange({ carbs: Number(v) || 0 })} />
@@ -142,15 +147,15 @@ function DayEditor({
   }
 
   return (
-    <div className="border border-border">
-      <div className="flex items-center justify-between border-b border-border bg-background/40 px-4 py-3">
+    <div className="overflow-hidden rounded-panel border border-border">
+      <div className="flex items-center justify-between border-b border-border bg-surface-soft px-4 py-3">
         <span className="text-xs font-bold uppercase tracking-widest text-foreground">{day.day}</span>
         {canDuplicate && (
           <button
             type="button"
             onClick={onDuplicateToNext}
             title="Dupliquer sur le jour suivant"
-            className="flex items-center gap-1 text-[11px] uppercase tracking-widest text-muted-foreground hover:text-primary"
+            className="pressable flex min-h-[44px] items-center gap-1 rounded-control px-2 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             <Copy size={12} />
             Dupliquer <ArrowRight size={10} />
@@ -164,7 +169,7 @@ function DayEditor({
         <button
           type="button"
           onClick={addMeal}
-          className="flex items-center justify-center gap-2 border border-dashed border-border py-3 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+          className="pressable flex min-h-[44px] items-center justify-center gap-2 rounded-control border border-dashed border-border py-3 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         >
           <Plus size={14} />
           Ajouter un repas
@@ -231,7 +236,7 @@ export function NutritionPlanBuilder({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="border border-border bg-card p-6">
+      <div className="rounded-card border border-border bg-card p-6 shadow-soft">
         <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
           Informations générales
         </h2>
@@ -254,7 +259,7 @@ export function NutritionPlanBuilder({
         </div>
       </div>
 
-      <div className="border border-border bg-card p-6">
+      <div className="rounded-card border border-border bg-card p-6 shadow-soft">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h2 className="font-heading text-lg font-bold uppercase text-foreground">
             Semaine alimentaire
@@ -262,7 +267,7 @@ export function NutritionPlanBuilder({
           <button
             type="button"
             onClick={copyMondayToWeek}
-            className="flex items-center gap-2 border border-primary px-4 py-2 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+            className="pressable flex min-h-[44px] items-center gap-2 rounded-control border border-primary px-4 py-2 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             <Copy size={14} />
             Copier lundi sur toute la semaine

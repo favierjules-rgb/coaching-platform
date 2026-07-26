@@ -146,7 +146,7 @@ function MeasurementTile({
   const isFirstMeasurement = entries.length <= 1 && delta === 0;
 
   return (
-    <div className="border border-border p-4">
+    <div className="rounded-panel border border-border p-4">
       <div className="flex items-center justify-between gap-4">
         <div>
           <span className="block text-sm text-foreground">{label || "Mensuration"}</span>
@@ -181,7 +181,7 @@ function MeasurementTile({
           <button
             type="button"
             onClick={() => setShowHistory((prev) => !prev)}
-            className="flex items-center gap-1 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary"
+            className="flex items-center gap-1 rounded-control px-1 py-0.5 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             {showHistory ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
             Historique ({entries.length})

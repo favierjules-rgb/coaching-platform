@@ -68,7 +68,7 @@ export function NutritionWeekSummaryCard({ studentId, planId, target }: Nutritio
         </div>
         <div>
           <span className="block text-xs uppercase tracking-wide text-muted-foreground">Écart</span>
-          <span className={`font-heading text-lg font-bold ${varianceSoFar > 0 ? "text-amber-400" : varianceSoFar < 0 ? "text-primary" : "text-foreground"}`}>
+          <span className={`font-heading text-lg font-bold ${varianceSoFar > 0 ? "text-warning" : varianceSoFar < 0 ? "text-primary" : "text-foreground"}`}>
             {varianceSoFar > 0 ? "+" : ""}
             {formatKcal(varianceSoFar)} kcal
           </span>

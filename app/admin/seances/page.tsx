@@ -70,7 +70,7 @@ export default function AdminSeancesPage() {
         <select
           value={sessionTypeFilter}
           onChange={(e) => setSessionTypeFilter(e.target.value as SessionTypeFilter)}
-          className="border border-border bg-background px-3 py-2.5 text-xs uppercase tracking-widest text-muted-foreground"
+          className="min-h-[44px] appearance-none rounded-control border border-border bg-surface-soft px-3 py-2.5 text-xs uppercase tracking-widest text-muted-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
         >
           <option value="tous">Tous les types</option>
           {Object.entries(sessionTypeLabels).map(([value, label]) => (

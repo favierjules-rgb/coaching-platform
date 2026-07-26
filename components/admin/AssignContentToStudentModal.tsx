@@ -52,7 +52,7 @@ export function AssignContentToStudentModal({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex items-center gap-1.5 border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+        className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
       >
         <UserPlus size={13} />
         Attribuer contenu
@@ -61,7 +61,7 @@ export function AssignContentToStudentModal({
       {open && (
         <Modal title={`Attribuer un contenu à ${student.firstName}`} onClose={close} maxWidth="max-w-lg">
           {confirmed ? (
-            <div className="flex items-center gap-3 border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-400">
+            <div className="flex items-center gap-3 rounded-panel border border-success/40 bg-success/10 px-4 py-3 text-sm text-success">
               <CheckCircle size={18} className="flex-shrink-0" />
               Contenus attribués mis à jour.
             </div>
@@ -70,7 +70,7 @@ export function AssignContentToStudentModal({
               <div>
                 <h4 className="mb-3 text-xs uppercase tracking-wide text-muted-foreground">Programmes</h4>
                 {isSupabaseStudent && !canAssignRealPrograms ? (
-                  <div className="flex items-start gap-3 border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-400">
+                  <div className="flex items-start gap-3 rounded-panel border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning">
                     <Info size={18} className="mt-0.5 flex-shrink-0" />
                     Crée d&apos;abord un programme réel (Admin &gt; Programmes) pour pouvoir l&apos;attribuer à cet élève.
                   </div>
@@ -94,7 +94,7 @@ export function AssignContentToStudentModal({
               <div>
                 <h4 className="mb-3 text-xs uppercase tracking-wide text-muted-foreground">Plans alimentaires</h4>
                 {isSupabaseStudent && !canAssignRealNutrition ? (
-                  <div className="flex items-start gap-3 border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-400">
+                  <div className="flex items-start gap-3 rounded-panel border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning">
                     <Info size={18} className="mt-0.5 flex-shrink-0" />
                     Crée d&apos;abord un plan alimentaire réel (Admin &gt; Nutrition) pour pouvoir l&apos;attribuer à
                     cet élève.
@@ -119,7 +119,7 @@ export function AssignContentToStudentModal({
               <div>
                 <h4 className="mb-3 text-xs uppercase tracking-wide text-muted-foreground">Documents</h4>
                 {isSupabaseStudent && !canAssignRealDocuments ? (
-                  <div className="flex items-start gap-3 border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-400">
+                  <div className="flex items-start gap-3 rounded-panel border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning">
                     <Info size={18} className="mt-0.5 flex-shrink-0" />
                     Crée d&apos;abord un document réel (Admin &gt; Documents) pour pouvoir l&apos;attribuer à cet
                     élève.

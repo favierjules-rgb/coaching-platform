@@ -41,7 +41,10 @@ export function CaloriesWeekChart({
       </div>
       {targetCaloriesPerDay !== null && (
         <p className="mt-2 text-[11px] text-muted-foreground">
-          Objectif quotidien : {targetCaloriesPerDay} kcal. Barres orange = jour au-dessus de l&apos;objectif.
+          {/* {" "} explicite : même bug d'espace avalé que sur le calendrier
+              (« 3000kcal. ») — voir audit final admin. */}
+          Objectif quotidien : {targetCaloriesPerDay}
+          {" "}kcal. Barres orange = jour au-dessus de l&apos;objectif.
         </p>
       )}
     </div>

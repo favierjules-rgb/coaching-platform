@@ -147,7 +147,11 @@ export default function AdminCalendrierPage() {
         <div>
           <h1 className="font-heading text-3xl font-extrabold uppercase text-foreground md:text-4xl">Calendrier</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {supabaseAppointments.appointments.length} rendez-vous · {todaysAppointments.length} aujourd&apos;hui
+            {/* {" "} explicite : la transformation JSX avalait l'espace entre
+                l'expression et un texte contenant une entité (&apos;) — rendu
+                « 0aujourd'hui » constaté à l'audit. */}
+            {supabaseAppointments.appointments.length} rendez-vous · {todaysAppointments.length}
+            {" "}aujourd&apos;hui
           </p>
         </div>
         {tab === "rendez-vous" && (
@@ -163,7 +167,8 @@ export default function AdminCalendrierPage() {
         <button
           type="button"
           onClick={() => setTab("rendez-vous")}
-          className={`border-b-2 px-4 py-2 text-xs font-bold uppercase tracking-widest transition-colors ${
+          aria-pressed={tab === "rendez-vous"}
+          className={`min-h-[44px] rounded-control border-b-2 px-4 py-2 text-xs font-bold uppercase tracking-widest transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
             tab === "rendez-vous" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
           }`}
         >
@@ -172,7 +177,8 @@ export default function AdminCalendrierPage() {
         <button
           type="button"
           onClick={() => setTab("disponibilites")}
-          className={`border-b-2 px-4 py-2 text-xs font-bold uppercase tracking-widest transition-colors ${
+          aria-pressed={tab === "disponibilites"}
+          className={`min-h-[44px] rounded-control border-b-2 px-4 py-2 text-xs font-bold uppercase tracking-widest transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
             tab === "disponibilites" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
           }`}
         >

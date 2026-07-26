@@ -72,7 +72,7 @@ export default function AdminNutritionPlansPage() {
         </div>
         <Link
           href="/admin/nutrition/nouveau"
-          className="flex items-center gap-2 border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
+          className="pressable flex min-h-[44px] items-center gap-2 rounded-control border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         >
           <Plus size={14} />
           Créer plan alimentaire
@@ -92,7 +92,7 @@ export default function AdminNutritionPlansPage() {
       ) : (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           {filtered.map((plan) => (
-            <div key={plan.id} className="flex flex-col gap-4 border border-border bg-card p-6">
+            <div key={plan.id} className="flex flex-col gap-4 rounded-card border border-border bg-card p-6 shadow-soft transition-colors hover:border-border-strong">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h2 className="font-heading text-lg font-bold uppercase text-foreground">{plan.name}</h2>
@@ -140,13 +140,13 @@ export default function AdminNutritionPlansPage() {
               <div className="flex flex-wrap gap-2">
                 <Link
                   href={`/admin/nutrition/${plan.id}`}
-                  className="border border-primary px-4 py-2 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+                  className="pressable flex min-h-[44px] items-center rounded-control border border-primary px-4 py-2 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                 >
                   Voir
                 </Link>
                 <Link
                   href={`/admin/nutrition/${plan.id}`}
-                  className="border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+                  className="pressable flex min-h-[44px] items-center rounded-control border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                 >
                   Modifier
                 </Link>

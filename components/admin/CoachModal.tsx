@@ -81,8 +81,8 @@ export function CoachModal({ coach, onSave }: CoachModalProps) {
         }}
         className={
           coach
-            ? "flex items-center gap-1.5 border border-border px-3 py-1.5 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
-            : "flex items-center gap-2 border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
+            ? "pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            : "pressable flex min-h-[44px] items-center gap-2 rounded-control border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         }
       >
         {coach ? <Pencil size={12} /> : <Plus size={14} />}
@@ -92,8 +92,8 @@ export function CoachModal({ coach, onSave }: CoachModalProps) {
       {open && (
         <Modal title={coach ? "Modifier le coach" : "Ajouter un coach"} onClose={close} maxWidth="max-w-lg">
           {saved ? (
-            <div className="flex items-center gap-3 border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-400">
-              <CheckCircle size={18} className="flex-shrink-0" />
+            <div role="status" className="flex items-center gap-3 rounded-panel border border-success/40 bg-success/10 px-4 py-3 text-sm text-success">
+              <CheckCircle size={18} className="flex-shrink-0" aria-hidden="true" />
               {coach ? "Coach mis à jour." : "Compte créé — un email d'invitation vient d'être envoyé."}
             </div>
           ) : (

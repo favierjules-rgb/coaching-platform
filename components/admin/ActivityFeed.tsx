@@ -22,7 +22,9 @@ import {
 import { fullName } from "@/lib/admin";
 import type { ActivityEvent, ActivityEventType, AdminStudent } from "@/types";
 
-const EVENT_ICONS: Record<ActivityEventType, typeof Activity> = {
+// Exporté (polish final admin) : les notifications du dashboard réutilisent
+// exactement les mêmes icônes par type d'événement — une seule source.
+export const EVENT_ICONS: Record<ActivityEventType, typeof Activity> = {
   onboarding_completed: UserCheck,
   weight_added: Scale,
   workout_feedback_submitted: Dumbbell,
@@ -40,7 +42,7 @@ const EVENT_ICONS: Record<ActivityEventType, typeof Activity> = {
   subscription_cancelled: XCircle,
 };
 
-function relativeTime(dateIso: string): string {
+export function relativeTime(dateIso: string): string {
   const diffMs = Date.now() - new Date(dateIso).getTime();
   const diffMinutes = Math.floor(diffMs / 60_000);
   if (diffMinutes < 1) return "à l'instant";
@@ -82,7 +84,8 @@ export function ActivityFeed({ events, students, onMarkRead, showFilter = false,
           <button
             type="button"
             onClick={() => setFilter("non-lues")}
-            className={`border px-4 py-2 text-xs uppercase tracking-widest transition-colors ${
+            aria-pressed={filter === "non-lues"}
+            className={`pressable min-h-[44px] rounded-full border px-4 py-2 text-xs uppercase tracking-widest focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
               filter === "non-lues" ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground hover:border-primary hover:text-primary"
             }`}
           >
@@ -91,7 +94,8 @@ export function ActivityFeed({ events, students, onMarkRead, showFilter = false,
           <button
             type="button"
             onClick={() => setFilter("toutes")}
-            className={`border px-4 py-2 text-xs uppercase tracking-widest transition-colors ${
+            aria-pressed={filter === "toutes"}
+            className={`pressable min-h-[44px] rounded-full border px-4 py-2 text-xs uppercase tracking-widest focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
               filter === "toutes" ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground hover:border-primary hover:text-primary"
             }`}
           >
@@ -111,7 +115,7 @@ export function ActivityFeed({ events, students, onMarkRead, showFilter = false,
             return (
               <div
                 key={event.id}
-                className={`flex items-start gap-3 border p-4 ${event.isRead ? "border-border" : "border-primary/40 bg-primary/5"}`}
+                className={`flex items-start gap-3 rounded-panel border p-4 ${event.isRead ? "border-border" : "border-primary/40 bg-primary/5"}`}
               >
                 <Icon size={16} className="mt-0.5 flex-shrink-0 text-primary" />
                 <div className="min-w-0 flex-1">
@@ -135,7 +139,7 @@ export function ActivityFeed({ events, students, onMarkRead, showFilter = false,
                       <button
                         type="button"
                         onClick={() => onMarkRead(event.id)}
-                        className="flex items-center gap-1 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary"
+                        className="flex min-h-[32px] items-center gap-1 rounded-control px-1 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                       >
                         <CheckCircle2 size={12} />
                         Marquer comme lu

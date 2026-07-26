@@ -12,12 +12,14 @@ export function StatCard({
   tone?: "default" | "primary" | "amber";
 }) {
   const iconClass =
-    tone === "primary" ? "text-primary" : tone === "amber" ? "text-amber-400" : "text-muted-foreground";
+    tone === "primary" ? "text-primary" : tone === "amber" ? "text-warning" : "text-muted-foreground";
   return (
-    <div className="border border-border bg-card p-5">
-      <Icon size={18} className={iconClass} />
-      <div className="mt-3 font-heading text-2xl font-bold text-foreground">{value}</div>
-      <div className="mt-1 text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
+    <div className="rounded-card border border-border bg-card p-5 shadow-soft">
+      <span className="inline-flex h-9 w-9 items-center justify-center rounded-panel bg-surface-soft/60">
+        <Icon size={18} className={iconClass} />
+      </span>
+      <div className="mt-3 font-heading text-2xl font-bold leading-none text-foreground">{value}</div>
+      <div className="mt-1.5 text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
     </div>
   );
 }

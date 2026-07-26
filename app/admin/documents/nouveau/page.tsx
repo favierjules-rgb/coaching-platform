@@ -218,14 +218,14 @@ export default function NewDocumentPage() {
           <ArrowLeft size={14} />
           Documents
         </Link>
-        <div className="flex items-center gap-3 border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-400">
-          <CheckCircle size={18} className="flex-shrink-0" />
+        <div className="flex items-center gap-3 rounded-panel border border-success/40 bg-success/10 px-4 py-3 text-sm text-success" role="status">
+          <CheckCircle size={18} aria-hidden className="flex-shrink-0" />
           Document &quot;{created.title}&quot; enregistré.
         </div>
         <button
           type="button"
           onClick={() => router.push("/admin/documents")}
-          className="mt-4 border border-primary px-4 py-2 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+          className="pressable mt-4 inline-flex min-h-[44px] items-center rounded-control border border-primary px-4 py-2 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         >
           Retour à la liste
         </button>
@@ -247,13 +247,13 @@ export default function NewDocumentPage() {
       </div>
 
       {saveError && (
-        <p className="mb-6 flex items-center gap-2 border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+        <p className="mb-6 flex items-center gap-2 rounded-panel border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive" role="alert">
           {saveError}
         </p>
       )}
 
       <div className="flex flex-col gap-6">
-        <div className="border border-border bg-card p-6">
+        <div className="rounded-card border border-border bg-card p-6 shadow-soft">
           <div className="flex flex-col gap-4">
             <Field label="Titre" value={title} onChange={setTitle} />
             <div className="grid grid-cols-2 gap-4">
@@ -297,11 +297,11 @@ export default function NewDocumentPage() {
                   id={fileInputId}
                   type="file"
                   onChange={handleFileChange}
-                  className="block w-full text-sm text-muted-foreground file:mr-4 file:border file:border-primary file:bg-transparent file:px-4 file:py-2 file:text-xs file:uppercase file:tracking-widest file:text-primary hover:file:bg-primary hover:file:text-primary-foreground"
+                  className="block w-full rounded-control text-sm text-muted-foreground file:mr-4 file:min-h-[44px] file:rounded-control file:border file:border-primary file:bg-transparent file:px-4 file:py-2 file:text-xs file:font-bold file:uppercase file:tracking-widest file:text-primary hover:file:bg-primary hover:file:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                 />
                 {fileName && (
                   <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                    <FileUp size={13} />
+                    <FileUp size={13} aria-hidden />
                     {fileName} — mode démo (Supabase non configuré), aucun upload réel.
                   </p>
                 )}
@@ -319,7 +319,7 @@ export default function NewDocumentPage() {
           </div>
         </div>
 
-        <div className="border border-border bg-card p-6">
+        <div className="rounded-card border border-border bg-card p-6 shadow-soft">
           <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
             Mode de distribution
           </h2>
@@ -352,7 +352,7 @@ export default function NewDocumentPage() {
           </div>
         </div>
 
-        <div className="border border-border bg-card p-6">
+        <div className="rounded-card border border-border bg-card p-6 shadow-soft">
           <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
             Élèves autorisés
           </h2>
@@ -378,14 +378,14 @@ export default function NewDocumentPage() {
           <button
             type="button"
             onClick={() => handleCreate(false)}
-            className="border border-primary bg-primary px-4 py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
+            className="pressable inline-flex min-h-[44px] items-center rounded-control border border-primary bg-primary px-4 py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             Enregistrer document
           </button>
           <button
             type="button"
             onClick={() => handleCreate(true)}
-            className="border border-primary px-4 py-3 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+            className="pressable inline-flex min-h-[44px] items-center rounded-control border border-primary px-4 py-3 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             Publier
           </button>

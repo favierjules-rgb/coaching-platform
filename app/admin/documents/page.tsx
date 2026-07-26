@@ -96,7 +96,7 @@ export default function AdminDocumentsPage() {
         </div>
         <Link
           href="/admin/documents/nouveau"
-          className="flex items-center gap-2 border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
+          className="pressable flex min-h-[44px] items-center gap-2 rounded-control border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         >
           <Plus size={14} />
           Ajouter document
@@ -110,7 +110,7 @@ export default function AdminDocumentsPage() {
           <select
             value={typeFilter}
             onChange={(e) => setTypeFilter(e.target.value)}
-            className="border border-border bg-background px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground"
+            className="min-h-[44px] rounded-control border border-border bg-surface-soft px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             <option value="tous">Tous les types</option>
             {Object.entries(documentTypeLabels).map(([value, label]) => (
@@ -122,7 +122,7 @@ export default function AdminDocumentsPage() {
           <select
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
-            className="border border-border bg-background px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground"
+            className="min-h-[44px] rounded-control border border-border bg-surface-soft px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             <option value="tous">Toutes les catégories</option>
             {Object.entries(documentCategoryLabels).map(([value, label]) => (
@@ -134,7 +134,7 @@ export default function AdminDocumentsPage() {
           <select
             value={levelFilter}
             onChange={(e) => setLevelFilter(e.target.value === "tous" ? "tous" : (Number(e.target.value) as 1 | 2 | 3 | 4))}
-            className="border border-border bg-background px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground"
+            className="min-h-[44px] rounded-control border border-border bg-surface-soft px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             <option value="tous">Tous les niveaux</option>
             <option value="1">Niveau 1</option>
@@ -155,7 +155,7 @@ export default function AdminDocumentsPage() {
           {filtered.map((doc) => (
             <div
               key={doc.id}
-              className="flex flex-col gap-4 border border-border bg-card p-6 lg:flex-row lg:items-center lg:justify-between"
+              className="flex flex-col gap-4 rounded-card border border-border bg-card p-6 shadow-soft transition-colors hover:border-border-strong lg:flex-row lg:items-center lg:justify-between"
             >
               <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
                 <div>

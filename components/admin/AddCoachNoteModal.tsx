@@ -28,7 +28,7 @@ export function AddCoachNoteModal({ onAdd }: { onAdd: (text: string) => void }) 
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex items-center gap-1.5 border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+        className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
       >
         <StickyNote size={13} />
         Ajouter une note
@@ -37,7 +37,7 @@ export function AddCoachNoteModal({ onAdd }: { onAdd: (text: string) => void }) 
       {open && (
         <Modal title="Ajouter une note coach" onClose={close}>
           {submitted ? (
-            <div className="flex items-center gap-3 border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-400">
+            <div className="flex items-center gap-3 rounded-panel border border-success/40 bg-success/10 px-4 py-3 text-sm text-success">
               <CheckCircle size={18} className="flex-shrink-0" />
               Note ajoutée.
             </div>

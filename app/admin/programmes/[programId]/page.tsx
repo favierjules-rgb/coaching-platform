@@ -7,7 +7,9 @@ import { ArrowLeft, Archive, Pencil } from "lucide-react";
 
 import { AssignStudentsModal } from "@/components/admin/AssignStudentsModal";
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
+import { SessionBlockChips } from "@/components/student/SessionBlockChips";
 import { StatCard } from "@/components/shared/StatCard";
+import { orderedAdminSessionBlocks } from "@/lib/admin-program-preview";
 import {
   AnalysisFilterLabel,
   FilteredExerciseList,
@@ -113,7 +115,7 @@ export default function ProgramDetailPage() {
             <div className="flex flex-wrap gap-2">
               <Link
                 href={`/admin/programmes/${program.id}/builder`}
-                className="flex items-center gap-1.5 border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
+                className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
               >
                 <Pencil size={13} />
                 Modifier
@@ -130,7 +132,7 @@ export default function ProgramDetailPage() {
               <button
                 type="button"
                 onClick={handleArchive}
-                className="flex items-center gap-1.5 border border-red-500/50 px-4 py-2 text-xs uppercase tracking-widest text-red-400 transition-colors hover:bg-red-500/10"
+                className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-destructive/50 px-4 py-2 text-xs uppercase tracking-widest text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40"
               >
                 <Archive size={13} />
                 Archiver
@@ -150,7 +152,7 @@ export default function ProgramDetailPage() {
           </div>
           {program.description && <p className="mb-6 text-sm text-muted-foreground">{program.description}</p>}
 
-          <div className="mb-6 border border-border bg-card p-6">
+          <div className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
             <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">Analyse du programme</h2>
             {weekNumbers.length === 0 ? (
               <p className="text-sm text-muted-foreground">Aucune séance planifiée pour le moment.</p>
@@ -184,7 +186,7 @@ export default function ProgramDetailPage() {
                   <div className="overflow-x-auto">
                     <div className="flex gap-3">
                       {weekMetricsList.map((week) => (
-                        <div key={week.weekNumber} className="w-44 flex-shrink-0 border border-border p-4">
+                        <div key={week.weekNumber} className="w-44 flex-shrink-0 rounded-panel border border-border p-4">
                           <span className="mb-2 block text-xs font-bold uppercase tracking-widest text-primary">
                             Semaine {week.weekNumber}
                           </span>
@@ -194,7 +196,7 @@ export default function ProgramDetailPage() {
                             <span>{formatTonnage(week.totalTonnageKg)}</span>
                           </div>
                           {week.mostTrainedMuscleGroup && (
-                            <span className="mt-2 block border border-border px-2 py-1 text-center text-[10px] uppercase tracking-wide text-muted-foreground">
+                            <span className="mt-2 block rounded-full border border-border px-2 py-1 text-center text-[10px] uppercase tracking-wide text-muted-foreground">
                               {muscleGroupLabels[week.mostTrainedMuscleGroup]}
                             </span>
                           )}
@@ -207,7 +209,7 @@ export default function ProgramDetailPage() {
             )}
           </div>
 
-          <div className="mb-6 border border-border bg-card p-6">
+          <div className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
             <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
               Calendrier semaine par semaine
             </h2>
@@ -228,7 +230,7 @@ export default function ProgramDetailPage() {
                         return (
                           <div
                             key={day}
-                            className={`border p-3 text-xs ${
+                            className={`rounded-panel border p-3 text-xs ${
                               session && !session.isRestDay ? "border-primary/40 bg-primary/5" : "border-border"
                             }`}
                           >
@@ -246,35 +248,41 @@ export default function ProgramDetailPage() {
             )}
           </div>
 
-          <div className="mb-6 border border-border bg-card p-6">
+          <div className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
             <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
-              Liste des séances et exercices
+              Liste des séances et blocs
             </h2>
             <div className="flex flex-col gap-4">
               {program.sessions
                 .filter((s) => !s.isRestDay)
-                .map((session) => (
-                  <div key={session.id} className="border border-border p-4">
-                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-sm font-bold text-foreground">
-                        S{session.weekNumber} · {session.day} — {session.name}
-                      </span>
-                      <span className="text-xs text-muted-foreground">{session.durationMinutes} min</span>
+                .map((session) => {
+                  // Source d'affichage = `blocks[]` (déjà composé, ordonné et
+                  // coloré par lib/supabase/programs.ts), avec repli legacy UNE
+                  // fois à la frontière — toute la logique vit dans le helper pur
+                  // testé `orderedAdminSessionBlocks` (jamais de rendu direct
+                  // depuis exercises[]/cardioBlocks[]). SessionBlockChips ne
+                  // reçoit QUE des TrainingBlock ordonnés.
+                  const orderedBlocks = orderedAdminSessionBlocks(session);
+                  return (
+                    <div key={session.id} className="rounded-panel border border-border p-4">
+                      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-sm font-bold text-foreground">
+                          S{session.weekNumber} · {session.day} — {session.name}
+                        </span>
+                        <span className="text-xs text-muted-foreground">{session.durationMinutes} min</span>
+                      </div>
+                      {orderedBlocks.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">Séance sans bloc pour le moment.</p>
+                      ) : (
+                        <SessionBlockChips blocks={orderedBlocks} max={orderedBlocks.length} />
+                      )}
                     </div>
-                    <ul className="flex flex-col gap-1">
-                      {session.exercises.map((ex) => (
-                        <li key={ex.id} className="text-sm text-muted-foreground">
-                          {ex.order}. {ex.name || "(sans nom)"} — {ex.sets} x {ex.reps}
-                          {ex.recommendedLoad && ` · ${ex.recommendedLoad}`}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
+                  );
+                })}
             </div>
           </div>
 
-          <div className="border border-border bg-card p-6">
+          <div className="rounded-card border border-border bg-card p-6 shadow-soft">
             <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
               Élèves assignés
             </h2>
@@ -286,7 +294,7 @@ export default function ProgramDetailPage() {
                   <Link
                     key={s.id}
                     href={`/admin/eleves/${s.id}`}
-                    className="border border-border px-3 py-1.5 text-xs text-foreground transition-colors hover:border-primary"
+                    className="pressable flex min-h-[44px] items-center rounded-control border border-border px-3 py-1.5 text-xs text-foreground transition-colors hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                   >
                     {fullName(s)}
                   </Link>

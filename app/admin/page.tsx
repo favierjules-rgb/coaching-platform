@@ -16,8 +16,8 @@ import {
 } from "lucide-react";
 
 import { ActivityFeed } from "@/components/admin/ActivityFeed";
+import { DashboardNotifications } from "@/components/admin/DashboardNotifications";
 import { StatCard } from "@/components/admin/StatCard";
-import { AdminSection } from "@/components/admin/AdminSection";
 import { StatusBadge, studentStatusTone } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
 import { useSupabaseActivity } from "@/hooks/useSupabaseActivity";
@@ -47,12 +47,6 @@ const quickActions = [
   { label: "Voir les retours élèves", href: "/admin/retours", icon: MessageSquare },
 ];
 
-const mockNotifications = [
-  "3 nouveaux retours élèves à traiter cette semaine",
-  "Léa Martin a mis son compte en pause",
-  "Nouveau document ajouté : Guide mobilité épaule",
-];
-
 function StudentWatchList({
   title,
   students,
@@ -73,7 +67,7 @@ function StudentWatchList({
             <Link
               key={s.id}
               href={`/admin/eleves/${s.id}`}
-              className="flex items-center justify-between gap-3 border border-border px-4 py-3 text-sm text-foreground transition-colors hover:border-primary"
+              className="pressable flex min-h-[44px] items-center justify-between gap-3 rounded-control border border-border px-4 py-2.5 text-sm text-foreground hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             >
               {fullName(s)}
               <StatusBadge label={s.status} tone={studentStatusTone(s.status)} />
@@ -121,6 +115,11 @@ export default function AdminDashboardPage() {
     (a) => (a.status === "pending" || a.status === "confirmed") && new Date(a.startAt).toDateString() === todayKey,
   );
 
+  // Notifications réelles = flux d'activité (activity_events), déjà chargé
+  // pour le Centre d'activité — aucune requête supplémentaire. Le compteur de
+  // la carte suit les non-lues ; le bloc liste les 4 plus récentes.
+  const unreadNotificationsCount = supabaseActivity.events.filter((event) => !event.isRead).length;
+
   const activeSubscriptions = supabaseBilling.items.filter((item) => item.status === "actif");
   const latePayments = supabaseBilling.items.filter((item) => item.status === "paiement_echoue");
   const estimatedMonthlyRevenueCents = activeSubscriptions.reduce(
@@ -164,7 +163,12 @@ export default function AdminDashboardPage() {
           tone={feedbackToTreat.length > 0 ? "amber" : "default"}
         />
         <StatCard icon={CalendarDays} label="Rendez-vous aujourd'hui" value={todaysAppointments.length} />
-        <StatCard icon={Bell} label="Notifications (exemple)" value={mockNotifications.length} />
+        <StatCard
+          icon={Bell}
+          label="Notifications non lues"
+          value={unreadNotificationsCount}
+          tone={unreadNotificationsCount > 0 ? "primary" : "default"}
+        />
       </div>
 
       <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -178,7 +182,7 @@ export default function AdminDashboardPage() {
         <StatCard icon={CreditCard} label="Revenu mensuel estimé" value={formatAmountCents(estimatedMonthlyRevenueCents)} />
       </div>
 
-      <div className="mb-8 border border-border bg-card p-6">
+      <div className="mb-8 rounded-card border border-border bg-card p-6 shadow-soft">
         <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
           Actions rapides
         </h2>
@@ -187,7 +191,7 @@ export default function AdminDashboardPage() {
             <Link
               key={href}
               href={href}
-              className="flex flex-col items-center gap-2 border border-border px-4 py-5 text-center text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+              className="pressable flex flex-col items-center justify-center gap-2 rounded-panel border border-border bg-surface-soft/40 px-4 py-5 text-center text-xs uppercase tracking-widest text-muted-foreground hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             >
               <Icon size={20} />
               {label}
@@ -196,21 +200,14 @@ export default function AdminDashboardPage() {
         </div>
       </div>
 
-      <div className="mb-8 border border-border bg-card p-6">
+      <div className="mb-8 rounded-card border border-border bg-card p-6 shadow-soft">
         <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
-          Notifications (exemple)
+          Notifications
         </h2>
-        <div className="flex flex-col gap-3">
-          {mockNotifications.map((notif) => (
-            <div key={notif} className="flex items-start gap-3 border-b border-border pb-3 text-sm text-foreground last:border-0 last:pb-0">
-              <Bell size={14} className="mt-0.5 flex-shrink-0 text-primary" />
-              {notif}
-            </div>
-          ))}
-        </div>
+        <DashboardNotifications events={supabaseActivity.events} loading={supabaseActivity.loading} />
       </div>
 
-      <div className="mb-8 border border-border bg-card p-6">
+      <div className="mb-8 rounded-card border border-border bg-card p-6 shadow-soft">
         <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
           Centre d&apos;activité
         </h2>
@@ -224,7 +221,14 @@ export default function AdminDashboardPage() {
         )}
       </div>
 
-      <AdminSection title="Élèves à suivre">
+      {/* Wrapper LOCAL (polish Apple admin, Lot B) : AdminSection est un
+          transversal réservé aux lots C/H/J — la carte « Élèves à suivre »
+          du dashboard est donc polie ici directement, sans toucher au
+          composant partagé ni en créer un nouveau. */}
+      <div className="rounded-card border border-border bg-card p-6 shadow-soft">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="font-heading text-lg font-bold uppercase text-foreground">Élèves à suivre</h2>
+        </div>
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <StudentWatchList
             title="Retour récent"
@@ -252,7 +256,7 @@ export default function AdminDashboardPage() {
             emptyLabel="Toutes les journées sont à jour."
           />
         </div>
-      </AdminSection>
+      </div>
     </div>
   );
 }

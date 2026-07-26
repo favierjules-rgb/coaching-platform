@@ -68,7 +68,7 @@ export function UpdateWeightModal({
           setTarget(String(targetWeightKg));
           setOpen(true);
         }}
-        className="border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+        className="pressable flex min-h-[44px] items-center rounded-control border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
       >
         Mettre à jour mon poids
       </button>
@@ -78,9 +78,9 @@ export function UpdateWeightModal({
           role="dialog"
           aria-modal="true"
           aria-label="Mettre à jour mon poids"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          className="modal-overlay-fade-in fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
         >
-          <div className="w-full max-w-md border border-border bg-card p-6">
+          <div className="modal-content-scale-in w-full max-w-md rounded-card border border-border bg-card p-6 shadow-soft">
             <div className="mb-4 flex items-start justify-between gap-4">
               <h3 className="font-heading text-lg font-bold uppercase text-foreground">
                 Mettre à jour mon poids
@@ -89,14 +89,14 @@ export function UpdateWeightModal({
                 type="button"
                 onClick={close}
                 aria-label="Fermer"
-                className="text-muted-foreground transition-colors hover:text-foreground"
+                className="-mr-2 -mt-1 flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-surface-soft hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
               >
                 <X size={18} />
               </button>
             </div>
 
             {submitted ? (
-              <div className="flex items-center gap-3 border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-400">
+              <div className="flex items-center gap-3 rounded-panel border border-success/40 bg-success/10 px-4 py-3 text-sm text-success">
                 <CheckCircle size={18} className="flex-shrink-0" />
                 Enregistré. La carte évolution du poids est à jour.
               </div>
@@ -107,7 +107,7 @@ export function UpdateWeightModal({
                   modifie uniquement ce que tu veux changer.
                 </p>
                 {error && (
-                  <div className="flex items-center gap-3 border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+                  <div className="flex items-center gap-3 rounded-panel border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
                     <AlertTriangle size={18} className="flex-shrink-0" />
                     Échec de l&apos;enregistrement. Réessaie.
                   </div>
@@ -130,7 +130,7 @@ export function UpdateWeightModal({
                   type="button"
                   onClick={handleSubmit}
                   disabled={!canSubmit || saving}
-                  className="mt-1 w-full bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
+                  className="pressable mt-1 min-h-[44px] w-full rounded-control bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
                 >
                   {saving ? "Enregistrement…" : "Enregistrer"}
                 </button>

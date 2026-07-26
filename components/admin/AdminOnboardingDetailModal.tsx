@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, ChevronDown, Info, Pencil, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, Info, Pencil } from "lucide-react";
 
 import { Field, SelectField, TextareaField, CheckboxField } from "@/components/admin/AdminFormFields";
+import { Modal } from "@/components/admin/Modal";
 import { InfoRow, TagList } from "@/components/student/ProfileSection";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { getStudentOnboardingDetails, updateStudentOnboardingDetails } from "@/lib/supabase/onboarding";
@@ -27,10 +28,10 @@ function val(value: string): string {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <details className="group border border-border" open>
-      <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-xs font-bold uppercase tracking-wide text-foreground">
+    <details className="group rounded-panel border border-border" open>
+      <summary className="flex min-h-[44px] cursor-pointer list-none items-center justify-between rounded-panel px-4 py-3 text-xs font-bold uppercase tracking-wide text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
         {title}
-        <ChevronDown size={14} className="transition-transform group-open:rotate-180" />
+        <ChevronDown size={14} className="transition-transform group-open:rotate-180 motion-reduce:transition-none" />
       </summary>
       <div className="border-t border-border px-4 py-3">{children}</div>
     </details>
@@ -141,38 +142,26 @@ export function AdminOnboardingDetailModal({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex items-center gap-1.5 border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+        className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
       >
         Voir le questionnaire complet
       </button>
 
       {open && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Questionnaire complet"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+        // Réutilise la modale partagée (Modal.tsx) : aria-labelledby, focus
+        // initial, piège Tab/Shift+Tab, Échap, retour du focus au déclencheur,
+        // clic overlay, bouton fermer 44px — même contrat a11y que toutes les
+        // autres modales admin (polish Apple, Lot C).
+        <Modal
+          title={editing ? "Compléter / modifier le questionnaire" : "Questionnaire complet"}
+          onClose={close}
+          maxWidth="max-w-2xl"
         >
-          <div className="flex max-h-[90vh] w-full max-w-2xl flex-col border border-border bg-card">
-            <div className="flex items-center justify-between border-b border-border px-6 py-4">
-              <h3 className="font-heading text-lg font-bold uppercase text-foreground">
-                {editing ? "Compléter / modifier le questionnaire" : "Questionnaire complet"}
-              </h3>
-              <button
-                type="button"
-                onClick={close}
-                aria-label="Fermer"
-                className="text-muted-foreground transition-colors hover:text-foreground"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto px-6 py-4">
+          <div>
               {loading ? (
                 <p className="text-sm text-muted-foreground">Chargement…</p>
               ) : error ? (
-                <div className="mb-4 flex items-center gap-3 border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+                <div className="mb-4 flex items-center gap-3 rounded-panel border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
                   <AlertTriangle size={18} className="flex-shrink-0" />
                   Échec de l&apos;enregistrement. Réessaie.
                 </div>
@@ -276,7 +265,7 @@ export function AdminOnboardingDetailModal({
                   <button
                     type="button"
                     onClick={startEdit}
-                    className="mt-2 flex items-center justify-center gap-1.5 border border-primary bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
+                    className="pressable mt-2 flex min-h-[44px] items-center justify-center gap-1.5 rounded-control border border-primary bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                   >
                     <Pencil size={13} />
                     Compléter / modifier
@@ -395,7 +384,7 @@ export function AdminOnboardingDetailModal({
                     <button
                       type="button"
                       onClick={() => setEditing(false)}
-                      className="flex-1 border border-border py-3 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+                      className="pressable min-h-[44px] flex-1 rounded-control border border-border py-3 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                     >
                       Annuler
                     </button>
@@ -403,16 +392,15 @@ export function AdminOnboardingDetailModal({
                       type="button"
                       onClick={handleSave}
                       disabled={saving}
-                      className="flex-1 bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
+                      className="pressable min-h-[44px] flex-1 rounded-control bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
                     >
                       {saving ? "Enregistrement…" : "Enregistrer"}
                     </button>
                   </div>
                 </div>
               )}
-            </div>
           </div>
-        </div>
+        </Modal>
       )}
     </>
   );

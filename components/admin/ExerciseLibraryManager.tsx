@@ -48,7 +48,7 @@ export function ExerciseLibraryManager({ items, onCreate, onUpdate, onSetStatus,
           {filtered.map((item) => (
             <div
               key={item.id}
-              className={`flex flex-col gap-3 border bg-card p-5 ${item.status === "archived" ? "border-border opacity-60" : "border-border"}`}
+              className={`flex flex-col gap-3 rounded-card border bg-card p-5 shadow-soft transition-colors ${item.status === "archived" ? "border-border opacity-60" : "border-border hover:border-border-strong"}`}
             >
               <div className="flex items-start justify-between gap-2">
                 <div>
@@ -56,22 +56,22 @@ export function ExerciseLibraryManager({ items, onCreate, onUpdate, onSetStatus,
                   <p className="text-xs text-muted-foreground">{muscleLabel(item.muscleGroup)}</p>
                 </div>
                 {item.status === "archived" && (
-                  <span className="flex-shrink-0 border border-red-500/40 px-2 py-0.5 text-[10px] uppercase tracking-wide text-red-400">
+                  <span className="flex-shrink-0 rounded-full border border-destructive/40 px-2 py-0.5 text-[10px] uppercase tracking-wide text-destructive">
                     Archivée
                   </span>
                 )}
               </div>
               <div className="flex flex-wrap gap-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
-                <span className="border border-border px-2 py-0.5">{exerciseCategoryLabels[item.category]}</span>
-                <span className="border border-border px-2 py-0.5">{exerciseEquipmentLabels[item.equipment]}</span>
-                <span className="border border-border px-2 py-0.5">{exerciseLevelLabels[item.level]}</span>
+                <span className="rounded-full border border-border px-2 py-0.5">{exerciseCategoryLabels[item.category]}</span>
+                <span className="rounded-full border border-border px-2 py-0.5">{exerciseEquipmentLabels[item.equipment]}</span>
+                <span className="rounded-full border border-border px-2 py-0.5">{exerciseLevelLabels[item.level]}</span>
               </div>
               {item.description && <p className="text-xs text-muted-foreground">{item.description}</p>}
               {item.technicalNote && <p className="text-xs text-muted-foreground">{item.technicalNote}</p>}
               {item.tags.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
                   {item.tags.map((tag) => (
-                    <span key={tag} className="border border-primary/40 px-2 py-0.5 text-[11px] text-primary">
+                    <span key={tag} className="rounded-full border border-primary/40 px-2 py-0.5 text-[11px] text-primary">
                       #{tag}
                     </span>
                   ))}
@@ -83,7 +83,7 @@ export function ExerciseLibraryManager({ items, onCreate, onUpdate, onSetStatus,
                     href={item.videoUrl.trim() || item.alternativeVideoUrl.trim()}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 border border-border px-3 py-1.5 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+                    className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-border px-3 py-1.5 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                   >
                     <PlayCircle size={12} />
                     Voir la démo
@@ -94,7 +94,7 @@ export function ExerciseLibraryManager({ items, onCreate, onUpdate, onSetStatus,
                   <button
                     type="button"
                     onClick={() => onSetStatus(item.id, "archived")}
-                    className="flex items-center gap-1.5 border border-red-500/40 px-3 py-1.5 text-[11px] uppercase tracking-widest text-red-400 transition-colors hover:bg-red-500/10"
+                    className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-destructive/40 px-3 py-1.5 text-[11px] uppercase tracking-widest text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40"
                   >
                     <Archive size={12} />
                     Archiver
@@ -103,7 +103,7 @@ export function ExerciseLibraryManager({ items, onCreate, onUpdate, onSetStatus,
                   <button
                     type="button"
                     onClick={() => onSetStatus(item.id, "active")}
-                    className="flex items-center gap-1.5 border border-primary/40 px-3 py-1.5 text-[11px] uppercase tracking-widest text-primary transition-colors hover:bg-primary/10"
+                    className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-primary/40 px-3 py-1.5 text-[11px] uppercase tracking-widest text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                   >
                     <ArchiveRestore size={12} />
                     Réactiver
@@ -116,7 +116,7 @@ export function ExerciseLibraryManager({ items, onCreate, onUpdate, onSetStatus,
                       onDelete(item.id);
                       setPendingDeleteId(null);
                     }}
-                    className="flex items-center gap-1.5 border border-red-500 bg-red-500/10 px-3 py-1.5 text-[11px] uppercase tracking-widest text-red-400"
+                    className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-destructive bg-destructive/10 px-3 py-1.5 text-[11px] uppercase tracking-widest text-destructive transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40"
                   >
                     <Trash2 size={12} />
                     Confirmer la suppression
@@ -125,7 +125,7 @@ export function ExerciseLibraryManager({ items, onCreate, onUpdate, onSetStatus,
                   <button
                     type="button"
                     onClick={() => setPendingDeleteId(item.id)}
-                    className="flex items-center gap-1.5 border border-red-500/40 px-3 py-1.5 text-[11px] uppercase tracking-widest text-red-400 transition-colors hover:bg-red-500/10"
+                    className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-destructive/40 px-3 py-1.5 text-[11px] uppercase tracking-widest text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40"
                   >
                     <Trash2 size={12} />
                     Supprimer

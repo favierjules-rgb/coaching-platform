@@ -86,7 +86,7 @@ export function AppointmentModal({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex items-center gap-2 border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
+        className="pressable flex min-h-[44px] items-center gap-2 rounded-control border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
       >
         <Plus size={14} />
         Créer un rendez-vous
@@ -95,7 +95,7 @@ export function AppointmentModal({
       {open && (
         <Modal title="Créer un rendez-vous" onClose={close} maxWidth="max-w-lg">
           {saved ? (
-            <div className="flex items-center gap-3 border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-400">
+            <div className="flex items-center gap-3 rounded-panel border border-success/40 bg-success/10 px-4 py-3 text-sm text-success">
               <CheckCircle size={18} className="flex-shrink-0" />
               Rendez-vous créé.
             </div>

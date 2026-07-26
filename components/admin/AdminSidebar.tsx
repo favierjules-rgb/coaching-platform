@@ -22,6 +22,7 @@ import {
 import { SignOutButton } from "@/components/auth/SignOutButton";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { Logo } from "@/components/ui/Logo";
+import { isAdminRouteActive, isAnyAdminRouteActive, isSubmenuOpen } from "@/lib/admin-shell-nav";
 
 // "Programmation" (V3 chantier module Programmation, étape 2) regroupe les 3
 // sous-domaines du contenu d'entraînement admin derrière un seul item
@@ -45,6 +46,23 @@ const adminLinks = [
   { href: "/admin/parametres", label: "Paramètres", icon: Settings },
 ];
 
+/**
+ * Item de navigation (chantier polish Apple admin, Lot A ; état actif adouci
+ * au polish final) : pastille `rounded-control`, hover discret, press
+ * feedback, cible >= 44px. L'item ACTIF n'est plus une pastille pleine à fort
+ * contraste : fond légèrement contrasté (`bg-primary/10`) + fin indicateur
+ * latéral arrondi — même langage que les sous-items Programmation. Le focus
+ * clavier (`focus-visible:ring`) reste distinct de l'état actif. Couleurs =
+ * tokens sémantiques uniquement.
+ */
+function navItemClass(active: boolean): string {
+  return `pressable flex min-h-[44px] items-center gap-3 rounded-control px-4 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+    active
+      ? "relative bg-primary/10 font-medium text-foreground before:absolute before:left-0 before:top-1/2 before:h-5 before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-primary before:content-['']"
+      : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+  }`;
+}
+
 interface AdminSidebarProps {
   mobile?: boolean;
   onNavigate?: () => void;
@@ -52,13 +70,19 @@ interface AdminSidebarProps {
 
 export function AdminSidebar({ mobile = false, onNavigate }: AdminSidebarProps) {
   const pathname = usePathname();
-  const programmationActive = programmationChildren.some((child) => pathname?.startsWith(child.href));
+  const programmationActive = isAnyAdminRouteActive(
+    pathname,
+    programmationChildren.map((child) => child.href),
+  );
   // État manuel du sous-menu (bascule au clic), indépendant de la route
   // active — pas de synchronisation via effet. L'état affiché est dérivé au
   // rendu : ouvert dès qu'on est sur une page du groupe, sinon piloté par le
   // clic (mêmes deux comportements qu'avant, sans setState dans un effet).
+  // Détection de route déléguée aux helpers purs lib/admin-shell-nav.ts
+  // (mêmes fonctions testées dans scripts/tests/admin-shell-nav.mts) — une
+  // seule source pour le style actif ET aria-current.
   const [programmationManualOpen, setProgrammationManualOpen] = useState(false);
-  const programmationOpen = programmationActive || programmationManualOpen;
+  const programmationOpen = isSubmenuOpen(programmationActive, programmationManualOpen);
 
   return (
     <div className="flex h-full w-60 flex-col border-r border-border bg-card">
@@ -69,7 +93,7 @@ export function AdminSidebar({ mobile = false, onNavigate }: AdminSidebarProps) 
             type="button"
             onClick={onNavigate}
             aria-label="Fermer le menu"
-            className="text-muted-foreground"
+            className="flex h-11 w-11 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             <X size={20} />
           </button>
@@ -80,19 +104,16 @@ export function AdminSidebar({ mobile = false, onNavigate }: AdminSidebarProps) 
         <span className="text-[11px] uppercase tracking-widest text-primary">Espace admin</span>
       </div>
 
-      <nav className="flex flex-1 flex-col gap-1 px-3 py-4">
+      <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-3 py-4">
         {adminLinks.slice(0, 2).map(({ href, label, icon: Icon }) => {
-          const active = href === "/admin" ? pathname === href : pathname?.startsWith(href);
+          const active = isAdminRouteActive(pathname, href);
           return (
             <Link
               key={href}
               href={href}
               onClick={onNavigate}
-              className={`flex items-center gap-3 px-4 py-3 text-sm transition-colors ${
-                active
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-              }`}
+              aria-current={active ? "page" : undefined}
+              className={navItemClass(Boolean(active))}
             >
               <Icon size={18} />
               {label}
@@ -105,29 +126,29 @@ export function AdminSidebar({ mobile = false, onNavigate }: AdminSidebarProps) 
             type="button"
             onClick={() => setProgrammationManualOpen((v) => !v)}
             aria-expanded={programmationOpen}
-            className={`flex w-full items-center gap-3 px-4 py-3 text-sm transition-colors ${
-              programmationActive
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-            }`}
+            className={`w-full ${navItemClass(programmationActive)}`}
           >
             <Dumbbell size={18} />
             <span className="flex-1 text-left">Programmation</span>
-            <ChevronDown size={16} className={`transition-transform ${programmationOpen ? "rotate-180" : ""}`} />
+            <ChevronDown
+              size={16}
+              className={`transition-transform motion-reduce:transition-none ${programmationOpen ? "rotate-180" : ""}`}
+            />
           </button>
           {programmationOpen && (
             <div className="sidebar-submenu-fade-in mt-1 flex flex-col gap-1 pl-[38px]">
               {programmationChildren.map((child) => {
-                const childActive = pathname?.startsWith(child.href);
+                const childActive = isAdminRouteActive(pathname, child.href);
                 return (
                   <Link
                     key={child.href}
                     href={child.href}
                     onClick={onNavigate}
-                    className={`px-4 py-2 text-sm transition-colors ${
+                    aria-current={childActive ? "page" : undefined}
+                    className={`pressable flex min-h-[44px] items-center rounded-control px-4 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
                       childActive
-                        ? "text-primary"
-                        : "text-muted-foreground hover:text-foreground"
+                        ? "bg-primary/10 font-medium text-primary"
+                        : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                     }`}
                   >
                     {child.label}
@@ -139,17 +160,14 @@ export function AdminSidebar({ mobile = false, onNavigate }: AdminSidebarProps) 
         </div>
 
         {adminLinks.slice(2).map(({ href, label, icon: Icon }) => {
-          const active = href === "/admin" ? pathname === href : pathname?.startsWith(href);
+          const active = isAdminRouteActive(pathname, href);
           return (
             <Link
               key={href}
               href={href}
               onClick={onNavigate}
-              className={`flex items-center gap-3 px-4 py-3 text-sm transition-colors ${
-                active
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-              }`}
+              aria-current={active ? "page" : undefined}
+              className={navItemClass(Boolean(active))}
             >
               <Icon size={18} />
               {label}
@@ -163,14 +181,14 @@ export function AdminSidebar({ mobile = false, onNavigate }: AdminSidebarProps) 
         <Link
           href="/dashboard"
           onClick={onNavigate}
-          className="flex items-center gap-3 px-4 py-3 text-sm text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+          className={navItemClass(false)}
         >
           <ArrowLeft size={18} />
           Espace élève
         </Link>
         <SignOutButton
           onBeforeNavigate={onNavigate}
-          className="flex w-full items-center gap-3 px-4 py-3 text-sm text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+          className={`w-full ${navItemClass(false)}`}
         />
       </div>
     </div>

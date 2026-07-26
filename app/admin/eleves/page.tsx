@@ -91,7 +91,7 @@ export default function AdminStudentsPage() {
           <select
             value={goalFilter}
             onChange={(e) => setGoalFilter(e.target.value)}
-            className="border border-border bg-background px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground"
+            className="min-h-[44px] appearance-none rounded-control border border-border bg-surface-soft px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
           >
             {goals.map((g) => (
               <option key={g} value={g}>
@@ -115,40 +115,40 @@ export default function AdminStudentsPage() {
             return (
               <div
                 key={student.id}
-                className="flex flex-col gap-4 border border-border bg-card p-6 lg:flex-row lg:items-center lg:justify-between"
+                className="flex flex-col gap-4 rounded-card border border-border bg-card p-6 shadow-soft transition-colors hover:border-border-strong xl:flex-row xl:items-center xl:justify-between"
               >
-                <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
-                  <div>
+                <div className="grid min-w-0 flex-1 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+                  <div className="min-w-0">
                     <span className="block text-xs uppercase tracking-wide text-muted-foreground">Élève</span>
-                    <span className="font-heading text-lg font-bold text-foreground">{fullName(student)}</span>
-                    <span className="block text-xs text-muted-foreground">{student.email}</span>
+                    <span className="break-words font-heading text-lg font-bold text-foreground">{fullName(student)}</span>
+                    <span className="block break-words text-xs text-muted-foreground">{student.email}</span>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <span className="block text-xs uppercase tracking-wide text-muted-foreground">Objectif</span>
-                    <span className="text-sm text-foreground">{student.goal || "Non renseigné"}</span>
+                    <span className="break-words text-sm text-foreground">{student.goal || "Non renseigné"}</span>
                     <span className="mt-1 block">
                       <StatusBadge label={studentStatusLabels[student.status]} tone={studentStatusTone(student.status)} />
                     </span>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <span className="block text-xs uppercase tracking-wide text-muted-foreground">Programme / plan</span>
-                    <span className="block text-sm text-foreground">{program?.name ?? "Aucun programme"}</span>
-                    <span className="block text-sm text-muted-foreground">{plan?.name ?? "Aucun plan"}</span>
+                    <span className="block break-words text-sm text-foreground">{program?.name ?? "Aucun programme"}</span>
+                    <span className="block break-words text-sm text-muted-foreground">{plan?.name ?? "Aucun plan"}</span>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <span className="block text-xs uppercase tracking-wide text-muted-foreground">Poids · Début</span>
                     <span className="block text-sm text-foreground">{weightProgressLabel(student)}</span>
                     <span className="block text-xs text-muted-foreground">Depuis le {formatDate(student.startDate)}</span>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <span className="block text-xs uppercase tracking-wide text-muted-foreground">Paiement</span>
-                    <span className="block text-sm text-foreground">{paymentSummaryLabel(student.paymentProfile)}</span>
+                    <span className="block break-words text-sm text-foreground">{paymentSummaryLabel(student.paymentProfile)}</span>
                   </div>
                 </div>
-                <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
+                <div className="flex flex-none flex-wrap items-center gap-2">
                   <Link
                     href={`/admin/eleves/${student.id}`}
-                    className="flex items-center gap-1.5 border border-primary px-4 py-2 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+                    className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-primary px-4 py-2 text-xs uppercase tracking-widest text-primary hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                   >
                     <Eye size={13} />
                     Voir profil

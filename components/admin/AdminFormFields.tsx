@@ -3,7 +3,7 @@
 import { useId } from "react";
 
 const inputClass =
-  "w-full border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none";
+  "w-full rounded-control border border-border bg-surface-soft px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30";
 const labelClass = "mb-2 block text-xs uppercase tracking-wide text-muted-foreground";
 
 interface FieldProps {

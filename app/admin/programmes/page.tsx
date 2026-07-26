@@ -168,7 +168,7 @@ export default function AdminProgramsPage() {
         {tab === "programmes" && (
           <Link
             href="/admin/programmes/nouveau"
-            className="flex items-center gap-2 border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
+            className="pressable flex min-h-[44px] items-center gap-2 rounded-control border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             <Plus size={14} />
             Créer programme
@@ -180,7 +180,8 @@ export default function AdminProgramsPage() {
         <button
           type="button"
           onClick={() => setTab("programmes")}
-          className={`border-b-2 px-4 py-2 text-xs font-bold uppercase tracking-widest transition-colors ${
+          aria-pressed={tab === "programmes"}
+          className={`min-h-[44px] rounded-control border-b-2 px-4 py-2 text-xs font-bold uppercase tracking-widest transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
             tab === "programmes" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
           }`}
         >
@@ -189,7 +190,8 @@ export default function AdminProgramsPage() {
         <button
           type="button"
           onClick={() => setTab("banque")}
-          className={`border-b-2 px-4 py-2 text-xs font-bold uppercase tracking-widest transition-colors ${
+          aria-pressed={tab === "banque"}
+          className={`min-h-[44px] rounded-control border-b-2 px-4 py-2 text-xs font-bold uppercase tracking-widest transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
             tab === "banque" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
           }`}
         >
@@ -214,7 +216,7 @@ export default function AdminProgramsPage() {
           <select
             value={levelFilter}
             onChange={(e) => setLevelFilter(e.target.value)}
-            className="border border-border bg-background px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground"
+            className="min-h-[44px] appearance-none rounded-control border border-border bg-surface-soft px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
           >
             {levels.map((l) => (
               <option key={l} value={l}>
@@ -233,7 +235,7 @@ export default function AdminProgramsPage() {
       ) : (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           {filtered.map((program) => (
-            <div key={program.id} className="flex flex-col gap-4 border border-border bg-card p-6">
+            <div key={program.id} className="flex flex-col gap-4 rounded-card border border-border bg-card p-6 shadow-soft transition-colors hover:border-border-strong">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h2 className="font-heading text-lg font-bold uppercase text-foreground">{program.name}</h2>
@@ -271,13 +273,13 @@ export default function AdminProgramsPage() {
               <div className="flex flex-wrap gap-2">
                 <Link
                   href={`/admin/programmes/${program.id}`}
-                  className="border border-primary px-4 py-2 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+                  className="pressable flex min-h-[44px] items-center rounded-control border border-primary px-4 py-2 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                 >
                   Voir
                 </Link>
                 <Link
                   href={`/admin/programmes/${program.id}`}
-                  className="border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+                  className="pressable flex min-h-[44px] items-center rounded-control border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                 >
                   Modifier
                 </Link>
@@ -286,7 +288,7 @@ export default function AdminProgramsPage() {
                     type="button"
                     onClick={() => void handleDuplicate(program.id)}
                     disabled={duplicatingId === program.id}
-                    className="flex items-center gap-1.5 border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary disabled:opacity-50"
+                    className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-50"
                   >
                     {duplicatingId === program.id ? <Loader2 size={13} className="animate-spin" /> : <Copy size={13} />}
                     Dupliquer
@@ -306,7 +308,7 @@ export default function AdminProgramsPage() {
                       type="button"
                       onClick={() => void handleDeleteProgram(program.id)}
                       disabled={deletingProgramId === program.id}
-                      className="flex items-center gap-1.5 border border-red-500 bg-red-500/10 px-4 py-2 text-xs uppercase tracking-widest text-red-400 disabled:opacity-50"
+                      className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-destructive bg-destructive/10 px-4 py-2 text-xs uppercase tracking-widest text-destructive transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40 disabled:opacity-50"
                     >
                       {deletingProgramId === program.id ? (
                         <Loader2 size={13} className="animate-spin" />
@@ -319,7 +321,7 @@ export default function AdminProgramsPage() {
                     <button
                       type="button"
                       onClick={() => setPendingDeleteProgramId(program.id)}
-                      className="flex items-center gap-1.5 border border-red-500/40 px-4 py-2 text-xs uppercase tracking-widest text-red-400 transition-colors hover:bg-red-500/10"
+                      className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-destructive/40 px-4 py-2 text-xs uppercase tracking-widest text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40"
                     >
                       <Trash2 size={13} />
                       Supprimer
