@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { computeDocumentAvailability, type DocumentAvailability } from "@/lib/admin";
+import { currentDate } from "@/lib/clock";
 import { buildStudentActivityLink, logActivityEvent } from "@/lib/supabase/activity";
 import type { AdminDocument } from "@/types";
 import type { Database } from "@/types/supabase";
@@ -125,13 +126,21 @@ export async function getAssignedDocumentIdsByStudent(
  * Détermine la disponibilité réelle d'un document pour un élève : priorité
  * au déblocage propre à l'assignation (manuel ou date spécifique), sinon la
  * règle du document lui-même (immédiat / niveau+semaines / date précise) —
- * même calcul que lib/admin.ts::computeDocumentAvailability (mock), pour
- * rester cohérent entre les deux chemins.
+ * même calcul que lib/admin.ts::computeDocumentAvailability, pour rester
+ * cohérent entre les deux chemins.
+ *
+ * `reference` est la date courante RÉELLE : jusqu'au 26/07/2026 ce chemin
+ * laissait `computeDocumentAvailability` retomber sur sa valeur par défaut
+ * d'alors, ADMIN_REFERENCE_DATE (2 juillet 2026 figé) — un document en
+ * déblocage automatique dont la date tombait après cette date restait donc
+ * verrouillé indéfiniment côté élève. La référence est explicite ici et
+ * injectable, pour que le comportement soit testable.
  */
 function computeRealDocumentAvailability(
   student: { startDate: string },
   document: AdminDocument,
   assignment: { manuallyUnlocked: boolean; unlockAt: string | null } | null,
+  reference: Date = currentDate(),
 ): DocumentAvailability {
   if (assignment?.manuallyUnlocked) {
     return { available: true, unlockDate: null, manuallyUnlocked: true };
@@ -139,11 +148,11 @@ function computeRealDocumentAvailability(
   if (assignment?.unlockAt) {
     const unlockDate = new Date(assignment.unlockAt);
     if (!Number.isNaN(unlockDate.getTime())) {
-      const available = Date.now() >= unlockDate.getTime();
+      const available = reference.getTime() >= unlockDate.getTime();
       return { available, unlockDate: available ? null : unlockDate.toISOString().slice(0, 10), manuallyUnlocked: false };
     }
   }
-  return computeDocumentAvailability(student, document, []);
+  return computeDocumentAvailability(student, document, [], reference);
 }
 
 export interface StudentDocumentWithAvailability {
@@ -173,6 +182,9 @@ export async function getStudentDocumentsWithAvailability(
   const seenIds = new Set<string>();
   const composed: StudentDocumentWithAvailability[] = [];
   const student = { startDate };
+  // Une seule lecture de l'horloge pour toute la liste : deux documents ne
+  // peuvent pas être évalués à des instants différents.
+  const reference = currentDate();
 
   type AssignmentWithDocument = DocumentAssignmentRow & { documents: DocumentRow | null };
   for (const assignment of (assignedResult.data ?? []) as AssignmentWithDocument[]) {
@@ -180,17 +192,19 @@ export async function getStudentDocumentsWithAvailability(
     if (!docRow || docRow.status !== "publié" || seenIds.has(docRow.id)) continue;
     seenIds.add(docRow.id);
     const document = mapDocumentRow(docRow, []);
-    const availability = computeRealDocumentAvailability(student, document, {
-      manuallyUnlocked: assignment.manually_unlocked,
-      unlockAt: assignment.unlock_at,
-    });
+    const availability = computeRealDocumentAvailability(
+      student,
+      document,
+      { manuallyUnlocked: assignment.manually_unlocked, unlockAt: assignment.unlock_at },
+      reference,
+    );
     composed.push({ document, availability });
   }
   for (const docRow of globalResult.data ?? []) {
     if (seenIds.has(docRow.id)) continue;
     seenIds.add(docRow.id);
     const document = mapDocumentRow(docRow, []);
-    const availability = computeRealDocumentAvailability(student, document, null);
+    const availability = computeRealDocumentAvailability(student, document, null, reference);
     composed.push({ document, availability });
   }
 
