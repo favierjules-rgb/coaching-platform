@@ -57,22 +57,22 @@ export function SessionTemplateLibraryManager({ templates, onUpdate, onDuplicate
             const exerciseCount = template.content.exercises.length;
             const cardioCount = template.content.cardioBlocks.length;
             return (
-              <div key={template.id} className="flex flex-col gap-3 border border-border bg-card p-5">
+              <div key={template.id} className="flex flex-col gap-3 rounded-card border border-border bg-card p-5 shadow-soft transition-colors hover:border-border-strong">
                 <div>
                   <h3 className="font-heading text-base font-bold uppercase text-foreground">{template.name}</h3>
                   {template.muscleGroup && <p className="text-xs text-muted-foreground">{template.muscleGroup}</p>}
                 </div>
 
                 <div className="flex flex-wrap gap-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
-                  <span className="border border-border px-2 py-0.5">{sessionTypeLabels[template.sessionType]}</span>
-                  {template.durationMinutes ? <span className="border border-border px-2 py-0.5">{template.durationMinutes} min</span> : null}
+                  <span className="rounded-full border border-border px-2 py-0.5">{sessionTypeLabels[template.sessionType]}</span>
+                  {template.durationMinutes ? <span className="rounded-full border border-border px-2 py-0.5">{template.durationMinutes} min</span> : null}
                   {template.sessionType !== "cardio" && (
-                    <span className="border border-border px-2 py-0.5">
+                    <span className="rounded-full border border-border px-2 py-0.5">
                       {exerciseCount} exercice{exerciseCount > 1 ? "s" : ""}
                     </span>
                   )}
                   {template.sessionType !== "strength" && (
-                    <span className="border border-border px-2 py-0.5">
+                    <span className="rounded-full border border-border px-2 py-0.5">
                       {cardioCount} bloc{cardioCount > 1 ? "s" : ""} cardio
                     </span>
                   )}
@@ -85,7 +85,7 @@ export function SessionTemplateLibraryManager({ templates, onUpdate, onDuplicate
                   <button
                     type="button"
                     onClick={() => onDuplicate(template)}
-                    className="flex items-center gap-1.5 border border-border px-3 py-1.5 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+                    className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-border px-3 py-1.5 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                   >
                     <Copy size={12} />
                     Dupliquer
@@ -97,7 +97,7 @@ export function SessionTemplateLibraryManager({ templates, onUpdate, onDuplicate
                         onDelete(template.id);
                         setPendingDeleteId(null);
                       }}
-                      className="flex items-center gap-1.5 border border-red-500 bg-red-500/10 px-3 py-1.5 text-[11px] uppercase tracking-widest text-red-400"
+                      className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-destructive bg-destructive/10 px-3 py-1.5 text-[11px] uppercase tracking-widest text-destructive transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40"
                     >
                       <Trash2 size={12} />
                       Confirmer la suppression
@@ -106,7 +106,7 @@ export function SessionTemplateLibraryManager({ templates, onUpdate, onDuplicate
                     <button
                       type="button"
                       onClick={() => setPendingDeleteId(template.id)}
-                      className="flex items-center gap-1.5 border border-red-500/40 px-3 py-1.5 text-[11px] uppercase tracking-widest text-red-400 transition-colors hover:bg-red-500/10"
+                      className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-destructive/40 px-3 py-1.5 text-[11px] uppercase tracking-widest text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40"
                     >
                       <Trash2 size={12} />
                       Supprimer

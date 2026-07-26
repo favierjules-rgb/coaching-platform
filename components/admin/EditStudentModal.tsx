@@ -94,7 +94,7 @@ export function EditStudentModal({
           setForm(formFromStudent(student));
           setOpen(true);
         }}
-        className="flex items-center gap-1.5 border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
+        className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
       >
         <Pencil size={13} />
         Modifier le profil
@@ -104,7 +104,7 @@ export function EditStudentModal({
         <Modal title="Modifier le profil" onClose={close} maxWidth="max-w-lg">
           <div className="flex flex-col gap-4">
             {error && (
-              <div className="flex items-center gap-3 border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+              <div className="flex items-center gap-3 rounded-panel border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
                 <AlertTriangle size={18} className="flex-shrink-0" />
                 Échec de l&apos;enregistrement. Réessaie.
               </div>

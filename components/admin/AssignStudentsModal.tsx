@@ -46,8 +46,8 @@ export function AssignStudentsModal({
         }}
         className={
           triggerVariant === "primary"
-            ? "border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
-            : "border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+            ? "pressable flex min-h-[44px] items-center rounded-control border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            : "pressable flex min-h-[44px] items-center rounded-control border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         }
       >
         <span className="flex items-center gap-1.5">
@@ -59,7 +59,7 @@ export function AssignStudentsModal({
       {open && (
         <Modal title={`Assigner — ${contentLabel}`} onClose={close}>
           {confirmed ? (
-            <div className="flex items-center gap-3 border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-400">
+            <div className="flex items-center gap-3 rounded-panel border border-success/40 bg-success/10 px-4 py-3 text-sm text-success">
               <CheckCircle size={18} className="flex-shrink-0" />
               Assignation mise à jour.
             </div>

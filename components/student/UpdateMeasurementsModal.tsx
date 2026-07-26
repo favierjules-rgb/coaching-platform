@@ -119,7 +119,7 @@ export function UpdateMeasurementsModal({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+        className="pressable flex min-h-[44px] items-center rounded-control border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
       >
         Mettre à jour mes mensurations
       </button>
@@ -129,9 +129,9 @@ export function UpdateMeasurementsModal({
           role="dialog"
           aria-modal="true"
           aria-label="Mettre à jour mes mensurations"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          className="modal-overlay-fade-in fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
         >
-          <div className="flex max-h-[90vh] w-full max-w-2xl flex-col border border-border bg-card">
+          <div className="modal-content-scale-in flex max-h-[90vh] w-full max-w-2xl flex-col rounded-card border border-border bg-card shadow-soft">
             <div className="flex items-center justify-between border-b border-border px-6 py-4">
               <h3 className="font-heading text-lg font-bold uppercase text-foreground">
                 Mettre à jour mes mensurations
@@ -140,7 +140,7 @@ export function UpdateMeasurementsModal({
                 type="button"
                 onClick={close}
                 aria-label="Fermer"
-                className="text-muted-foreground transition-colors hover:text-foreground"
+                className="-mr-2 -mt-1 flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-surface-soft hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
               >
                 <X size={18} />
               </button>
@@ -148,7 +148,7 @@ export function UpdateMeasurementsModal({
 
             <div className="flex-1 overflow-y-auto px-6 py-4">
               {submitted ? (
-                <div className="flex items-center gap-3 border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-400">
+                <div className="flex items-center gap-3 rounded-panel border border-success/40 bg-success/10 px-4 py-3 text-sm text-success">
                   <CheckCircle size={18} className="flex-shrink-0" />
                   Mensurations enregistrées. Ton coach pourra les consulter.
                 </div>
@@ -194,7 +194,7 @@ export function UpdateMeasurementsModal({
                       <button
                         type="button"
                         onClick={() => setShowCustom(true)}
-                        className="flex items-center gap-2 text-xs uppercase tracking-widest text-primary transition-colors hover:text-red-400"
+                        className="pressable flex min-h-[44px] items-center gap-2 rounded-control text-xs uppercase tracking-widest text-primary transition-colors hover:text-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                       >
                         <Plus size={14} />
                         Ajouter une mesure personnalisée
@@ -238,7 +238,7 @@ export function UpdateMeasurementsModal({
                     type="button"
                     onClick={handleSubmit}
                     disabled={!canSubmit}
-                    className="mt-1 w-full bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
+                    className="pressable mt-1 min-h-[44px] w-full rounded-control bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
                   >
                     Enregistrer les mensurations
                   </button>

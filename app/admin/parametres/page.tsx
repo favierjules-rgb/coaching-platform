@@ -119,8 +119,8 @@ export default function AdminSettingsPage() {
               options={statusOptions}
             />
             {saved && (
-              <div className="flex items-center gap-3 border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-400">
-                <CheckCircle size={18} className="flex-shrink-0" />
+              <div role="status" className="flex items-center gap-3 rounded-panel border border-success/40 bg-success/10 px-4 py-3 text-sm text-success">
+                <CheckCircle size={18} className="flex-shrink-0" aria-hidden="true" />
                 Informations enregistrées.
               </div>
             )}
@@ -136,7 +136,7 @@ export default function AdminSettingsPage() {
               {coaches.map((coach) => {
                 const isSelf = Boolean(coach.userId) && coach.userId === currentUserId;
                 return (
-                  <div key={coach.id} className="flex flex-col gap-3 border border-border p-4">
+                  <div key={coach.id} className="flex flex-col gap-3 rounded-panel border border-border bg-surface-soft/40 p-4 transition-colors hover:border-border-strong">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div>
                         <div className="flex items-center gap-2">
@@ -159,17 +159,17 @@ export default function AdminSettingsPage() {
                             type="button"
                             onClick={() => handleDeleteCoach(coach)}
                             disabled={deletingId === coach.id}
-                            className="flex items-center gap-1.5 border border-red-500/50 bg-red-500/10 px-3 py-1.5 text-[11px] uppercase tracking-widest text-red-400 transition-colors hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-destructive/50 px-4 py-2 text-xs uppercase tracking-widest text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40 disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            <Trash2 size={12} />
+                            <Trash2 size={12} aria-hidden="true" />
                             {deletingId === coach.id ? "Suppression..." : "Supprimer"}
                           </button>
                         )}
                       </div>
                     </div>
                     {deleteErrorId === coach.id && (
-                      <p className="flex items-center gap-2 text-xs text-red-400">
-                        <AlertTriangle size={14} className="flex-shrink-0" />
+                      <p role="alert" className="flex items-center gap-2 text-xs text-destructive">
+                        <AlertTriangle size={14} className="flex-shrink-0" aria-hidden="true" />
                         Échec de la suppression. Réessaie.
                       </p>
                     )}
@@ -180,8 +180,12 @@ export default function AdminSettingsPage() {
           )}
         </AdminSection>
 
-        <div className="border border-red-500/40 bg-red-500/5 p-6">
-          <h2 className="mb-2 font-heading text-sm font-bold uppercase text-red-400">Zone de test</h2>
+        {/* Zone de test : plus de grand encadré rouge plein cadre (c'était le
+            « halo rouge » perçu à côté de la sidebar) — carte au langage
+            commun, la dangerosité est portée par le titre et le bouton
+            destructifs, pas par un cadre criard. */}
+        <div className="rounded-card border border-border bg-card p-6 shadow-soft">
+          <h2 className="mb-2 font-heading text-sm font-bold uppercase text-destructive">Zone de test</h2>
           <p className="mb-4 text-sm text-muted-foreground">
             Réinitialise toutes les données admin mockées (élèves, programmes, plans, documents, retours) et
             revient aux données de départ. N&apos;affecte pas l&apos;espace élève.
@@ -189,9 +193,9 @@ export default function AdminSettingsPage() {
           <button
             type="button"
             onClick={handleReset}
-            className="flex items-center gap-2 border border-red-500/50 px-4 py-2 text-xs uppercase tracking-widest text-red-400 transition-colors hover:bg-red-500/10"
+            className="pressable flex min-h-[44px] items-center gap-2 rounded-control border border-destructive/50 px-4 py-2 text-xs uppercase tracking-widest text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40"
           >
-            <RotateCcw size={13} />
+            <RotateCcw size={13} aria-hidden="true" />
             Réinitialiser les données de test
           </button>
         </div>

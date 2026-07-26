@@ -20,7 +20,7 @@ function AvailabilityRow({
   onDelete: () => void;
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border border-border p-3">
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-panel border border-border bg-surface-soft/40 p-3">
       <div className="text-sm text-foreground">
         <span className="font-bold">{weekdayLabels[availability.weekday]}</span>{" "}
         {availability.startTime.slice(0, 5)}–{availability.endTime.slice(0, 5)} ·{" "}
@@ -28,7 +28,7 @@ function AvailabilityRow({
         {availability.location && <span className="text-muted-foreground"> · {availability.location}</span>}
       </div>
       <div className="flex items-center gap-3">
-        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+        <label className="flex min-h-[44px] items-center gap-2 text-xs text-muted-foreground">
           <input
             type="checkbox"
             checked={availability.isActive}
@@ -37,7 +37,12 @@ function AvailabilityRow({
           />
           Active
         </label>
-        <button type="button" onClick={onDelete} className="text-red-400 hover:text-red-300">
+        <button
+          type="button"
+          onClick={onDelete}
+          aria-label={`Supprimer la disponibilité du ${weekdayLabels[availability.weekday]}`}
+          className="pressable flex h-11 w-11 items-center justify-center rounded-control text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40"
+        >
           <Trash2 size={14} />
         </button>
       </div>
@@ -67,7 +72,7 @@ function NewAvailabilityForm({
   }
 
   return (
-    <div className="flex flex-col gap-3 border border-dashed border-border p-4">
+    <div className="flex flex-col gap-3 rounded-panel border border-dashed border-border p-4">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <SelectField label="Jour" value={String(weekday)} onChange={(v) => setWeekday(Number(v) as Weekday)} options={weekdayOptions} />
         <Field label="Début" type="time" value={startTime} onChange={setStartTime} />
@@ -86,7 +91,7 @@ function NewAvailabilityForm({
       <button
         type="button"
         onClick={submit}
-        className="flex items-center justify-center gap-2 border border-primary bg-primary py-2.5 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
+        className="pressable flex min-h-[44px] items-center justify-center gap-2 rounded-control border border-primary bg-primary py-2.5 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
       >
         <Plus size={14} />
         Ajouter cette disponibilité
@@ -114,7 +119,7 @@ function NewUnavailabilityForm({ onCreate }: { onCreate: (data: { startAt: strin
   }
 
   return (
-    <div className="flex flex-col gap-3 border border-dashed border-border p-4">
+    <div className="flex flex-col gap-3 rounded-panel border border-dashed border-border p-4">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Field label="Début (date)" type="date" value={startDate} onChange={setStartDate} />
         <Field label="Début (heure)" type="time" value={startTime} onChange={setStartTime} />
@@ -125,7 +130,7 @@ function NewUnavailabilityForm({ onCreate }: { onCreate: (data: { startAt: strin
       <button
         type="button"
         onClick={submit}
-        className="flex items-center justify-center gap-2 border border-primary bg-primary py-2.5 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
+        className="pressable flex min-h-[44px] items-center justify-center gap-2 rounded-control border border-primary bg-primary py-2.5 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
       >
         <Plus size={14} />
         Bloquer ce créneau
@@ -160,7 +165,7 @@ export function AvailabilityManager({
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="border border-border bg-card p-6">
+      <div className="rounded-card border border-border bg-card p-6 shadow-soft">
         <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">Réglages de réservation</h2>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <Field
@@ -184,7 +189,7 @@ export function AvailabilityManager({
         </div>
       </div>
 
-      <div className="border border-border bg-card p-6">
+      <div className="rounded-card border border-border bg-card p-6 shadow-soft">
         <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">Disponibilités récurrentes</h2>
         <div className="mb-4 flex flex-col gap-2">
           {sortedAvailabilities.length === 0 ? (
@@ -203,19 +208,24 @@ export function AvailabilityManager({
         <NewAvailabilityForm defaultDurationMinutes={bookingSettings.defaultDurationMinutes} onCreate={onCreateAvailability} />
       </div>
 
-      <div className="border border-border bg-card p-6">
+      <div className="rounded-card border border-border bg-card p-6 shadow-soft">
         <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">Exceptions / indisponibilités</h2>
         <div className="mb-4 flex flex-col gap-2">
           {upcomingUnavailabilities.length === 0 ? (
             <p className="text-sm text-muted-foreground">Aucune exception bloquée.</p>
           ) : (
             upcomingUnavailabilities.map((u) => (
-              <div key={u.id} className="flex flex-wrap items-center justify-between gap-3 border border-border p-3">
+              <div key={u.id} className="flex flex-wrap items-center justify-between gap-3 rounded-panel border border-border bg-surface-soft/40 p-3">
                 <div className="text-sm text-foreground">
                   {formatDateTime(u.startAt)} → {formatDateTime(u.endAt)}
                   {u.reason && <span className="text-muted-foreground"> · {u.reason}</span>}
                 </div>
-                <button type="button" onClick={() => onDeleteUnavailability(u.id)} className="text-red-400 hover:text-red-300">
+                <button
+                  type="button"
+                  onClick={() => onDeleteUnavailability(u.id)}
+                  aria-label="Supprimer cette indisponibilité"
+                  className="pressable flex h-11 w-11 items-center justify-center rounded-control text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40"
+                >
                   <Trash2 size={14} />
                 </button>
               </div>

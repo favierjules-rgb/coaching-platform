@@ -107,7 +107,7 @@ export default function AdminExercicesPage() {
         <select
           value={muscleFilter}
           onChange={(e) => setMuscleFilter(e.target.value as MuscleGroup | "tous")}
-          className="border border-border bg-background px-3 py-2.5 text-xs uppercase tracking-widest text-muted-foreground"
+          className="min-h-[44px] appearance-none rounded-control border border-border bg-surface-soft px-3 py-2.5 text-xs uppercase tracking-widest text-muted-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
         >
           <option value="tous">Tous les muscles</option>
           {muscleGroupOrder.map((group) => (
@@ -119,7 +119,7 @@ export default function AdminExercicesPage() {
         <select
           value={categoryFilter}
           onChange={(e) => setCategoryFilter(e.target.value as ExerciseCategory | "tous")}
-          className="border border-border bg-background px-3 py-2.5 text-xs uppercase tracking-widest text-muted-foreground"
+          className="min-h-[44px] appearance-none rounded-control border border-border bg-surface-soft px-3 py-2.5 text-xs uppercase tracking-widest text-muted-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
         >
           <option value="tous">Toutes les catégories</option>
           {Object.entries(exerciseCategoryLabels).map(([value, label]) => (
@@ -131,7 +131,7 @@ export default function AdminExercicesPage() {
         <select
           value={equipmentFilter}
           onChange={(e) => setEquipmentFilter(e.target.value as ExerciseEquipment | "tous")}
-          className="border border-border bg-background px-3 py-2.5 text-xs uppercase tracking-widest text-muted-foreground"
+          className="min-h-[44px] appearance-none rounded-control border border-border bg-surface-soft px-3 py-2.5 text-xs uppercase tracking-widest text-muted-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
         >
           <option value="tous">Tout matériel</option>
           {Object.entries(exerciseEquipmentLabels).map(([value, label]) => (
@@ -143,7 +143,7 @@ export default function AdminExercicesPage() {
         <select
           value={levelFilter}
           onChange={(e) => setLevelFilter(e.target.value as ExerciseLevel | "tous")}
-          className="border border-border bg-background px-3 py-2.5 text-xs uppercase tracking-widest text-muted-foreground"
+          className="min-h-[44px] appearance-none rounded-control border border-border bg-surface-soft px-3 py-2.5 text-xs uppercase tracking-widest text-muted-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
         >
           <option value="tous">Tous les niveaux</option>
           {Object.entries(exerciseLevelLabels).map(([value, label]) => (
@@ -155,7 +155,7 @@ export default function AdminExercicesPage() {
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-          className="border border-border bg-background px-3 py-2.5 text-xs uppercase tracking-widest text-muted-foreground"
+          className="min-h-[44px] appearance-none rounded-control border border-border bg-surface-soft px-3 py-2.5 text-xs uppercase tracking-widest text-muted-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
         >
           <option value="tous">Actifs et archivés</option>
           <option value="active">Actifs seulement</option>

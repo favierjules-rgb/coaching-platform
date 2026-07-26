@@ -30,7 +30,7 @@ export function ThemeToggle({ variant = "sidebar" }: ThemeToggleProps) {
     <button
       type="button"
       onClick={toggleTheme}
-      className="flex w-full items-center gap-3 px-4 py-3 text-sm text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+      className="pressable flex min-h-[44px] w-full items-center gap-3 rounded-control px-4 text-sm text-muted-foreground hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
     >
       {isLight ? <Moon size={18} /> : <Sun size={18} />}
       {isLight ? "Mode sombre" : "Mode clair"}

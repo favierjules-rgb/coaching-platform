@@ -17,7 +17,13 @@
     "test:muscle-overlays": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/muscle-overlays.mts",
     "test:weight-chart": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/weight-chart.mts",
     "test:session-summary": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/session-summary.mts",
-    "test:student-session-blocks": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/student-session-blocks.mts"
+    "test:student-session-blocks": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/student-session-blocks.mts",
+    "test:admin-shell-nav": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/admin-shell-nav.mts",
+    "test:admin-program-preview": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/admin-program-preview.mts",
+    "test:subscription-template-deletion": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/subscription-template-deletion.mts",
+    "test:feedback-reply-draft": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/feedback-reply-draft.mts",
+    "test:cardio-feedback": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/cardio-feedback.mts",
+    "test:cardio-block-form-render": "npx tsx scripts/tests/cardio-block-form-render.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

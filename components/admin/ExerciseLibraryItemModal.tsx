@@ -110,8 +110,8 @@ export function ExerciseLibraryItemModal({ item, onSave }: ExerciseLibraryItemMo
         }}
         className={
           item
-            ? "flex items-center gap-1.5 border border-border px-3 py-1.5 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
-            : "flex items-center gap-2 border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
+            ? "pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-border px-3 py-1.5 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            : "pressable flex min-h-[44px] items-center gap-2 rounded-control border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         }
       >
         {item ? <Pencil size={12} /> : <Plus size={14} />}
@@ -121,7 +121,7 @@ export function ExerciseLibraryItemModal({ item, onSave }: ExerciseLibraryItemMo
       {open && (
         <Modal title={item ? "Modifier l'exercice" : "Créer un exercice"} onClose={close} maxWidth="max-w-2xl">
           {saved ? (
-            <div className="flex items-center gap-3 border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-400">
+            <div className="flex items-center gap-3 rounded-panel border border-success/40 bg-success/10 px-4 py-3 text-sm text-success">
               <CheckCircle size={18} className="flex-shrink-0" />
               Exercice enregistré dans la banque.
             </div>
@@ -145,7 +145,8 @@ export function ExerciseLibraryItemModal({ item, onSave }: ExerciseLibraryItemMo
                       key={group}
                       type="button"
                       onClick={() => toggleSecondaryMuscle(group)}
-                      className={`border px-2.5 py-1 text-[11px] uppercase tracking-wide transition-colors ${
+                      aria-pressed={form.secondaryMuscles.includes(group)}
+                      className={`pressable min-h-[36px] rounded-full border px-2.5 py-1 text-[11px] uppercase tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
                         form.secondaryMuscles.includes(group)
                           ? "border-primary bg-primary text-primary-foreground"
                           : "border-border text-muted-foreground hover:border-primary hover:text-primary"

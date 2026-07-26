@@ -1,11 +1,12 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Menu } from "lucide-react";
 
 import { Logo } from "@/components/ui/Logo";
 import { AdminSidebar } from "@/components/admin/AdminSidebar";
+import { FOCUSABLE_SELECTOR, bodyOverflowFor, nextDrawerOpen, wrapFocusTarget } from "@/lib/admin-shell-nav";
 
 // Le builder plein écran (V3, /admin/programmes/[id]/builder) est un
 // "sandbox" volontairement sans sidebar ni menu admin (voir spec V3 —
@@ -31,6 +32,81 @@ const BUILDER_ROUTE_PATTERN = /^\/admin\/programmes\/[^/]+\/builder(\/.*)?$/;
 export function AdminShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [sideOpen, setSideOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
+
+  // Drawer mobile — accessibilité complète (polish Apple admin, Lot A) :
+  //  - à l'ouverture : mémorise le déclencheur, bloque le scroll du document,
+  //    place le focus sur le premier élément focusable (bouton Fermer) ;
+  //  - pendant : Échap ferme ; Tab/Shift+Tab bouclent DANS le drawer
+  //    (wrapFocusTarget, testé dans scripts/tests/admin-shell-nav.mts) ; un
+  //    focus égaré derrière l'overlay est ramené au premier élément ;
+  //  - à la fermeture (Échap, overlay, navigation, ou démontage du composant
+  //    pendant l'ouverture) : le cleanup restaure le scroll et RETOURNE le
+  //    focus au déclencheur. Ouvertures/fermetures répétées : l'effet se
+  //    réexécute proprement à chaque cycle. Aucune dépendance ajoutée.
+  useEffect(() => {
+    if (!sideOpen) return;
+
+    // Safari/iOS ne donne PAS le focus à un <button> cliqué :
+    // document.activeElement reste <body>, qui EST un HTMLElement — l'ancien
+    // test `instanceof HTMLElement` ne repliait donc jamais sur le
+    // déclencheur et le focus était « rendu » à <body>. On n'accepte
+    // l'élément actif que s'il est réellement focalisé (≠ body/html), sinon
+    // référence stable vers le bouton menu.
+    const triggerAtOpen = triggerRef.current;
+    const activeAtOpen = document.activeElement;
+    const previouslyFocused =
+      activeAtOpen instanceof HTMLElement && activeAtOpen !== document.body && activeAtOpen !== document.documentElement
+        ? activeAtOpen
+        : triggerAtOpen;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = bodyOverflowFor(true, previousOverflow);
+
+    const focusables = () =>
+      Array.from(drawerRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR) ?? []);
+    focusables()[0]?.focus();
+
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setSideOpen((open) => nextDrawerOpen(open, "escape"));
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const elements = focusables();
+      const current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      const target = wrapFocusTarget(elements, current, event.shiftKey);
+      if (target) {
+        event.preventDefault();
+        target.focus();
+      }
+    }
+
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = bodyOverflowFor(false, previousOverflow);
+      // Restitution APRÈS la fermeture réelle (rAF) : à l'instant du cleanup
+      // le drawer est encore dans le DOM et Safari peut refuser un focus()
+      // synchrone vers l'extérieur. Cible = élément mémorisé s'il est
+      // toujours monté et focusable, sinon repli explicite sur le bouton
+      // menu — jamais <body>.
+      const restoreFocus = () => {
+        const candidate =
+          previouslyFocused && previouslyFocused.isConnected && !previouslyFocused.hasAttribute("disabled")
+            ? previouslyFocused
+            : triggerAtOpen;
+        if (candidate && candidate.isConnected && !candidate.hasAttribute("disabled")) {
+          candidate.focus();
+        }
+      };
+      if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(restoreFocus);
+      } else {
+        restoreFocus();
+      }
+    };
+  }, [sideOpen]);
 
   if (pathname && BUILDER_ROUTE_PATTERN.test(pathname)) {
     // Racine en `<main>` (Lot 6, Groupe C — landmarks) : ce sandbox
@@ -51,21 +127,31 @@ export function AdminShell({ children }: { children: ReactNode }) {
       </div>
 
       {sideOpen && (
-        <div className="fixed inset-0 z-50 flex lg:hidden">
-          <div className="h-full w-64">
-            <AdminSidebar mobile onNavigate={() => setSideOpen(false)} />
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Menu admin"
+          className="modal-overlay-fade-in fixed inset-0 z-50 flex bg-black/60 lg:hidden"
+        >
+          <div ref={drawerRef} className="animate-fade-in h-full w-64 shadow-soft">
+            <AdminSidebar mobile onNavigate={() => setSideOpen((open) => nextDrawerOpen(open, "navigate"))} />
           </div>
-          <div className="flex-1 bg-black/60" onClick={() => setSideOpen(false)} />
+          <div
+            className="flex-1"
+            onClick={() => setSideOpen((open) => nextDrawerOpen(open, "overlay"))}
+          />
         </div>
       )}
 
       <div className="flex flex-1 flex-col">
         <div className="flex h-16 items-center gap-3 border-b border-border bg-card px-4 lg:hidden">
           <button
+            ref={triggerRef}
             type="button"
-            onClick={() => setSideOpen(true)}
+            onClick={() => setSideOpen((open) => nextDrawerOpen(open, "toggle"))}
             aria-label="Ouvrir le menu"
-            className="text-foreground"
+            aria-expanded={sideOpen}
+            className="pressable flex h-11 w-11 items-center justify-center rounded-control text-foreground transition-colors hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             <Menu size={20} />
           </button>

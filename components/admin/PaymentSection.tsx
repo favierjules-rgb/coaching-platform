@@ -97,7 +97,7 @@ function EditPaymentProfileModal({
       {open && (
         <Modal title="Modifier le paiement" onClose={() => setOpen(false)} maxWidth="max-w-lg">
           {submitted ? (
-            <div className="flex items-center gap-3 border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-400">
+            <div className="flex items-center gap-3 rounded-panel border border-success/40 bg-success/10 px-4 py-3 text-sm text-success">
               <CheckCircle size={18} className="flex-shrink-0" />
               Paiement mis à jour.
             </div>
@@ -212,7 +212,7 @@ function AddPaymentEntryModal({
       {open && (
         <Modal title="Ajouter un paiement" onClose={() => setOpen(false)} maxWidth="max-w-md">
           {submitted ? (
-            <div className="flex items-center gap-3 border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-400">
+            <div className="flex items-center gap-3 rounded-panel border border-success/40 bg-success/10 px-4 py-3 text-sm text-success">
               <CheckCircle size={18} className="flex-shrink-0" />
               Paiement enregistré.
             </div>
@@ -292,7 +292,7 @@ export function PaymentSectionContent({
           type="button"
           onClick={handleMarkAsPaid}
           disabled={profile.status === "terminé" && remaining === 0}
-          className="flex items-center gap-1.5 border border-green-500/50 px-4 py-2 text-xs uppercase tracking-widest text-green-400 transition-colors hover:bg-green-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+          className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-success/50 px-4 py-2 text-xs uppercase tracking-widest text-success transition-colors hover:bg-success/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-success/40 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <CreditCard size={13} />
           Marquer comme payé
@@ -336,7 +336,7 @@ export function PaymentSectionContent({
                 {sortedEntries.map((entry) => (
                   <div
                     key={entry.paymentId}
-                    className="flex flex-wrap items-center justify-between gap-2 border border-border px-4 py-3"
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-panel border border-border px-4 py-3"
                   >
                     <div>
                       <span className="block text-sm text-foreground">{entry.amount} €</span>

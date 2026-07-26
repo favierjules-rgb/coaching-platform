@@ -1,8 +1,9 @@
 "use client";
 
 import { useId, useState } from "react";
-import { CreditCard, ExternalLink, X } from "lucide-react";
+import { CreditCard, ExternalLink } from "lucide-react";
 
+import { Modal, PrimaryButton } from "@/components/admin/Modal";
 import type { CheckoutOffer } from "@/lib/stripe/plans";
 
 interface CreateCheckoutLinkModalProps {
@@ -74,79 +75,55 @@ export function CreateCheckoutLinkModal({ triggerLabel, mode, offers, onCreateCh
       <button
         type="button"
         onClick={openModal}
-        className="flex items-center gap-1.5 border border-primary px-4 py-2 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+        className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-primary px-4 py-2 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
       >
         <CreditCard size={14} aria-hidden="true" />
         {triggerLabel}
       </button>
 
       {open && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={triggerLabel}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
-        >
-          <div className="w-full max-w-sm border border-border bg-card p-6">
-            <div className="mb-4 flex items-start justify-between gap-4">
-              <h3 className="font-heading text-lg font-bold uppercase text-foreground">{triggerLabel}</h3>
-              <button
-                type="button"
-                onClick={close}
-                aria-label="Fermer"
-                className="text-muted-foreground transition-colors hover:text-foreground"
+        <Modal title={triggerLabel} onClose={close} maxWidth="max-w-sm">
+          {checkoutUrl ? (
+            <div className="flex flex-col gap-4">
+              <p className="text-sm text-muted-foreground">Lien de paiement créé.</p>
+              <a
+                href={checkoutUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="pressable flex min-h-[44px] items-center justify-center gap-2 rounded-control border border-primary bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
               >
-                <X size={18} />
-              </button>
+                <ExternalLink size={14} aria-hidden="true" />
+                Ouvrir le lien Stripe
+              </a>
             </div>
-
-            {checkoutUrl ? (
-              <div className="flex flex-col gap-4">
-                <p className="text-sm text-muted-foreground">Lien de paiement créé.</p>
-                <a
-                  href={checkoutUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-2 border border-primary bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
+          ) : offers.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Aucune formule disponible pour le moment.</p>
+          ) : (
+            <div className="flex flex-col gap-4">
+              <div>
+                <label htmlFor={selectId} className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                  Formule
+                </label>
+                <select
+                  id={selectId}
+                  value={offerId}
+                  onChange={(event) => setOfferId(event.target.value)}
+                  className="w-full rounded-control border border-border bg-surface-soft px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
                 >
-                  <ExternalLink size={14} aria-hidden="true" />
-                  Ouvrir le lien Stripe
-                </a>
+                  {offers.map((offer) => (
+                    <option key={offer.id} value={offer.id}>
+                      {offer.label}
+                    </option>
+                  ))}
+                </select>
               </div>
-            ) : offers.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Aucune formule disponible pour le moment.</p>
-            ) : (
-              <div className="flex flex-col gap-4">
-                <div>
-                  <label htmlFor={selectId} className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
-                    Formule
-                  </label>
-                  <select
-                    id={selectId}
-                    value={offerId}
-                    onChange={(event) => setOfferId(event.target.value)}
-                    className="w-full border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none"
-                  >
-                    {offers.map((offer) => (
-                      <option key={offer.id} value={offer.id}>
-                        {offer.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                {error && <p className="text-xs text-red-400">{error}</p>}
-                <button
-                  type="button"
-                  onClick={handleCreate}
-                  disabled={loading}
-                  className="w-full bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {loading ? "Création…" : "Créer le lien de paiement"}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
+              {error && <p className="text-xs text-destructive" role="alert">{error}</p>}
+              <PrimaryButton onClick={handleCreate} disabled={loading}>
+                {loading ? "Création…" : "Créer le lien de paiement"}
+              </PrimaryButton>
+            </div>
+          )}
+        </Modal>
       )}
     </>
   );

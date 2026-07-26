@@ -72,7 +72,7 @@ export function WeightEvolutionCard({
               </span>
               <span
                 className={`flex items-center gap-1 font-heading text-2xl font-bold ${
-                  evolution.deltaFromStartKg >= 0 ? "text-green-400" : "text-red-400"
+                  evolution.deltaFromStartKg >= 0 ? "text-success" : "text-destructive"
                 }`}
               >
                 {evolution.deltaFromStartKg >= 0 ? (

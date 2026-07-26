@@ -542,7 +542,7 @@ export default function AdminStudentDetailPage() {
           {isSupabaseStudent && (
             <Link
               href={`/admin/eleves/${student.id}/progression`}
-              className="flex items-center gap-1.5 border border-primary px-4 py-2 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+              className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-primary px-4 py-2 text-xs uppercase tracking-widest text-primary hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             >
               <TrendingUp size={14} />
               Progression
@@ -571,7 +571,7 @@ export default function AdminStudentDetailPage() {
               const result = await applyStudentUpdate({ status: student.status === "pause" ? "actif" : "pause" });
               if (result === false) setStatusActionError(true);
             }}
-            className="flex items-center gap-1.5 border border-amber-500/50 px-4 py-2 text-xs uppercase tracking-widest text-amber-400 transition-colors hover:bg-amber-500/10"
+            className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-warning/50 px-4 py-2 text-xs uppercase tracking-widest text-warning hover:bg-warning/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning/40"
           >
             {student.status === "pause" ? <Play size={13} /> : <Pause size={13} />}
             {student.status === "pause" ? "Réactiver" : "Mettre en pause"}
@@ -590,7 +590,7 @@ export default function AdminStudentDetailPage() {
               }
               router.push("/admin/eleves");
             }}
-            className="flex items-center gap-1.5 border border-red-500/50 px-4 py-2 text-xs uppercase tracking-widest text-red-400 transition-colors hover:bg-red-500/10"
+            className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-destructive/50 px-4 py-2 text-xs uppercase tracking-widest text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40"
           >
             <Archive size={13} />
             Archiver l&apos;élève
@@ -600,7 +600,7 @@ export default function AdminStudentDetailPage() {
               type="button"
               onClick={handleDeleteStudent}
               disabled={deleting}
-              className="flex items-center gap-1.5 border border-red-500/50 bg-red-500/10 px-4 py-2 text-xs uppercase tracking-widest text-red-400 transition-colors hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+              className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-destructive/50 bg-destructive/10 px-4 py-2 text-xs uppercase tracking-widest text-destructive hover:bg-destructive/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Trash2 size={13} />
               {deleting ? "Suppression…" : "Supprimer définitivement"}
@@ -608,13 +608,13 @@ export default function AdminStudentDetailPage() {
           )}
         </div>
         {statusActionError && (
-          <p className="mt-2 flex w-full items-center gap-2 text-xs text-red-400">
+          <p className="mt-2 flex w-full items-center gap-2 text-xs text-destructive">
             <AlertTriangle size={14} className="flex-shrink-0" />
             Échec de la mise à jour du statut. Réessaie.
           </p>
         )}
         {deleteError && (
-          <p className="mt-2 flex w-full items-center gap-2 text-xs text-red-400">
+          <p className="mt-2 flex w-full items-center gap-2 text-xs text-destructive">
             <AlertTriangle size={14} className="flex-shrink-0" />
             Échec de la suppression. Réessaie.
           </p>
@@ -762,36 +762,36 @@ export default function AdminStudentDetailPage() {
             </AdminSection>
           </div>
 
-          <div className="mb-6 border border-amber-500/40 bg-amber-500/10 p-6">
+          <div className="mb-6 rounded-card border border-warning/40 bg-warning/10 p-6">
             <div className="flex items-start gap-3">
-              <AlertTriangle size={18} className="mt-0.5 flex-shrink-0 text-amber-400" />
+              <AlertTriangle size={18} className="mt-0.5 flex-shrink-0 text-warning" />
               <div className="flex-1">
-                <h2 className="mb-3 font-heading text-sm font-bold uppercase text-amber-400">
+                <h2 className="mb-3 font-heading text-sm font-bold uppercase text-warning">
                   Blessures et contraintes
                 </h2>
-                <div className="flex flex-col gap-3 text-sm text-amber-200/90">
+                <div className="flex flex-col gap-3 text-sm text-foreground/90">
                   <p>
-                    <span className="mr-2 text-xs uppercase tracking-wide text-amber-400/80">Blessures :</span>
+                    <span className="mr-2 text-xs uppercase tracking-wide text-warning/80">Blessures :</span>
                     {formatTextOrEmpty(onboardingProfile.onboardingInjuries)}
                   </p>
                   <div>
-                    <span className="mb-2 block text-xs uppercase tracking-wide text-amber-400/80">Exercices à éviter</span>
+                    <span className="mb-2 block text-xs uppercase tracking-wide text-warning/80">Exercices à éviter</span>
                     <TagList items={onboardingProfile.avoidedExercises} />
                   </div>
                   <p>
-                    <span className="mr-2 text-xs uppercase tracking-wide text-amber-400/80">Notes santé :</span>
+                    <span className="mr-2 text-xs uppercase tracking-wide text-warning/80">Notes santé :</span>
                     {formatTextOrEmpty(onboardingProfile.healthNotes)}
                   </p>
                   <p>
-                    <span className="mr-2 text-xs uppercase tracking-wide text-amber-400/80">Traitements :</span>
+                    <span className="mr-2 text-xs uppercase tracking-wide text-warning/80">Traitements :</span>
                     {formatTextOrEmpty(onboardingProfile.medicalTreatments)}
                   </p>
                   <p>
-                    <span className="mr-2 text-xs uppercase tracking-wide text-amber-400/80">Médicaments :</span>
+                    <span className="mr-2 text-xs uppercase tracking-wide text-warning/80">Médicaments :</span>
                     {formatTextOrEmpty(onboardingProfile.medications)}
                   </p>
                   <p>
-                    <span className="mr-2 text-xs uppercase tracking-wide text-amber-400/80">Notes coach :</span>
+                    <span className="mr-2 text-xs uppercase tracking-wide text-warning/80">Notes coach :</span>
                     {formatTextOrEmpty(onboardingProfile.trainingNotes)}
                   </p>
                 </div>
@@ -842,14 +842,14 @@ export default function AdminStudentDetailPage() {
             </AdminSection>
           </div>
 
-          <div className="mb-6 border border-amber-500/40 bg-amber-500/10 p-6">
+          <div className="mb-6 rounded-card border border-warning/40 bg-warning/10 p-6">
             <div className="flex items-start gap-3">
-              <AlertTriangle size={18} className="mt-0.5 flex-shrink-0 text-amber-400" />
+              <AlertTriangle size={18} className="mt-0.5 flex-shrink-0 text-warning" />
               <div>
-                <h2 className="mb-1 font-heading text-sm font-bold uppercase text-amber-400">
+                <h2 className="mb-1 font-heading text-sm font-bold uppercase text-warning">
                   Blessures et contraintes
                 </h2>
-                <p className="text-sm text-amber-200/90">
+                <p className="text-sm text-foreground/90">
                   {student.injuries.trim() ? student.injuries : "Aucune information renseignée."}
                 </p>
               </div>
@@ -904,7 +904,7 @@ export default function AdminStudentDetailPage() {
               <button
                 type="button"
                 onClick={() => void handleUnlockAllDocuments()}
-                className="flex items-center gap-1.5 border border-primary px-3 py-1.5 text-[11px] uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+                className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-primary px-3 py-1.5 text-[11px] uppercase tracking-widest text-primary hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
               >
                 <Unlock size={12} />
                 Tout débloquer
@@ -928,7 +928,7 @@ export default function AdminStudentDetailPage() {
                         <button
                           type="button"
                           onClick={() => handleSetAssignment(student.id, "document", document.id, false)}
-                          className="flex-shrink-0 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary"
+                          className="flex-shrink-0 rounded-control px-1 py-0.5 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                         >
                           Retirer
                         </button>
@@ -954,7 +954,7 @@ export default function AdminStudentDetailPage() {
                       <button
                         type="button"
                         onClick={() => void handleUnlockDocument(document.id)}
-                        className="flex-shrink-0 text-[11px] uppercase tracking-widest text-primary hover:underline"
+                        className="flex-shrink-0 rounded-control px-1 py-0.5 text-[11px] uppercase tracking-widest text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                       >
                         Débloquer
                       </button>
@@ -968,7 +968,7 @@ export default function AdminStudentDetailPage() {
       </div>
 
       {isSupabaseStudent && assignedPlan && (
-        <div className="mb-6 border border-border bg-card p-6">
+        <div className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
           <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
             Suivi nutrition
           </h2>
@@ -986,7 +986,7 @@ export default function AdminStudentDetailPage() {
         </div>
       )}
 
-      <div className="mb-6 border border-border bg-card p-6">
+      <div className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
         <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
           Retours récents
         </h2>
@@ -995,7 +995,7 @@ export default function AdminStudentDetailPage() {
         ) : (
           <div className="flex flex-col gap-3">
             {studentFeedback.slice(0, 5).map((f) => (
-              <div key={f.id} className="border border-border p-4">
+              <div key={f.id} className="rounded-panel border border-border p-4">
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <span className="text-sm font-bold text-foreground">
                     {feedbackTypeLabels[f.type]} · {f.refLabel}
@@ -1011,7 +1011,7 @@ export default function AdminStudentDetailPage() {
       </div>
 
       {isSupabaseStudent && (
-        <div className="mb-6 border border-border bg-card p-6">
+        <div className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
           <h2 className="mb-4 flex items-center gap-2 font-heading text-lg font-bold uppercase text-foreground">
             <History size={18} className="text-primary" />
             Historique récent
@@ -1020,7 +1020,7 @@ export default function AdminStudentDetailPage() {
         </div>
       )}
 
-      <div className="mb-6 border border-border bg-card p-6">
+      <div className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
         <h2 className="mb-4 flex items-center gap-2 font-heading text-lg font-bold uppercase text-foreground">
           <Activity size={18} className="text-primary" />
           Charge d&apos;entraînement de l&apos;élève
@@ -1074,7 +1074,7 @@ export default function AdminStudentDetailPage() {
                   Prévu vs réalisé — {lastCompletedSession?.refLabel}
                 </h3>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div className="border border-border p-4">
+                  <div className="rounded-panel border border-border p-4">
                     <span className="mb-2 block text-[11px] uppercase tracking-widest text-muted-foreground">Prévu</span>
                     <TrainingStatCards
                       totalSets={plannedVsActual.planned.totalSets}
@@ -1082,7 +1082,7 @@ export default function AdminStudentDetailPage() {
                       totalTonnageKg={plannedVsActual.planned.totalTonnageKg}
                     />
                   </div>
-                  <div className="border border-primary/40 p-4">
+                  <div className="rounded-panel border border-primary/40 p-4">
                     <span className="mb-2 block text-[11px] uppercase tracking-widest text-primary">Réalisé</span>
                     <TrainingStatCards
                       totalSets={plannedVsActual.actual.totalSets}
@@ -1095,7 +1095,7 @@ export default function AdminStudentDetailPage() {
                   <p className="mt-3 text-sm text-foreground">
                     Tonnage réalisé : {formatTonnage(plannedVsActual.actual.totalTonnageKg)} / prévu :{" "}
                     {formatTonnage(plannedVsActual.planned.totalTonnageKg)}{" "}
-                    <span className={plannedVsActual.tonnageDeltaKg >= 0 ? "text-green-400" : "text-red-400"}>
+                    <span className={plannedVsActual.tonnageDeltaKg >= 0 ? "text-success" : "text-destructive"}>
                       ({plannedVsActual.tonnageDeltaKg >= 0 ? "+" : ""}
                       {Math.round(plannedVsActual.tonnageDeltaKg).toLocaleString("fr-FR")} kg)
                     </span>
@@ -1107,7 +1107,7 @@ export default function AdminStudentDetailPage() {
         )}
       </div>
 
-      <div className="border border-border bg-card p-6">
+      <div className="rounded-card border border-border bg-card p-6 shadow-soft">
         <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
           Notes privées du coach
         </h2>

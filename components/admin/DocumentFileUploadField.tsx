@@ -25,6 +25,14 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
 }
 
+/** Consigne lisible (types + taille max) affichée dans la zone d'upload — purement informative, dérivée des mêmes contraintes que validateDocumentFile. */
+function acceptHint(type: DocumentType): string {
+  if (type === "pdf") return "PDF — 25 Mo max.";
+  if (type === "image") return "Image (jpg, png, webp…) — 10 Mo max.";
+  if (type === "vidéo") return "Vidéo — 200 Mo max.";
+  return "Fichier — 25 Mo max.";
+}
+
 interface DocumentFileUploadFieldProps {
   /** Id (déjà généré ou réel) sous lequel le fichier est rangé dans le bucket : `<documentId>/<timestamp>-<nom>`. */
   documentId: string;
@@ -120,8 +128,8 @@ export function DocumentFileUploadField({ documentId, type, current, onUploaded 
       </label>
 
       {uploaded && (
-        <div className="flex items-center justify-between gap-3 border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-400">
-          <span className="flex items-center gap-2 truncate">
+        <div className="flex items-center justify-between gap-3 rounded-control border border-success/40 bg-success/10 px-4 py-3 text-sm text-success">
+          <span className="flex min-w-0 items-center gap-2 truncate">
             <CheckCircle size={16} className="flex-shrink-0" />
             <span className="truncate">
               {uploaded.fileName || uploaded.storagePath}
@@ -131,27 +139,33 @@ export function DocumentFileUploadField({ documentId, type, current, onUploaded 
           <button
             type="button"
             onClick={() => void handleRemove()}
-            className="flex-shrink-0 text-muted-foreground transition-colors hover:text-red-400"
-            title="Retirer le fichier uploadé"
+            aria-label={`Retirer le fichier ${uploaded.fileName || uploaded.storagePath}`}
+            className="pressable flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40"
           >
-            <Trash2 size={14} />
+            <Trash2 size={16} aria-hidden />
           </button>
         </div>
       )}
 
-      <input
-        ref={fileInputRef}
-        id={inputId}
-        type="file"
-        accept={acceptFor(type)}
-        onChange={handleFileChange}
-        className="block w-full text-sm text-muted-foreground file:mr-4 file:border file:border-primary file:bg-transparent file:px-4 file:py-2 file:text-xs file:uppercase file:tracking-widest file:text-primary hover:file:bg-primary hover:file:text-primary-foreground"
-      />
+      <div className="flex flex-col gap-2 rounded-panel border border-border bg-surface-soft/40 p-4">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <FileUp size={14} aria-hidden className="flex-shrink-0" />
+          {acceptHint(type)}
+        </div>
+        <input
+          ref={fileInputRef}
+          id={inputId}
+          type="file"
+          accept={acceptFor(type)}
+          onChange={handleFileChange}
+          className="block w-full rounded-control text-sm text-muted-foreground file:mr-4 file:min-h-[44px] file:rounded-control file:border file:border-primary file:bg-transparent file:px-4 file:py-2 file:text-xs file:font-bold file:uppercase file:tracking-widest file:text-primary hover:file:bg-primary hover:file:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        />
+      </div>
 
       {selectedFile && (
-        <div className="flex items-center justify-between gap-3 border border-border px-4 py-3 text-xs text-muted-foreground">
-          <span className="flex items-center gap-2 truncate">
-            <FileUp size={14} className="flex-shrink-0" />
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-control border border-border bg-surface-soft/40 px-4 py-3 text-xs text-muted-foreground">
+          <span className="flex min-w-0 items-center gap-2">
+            <FileUp size={14} aria-hidden className="flex-shrink-0" />
             <span className="truncate">
               {selectedFile.name} — {formatSize(selectedFile.size)}
             </span>
@@ -160,7 +174,7 @@ export function DocumentFileUploadField({ documentId, type, current, onUploaded 
             type="button"
             onClick={() => void handleUpload()}
             disabled={uploading}
-            className="flex flex-shrink-0 items-center gap-1.5 border border-primary px-3 py-1.5 uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground disabled:opacity-50"
+            className="pressable flex min-h-[44px] flex-shrink-0 items-center gap-1.5 rounded-control border border-primary px-4 py-2 uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {uploading ? (
               <>
@@ -175,14 +189,14 @@ export function DocumentFileUploadField({ documentId, type, current, onUploaded 
       )}
 
       {warning && (
-        <p className="flex items-center gap-2 text-xs text-amber-400">
-          <AlertTriangle size={13} className="flex-shrink-0" />
+        <p className="flex items-center gap-2 text-xs text-warning">
+          <AlertTriangle size={13} aria-hidden className="flex-shrink-0" />
           {warning}
         </p>
       )}
       {error && (
-        <p className="flex items-center gap-2 text-xs text-red-400">
-          <AlertTriangle size={13} className="flex-shrink-0" />
+        <p className="flex items-center gap-2 text-xs text-destructive" role="alert">
+          <AlertTriangle size={13} aria-hidden className="flex-shrink-0" />
           {error}
         </p>
       )}

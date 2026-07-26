@@ -23,7 +23,7 @@ import { buildTransformationRecapInput } from "@/lib/pdf/transformation-recap";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="mb-6 border border-border bg-card p-6">
+    <section className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
       <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">{title}</h2>
       {children}
     </section>
@@ -152,7 +152,7 @@ export default function AdminStudentProgressionPage() {
                   value={coachComment}
                   onChange={(event) => setCoachComment(event.target.value)}
                   rows={3}
-                  className="w-full border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none"
+                  className="w-full rounded-control border border-border bg-surface-soft px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
                   placeholder="Ex : très belle progression, continue comme ça sur les prochaines semaines."
                 />
               </div>
@@ -165,7 +165,7 @@ export default function AdminStudentProgressionPage() {
                   value={nextObjective}
                   onChange={(event) => setNextObjective(event.target.value)}
                   rows={3}
-                  className="w-full border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none"
+                  className="w-full rounded-control border border-border bg-surface-soft px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
                   placeholder="Ex : viser -2 kg d'ici la prochaine évaluation."
                 />
               </div>

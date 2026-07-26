@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { CheckCircle } from "lucide-react";
 
 import { ExerciseFeedbackCard } from "@/components/student/ExerciseFeedbackCard";
@@ -8,7 +8,23 @@ import { StudentSessionBlockList } from "@/components/student/StudentSessionBloc
 import { TrainingStatCards } from "@/components/shared/TrainingMetricsSummary";
 import { useAdminData } from "@/hooks/useAdminData";
 import { useSupabaseWorkoutFeedback } from "@/hooks/useSupabaseWorkoutFeedback";
-import { orderedStrengthExercises, orderedStudentSessionBlocks } from "@/lib/student-session-blocks";
+import { CardioBlockFeedbackForm } from "@/components/student/CardioBlockFeedbackForm";
+import {
+  PAIN_LEVELS,
+  cardioBlockPrescribedSnapshot,
+  composePainText,
+  draftFromBlockResult,
+  emptyCardioBlockDraft,
+  isBlockResultEmpty,
+  parseCardioResults,
+  realizedFromDraft,
+  serializeCardioBlockResult,
+  type CardioBlockDraft,
+  type CardioBlockResult,
+  type PainLevel,
+} from "@/lib/cardio-feedback";
+import { cardioTypeLabels, formatDistanceMeters, formatDurationSeconds } from "@/lib/cardio";
+import { orderedStrengthExercises, orderedStudentSessionBlocks, type StudentSessionBlockView } from "@/lib/student-session-blocks";
 import { calculatePlannedVsActualMetrics, formatTonnage } from "@/lib/training-metrics";
 import { isUuid } from "@/lib/uuid";
 import type {
@@ -155,6 +171,24 @@ export function SessionFeedbackSection({
   // QUE `blockViews` / `strengthExercises`.
   const blockViews = orderedStudentSessionBlocks({ blocks, exercises, cardioBlocks });
   const strengthExercises = orderedStrengthExercises(blockViews);
+  // Retour cardio (correction fonctionnelle 25/07/2026) : dès qu'une séance
+  // contient au moins un bloc cardio, l'élève peut saisir durée / distance /
+  // D+ réellement réalisés — repères prescrits calculés depuis les segments.
+  const hasCardio = blockViews.some((view) => view.kind === "cardio");
+  // Blocs cardio AVEC leur position réelle dans la séance (ordre de
+  // blockViews) et un libellé d'affichage — l'IDENTITÉ reste view.id (UUID
+  // stable du bloc), jamais le titre ni l'index : deux blocs peuvent
+  // s'appeler tous deux « Effort continu ».
+  const cardioItems: { view: Extract<StudentSessionBlockView, { kind: "cardio" }>; order: number; label: string }[] = [];
+  blockViews.forEach((view, index) => {
+    if (view.kind === "cardio") {
+      cardioItems.push({
+        view,
+        order: index,
+        label: `Bloc ${cardioItems.length + 1} — ${view.title || cardioTypeLabels[view.cardioType]}`,
+      });
+    }
+  });
 
   const { state, addFeedback } = useAdminData();
   const mockExistingFeedback = state.feedback.find(
@@ -175,6 +209,27 @@ export function SessionFeedbackSection({
   const [globalRpe, setGlobalRpe] = useState("");
   const [globalComment, setGlobalComment] = useState("");
   const [pain, setPain] = useState("");
+  // Douleur globale structurée (séances cardio) : niveau + détail optionnel.
+  const [painLevel, setPainLevel] = useState<PainLevel>("aucune");
+  const [painDetail, setPainDetail] = useState("");
+  // Réalisations cardio BLOC PAR BLOC — brouillons locaux par blockId
+  // stable, AUCUNE requête à la frappe ; modifier un bloc ne touche jamais
+  // les brouillons des autres. Erreurs rattachées au bloc concerné.
+  const [blockDrafts, setBlockDrafts] = useState<Record<string, CardioBlockDraft>>({});
+  const [blockErrors, setBlockErrors] = useState<Record<string, string>>({});
+  const draftFor = (blockId: string): CardioBlockDraft => blockDrafts[blockId] ?? emptyCardioBlockDraft();
+  const patchBlockDraft = (blockId: string, next: CardioBlockDraft) =>
+    setBlockDrafts((prev) => ({ ...prev, [blockId]: next }));
+  // Mode édition d'un retour déjà envoyé (Supabase uniquement — le circuit
+  // mock historique ne sait pas mettre à jour, il resterait en lecture).
+  const [editing, setEditing] = useState(false);
+  // Enregistrement : anti double-soumission + erreurs (validation ou réseau).
+  // Le ref est le verrou SYNCHRONE (deux clics dans le même tick arrivent
+  // avant tout re-render : un simple état React ne suffit pas) ; l'état ne
+  // sert qu'à l'affichage (bouton désactivé + libellé).
+  const submittingRef = useRef(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   if (!supabaseFeedback.ready) {
     return <p className="text-sm text-muted-foreground">Chargement du retour…</p>;
@@ -216,87 +271,269 @@ export function SessionFeedbackSection({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submittingRef.current) return; // double clic / double soumission (verrou synchrone)
 
     const globalRpeValue = globalRpe === "" ? null : Number(globalRpe);
 
-    if (supabaseFeedback.active) {
-      const exercisesPayload: ExerciseFeedbackPayload[] = Object.values(exerciseFeedback)
-        .map((exerciseFb, index) => ({
-          exerciseName: exerciseFb.exerciseName,
-          exerciseOrder: index,
-          rpe: exerciseFb.rpe,
-          comment: exerciseFb.comment,
-          sets: exerciseFb.sets
-            .filter((set) => set.loadUsed.trim() || set.repsDone.trim())
-            .map((set) => ({ setNumber: set.setNumber, loadUsed: set.loadUsed, repsDone: set.repsDone })),
-        }))
-        .filter((exerciseFb) => exerciseFb.sets.length > 0);
-
-      await supabaseFeedback.submit({
-        sessionRefLabel,
-        completed,
-        globalRpe: globalRpeValue,
-        globalComment,
-        pain,
-        exercises: exercisesPayload,
-        // Renseignées uniquement quand la séance vient d'un vrai programme
-        // Supabase (voir lib/supabase/programs.ts) — sessionId/programId
-        // mock ("session-upper", "prog-1"...) ne sont pas des uuid valides
-        // et resteraient null, comme avant la migration des programmes.
-        sessionId: isUuid(sessionId) ? sessionId : null,
-        programId: isUuid(programId) ? programId : null,
-      });
-      return;
+    // Validation + conversion des réalisations cardio BLOC PAR BLOC
+    // (virgule française et point acceptés ; valeurs impossibles rejetées).
+    // Une erreur est rattachée à SON bloc et bloque l'envoi sans effacer le
+    // moindre brouillon ; un bloc laissé entièrement vide n'écrit rien.
+    const cardioPayloads: ExerciseFeedbackPayload[] = [];
+    if (hasCardio) {
+      const nextErrors: Record<string, string> = {};
+      for (const item of cardioItems) {
+        const conversion = realizedFromDraft(draftFor(item.view.id));
+        if (conversion.realized === null) {
+          nextErrors[item.view.id] = conversion.error;
+          continue;
+        }
+        if (isBlockResultEmpty(conversion.realized)) continue;
+        const result: CardioBlockResult = {
+          version: 2,
+          blockId: item.view.id,
+          order: item.order,
+          title: item.label,
+          // Même source que les repères affichés sous CE bloc (helper unique).
+          prescribed: cardioBlockPrescribedSnapshot(item.view),
+          ...conversion.realized,
+        };
+        cardioPayloads.push(serializeCardioBlockResult(result));
+      }
+      setBlockErrors(nextErrors);
+      if (Object.keys(nextErrors).length > 0) {
+        setSubmitError("Corrige les blocs signalés avant d'enregistrer — rien n'a été perdu.");
+        return;
+      }
     }
 
-    const submittedAt = new Date().toISOString();
-    const exerciseEntries: AdminExerciseFeedbackEntry[] = Object.values(exerciseFeedback).flatMap(
-      (exerciseFb) =>
-        exerciseFb.sets
-          .filter((set) => set.loadUsed.trim() || set.repsDone.trim())
-          .map((set) => ({
-            exerciseId: exerciseFb.exerciseId,
+    const painText = hasCardio ? composePainText(painLevel, painDetail) : pain;
+
+    // Verrou one-shot : posé AVANT le travail, il n'est relâché QUE si
+    // l'enregistrement échoue (pour permettre un nouvel essai). Après un
+    // succès il reste posé — le formulaire est remplacé par le récapitulatif
+    // au rendu suivant. Indispensable sur le chemin mock, entièrement
+    // synchrone : un double/triple clic arrive avant tout re-render et un
+    // verrou relâché en `finally` laisserait passer chaque clic.
+    setSubmitError(null);
+    submittingRef.current = true;
+    setSubmitting(true);
+    const releaseForRetry = () => {
+      submittingRef.current = false;
+      setSubmitting(false);
+    };
+    try {
+      if (supabaseFeedback.active) {
+        const exercisesPayload: ExerciseFeedbackPayload[] = Object.values(exerciseFeedback)
+          .map((exerciseFb, index) => ({
             exerciseName: exerciseFb.exerciseName,
+            exerciseOrder: index,
+            rpe: exerciseFb.rpe,
+            comment: exerciseFb.comment,
+            sets: exerciseFb.sets
+              .filter((set) => set.loadUsed.trim() || set.repsDone.trim())
+              .map((set) => ({ setNumber: set.setNumber, loadUsed: set.loadUsed, repsDone: set.repsDone })),
+          }))
+          .filter((exerciseFb) => exerciseFb.sets.length > 0);
+        exercisesPayload.push(...cardioPayloads);
+
+        const ok = await supabaseFeedback.submit({
+          sessionRefLabel,
+          completed,
+          globalRpe: globalRpeValue,
+          globalComment,
+          pain: painText,
+          exercises: exercisesPayload,
+          // Renseignées uniquement quand la séance vient d'un vrai programme
+          // Supabase (voir lib/supabase/programs.ts) — sessionId/programId
+          // mock ("session-upper", "prog-1"...) ne sont pas des uuid valides
+          // et resteraient null, comme avant la migration des programmes.
+          sessionId: isUuid(sessionId) ? sessionId : null,
+          programId: isUuid(programId) ? programId : null,
+        });
+        if (!ok) {
+          // Les données saisies restent en place — l'élève peut réessayer.
+          setSubmitError("L'enregistrement a échoué. Vérifie ta connexion puis réessaie.");
+          releaseForRetry();
+          return;
+        }
+        setEditing(false);
+        return;
+      }
+
+      const submittedAt = new Date().toISOString();
+      const exerciseEntries: AdminExerciseFeedbackEntry[] = Object.values(exerciseFeedback).flatMap(
+        (exerciseFb) =>
+          exerciseFb.sets
+            .filter((set) => set.loadUsed.trim() || set.repsDone.trim())
+            .map((set) => ({
+              exerciseId: exerciseFb.exerciseId,
+              exerciseName: exerciseFb.exerciseName,
+              setNumber: set.setNumber,
+              loadUsed: set.loadUsed,
+              repsDone: set.repsDone,
+              rpe: exerciseFb.rpe,
+              comment: exerciseFb.comment,
+            })),
+      );
+      for (const payload of cardioPayloads) {
+        for (const set of payload.sets) {
+          exerciseEntries.push({
+            exerciseId: "cardio-results",
+            exerciseName: payload.exerciseName,
             setNumber: set.setNumber,
             loadUsed: set.loadUsed,
             repsDone: set.repsDone,
-            rpe: exerciseFb.rpe,
-            comment: exerciseFb.comment,
-          })),
-    );
+            rpe: payload.rpe,
+            comment: payload.comment,
+          });
+        }
+      }
 
-    const feedback: Omit<AdminStudentFeedback, "id" | "createdAt" | "updatedAt"> = {
-      studentId,
-      type: "entrainement",
-      sessionId,
-      programId,
-      refLabel: sessionRefLabel,
-      date: submittedAt.slice(0, 10),
-      completed,
-      rpe: globalRpeValue,
-      pain,
-      comment: globalComment,
-      exerciseEntries,
-      status: "a-traiter",
-      coachReply: "",
-    };
+      const feedback: Omit<AdminStudentFeedback, "id" | "createdAt" | "updatedAt"> = {
+        studentId,
+        type: "entrainement",
+        sessionId,
+        programId,
+        refLabel: sessionRefLabel,
+        date: submittedAt.slice(0, 10),
+        completed,
+        rpe: globalRpeValue,
+        pain: painText,
+        comment: globalComment,
+        exerciseEntries,
+        status: "a-traiter",
+        coachReply: "",
+      };
 
-    addFeedback(feedback);
+      addFeedback(feedback);
+    } catch {
+      setSubmitError("L'enregistrement a échoué. Vérifie ta connexion puis réessaie.");
+      releaseForRetry();
+    }
   }
 
-  if (existingFeedback) {
+  function startEditing() {
+    if (!existingFeedback) return;
+    const parsed = parseCardioResults(existingFeedback.exerciseEntries);
+    const drafts: Record<string, CardioBlockDraft> = {};
+    for (const result of parsed.blocks) {
+      drafts[result.blockId] = draftFromBlockResult(result);
+    }
+    setBlockDrafts(drafts);
+    setBlockErrors({});
+    setCompleted(existingFeedback.completed ?? false);
+    setGlobalRpe(existingFeedback.rpe !== null ? String(existingFeedback.rpe) : "");
+    setGlobalComment(existingFeedback.comment);
+    if (hasCardio) {
+      setPainLevel(
+        existingFeedback.pain.startsWith("Gêne importante")
+          ? "importante"
+          : existingFeedback.pain.startsWith("Gêne modérée")
+            ? "modérée"
+            : existingFeedback.pain.startsWith("Gêne légère")
+              ? "légère"
+              : "aucune",
+      );
+      setPainDetail(existingFeedback.pain.includes(" — ") ? existingFeedback.pain.slice(existingFeedback.pain.indexOf(" — ") + 3) : "");
+    } else {
+      setPain(existingFeedback.pain);
+    }
+    submittingRef.current = false;
+    setSubmitting(false);
+    setSubmitError(null);
+    setEditing(true);
+  }
+
+  if (existingFeedback && !editing) {
+    const parsed = parseCardioResults(existingFeedback.exerciseEntries);
     return (
       <div className="flex flex-col gap-6 animate-fade-in">
-        <div className="border border-primary/30 bg-card p-8 text-center">
+        <div className="rounded-card border border-primary/30 bg-card p-8 text-center shadow-soft">
           <CheckCircle size={32} className="mx-auto mb-3 text-primary" />
           <h3 className="mb-1 font-heading text-base font-bold uppercase text-foreground">
             Retour envoyé
           </h3>
           <p className="text-sm text-muted-foreground">
-            Ton coach recevra ton retour, exercice par exercice, avant la
-            prochaine séance.
+            Ton coach recevra ton retour avant la prochaine séance.
           </p>
+          {supabaseFeedback.active && (
+            <button
+              type="button"
+              onClick={startEditing}
+              className="pressable mx-auto mt-4 flex min-h-[44px] items-center gap-2 rounded-control border border-border px-5 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            >
+              Modifier mon retour
+            </button>
+          )}
         </div>
+
+        {parsed.blocks.length > 0 && (
+          <div className="flex flex-col gap-4">
+            {parsed.blocks.map((result) => (
+              <div key={result.blockId} className="rounded-card border border-border bg-card p-6 shadow-soft">
+                <h3 className="mb-3 font-heading text-sm font-bold uppercase text-foreground">{result.title}</h3>
+                <dl className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  {result.durationSeconds !== null && (
+                    <div className="rounded-panel border border-border bg-surface-soft/40 p-4">
+                      <dt className="text-[11px] uppercase tracking-widest text-muted-foreground">Durée réalisée</dt>
+                      <dd className="mt-1 text-sm font-semibold text-foreground">{formatDurationSeconds(result.durationSeconds)}</dd>
+                    </div>
+                  )}
+                  {result.distanceMeters !== null && (
+                    <div className="rounded-panel border border-border bg-surface-soft/40 p-4">
+                      <dt className="text-[11px] uppercase tracking-widest text-muted-foreground">Distance réalisée</dt>
+                      <dd className="mt-1 text-sm font-semibold text-foreground">{formatDistanceMeters(result.distanceMeters)}</dd>
+                    </div>
+                  )}
+                  {result.elevationGainMeters !== null && (
+                    <div className="rounded-panel border border-border bg-surface-soft/40 p-4">
+                      <dt className="text-[11px] uppercase tracking-widest text-muted-foreground">Dénivelé réalisé</dt>
+                      <dd className="mt-1 text-sm font-semibold text-foreground">{result.elevationGainMeters} m</dd>
+                    </div>
+                  )}
+                  {result.repetitionsDone !== null && (
+                    <div className="rounded-panel border border-border bg-surface-soft/40 p-4">
+                      <dt className="text-[11px] uppercase tracking-widest text-muted-foreground">Répétitions terminées</dt>
+                      <dd className="mt-1 text-sm font-semibold text-foreground">
+                        {result.repetitionsDone}
+                        {result.prescribed.repetitions !== null ? ` / ${result.prescribed.repetitions}` : ""}
+                      </dd>
+                    </div>
+                  )}
+                </dl>
+                <div className="mt-3 flex flex-col gap-1 text-sm text-muted-foreground">
+                  <p>{result.completed ? "Bloc terminé" : "Bloc non terminé"}</p>
+                  {result.rpe !== null && <p>RPE du bloc : {result.rpe} / 10</p>}
+                  {result.pain && <p>Douleur / gêne : {result.pain}</p>}
+                  {result.comment && <p className="text-foreground">{result.comment}</p>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {parsed.legacy && (
+          <div className="rounded-card border border-border bg-card p-6 shadow-soft">
+            <h3 className="mb-3 font-heading text-sm font-bold uppercase text-foreground">Retour cardio global (historique)</h3>
+            <div className="flex flex-wrap gap-4 text-sm text-foreground">
+              {parsed.legacy.durationLabel && <span>Durée : {parsed.legacy.durationLabel}</span>}
+              {parsed.legacy.distanceLabel && <span>Distance : {parsed.legacy.distanceLabel}</span>}
+              {parsed.legacy.elevationLabel && <span>D+ : {parsed.legacy.elevationLabel}</span>}
+            </div>
+          </div>
+        )}
+
+        {(existingFeedback.rpe !== null || existingFeedback.comment || existingFeedback.pain) && (
+          <div className="rounded-card border border-border bg-card p-6 shadow-soft">
+            <h3 className="mb-3 font-heading text-sm font-bold uppercase text-foreground">Résumé global de la séance</h3>
+            <div className="flex flex-col gap-1 text-sm text-muted-foreground">
+              {existingFeedback.rpe !== null && <p>RPE global : {existingFeedback.rpe} / 10</p>}
+              {existingFeedback.pain && <p>Douleur / gêne : {existingFeedback.pain}</p>}
+              {existingFeedback.comment && <p className="text-foreground">{existingFeedback.comment}</p>}
+            </div>
+          </div>
+        )}
 
         <PlannedVsActualSummary
           exercises={strengthExercises}
@@ -325,15 +562,29 @@ export function SessionFeedbackSection({
             onCommentChange={(value) => handleCommentChange(exercise.id, value)}
           />
         )}
+        renderCardioFooter={(block) => {
+          const item = cardioItems.find((candidate) => candidate.view.id === block.id);
+          if (!item) return null;
+          return (
+            <CardioBlockFeedbackForm
+              blockId={block.id}
+              blockLabel={item.label}
+              prescribed={cardioBlockPrescribedSnapshot(block)}
+              draft={draftFor(block.id)}
+              error={blockErrors[block.id] ?? null}
+              onChange={(next) => patchBlockDraft(block.id, next)}
+            />
+          );
+        }}
       />
 
-      <div className="border border-border bg-card p-6">
+      <div className="rounded-card border border-border bg-card p-6 shadow-soft">
         <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
           Résumé de la séance
         </h2>
 
         <div className="flex flex-col gap-5">
-          <label className="flex items-center gap-3 border border-border bg-background px-4 py-3 text-sm text-foreground">
+          <label className="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-control border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus-within:ring-2 focus-within:ring-primary/40 hover:border-border-strong">
             <input
               type="checkbox"
               checked={completed}
@@ -349,12 +600,13 @@ export function SessionFeedbackSection({
               className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground"
             >
               RPE global
+              {hasCardio && <span className="ml-2 normal-case tracking-normal">(difficulté générale de la séance — le RPE de chaque bloc se saisit sous le bloc)</span>}
             </label>
             <select
               id="global-rpe"
               value={globalRpe}
               onChange={(event) => setGlobalRpe(event.target.value)}
-              className="w-full appearance-none border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none"
+              className="min-h-[44px] w-full appearance-none rounded-control border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             >
               <option value="" disabled>
                 Choisir une note sur 10
@@ -379,32 +631,76 @@ export function SessionFeedbackSection({
               rows={3}
               value={globalComment}
               onChange={(event) => setGlobalComment(event.target.value)}
-              placeholder="Comment s'est passée la séance dans son ensemble ?"
-              className="w-full resize-none border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none"
+              placeholder="Ex : bonnes sensations au début, difficulté dans la dernière montée."
+              className="w-full resize-none rounded-control border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             />
           </div>
 
-          <div>
-            <label
-              htmlFor="pain"
-              className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground"
-            >
-              Douleur ou gêne éventuelle
-            </label>
-            <input
-              id="pain"
-              value={pain}
-              onChange={(event) => setPain(event.target.value)}
-              placeholder="Ex : légère gêne à l'épaule droite"
-              className="w-full border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none"
-            />
-          </div>
+          {hasCardio ? (
+            <div className="flex flex-col gap-3">
+              <div>
+                <label htmlFor="pain-level" className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                  Douleur ou gêne globale
+                  <span className="ml-2 normal-case tracking-normal">(ressenti d&apos;ensemble — une gêne localisée à un bloc se saisit sous le bloc)</span>
+                </label>
+                <select
+                  id="pain-level"
+                  value={painLevel}
+                  onChange={(event) => setPainLevel(event.target.value as PainLevel)}
+                  className="min-h-[44px] w-full appearance-none rounded-control border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                >
+                  {PAIN_LEVELS.map((level) => (
+                    <option key={level} value={level}>
+                      {level === "aucune" ? "Aucune" : `Gêne ${level}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {painLevel !== "aucune" && (
+                <div>
+                  <label htmlFor="pain-detail" className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                    Où / comment ? (optionnel)
+                  </label>
+                  <input
+                    id="pain-detail"
+                    value={painDetail}
+                    onChange={(event) => setPainDetail(event.target.value)}
+                    placeholder="Ex : mollet droit dans les descentes"
+                    className="min-h-[44px] w-full rounded-control border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                  />
+                </div>
+              )}
+            </div>
+          ) : (
+            <div>
+              <label
+                htmlFor="pain"
+                className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground"
+              >
+                Douleur ou gêne éventuelle
+              </label>
+              <input
+                id="pain"
+                value={pain}
+                onChange={(event) => setPain(event.target.value)}
+                placeholder="Ex : légère gêne à l'épaule droite"
+                className="min-h-[44px] w-full rounded-control border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+              />
+            </div>
+          )}
+
+          {submitError && (
+            <p role="alert" className="flex items-start gap-2 rounded-panel border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              {submitError}
+            </p>
+          )}
 
           <button
             type="submit"
-            className="mt-2 bg-primary py-4 text-center text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
+            disabled={submitting}
+            className="pressable mt-2 min-h-[48px] rounded-control bg-primary py-4 text-center text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Envoyer le retour
+            {submitting ? "Enregistrement…" : "Enregistrer mon retour"}
           </button>
         </div>
       </div>

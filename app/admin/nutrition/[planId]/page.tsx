@@ -113,7 +113,7 @@ export default function NutritionPlanDetailPage() {
       </Link>
 
       {saveError && (
-        <p className="mb-6 flex items-center gap-2 border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+        <p className="mb-6 flex items-center gap-2 rounded-panel border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive" role="alert">
           Échec de l&apos;enregistrement. Réessaie.
         </p>
       )}
@@ -161,7 +161,7 @@ export default function NutritionPlanDetailPage() {
               <button
                 type="button"
                 onClick={() => setEditing(true)}
-                className="flex items-center gap-1.5 border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
+                className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
               >
                 <Pencil size={13} />
                 Modifier
@@ -178,7 +178,7 @@ export default function NutritionPlanDetailPage() {
               <button
                 type="button"
                 onClick={handleArchive}
-                className="flex items-center gap-1.5 border border-red-500/50 px-4 py-2 text-xs uppercase tracking-widest text-red-400 transition-colors hover:bg-red-500/10"
+                className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-destructive/50 px-4 py-2 text-xs uppercase tracking-widest text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40"
               >
                 <Archive size={13} />
                 Archiver
@@ -193,7 +193,7 @@ export default function NutritionPlanDetailPage() {
             <StatCard label="Lipides" value={`${plan.fat}g`} size="lg" />
           </div>
 
-          <div className="mb-6 border border-border bg-card p-6">
+          <div className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
             <h2 className="mb-2 font-heading text-lg font-bold uppercase text-foreground">
               Objectif hebdomadaire
             </h2>
@@ -204,13 +204,13 @@ export default function NutritionPlanDetailPage() {
             {plan.coachNotes && <p className="mt-2 text-sm text-foreground">{plan.coachNotes}</p>}
           </div>
 
-          <div className="mb-6 border border-border bg-card p-6">
+          <div className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
             <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
               Semaine alimentaire
             </h2>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               {plan.days.map((day) => (
-                <div key={day.id} className="border border-border p-4">
+                <div key={day.id} className="rounded-panel border border-border p-4">
                   <span className="mb-2 block text-xs font-bold uppercase tracking-widest text-primary">
                     {day.day}
                   </span>
@@ -231,7 +231,7 @@ export default function NutritionPlanDetailPage() {
             </div>
           </div>
 
-          <div className="border border-border bg-card p-6">
+          <div className="rounded-card border border-border bg-card p-6 shadow-soft">
             <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
               Élèves assignés
             </h2>
@@ -243,7 +243,7 @@ export default function NutritionPlanDetailPage() {
                   <Link
                     key={s.id}
                     href={`/admin/eleves/${s.id}`}
-                    className="border border-border px-3 py-1.5 text-xs text-foreground transition-colors hover:border-primary"
+                    className="pressable flex min-h-[44px] items-center rounded-control border border-border px-3 py-1.5 text-xs text-foreground transition-colors hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                   >
                     {fullName(s)}
                   </Link>

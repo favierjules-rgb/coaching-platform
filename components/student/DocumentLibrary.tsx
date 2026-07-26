@@ -63,7 +63,7 @@ export function DocumentLibrary({
             type="button"
             onClick={() => setActiveFilter(filter.key)}
             aria-pressed={activeFilter === filter.key}
-            className={`pressable min-h-[40px] rounded-full border px-4 py-2 text-xs uppercase tracking-widest focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+            className={`pressable min-h-[44px] rounded-full border px-4 py-2 text-xs uppercase tracking-widest focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
               activeFilter === filter.key
                 ? "border-primary bg-primary text-primary-foreground"
                 : "border-border text-muted-foreground hover:border-foreground hover:text-foreground"

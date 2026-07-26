@@ -19,7 +19,7 @@ export function SearchInput({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        className="w-full border border-border bg-background py-3 pl-11 pr-4 text-sm text-foreground transition-colors focus:border-primary focus:outline-none"
+        className="w-full rounded-control border border-border bg-surface-soft py-3 pl-11 pr-4 text-sm text-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
       />
     </div>
   );
@@ -41,7 +41,8 @@ export function FilterButtons<T extends string>({
           key={option.value}
           type="button"
           onClick={() => onChange(option.value)}
-          className={`border px-4 py-2 text-xs uppercase tracking-widest transition-colors ${
+          aria-pressed={active === option.value}
+          className={`pressable min-h-[44px] rounded-full border px-4 py-2 text-xs uppercase tracking-widest transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
             active === option.value
               ? "border-primary bg-primary text-primary-foreground"
               : "border-border text-muted-foreground hover:border-primary hover:text-primary"

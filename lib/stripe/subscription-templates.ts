@@ -121,3 +121,125 @@ export async function createStripePriceForExistingProduct(
   }
   return price.id;
 }
+
+/**
+ * ARCHIVAGE STANDARD — désactive UNIQUEMENT le Price du modèle (`active:false`).
+ * Le Product est délibérément laissé actif : il peut porter d'autres Prices, et
+ * l'objectif de l'archivage est seulement d'empêcher de NOUVELLES ventes de ce
+ * tarif. Les abonnements/paiements existants ne sont jamais touchés (Stripe
+ * continue de facturer un abonnement sur un Price archivé).
+ * Strict : une erreur réelle est levée (l'appelant n'archive alors pas en base).
+ * Idempotent : un Price déjà inactif/absent est un succès.
+ */
+export async function archiveStripePriceOnly(stripe: Stripe, priceId: string | null): Promise<void> {
+  if (!priceId) return;
+  try {
+    await stripe.prices.update(priceId, { active: false });
+  } catch (error) {
+    if (!isStripeResourceMissing(error)) throw error;
+  }
+}
+
+/**
+ * RÉACTIVATION SYMÉTRIQUE — un Price ne peut pas être actif sous un Product
+ * inactif : on réactive donc d'abord le Product (s'il est inactif), puis le
+ * Price du modèle. Strict : toute erreur est levée pour que l'appelant
+ * conserve le modèle archivé en base (jamais de modèle local actif pointant un
+ * Price inactif). Idempotent : Product/Price déjà actifs = succès.
+ */
+export async function reactivateStripeForTemplate(
+  stripe: Stripe,
+  input: { productId: string | null; priceId: string | null },
+): Promise<{ productReactivated: boolean; priceReactivated: boolean }> {
+  let productReactivated = false;
+  if (input.productId) {
+    const product = await stripe.products.retrieve(input.productId);
+    if (product && product.active === false) {
+      await stripe.products.update(input.productId, { active: true });
+      productReactivated = true;
+    }
+  }
+  let priceReactivated = false;
+  if (input.priceId) {
+    await stripe.prices.update(input.priceId, { active: true });
+    priceReactivated = true;
+  }
+  return { productReactivated, priceReactivated };
+}
+
+export interface ArchiveStripeForDeletedTemplateInput {
+  productId: string | null;
+  priceId: string | null;
+  /** Au moins un AUTRE modèle local référence le même stripe_product_id (calculé par l'appelant en base). Si vrai, le Product n'est jamais archivé. */
+  otherTemplatesShareProduct: boolean;
+}
+
+export interface ArchiveStripeResult {
+  priceArchived: boolean;
+  productArchived: boolean;
+  /** Renseigné uniquement si le Product N'a PAS été archivé, pour tracer pourquoi. */
+  productSkippedReason?: "shared_product" | "active_prices" | "missing_id";
+}
+
+/** `true` s'il reste au moins un Price actif rattaché au Product autre que celui qu'on archive (Stripe read, pas d'écriture). */
+async function hasOtherActiveStripePrice(stripe: Stripe, productId: string, excludingPriceId: string | null): Promise<boolean> {
+  const prices = await stripe.prices.list({ product: productId, active: true, limit: 100 });
+  return prices.data.some((price) => price.id !== excludingPriceId);
+}
+
+/**
+ * Archivage Stripe STRICT pour une suppression définitive de modèle — jamais
+ * best-effort : une erreur Stripe réelle est *levée* (l'appelant arrête alors
+ * et ne supprime pas la ligne en base). Rien n'est jamais *supprimé* côté
+ * Stripe (les objets restent pour l'historique de facturation), seulement
+ * passés `active: false`.
+ *
+ * Ordre : (1) le Price est archivé systématiquement (obligatoire) ; (2) le
+ * Product n'est archivé QUE s'il devient réellement inutilisé — pas partagé
+ * par un autre modèle local (`otherTemplatesShareProduct`) ET sans autre Price
+ * actif rattaché (`hasOtherActiveStripePrice`). Sinon `productArchived: false`
+ * avec une raison explicite ; le Product reste actif.
+ *
+ * Idempotent : un Price/Product déjà inactif ou déjà absent côté Stripe
+ * (`resource_missing`) est traité comme un succès d'archivage — une nouvelle
+ * tentative après une erreur DB ne réactive jamais quoi que ce soit.
+ */
+export async function archiveStripeForDeletedTemplate(
+  stripe: Stripe,
+  input: ArchiveStripeForDeletedTemplateInput,
+): Promise<ArchiveStripeResult> {
+  // 1. Price — obligatoire.
+  let priceArchived = false;
+  if (input.priceId) {
+    try {
+      await stripe.prices.update(input.priceId, { active: false });
+      priceArchived = true;
+    } catch (error) {
+      if (isStripeResourceMissing(error)) {
+        priceArchived = true; // idempotent : price déjà absent → considéré archivé
+      } else {
+        throw error; // échec réel → l'appelant arrête, aucune suppression DB
+      }
+    }
+  }
+
+  // 2. Product — seulement s'il devient réellement inutilisé.
+  if (!input.productId) {
+    return { priceArchived, productArchived: false, productSkippedReason: "missing_id" };
+  }
+  if (input.otherTemplatesShareProduct) {
+    return { priceArchived, productArchived: false, productSkippedReason: "shared_product" };
+  }
+  if (await hasOtherActiveStripePrice(stripe, input.productId, input.priceId)) {
+    return { priceArchived, productArchived: false, productSkippedReason: "active_prices" };
+  }
+  try {
+    await stripe.products.update(input.productId, { active: false });
+    return { priceArchived, productArchived: true };
+  } catch (error) {
+    if (isStripeResourceMissing(error)) {
+      return { priceArchived, productArchived: true }; // idempotent
+    }
+    throw error; // échec réel → l'appelant arrête, aucune suppression DB
+  }
+}

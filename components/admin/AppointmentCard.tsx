@@ -62,9 +62,17 @@ export function AppointmentCard({
   }
 
   const isActive = appointment.status === "pending" || appointment.status === "confirmed";
+  // Rendez-vous annulés/absents : visibles mais SECONDAIRES (fond atténué),
+  // sans jamais masquer l'information — le badge « Annulé » (StatusBadge) porte
+  // déjà le statut en toutes lettres.
+  const dimmed = appointment.status === "cancelled" || appointment.status === "no_show";
 
   return (
-    <div className="flex flex-col gap-3 border border-border bg-card p-5">
+    <div
+      className={`flex flex-col gap-3 rounded-card border border-border bg-card p-5 shadow-soft transition-colors ${
+        dimmed ? "opacity-70" : "hover:border-border-strong"
+      }`}
+    >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h3 className="font-heading text-sm font-bold uppercase text-foreground">{appointment.title}</h3>
@@ -92,14 +100,14 @@ export function AppointmentCard({
         </p>
       )}
       {appointment.status === "cancelled" && appointment.cancellationReason && (
-        <p className="text-xs text-red-400">Motif d&apos;annulation : {appointment.cancellationReason}</p>
+        <p className="text-xs text-destructive">Motif d&apos;annulation : {appointment.cancellationReason}</p>
       )}
 
       <div className="mt-1 flex flex-wrap gap-2">
         <button
           type="button"
           onClick={handleDownloadIcs}
-          className="flex items-center gap-1.5 border border-border px-3 py-1.5 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+          className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-border px-3 py-1.5 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         >
           <Download size={12} />
           Télécharger .ics
@@ -109,7 +117,8 @@ export function AppointmentCard({
             <button
               type="button"
               onClick={() => setShowRescheduleForm((v) => !v)}
-              className="flex items-center gap-1.5 border border-border px-3 py-1.5 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+              aria-expanded={showRescheduleForm}
+              className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-border px-3 py-1.5 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             >
               <Calendar size={12} />
               Reporter
@@ -117,7 +126,8 @@ export function AppointmentCard({
             <button
               type="button"
               onClick={() => setShowCancelForm((v) => !v)}
-              className="flex items-center gap-1.5 border border-red-500/40 px-3 py-1.5 text-[11px] uppercase tracking-widest text-red-400 transition-colors hover:bg-red-500/10"
+              aria-expanded={showCancelForm}
+              className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-destructive/40 px-3 py-1.5 text-[11px] uppercase tracking-widest text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40"
             >
               <XCircle size={12} />
               Annuler
@@ -133,19 +143,19 @@ export function AppointmentCard({
               type="date"
               value={newDate}
               onChange={(e) => setNewDate(e.target.value)}
-              className="border border-border bg-background px-3 py-2 text-xs text-foreground"
+              className="min-h-[44px] rounded-control border border-border bg-surface-soft px-3 py-2 text-xs text-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
             />
             <input
               type="time"
               value={newTime}
               onChange={(e) => setNewTime(e.target.value)}
-              className="border border-border bg-background px-3 py-2 text-xs text-foreground"
+              className="min-h-[44px] rounded-control border border-border bg-surface-soft px-3 py-2 text-xs text-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
             />
           </div>
           <button
             type="button"
             onClick={submitReschedule}
-            className="border border-primary bg-primary px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
+            className="pressable min-h-[44px] rounded-control border border-primary bg-primary px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             Confirmer le report
           </button>
@@ -159,7 +169,7 @@ export function AppointmentCard({
             value={cancelReason}
             onChange={(e) => setCancelReason(e.target.value)}
             placeholder="Motif d'annulation (optionnel)"
-            className="border border-border bg-background px-3 py-2 text-xs text-foreground"
+            className="min-h-[44px] rounded-control border border-border bg-surface-soft px-3 py-2 text-xs text-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
           />
           <button
             type="button"
@@ -167,7 +177,7 @@ export function AppointmentCard({
               onCancel(cancelReason.trim());
               setShowCancelForm(false);
             }}
-            className="border border-red-500/40 px-3 py-2 text-[11px] uppercase tracking-widest text-red-400 transition-colors hover:bg-red-500/10"
+            className="pressable min-h-[44px] rounded-control border border-destructive/40 px-3 py-2 text-[11px] uppercase tracking-widest text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40"
           >
             Confirmer l&apos;annulation
           </button>

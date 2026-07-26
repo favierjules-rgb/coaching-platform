@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { CheckCircle2, MailX, RefreshCw, SkipForward } from "lucide-react";
 
 import { FilterButtons, SearchInput } from "@/components/admin/SearchAndFilters";
+import { StatCard } from "@/components/admin/StatCard";
 import { StatusBadge } from "@/components/admin/StatusBadge";
 import { formatDateTime, matchesTextSearch } from "@/lib/admin";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -54,8 +55,11 @@ const statusFilters: { value: StatusFilter; label: string }[] = [
   { value: "pending", label: "En cours" },
 ];
 
-const typeFilters: { value: TypeFilter; label: string }[] = [
-  { value: "tous", label: "Tous types" },
+// 16 types d'email : un select tokenisé (même langage que les filtres de
+// /admin/documents) reste lisible là où 17 pastilles satureraient la ligne,
+// surtout en mobile.
+const typeFilterOptions: { value: TypeFilter; label: string }[] = [
+  { value: "tous", label: "Tous les types" },
   ...(Object.keys(emailTypeLabels) as EmailType[]).map((value) => ({ value, label: emailTypeLabels[value] })),
 ];
 
@@ -82,51 +86,61 @@ function ResendButton({ logId, onResent }: { logId: string; onResent: () => void
   }
 
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div className="flex flex-col items-start gap-1 lg:items-end">
       <button
         type="button"
         onClick={handleResend}
         disabled={resending}
-        className="flex items-center gap-1.5 border border-primary px-3 py-1.5 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
+        className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-40"
       >
         <RefreshCw size={13} aria-hidden="true" />
         {resending ? "Renvoi…" : "Renvoyer"}
       </button>
-      {error && <span className="text-xs text-red-400">{error}</span>}
+      {error && (
+        <span role="alert" className="text-xs text-destructive">
+          {error}
+        </span>
+      )}
     </div>
   );
 }
 
 function EmailLogRow({ log, onResent }: { log: EmailLog; onResent: () => void }) {
+  // Passage multi-colonnes seulement à partir de xl (leçon de l'audit
+  // 1024-1440 : avec la sidebar de 240 px, une grille 5 colonnes dès lg:
+  // provoque des chevauchements). Chaque cellule est min-w-0 et les textes
+  // longs (email, sujet) cassent proprement.
   return (
-    <div className="flex flex-col gap-4 border border-border bg-card p-6 lg:flex-row lg:items-center lg:justify-between">
-      <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        <div>
+    <div className="flex flex-col gap-4 rounded-card border border-border bg-card p-6 shadow-soft transition-colors hover:border-border-strong xl:flex-row xl:items-center xl:justify-between">
+      <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="min-w-0">
           <span className="block text-xs uppercase tracking-wide text-muted-foreground">Destinataire</span>
-          <span className="block text-sm text-foreground">{log.recipientEmail}</span>
+          <span className="block break-words text-sm text-foreground">{log.recipientEmail}</span>
         </div>
-        <div>
+        <div className="min-w-0">
           <span className="block text-xs uppercase tracking-wide text-muted-foreground">Type</span>
           <span className="block text-sm text-foreground">{emailTypeLabels[log.emailType] ?? log.emailType}</span>
         </div>
-        <div>
+        <div className="min-w-0">
           <span className="block text-xs uppercase tracking-wide text-muted-foreground">Sujet</span>
-          <span className="block text-sm text-foreground">{log.subject}</span>
+          <span className="block break-words text-sm text-foreground">{log.subject}</span>
         </div>
-        <div>
+        <div className="min-w-0">
           <span className="block text-xs uppercase tracking-wide text-muted-foreground">Statut</span>
           <span className="mt-1 block">
             <StatusBadge label={emailStatusLabels[log.status] ?? log.status} tone={emailStatusTone[log.status] ?? "muted"} />
           </span>
-          {log.errorMessage && <span className="mt-1 block text-xs text-red-400">{log.errorMessage}</span>}
+          {log.errorMessage && (
+            <span className="mt-1 block break-words text-xs text-destructive">{log.errorMessage}</span>
+          )}
         </div>
-        <div>
+        <div className="min-w-0">
           <span className="block text-xs uppercase tracking-wide text-muted-foreground">Date</span>
           <span className="block text-sm text-foreground">{formatDateTime(log.sentAt ?? log.createdAt)}</span>
         </div>
       </div>
       {log.status === "failed" && (
-        <div className="flex-shrink-0">
+        <div className="flex-none">
           <ResendButton logId={log.id} onResent={onResent} />
         </div>
       )}
@@ -197,30 +211,38 @@ export default function AdminEmailsPage() {
       </div>
 
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <div className="border border-border bg-card p-4">
-          <span className="block text-xs uppercase tracking-wide text-muted-foreground">Envoyés</span>
-          <span className="font-heading text-2xl font-bold text-foreground">{sentCount}</span>
-        </div>
-        <div className="border border-border bg-card p-4">
-          <span className="block text-xs uppercase tracking-wide text-muted-foreground">Échecs</span>
-          <span className="font-heading text-2xl font-bold text-foreground">{failedCount}</span>
-        </div>
-        <div className="border border-border bg-card p-4">
-          <span className="block text-xs uppercase tracking-wide text-muted-foreground">Ignorés</span>
-          <span className="font-heading text-2xl font-bold text-foreground">{skippedCount}</span>
-        </div>
+        <StatCard icon={CheckCircle2} label="Envoyés" value={sentCount} tone="primary" />
+        <StatCard icon={MailX} label="Échecs" value={failedCount} tone={failedCount > 0 ? "amber" : "default"} />
+        <StatCard icon={SkipForward} label="Ignorés" value={skippedCount} />
       </div>
 
       <div className="mb-6 flex flex-col gap-4">
         <SearchInput value={query} onChange={setQuery} placeholder="Rechercher par destinataire ou sujet..." />
-        <FilterButtons options={statusFilters} active={statusFilter} onChange={setStatusFilter} />
-        <FilterButtons options={typeFilters} active={typeFilter} onChange={setTypeFilter} />
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+          <FilterButtons options={statusFilters} active={statusFilter} onChange={setStatusFilter} />
+          <select
+            value={typeFilter}
+            onChange={(e) => setTypeFilter(e.target.value as TypeFilter)}
+            aria-label="Filtrer par type d'email"
+            className="min-h-[44px] max-w-full rounded-control border border-border bg-surface-soft px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          >
+            {typeFilterOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {loading ? (
-        <p className="text-sm text-muted-foreground">Chargement…</p>
+        <p role="status" className="text-sm text-muted-foreground">
+          Chargement…
+        </p>
       ) : filtered.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Aucun email ne correspond à ces filtres.</p>
+        <p className="rounded-card border border-border bg-card p-6 text-sm text-muted-foreground shadow-soft">
+          {logs.length === 0 ? "Aucun email envoyé pour le moment." : "Aucun email ne correspond à ces filtres."}
+        </p>
       ) : (
         <div className="flex flex-col gap-4">
           {filtered.map((log) => (

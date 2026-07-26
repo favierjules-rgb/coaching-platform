@@ -166,8 +166,8 @@ export function DocumentModal({
         }}
         className={
           initialEditing
-            ? "flex items-center gap-1.5 border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
-            : "flex items-center gap-1.5 border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+            ? "pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            : "pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         }
       >
         {initialEditing ? <Pencil size={13} /> : <Eye size={13} />}
@@ -177,8 +177,8 @@ export function DocumentModal({
       {open && (
         <Modal title={document.title} onClose={close} maxWidth="max-w-lg">
           {saved ? (
-            <div className="flex items-center gap-3 border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-400">
-              <CheckCircle size={18} className="flex-shrink-0" />
+            <div className="flex items-center gap-3 rounded-panel border border-success/40 bg-success/10 px-4 py-3 text-sm text-success" role="status">
+              <CheckCircle size={18} aria-hidden className="flex-shrink-0" />
               Document mis à jour.
             </div>
           ) : editing ? (
@@ -257,7 +257,7 @@ export function DocumentModal({
             <div className="flex flex-col gap-4">
               <div className="flex flex-wrap items-center gap-2">
                 <StatusBadge label={documentStatusLabels[document.status]} tone={contentStatusTone(document.status)} />
-                {document.important && <StatusBadge label="Important" tone="red" />}
+                {document.important && <StatusBadge label="Important" tone="primary" />}
                 <StatusBadge label={`Niveau ${document.level}`} tone="muted" />
                 <StatusBadge label={document.visibility === "global" ? "Global" : "Assigné"} tone="muted" />
               </div>
@@ -287,7 +287,7 @@ export function DocumentModal({
               {document.tags.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
                   {document.tags.map((tag) => (
-                    <span key={tag} className="border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
+                    <span key={tag} className="rounded-full border border-border px-2.5 py-0.5 text-[11px] text-muted-foreground">
                       {tag}
                     </span>
                   ))}
@@ -311,9 +311,9 @@ export function DocumentModal({
               <button
                 type="button"
                 onClick={() => setEditing(true)}
-                className="flex items-center justify-center gap-2 border border-primary px-4 py-3 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+                className="pressable flex min-h-[44px] items-center justify-center gap-2 rounded-control border border-primary px-4 py-3 text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
               >
-                <Pencil size={13} />
+                <Pencil size={13} aria-hidden />
                 Modifier
               </button>
             </div>

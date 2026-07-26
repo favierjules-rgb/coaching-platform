@@ -132,20 +132,21 @@ function BillingRow({
   }
 
   return (
-    <div className="flex flex-col gap-4 border border-border bg-card p-6 lg:flex-row lg:items-center lg:justify-between">
+    <div className="flex flex-col gap-4 rounded-card border border-border bg-card p-6 shadow-soft transition-colors hover:border-border-strong 2xl:flex-row 2xl:items-center 2xl:justify-between">
       {/* min-w-0 sur chaque cellule : une grille CSS ne rétrécit jamais une
           colonne sous la largeur intrinsèque de son contenu par défaut — un
           badge au libellé long ("Sans abonnement") ou un texte non coupé
-          poussait la colonne suivante et donnait un chevauchement visuel
-          (même classe de bug que le débordement des selects
-          ExerciseSearchPicker, cf. commit 1705e47). */}
-      <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-6">
+          poussait la colonne suivante et donnait un chevauchement visuel.
+          Collisions 1024-1440 (audit final) : 6 colonnes = la ligne la plus
+          dense de l'admin → 2 col dès sm, 3 à xl, 6 seulement à 2xl, actions
+          côte à côte à 2xl uniquement. */}
+      <div className="grid min-w-0 flex-1 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
         <div className="min-w-0">
           <span className="block text-xs uppercase tracking-wide text-muted-foreground">Élève</span>
-          <span className="font-heading text-lg font-bold text-foreground">
+          <span className="break-words font-heading text-lg font-bold text-foreground">
             {item.studentFirstName} {item.studentLastName}
           </span>
-          <span className="block truncate text-xs text-muted-foreground">{item.studentEmail}</span>
+          <span className="block truncate text-xs text-muted-foreground" title={item.studentEmail}>{item.studentEmail}</span>
         </div>
         <div className="min-w-0">
           <span className="block text-xs uppercase tracking-wide text-muted-foreground">Statut abonnement</span>
@@ -182,7 +183,7 @@ function BillingRow({
           </span>
         </div>
       </div>
-      <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
+      <div className="flex flex-none flex-wrap items-center gap-2">
         <CreateCheckoutLinkModal
           triggerLabel="Créer lien de paiement"
           mode="admin"
@@ -195,35 +196,35 @@ function BillingRow({
             <button
               type="button"
               onClick={handleOpenPortal}
-              className="flex items-center gap-1.5 border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+              className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             >
-              <CreditCard size={13} />
+              <CreditCard size={13} aria-hidden="true" />
               Portail
             </button>
             <a
               href={`https://dashboard.stripe.com/customers/${item.customer.stripeCustomerId}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1.5 border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+              className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             >
-              <ExternalLink size={13} />
+              <ExternalLink size={13} aria-hidden="true" />
               Stripe
             </a>
           </>
         )}
         {(item.subscription || item.lastPayment) && (
           <details className="relative">
-            <summary className="flex cursor-pointer list-none items-center gap-1.5 border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-red-500 hover:text-red-400 [&::-webkit-details-marker]:hidden">
-              <Trash2 size={13} />
+            <summary className="pressable flex min-h-[44px] cursor-pointer list-none items-center gap-1.5 rounded-control border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-destructive hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40 [&::-webkit-details-marker]:hidden">
+              <Trash2 size={13} aria-hidden="true" />
               Nettoyer
             </summary>
-            <div className="absolute right-0 z-10 mt-1 flex w-56 flex-col gap-1 border border-border bg-card p-2 shadow-lg">
+            <div className="absolute right-0 z-10 mt-1 flex w-56 flex-col gap-1 rounded-panel border border-border bg-card p-2 shadow-soft">
               {item.subscription && (
                 <button
                   type="button"
                   onClick={handleDeleteSubscription}
                   disabled={deleting}
-                  className="px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-red-500/10 hover:text-red-400 disabled:opacity-40"
+                  className="flex min-h-[44px] items-center rounded-control px-3 text-left text-xs text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40 disabled:opacity-40"
                 >
                   Supprimer l&apos;abonnement (Supabase)
                 </button>
@@ -233,7 +234,7 @@ function BillingRow({
                   type="button"
                   onClick={handleDeletePayment}
                   disabled={deleting}
-                  className="px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-red-500/10 hover:text-red-400 disabled:opacity-40"
+                  className="flex min-h-[44px] items-center rounded-control px-3 text-left text-xs text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40 disabled:opacity-40"
                 >
                   Supprimer le dernier paiement (Supabase)
                 </button>
@@ -281,7 +282,7 @@ export default function AdminBillingPage() {
         </div>
         <Link
           href="/admin/abonnements"
-          className="flex items-center gap-1.5 border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+          className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         >
           <Settings size={14} aria-hidden="true" />
           Gérer les modèles d&apos;abonnements
@@ -289,19 +290,19 @@ export default function AdminBillingPage() {
       </div>
 
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="border border-border bg-card p-4">
+        <div className="rounded-card border border-border bg-card p-4 shadow-soft">
           <span className="block text-xs uppercase tracking-wide text-muted-foreground">Abonnements actifs</span>
           <span className="font-heading text-2xl font-bold text-foreground">{activeCount}</span>
         </div>
-        <div className="border border-border bg-card p-4">
+        <div className="rounded-card border border-border bg-card p-4 shadow-soft">
           <span className="block text-xs uppercase tracking-wide text-muted-foreground">Paiements en retard</span>
           <span className="font-heading text-2xl font-bold text-foreground">{lateCount}</span>
         </div>
-        <div className="border border-border bg-card p-4">
+        <div className="rounded-card border border-border bg-card p-4 shadow-soft">
           <span className="block text-xs uppercase tracking-wide text-muted-foreground">Accès bloqué</span>
           <span className="font-heading text-2xl font-bold text-foreground">{blockedCount}</span>
         </div>
-        <div className="border border-border bg-card p-4">
+        <div className="rounded-card border border-border bg-card p-4 shadow-soft">
           <span className="block text-xs uppercase tracking-wide text-muted-foreground">Revenu mensuel estimé</span>
           <span className="font-heading text-2xl font-bold text-foreground">{formatAmountCents(monthlyRevenueCents)}</span>
         </div>

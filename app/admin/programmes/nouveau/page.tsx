@@ -189,13 +189,13 @@ export default function NewProgramPage() {
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
           {poles.map(({ id, icon: Icon, title, badge, bullets, cta }) => (
-            <div key={id} className="flex flex-col border border-border bg-card p-6">
-              <div className="mb-6 flex h-28 items-center justify-center border border-border bg-background/30">
+            <div key={id} className="flex flex-col rounded-card border border-border bg-card p-6 shadow-soft transition-colors hover:border-border-strong">
+              <div className="mb-6 flex h-28 items-center justify-center rounded-panel border border-border bg-surface-soft/50">
                 <Icon size={32} className="text-primary" />
               </div>
               <div className="mb-3 flex items-center justify-between gap-2">
                 <h2 className="font-heading text-lg font-bold uppercase text-foreground">{title}</h2>
-                <span className="whitespace-nowrap border border-primary px-2 py-0.5 text-[10px] uppercase tracking-wide text-primary">
+                <span className="whitespace-nowrap rounded-full border border-primary px-2 py-0.5 text-[10px] uppercase tracking-wide text-primary">
                   {badge}
                 </span>
               </div>
@@ -210,7 +210,7 @@ export default function NewProgramPage() {
               <button
                 type="button"
                 onClick={() => setPole(id)}
-                className="border border-foreground bg-foreground px-4 py-3 text-xs uppercase tracking-widest text-background transition-colors hover:bg-transparent hover:text-foreground"
+                className="pressable min-h-[44px] rounded-control border border-foreground bg-foreground px-4 py-3 text-xs uppercase tracking-widest text-background transition-colors hover:bg-transparent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
               >
                 {cta}
               </button>
@@ -243,7 +243,7 @@ export default function NewProgramPage() {
         </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="flex max-w-2xl flex-col gap-4 border border-border bg-card p-6">
+      <form onSubmit={handleSubmit} className="flex max-w-2xl flex-col gap-4 rounded-card border border-border bg-card p-6 shadow-soft">
         <Field label="Nom du programme" value={name} onChange={setName} required />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <Field label="Objectif" value={goal} onChange={setGoal} />
@@ -258,7 +258,7 @@ export default function NewProgramPage() {
         <TextareaField label="Description" value={description} onChange={setDescription} rows={3} />
 
         {pole === "public" && (
-          <div className="flex flex-col gap-3 border border-border p-4">
+          <div className="flex flex-col gap-3 rounded-panel border border-border p-4">
             <SelectField
               label="Accès"
               value={accessChoice}
@@ -295,7 +295,11 @@ export default function NewProgramPage() {
           </p>
         )}
 
-        {error && <p className="text-xs text-red-400">{error}</p>}
+        {error && (
+          <p className="text-xs text-destructive" role="alert">
+            {error}
+          </p>
+        )}
 
         <PrimaryButton type="submit" disabled={submitting}>
           <span className="flex items-center justify-center gap-2">

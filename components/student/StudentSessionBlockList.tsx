@@ -16,9 +16,12 @@ import type { Exercise } from "@/types";
 export function StudentSessionBlockList({
   blocks,
   renderStrengthExercise,
+  renderCardioFooter,
 }: {
   blocks: StudentSessionBlockView[];
   renderStrengthExercise: (exercise: Exercise, globalIndex: number) => ReactNode;
+  /** Rendu OPTIONNEL sous chaque bloc cardio (retour élève bloc par bloc) — visuellement rattaché à la carte du bloc. */
+  renderCardioFooter?: (block: Extract<StudentSessionBlockView, { kind: "cardio" }>, blockIndex: number) => ReactNode;
 }) {
   // Décalage d'index (nombre d'exercices strength avant chaque bloc) —
   // précalculé pour éviter toute mutation pendant le rendu.
@@ -41,7 +44,10 @@ export function StudentSessionBlockList({
             ))}
           </StudentStrengthBlockCard>
         ) : (
-          <StudentCardioBlockCard key={block.id} block={block} />
+          <div key={block.id} className="flex flex-col gap-3">
+            <StudentCardioBlockCard block={block} />
+            {renderCardioFooter?.(block, blockIndex)}
+          </div>
         ),
       )}
     </div>

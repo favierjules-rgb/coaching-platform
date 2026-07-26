@@ -78,14 +78,14 @@ export default function NewNutritionPlanPage() {
       </div>
 
       {saveError && (
-        <p className="mb-6 flex items-center gap-2 border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+        <p className="mb-6 flex items-center gap-2 rounded-panel border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive" role="alert">
           Échec de l&apos;enregistrement du plan. Réessaie.
         </p>
       )}
 
       {createdPlan ? (
         <div className="flex flex-col gap-4">
-          <div className="flex items-center gap-3 border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-400">
+          <div className="flex items-center gap-3 rounded-panel border border-success/40 bg-success/10 px-4 py-3 text-sm text-success">
             <CheckCircle size={18} className="flex-shrink-0" />
             Plan &quot;{createdPlan.name}&quot; enregistré.
           </div>
@@ -103,7 +103,7 @@ export default function NewNutritionPlanPage() {
             <button
               type="button"
               onClick={() => router.push(`/admin/nutrition/${createdPlan.id}`)}
-              className="border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+              className="pressable flex min-h-[44px] items-center rounded-control border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             >
               Voir le plan
             </button>
