@@ -34,7 +34,8 @@ import {
   QUESTION_FIELDS,
   type BusinessInquiryInput,
 } from "../../lib/business-inquiry/schema";
-import { checkRateLimit } from "../../lib/newsletter/rate-limit";
+import { consumeRateLimit } from "../../lib/security/rate-limit";
+import { DOUBLE_SUBMIT, BUSINESS_INQUIRY_IP } from "../../lib/security/rules";
 import type { EmailTransport, RawEmailInput } from "../../lib/email/send-raw-email";
 
 let passed = 0;
@@ -258,20 +259,20 @@ await test("10. honeypot rempli ⇒ soumission considérée comme automatisée",
   assert.equal(businessInquirySchema.safeParse(validInquiry({ website: "spam" })).success, true);
 });
 
-await test("11. limitation de fréquence : 3 demandes par fenêtre, la 4e est refusée", () => {
+await test("11. limitation de fréquence : 3 demandes par fenêtre, la 4e est refusée", async () => {
   const key = `test_business_inquiry_${Math.random()}`;
-  for (let i = 0; i < 3; i += 1) {
-    assert.equal(checkRateLimit(key, 3, 60_000).allowed, true, `demande ${i + 1} autorisée`);
+  for (let i = 0; i < BUSINESS_INQUIRY_IP.limit; i += 1) {
+    assert.equal((await consumeRateLimit(key, BUSINESS_INQUIRY_IP)).allowed, true, `demande ${i + 1} autorisée`);
   }
-  const quatrieme = checkRateLimit(key, 3, 60_000);
-  assert.equal(quatrieme.allowed, false, "la 4e demande doit être refusée");
-  assert.ok(quatrieme.retryAfterMs > 0, "un délai d'attente est indiqué");
+  const suivante = await consumeRateLimit(key, BUSINESS_INQUIRY_IP);
+  assert.equal(suivante.allowed, false, "la demande au-delà du quota doit être refusée");
+  assert.ok(suivante.retryAfterMs > 0, "un délai d'attente est indiqué");
 });
 
-await test("12. double soumission : deux envois rapprochés, un seul passe", () => {
-  const key = `test_business_burst_${Math.random()}`;
-  assert.equal(checkRateLimit(key, 1, 20_000).allowed, true);
-  assert.equal(checkRateLimit(key, 1, 20_000).allowed, false, "le doublon immédiat est bloqué");
+await test("12. double soumission : deux envois rapprochés, un seul passe", async () => {
+  const key = `test_business_inquiry_burst_${Math.random()}`;
+  assert.equal((await consumeRateLimit(key, DOUBLE_SUBMIT)).allowed, true);
+  assert.equal((await consumeRateLimit(key, DOUBLE_SUBMIT)).allowed, false, "le doublon immédiat est bloqué");
 });
 
 /* ─── 13-14. Contenu de l'email et échappement ─── */

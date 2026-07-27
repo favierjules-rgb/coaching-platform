@@ -205,7 +205,11 @@ await test("8. les quatre routes coûteuses appliquent un quota et une taille ma
     if (avecTaille) {
       assert.ok(source.includes("MAX_BODY_BYTES"), `${chemin} : taille du corps non bornée`);
     }
-    assert.ok(source.includes("rateLimitHeaders"), `${chemin} : pas d'en-têtes 429`);
+    // Depuis l'arbitrage H-2, le refus passe par le helper commun
+    // `refusDeLimite`, qui pose les en-têtes ET distingue 429 (quota) de 503
+    // (magasin partagé indisponible). Une route qui poserait encore ses
+    // en-têtes à la main aurait forcément oublié cette distinction.
+    assert.ok(source.includes("refusDeLimite"), `${chemin} : le refus doit passer par le helper commun`);
   }
 });
 

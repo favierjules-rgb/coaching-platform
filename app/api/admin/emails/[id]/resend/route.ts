@@ -2,12 +2,12 @@ import { NextResponse } from "next/server";
 
 import { recomposeEmail } from "@/lib/email/recompose";
 import { sendTransactionalEmail } from "@/lib/email/send-transactional-email";
-import { getCurrentUser, getCurrentUserRole } from "@/lib/supabase/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getEmailLogById } from "@/lib/supabase/email-logs";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { parseParams } from "@/lib/api/validate";
 import { idParamSchema } from "@/lib/api/schemas/common";
+import { requireStaff, requireStaffForStudent } from "@/lib/api/authz";
 
 /**
  * POST /api/admin/emails/[id]/resend — renvoie un email transactionnel en
@@ -29,14 +29,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "Supabase non configuré." }, { status: 503 });
   }
 
-  const user = await getCurrentUser();
-  if (!user) {
-    return NextResponse.json({ error: "Authentification requise." }, { status: 401 });
-  }
-  const role = await getCurrentUserRole();
-  if (role !== "admin" && role !== "coach") {
-    return NextResponse.json({ error: "Accès refusé." }, { status: 403 });
-  }
+  // Staff requis pour lire le journal ; l'affectation est vérifiée juste
+  // après, une fois l'entité liée connue (H-3).
+  const acces = await requireStaff();
+  if (!acces.ok) return acces.response;
 
   // Client service role : `email_logs` n'a aucune policy d'insert/update
   // pour un rôle authentifié (voir supabase/schema.sql), seul le service
@@ -49,6 +45,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const log = await getEmailLogById(supabase, id);
   if (!log) {
     return NextResponse.json({ error: "Email introuvable." }, { status: 404 });
+  }
+
+  // Correctif H-3 — un renvoi d'email expédie un contenu réel à un vrai
+  // destinataire : un coach ne peut le déclencher que pour un élève qui lui
+  // est affecté. Tout journal rattaché à autre chose qu'un élève (facture,
+  // programme public, newsletter) relève de l'administration globale.
+  if (!acces.estAdmin) {
+    if (log.relatedEntityType !== "student" || !log.relatedEntityId) {
+      return NextResponse.json({ error: "Accès refusé." }, { status: 403 });
+    }
+    const accesEleve = await requireStaffForStudent(log.relatedEntityId);
+    if (!accesEleve.ok) return accesEleve.response;
   }
   if (log.status !== "failed") {
     return NextResponse.json({ error: "Seul un email en échec peut être renvoyé." }, { status: 400 });

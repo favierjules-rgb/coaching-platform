@@ -35,7 +35,8 @@ import {
   looksAutomated,
 } from "../../lib/free-assessment/schema";
 import { getPublicAppUrl } from "../../lib/email/templates/base";
-import { checkRateLimit } from "../../lib/newsletter/rate-limit";
+import { consumeRateLimit } from "../../lib/security/rate-limit";
+import { DOUBLE_SUBMIT, FREE_ASSESSMENT_IP } from "../../lib/security/rules";
 import type { EmailTransport, RawEmailInput } from "../../lib/email/send-raw-email";
 
 let passed = 0;
@@ -289,20 +290,20 @@ await test("10. honeypot rempli ⇒ soumission considérée comme automatisée",
   assert.equal(freeAssessmentSchema.safeParse(validAssessment({ website: "http://spam.test" })).success, true);
 });
 
-await test("11. limitation de fréquence : 3 demandes par fenêtre, la 4e est refusée", () => {
-  const cle = `test_free_assessment_${Date.now()}`;
-  for (let i = 1; i <= 3; i += 1) {
-    assert.equal(checkRateLimit(cle, 3, 60_000).allowed, true, `demande ${i} autorisée`);
+await test("11. limitation de fréquence : 3 demandes par fenêtre, la 4e est refusée", async () => {
+  const key = `test_free_assessment_${Math.random()}`;
+  for (let i = 0; i < FREE_ASSESSMENT_IP.limit; i += 1) {
+    assert.equal((await consumeRateLimit(key, FREE_ASSESSMENT_IP)).allowed, true, `demande ${i + 1} autorisée`);
   }
-  const quatrieme = checkRateLimit(cle, 3, 60_000);
-  assert.equal(quatrieme.allowed, false, "4e demande refusée");
-  assert.ok(quatrieme.retryAfterMs > 0, "délai d'attente communiqué");
+  const suivante = await consumeRateLimit(key, FREE_ASSESSMENT_IP);
+  assert.equal(suivante.allowed, false, "la demande au-delà du quota doit être refusée");
+  assert.ok(suivante.retryAfterMs > 0, "un délai d'attente est indiqué");
 });
 
-await test("12. double soumission : deux envois rapprochés, un seul passe", () => {
-  const cle = `test_free_burst_${Date.now()}`;
-  assert.equal(checkRateLimit(cle, 1, 20_000).allowed, true);
-  assert.equal(checkRateLimit(cle, 1, 20_000).allowed, false, "second envoi immédiat bloqué");
+await test("12. double soumission : deux envois rapprochés, un seul passe", async () => {
+  const key = `test_free_assessment_burst_${Math.random()}`;
+  assert.equal((await consumeRateLimit(key, DOUBLE_SUBMIT)).allowed, true);
+  assert.equal((await consumeRateLimit(key, DOUBLE_SUBMIT)).allowed, false, "le doublon immédiat est bloqué");
 });
 
 /* ─── 13-16. Contenu de l'email ─── */

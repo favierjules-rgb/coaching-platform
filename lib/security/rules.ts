@@ -56,8 +56,9 @@ export const PROGRAM_CHECKOUT_IP: RateLimitRule = {
 
 /**
  * Consultation du statut d'un paiement : appelée en boucle courte par la page
- * de retour, donc quota large — mais elle interroge Stripe et génère un
- * magiclink, elle ne peut pas rester libre.
+ * de retour, donc quota large — mais elle interroge Stripe à chaque appel,
+ * elle ne peut pas rester libre. (Depuis le correctif H-1, elle ne génère
+ * plus aucun magiclink.)
  */
 export const CHECKOUT_STATUS_IP: RateLimitRule = {
   name: "checkout_status_ip",
@@ -71,4 +72,57 @@ export const DOUBLE_SUBMIT: RateLimitRule = {
   name: "double_submit",
   limit: 1,
   windowMs: 20 * 1000,
+};
+
+/* ─────────────── Formulaires publics (correctif H-2) ─────────────── */
+
+/**
+ * Ces quatre routes utilisaient `lib/newsletter/rate-limit`, dont
+ * l'extraction d'IP faisait confiance à `X-Forwarded-For` — un en-tête
+ * fourni par le client. Il suffisait de le faire varier à chaque requête
+ * pour ouvrir un compteur neuf, et le compteur mémoire ne survivait de
+ * toute façon pas au partage entre instances serverless.
+ *
+ * `failClosed: true` (arbitrage Jules, 27/07/2026) : toutes produisent un
+ * EFFET EXTERNE — un email part via Resend, un contact est créé chez Brevo.
+ * Sans magasin partagé en production, la limite annoncée n'existe pas ; les
+ * laisser passer reviendrait à offrir un relais d'envoi non borné, avec à la
+ * clé la réputation du domaine expéditeur. Une indisponibilité visible vaut
+ * mieux qu'une protection imaginaire.
+ *
+ * La route répond alors 503 (et non 429) avec un message générique : le
+ * client n'apprend rien de l'infrastructure, et aucun effet externe n'est
+ * déclenché — voir `refusDeLimite` dans lib/security/rate-limit.ts.
+ */
+
+/** Demande « Services aux entreprises » : envoie un email au coach. */
+export const BUSINESS_INQUIRY_IP: RateLimitRule = {
+  name: "business_inquiry_ip",
+  limit: 3,
+  windowMs: HEURE,
+  failClosed: true,
+};
+
+/** Formulaire « Mon bilan offert » : envoie un email au coach. */
+export const FREE_ASSESSMENT_IP: RateLimitRule = {
+  name: "free_assessment_ip",
+  limit: 3,
+  windowMs: HEURE,
+  failClosed: true,
+};
+
+/** Inscription à la newsletter : crée un contact Brevo. */
+export const NEWSLETTER_SUBSCRIBE_IP: RateLimitRule = {
+  name: "newsletter_subscribe_ip",
+  limit: 5,
+  windowMs: 10 * MINUTE,
+  failClosed: true,
+};
+
+/** Désinscription : protégée par jeton signé, quota simplement anti-abus. */
+export const NEWSLETTER_UNSUBSCRIBE_IP: RateLimitRule = {
+  name: "newsletter_unsubscribe_ip",
+  limit: 10,
+  windowMs: 10 * MINUTE,
+  failClosed: true,
 };

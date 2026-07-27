@@ -7,7 +7,7 @@ import { sendTransactionalEmail } from "@/lib/email/send-transactional-email";
 import {
   consumeRateLimit,
   getTrustedClientIp,
-  rateLimitHeaders,
+  refusDeLimite,
   rateLimitKey,
 } from "@/lib/security/rate-limit";
 import { PASSWORD_RESET_EMAIL, PASSWORD_RESET_IP } from "@/lib/security/rules";
@@ -42,10 +42,7 @@ export async function POST(request: Request) {
   const ip = getTrustedClientIp(request);
   const parIp = await consumeRateLimit(rateLimitKey([ip]), PASSWORD_RESET_IP);
   if (!parIp.allowed) {
-    return NextResponse.json(
-      { error: "Trop de demandes. Réessaie plus tard." },
-      { status: 429, headers: rateLimitHeaders(parIp) },
-    );
+    return refusDeLimite(parIp, "Trop de demandes. Réessaie plus tard.");
   }
 
   const parsedBody = await parseJsonBody(request, bodySchema);

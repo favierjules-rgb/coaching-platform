@@ -8,20 +8,26 @@ import {
   updateSubscriberByNormalizedEmail,
 } from "@/lib/newsletter/db";
 import { deleteBrevoContact } from "@/lib/brevo/client";
-import { checkRateLimit, getClientIp } from "@/lib/newsletter/rate-limit";
+import {
+  consumeRateLimit,
+  getTrustedClientIp,
+  refusDeLimite,
+  rateLimitKey,
+} from "@/lib/security/rate-limit";
+import { NEWSLETTER_UNSUBSCRIBE_IP } from "@/lib/security/rules";
 
 export const runtime = "nodejs";
 
 const GENERIC_MESSAGE = "Vous avez bien été désinscrit(e) de la newsletter.";
 
 export async function POST(request: Request) {
-  const ip = getClientIp(request);
-  const rateLimit = checkRateLimit(`newsletter_unsubscribe:${ip}`, 10, 10 * 60 * 1000);
+  // getTrustedClientIp ignore `X-Forwarded-For` en production (correctif H-2).
+  const ip = getTrustedClientIp(request);
+  const rateLimit = await consumeRateLimit(rateLimitKey(["newsletter_unsubscribe", ip]), NEWSLETTER_UNSUBSCRIBE_IP);
   if (!rateLimit.allowed) {
-    return NextResponse.json(
-      { error: "Trop de tentatives. Réessayez plus tard." },
-      { status: 429 }
-    );
+    // 429 quota dépassé / 503 magasin indisponible — dans ce second cas,
+    // aucun appel à Brevo n'est effectué (arbitrage H-2).
+    return refusDeLimite(rateLimit, "Trop de tentatives. Réessayez plus tard.");
   }
 
   const parsed = await parseJsonBody(request, newsletterUnsubscribeBodySchema);

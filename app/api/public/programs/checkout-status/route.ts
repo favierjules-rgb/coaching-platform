@@ -5,7 +5,7 @@ import { parseParams } from "@/lib/api/validate";
 import {
   consumeRateLimit,
   getTrustedClientIp,
-  rateLimitHeaders,
+  refusDeLimite,
   rateLimitKey,
 } from "@/lib/security/rate-limit";
 import { CHECKOUT_STATUS_IP } from "@/lib/security/rules";
@@ -14,100 +14,148 @@ import { getStripeClient } from "@/lib/stripe/client";
 
 /**
  * GET /api/public/programs/checkout-status?session_id=cs_... — statut du
- * provisionnement après un achat de programme public (chantier module
- * Programmation, correctif "accès direct post-paiement"). Interrogée par la
- * page /programmes/merci en polling juste après le retour de Stripe
- * Checkout, PAS par le webhook lui-même : cette route ne crée jamais de
- * compte, elle se contente de vérifier si le webhook
- * (checkout.session.completed, voir lib/stripe/webhook-handlers.ts) a déjà
- * fini son travail — le webhook reste l'unique source de vérité pour le
- * provisionnement, ce qui reste fiable même si ce polling échoue ou
- * n'aboutit jamais (l'email de bienvenue envoyé par le webhook sert alors de
- * filet de sécurité).
+ * provisionnement après un achat de programme public. Interrogée en polling
+ * par /programmes/merci au retour de Stripe Checkout.
  *
- * Une fois le compte trouvé, génère un lien de connexion Supabase à usage
- * unique (magiclink, distinct de celui déjà envoyé par email — chaque appel
- * à generateLink produit un jeton différent, donc consommer celui-ci ici ne
- * invalide jamais le lien "définir ton mot de passe" de l'email) pour
- * ramener l'acheteur directement dans l'app, déjà connecté. Compte flambant
- * neuf (créé par ce paiement) -> /reinitialiser-mot-de-passe, pour qu'il
- * reparte avec un vrai mot de passe utilisable plus tard (accès durable dans
- * le temps) ; compte déjà existant (achat d'un programme supplémentaire) ->
- * /dashboard directement, il a déjà un mot de passe, inutile de le lui
- * redemander.
+ * ---------------------------------------------------------------------
+ * Correctif de sécurité H-1 (audit du 27/07/2026)
+ * ---------------------------------------------------------------------
+ * Cette route RENVOYAIT un magiclink Supabase (`action_link`) dès qu'un
+ * `session_id` payé lui était présenté. Or ce `session_id` circule en clair
+ * dans l'URL de retour Stripe (/programmes/merci?session_id=cs_...) : il se
+ * retrouve dans l'historique du navigateur, les journaux d'accès de la
+ * plateforme, une capture d'écran ou un lien partagé. Quiconque le
+ * récupérait obtenait un lien de connexion valide — et, sur un compte
+ * fraîchement créé, la redirection vers /reinitialiser-mot-de-passe lui
+ * permettait de fixer lui-même le mot de passe. Aucune borne temporelle ne
+ * s'y opposait : `sessions.retrieve` répond indéfiniment et un nouveau
+ * magiclink était généré à CHAQUE appel.
+ *
+ * Règle désormais appliquée : **un session_id ne donne jamais accès à une
+ * authentification.** Cette route ne renvoie plus qu'un statut booléen et
+ * une destination interne non privilégiée. Aucun magiclink, aucun lien de
+ * récupération, aucun access token, aucun refresh token, aucune URL
+ * permettant de prendre le contrôle d'un compte ne transite plus par le
+ * navigateur.
+ *
+ * Le lien de définition de mot de passe continue d'être émis, mais
+ * uniquement côté serveur, par le webhook Stripe
+ * (lib/supabase/public-program-provisioning.ts), envoyé par email à
+ * l'adresse portée par la Checkout Session vérifiée, et de façon idempotente
+ * (verrou d'évènement, cf. lib/supabase/billing.ts). Le canal email est le
+ * seul à recevoir un lien : il prouve la possession de la boîte de
+ * réception, ce qu'un session_id ne prouve pas.
+ *
+ * Autres mesures de la même correction :
+ *   - `Cache-Control: no-store` sur TOUTES les réponses, y compris les
+ *     erreurs — un intermédiaire ne doit jamais conserver un statut de
+ *     paiement ;
+ *   - le `session_id` n'est jamais journalisé en entier (voir `traceSession`) ;
+ *   - l'adresse email n'est plus lue depuis `metadata` en premier : la
+ *     source de vérité est `customer_details.email`, renseignée par Stripe
+ *     lui-même. `metadata.email` provient d'un corps de requête soumis par
+ *     le navigateur au moment du Checkout — donc d'une origine non fiable.
  */
+
+/** En-têtes communs : un statut de paiement ne se met jamais en cache. */
+const NO_STORE = { "Cache-Control": "no-store" } as const;
+
+function reponse(corps: unknown, init?: { status?: number; headers?: Record<string, string> }) {
+  return NextResponse.json(corps, {
+    status: init?.status ?? 200,
+    headers: { ...NO_STORE, ...(init?.headers ?? {}) },
+  });
+}
+
+/**
+ * Identifiant tronqué pour les journaux. Un `session_id` complet dans un log
+ * reste un identifiant de commande exploitable ; les 8 premiers caractères
+ * après le préfixe suffisent à retrouver la trace côté Stripe.
+ */
+function traceSession(sessionId: string): string {
+  return `${sessionId.slice(0, 11)}…`;
+}
+
 export async function GET(request: Request) {
   // Quota large : la page /programmes/merci interroge cette route en boucle
-  // courte. Il borne malgré tout les appels à Stripe et la génération de
-  // magiclinks, qui ne peuvent pas rester libres (audit H-2).
+  // courte. Il borne malgré tout les appels à Stripe.
   const ip = getTrustedClientIp(request);
   const parIp = await consumeRateLimit(rateLimitKey([ip]), CHECKOUT_STATUS_IP);
   if (!parIp.allowed) {
-    return NextResponse.json(
-      { error: "Trop de requêtes. Réessaie dans un instant." },
-      { status: 429, headers: rateLimitHeaders(parIp) },
-    );
+    // Cette route ne produit aucun effet externe : elle n'est pas
+    // `failClosed`. Le helper commun distingue tout de même 429 (quota) et
+    // 503 (magasin indisponible), et `no-store` est ajouté par-dessus.
+    const refus = refusDeLimite(parIp, "Trop de requêtes. Réessaie dans un instant.");
+    refus.headers.set("Cache-Control", "no-store");
+    return refus;
   }
 
   const { searchParams } = new URL(request.url);
   const parsedParams = parseParams(Object.fromEntries(searchParams), checkoutStatusQuerySchema);
-  if (!parsedParams.success) return parsedParams.response;
+  if (!parsedParams.success) {
+    return reponse({ error: "Paramètres invalides." }, { status: 400 });
+  }
   const { session_id: sessionId } = parsedParams.data;
 
   const stripe = getStripeClient();
   if (!stripe) {
-    return NextResponse.json({ error: "Stripe non configuré." }, { status: 503 });
+    return reponse({ error: "Stripe non configuré." }, { status: 503 });
   }
 
   const supabase = createSupabaseAdminClient();
   if (!supabase) {
-    return NextResponse.json({ error: "Supabase non configuré." }, { status: 503 });
+    return reponse({ error: "Supabase non configuré." }, { status: 503 });
   }
 
   let session;
   try {
     session = await stripe.checkout.sessions.retrieve(sessionId);
   } catch (error) {
-    console.error("[public/programs/checkout-status] session Stripe introuvable", error);
-    return NextResponse.json({ error: "Session de paiement introuvable." }, { status: 404 });
+    console.error(`[public/programs/checkout-status] session Stripe introuvable (${traceSession(sessionId)})`, error);
+    return reponse({ error: "Session de paiement introuvable." }, { status: 404 });
   }
 
   // Cette route ne sert que le parcours "programme public" (metadata posée
   // par /api/public/programs/[programId]/checkout) — jamais les sessions
   // d'abonnement élève classiques.
   if (!session.metadata?.public_program_id) {
-    return NextResponse.json({ error: "Session hors périmètre." }, { status: 400 });
+    return reponse({ error: "Session hors périmètre." }, { status: 400 });
   }
 
   if (session.payment_status !== "paid") {
-    return NextResponse.json({ ready: false });
+    return reponse({ paid: false, ready: false });
   }
 
-  const email = (session.metadata?.email || session.customer_details?.email || session.customer_email || "")
+  // Adresse issue de la Checkout Session VÉRIFIÉE. `customer_details.email`
+  // est renseignée par Stripe à partir du formulaire de paiement ;
+  // `customer_email` est celle transmise à la création de la session. Le
+  // repli sur `metadata.email` reste possible pour les sessions antérieures
+  // au correctif, mais n'est jamais prioritaire : il vient d'un corps de
+  // requête soumis par le navigateur.
+  const email = (session.customer_details?.email || session.customer_email || session.metadata?.email || "")
     .trim()
     .toLowerCase();
   if (!email) {
-    return NextResponse.json({ ready: false });
+    return reponse({ paid: true, ready: false });
   }
 
   const { data: student, error: studentError } = await supabase
     .from("students")
-    .select("id, created_at")
+    .select("id")
     .ilike("email", email)
     .maybeSingle();
   if (studentError) {
-    console.error(`[public/programs/checkout-status] lecture élève : ${studentError.message}`);
+    console.error(`[public/programs/checkout-status] lecture élève (${traceSession(sessionId)}) : ${studentError.message}`);
   }
   if (!student) {
     // Webhook pas encore passé — la page continue de poller.
-    return NextResponse.json({ ready: false });
+    return reponse({ paid: true, ready: false });
   }
 
   // Un email déjà connu (achat d'un programme supplémentaire) a déjà un
-  // compte de longue date — le trouver ici ne prouve pas que LE WEBHOOK DE
-  // CET ACHAT a fini de tourner. Seule l'assignation de ce programme précis
-  // en est la preuve : sans ça, on redirigerait un client existant vers son
-  // espace avant même que son nouveau programme n'y soit visible.
+  // compte de longue date : le trouver ici ne prouve pas que LE WEBHOOK DE
+  // CET ACHAT a fini. Seule l'assignation de ce programme précis en est la
+  // preuve.
   const { data: assignment, error: assignmentError } = await supabase
     .from("assignments")
     .select("id")
@@ -116,29 +164,15 @@ export async function GET(request: Request) {
     .eq("content_id", session.metadata.public_program_id)
     .maybeSingle();
   if (assignmentError) {
-    console.error(`[public/programs/checkout-status] lecture assignation : ${assignmentError.message}`);
+    console.error(`[public/programs/checkout-status] lecture assignation (${traceSession(sessionId)}) : ${assignmentError.message}`);
   }
   if (!assignment) {
-    return NextResponse.json({ ready: false });
+    return reponse({ paid: true, ready: false });
   }
 
-  // Compte créé il y a moins de 5 minutes -> quasi certainement provisionné
-  // par ce paiement même (le webhook tourne en quelques secondes) -> jamais
-  // encore de mot de passe défini.
-  const isNewAccount = Date.now() - new Date(student.created_at).getTime() < 5 * 60 * 1000;
-
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
-  const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
-    type: "magiclink",
-    email,
-    options: { redirectTo: `${appUrl}${isNewAccount ? "/reinitialiser-mot-de-passe" : "/dashboard"}` },
-  });
-  if (linkError || !linkData?.properties?.action_link) {
-    console.error(`[public/programs/checkout-status] génération du lien de connexion : ${linkError?.message ?? "action_link manquant"}`);
-    // Le compte existe déjà (webhook terminé) : mieux vaut laisser la page
-    // basculer sur le message "vérifie ton email" que bloquer indéfiniment.
-    return NextResponse.json({ ready: false });
-  }
-
-  return NextResponse.json({ ready: true, loginUrl: linkData.properties.action_link });
+  // Provisionnement terminé. La seule chose renvoyée au navigateur est une
+  // destination INTERNE et NON PRIVILÉGIÉE : /connexion n'accorde aucun
+  // droit par elle-même, elle demande des identifiants. Le lien de
+  // définition de mot de passe, lui, est déjà parti par email.
+  return reponse({ paid: true, ready: true, redirectTo: "/connexion" });
 }

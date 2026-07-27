@@ -11,6 +11,7 @@ import { getResolvedPlanByKey } from "@/lib/stripe/plans-server";
 import { getStripeClient } from "@/lib/stripe/client";
 import { parseJsonBody } from "@/lib/api/validate";
 import { createCheckoutSessionBodySchema } from "@/lib/api/schemas/stripe";
+import { requireStaffForStudent } from "@/lib/api/authz";
 
 /**
  * POST /api/stripe/create-checkout-session — crée une session Stripe
@@ -58,6 +59,11 @@ export async function POST(request: Request) {
     }
   } else if (role !== "admin" && role !== "coach") {
     return NextResponse.json({ error: "Accès refusé." }, { status: 403 });
+  } else {
+    // Correctif H-3 : un coach n'agit que sur les élèves qui lui sont
+    // affectés. L'administrateur passe sans condition.
+    const accesEleve = await requireStaffForStudent(studentId);
+    if (!accesEleve.ok) return accesEleve.response;
   }
 
   // L'élève ne choisit jamais la formule : on résout systématiquement le

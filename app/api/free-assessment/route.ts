@@ -3,7 +3,13 @@ import { NextResponse } from "next/server";
 import { parseJsonBody } from "@/lib/api/validate";
 import { freeAssessmentSchema, looksAutomated } from "@/lib/free-assessment/schema";
 import { sendFreeAssessmentEmail } from "@/lib/free-assessment/email";
-import { checkRateLimit, getClientIp } from "@/lib/newsletter/rate-limit";
+import {
+  consumeRateLimit,
+  getTrustedClientIp,
+  refusDeLimite,
+  rateLimitKey,
+} from "@/lib/security/rate-limit";
+import { DOUBLE_SUBMIT, FREE_ASSESSMENT_IP } from "@/lib/security/rules";
 
 export const runtime = "nodejs";
 
@@ -32,12 +38,8 @@ export const runtime = "nodejs";
 /** ~8 Ko : très au-dessus d'une demande légitime (1 500 caractères max), très en dessous d'un abus. */
 const MAX_BODY_BYTES = 8 * 1024;
 
-/** 3 demandes par IP et par heure. */
-const RATE_LIMIT_MAX = 3;
-const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
-
-/** Deux envois de la même IP à moins de 20 s d'intervalle : double-clic ou rejeu. */
-const DOUBLE_SUBMIT_WINDOW_MS = 20 * 1000;
+// Quotas et fenêtres : lib/security/rules.ts (BUSINESS_INQUIRY_IP /
+// FREE_ASSESSMENT_IP et DOUBLE_SUBMIT), pour être relus d'un seul endroit.
 
 const SUCCESS_MESSAGE =
   "Ta demande a bien été envoyée. Je te recontacte personnellement pour échanger sur ton objectif.";
@@ -50,7 +52,10 @@ function successResponse() {
 }
 
 export async function POST(request: Request) {
-  const ip = getClientIp(request);
+  // getTrustedClientIp ignore `X-Forwarded-For` en production : cet en-tête
+  // est fourni par le client et suffisait à ouvrir un compteur neuf à chaque
+  // requête (correctif H-2, audit du 27/07/2026).
+  const ip = getTrustedClientIp(request);
 
   // 1) Taille du corps — refusée avant toute lecture/parsing coûteux.
   const contentLength = Number(request.headers.get("content-length") ?? "0");
@@ -59,12 +64,12 @@ export async function POST(request: Request) {
   }
 
   // 2) Limite de fréquence par IP.
-  const rateLimit = checkRateLimit(`free_assessment:${ip}`, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
+  const rateLimit = await consumeRateLimit(rateLimitKey(["free_assessment", ip]), FREE_ASSESSMENT_IP);
   if (!rateLimit.allowed) {
-    return NextResponse.json(
-      { error: RATE_LIMITED_MESSAGE },
-      { status: 429, headers: { "Retry-After": String(Math.ceil(rateLimit.retryAfterMs / 1000)) } },
-    );
+    // 429 si le quota est dépassé, 503 si le magasin partagé est
+    // indisponible en production : dans ce second cas AUCUN email n'est
+    // envoyé, et le message reste muet sur la cause (arbitrage H-2).
+    return refusDeLimite(rateLimit, RATE_LIMITED_MESSAGE);
   }
 
   // 3) Validation stricte (mêmes règles que le formulaire client).
@@ -78,7 +83,7 @@ export async function POST(request: Request) {
   }
 
   // 5) Double soumission : la même IP vient déjà d'envoyer une demande.
-  const doubleSubmit = checkRateLimit(`free_assessment_burst:${ip}`, 1, DOUBLE_SUBMIT_WINDOW_MS);
+  const doubleSubmit = await consumeRateLimit(rateLimitKey(["free_assessment_burst", ip]), DOUBLE_SUBMIT);
   if (!doubleSubmit.allowed) {
     // Succès neutre : la première demande est bien partie, inutile
     // d'inquiéter quelqu'un qui a double-cliqué.

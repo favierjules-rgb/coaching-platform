@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 
 import { createCoachingStudent } from "@/lib/supabase/coach-student-provisioning";
-import { getCurrentUser, getCurrentUserRole } from "@/lib/supabase/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { parseJsonBody } from "@/lib/api/validate";
 import { createStudentBodySchema } from "@/lib/api/schemas/students";
+import { requireStaff } from "@/lib/api/authz";
 
 /**
  * POST /api/admin/students — création réelle d'un élève depuis
@@ -26,14 +26,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Supabase non configuré." }, { status: 503 });
   }
 
-  const user = await getCurrentUser();
-  if (!user) {
-    return NextResponse.json({ error: "Authentification requise." }, { status: 401 });
-  }
-  const role = await getCurrentUserRole();
-  if (role !== "admin" && role !== "coach") {
-    return NextResponse.json({ error: "Accès refusé." }, { status: 403 });
-  }
+  // Création d'un élève : admin ou coach (H-3). Aucun contrôle
+  // d'affectation n'est possible ici — l'élève n'existe pas encore — mais il
+  // n'est pas non plus nécessaire : `createStudentBodySchema` n'expose aucun
+  // champ de coach, et `resolveCoachId` rattache l'élève à la fiche du
+  // demandeur. Un coach ne peut donc créer que POUR LUI-MÊME.
+  const acces = await requireStaff();
+  if (!acces.ok) return acces.response;
+  const user = acces.user;
 
   // Client service role : création d'un compte auth.users (invite) et
   // écriture de email_logs, toutes deux hors de portée d'un client de

@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { getCurrentUser, getCurrentUserRole } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   deleteUnusedSubscriptionTemplateRpc,
@@ -20,6 +19,7 @@ import {
 import { parseJsonBody, parseParams } from "@/lib/api/validate";
 import { idParamSchema } from "@/lib/api/schemas/common";
 import { updateSubscriptionTemplateBodySchema } from "@/lib/api/schemas/subscription-templates";
+import { requireAdmin, requireStaff } from "@/lib/api/authz";
 import {
   archiveStripeForDeletedTemplate,
   archiveStripePriceOnly,
@@ -55,14 +55,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     return NextResponse.json({ error: "Supabase non configuré." }, { status: 503 });
   }
 
-  const user = await getCurrentUser();
-  if (!user) {
-    return NextResponse.json({ error: "Authentification requise." }, { status: 401 });
-  }
-  const role = await getCurrentUserRole();
-  if (role !== "admin" && role !== "coach") {
-    return NextResponse.json({ error: "Accès refusé." }, { status: 403 });
-  }
+  // Le catalogue d'abonnements est une donnée globale : modification et
+  // suppression réservées à l'administrateur (H-3).
+  const acces = await requireAdmin();
+  if (!acces.ok) return acces.response;
 
   const existing = await getSubscriptionTemplateById(sessionSupabase, id);
   if (!existing) {
@@ -193,18 +189,19 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   return NextResponse.json({ template });
 }
 
-/** Auth commune aux handlers staff : renvoie soit une NextResponse d'erreur, soit le client session + le rôle. */
-async function requireStaff(): Promise<
+/**
+ * Client de session + contrôle d'accès staff. La DÉCISION d'autorisation est
+ * déléguée à `lib/api/authz` (correctif H-3) : ce fichier ne réimplémente
+ * plus sa propre règle, il se contente d'y ajouter le client dont les
+ * handlers ont besoin.
+ */
+async function sessionStaff(): Promise<
   { ok: false; response: NextResponse } | { ok: true; supabase: NonNullable<Awaited<ReturnType<typeof createSupabaseServerClient>>> }
 > {
+  const acces = await requireStaff();
+  if (!acces.ok) return { ok: false, response: acces.response };
   const supabase = await createSupabaseServerClient();
   if (!supabase) return { ok: false, response: NextResponse.json({ error: "Supabase non configuré." }, { status: 503 }) };
-  const user = await getCurrentUser();
-  if (!user) return { ok: false, response: NextResponse.json({ error: "Authentification requise." }, { status: 401 }) };
-  const role = await getCurrentUserRole();
-  if (role !== "admin" && role !== "coach") {
-    return { ok: false, response: NextResponse.json({ error: "Accès refusé." }, { status: 403 }) };
-  }
   return { ok: true, supabase };
 }
 
@@ -221,7 +218,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   if (!parsedParams.success) return parsedParams.response;
   const { id } = parsedParams.data;
 
-  const auth = await requireStaff();
+  const auth = await sessionStaff();
   if (!auth.ok) return auth.response;
 
   const existing = await getSubscriptionTemplateById(auth.supabase, id);
@@ -255,8 +252,16 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
   if (!parsedParams.success) return parsedParams.response;
   const { id } = parsedParams.data;
 
-  const auth = await requireStaff();
-  if (!auth.ok) return auth.response;
+  // Suppression définitive dans le catalogue global : administrateur seul
+  // (H-3). `sessionAdmin` fournit en plus le client de session attendu par
+  // les lectures ci-dessous.
+  const acces = await requireAdmin();
+  if (!acces.ok) return acces.response;
+  const sessionSupabase = await createSupabaseServerClient();
+  if (!sessionSupabase) {
+    return NextResponse.json({ error: "Supabase non configuré." }, { status: 503 });
+  }
+  const auth = { supabase: sessionSupabase };
 
   // La RPC destructive n'est exécutable QUE par `service_role` (EXECUTE révoqué
   // à authenticated) : elle est donc appelée avec le client admin, uniquement

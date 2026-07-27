@@ -1,28 +1,44 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Loader2, MailCheck } from "lucide-react";
 
 const POLL_INTERVAL_MS = 1500;
 const MAX_ATTEMPTS = 14; // ~20s, au-delà on bascule sur le message email.
 
-type Phase = "checking" | "redirecting" | "fallback";
+type Phase = "checking" | "ready" | "fallback";
+
+/** Destinations acceptées : jamais une URL fournie librement par l'API. */
+const DESTINATIONS_AUTORISEES = new Set(["/connexion"]);
 
 /**
  * Corps interactif de /programmes/merci (voir page.tsx) — Client Component
  * car il doit lire ?session_id= et interroger
- * /api/public/programs/checkout-status pour offrir un accès direct dès que
- * le webhook Stripe (source de vérité pour le provisionnement, jamais
- * remise en cause ici) a fini de créer le compte, plutôt que de renvoyer
- * systématiquement vers l'email. Sans session_id (retour du parcours
- * gratuit /claim, qui ne passe jamais par Stripe), affiche directement le
- * message "vérifie ton email" — rien à poller.
+ * /api/public/programs/checkout-status pour savoir quand le webhook Stripe
+ * (source de vérité du provisionnement) a fini de créer le compte. Sans
+ * session_id (retour du parcours gratuit /claim, qui ne passe jamais par
+ * Stripe), affiche directement le message "vérifie ton email" — rien à
+ * poller.
+ *
+ * Correctif de sécurité H-1 (audit du 27/07/2026) : ce composant
+ * redirigeait auparavant vers `body.loginUrl`, un magiclink Supabase que la
+ * route renvoyait au navigateur. Un `session_id` — visible dans l'URL, donc
+ * dans l'historique et les journaux — suffisait alors à prendre le contrôle
+ * du compte. La route ne renvoie plus aucun lien d'authentification ; le
+ * lien de définition de mot de passe part uniquement par email, côté
+ * serveur. Ici, on se contente d'annoncer que l'accès est prêt et de
+ * proposer /connexion.
+ *
+ * `redirectTo` est de surcroît confronté à une liste blanche : même si la
+ * réponse changeait, aucune destination arbitraire ne pourrait être suivie.
  */
 export function ProgrammesMerciStatus() {
   const searchParams = useSearchParams();
   const sessionId = searchParams.get("session_id");
   const [phase, setPhase] = useState<Phase>(sessionId ? "checking" : "fallback");
+  const [destination, setDestination] = useState("/connexion");
   const attempts = useRef(0);
 
   useEffect(() => {
@@ -36,9 +52,10 @@ export function ProgrammesMerciStatus() {
         const res = await fetch(`/api/public/programs/checkout-status?session_id=${encodeURIComponent(sessionId as string)}`);
         const body = await res.json().catch(() => null);
         if (cancelled) return;
-        if (body?.ready && body?.loginUrl) {
-          setPhase("redirecting");
-          window.location.href = body.loginUrl;
+        if (body?.ready) {
+          const cible = typeof body.redirectTo === "string" ? body.redirectTo : "";
+          if (DESTINATIONS_AUTORISEES.has(cible)) setDestination(cible);
+          setPhase("ready");
           return;
         }
       } catch {
@@ -59,14 +76,31 @@ export function ProgrammesMerciStatus() {
     };
   }, [sessionId]);
 
-  if (phase === "checking" || phase === "redirecting") {
+  if (phase === "checking") {
     return (
       <div className="w-full max-w-md border border-border bg-zinc-950 p-8">
         <Loader2 size={28} className="mx-auto mb-4 animate-spin text-primary" />
         <h1 className="mb-2 font-heading text-2xl font-extrabold uppercase text-foreground">Un instant...</h1>
+        <p className="text-sm leading-relaxed text-muted-foreground">On prépare ton accès.</p>
+      </div>
+    );
+  }
+
+  if (phase === "ready") {
+    return (
+      <div className="w-full max-w-md border border-border bg-zinc-950 p-8">
+        <MailCheck size={28} className="mx-auto mb-4 text-primary" />
+        <h1 className="mb-2 font-heading text-2xl font-extrabold uppercase text-foreground">Ton accès est prêt !</h1>
         <p className="text-sm leading-relaxed text-muted-foreground">
-          On prépare ton accès. Tu vas être redirigé automatiquement vers ton programme.
+          On vient de t&apos;envoyer un email avec un lien pour définir ton mot de passe. Une fois c&apos;est fait, tu
+          retrouves ton programme dans ton espace.
         </p>
+        <Link
+          href={destination}
+          className="mt-6 inline-block border border-border px-6 py-3 text-xs uppercase tracking-widest text-foreground transition-colors hover:border-primary hover:text-primary"
+        >
+          Aller à la connexion
+        </Link>
       </div>
     );
   }

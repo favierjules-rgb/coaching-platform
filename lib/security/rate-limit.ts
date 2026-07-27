@@ -1,5 +1,7 @@
 import "server-only";
 
+import { NextResponse } from "next/server";
+
 /**
  * Limitation de fréquence — abstraction unique du projet (audit de sécurité,
  * juillet 2026, points H-2 / M-1 / M-2).
@@ -234,4 +236,38 @@ export function rateLimitHeaders(decision: RateLimitDecision): Record<string, st
     "Retry-After": String(Math.max(1, Math.ceil(decision.retryAfterMs / 1000))),
     "X-RateLimit-Remaining": String(decision.remaining),
   };
+}
+
+/* ─────────────── Refus normalisé ─────────────── */
+
+/**
+ * Message unique des refus pour indisponibilité. Volontairement muet sur la
+ * cause : le client n'a pas à apprendre qu'un magasin Redis est injoignable,
+ * ni même qu'il en existe un.
+ */
+export const MESSAGE_INDISPONIBLE =
+  "Service temporairement indisponible. Merci de réessayer dans quelques minutes.";
+
+/**
+ * Traduit une décision de refus en réponse HTTP, en distinguant les deux
+ * causes que les routes confondaient jusqu'ici :
+ *
+ *   - quota réellement dépassé          → 429, message métier de la route ;
+ *   - magasin partagé indisponible      → 503, message générique.
+ *
+ * La distinction n'est pas cosmétique. Un 429 dit « tu as trop demandé » et
+ * invite à ralentir ; un 503 dit « le service ne peut pas garantir la limite
+ * en ce moment » et n'accuse personne. Surtout, sur une route `failClosed`,
+ * le 503 signale que RIEN n'a été déclenché : aucun email, aucun appel à un
+ * service tiers.
+ *
+ * Centralisé ici pour qu'aucune route ne puisse l'oublier — c'est
+ * précisément le genre de branche qu'on oublie en la recopiant.
+ */
+export function refusDeLimite(decision: RateLimitDecision, messageQuota: string): NextResponse {
+  const headers = rateLimitHeaders(decision);
+  if (decision.backend === "unavailable") {
+    return NextResponse.json({ error: MESSAGE_INDISPONIBLE }, { status: 503, headers });
+  }
+  return NextResponse.json({ error: messageQuota }, { status: 429, headers });
 }
