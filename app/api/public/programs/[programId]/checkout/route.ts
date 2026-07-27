@@ -7,7 +7,7 @@ import { CGV_PROGRAMME_CONSENT_TEXT_VERSION, IMMEDIATE_ACCESS_AND_WAIVER_CONSENT
 import {
   consumeRateLimit,
   getTrustedClientIp,
-  rateLimitHeaders,
+  refusDeLimite,
   rateLimitKey,
 } from "@/lib/security/rate-limit";
 import { DOUBLE_SUBMIT, PROGRAM_CHECKOUT_IP } from "@/lib/security/rules";
@@ -40,10 +40,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
   const ip = getTrustedClientIp(request);
   const parIp = await consumeRateLimit(rateLimitKey([ip]), PROGRAM_CHECKOUT_IP);
   if (!parIp.allowed) {
-    return NextResponse.json(
-      { error: "Trop de demandes. Réessaie plus tard." },
-      { status: 429, headers: rateLimitHeaders(parIp) },
-    );
+    return refusDeLimite(parIp, "Trop de demandes. Réessaie plus tard.");
   }
 
   const routeParams = await params;
@@ -60,10 +57,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     DOUBLE_SUBMIT,
   );
   if (!antiRejeu.allowed) {
-    return NextResponse.json(
-      { error: "Demande déjà en cours de traitement." },
-      { status: 429, headers: rateLimitHeaders(antiRejeu) },
-    );
+    return refusDeLimite(antiRejeu, "Demande déjà en cours de traitement.");
   }
 
   const supabase = createSupabaseAdminClient();

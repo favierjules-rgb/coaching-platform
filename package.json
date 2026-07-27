@@ -35,6 +35,8 @@
     "test:free-assessment-email": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/free-assessment-email.mts",
     "test:free-assessment-page": "npx tsx scripts/tests/free-assessment-page.mts",
     "test:security-hardening": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/security-hardening.mts",
+    "test:authz-hardening": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/authz-hardening.mts",
+    "test:authz-behaviour": "NODE_OPTIONS=\"--conditions=react-server --no-warnings\" npx tsx --experimental-test-module-mocks scripts/tests/authz-behaviour.mts",
     "db:local:init": "bash scripts/db-local-init.sh"
   },
   "dependencies": {
@@ -42,7 +44,7 @@
     "@supabase/supabase-js": "^2.110.0",
     "jspdf": "^4.2.1",
     "lucide-react": "^1.23.0",
-    "next": "16.2.10",
+    "next": "16.2.12",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "resend": "^6.17.2",
@@ -59,5 +61,8 @@
     "eslint-config-next": "16.2.10",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "overrides": {
+    "sharp": "0.35.0"
   }
 }

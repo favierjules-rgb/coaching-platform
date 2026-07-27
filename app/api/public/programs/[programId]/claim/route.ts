@@ -7,7 +7,7 @@ import { CGV_PROGRAMME_CONSENT_TEXT_VERSION } from "@/lib/legal-consents";
 import {
   consumeRateLimit,
   getTrustedClientIp,
-  rateLimitHeaders,
+  refusDeLimite,
   rateLimitKey,
 } from "@/lib/security/rate-limit";
 import { CLAIM_PROGRAM_EMAIL, CLAIM_PROGRAM_IP, DOUBLE_SUBMIT } from "@/lib/security/rules";
@@ -43,7 +43,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
   const ip = getTrustedClientIp(request);
   const parIp = await consumeRateLimit(rateLimitKey([ip]), CLAIM_PROGRAM_IP);
   if (!parIp.allowed) {
-    return NextResponse.json({ error: TROP_DE_DEMANDES }, { status: 429, headers: rateLimitHeaders(parIp) });
+    return refusDeLimite(parIp, TROP_DE_DEMANDES);
   }
 
   const routeParams = await params;

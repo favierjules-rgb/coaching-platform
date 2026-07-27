@@ -9,6 +9,7 @@ import { getStudentById } from "@/lib/supabase/students";
 import type { EmailType } from "@/types";
 import { parseJsonBody } from "@/lib/api/validate";
 import { contentAssignedBodySchema } from "@/lib/api/schemas/email";
+import { requireStaffForStudent } from "@/lib/api/authz";
 
 /**
  * POST /api/email/content-assigned — envoie l'email "programme/plan
@@ -34,6 +35,11 @@ export async function POST(request: Request) {
   if (role !== "admin" && role !== "coach") {
     return NextResponse.json({ error: "Accès refusé." }, { status: 403 });
   }
+  // Correctif H-3 : un coach n'agit que sur les élèves qui lui sont
+  // affectés. L'administrateur passe sans condition.
+  const accesEleve = await requireStaffForStudent(studentId);
+  if (!accesEleve.ok) return accesEleve.response;
+
 
   // Client service role : `email_logs` n'a aucune policy d'insert/update
   // pour un rôle authentifié (voir supabase/schema.sql), seul le service

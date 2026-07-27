@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 
-import { getCurrentUser, getCurrentUserRole } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSubscriptionTemplate } from "@/lib/supabase/subscription-templates";
 import { getStripeClient } from "@/lib/stripe/client";
@@ -8,6 +7,7 @@ import { createStripeProductAndPrice, describeStripeError } from "@/lib/stripe/s
 import { parseJsonBody } from "@/lib/api/validate";
 import { createSubscriptionTemplateBodySchema } from "@/lib/api/schemas/subscription-templates";
 import type { BillingInterval } from "@/types";
+import { requireAdmin } from "@/lib/api/authz";
 
 /**
  * POST /api/admin/subscription-templates — crée un modèle d'abonnement
@@ -29,14 +29,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Supabase non configuré." }, { status: 503 });
   }
 
-  const user = await getCurrentUser();
-  if (!user) {
-    return NextResponse.json({ error: "Authentification requise." }, { status: 401 });
-  }
-  const role = await getCurrentUserRole();
-  if (role !== "admin" && role !== "coach") {
-    return NextResponse.json({ error: "Accès refusé." }, { status: 403 });
-  }
+  // Action globale ou destructive : administrateur uniquement (H-3).
+  const acces = await requireAdmin();
+  if (!acces.ok) return acces.response;
+  const user = acces.user;
 
   const stripe = getStripeClient();
   let stripeProductId: string | null = null;

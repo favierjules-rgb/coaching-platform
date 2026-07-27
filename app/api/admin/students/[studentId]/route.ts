@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 
-import { getCurrentUser, getCurrentUserRole } from "@/lib/supabase/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { deleteStudentCompletely } from "@/lib/supabase/delete-student";
 import { parseParams } from "@/lib/api/validate";
 import { studentIdParamSchema } from "@/lib/api/schemas/students";
+import { requireAdmin } from "@/lib/api/authz";
 
 /**
  * DELETE /api/admin/students/[studentId] — suppression définitive et
@@ -25,14 +25,9 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ s
     return NextResponse.json({ error: "Supabase non configuré." }, { status: 503 });
   }
 
-  const user = await getCurrentUser();
-  if (!user) {
-    return NextResponse.json({ error: "Authentification requise." }, { status: 401 });
-  }
-  const role = await getCurrentUserRole();
-  if (role !== "admin" && role !== "coach") {
-    return NextResponse.json({ error: "Accès refusé." }, { status: 403 });
-  }
+  // Action globale ou destructive : administrateur uniquement (H-3).
+  const acces = await requireAdmin();
+  if (!acces.ok) return acces.response;
 
   // Client service role : suppression auth.users (Admin API) et cascade sur
   // des tables sans policy DELETE pour un rôle authentifié classique.

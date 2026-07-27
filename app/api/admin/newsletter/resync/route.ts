@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { getCurrentUser, getCurrentUserRole } from "@/lib/supabase/auth";
 import { parseJsonBody } from "@/lib/api/validate";
 import { newsletterResyncBodySchema } from "@/lib/api/schemas/newsletter";
 import {
@@ -7,18 +6,14 @@ import {
   updateSubscriberById,
 } from "@/lib/newsletter/db";
 import { upsertNewsletterContact } from "@/lib/brevo/client";
+import { requireAdmin } from "@/lib/api/authz";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  const user = await getCurrentUser();
-  if (!user) {
-    return NextResponse.json({ error: "Authentification requise." }, { status: 401 });
-  }
-  const role = await getCurrentUserRole();
-  if (role !== "admin" && role !== "coach") {
-    return NextResponse.json({ error: "Accès refusé." }, { status: 403 });
-  }
+  // Action globale ou destructive : administrateur uniquement (H-3).
+  const acces = await requireAdmin();
+  if (!acces.ok) return acces.response;
 
   const parsed = await parseJsonBody(request, newsletterResyncBodySchema);
   if (!parsed.success) return parsed.response;

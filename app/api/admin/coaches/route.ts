@@ -3,9 +3,10 @@ import { NextResponse } from "next/server";
 import { createCoachBodySchema } from "@/lib/api/schemas/coaches";
 import { parseJsonBody } from "@/lib/api/validate";
 import { createCoachAccount } from "@/lib/supabase/coach-account-provisioning";
-import { getCurrentUser, getCurrentUserRole, getProfileByUserId } from "@/lib/supabase/auth";
+import { getProfileByUserId } from "@/lib/supabase/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { requireAdmin } from "@/lib/api/authz";
 
 /**
  * POST /api/admin/coaches — création réelle d'un collaborateur admin/coach
@@ -24,14 +25,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Supabase non configuré." }, { status: 503 });
   }
 
-  const user = await getCurrentUser();
-  if (!user) {
-    return NextResponse.json({ error: "Authentification requise." }, { status: 401 });
-  }
-  const role = await getCurrentUserRole();
-  if (role !== "admin" && role !== "coach") {
-    return NextResponse.json({ error: "Accès refusé." }, { status: 403 });
-  }
+  // Action globale ou destructive : administrateur uniquement (H-3).
+  const acces = await requireAdmin();
+  if (!acces.ok) return acces.response;
+  const user = acces.user;
 
   const requestingProfile = await getProfileByUserId(user.id);
   const requestingUserName =

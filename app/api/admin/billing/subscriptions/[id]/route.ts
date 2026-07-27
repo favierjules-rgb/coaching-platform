@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 
-import { getCurrentUser, getCurrentUserRole } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { deleteSubscriptionRecord } from "@/lib/supabase/billing";
 import { parseParams } from "@/lib/api/validate";
 import { idParamSchema } from "@/lib/api/schemas/common";
+import { requireAdmin } from "@/lib/api/authz";
 
 /**
  * DELETE /api/admin/billing/subscriptions/[id] — supprime définitivement
@@ -28,14 +28,9 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     return NextResponse.json({ error: "Supabase non configuré." }, { status: 503 });
   }
 
-  const user = await getCurrentUser();
-  if (!user) {
-    return NextResponse.json({ error: "Authentification requise." }, { status: 401 });
-  }
-  const role = await getCurrentUserRole();
-  if (role !== "admin" && role !== "coach") {
-    return NextResponse.json({ error: "Accès refusé." }, { status: 403 });
-  }
+  // Action globale ou destructive : administrateur uniquement (H-3).
+  const acces = await requireAdmin();
+  if (!acces.ok) return acces.response;
 
   const ok = await deleteSubscriptionRecord(sessionSupabase, id);
   if (!ok) {

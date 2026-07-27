@@ -5,7 +5,13 @@ import {
 } from "@/lib/newsletter/validation";
 import { parseJsonBody } from "@/lib/api/validate";
 import { newsletterSubscribeBodySchema } from "@/lib/api/schemas/newsletter";
-import { checkRateLimit, getClientIp } from "@/lib/newsletter/rate-limit";
+import {
+  consumeRateLimit,
+  getTrustedClientIp,
+  refusDeLimite,
+  rateLimitKey,
+} from "@/lib/security/rate-limit";
+import { NEWSLETTER_SUBSCRIBE_IP } from "@/lib/security/rules";
 import {
   createSubscriber,
   findSubscriberByNormalizedEmail,
@@ -30,13 +36,13 @@ function appendHistory(
 }
 
 export async function POST(request: Request) {
-  const ip = getClientIp(request);
-  const rateLimit = checkRateLimit(`newsletter_subscribe:${ip}`, 5, 10 * 60 * 1000);
+  // getTrustedClientIp ignore `X-Forwarded-For` en production (correctif H-2).
+  const ip = getTrustedClientIp(request);
+  const rateLimit = await consumeRateLimit(rateLimitKey(["newsletter_subscribe", ip]), NEWSLETTER_SUBSCRIBE_IP);
   if (!rateLimit.allowed) {
-    return NextResponse.json(
-      { error: "Trop de tentatives. Réessayez plus tard." },
-      { status: 429 }
-    );
+    // 429 quota dépassé / 503 magasin indisponible — dans ce second cas,
+    // aucun appel à Brevo n'est effectué (arbitrage H-2).
+    return refusDeLimite(rateLimit, "Trop de tentatives. Réessayez plus tard.");
   }
 
   const parsed = await parseJsonBody(request, newsletterSubscribeBodySchema);

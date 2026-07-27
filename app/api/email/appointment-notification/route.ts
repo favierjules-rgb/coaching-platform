@@ -16,6 +16,7 @@ import { getStudentById } from "@/lib/supabase/students";
 import type { EmailType } from "@/types";
 import { parseJsonBody } from "@/lib/api/validate";
 import { appointmentNotificationBodySchema } from "@/lib/api/schemas/email";
+import { requireStaffForStudent } from "@/lib/api/authz";
 
 /**
  * POST /api/email/appointment-notification — envoie l'email de
@@ -64,6 +65,11 @@ export async function POST(request: Request) {
     }
   } else if (role !== "admin" && role !== "coach") {
     return NextResponse.json({ error: "Accès refusé." }, { status: 403 });
+  } else {
+    // Correctif H-3 : un coach ne notifie que les rendez-vous de SES élèves.
+    // L'administrateur passe sans condition.
+    const accesEleve = await requireStaffForStudent(appointment.studentId);
+    if (!accesEleve.ok) return accesEleve.response;
   }
 
   const [student, coach] = await Promise.all([
