@@ -100,16 +100,16 @@ test("le titre de section reste présent au-dessus des piliers", () => {
 /* ─── Mise en page : plus aucune contrainte de hauteur sur mobile ─── */
 
 test("RÉGRESSION : le repli en flux normal n'enferme pas le CONTENU dans une hauteur de viewport", () => {
-  // La bande décorative des étoiles porte, elle, `overflow-hidden` (pour
-  // que les étoiles sortent par ses bords sans créer de défilement
-  // horizontal) : la garde porte donc sur le contenu, pas sur la chaîne
-  // brute. On isole ce qui suit la bande — titre + grille des piliers.
-  const apresBande = flowHtml.slice(flowHtml.indexOf("Ma méthode"));
+  // La couche décorative des étoiles porte, elle, `overflow-hidden` et
+  // `sticky` (pour rester centrée dans l'écran et couper le débordement) :
+  // la garde porte donc sur le CONTENU, pas sur la chaîne brute. On isole
+  // ce qui suit la couche — titre + grille des piliers.
+  const apresCouche = flowHtml.slice(flowHtml.indexOf("Ma méthode"));
   for (const classe of ["h-screen", "overflow-hidden", "sticky", "pinned-scene"]) {
-    assert.ok(!apresBande.includes(classe), `« ${classe} » ne doit pas contraindre le contenu en flux`);
+    assert.ok(!apresCouche.includes(classe), `« ${classe} » ne doit pas contraindre le contenu en flux`);
   }
   assert.ok(
-    !/style="[^"]*height:/.test(apresBande),
+    !/style="[^"]*height:/.test(apresCouche),
     "aucune hauteur inline ne doit contraindre le titre ni les piliers",
   );
   // Et la section elle-même reste dimensionnée par son contenu.
@@ -131,13 +131,17 @@ test("la scène ancrée mesure sa hauteur en svh, jamais en vh brut", () => {
 test("densité compacte sous lg : les 4 piliers tiennent dans une hauteur d'écran", () => {
   // Padding, marges, tailles de texte et d'icône réduits en mobile, valeurs
   // desktop reprises telles quelles derrière `lg:`.
+  // Resserrage du 29/07/2026 : chaque valeur de base perd un cran (le
+  // contenu passe de 645px à 568px de haut à 390px de large), ce qui rend
+  // la scène ancrée possible sur un iPhone 14. Les paliers `sm:` et `lg:`
+  // reprennent les valeurs d'origine.
   for (const [compact, desktop] of [
-    ["p-3.5", "lg:p-8"],
-    ["mb-1.5", "lg:mb-6"],
-    ["h-5 w-5", "lg:h-7 lg:w-7"],
-    ["text-base", "lg:text-xl"],
-    ["text-xs", "lg:text-sm"],
-    ["leading-snug", "lg:leading-relaxed"],
+    ["p-3", "lg:p-8"],
+    ["mb-1", "lg:mb-6"],
+    ["h-[18px] w-[18px]", "sm:h-5 sm:w-5"],
+    ["text-[0.95rem]", "lg:text-xl"],
+    ["text-[11px]", "lg:text-sm"],
+    ["leading-[1.35]", "lg:leading-relaxed"],
   ]) {
     assert.ok(flowHtml.includes(compact), `densité mobile : « ${compact} » attendu`);
     assert.ok(source.includes(desktop), `valeur desktop « ${desktop} » conservée`);
@@ -145,7 +149,7 @@ test("densité compacte sous lg : les 4 piliers tiennent dans une hauteur d'écr
 });
 
 test("RÉGRESSION : la hauteur vient du contenu (padding vertical, pas de vh)", () => {
-  assert.ok(flowHtml.includes("py-24"), "la section doit garder son rythme vertical normal");
+  assert.ok(flowHtml.includes("py-16 sm:py-24"), "la section doit garder son rythme vertical normal");
   assert.ok(!/\b(h|min-h)-\[\d+(vh|svh|dvh)\]/.test(flowHtml), "aucune hauteur en unités de viewport");
 });
 
@@ -184,7 +188,11 @@ test("NON-RÉGRESSION : les deux variantes partagent le même markup de contenu"
   // Un seul composant produit le titre + la grille : impossible que les
   // rendus mobile et desktop divergent en textes ou en ordre.
   assert.equal((source.match(/function PillarsContent/g) ?? []).length, 1);
-  assert.equal((source.match(/<PillarsContent \/>/g) ?? []).length, 2, "utilisé par les deux variantes");
+  assert.equal(
+    (source.match(/<PillarsContent \/>/g) ?? []).length,
+    3,
+    "utilisé par les trois rendus : scène ancrée, traversée en flux, statique reduced-motion",
+  );
   assert.equal((source.match(/methodPillars\.map/g) ?? []).length, 1, "une seule boucle sur les piliers");
 });
 
@@ -228,7 +236,7 @@ function blocsMedia(feuille: string): { condition: string; corps: string }[] {
   return blocs;
 }
 /** Bloc CSS dédié au motif, isolé pour être inspecté règle par règle. */
-const debutMotif = css.indexOf(".method-stars-scene,");
+const debutMotif = css.indexOf(".method-stars-scene {");
 const finMotif = css.indexOf("/* Fin motif étoiles */");
 assert.ok(debutMotif > -1 && finMotif > debutMotif, "le bloc CSS du motif doit être délimité dans globals.css");
 const blocEtoiles = css.slice(debutMotif, finMotif);
@@ -253,13 +261,43 @@ test("GARDE : aucune media query ne désactive l'animation des étoiles", () => 
   // Le seul palier de largeur du projet reste celui de l'ANCRAGE, et il
   // porte sur la place disponible, pas sur une classe d'appareil.
   assert.ok(
-    hookAncrage.includes("(min-width: 1024px) and (min-height: 560px), (min-height: 700px)"),
+    hookAncrage.includes("(min-width: 1024px) and (min-height: 560px), (min-height: 610px)"),
     "le seuil d'ancrage est explicite et documenté",
   );
   assert.ok(
     !sansCommentaires(hookAncrage).includes("StarPair"),
     "le hook d'ancrage ne doit rien savoir des étoiles",
   );
+});
+
+test("GARDE : le motif SE SUPERPOSE à la zone des piliers, jamais dans un bandeau à côté", () => {
+  // Régression du 29/07/2026 (2e retour de Jules) : le repli en flux avait
+  // reçu le geste, mais dans une bande distincte AU-DESSUS du titre. Le
+  // motif doit traverser le bloc « 4 piliers », comme sur desktop.
+  assert.ok(!source.includes("method-stars-band"), "plus de bande séparée au-dessus du contenu");
+  assert.ok(!css.includes(".method-stars-band"), "plus de règle CSS de bande séparée");
+
+  // Couche décorative en position absolue sur TOUTE la section...
+  assert.ok(
+    source.includes('className="pointer-events-none absolute inset-0 z-20"'),
+    "la couche des étoiles couvre la section entière",
+  );
+  // ...au-dessus du contenu, qui est lui-même positionné pour rester dans
+  // le flux de peinture (cartes opaques : derrière = invisible).
+  assert.ok(source.includes('className="relative z-10 mx-auto max-w-7xl px-6"'), "contenu en flux sous la couche");
+  assert.ok(source.includes("relative z-10 mx-auto flex h-full max-w-7xl"), "contenu ancré sous la couche");
+  assert.ok(
+    (source.match(/absolute left-1\/2 top-1\/2 z-20/g) ?? []).length === 2,
+    "les deux étoiles sont au même niveau de superposition",
+  );
+
+  // La barre de navigation est `fixed z-50` : elle reste au-dessus.
+  const chrome = readFileSync(new URL("../../components/layout/Header.tsx", import.meta.url), "utf8");
+  assert.ok(chrome.includes("fixed inset-x-0 top-0 z-50"), "la nav garde un z-index supérieur au motif");
+
+  // Les deux variantes montent le même composant d'étoiles au même endroit
+  // logique : aucune divergence de composition possible.
+  assert.equal((source.match(/<StarPair sepT=\{sepT\} \/>/g) ?? []).length, 2);
 });
 
 test("GARDE : les étoiles ne sont jamais masquées, en particulier sous 400px", () => {
@@ -281,15 +319,23 @@ test("GARDE : les étoiles ne sont jamais masquées, en particulier sous 400px",
 test("GARDE : reduced-motion conserve un rendu statique VISIBLE", () => {
   // `immobile` fige la progression à 0 — position de repos, étoiles
   // assemblées — sans jamais les retirer du rendu.
-  assert.ok(
-    /const sepT = immobile\s*\?\s*0/.test(source),
-    "reduced-motion doit figer la progression, pas supprimer les étoiles",
-  );
   assert.ok(source.includes("<MethodPillarsFlow immobile={reducedMotion} />"), "le repli reçoit bien l'information");
+  assert.ok(source.includes("if (immobile) return <MethodPillarsStatic />;"), "reduced-motion a son propre rendu");
   assert.ok(
     !/reducedMotion[^\n]*return null/.test(source),
     "reduced-motion ne doit jamais aboutir à un rendu vide",
   );
+
+  // Le rendu statique montre bien les deux étoiles — assemblées, à taille
+  // raisonnable — et ne les superpose PAS au texte : figée, une
+  // superposition n'est plus une traversée, c'est un motif posé en travers
+  // du contenu que rien ne vient dégager (mesuré sur rendu réel).
+  const statique = source.slice(source.indexOf("function MethodPillarsStatic"), source.indexOf("function MethodPillarsCrossing"));
+  assert.ok(statique.includes("<SethStarsMark"), "les deux étoiles restent affichées");
+  assert.ok(!statique.includes("absolute"), "aucune superposition sous reduced-motion");
+  assert.ok(!statique.includes("StarPair"), "aucun geste monté sous reduced-motion");
+  assert.ok(!statique.includes("useSectionScrollProgress"), "aucun écouteur de scroll sous reduced-motion");
+  assert.ok(statique.includes("<PillarsContent />"), "le contenu reste intégralement rendu");
 });
 
 test("GARDE : aucune détection d'appareil, d'agent utilisateur ni de largeur en JavaScript", () => {
@@ -309,7 +355,7 @@ test("GARDE : aucune largeur fixe ne peut provoquer de débordement horizontal",
   // les étoiles sont confinées par un conteneur qui coupe le dépassement.
   assert.ok(/--method-star-h:\s*min\([^)]*vw\)/.test(blocEtoiles), "la hauteur d'étoile est bornée par la largeur");
   assert.ok(/--method-col-half:\s*min\(640px,/.test(blocEtoiles), "la demi-colonne suit la largeur réelle du viewport");
-  assert.ok(source.includes("method-stars-band relative mb-12 overflow-hidden"), "la bande coupe le dépassement");
+  assert.ok(source.includes("method-stars-overlay sticky top-0 overflow-hidden"), "le clipueur coupe le dépassement");
   assert.ok(source.includes("pinned-scene-viewport sticky top-0 w-full overflow-hidden"), "la scène ancrée aussi");
   // Aucune coordonnée en pixels en dur dans le transform des étoiles.
   const rendu = source.slice(source.indexOf("function StarPair"), source.indexOf("function PillarsContent"));
@@ -328,7 +374,7 @@ test("GARDE : la scène est mesurée en svh, avec repli vh, pour la barre d'adre
 test("le titre reste lisible sur les petits écrans (pas de débordement horizontal)", () => {
   // « 1 transformation. » dépasse une colonne de 320px en text-4xl : la
   // taille de base est réduite, les paliers sm/md sont conservés.
-  assert.ok(flowHtml.includes("text-[1.6rem]"), "taille de base réduite sous sm");
+  assert.ok(flowHtml.includes("text-[1.45rem]"), "taille de base réduite sous sm");
   assert.ok(flowHtml.includes("sm:text-4xl"), "palier sm conservé");
   assert.ok(flowHtml.includes("md:text-6xl"), "palier desktop d'origine conservé");
 });
