@@ -73,6 +73,9 @@ const privateCacheHeaders = [
 ];
 
 const PRIVATE_PATHS = [
+  // Atteinte par un lien porteur d'un jeton à usage unique : ni cache
+  // partagé, ni conservation par un intermédiaire (incident du 27/07/2026).
+  "/reinitialiser-mot-de-passe",
   "/dashboard",
   "/admin",
   "/entrainement",
@@ -91,6 +94,12 @@ const nextConfig: NextConfig = {
       { source: "/:path*", headers: securityHeaders },
       // Les routes d'API renvoient des données personnelles : même règle.
       { source: "/api/:path*", headers: privateCacheHeaders },
+      // Le jeton d'activation transite dans l'URL : aucun `Referer` ne doit
+      // sortir de cette page vers une origine tierce, même en HTTPS.
+      {
+        source: "/reinitialiser-mot-de-passe",
+        headers: [{ key: "Referrer-Policy", value: "no-referrer" }],
+      },
       ...PRIVATE_PATHS.map((path) => ({ source: path, headers: privateCacheHeaders })),
       ...PRIVATE_PATHS.map((path) => ({
         source: `${path}/:path*`,
