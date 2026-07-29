@@ -3,7 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { composeProgramAssignedEmail, composePublicProgramWelcomeEmail } from "@/lib/email/templates";
-import { sendTransactionalEmail } from "@/lib/email/send-transactional-email";
+import { sendTransactionalEmail, wasEmailAlreadySent } from "@/lib/email/send-transactional-email";
 import { hasLegalConsentForCheckoutSession, insertLegalConsent } from "@/lib/legal-consents";
 import { setProgramAssignment } from "@/lib/supabase/programs";
 import type { Database } from "@/types/supabase";
@@ -269,8 +269,48 @@ async function grantExistingStudent(
     throw new RetryablePublicProgramProvisioningError(`Échec de l'activation de l'accès au programme (session ${input.checkoutSessionId}).`);
   }
 
-  const { data: studentRow } = await supabase.from("students").select("email").eq("id", student.id).maybeSingle();
+  const { data: studentRow } = await supabase
+    .from("students")
+    .select("email, access_type, user_id")
+    .eq("id", student.id)
+    .maybeSingle();
   const recipientEmail = studentRow?.email || input.email;
+
+  /**
+   * Reprise d'une création interrompue.
+   *
+   * Si un achat précédent a créé le compte mais n'a pas pu remettre le lien
+   * d'accès (génération ou envoi en échec), l'élève existe désormais : la
+   * livraison Stripe rejouée passe par ici, et non plus par
+   * `createProgramOnlyStudent`. Sans cette reprise, l'acheteur resterait
+   * sans aucun moyen de définir son mot de passe.
+   *
+   * Deux conditions, volontairement étroites : le compte doit être un accès
+   * « programme seul » (créé par un achat, jamais par le coach), et aucun
+   * e-mail de bienvenue ne doit lui être encore parti — `envoyerLienAccesInitial`
+   * le vérifie lui-même. Un élève en coaching, ou un acheteur de longue date
+   * ayant déjà son mot de passe, ne reçoit donc jamais de lien d'activation.
+   */
+  const compteJamaisActive = studentRow?.access_type === "programme_seul";
+  if (compteJamaisActive && recipientEmail) {
+    const avantReprise = await wasEmailAlreadySent(supabase, {
+      emailType: "welcome",
+      relatedEntityType: "student",
+      relatedEntityId: student.id,
+    });
+    if (!avantReprise) {
+      await envoyerLienAccesInitial(
+        supabase,
+        { ...input, email: recipientEmail },
+        { studentId: student.id, authUserId: studentRow?.user_id ?? null },
+      );
+      // Le compte vient seulement d'être rendu utilisable : lui envoyer en
+      // plus « ton programme est disponible » n'apporterait rien et
+      // brouillerait le message. On s'arrête ici.
+      return { studentId: student.id, isNewAccount: false };
+    }
+  }
+
   if (recipientEmail) {
     const email = composeProgramAssignedEmail({
       firstName: student.firstName || input.firstName,
@@ -293,16 +333,132 @@ async function grantExistingStudent(
   return { studentId: student.id, isNewAccount: false };
 }
 
+
+/**
+ * Envoie le lien de création de mot de passe — ou ne fait rien s'il est déjà
+ * parti.
+ *
+ * ---------------------------------------------------------------------
+ * Aucun repli sur un jeton antérieur
+ * ---------------------------------------------------------------------
+ * Le jeton envoyé est TOUJOURS celui que produit l'appel ci-dessous, jamais
+ * un jeton généré plus tôt. La raison est subtile mais décisive : si cet
+ * appel échoue côté réseau APRÈS avoir été traité par Supabase, il a pu
+ * invalider le jeton précédent sans que nous le sachions. Envoyer l'ancien
+ * reviendrait alors à expédier un lien mort — exactement le symptôme que ce
+ * chantier corrige. On préfère ne rien envoyer et laisser Stripe rejouer.
+ *
+ * ---------------------------------------------------------------------
+ * Idempotence
+ * ---------------------------------------------------------------------
+ * Un e-mail de bienvenue effectivement parti (`status = "sent"`) bloque tout
+ * nouvel envoi. Deux clés sont interrogées : `student/studentId`, la
+ * convention du projet (cf. app/api/email/welcome/route.ts), et
+ * `program/programId`, employée par les envois antérieurs à ce correctif —
+ * sans quoi un acheteur de longue date pourrait recevoir un lien d'activation
+ * dont il n'a plus besoin.
+ *
+ * En cas d'échec — génération du lien impossible, ou envoi refusé par le
+ * transporteur — la fonction lève `RetryablePublicProgramProvisioningError`
+ * lorsqu'un paiement est en jeu. Le webhook répond alors 500, Stripe
+ * reprogramme une livraison, et la reprise repassera ici pour générer un
+ * jeton FRAIS. Le paiement n'est pas annulé, le programme reste attribué :
+ * seule la remise du lien est retentée.
+ */
+async function envoyerLienAccesInitial(
+  supabase: TypedSupabaseClient,
+  input: ProvisionPublicProgramAccessInput,
+  cible: { studentId: string; authUserId: string | null },
+): Promise<void> {
+  const dejaEnvoye =
+    (await wasEmailAlreadySent(supabase, {
+      emailType: "welcome",
+      relatedEntityType: "student",
+      relatedEntityId: cible.studentId,
+    })) ||
+    (await wasEmailAlreadySent(supabase, {
+      emailType: "welcome",
+      relatedEntityType: "program",
+      relatedEntityId: input.programId,
+    }));
+  if (dejaEnvoye) return;
+
+  const { data: lien, error: lienError } = await supabase.auth.admin.generateLink({
+    type: "invite",
+    email: input.email,
+    options: { redirectTo: `${appUrl()}/reinitialiser-mot-de-passe` },
+  });
+
+  const hashedToken = lien?.properties?.hashed_token;
+  if (lienError || !hashedToken) {
+    // Jamais le jeton, le lien ni l'adresse dans le journal — seul le motif
+    // technique et l'identifiant interne de l'élève.
+    console.error(
+      `[public-program-provisioning] Lien d'accès non généré (élève ${cible.studentId}) : ${lienError?.message ?? "jeton absent"}.`,
+    );
+    if (input.checkoutSessionId) {
+      throw new RetryablePublicProgramProvisioningError(
+        `Lien d'accès non généré (session ${input.checkoutSessionId}). Aucun e-mail envoyé, reprise attendue.`,
+      );
+    }
+    return;
+  }
+
+  const actionLink = `${appUrl()}/reinitialiser-mot-de-passe?token_hash=${encodeURIComponent(hashedToken)}&type=invite`;
+  const contenu = composePublicProgramWelcomeEmail({
+    firstName: input.firstName,
+    programName: input.programName,
+    setPasswordUrl: actionLink,
+  });
+
+  const resultat = await sendTransactionalEmail(supabase, {
+    emailType: "welcome",
+    recipientEmail: input.email,
+    recipientUserId: cible.authUserId,
+    subject: contenu.subject,
+    html: contenu.html,
+    text: contenu.text,
+    // Convention du projet pour un e-mail de bienvenue : il concerne
+    // l'élève, pas le programme (cf. app/api/email/welcome/route.ts). C'est
+    // aussi ce qui rend l'idempotence correcte quand deux acheteurs
+    // différents prennent le même programme.
+    relatedEntityType: "student",
+    relatedEntityId: cible.studentId,
+    metadata: { source: "public_program_purchase", programId: input.programId },
+  });
+
+  if (resultat.status === "failed" && input.checkoutSessionId) {
+    // L'échec est déjà journalisé dans `email_logs` par sendTransactionalEmail.
+    throw new RetryablePublicProgramProvisioningError(
+      `Envoi du lien d'accès en échec (session ${input.checkoutSessionId}). Reprise attendue avec un jeton neuf.`,
+    );
+  }
+}
+
 /**
  * Chemin "email inconnu" : crée le compte auth (invite) + profils + fiche
  * élève (access_type "programme_seul") + assignation, envoie l'email de
  * bienvenue avec le lien de définition de mot de passe.
+ *
+ * Ordre voulu (incident du 27/07/2026) : le jeton effectivement ENVOYÉ est
+ * généré au tout dernier moment, juste avant la composition de l'e-mail.
+ * Auparavant il était produit en tête de fonction, puis restait à ne rien
+ * faire pendant les insertions, l'enregistrement des consentements et
+ * l'envoi de l'e-mail de commande — une fenêtre de plusieurs secondes
+ * pendant laquelle rien ne le protégeait. Réduire cette fenêtre ne suffit
+ * pas à elle seule (la protection réelle est côté page, qui n'échange plus
+ * le jeton sans clic humain), mais il n'y a aucune raison de la laisser
+ * ouverte.
  */
 async function createProgramOnlyStudent(
   supabase: TypedSupabaseClient,
   input: ProvisionPublicProgramAccessInput,
 ): Promise<ProvisionPublicProgramAccessResult | null> {
-  const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
+  // Premier appel : il CRÉE le compte auth. Son jeton n'est pas utilisé —
+  // `generateLink` est la seule voie pour créer un compte en mode "invite"
+  // sans passer par `createUser`, qui n'a pas la même sémantique. Le jeton
+  // réellement envoyé sera régénéré plus bas.
+  const { data: creation, error: creationError } = await supabase.auth.admin.generateLink({
     type: "invite",
     email: input.email,
     // Passe par /reinitialiser-mot-de-passe (jamais /entrainement
@@ -314,25 +470,18 @@ async function createProgramOnlyStudent(
     options: { redirectTo: `${appUrl()}/reinitialiser-mot-de-passe` },
   });
 
-  if (linkError || !linkData?.user) {
+  if (creationError || !creation?.user) {
     // Cas limite : un compte auth existe déjà pour cet email sans fiche
     // `students` correspondante (ex : compte créé manuellement puis jamais
     // relié). On ne peut pas créer de doublon auth.users — on log clairement
     // pour une intervention manuelle plutôt que d'échouer silencieusement.
     console.error(
-      `[public-program-provisioning] Échec de création du compte pour ${input.email} : ${linkError?.message ?? "utilisateur introuvable"}. Intervention manuelle probablement nécessaire (compte auth déjà existant sans fiche élève ?).`,
+      `[public-program-provisioning] Échec de création du compte pour ${input.email} : ${creationError?.message ?? "utilisateur introuvable"}. Intervention manuelle probablement nécessaire (compte auth déjà existant sans fiche élève ?).`,
     );
     return null;
   }
 
-  const authUserId = linkData.user.id;
-  // token_hash plutôt que action_link (hébergé par Supabase) : ce dernier
-  // tronque le chemin de redirectTo dès qu'il ne correspond pas exactement
-  // à la liste "Redirect URLs" du dashboard — voir le commentaire détaillé
-  // dans ResetPasswordForm.tsx, qui échange ce jeton via verifyOtp().
-  const actionLink = linkData.properties?.hashed_token
-    ? `${appUrl()}/reinitialiser-mot-de-passe?token_hash=${encodeURIComponent(linkData.properties.hashed_token)}&type=invite`
-    : `${appUrl()}/connexion`;
+  const authUserId = creation.user.id;
 
   const { error: profileError } = await supabase.from("profiles").insert({
     user_id: authUserId,
@@ -374,22 +523,9 @@ async function createProgramOnlyStudent(
     throw new RetryablePublicProgramProvisioningError(`Échec de l'activation de l'accès au programme (session ${input.checkoutSessionId}).`);
   }
 
-  const email = composePublicProgramWelcomeEmail({
-    firstName: input.firstName,
-    programName: input.programName,
-    setPasswordUrl: actionLink,
-  });
-  await sendTransactionalEmail(supabase, {
-    emailType: "welcome",
-    recipientEmail: input.email,
-    recipientUserId: authUserId,
-    subject: email.subject,
-    html: email.html,
-    text: email.text,
-    relatedEntityType: "program",
-    relatedEntityId: input.programId,
-    metadata: { source: "public_program_purchase" },
-  });
+  // Remise du lien d'accès : jeton généré à l'instant, aucun repli sur
+  // celui du premier appel (voir envoyerLienAccesInitial).
+  await envoyerLienAccesInitial(supabase, input, { studentId: studentRow.id, authUserId });
 
   return { studentId: studentRow.id, isNewAccount: true };
 }

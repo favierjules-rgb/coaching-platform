@@ -34,6 +34,8 @@
     "test:business-inquiry-email": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/business-inquiry-email.mts",
     "test:free-assessment-email": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/free-assessment-email.mts",
     "test:free-assessment-page": "npx tsx scripts/tests/free-assessment-page.mts",
+    "test:account-activation": "NODE_OPTIONS=\"--no-warnings\" npx tsx --experimental-test-module-mocks scripts/tests/account-activation.mts",
+    "test:account-activation-provisioning": "NODE_OPTIONS=\"--conditions=react-server --no-warnings\" npx tsx --experimental-test-module-mocks scripts/tests/account-activation-provisioning.mts",
     "test:security-hardening": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/security-hardening.mts",
     "test:authz-hardening": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/authz-hardening.mts",
     "test:authz-behaviour": "NODE_OPTIONS=\"--conditions=react-server --no-warnings\" npx tsx --experimental-test-module-mocks scripts/tests/authz-behaviour.mts",

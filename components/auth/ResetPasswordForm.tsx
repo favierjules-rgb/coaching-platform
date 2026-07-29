@@ -1,56 +1,85 @@
 "use client";
 
-import { useEffect, useId, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { AlertCircle, ArrowLeft, Loader2 } from "lucide-react";
-import type { EmailOtpType } from "@supabase/supabase-js";
+import { AlertCircle, ArrowLeft, Loader2, ShieldCheck } from "lucide-react";
 
 import { AuthCardLayout } from "@/components/shared/AuthCardLayout";
+import {
+  creerVerificateurActivation,
+  lireJetonActivation,
+  urlPorteUnJeton,
+  urlSansJeton,
+  type JetonActivation,
+} from "@/lib/auth/activation-token";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
-type Status = "checking" | "ready" | "invalid";
-
-const VALID_OTP_TYPES: readonly EmailOtpType[] = ["recovery", "invite", "magiclink", "signup", "email_change", "email"];
+/**
+ * `arme`    — un jeton exploitable est en mémoire, EN ATTENTE d'un clic ;
+ * `session` — une session existe déjà (repli `#access_token`, ou vérification
+ *             réussie) : le formulaire de mot de passe est affiché ;
+ * `consomme`— le lien a déjà été ouvert ;
+ * `invalide`— aucun jeton exploitable, ou jeton refusé.
+ */
+type Etat = "arme" | "session" | "consomme" | "invalide";
 
 function redirectPathForRole(role: string): string {
   return role === "student" ? "/dashboard" : "/admin";
 }
 
 /**
- * Formulaire "définir un nouveau mot de passe" (/reinitialiser-mot-de-passe)
- * — destination commune de trois liens Supabase distincts : le recovery de
- * /mot-de-passe-oublie, l'invite envoyé aux nouveaux élèves (coach ou achat
- * de programme public, voir lib/supabase/coach-student-provisioning.ts et
- * lib/supabase/public-program-provisioning.ts) et le magiclink d'auto-
- * connexion post-paiement (voir app/api/public/programs/checkout-status/route.ts).
+ * Formulaire « définir un nouveau mot de passe » (/reinitialiser-mot-de-passe)
+ * — destination commune du lien d'invitation envoyé aux nouveaux élèves et du
+ * lien de récupération de /mot-de-passe-oublie.
  *
- * Chemin principal — ?token_hash=...&type=... : on échange nous-mêmes le
- * jeton contre une session via verifyOtp(). Avant, ces liens pointaient vers
- * l'URL "action_link" hébergée par Supabase (/auth/v1/verify?...&redirect_to=...),
- * qui redirige ENSUITE vers cette page avec la session dans le hash — mais
- * GoTrue tronque silencieusement redirect_to (y compris le chemin
- * /reinitialiser-mot-de-passe) dès qu'il ne correspond pas EXACTEMENT à une
- * entrée de la liste "Redirect URLs" du dashboard Supabase (les wildcards
- * `**` n'ont pas suffi en pratique pour les liens générés côté admin), ce
- * qui a cassé ce flux en prod (17/07/2026 — mot de passe admin écrasé sans
- * le vouloir, puis liens de récupération systématiquement "invalides"). En
- * passant nous-mêmes le hashed_token en paramètre de requête vers CETTE
- * page et en appelant verifyOtp() ici, on n'a plus jamais besoin de la
- * redirection hébergée par Supabase ni de sa liste d'URLs autorisées.
+ * ---------------------------------------------------------------------
+ * Pourquoi la vérification n'a PLUS lieu au chargement
+ * ---------------------------------------------------------------------
+ * Incident du 27/07/2026, établi par les traces Supabase : le jeton
+ * d'invitation a été vérifié avec SUCCÈS 8 secondes après l'envoi de
+ * l'e-mail (`email_confirmed_at`), sans qu'aucune session ne soit créée. Le
+ * clic réel de l'acheteur, 1 min 43 plus tard, a reçu un 403 — le jeton était
+ * déjà consommé. Autrement dit : quelque chose avait ouvert le lien avant
+ * l'utilisateur.
  *
- * Repli — #access_token=... (detectSessionInUrl, activé par défaut côté
- * @supabase/ssr) : conservé pour tout ancien lien déjà envoyé/en cache avant
- * ce correctif.
+ * C'est le comportement normal d'un lien à usage unique envoyé par e-mail :
+ * relais de sécurité, aperçu de lien, préchargement du navigateur, indexation
+ * — un GET automatique suffit à le brûler. Aucune correction côté serveur ne
+ * peut l'empêcher tant que le simple CHARGEMENT de la page consomme le jeton.
+ *
+ * D'où la règle appliquée ici : **le chargement de la page ne vérifie
+ * rien.** Le jeton est mis de côté en mémoire, retiré de l'URL, et n'est
+ * échangé contre une session qu'au clic explicite de l'utilisateur sur
+ * « Définir mon mot de passe ». Un automate qui suit le lien voit une page
+ * d'attente ; il ne déclenche aucun appel réseau vers Supabase.
+ *
+ * Le jeton est retiré de la barre d'adresse dès le premier rendu
+ * (`router.replace`) : il ne part donc plus dans le `Referer`, ne reste pas
+ * dans l'historique, et ne peut plus être rejoué depuis un partage d'URL.
+ *
+ * ---------------------------------------------------------------------
+ * Pourquoi le jeton n'est lu qu'une fois
+ * ---------------------------------------------------------------------
+ * Il est capté par l'initialiseur paresseux d'un `useState`, qui ne
+ * s'exécute qu'à la création de l'instance, et le drapeau « déjà tenté »
+ * vit dans un `useRef`. Ni l'un ni l'autre ne dépend de `searchParams`,
+ * dont la référence change après hydratation. Aucune ré-exécution d'effet,
+ * aucun re-rendu, aucun changement de props ne peut donc déclencher une
+ * seconde vérification.
+ *
+ * ---------------------------------------------------------------------
+ * Repli `#access_token`
+ * ---------------------------------------------------------------------
+ * Conservé pour les liens historiques : si `detectSessionInUrl` a déjà
+ * établi une session, on passe directement au formulaire. Ce chemin ne
+ * consomme aucun jeton d'invitation.
  *
  * Garde anti-collision multi-onglets : le client Supabase stocke la session
- * dans localStorage, PARTAGÉ par tous les onglets du même navigateur/profil.
- * Si un autre onglet (ex. une session admin déjà ouverte) réécrit cette
- * clé entre le moment où le lien est traité et le clic sur "Valider", le
- * mot de passe pourrait être appliqué au mauvais compte. On mémorise donc
- * l'utilisateur ciblé dès que la session est prête, et on revérifie juste
- * avant l'appel updateUser que la session courante correspond toujours à ce
- * même utilisateur — sinon on refuse plutôt que d'écraser un autre compte.
+ * dans localStorage, PARTAGÉ par tous les onglets. On mémorise l'utilisateur
+ * ciblé au moment où la session est établie, et on revérifie juste avant
+ * `updateUser` que la session correspond toujours — sinon on refuse plutôt
+ * que d'écraser le mot de passe d'un autre compte.
  */
 export function ResetPasswordForm({ supabaseConfigured }: { supabaseConfigured: boolean }) {
   const router = useRouter();
@@ -59,58 +88,97 @@ export function ResetPasswordForm({ supabaseConfigured }: { supabaseConfigured: 
   const confirmId = useId();
 
   const [supabase] = useState(() => (supabaseConfigured ? createSupabaseBrowserClient() : null));
-  const [status, setStatus] = useState<Status>(supabase ? "checking" : "invalid");
+
+  /**
+   * Jeton capté UNE SEULE FOIS, à la création de l'instance.
+   *
+   * L'initialiseur paresseux de `useState` ne s'exécute qu'au premier rendu :
+   * la valeur survit ensuite à tous les re-rendus, sans jamais relire
+   * `searchParams` — dont la référence change après hydratation. Un
+   * changement de props, un re-rendu ou une navigation ne peuvent donc pas
+   * ressusciter un jeton déjà utilisé.
+   */
+  const [jetonInitial] = useState<JetonActivation | null>(() =>
+    lireJetonActivation((cle) => searchParams.get(cle)),
+  );
+
+  /**
+   * Vérificateur à usage unique, créé une seule fois par instance. Toute la
+   * garde anti-rejeu vit dans `lib/auth/activation-token.ts`, testée à part.
+   */
+  const verificateurRef = useRef(
+    creerVerificateurActivation(jetonInitial, {
+      verifierJeton: async (jeton) => {
+        if (!supabase) return { messageErreur: "client indisponible" };
+        const { data, error: verifyError } = await supabase.auth.verifyOtp({
+          token_hash: jeton.tokenHash,
+          // Correspondance stricte avec le type émis : invite → invite,
+          // recovery → recovery. Jamais de conversion.
+          type: jeton.type,
+        });
+        if (verifyError || !data.session) return { messageErreur: verifyError?.message ?? "aucune session" };
+        return { userId: data.session.user.id };
+      },
+    }),
+  );
+
+  const [etat, setEtat] = useState<Etat>(() => (jetonInitial ? "arme" : "invalide"));
   const [targetUserId, setTargetUserId] = useState<string | null>(null);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [verification, setVerification] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  /**
+   * Nettoyage de l'URL — le SEUL effet de cette page. Il ne contacte aucun
+   * service : il retire `token_hash` et `type` de la barre d'adresse, sans
+   * rechargement. Aucune vérification n'a lieu ici, par construction.
+   */
   useEffect(() => {
-    if (!supabase) return;
-
-    let settled = false;
-    function markReady(userId: string) {
-      if (settled) return;
-      settled = true;
-      setTargetUserId(userId);
-      setStatus("ready");
+    if (typeof window === "undefined") return;
+    if (urlPorteUnJeton(window.location.href)) {
+      router.replace(urlSansJeton(window.location.href), { scroll: false });
     }
+  }, [router]);
 
-    const tokenHash = searchParams.get("token_hash");
-    const typeParam = searchParams.get("type");
-    if (tokenHash && typeParam && (VALID_OTP_TYPES as string[]).includes(typeParam)) {
-      supabase.auth.verifyOtp({ token_hash: tokenHash, type: typeParam as EmailOtpType }).then(({ data, error: verifyError }) => {
-        if (verifyError || !data.session) {
-          if (!settled) setStatus("invalid");
-          return;
-        }
-        markReady(data.session.user.id);
-      });
-    }
-
-    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
-      if ((event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") && session) {
-        markReady(session.user.id);
-      }
-    });
-
+  /**
+   * Repli pour les liens historiques `#access_token` : `detectSessionInUrl`
+   * a pu établir une session sans notre intervention. On se contente de la
+   * CONSTATER — aucun jeton n'est consommé ici.
+   */
+  useEffect(() => {
+    if (!supabase || jetonInitial) return;
+    let annule = false;
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session) markReady(data.session.user.id);
+      if (annule || !data.session) return;
+      setTargetUserId(data.session.user.id);
+      setEtat("session");
     });
-
-    // L'échange token_hash / le hash d'auth peuvent mettre un instant à être
-    // traités au premier chargement — on laisse une marge avant de conclure
-    // à un lien invalide/expiré plutôt que d'afficher l'erreur trop tôt.
-    const timeout = setTimeout(() => {
-      if (!settled) setStatus("invalid");
-    }, 4000);
-
     return () => {
-      listener.subscription.unsubscribe();
-      clearTimeout(timeout);
+      annule = true;
     };
-  }, [supabase, searchParams]);
+  }, [supabase, jetonInitial]);
+
+  /**
+   * Échange du jeton contre une session — déclenché UNIQUEMENT par le clic
+   * de l'utilisateur. Le drapeau `tentativeFaiteRef` est posé avant tout
+   * `await` : deux clics rapprochés ne produisent qu'un seul appel réseau.
+   */
+  async function handleVerifier() {
+    if (!verificateurRef.current.disponible()) return;
+    setVerification(true);
+    const issue = await verificateurRef.current.tenter();
+    setVerification(false);
+
+    if (issue.etat === "ignore") return;
+    if (issue.etat === "session") {
+      setTargetUserId(issue.userId);
+      setEtat("session");
+      return;
+    }
+    setEtat(issue.etat);
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -160,15 +228,10 @@ export function ResetPasswordForm({ supabaseConfigured }: { supabaseConfigured: 
     router.refresh();
   }
 
-  if (status === "checking") {
-    return (
-      <AuthCardLayout card={false}>
-        <Loader2 size={24} className="animate-spin text-primary" />
-      </AuthCardLayout>
-    );
-  }
+  /* ─────────────── Lien déjà ouvert ─────────────── */
 
-  if (status === "invalid") {
+  if (etat === "consomme" || etat === "invalide") {
+    const dejaOuvert = etat === "consomme";
     return (
       <AuthCardLayout
         cardClassName="text-center"
@@ -178,18 +241,54 @@ export function ResetPasswordForm({ supabaseConfigured }: { supabaseConfigured: 
             className="mt-6 flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary"
           >
             <ArrowLeft size={14} />
-            Redemander un lien
+            Demander un nouveau lien
           </Link>
         }
       >
         <AlertCircle size={28} className="mx-auto mb-4 text-red-400" />
-        <h1 className="mb-2 font-heading text-2xl font-extrabold uppercase text-foreground">Lien invalide</h1>
+        <h1 className="mb-2 font-heading text-2xl font-extrabold uppercase text-foreground">
+          {dejaOuvert ? "Lien déjà ouvert" : "Lien expiré"}
+        </h1>
         <p className="text-sm leading-relaxed text-muted-foreground">
-          Ce lien est invalide ou a expiré. Redemande un lien pour définir ton mot de passe.
+          {dejaOuvert
+            ? "Ce lien a déjà été ouvert. Demandez un nouveau lien pour définir votre mot de passe."
+            : "Ce lien n'est plus valide. Demandez un nouveau lien pour continuer."}
         </p>
       </AuthCardLayout>
     );
   }
+
+  /* ─────────────── Jeton en attente du clic ─────────────── */
+
+  if (etat === "arme") {
+    return (
+      <AuthCardLayout cardClassName="text-center">
+        <ShieldCheck size={28} className="mx-auto mb-4 text-primary" />
+        <h1 className="mb-2 font-heading text-2xl font-extrabold uppercase text-foreground">Votre lien est prêt</h1>
+        <p className="mb-6 text-sm leading-relaxed text-muted-foreground">
+          Votre lien est prêt. Cliquez sur le bouton ci-dessous pour sécuriser votre accès et définir votre mot de
+          passe.
+        </p>
+        <button
+          type="button"
+          onClick={handleVerifier}
+          disabled={verification}
+          className="w-full bg-primary py-3 text-center text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
+        >
+          {verification ? (
+            <span className="inline-flex items-center gap-2">
+              <Loader2 size={14} className="animate-spin" />
+              Vérification...
+            </span>
+          ) : (
+            "Définir mon mot de passe"
+          )}
+        </button>
+      </AuthCardLayout>
+    );
+  }
+
+  /* ─────────────── Session établie : formulaire ─────────────── */
 
   return (
     <AuthCardLayout>
