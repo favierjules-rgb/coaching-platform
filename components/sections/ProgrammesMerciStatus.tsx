@@ -10,6 +10,9 @@ const MAX_ATTEMPTS = 14; // ~20s, au-delà on bascule sur le message email.
 
 type Phase = "checking" | "ready" | "fallback";
 
+/** Ce que le backend a pu confirmer sur la remise du lien d'activation. */
+type RemiseLien = "confirmee" | "inconnue";
+
 /** Destinations acceptées : jamais une URL fournie librement par l'API. */
 const DESTINATIONS_AUTORISEES = new Set(["/connexion"]);
 
@@ -39,6 +42,7 @@ export function ProgrammesMerciStatus() {
   const sessionId = searchParams.get("session_id");
   const [phase, setPhase] = useState<Phase>(sessionId ? "checking" : "fallback");
   const [destination, setDestination] = useState("/connexion");
+  const [remiseLien, setRemiseLien] = useState<RemiseLien>("inconnue");
   const attempts = useRef(0);
 
   useEffect(() => {
@@ -55,6 +59,8 @@ export function ProgrammesMerciStatus() {
         if (body?.ready) {
           const cible = typeof body.redirectTo === "string" ? body.redirectTo : "";
           if (DESTINATIONS_AUTORISEES.has(cible)) setDestination(cible);
+          // On n'affirme un envoi que si le backend l'a confirmé.
+          setRemiseLien(body.accessEmailSent === true ? "confirmee" : "inconnue");
           setPhase("ready");
           return;
         }
@@ -92,8 +98,9 @@ export function ProgrammesMerciStatus() {
         <MailCheck size={28} className="mx-auto mb-4 text-primary" />
         <h1 className="mb-2 font-heading text-2xl font-extrabold uppercase text-foreground">Ton accès est prêt !</h1>
         <p className="text-sm leading-relaxed text-muted-foreground">
-          On vient de t&apos;envoyer un email avec un lien pour définir ton mot de passe. Une fois c&apos;est fait, tu
-          retrouves ton programme dans ton espace.
+          {remiseLien === "confirmee"
+            ? "On vient de t'envoyer un email avec un lien pour définir ton mot de passe. Une fois c'est fait, tu retrouves ton programme dans ton espace."
+            : "Ton programme est bien enregistré. L'email contenant ton lien de connexion arrive dans les prochaines minutes — pense à vérifier tes spams. S'il n'arrive pas, tu peux demander un lien depuis la page de connexion."}
         </p>
         <Link
           href={destination}
@@ -110,8 +117,9 @@ export function ProgrammesMerciStatus() {
       <MailCheck size={28} className="mx-auto mb-4 text-primary" />
       <h1 className="mb-2 font-heading text-2xl font-extrabold uppercase text-foreground">C&apos;est fait !</h1>
       <p className="text-sm leading-relaxed text-muted-foreground">
-        Ton accès est en cours de préparation. Tu vas recevoir un email dans les prochaines minutes avec un lien pour
-        définir ton mot de passe et accéder directement à ton programme.
+        Ton accès est en cours de préparation. Un email contenant ton lien de connexion doit arriver dans les
+        prochaines minutes — pense à vérifier tes spams. S&apos;il n&apos;arrive pas, tu peux demander un lien depuis la
+        page de connexion.
       </p>
     </div>
   );

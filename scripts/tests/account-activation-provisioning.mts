@@ -84,11 +84,29 @@ const JETON_SECOND = "jeton-second-appel-non-reel";
 function faireSupabaseProvisionnement(options: {
   eleveExistant?: { id: string; access_type: string; user_id: string | null; email: string } | null;
   echecSecondLien?: boolean;
+  /** Renseigné quand le compte a déjà servi : la reprise ne doit rien envoyer. */
+  derniereConnexion?: string | null;
+  /** Simule une panne transitoire de l'API Auth. */
+  echecGetUserById?: boolean;
+  /** Simule une réponse sans erreur mais sans utilisateur (cas ambigu). */
+  utilisateurAbsent?: boolean;
 }) {
   const appelsGenerateLink: string[] = [];
   const client = {
     auth: {
       admin: {
+        getUserById: async () => {
+          if (options.echecGetUserById) {
+            return { data: { user: null }, error: { message: "service indisponible (simulé)" } };
+          }
+          if (options.utilisateurAbsent) {
+            return { data: { user: null }, error: null };
+          }
+          return {
+            data: { user: { last_sign_in_at: options.derniereConnexion ?? null } },
+            error: null,
+          };
+        },
         generateLink: async ({ type }: { type: string }) => {
           appelsGenerateLink.push(type);
           const premier = appelsGenerateLink.length === 1;
@@ -267,6 +285,312 @@ await test("27. un envoi en échec est rejouable, sans second compte ni seconde 
   // Le compte a été créé une seule fois ; la reprise passera par le chemin
   // « élève existant », donc sans nouvelle création ni nouvelle attribution.
   assert.equal(appelsGenerateLink.length, 2, "un appel de création, un appel de remise");
+});
+
+
+/* ═══════ 28-37. Idempotence par COMPTE, jamais par programme ═══════ */
+
+/**
+ * Régression du 29/07/2026 : la clé de déduplication du welcome interrogeait
+ * aussi `program/programId`. Or ce champ est partagé par tous les acheteurs
+ * d'un même programme — dès qu'un premier avait reçu son lien, tous les
+ * suivants étaient ignorés en silence. Les journaux de production l'ont
+ * confirmé : deux `welcome` en statut `sent`, une seule valeur de
+ * `related_entity_id`.
+ */
+
+const PROGRAMME_X = "programme-x";
+
+function achatDe(email: string, session: string) {
+  return {
+    email,
+    firstName: "Acheteur",
+    lastName: "Test",
+    programId: PROGRAMME_X,
+    programName: "Programme X",
+    coachId: null,
+    checkoutSessionId: session,
+  };
+}
+
+await test("28. élève A achète le programme X → welcome envoyé", async () => {
+  courrier.envois.length = 0;
+  courrier.dejaEnvoyes.clear();
+  courrier.statutProchainEnvoi = "sent";
+  const { client } = faireSupabaseProvisionnement({ eleveExistant: null });
+
+  await provisionPublicProgramAccess(client as never, achatDe("a@exemple.test", "cs_a") as never);
+  const welcome = courrier.envois.filter((e) => e.emailType === "welcome");
+  assert.equal(welcome.length, 1, "l'élève A doit recevoir son lien");
+  assert.equal(welcome[0].relatedEntityType, "student", "la clé du journal est l'élève");
+});
+
+await test("29. élève B achète le MÊME programme X → welcome envoyé aussi", async () => {
+  courrier.envois.length = 0;
+  courrier.dejaEnvoyes.clear();
+  // L'élève A a bien reçu le sien : sa trace existe, sous SA clé.
+  courrier.dejaEnvoyes.add("welcome|student|student-A");
+  courrier.statutProchainEnvoi = "sent";
+  const { client } = faireSupabaseProvisionnement({ eleveExistant: null });
+
+  await provisionPublicProgramAccess(client as never, achatDe("b@exemple.test", "cs_b") as never);
+  assert.equal(
+    courrier.envois.filter((e) => e.emailType === "welcome").length,
+    1,
+    "l'élève B doit recevoir SON lien, indépendamment de l'élève A",
+  );
+});
+
+await test("30. une ancienne ligne welcome liée au programId ne bloque personne", async () => {
+  courrier.envois.length = 0;
+  courrier.dejaEnvoyes.clear();
+  // Exactement la situation de production : un welcome historique journalisé
+  // sous le programme, pas sous l'élève.
+  courrier.dejaEnvoyes.add(`welcome|program|${PROGRAMME_X}`);
+  courrier.statutProchainEnvoi = "sent";
+  const { client } = faireSupabaseProvisionnement({ eleveExistant: null });
+
+  await provisionPublicProgramAccess(client as never, achatDe("b@exemple.test", "cs_b") as never);
+  assert.equal(
+    courrier.envois.filter((e) => e.emailType === "welcome").length,
+    1,
+    "une trace par programme ne doit JAMAIS bloquer un nouvel acheteur",
+  );
+});
+
+await test("31. le code n'interroge plus jamais le journal par programme pour le welcome", () => {
+  const source = lire("../../lib/supabase/public-program-provisioning.ts");
+  const appels = [...source.matchAll(/wasEmailAlreadySent\(supabase, \{([\s\S]*?)\}\)/g)].map((m) => m[1]);
+  assert.ok(appels.length > 0, "aucun appel trouvé — le test ne prouverait rien");
+  for (const appel of appels) {
+    if (!appel.includes('emailType: "welcome"')) continue;
+    assert.ok(
+      appel.includes('relatedEntityType: "student"'),
+      `la clé du welcome doit être l'élève : ${appel.trim()}`,
+    );
+    assert.ok(
+      !appel.includes('relatedEntityType: "program"'),
+      `programId ne doit jamais servir de clé d'idempotence : ${appel.trim()}`,
+    );
+  }
+});
+
+await test("32. rejeu après un welcome sent → aucun deuxième e-mail", async () => {
+  courrier.envois.length = 0;
+  courrier.dejaEnvoyes.clear();
+  courrier.dejaEnvoyes.add("welcome|student|student-1");
+  courrier.statutProchainEnvoi = "sent";
+  const { client, appelsGenerateLink } = faireSupabaseProvisionnement({
+    eleveExistant: { id: "student-1", access_type: "programme_seul", user_id: "auth-1", email: "a@exemple.test" },
+  });
+
+  await provisionPublicProgramAccess(client as never, achatDe("a@exemple.test", "cs_a") as never);
+  assert.equal(courrier.envois.filter((e) => e.emailType === "welcome").length, 0, "aucun second welcome");
+  assert.equal(appelsGenerateLink.length, 0, "aucun jeton généré inutilement");
+});
+
+await test("33. rejeu après un welcome failed → nouveau lien et nouvel envoi", async () => {
+  courrier.envois.length = 0;
+  courrier.dejaEnvoyes.clear(); // `failed` n'est jamais enregistré comme « déjà envoyé »
+  courrier.statutProchainEnvoi = "sent";
+  const { client, appelsGenerateLink } = faireSupabaseProvisionnement({
+    eleveExistant: { id: "student-1", access_type: "programme_seul", user_id: "auth-1", email: "a@exemple.test" },
+  });
+
+  await provisionPublicProgramAccess(client as never, achatDe("a@exemple.test", "cs_a") as never);
+  assert.equal(appelsGenerateLink.length, 1, "un jeton frais est généré pour la reprise");
+  assert.equal(courrier.envois.filter((e) => e.emailType === "welcome").length, 1, "l'envoi est retenté");
+});
+
+await test("34. la reprise ne duplique ni le compte ni l'attribution", async () => {
+  courrier.envois.length = 0;
+  courrier.dejaEnvoyes.clear();
+  courrier.statutProchainEnvoi = "sent";
+  const { client, appelsGenerateLink } = faireSupabaseProvisionnement({
+    eleveExistant: { id: "student-1", access_type: "programme_seul", user_id: "auth-1", email: "a@exemple.test" },
+  });
+
+  const resultat = await provisionPublicProgramAccess(client as never, achatDe("a@exemple.test", "cs_a") as never);
+  assert.equal(resultat?.isNewAccount, false, "aucun nouveau compte n'est créé");
+  assert.equal(resultat?.studentId, "student-1", "c'est bien l'élève existant qui est repris");
+  // Un seul generateLink : celui de la remise. Aucun appel de création.
+  assert.equal(appelsGenerateLink.length, 1, "aucun compte Auth supplémentaire");
+
+  // `setProgramAssignment` est idempotent côté base ; le code ne le rejoue
+  // qu'une fois par passage.
+  const source = lire("../../lib/supabase/public-program-provisioning.ts");
+  const grant = source.slice(source.indexOf("async function grantExistingStudent"), source.indexOf("async function envoyerLienAccesInitial"));
+  assert.equal(
+    (grant.match(/setProgramAssignment/g) ?? []).length,
+    1,
+    "une seule attribution par passage",
+  );
+});
+
+await test("35. un compte déjà utilisé ne reçoit pas de lien d'activation", async () => {
+  courrier.envois.length = 0;
+  courrier.dejaEnvoyes.clear();
+  courrier.statutProchainEnvoi = "sent";
+  // `last_sign_in_at` renseigné : l'acheteur a déjà un mot de passe.
+  const { client, appelsGenerateLink } = faireSupabaseProvisionnement({
+    eleveExistant: { id: "student-1", access_type: "programme_seul", user_id: "auth-1", email: "a@exemple.test" },
+    derniereConnexion: "2026-07-20T10:00:00Z",
+  });
+
+  await provisionPublicProgramAccess(client as never, achatDe("a@exemple.test", "cs_b") as never);
+  assert.equal(
+    courrier.envois.filter((e) => e.emailType === "welcome").length,
+    0,
+    "un compte actif ne doit pas recevoir de lien d'activation",
+  );
+  assert.equal(appelsGenerateLink.length, 0, "aucun jeton généré");
+  assert.equal(
+    courrier.envois.filter((e) => e.emailType === "program_assigned").length,
+    1,
+    "il reçoit en revanche « ton programme est disponible »",
+  );
+});
+
+await test("36. checkout-status n'annonce un envoi que s'il est confirmé", () => {
+  const route = lire("../../app/api/public/programs/checkout-status/route.ts");
+  assert.ok(route.includes("accessEmailSent"), "le statut d'envoi doit être exposé");
+  assert.ok(route.includes('.eq("status", "sent")'), "seul un envoi abouti compte");
+  assert.ok(route.includes('.eq("related_entity_type", "student")'), "la clé lue est l'élève");
+  // Aucun lien d'authentification ne revient par cette porte.
+  const sansCommentaires = route.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  for (const interdit of ["action_link", "hashed_token", "access_token", "refresh_token", "loginUrl", "magiclink"]) {
+    assert.ok(!sansCommentaires.includes(interdit), `la réponse ne doit pas contenir « ${interdit} »`);
+  }
+
+  const composant = lire("../../components/sections/ProgrammesMerciStatus.tsx");
+  assert.ok(composant.includes("accessEmailSent === true"), "la page ne doit affirmer que sur confirmation");
+  assert.ok(
+    composant.includes("vérifier tes spams"),
+    "à défaut de confirmation, la formulation doit rester prudente",
+  );
+});
+
+await test("37. aucun e-mail, jeton ni lien dans les journaux du provisionnement", () => {
+  const source = lire("../../lib/supabase/public-program-provisioning.ts");
+  const journaux = [...source.matchAll(/console\.(?:log|warn|error)\(([\s\S]*?)\);/g)].map((m) => m[1]);
+  for (const journal of journaux) {
+    for (const interdit of ["hashed_token", "actionLink", "action_link", "access_token", "refresh_token", "setPasswordUrl"]) {
+      assert.ok(!journal.includes(interdit), `journal fautif : ${journal.trim().slice(0, 70)}`);
+    }
+  }
+  // L'adresse de l'acheteur ne doit plus apparaître non plus.
+  for (const journal of journaux) {
+    assert.ok(
+      !/\$\{input\.email\}|\$\{recipientEmail\}|\$\{email\}/.test(journal),
+      `adresse journalisée : ${journal.trim().slice(0, 70)}`,
+    );
+  }
+});
+
+
+/* ═══ 38-42. Incertitude sur l'état Auth : jamais un succès silencieux ═══ */
+
+/**
+ * Correctif du 29/07/2026. Une version précédente traitait un échec de
+ * `getUserById` en réputant le compte actif : aucun e-mail, mais webhook 200.
+ * Stripe tenait alors l'évènement pour traité et ne le rejouait jamais —
+ * l'acheteur restait sans lien, et rien ne le signalait. Une panne
+ * transitoire de l'API Auth doit produire une erreur rejouable, pas un
+ * silence.
+ */
+
+await test("38. getUserById échoue → rien n'est envoyé, l'erreur est rejouable", async () => {
+  courrier.envois.length = 0;
+  courrier.dejaEnvoyes.clear();
+  courrier.statutProchainEnvoi = "sent";
+  const { client, appelsGenerateLink } = faireSupabaseProvisionnement({
+    eleveExistant: { id: "student-1", access_type: "programme_seul", user_id: "auth-1", email: "a@exemple.test" },
+    echecGetUserById: true,
+  });
+
+  await assert.rejects(
+    () => provisionPublicProgramAccess(client as never, achatDe("a@exemple.test", "cs_a") as never),
+    RetryablePublicProgramProvisioningError,
+    "une incertitude doit être signalée comme rejouable",
+  );
+
+  assert.equal(courrier.envois.filter((e) => e.emailType === "welcome").length, 0, "aucun welcome");
+  assert.equal(
+    courrier.envois.filter((e) => e.emailType === "program_assigned").length,
+    0,
+    "aucun « programme disponible » : rien ne doit laisser croire que tout est normal",
+  );
+  assert.equal(appelsGenerateLink.length, 0, "aucun jeton généré");
+});
+
+await test("39. réponse ambiguë (ni erreur, ni utilisateur) → même traitement", async () => {
+  courrier.envois.length = 0;
+  courrier.dejaEnvoyes.clear();
+  const { client } = faireSupabaseProvisionnement({
+    eleveExistant: { id: "student-1", access_type: "programme_seul", user_id: "auth-1", email: "a@exemple.test" },
+    utilisateurAbsent: true,
+  });
+
+  await assert.rejects(
+    () => provisionPublicProgramAccess(client as never, achatDe("a@exemple.test", "cs_a") as never),
+    RetryablePublicProgramProvisioningError,
+    "un utilisateur absent sans erreur reste une incertitude",
+  );
+  assert.equal(courrier.envois.length, 0, "aucun e-mail, quel qu'il soit");
+});
+
+await test("40. l'attribution du programme est conservée malgré l'incertitude", () => {
+  const source = lire("../../lib/supabase/public-program-provisioning.ts");
+  const grant = source.slice(
+    source.indexOf("async function grantExistingStudent"),
+    source.indexOf("async function envoyerLienAccesInitial"),
+  );
+  // L'attribution précède la lecture de l'état Auth : une levée ultérieure
+  // ne peut pas la défaire.
+  const posAssignation = grant.indexOf("setProgramAssignment");
+  const posEtatAuth = grant.indexOf("getUserById");
+  assert.ok(posAssignation > 0 && posEtatAuth > posAssignation, "le programme est attribué avant la lecture Auth");
+  // Et rien, dans ce chemin, ne retire ou n'annule quoi que ce soit.
+  const depuisEtatAuth = grant.slice(posEtatAuth);
+  assert.ok(!/setProgramAssignment\([^)]*false/.test(depuisEtatAuth), "aucune désattribution");
+  assert.ok(!/delete\(\)|refund|cancel/i.test(depuisEtatAuth), "aucune suppression ni annulation");
+});
+
+await test("41. reprise après rétablissement : jeton frais, un seul welcome", async () => {
+  courrier.envois.length = 0;
+  courrier.dejaEnvoyes.clear();
+  courrier.statutProchainEnvoi = "sent";
+  // L'API Auth répond de nouveau ; le compte n'a jamais servi.
+  const { client, appelsGenerateLink } = faireSupabaseProvisionnement({
+    eleveExistant: { id: "student-1", access_type: "programme_seul", user_id: "auth-1", email: "a@exemple.test" },
+    derniereConnexion: null,
+  });
+
+  const resultat = await provisionPublicProgramAccess(client as never, achatDe("a@exemple.test", "cs_a") as never);
+
+  assert.equal(resultat?.isNewAccount, false, "le compte existant est retrouvé, pas recréé");
+  assert.equal(appelsGenerateLink.length, 1, "un jeton frais, généré pour cette reprise");
+  assert.equal(courrier.envois.filter((e) => e.emailType === "welcome").length, 1, "un seul welcome");
+});
+
+await test("42. aucun chemin d'erreur Auth n'aboutit à un succès silencieux", () => {
+  const source = lire("../../lib/supabase/public-program-provisioning.ts");
+  // Découpe à partir de l'APPEL, pas de la première mention du nom : le
+  // commentaire qui explique le correctif cite lui aussi `getUserById`.
+  const bloc = source.slice(source.indexOf("const { data: compte, error: compteError }"));
+  const corps = bloc.slice(0, bloc.indexOf("compteJamaisConnecte = !compte"));
+
+  // La branche d'erreur doit lever, jamais se rabattre sur une valeur.
+  assert.ok(/throw new RetryablePublicProgramProvisioningError/.test(corps), "l'incertitude doit lever");
+  assert.ok(
+    !/compteJamaisConnecte = false;?\s*\/\/ *(fail|repli)/i.test(corps),
+    "aucun repli silencieux sur « compte actif »",
+  );
+  // Le drapeau n'est calculé qu'APRÈS la garde : il ne peut pas hériter
+  // d'une réponse douteuse.
+  const posGarde = bloc.indexOf("throw new RetryablePublicProgramProvisioningError");
+  const posCalcul = bloc.indexOf("compteJamaisConnecte = !compte.user.last_sign_in_at");
+  assert.ok(posGarde > 0 && posCalcul > posGarde, "le calcul suit la garde, jamais l'inverse");
 });
 
 

@@ -176,7 +176,10 @@ const UUID_B = "22222222-2222-4222-8222-222222222222";
 
 /* ═══════════════════ H-1 — checkout-status, exécuté ═══════════════════ */
 
-const CHAMPS_AUTORISES = new Set(["paid", "ready", "redirectTo", "error"]);
+// `accountReady` et `accessEmailSent` ont été ajoutés le 29/07/2026 : la page
+// de remerciement ne doit plus AFFIRMER qu'un e-mail est parti sans que le
+// backend l'ait confirmé. Ce sont des booléens, sans donnée personnelle.
+const CHAMPS_AUTORISES = new Set(["paid", "ready", "redirectTo", "error", "accountReady", "accessEmailSent"]);
 
 function requeteStatut(sessionId: string): Request {
   return new Request(`https://exemple.test/api/public/programs/checkout-status?session_id=${sessionId}`, {
@@ -197,7 +200,7 @@ await test("1. session payée et provisionnée : la réponse ne contient QUE les
   const corps = await res.json();
 
   assert.equal(res.status, 200);
-  assert.deepEqual(Object.keys(corps).sort(), ["paid", "ready", "redirectTo"]);
+  assert.deepEqual(Object.keys(corps).sort(), ["accessEmailSent", "accountReady", "paid", "ready", "redirectTo"]);
   for (const cle of Object.keys(corps)) {
     assert.ok(CHAMPS_AUTORISES.has(cle), `champ inattendu dans la réponse : ${cle}`);
   }

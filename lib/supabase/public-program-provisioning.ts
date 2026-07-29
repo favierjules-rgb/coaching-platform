@@ -291,24 +291,65 @@ async function grantExistingStudent(
    * le vérifie lui-même. Un élève en coaching, ou un acheteur de longue date
    * ayant déjà son mot de passe, ne reçoit donc jamais de lien d'activation.
    */
-  const compteJamaisActive = studentRow?.access_type === "programme_seul";
-  if (compteJamaisActive && recipientEmail) {
-    const avantReprise = await wasEmailAlreadySent(supabase, {
+  /**
+   * Le compte a-t-il déjà servi ?
+   *
+   * `last_sign_in_at` est la seule preuve fiable qu'un mot de passe a été
+   * défini et utilisé. Elle remplace l'ancien garde-fou qui interrogeait les
+   * journaux par `programId` — lequel, partagé entre acheteurs, bloquait des
+   * envois légitimes. Ici la question porte bien sur CE compte.
+   *
+   * ---------------------------------------------------------------------
+   * Pourquoi une incertitude lève au lieu de trancher
+   * ---------------------------------------------------------------------
+   * Une version précédente considérait le compte comme « déjà actif » quand
+   * `getUserById` échouait, au motif qu'un lien de trop vaut mieux qu'un lien
+   * manquant. C'était un raisonnement faux dans ce contexte précis : ne rien
+   * envoyer laisse le webhook répondre 200, Stripe tient l'évènement pour
+   * traité et ne le rejoue jamais. L'acheteur reste alors « Waiting for
+   * verification », sans aucun moyen de définir son mot de passe — et
+   * personne n'en sait rien, puisque tout paraît normal.
+   *
+   * Une panne transitoire de l'API Auth ne doit pas se déguiser en succès.
+   * Elle lève donc, le webhook répond 500, et Stripe reprogramme une
+   * livraison. Le paiement et l'attribution du programme, déjà enregistrés,
+   * ne sont pas touchés : seule la remise du lien est retentée.
+   */
+  let compteJamaisConnecte = false;
+  if (studentRow?.access_type === "programme_seul" && studentRow?.user_id) {
+    const { data: compte, error: compteError } = await supabase.auth.admin.getUserById(studentRow.user_id);
+
+    // Trois issues, dont une seule est exploitable telle quelle.
+    if (compteError || !compte?.user) {
+      // Jamais l'adresse ni le jeton dans le journal — le motif technique et
+      // l'identifiant interne suffisent au diagnostic.
+      console.error(
+        `[public-program-provisioning] État du compte indéterminé (élève ${student.id}) : ${compteError?.message ?? "utilisateur introuvable"}. Aucun e-mail envoyé, reprise attendue.`,
+      );
+      throw new RetryablePublicProgramProvisioningError(
+        `État Auth indéterminé pour l'élève ${student.id}. Aucun e-mail envoyé, reprise attendue.`,
+      );
+    }
+
+    compteJamaisConnecte = !compte.user.last_sign_in_at;
+  }
+
+  if (compteJamaisConnecte && recipientEmail) {
+    await envoyerLienAccesInitial(
+      supabase,
+      { ...input, email: recipientEmail },
+      { studentId: student.id, authUserId: studentRow?.user_id ?? null },
+    );
+    // `envoyerLienAccesInitial` est lui-même idempotent : si le lien était
+    // déjà parti pour ce compte, il n'a rien fait et l'e-mail « programme
+    // disponible » ci-dessous reste pertinent. Sinon le compte vient d'être
+    // rendu utilisable, et un second message brouillerait le propos.
+    const lienVientDePartir = await wasEmailAlreadySent(supabase, {
       emailType: "welcome",
       relatedEntityType: "student",
       relatedEntityId: student.id,
     });
-    if (!avantReprise) {
-      await envoyerLienAccesInitial(
-        supabase,
-        { ...input, email: recipientEmail },
-        { studentId: student.id, authUserId: studentRow?.user_id ?? null },
-      );
-      // Le compte vient seulement d'être rendu utilisable : lui envoyer en
-      // plus « ton programme est disponible » n'apporterait rien et
-      // brouillerait le message. On s'arrête ici.
-      return { studentId: student.id, isNewAccount: false };
-    }
+    if (lienVientDePartir) return { studentId: student.id, isNewAccount: false };
   }
 
   if (recipientEmail) {
@@ -352,11 +393,10 @@ async function grantExistingStudent(
  * Idempotence
  * ---------------------------------------------------------------------
  * Un e-mail de bienvenue effectivement parti (`status = "sent"`) bloque tout
- * nouvel envoi. Deux clés sont interrogées : `student/studentId`, la
- * convention du projet (cf. app/api/email/welcome/route.ts), et
- * `program/programId`, employée par les envois antérieurs à ce correctif —
- * sans quoi un acheteur de longue date pourrait recevoir un lien d'activation
- * dont il n'a plus besoin.
+ * nouvel envoi AU MÊME COMPTE. La clé est `student/studentId`, jamais le
+ * programme : deux acheteurs d'un même programme reçoivent chacun le leur.
+ * Un envoi en `failed` ne bloque rien — c'est précisément le cas qu'une
+ * reprise doit pouvoir rejouer.
  *
  * En cas d'échec — génération du lien impossible, ou envoi refusé par le
  * transporteur — la fonction lève `RetryablePublicProgramProvisioningError`
@@ -370,17 +410,25 @@ async function envoyerLienAccesInitial(
   input: ProvisionPublicProgramAccessInput,
   cible: { studentId: string; authUserId: string | null },
 ): Promise<void> {
-  const dejaEnvoye =
-    (await wasEmailAlreadySent(supabase, {
-      emailType: "welcome",
-      relatedEntityType: "student",
-      relatedEntityId: cible.studentId,
-    })) ||
-    (await wasEmailAlreadySent(supabase, {
-      emailType: "welcome",
-      relatedEntityType: "program",
-      relatedEntityId: input.programId,
-    }));
+  /**
+   * Idempotence STRICTEMENT individuelle.
+   *
+   * Une version précédente interrogeait aussi `program/programId` « pour les
+   * envois antérieurs au correctif ». C'était une faute de raisonnement :
+   * `programId` est partagé par TOUS les acheteurs d'un même programme. Dès
+   * qu'un premier acheteur avait reçu son lien, la clé bloquait tous les
+   * suivants — compte créé, programme attribué, webhook 200, et aucun
+   * e-mail. Les journaux de production l'ont confirmé : deux lignes
+   * `welcome` en statut `sent`, une seule valeur de `related_entity_id`.
+   *
+   * Un e-mail d'activation s'adresse à UN compte. Sa clé de déduplication ne
+   * peut donc être que l'identité de ce compte.
+   */
+  const dejaEnvoye = await wasEmailAlreadySent(supabase, {
+    emailType: "welcome",
+    relatedEntityType: "student",
+    relatedEntityId: cible.studentId,
+  });
   if (dejaEnvoye) return;
 
   const { data: lien, error: lienError } = await supabase.auth.admin.generateLink({
@@ -475,8 +523,10 @@ async function createProgramOnlyStudent(
     // `students` correspondante (ex : compte créé manuellement puis jamais
     // relié). On ne peut pas créer de doublon auth.users — on log clairement
     // pour une intervention manuelle plutôt que d'échouer silencieusement.
+    // L'adresse de l'acheteur ne doit jamais figurer dans un journal : le
+    // programme et le motif technique suffisent au diagnostic.
     console.error(
-      `[public-program-provisioning] Échec de création du compte pour ${input.email} : ${creationError?.message ?? "utilisateur introuvable"}. Intervention manuelle probablement nécessaire (compte auth déjà existant sans fiche élève ?).`,
+      `[public-program-provisioning] Échec de création du compte (programme ${input.programId}) : ${creationError?.message ?? "utilisateur introuvable"}. Intervention manuelle probablement nécessaire (compte auth déjà existant sans fiche élève ?).`,
     );
     return null;
   }
