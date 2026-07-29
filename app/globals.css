@@ -629,8 +629,7 @@ body {
  * `svh` plutôt que `vh` (repli `vh` d'abord) : la barre d'adresse mobile
  * ne doit ni déplacer ni recadrer le motif pendant le défilement.
  */
-.method-stars-scene,
-.method-stars-band {
+.method-stars-scene {
   --method-col-half: min(640px, calc(50vw - 1.5rem));
   --method-star-half-w: calc(0.3654 * var(--method-star-h));
   --method-rest-x: calc(0.1904 * var(--method-star-h));
@@ -642,35 +641,36 @@ body {
   --method-end-y: calc(0.2896 * var(--method-star-h));
 }
 
-/* Scène ancrée : l'étoile occupe la hauteur d'écran, bornée par la largeur
-   pour que la paire assemblée tienne toujours dans le viewport. */
+/*
+ * L'étoile occupe la hauteur d'écran, bornée par la largeur pour que la
+ * paire assemblée reste lisible comme une marque plutôt que comme un mur
+ * blanc. Le plafond en `vw` est passé de 83 à 96 le 29/07/2026 (retour de
+ * Jules : « augmenter la taille des étoiles d'un cran ») — sur un écran
+ * étroit le motif doit vraiment couvrir la zone des cartes, comme il le
+ * fait naturellement sur desktop. Aucun effet au-delà de ~1000px de large,
+ * où c'est la hauteur qui borne.
+ */
 .method-stars-scene {
-  --method-star-h: min(92vh, 83vw);
+  --method-star-h: min(92vh, 96vw);
 }
 
-/* Repli en flux : le motif a sa propre bande, au-dessus du titre — il n'est
-   jamais superposé au texte ni masqué par les cartes opaques des piliers.
-   Même géométrie, échelle réduite ; la bande est dimensionnée pour contenir
-   la paire assemblée en entier (0.5 + 0.2026 hauteur d'étoile de part et
-   d'autre du centre, plus une marge). */
-.method-stars-band {
-  --method-star-h: min(30vh, 40vw);
-  height: calc(1.45 * var(--method-star-h));
-  /* Dans la bande il n'y a aucun texte à dégager : la fin du geste vise
-     les bords de la bande, et non l'extérieur d'une colonne de contenu.
-     Chaque étoile y garde donc un morceau visible au lieu de sortir
-     complètement, ce qui laisserait une bande vide le temps que la
-     section défile. */
-  --method-end-x: calc(var(--method-col-half) + 0.15 * var(--method-star-h));
+/*
+ * Clipueur du repli en flux : une hauteur d'écran, collée en haut, à
+ * l'intérieur de la couche `absolute inset-0`. Il garde le motif centré
+ * dans le viewport pendant que la section défile, et c'est lui — et non la
+ * section — qui coupe le débordement, pour ne pas casser le `sticky`.
+ */
+.method-stars-overlay {
+  height: 100vh;
 }
 
 @supports (height: 100svh) {
   .method-stars-scene {
-    --method-star-h: min(92svh, 83vw);
+    --method-star-h: min(92svh, 96vw);
   }
 
-  .method-stars-band {
-    --method-star-h: min(30svh, 40vw);
+  .method-stars-overlay {
+    height: 100svh;
   }
 }
 

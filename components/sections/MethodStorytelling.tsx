@@ -17,8 +17,9 @@ import { easeOut } from "@/lib/easing";
 // piliers de la méthode — au lieu du rideau noir qui ouvrait le Hero.
 //
 // Géométrie du motif : entièrement déportée en CSS, dans les variables
-// `--method-*` définies par `.method-stars-scene` / `.method-stars-band`
-// (app/globals.css). Une seule longueur y est libre — la hauteur d'étoile
+// `--method-*` définies par `.method-stars-scene` (app/globals.css), la
+// classe portée par la section dans les deux variantes. Une seule longueur
+// y est libre — la hauteur d'étoile
 // — et la position de repos comme la position finale en découlent par des
 // rapports constants, repris du calibrage desktop validé.
 //
@@ -107,13 +108,13 @@ function StarPair({ sepT }: { sepT: number }) {
   return (
     <>
       <div
-        className="pointer-events-none absolute left-1/2 top-1/2"
+        className="pointer-events-none absolute left-1/2 top-1/2 z-20"
         style={{ ...commun, transform: `translate(-50%, -50%) translate(calc(-1 * ${dx}), calc(-1 * ${dy}))` }}
       >
         <SethStarsMark star="A" className="block" style={taille} />
       </div>
       <div
-        className="pointer-events-none absolute left-1/2 top-1/2"
+        className="pointer-events-none absolute left-1/2 top-1/2 z-20"
         style={{ ...commun, transform: `translate(-50%, -50%) translate(${dx}, ${dy})` }}
       >
         <SethStarsMark star="B" className="block" style={taille} />
@@ -140,12 +141,12 @@ function PillarsContent() {
   return (
     <>
       <SectionLabel>Ma méthode</SectionLabel>
-      {/* text-3xl en dessous de `sm` : « 1 transformation. » dépasse la
-          colonne sur un écran de 320px en text-4xl, ce qui créerait un
+      {/* Taille réduite en dessous de `sm` : « 1 transformation. » dépasse
+          la colonne sur un écran de 320px en text-4xl, ce qui créerait un
           défilement horizontal. Tailles `sm:`/`md:` d'origine inchangées.
-          Marge basse resserrée sous `lg` pour dégager de la hauteur au
-          profit des piliers. */}
-      <h2 className="mb-3 font-heading text-[1.6rem] font-extrabold uppercase leading-[1.05] text-foreground sm:mb-5 sm:text-4xl sm:leading-tight lg:mb-12 md:text-6xl">
+          Resserrée d'un cran de plus le 29/07/2026 (1.6rem → 1.45rem, mb-3
+          → mb-2) : voir le bloc de densité ci-dessous. */}
+      <h2 className="mb-2 font-heading text-[1.45rem] font-extrabold uppercase leading-[1.02] text-foreground sm:mb-5 sm:text-4xl sm:leading-tight lg:mb-12 md:text-6xl">
         4 piliers.
         <br />1 transformation.
       </h2>
@@ -153,18 +154,26 @@ function PillarsContent() {
       {/* Densité compacte sous `lg` (padding, marges, tailles de texte et
           d'icône) pour que les 4 piliers empilés tiennent dans la hauteur
           d'un téléphone et que la scène ancrée reste possible. Toutes les
-          valeurs desktop sont reprises telles quelles derrière `lg:`. */}
+          valeurs desktop sont reprises telles quelles derrière `sm:`/`lg:`.
+          Resserrage du 29/07/2026 : les étoiles doivent traverser la zone
+          des cartes comme sur desktop, ce qui suppose que la scène ancrée
+          — donc le contenu tenant dans une hauteur d'écran — soit possible
+          jusqu'à ~600px de hauteur visible (iPhone 14 sous Safari en
+          affiche ~664). Chaque valeur de base perd un cran ; rien ne bouge
+          à partir de `sm`. */}
       <div className="grid grid-cols-1 gap-px bg-border sm:grid-cols-2 lg:grid-cols-4">
         {methodPillars.map(({ icon: Icon, title, description }, index) => (
-          <div key={title} className="bg-card p-3.5 sm:p-5 lg:p-8">
-            <div className="mb-1.5 font-heading text-[10px] font-semibold uppercase tracking-[0.3em] text-primary sm:text-xs lg:mb-6">
+          <div key={title} className="bg-card p-3 sm:p-5 lg:p-8">
+            <div className="mb-1 font-heading text-[10px] font-semibold uppercase tracking-[0.3em] text-primary sm:mb-1.5 sm:text-xs lg:mb-6">
               0{index + 1}
             </div>
-            <Icon size={28} className="mb-1.5 h-5 w-5 text-primary lg:mb-4 lg:h-7 lg:w-7" />
-            <h3 className="mb-1 font-heading text-base font-bold uppercase leading-tight text-foreground sm:text-lg lg:mb-3 lg:text-xl lg:leading-normal">
+            <Icon size={28} className="mb-1 h-[18px] w-[18px] text-primary sm:mb-1.5 sm:h-5 sm:w-5 lg:mb-4 lg:h-7 lg:w-7" />
+            <h3 className="mb-0.5 font-heading text-[0.95rem] font-bold uppercase leading-tight text-foreground sm:mb-1 sm:text-lg lg:mb-3 lg:text-xl lg:leading-normal">
               {title}
             </h3>
-            <p className="text-xs leading-snug text-muted-foreground lg:text-sm lg:leading-relaxed">{description}</p>
+            <p className="text-[11px] leading-[1.35] text-muted-foreground sm:text-xs sm:leading-snug lg:text-sm lg:leading-relaxed">
+              {description}
+            </p>
           </div>
         ))}
       </div>
@@ -185,43 +194,92 @@ function PillarsContent() {
  * rognés en haut, la fin du pilier 04 en bas, et la section suivante
  * semblait « remonter ».
  *
- * Correction du 29/07/2026 : cette variante n'était plus animée du tout —
- * elle posait la marque assemblée en image fixe. C'est ce que voyait un
- * iPhone 14. Elle reçoit désormais le MÊME geste, dans une bande qui lui
- * est propre, au-dessus du titre : les étoiles y sont entières au repos,
- * s'écartent au défilement et sortent par les bords. La bande évite le
- * seul placement qui ne pouvait pas marcher ici — superposer les étoiles
- * au contenu : les cartes des piliers sont opaques (`bg-card`), une étoile
- * passée derrière serait invisible, et passée devant elle rendrait le
- * texte illisible sur une colonne étroite.
+ * Correction du 29/07/2026, 1re passe : cette variante n'était plus animée
+ * du tout — elle posait la marque assemblée en image fixe. C'est ce que
+ * voyait un iPhone 14.
  *
- * `immobile` : `prefers-reduced-motion`. Les étoiles restent alors à leur
- * position de repos — assemblées, exactement la marque du logo — visibles
- * et nettes, simplement sans mouvement.
+ * Correction du 29/07/2026, 2e passe (retour de Jules) : le geste avait
+ * bien été rétabli, mais dans une BANDE distincte au-dessus du titre. Le
+ * motif se jouait donc à côté du bloc « 4 piliers » au lieu de le
+ * traverser — deux compositions différentes selon la taille d'écran, là
+ * où il n'en faut qu'une. Les étoiles reviennent en SUPERPOSITION sur
+ * toute la section, titre et cartes compris, exactement comme sur la scène
+ * ancrée : couche absolue `inset-0` au-dessus du contenu (z-20 contre
+ * z-10), avec un clipueur interne collant d'une hauteur d'écran pour que le
+ * motif reste centré dans le viewport pendant que la section défile.
+ *
+ * Le `sticky` interne impose une contrainte : aucun ancêtre ne doit couper
+ * le débordement, sinon il se calerait sur un conteneur qui ne défile pas.
+ * La section reste donc `overflow: visible` et c'est le clipueur lui-même,
+ * large de toute la section, qui empêche les étoiles de créer un
+ * défilement horizontal.
+ *
+ * `immobile` : `prefers-reduced-motion`. La superposition n'a alors plus
+ * de sens — elle ne raconte plus une traversée, elle pose un motif opaque
+ * en travers du texte, définitivement. Voir `MethodPillarsStatic`.
  */
 function MethodPillarsFlow({ immobile }: { immobile: boolean }) {
-  // La progression est mesurée sur la BANDE elle-même, en mode traversée :
-  // le geste se déroule exactement pendant qu'elle traverse l'écran, donc
-  // entièrement sous les yeux. Mesurée sur la section entière, il se serait
-  // joué pendant que la bande sortait déjà par le haut.
-  const { ref, progress } = useSectionScrollProgress<HTMLDivElement>("traversal");
+  if (immobile) return <MethodPillarsStatic />;
+  return <MethodPillarsCrossing />;
+}
 
-  // Fenêtre resserrée sur le milieu de la traversée : les étoiles restent
-  // assemblées le temps que la bande entre par le bas, s'écartent pendant
-  // qu'elle remonte, et ont fini avant qu'elle ne sorte par le haut.
-  const sepT = immobile
-    ? 0
-    : Math.min(1, Math.max(0, (progress - FLOW_SEPARATION_START) / (FLOW_SEPARATION_END - FLOW_SEPARATION_START)));
-
+/**
+ * `prefers-reduced-motion` : aucun mouvement, et surtout aucune
+ * superposition permanente.
+ *
+ * La superposition ne se justifie que parce qu'elle est TRANSITOIRE : les
+ * étoiles balaient la zone des cartes puis la libèrent. Figée, elle laisse
+ * un motif clair posé en travers du texte, que rien ne viendra dégager —
+ * mesuré le 29/07/2026 sur un rendu réel : les piliers 02 et 03 en
+ * devenaient difficiles à lire.
+ *
+ * Le motif revient donc à sa place historique : la marque assemblée,
+ * centrée au-dessus du titre, à taille raisonnable. Les deux étoiles
+ * restent parfaitement visibles — jamais masquées — et le contenu reste
+ * intégralement lisible.
+ */
+function MethodPillarsStatic() {
   return (
-    <section id="methode" className="method-stars-scene scroll-mt-24 bg-background py-24">
+    <section id="methode" className="scroll-mt-24 bg-background py-16 sm:py-24">
       <div className="mx-auto max-w-7xl px-6">
-        {/* `overflow-hidden` : les étoiles sortent par les bords de la
-            bande sans jamais créer de défilement horizontal sur la page. */}
-        <div ref={ref} className="method-stars-band relative mb-12 overflow-hidden" aria-hidden="true">
-          <StarPair sepT={sepT} />
+        <div className="mb-12 flex justify-center">
+          <SethStarsMark className="h-40 w-auto max-w-[70vw] opacity-90" />
         </div>
 
+        <PillarsContent />
+      </div>
+    </section>
+  );
+}
+
+/** Repli en flux ANIMÉ : le motif traverse la section, par-dessus le contenu. */
+function MethodPillarsCrossing() {
+  // Progression mesurée sur la SECTION, en mode traversée : le geste
+  // occupe le temps où le bloc « 4 piliers » passe devant les yeux, ce qui
+  // est précisément la zone que les étoiles doivent balayer.
+  const { ref, progress } = useSectionScrollProgress<HTMLElement>("traversal");
+
+  const sepT = Math.min(
+    1,
+    Math.max(0, (progress - FLOW_SEPARATION_START) / (FLOW_SEPARATION_END - FLOW_SEPARATION_START)),
+  );
+
+  return (
+    <section
+      ref={ref}
+      id="methode"
+      className="method-stars-scene relative scroll-mt-24 bg-background py-16 sm:py-24"
+    >
+      {/* Couche décorative : couvre toute la section (titre + cartes) et
+          passe DEVANT le contenu — les cartes sont opaques (`bg-card`), une
+          étoile placée derrière serait purement invisible. */}
+      <div className="pointer-events-none absolute inset-0 z-20" aria-hidden="true">
+        <div className="method-stars-overlay sticky top-0 overflow-hidden">
+          <StarPair sepT={sepT} />
+        </div>
+      </div>
+
+      <div className="relative z-10 mx-auto max-w-7xl px-6">
         <PillarsContent />
       </div>
     </section>
@@ -303,7 +361,7 @@ function MethodPillarsScene() {
       <div ref={ref} className="pinned-scene-track relative">
         <div className="pinned-scene-viewport sticky top-0 w-full overflow-hidden">
           <div
-            className="mx-auto flex h-full max-w-7xl flex-col justify-center px-6 py-6 lg:py-0"
+            className="relative z-10 mx-auto flex h-full max-w-7xl flex-col justify-center px-6 py-4 sm:py-6 lg:py-0"
             style={{
               opacity: contentT,
               transform: `scale(${0.96 + 0.04 * contentT})`,

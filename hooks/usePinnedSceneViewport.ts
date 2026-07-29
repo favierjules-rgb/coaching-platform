@@ -30,9 +30,16 @@ import { useCallback, useSyncExternalStore } from "react";
  *
  *  - à partir de `lg` (1024px), la grille passe sur 4 colonnes et le contenu
  *    ne fait plus que ~485px de haut → 560px de hauteur d'écran suffisent ;
- *  - en dessous, les piliers s'empilent ; avec la densité compacte mobile le
- *    contenu fait ~645px → il faut ~700px de hauteur pour le poser sans le
- *    coller aux bords.
+ *  - en dessous, les piliers s'empilent. La densité compacte a été
+ *    resserrée d'un cran le 29/07/2026 (padding, marges, tailles de texte
+ *    et d'icône sous `sm`) : le contenu est passé de 645px à **568px**,
+ *    mesuré sur le rendu réel. Avec le `py-4` de la scène, il faut donc
+ *    600px ; le seuil est posé à 610px pour ne pas coller aux bords.
+ *
+ * C'est ce resserrage qui fait entrer un iPhone 14 (~664px visibles sous
+ * Safari) dans la scène ancrée, et donc qui lui rend la composition du
+ * desktop : les étoiles traversent la zone des cartes au lieu de se jouer
+ * dans un bandeau à côté.
  *
  * Le palier en largeur n'est pas un « breakpoint mobile » : il traduit le
  * fait qu'à partir de `lg` la grille passe sur 4 colonnes, donc que le
@@ -49,7 +56,7 @@ import { useCallback, useSyncExternalStore } from "react";
  * déclencher d'erreur « Hydration failed » — ce qu'un simple état initialisé
  * depuis `matchMedia` provoquait.
  */
-const PINNED_SCENE_QUERY = "(min-width: 1024px) and (min-height: 560px), (min-height: 700px)";
+const PINNED_SCENE_QUERY = "(min-width: 1024px) and (min-height: 560px), (min-height: 610px)";
 
 function getServerSnapshot(): boolean {
   return false;
