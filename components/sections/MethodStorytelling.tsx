@@ -1,5 +1,7 @@
 "use client";
 
+import type { CSSProperties } from "react";
+
 import { SethStarsMark } from "@/components/brand/SethStarsMark";
 import { SectionLabel } from "@/components/ui/SectionLabel";
 import { methodPillars } from "@/data/mock";
@@ -14,32 +16,31 @@ import { easeOut } from "@/lib/easing";
 // comme la marque de repos, S'ÉCARTENT au scroll pour révéler les 4
 // piliers de la méthode — au lieu du rideau noir qui ouvrait le Hero.
 //
-// Position de repos (étoiles assemblées) : formule déjà validée dans
-// `SethStarsIntro.tsx` — écart réel ±17.52vh / ±18.64vh entre les centres
-// des deux étoiles du logo source (viewBox "0 0 636.03 807"), en vh sur
-// les deux axes pour préserver l'angle ~46.8° quel que soit le ratio du
-// viewport. Réutilisée telle quelle ici pour la cohérence visuelle du
-// motif (même geste que ce qui devait ouvrir le Hero, simplement déplacé
-// plus bas dans la page).
-const REST_OFFSET_X_VH = 17.52;
-const REST_OFFSET_Y_VH = 18.64;
-
-// Amplitude de l'écartement (ajoutée à la position de repos ci-dessus).
-// Calculée pour dégager le bord de la colonne de contenu (max-w-7xl =
-// 1280px, donc ±640px depuis le centre) de la largeur propre de chaque
-// étoile (92vh de haut × ratio 636.03/807 ≈ 0.7881 de large, soit une
-// demi-largeur ≈ 0.394×92vh ≈ 36.2vh) — sur un viewport desktop courant
-// (~900px de haut), 640px − 17.52vh(repos) + 36.2vh(demi-largeur étoile)
-// ≈ 808px de croissance nécessaire, soit environ 56vw. Valeur en vw (pas
-// en px fixe) car elle doit rester proportionnée au viewport ; sur un
-// écran plus étroit que 1280px, la colonne elle-même rétrécit avec lui,
-// donc l'écart réellement nécessaire diminue aussi. Composante verticale
-// modeste (8 vs 34vh dans l'ancien rideau du Hero) pour lire comme un
-// geste surtout horizontal (« s'écartent »), plutôt que la diagonale
-// complète de l'ancienne sortie. Première estimation par le calcul,
-// pas encore vérifiée sur un viewport desktop large — à confirmer.
-const GROWTH_X_VW = 56;
-const GROWTH_Y_VH = 8;
+// Géométrie du motif : entièrement déportée en CSS, dans les variables
+// `--method-*` définies par `.method-stars-scene` / `.method-stars-band`
+// (app/globals.css). Une seule longueur y est libre — la hauteur d'étoile
+// — et la position de repos comme la position finale en découlent par des
+// rapports constants, repris du calibrage desktop validé.
+//
+// Correction du 29/07/2026 (retour de Jules : animation figée sur iPhone
+// 14, correcte sur iPhone 16 Pro Max). Deux défauts distincts :
+//
+//  1. `usePinnedSceneViewport` conditionnait l'ANIMATION elle-même à
+//     `(min-height: 700px)`. Ce seuil tombe pile entre la hauteur
+//     réellement visible d'un iPhone 14 sous Safari (~664px, barres
+//     comprises) et celle d'un grand iPhone (~740-776px) : le premier
+//     recevait un repli entièrement statique, le second l'animation. Le
+//     seuil ne décide plus désormais que de la MISE EN PAGE (contenu
+//     ancré ou en flux) ; les étoiles s'écartent dans les deux cas.
+//
+//  2. La géométrie était exprimée en unités calibrées pour le bureau
+//     (`92vh` de haut, `56vw` d'écart). Sur un écran étroit, l'étoile
+//     devenait plus large que le viewport et l'écart ne suffisait plus à
+//     l'en faire sortir. Voir le commentaire de `app/globals.css`.
+//
+// Aucun ciblage d'appareil, aucun User-Agent, aucun `window.innerWidth` :
+// tout est résolu par `min()`/`max()` côté CSS, donc valable à toute
+// largeur et recalculé par le navigateur à chaque changement de taille.
 
 // Progression locale (0→1) à laquelle l'écartement est terminé — au-delà,
 // les étoiles restent immobiles à leur position finale pendant le reste
@@ -47,6 +48,14 @@ const GROWTH_Y_VH = 8;
 // reprenne). Le contenu (titre + 4 piliers) apparaît pendant l'écart,
 // cf. `CONTENT_START`/`CONTENT_END` ci-dessous.
 const SEPARATION_END = 0.6;
+
+// Mêmes bornes, pour le repli en flux — exprimées sur la traversée de la
+// bande décorative (0 = elle entre par le bas de l'écran, 1 = elle sort par
+// le haut). Départ une fois la bande entrée, arrivée alors qu'elle sort
+// déjà : l'écart occupe donc toute la portion où on la regarde, et on ne
+// voit jamais une bande vide attendre la fin du défilement.
+const FLOW_SEPARATION_START = 0.3;
+const FLOW_SEPARATION_END = 0.85;
 
 // Fenêtre de progression sur laquelle le contenu (titre + grille des 4
 // piliers) apparaît. Commence après un court délai (les étoiles doivent
@@ -59,6 +68,59 @@ const CONTENT_END = 0.5;
 // Transparence constante des étoiles (déjà validée par Jules dans
 // `SethStarsIntro.tsx`) — inchangée ici pour la cohérence du motif.
 const STAR_OPACITY = 0.88;
+
+/**
+ * Les deux étoiles, à une étape donnée de l'écartement (`sepT`, 0 → 1).
+ *
+ * Un seul `transform` par étoile, interpolé entre la position de repos et
+ * la position finale — les deux lues dans les variables CSS de l'ancêtre.
+ * `sepT` n'entre donc que comme un nombre : c'est le navigateur qui fait
+ * l'arithmétique des unités, à la largeur courante, sans que JavaScript
+ * n'ait à connaître la taille de l'écran.
+ *
+ * Skills appliquées (cf. `.agents/skills/review-animations/SKILL.md`,
+ * `.agents/skills/emil-design-eng/SKILL.md`) :
+ * - `transform` seul, jamais `top`/`left` (règle « GPU-only properties ») ;
+ * - `transform-origin: center` explicite — le motif pivote autour de son
+ *   propre centre, il n'est ancré à aucun déclencheur ;
+ * - `will-change: transform` uniquement sur ce qui bouge réellement ;
+ * - `pointer-events: none` : décor pur, jamais dans le chemin du clic ;
+ * - la variable CSS n'est PAS réécrite image par image sur un parent
+ *   (déclencherait une tempête de recalculs sur tout le sous-arbre) : elle
+ *   est statique, seul le `transform` de chaque étoile change.
+ */
+function StarPair({ sepT }: { sepT: number }) {
+  const t = sepT.toFixed(4);
+  const dx = `calc(var(--method-rest-x) + ${t} * (var(--method-end-x) - var(--method-rest-x)))`;
+  const dy = `calc(var(--method-rest-y) + ${t} * (var(--method-end-y) - var(--method-rest-y)))`;
+
+  const commun: CSSProperties = {
+    opacity: STAR_OPACITY,
+    transformOrigin: "center",
+    willChange: "transform",
+  };
+  // `width: auto` + hauteur imposée : le viewBox de chaque étoile donne le
+  // ratio, donc la largeur suit sans jamais déformer le tracé
+  // (`preserveAspectRatio` reste à sa valeur par défaut, xMidYMid meet).
+  const taille: CSSProperties = { height: "var(--method-star-h)", width: "auto" };
+
+  return (
+    <>
+      <div
+        className="pointer-events-none absolute left-1/2 top-1/2"
+        style={{ ...commun, transform: `translate(-50%, -50%) translate(calc(-1 * ${dx}), calc(-1 * ${dy}))` }}
+      >
+        <SethStarsMark star="A" className="block" style={taille} />
+      </div>
+      <div
+        className="pointer-events-none absolute left-1/2 top-1/2"
+        style={{ ...commun, transform: `translate(-50%, -50%) translate(${dx}, ${dy})` }}
+      >
+        <SethStarsMark star="B" className="block" style={taille} />
+      </div>
+    </>
+  );
+}
 
 // Hauteur de la scène ancrée : 220 hauteurs d'écran, définies par les
 // classes `.pinned-scene-track` / `.pinned-scene-viewport` (app/globals.css)
@@ -112,23 +174,52 @@ function PillarsContent() {
 
 /**
  * Rendu en FLUX NORMAL : hauteur déterminée par le contenu, aucune scène
- * ancrée, aucun rognage. Sert `prefers-reduced-motion` et les écrans trop
- * courts pour la scène (voir `usePinnedSceneViewport`).
+ * ancrée, aucun rognage. Sert les écrans trop courts pour immobiliser le
+ * contenu dans une hauteur d'écran (voir `usePinnedSceneViewport`) et
+ * `prefers-reduced-motion`.
  *
  * Correction du 26/07/2026 : sur téléphone, la grille des piliers s'empile
  * et devenait bien plus haute que le viewport. Enfermée dans la scène
  * ancrée (`h-screen` + `overflow-hidden` + `justify-center`), elle
  * débordait des deux côtés à la fois : le titre et le haut du pilier 01
  * rognés en haut, la fin du pilier 04 en bas, et la section suivante
- * semblait « remonter ». Les étoiles restent présentes en décoration,
- * assemblées comme au repos.
+ * semblait « remonter ».
+ *
+ * Correction du 29/07/2026 : cette variante n'était plus animée du tout —
+ * elle posait la marque assemblée en image fixe. C'est ce que voyait un
+ * iPhone 14. Elle reçoit désormais le MÊME geste, dans une bande qui lui
+ * est propre, au-dessus du titre : les étoiles y sont entières au repos,
+ * s'écartent au défilement et sortent par les bords. La bande évite le
+ * seul placement qui ne pouvait pas marcher ici — superposer les étoiles
+ * au contenu : les cartes des piliers sont opaques (`bg-card`), une étoile
+ * passée derrière serait invisible, et passée devant elle rendrait le
+ * texte illisible sur une colonne étroite.
+ *
+ * `immobile` : `prefers-reduced-motion`. Les étoiles restent alors à leur
+ * position de repos — assemblées, exactement la marque du logo — visibles
+ * et nettes, simplement sans mouvement.
  */
-function MethodPillarsFlow() {
+function MethodPillarsFlow({ immobile }: { immobile: boolean }) {
+  // La progression est mesurée sur la BANDE elle-même, en mode traversée :
+  // le geste se déroule exactement pendant qu'elle traverse l'écran, donc
+  // entièrement sous les yeux. Mesurée sur la section entière, il se serait
+  // joué pendant que la bande sortait déjà par le haut.
+  const { ref, progress } = useSectionScrollProgress<HTMLDivElement>("traversal");
+
+  // Fenêtre resserrée sur le milieu de la traversée : les étoiles restent
+  // assemblées le temps que la bande entre par le bas, s'écartent pendant
+  // qu'elle remonte, et ont fini avant qu'elle ne sorte par le haut.
+  const sepT = immobile
+    ? 0
+    : Math.min(1, Math.max(0, (progress - FLOW_SEPARATION_START) / (FLOW_SEPARATION_END - FLOW_SEPARATION_START)));
+
   return (
-    <section id="methode" className="scroll-mt-24 bg-background py-24">
+    <section id="methode" className="method-stars-scene scroll-mt-24 bg-background py-24">
       <div className="mx-auto max-w-7xl px-6">
-        <div className="mb-12 flex justify-center">
-          <SethStarsMark className="h-40 w-auto max-w-[70vw] opacity-90" />
+        {/* `overflow-hidden` : les étoiles sortent par les bords de la
+            bande sans jamais créer de défilement horizontal sur la page. */}
+        <div ref={ref} className="method-stars-band relative mb-12 overflow-hidden" aria-hidden="true">
+          <StarPair sepT={sepT} />
         </div>
 
         <PillarsContent />
@@ -153,11 +244,15 @@ function MethodPillarsFlow() {
  * les piliers y adoptent une densité compacte — padding, marges, tailles de
  * texte et d'icône réduits sous `lg` — pour tenir dans une hauteur d'écran,
  * et la scène est mesurée en `svh` afin de rester dans la zone réellement
- * visible. `usePinnedSceneViewport` ne l'active que si le viewport peut
- * l'accueillir sans rogner : sous ce seuil (iPhone SE et assimilés), le
- * contenu passe en flux normal (voir `MethodPillarsFlow`) — conformément à
- * la hiérarchie de remède de `.agents/skills/review-animations` : mieux
- * vaut retirer l'animation d'un contexte que d'y contraindre le contenu.
+ * visible.
+ *
+ * `usePinnedSceneViewport` arbitre uniquement la MISE EN PAGE : le contenu
+ * peut-il être immobilisé dans une hauteur d'écran sans être rogné ? Sous
+ * ce seuil, il repasse en flux normal — mais les étoiles s'écartent dans
+ * les deux cas (correction du 29/07/2026). Ce que la hiérarchie de remède
+ * de `.agents/skills/review-animations` recommande de retirer, c'est une
+ * animation qui contraint son contenu ; ici c'est l'ancrage qui contraint,
+ * pas le geste, et seul l'ancrage est abandonné.
  *
  * Skills appliquées (cf. `.agents/skills/emil-design-eng/SKILL.md`,
  * `.agents/skills/animation-vocabulary/SKILL.md`) :
@@ -170,43 +265,41 @@ function MethodPillarsFlow() {
  * - C'est un `Scroll-driven animation` + `Reveal` (vocabulaire du
  *   glossaire) : la progression est pilotée par le scroll, pas une
  *   temporisation fixe.
- * - `prefers-reduced-motion` : aucune scène ancrée, aucun mouvement —
- *   repli direct sur le contenu final (étoiles assemblées statiques,
- *   titre et 4 piliers immédiatement visibles et lisibles).
+ * - `prefers-reduced-motion` : aucune scène ancrée, aucun mouvement — les
+ *   deux étoiles restent assemblées à leur position de repos, visibles et
+ *   nettes, titre et 4 piliers immédiatement lisibles. Jamais masquées.
  */
 export function MethodStorytelling() {
   const reducedMotion = usePrefersReducedMotion();
   const canPinScene = usePinnedSceneViewport();
 
-  // La scène ancrée est un composant à part, monté UNIQUEMENT sur desktop :
+  // Les deux variantes sont des composants distincts :
   // `useSectionScrollProgress` attache son écouteur de scroll dans un effet à
   // dépendances vides, donc au montage de son composant. Appelé depuis ce
-  // composant-ci, il se serait exécuté au tout premier rendu — celui du flux
-  // normal, où son `ref` n'est attaché à aucun nœud — et n'aurait jamais été
-  // rejoué au passage en desktop : l'écouteur n'aurait jamais existé, la
-  // progression serait restée à 0 et le contenu à `opacity: 0`. Monter la
-  // scène séparément garantit que le ref est en place avant l'effet.
+  // composant-ci, il se serait exécuté au tout premier rendu — celui servi par
+  // le serveur, où son `ref` n'est attaché à aucun nœud — et n'aurait jamais
+  // été rejoué au passage sur l'autre variante : l'écouteur n'aurait jamais
+  // existé et la progression serait restée à 0. Monter chaque variante
+  // séparément garantit que le ref est en place avant l'effet.
   if (reducedMotion || !canPinScene) {
-    return <MethodPillarsFlow />;
+    return <MethodPillarsFlow immobile={reducedMotion} />;
   }
 
   return <MethodPillarsScene />;
 }
 
-/** Scène ancrée desktop — markup et calculs strictement identiques à l'existant. */
+/** Scène ancrée : le contenu est immobilisé, les étoiles s'écartent devant. */
 function MethodPillarsScene() {
   const { ref, progress } = useSectionScrollProgress<HTMLDivElement>();
 
   const sepT = Math.min(1, progress / SEPARATION_END);
-  const starATransform = `translate(-50%, -50%) translate(calc(-${REST_OFFSET_X_VH}vh - ${sepT * GROWTH_X_VW}vw), calc(-${REST_OFFSET_Y_VH}vh - ${sepT * GROWTH_Y_VH}vh))`;
-  const starBTransform = `translate(-50%, -50%) translate(calc(${REST_OFFSET_X_VH}vh + ${sepT * GROWTH_X_VW}vw), calc(${REST_OFFSET_Y_VH}vh + ${sepT * GROWTH_Y_VH}vh))`;
 
   const contentT = easeOut(
     Math.min(1, Math.max(0, (progress - CONTENT_START) / (CONTENT_END - CONTENT_START)))
   );
 
   return (
-    <section id="methode" className="scroll-mt-24 bg-background">
+    <section id="methode" className="method-stars-scene scroll-mt-24 bg-background">
       <div ref={ref} className="pinned-scene-track relative">
         <div className="pinned-scene-viewport sticky top-0 w-full overflow-hidden">
           <div
@@ -220,18 +313,7 @@ function MethodPillarsScene() {
             <PillarsContent />
           </div>
 
-          <div
-            className="pointer-events-none absolute left-1/2 top-1/2 h-[92vh] w-auto"
-            style={{ transform: starATransform, opacity: STAR_OPACITY, willChange: "transform" }}
-          >
-            <SethStarsMark star="A" className="h-[92vh] w-auto" />
-          </div>
-          <div
-            className="pointer-events-none absolute left-1/2 top-1/2 h-[92vh] w-auto"
-            style={{ transform: starBTransform, opacity: STAR_OPACITY, willChange: "transform" }}
-          >
-            <SethStarsMark star="B" className="h-[92vh] w-auto" />
-          </div>
+          <StarPair sepT={sepT} />
         </div>
       </div>
     </section>
