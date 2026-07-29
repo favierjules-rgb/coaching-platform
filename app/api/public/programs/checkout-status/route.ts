@@ -170,9 +170,36 @@ export async function GET(request: Request) {
     return reponse({ paid: true, ready: false });
   }
 
-  // Provisionnement terminé. La seule chose renvoyée au navigateur est une
-  // destination INTERNE et NON PRIVILÉGIÉE : /connexion n'accorde aucun
-  // droit par elle-même, elle demande des identifiants. Le lien de
-  // définition de mot de passe, lui, est déjà parti par email.
-  return reponse({ paid: true, ready: true, redirectTo: "/connexion" });
+  /**
+   * Le compte est prêt. Reste à savoir si le lien d'activation est
+   * RÉELLEMENT parti : la page de remerciement l'annonçait jusqu'ici comme
+   * acquis, y compris quand le backend l'avait ignoré (incident du
+   * 29/07/2026). On regarde donc le journal d'envoi plutôt que de supposer.
+   *
+   * Seul un booléen sort d'ici. Ni adresse, ni lien, ni jeton, ni identifiant
+   * de compte : le navigateur apprend qu'un e-mail est parti, rien de plus.
+   */
+  const { data: journalWelcome, error: journalError } = await supabase
+    .from("email_logs")
+    .select("id")
+    .eq("email_type", "welcome")
+    .eq("related_entity_type", "student")
+    .eq("related_entity_id", student.id)
+    .eq("status", "sent")
+    .limit(1)
+    .maybeSingle();
+  if (journalError) {
+    console.error(`[public/programs/checkout-status] lecture journal e-mail (${traceSession(sessionId)}) : ${journalError.message}`);
+  }
+
+  return reponse({
+    paid: true,
+    ready: true,
+    accountReady: true,
+    // `false` couvre deux situations que le visiteur n'a pas à distinguer :
+    // l'envoi n'a pas encore eu lieu, ou il n'a pas abouti. Dans les deux
+    // cas, la page doit rester prudente dans sa formulation.
+    accessEmailSent: Boolean(journalWelcome),
+    redirectTo: "/connexion",
+  });
 }
