@@ -590,3 +590,88 @@ body {
     height: 100svh;
   }
 }
+
+/*
+ * Géométrie fluide du motif des deux étoiles
+ * (components/sections/MethodStorytelling.tsx).
+ *
+ * ---------------------------------------------------------------------
+ * Pourquoi ces variables existent
+ * ---------------------------------------------------------------------
+ * La première version exprimait le motif en valeurs calibrées pour un
+ * viewport de bureau : étoile haute de `92vh`, position de repos à
+ * ±17.52vh / ±18.64vh, écartement de `56vw`. Sur un téléphone, `92vh`
+ * donne une étoile PLUS LARGE que l'écran (ratio du tracé ≈ 0.731), et
+ * `56vw` ne représente plus que ~220px : les deux étoiles couvraient tout
+ * le viewport sans jamais réussir à en sortir. Le geste ne se lisait pas.
+ *
+ * Ici, une seule longueur est libre — la hauteur d'étoile — et TOUT le
+ * reste en découle par un rapport constant, repris du calibrage desktop
+ * validé (17.52/92, 18.64/92, 8/92). Le motif est donc auto-similaire :
+ * mêmes proportions et même angle de séparation à 320px comme à 1440px,
+ * sans une seule règle propre à un appareil.
+ *
+ *   --method-star-h    hauteur d'étoile, seule valeur réellement fluide
+ *   --method-rest-*    position de repos (les deux étoiles assemblées,
+ *                      exactement la géométrie du logo source)
+ *   --method-end-*     position en fin d'écartement
+ *
+ * `--method-end-x` est un `max()` de deux exigences, et non une distance
+ * fixe :
+ *   1. dégager le bord de la colonne de contenu (`max-w-7xl`, donc
+ *      640px, ou la demi-largeur réelle si l'écran est plus étroit) de la
+ *      demi-largeur de l'étoile, plus une petite marge ;
+ *   2. parcourir au minimum 0.35 hauteur d'étoile, pour que le
+ *      déplacement reste perceptible même sur une colonne très étroite.
+ * À 1440×900 cela redonne ~967px, soit la valeur d'origine (964px) à
+ * 3px près : le rendu desktop déjà validé est conservé.
+ *
+ * `svh` plutôt que `vh` (repli `vh` d'abord) : la barre d'adresse mobile
+ * ne doit ni déplacer ni recadrer le motif pendant le défilement.
+ */
+.method-stars-scene,
+.method-stars-band {
+  --method-col-half: min(640px, calc(50vw - 1.5rem));
+  --method-star-half-w: calc(0.3654 * var(--method-star-h));
+  --method-rest-x: calc(0.1904 * var(--method-star-h));
+  --method-rest-y: calc(0.2026 * var(--method-star-h));
+  --method-end-x: max(
+    calc(var(--method-col-half) + var(--method-star-half-w) + 0.03 * var(--method-star-h)),
+    calc(var(--method-rest-x) + 0.35 * var(--method-star-h))
+  );
+  --method-end-y: calc(0.2896 * var(--method-star-h));
+}
+
+/* Scène ancrée : l'étoile occupe la hauteur d'écran, bornée par la largeur
+   pour que la paire assemblée tienne toujours dans le viewport. */
+.method-stars-scene {
+  --method-star-h: min(92vh, 83vw);
+}
+
+/* Repli en flux : le motif a sa propre bande, au-dessus du titre — il n'est
+   jamais superposé au texte ni masqué par les cartes opaques des piliers.
+   Même géométrie, échelle réduite ; la bande est dimensionnée pour contenir
+   la paire assemblée en entier (0.5 + 0.2026 hauteur d'étoile de part et
+   d'autre du centre, plus une marge). */
+.method-stars-band {
+  --method-star-h: min(30vh, 40vw);
+  height: calc(1.45 * var(--method-star-h));
+  /* Dans la bande il n'y a aucun texte à dégager : la fin du geste vise
+     les bords de la bande, et non l'extérieur d'une colonne de contenu.
+     Chaque étoile y garde donc un morceau visible au lieu de sortir
+     complètement, ce qui laisserait une bande vide le temps que la
+     section défile. */
+  --method-end-x: calc(var(--method-col-half) + 0.15 * var(--method-star-h));
+}
+
+@supports (height: 100svh) {
+  .method-stars-scene {
+    --method-star-h: min(92svh, 83vw);
+  }
+
+  .method-stars-band {
+    --method-star-h: min(30svh, 40vw);
+  }
+}
+
+/* Fin motif étoiles */

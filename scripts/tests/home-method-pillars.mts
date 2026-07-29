@@ -99,13 +99,21 @@ test("le titre de section reste présent au-dessus des piliers", () => {
 
 /* ─── Mise en page : plus aucune contrainte de hauteur sur mobile ─── */
 
-test("RÉGRESSION : le repli en flux normal n'enferme pas le contenu dans une hauteur de viewport", () => {
+test("RÉGRESSION : le repli en flux normal n'enferme pas le CONTENU dans une hauteur de viewport", () => {
+  // La bande décorative des étoiles porte, elle, `overflow-hidden` (pour
+  // que les étoiles sortent par ses bords sans créer de défilement
+  // horizontal) : la garde porte donc sur le contenu, pas sur la chaîne
+  // brute. On isole ce qui suit la bande — titre + grille des piliers.
+  const apresBande = flowHtml.slice(flowHtml.indexOf("Ma méthode"));
   for (const classe of ["h-screen", "overflow-hidden", "sticky", "pinned-scene"]) {
-    assert.ok(!flowHtml.includes(classe), `« ${classe} » ne doit pas apparaître dans le rendu en flux`);
+    assert.ok(!apresBande.includes(classe), `« ${classe} » ne doit pas contraindre le contenu en flux`);
   }
-  // Aucune hauteur imposée en style inline non plus (l'ancienne scène en
-  // posait une de 220vh).
-  assert.ok(!/style="[^"]*height:/.test(flowHtml), "aucune hauteur inline ne doit contraindre la section");
+  assert.ok(
+    !/style="[^"]*height:/.test(apresBande),
+    "aucune hauteur inline ne doit contraindre le titre ni les piliers",
+  );
+  // Et la section elle-même reste dimensionnée par son contenu.
+  assert.ok(!flowHtml.includes("pinned-scene-track"), "aucune piste de scène ancrée dans le repli");
 });
 
 test("la scène ancrée mesure sa hauteur en svh, jamais en vh brut", () => {
@@ -163,16 +171,12 @@ test("« Résultats réels » se rend après les piliers, dans une section disti
 test("NON-RÉGRESSION desktop : la scène ancrée et l'écartement des étoiles sont conservés dans le code", () => {
   for (const marqueur of [
     "pinned-scene-viewport sticky top-0",
-    "starATransform",
-    "starBTransform",
-    "GROWTH_X_VW",
+    "<StarPair sepT={sepT} />",
     "useSectionScrollProgress",
   ]) {
     assert.ok(source.includes(marqueur), `la scène desktop doit conserver « ${marqueur} »`);
   }
-  // La bascule se fait au breakpoint lg, et le repli reste actif pour
-  // prefers-reduced-motion.
-  assert.ok(source.includes("usePinnedSceneViewport"), "la scène doit être conditionnée à la place disponible");
+  assert.ok(source.includes("usePinnedSceneViewport"), "l'ancrage reste conditionné à la place disponible");
   assert.ok(source.includes("reducedMotion || !canPinScene"), "le flux sert reduced-motion ET les écrans trop courts");
 });
 
@@ -182,6 +186,143 @@ test("NON-RÉGRESSION : les deux variantes partagent le même markup de contenu"
   assert.equal((source.match(/function PillarsContent/g) ?? []).length, 1);
   assert.equal((source.match(/<PillarsContent \/>/g) ?? []).length, 2, "utilisé par les deux variantes");
   assert.equal((source.match(/methodPillars\.map/g) ?? []).length, 1, "une seule boucle sur les piliers");
+});
+
+/* ─── Étoiles : animation universelle, sans ciblage d'appareil ─── */
+/*
+ * Bug du 29/07/2026 : animation correcte sur iPhone 16 Pro Max, figée sur
+ * iPhone 14. Cause — `usePinnedSceneViewport` conditionnait l'ANIMATION à
+ * `(min-height: 700px)`, seuil situé entre la hauteur réellement visible
+ * d'un iPhone 14 sous Safari (~664px) et celle d'un grand iPhone (~776px).
+ * Les gardes ci-dessous verrouillent chacun des points qui ont permis
+ * cette divergence.
+ */
+
+const css = readFileSync(new URL("../../app/globals.css", import.meta.url), "utf8");
+const hookAncrage = readFileSync(new URL("../../hooks/usePinnedSceneViewport.ts", import.meta.url), "utf8");
+
+/**
+ * Source débarrassée de ses commentaires. Les commentaires de ce chantier
+ * citent nommément « iPhone 14 » pour expliquer le bug : la garde
+ * anti-détection d'appareil doit porter sur le CODE, pas sur la prose.
+ */
+function sansCommentaires(texte: string): string {
+  return texte.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+}
+
+/** Chaque bloc `@media` de la feuille, délimité par comptage d'accolades. */
+function blocsMedia(feuille: string): { condition: string; corps: string }[] {
+  const blocs: { condition: string; corps: string }[] = [];
+  const regex = /@media([^{]*)\{/g;
+  let m: RegExpExecArray | null;
+  while ((m = regex.exec(feuille)) !== null) {
+    let profondeur = 1;
+    let i = regex.lastIndex;
+    while (i < feuille.length && profondeur > 0) {
+      if (feuille[i] === "{") profondeur += 1;
+      else if (feuille[i] === "}") profondeur -= 1;
+      i += 1;
+    }
+    blocs.push({ condition: m[1].trim(), corps: feuille.slice(regex.lastIndex, i - 1) });
+  }
+  return blocs;
+}
+/** Bloc CSS dédié au motif, isolé pour être inspecté règle par règle. */
+const debutMotif = css.indexOf(".method-stars-scene,");
+const finMotif = css.indexOf("/* Fin motif étoiles */");
+assert.ok(debutMotif > -1 && finMotif > debutMotif, "le bloc CSS du motif doit être délimité dans globals.css");
+const blocEtoiles = css.slice(debutMotif, finMotif);
+
+test("GARDE : aucune media query ne désactive l'animation des étoiles", () => {
+  // Le seul `matchMedia` du composant sert à choisir la MISE EN PAGE.
+  // Le geste, lui, n'est plus derrière aucune condition : les deux
+  // variantes montent `StarPair`.
+  assert.equal((source.match(/<StarPair sepT=\{sepT\} \/>/g) ?? []).length, 2, "les deux variantes animent les étoiles");
+  assert.ok(!/animation:\s*none/.test(blocEtoiles), "aucune règle `animation: none` sur le motif");
+  assert.ok(!/transition:\s*none/.test(blocEtoiles), "aucune règle `transition: none` sur le motif");
+  // Aucune règle du motif ne vit dans une media query de largeur. Les
+  // blocs sont extraits par comptage d'accolades plutôt que par une
+  // expression régulière approximative.
+  for (const bloc of blocsMedia(css)) {
+    if (!/width/.test(bloc.condition)) continue;
+    assert.ok(
+      !bloc.corps.includes("method-stars"),
+      `le motif ne doit pas dépendre de « ${bloc.condition} »`,
+    );
+  }
+  // Le seul palier de largeur du projet reste celui de l'ANCRAGE, et il
+  // porte sur la place disponible, pas sur une classe d'appareil.
+  assert.ok(
+    hookAncrage.includes("(min-width: 1024px) and (min-height: 560px), (min-height: 700px)"),
+    "le seuil d'ancrage est explicite et documenté",
+  );
+  assert.ok(
+    !sansCommentaires(hookAncrage).includes("StarPair"),
+    "le hook d'ancrage ne doit rien savoir des étoiles",
+  );
+});
+
+test("GARDE : les étoiles ne sont jamais masquées, en particulier sous 400px", () => {
+  for (const interdit of ["display: none", "display:none", "visibility: hidden", "visibility:hidden"]) {
+    assert.ok(!blocEtoiles.includes(interdit), `« ${interdit} » ne doit pas s'appliquer au motif`);
+  }
+  // Le composant n'a qu'une opacité, constante et non nulle.
+  const opacite = source.match(/const STAR_OPACITY = ([\d.]+);/);
+  assert.ok(opacite, "l'opacité des étoiles doit rester explicite");
+  assert.ok(Number(opacite[1]) > 0, "les étoiles ne doivent jamais être rendues transparentes");
+  assert.ok(!/hidden|opacity-0/.test(source.slice(source.indexOf("function StarPair"), source.indexOf("function PillarsContent"))),
+    "aucun masquage dans le rendu des étoiles");
+  // Rendu serveur (le HTML que reçoit un téléphone avant hydratation) :
+  // les deux tracés sont bien là.
+  const tracesEtoiles = (flowHtml.match(/viewBox="(-5\.25|216\.92)/g) ?? []).length;
+  assert.equal(tracesEtoiles, 2, "les deux étoiles doivent être dans le HTML servi, avant tout JavaScript");
+});
+
+test("GARDE : reduced-motion conserve un rendu statique VISIBLE", () => {
+  // `immobile` fige la progression à 0 — position de repos, étoiles
+  // assemblées — sans jamais les retirer du rendu.
+  assert.ok(
+    /const sepT = immobile\s*\?\s*0/.test(source),
+    "reduced-motion doit figer la progression, pas supprimer les étoiles",
+  );
+  assert.ok(source.includes("<MethodPillarsFlow immobile={reducedMotion} />"), "le repli reçoit bien l'information");
+  assert.ok(
+    !/reducedMotion[^\n]*return null/.test(source),
+    "reduced-motion ne doit jamais aboutir à un rendu vide",
+  );
+});
+
+test("GARDE : aucune détection d'appareil, d'agent utilisateur ni de largeur en JavaScript", () => {
+  for (const fichier of [sansCommentaires(source), sansCommentaires(hookAncrage)]) {
+    for (const interdit of ["userAgent", "navigator.platform", "iPhone", "iPad", "isMobile", "window.innerWidth"]) {
+      assert.ok(!fichier.includes(interdit), `détection interdite : « ${interdit} »`);
+    }
+  }
+  // La géométrie est résolue par le navigateur, pas calculée en JS à
+  // partir d'une taille d'écran lue une fois.
+  assert.ok(blocEtoiles.includes("min("), "la taille du motif passe par min()");
+  assert.ok(blocEtoiles.includes("max("), "l'amplitude passe par max()");
+});
+
+test("GARDE : aucune largeur fixe ne peut provoquer de débordement horizontal", () => {
+  // Toute la géométrie est bornée par la largeur du viewport (`vw`) et
+  // les étoiles sont confinées par un conteneur qui coupe le dépassement.
+  assert.ok(/--method-star-h:\s*min\([^)]*vw\)/.test(blocEtoiles), "la hauteur d'étoile est bornée par la largeur");
+  assert.ok(/--method-col-half:\s*min\(640px,/.test(blocEtoiles), "la demi-colonne suit la largeur réelle du viewport");
+  assert.ok(source.includes("method-stars-band relative mb-12 overflow-hidden"), "la bande coupe le dépassement");
+  assert.ok(source.includes("pinned-scene-viewport sticky top-0 w-full overflow-hidden"), "la scène ancrée aussi");
+  // Aucune coordonnée en pixels en dur dans le transform des étoiles.
+  const rendu = source.slice(source.indexOf("function StarPair"), source.indexOf("function PillarsContent"));
+  assert.ok(!/\d+px/.test(rendu), "aucune coordonnée fixe en pixels dans le déplacement des étoiles");
+  assert.ok(rendu.includes("pointer-events-none"), "le motif ne capte jamais le pointeur");
+  assert.ok(rendu.includes('transformOrigin: "center"'), "origine de transformation explicite");
+  assert.ok(!/top:|left:/.test(rendu), "le déplacement passe par transform, jamais par top/left");
+});
+
+test("GARDE : la scène est mesurée en svh, avec repli vh, pour la barre d'adresse mobile", () => {
+  assert.ok(css.includes("@supports (height: 100svh)"), "les valeurs svh restent derrière un @supports");
+  assert.ok(/--method-star-h:\s*min\(92vh/.test(css), "repli vh présent");
+  assert.ok(/--method-star-h:\s*min\(92svh/.test(css), "valeur svh présente");
 });
 
 test("le titre reste lisible sur les petits écrans (pas de débordement horizontal)", () => {
