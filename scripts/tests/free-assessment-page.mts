@@ -37,6 +37,8 @@ function test(name: string, fn: () => void) {
 const formHtml = renderToStaticMarkup(createElement(FreeAssessmentForm));
 const sectionHtml = renderToStaticMarkup(createElement(FreeAssessment));
 const homeSource = readFileSync(new URL("../../app/page.tsx", import.meta.url), "utf8");
+/** Feuille de styles globale — lue une seule fois, partagée par les tests 9, 10 et 11. */
+const css = readFileSync(new URL("../../app/globals.css", import.meta.url), "utf8");
 const formSource = readFileSync(
   new URL("../../components/sections/FreeAssessmentForm.tsx", import.meta.url),
   "utf8",
@@ -80,7 +82,9 @@ test("3. titre, introduction, mention sans engagement et ancre stable", () => {
     sectionHtml.includes("comprendre ton objectif et les difficultés que tu"),
     "texte d'introduction absent",
   );
-  assert.ok(sectionHtml.includes("sans engagement"), "mention « sans engagement » absente");
+  // Depuis la mise en avant, la mention est une pastille (« Sans engagement »)
+  // plutôt qu'une phrase : on teste la présence, pas la capitalisation.
+  assert.ok(/sans engagement/i.test(sectionHtml), "mention « sans engagement » absente");
   // Aucun prix, aucune promesse de résultat.
   assert.ok(!/\d+\s*(€|euros)/i.test(sectionHtml), "aucun prix ne doit être affiché");
   assert.ok(!/garanti/i.test(sectionHtml), "aucune promesse de résultat garanti");
@@ -195,13 +199,26 @@ test("9. animation : réutilise question-reveal et respecte prefers-reduced-moti
   assert.ok(formSource.includes("question-reveal"), "animation appliquée au consentement et au bouton");
   assert.ok(formSource.includes("animate={hasInteracted}"), "pas d'animation au premier rendu");
 
-  const css = readFileSync(new URL("../../app/globals.css", import.meta.url), "utf8");
   const bloc = css.slice(css.indexOf(".question-reveal"));
   assert.ok(/@media \(prefers-reduced-motion: reduce\)[\s\S]{0,200}\.question-reveal[\s\S]{0,80}animation: none/.test(css),
     "animation coupée sous prefers-reduced-motion");
   assert.ok(bloc.length > 0, "classe question-reveal définie");
   // La barre de progression aussi.
   assert.ok(primitives.includes("motion-reduce:transition-none"), "barre de progression figée en reduced-motion");
+
+  // Brillance tournante de l'encadré (chantier mise en avant) : elle doit
+  // s'immobiliser sous prefers-reduced-motion, pas disparaître.
+  assert.ok(/@property --bilan-angle/.test(css), "angle animable déclaré via @property");
+  assert.ok(/animation: bilan-tour /.test(css), "anneau principal animé");
+  assert.ok(/animation: bilan-tour-inverse /.test(css), "second anneau à contresens");
+  const reduit = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)", css.indexOf(".bilan-card")));
+  assert.ok(/\.bilan-card::before,\s*\n\s*\.bilan-card::after \{\s*\n\s*animation: none;/.test(reduit),
+    "les deux anneaux figés sous prefers-reduced-motion");
+  assert.ok(/--bilan-angle: \d+deg/.test(reduit), "angle de repli fixé (brillance conservée, pas supprimée)");
+  // Repli si @property n'est pas supporté : la valeur par défaut doit être
+  // écrite dans le var(), sinon le dégradé entier devient invalide.
+  assert.ok(/conic-gradient\(\s*\n?\s*from var\(--bilan-angle, 0deg\)/.test(css),
+    "valeur de repli dans var(--bilan-angle)");
 });
 
 /* ─── 10. Responsive ─── */
@@ -210,9 +227,16 @@ test("10. responsive : aucune largeur fixe, grille adaptative, colonne bornée",
   assert.ok(!/w-\[\d{3,}px\]/.test(sectionHtml), "aucune largeur fixe en pixels");
   assert.ok(!/style="[^"]*width:\s*\d+px/.test(sectionHtml), "aucune largeur inline en pixels");
   assert.ok(sectionHtml.includes("max-w-7xl") && sectionHtml.includes("px-6"), "colonne centrée avec marges");
-  assert.ok(sectionSource.includes("max-w-3xl"), "formulaire dans une colonne lisible");
+  assert.ok(/max-w-\[\d+ch\]/.test(sectionSource), "colonne de texte bornée en mesure (ch)");
+  assert.ok(/minmax\(0,\s*1fr\)/.test(sectionSource), "colonnes de grille qui peuvent rétrécir (minmax 0)");
   assert.ok(formSource.includes("sm:grid-cols-2"), "grille d'options responsive");
-  assert.ok(/text-4xl[^"]*md:text-6xl/.test(sectionHtml), "titre progressif mobile → desktop");
+  assert.ok(/text-\[2\.5rem\][^"]*sm:text-5xl[^"]*md:text-6xl/.test(sectionHtml),
+    "titre progressif mobile → desktop, en trois paliers");
+  // Rembourrages et rayons de l'encadré en clamp() : jamais d'écrasement
+  // sous 360 px ni de boursouflure au-delà de 1440 px.
+  const cssCard = css.slice(css.indexOf(".bilan-card {"));
+  assert.ok(/padding:\s*clamp\(/.test(cssCard), "rembourrage de l'encadré en clamp()");
+  assert.ok(/border-radius:\s*clamp\(/.test(cssCard), "rayon de l'encadré en clamp()");
 });
 
 /* ─── 11. Cohérence visuelle avec la page d'accueil ─── */
@@ -222,7 +246,7 @@ test("11. la section reprend les codes visuels des sections voisines", () => {
     new URL("../../components/sections/Transformations.tsx", import.meta.url),
     "utf8",
   );
-  for (const classe of ["bg-black", "py-24", "mx-auto max-w-7xl px-6"]) {
+  for (const classe of ["bg-black", "mx-auto max-w-7xl px-6"]) {
     assert.ok(transformations.includes(classe), `référence : ${classe}`);
     assert.ok(sectionSource.includes(classe), `la nouvelle section doit reprendre ${classe}`);
   }
@@ -232,7 +256,31 @@ test("11. la section reprend les codes visuels des sections voisines", () => {
     "même traitement typographique du titre",
   );
   // Identité monochrome : aucune couleur décorative introduite.
-  assert.ok(!/bg-(blue|green|red|yellow|purple|pink|orange)-\d/.test(sectionHtml), "palette monochrome respectée");
+  assert.ok(!/bg-(blue|green|red|yellow|purple|pink|orange)-\d/.test(sectionHtml),
+    "aucune classe de couleur utilitaire : l'accent passe par des tokens scopés");
+  // L'accent est volontaire (chantier mise en avant) mais doit rester enfermé
+  // dans .bilan-highlight — aucune fuite vers le thème global ni vers les voisines.
+  assert.ok(/\.bilan-highlight\s*\{[^}]*--bilan-accent:/.test(css),
+    "l'accent doit être déclaré DANS .bilan-highlight");
+
+  // Arrivée PROGRESSIVE de la couleur : la section précédente est noire, le
+  // haut du bloc doit l'être aussi pour que la couture ne se voie pas.
+  const halo = css.slice(css.indexOf(".bilan-highlight::before"), css.indexOf(".bilan-card {"));
+  assert.ok(/mask-image:\s*linear-gradient\(\s*\n?\s*to bottom,\s*\n?\s*transparent 0%/.test(halo),
+    "halo éteint au bord supérieur par un masque vertical");
+  const ancrages = [...halo.matchAll(/radial-gradient\([^)]*at\s+\d+%\s+(\d+)%/g)].map((m) => Number(m[1]));
+  assert.ok(ancrages.length > 0, "nappes du halo détectées");
+  assert.ok(ancrages.every((y) => y >= 50),
+    `aucune nappe ancrée dans la moitié haute (trouvé : ${ancrages.join(", ")})`);
+  assert.ok(/lg:mt-\d+/.test(sectionSource),
+    "encadré décalé vers le bas en deux colonnes, pas à fleur du bord supérieur");
+  const avantSection = css.slice(0, css.indexOf(".bilan-highlight"));
+  assert.ok(!/--bilan-accent/.test(avantSection),
+    "aucun token d'accent déclaré dans :root ou .light");
+  for (const voisine of ["Transformations", "PublicPrograms", "Hero", "Newsletter"]) {
+    const src = readFileSync(new URL(`../../components/sections/${voisine}.tsx`, import.meta.url), "utf8");
+    assert.ok(!src.includes("bilan-"), `${voisine} ne doit pas consommer l'accent du bilan`);
+  }
 });
 
 console.log(`\n${passed} test(s) réussi(s), ${failed} échec(s).`);
