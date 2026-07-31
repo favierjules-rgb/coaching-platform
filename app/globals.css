@@ -905,3 +905,83 @@ body {
   color: var(--bilan-accent);
 }
 /* Mise en avant « Mon bilan offert » — fin */
+
+/*
+ * Section « Mon histoire » — début
+ *
+ * Strictement monochrome : aucune couleur, aucun accent. La seule section
+ * teintée de la home reste « Mon bilan offert », et c'est ce qui lui donne
+ * sa force. Ce qui est repris ici, c'est le soin de fabrication — halo très
+ * étalé, encadré au rayon fluide, filet de lumière discret — pas la teinte.
+ *
+ * Tout est statique : aucune animation permanente. Le seul mouvement de la
+ * section est le compteur, qui se joue une fois à l'entrée dans le viewport
+ * (voir AnimatedCounter.tsx).
+ */
+.histoire {
+  position: relative;
+  isolation: isolate;
+}
+
+/* Halo blanc très dilué, ancré bas-gauche derrière la photo : il détache le
+   bloc du noir plat sans jamais devenir une surface visible. Le masque
+   vertical laisse le haut de la section en noir pur, pour que la couture
+   avec la newsletter ne se voie pas. */
+.histoire::before {
+  content: "";
+  position: absolute;
+  inset: 0 -8% -12%;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(54% 48% at 26% 68%, rgba(255, 255, 255, 0.07), transparent 72%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, transparent 18%, rgba(0, 0, 0, 0.6) 46%, #000 74%);
+  mask-image: linear-gradient(to bottom, transparent 0%, transparent 18%, rgba(0, 0, 0, 0.6) 46%, #000 74%);
+}
+
+/* Cadre photo : rayon fluide, liseré de lumière sur l'arête haute, ombre
+   portée profonde. `overflow: hidden` rogne l'image au rayon sans qu'elle
+   ait besoin de le connaître. */
+.histoire-photo {
+  position: relative;
+  overflow: hidden;
+  border-radius: clamp(0.875rem, 2.2vw, 1.5rem);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.02);
+  box-shadow:
+    0 30px 70px -38px rgba(0, 0, 0, 0.9),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+/* Voile bas : ancre la photo dans le fond noir et évite l'effet « vignette
+   collée ». Purement décoratif, jamais cliquable. */
+.histoire-photo::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 38%;
+  pointer-events: none;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.55), transparent);
+}
+
+/* Filet vertical à gauche du compteur : un simple repère de lecture, il
+   donne du poids au chiffre sans ajouter d'ornement. */
+.histoire-compteur {
+  position: relative;
+  padding-left: 1rem;
+}
+
+.histoire-compteur::before {
+  content: "";
+  position: absolute;
+  inset: 0.1em auto 0.25em 0;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.06));
+}
+
+/* Citation finale : même repère, plus sobre. */
+.histoire-citation {
+  padding-left: 1rem;
+  border-left: 1px solid rgba(255, 255, 255, 0.18);
+}
+/* Section « Mon histoire » — fin */
