@@ -39,7 +39,8 @@
     "test:security-hardening": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/security-hardening.mts",
     "test:authz-hardening": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/authz-hardening.mts",
     "test:authz-behaviour": "NODE_OPTIONS=\"--conditions=react-server --no-warnings\" npx tsx --experimental-test-module-mocks scripts/tests/authz-behaviour.mts",
-    "db:local:init": "bash scripts/db-local-init.sh"
+    "db:local:init": "bash scripts/db-local-init.sh",
+    "test:home-personal-story": "npx tsx scripts/tests/home-personal-story.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

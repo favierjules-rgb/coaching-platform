@@ -2,6 +2,7 @@ import { FreeAssessment } from "@/components/sections/FreeAssessment";
 import { Hero } from "@/components/sections/Hero";
 import { MethodStorytelling } from "@/components/sections/MethodStorytelling";
 import { Newsletter } from "@/components/sections/Newsletter";
+import { PersonalStory } from "@/components/sections/PersonalStory";
 import { PublicPrograms } from "@/components/sections/PublicPrograms";
 import { Transformations } from "@/components/sections/Transformations";
 
@@ -26,6 +27,7 @@ export default function HomePage() {
       <FreeAssessment />
       <PublicPrograms />
       <Newsletter />
+      <PersonalStory />
     </>
   );
 }
