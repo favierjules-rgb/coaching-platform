@@ -246,7 +246,9 @@ test("11. la section reprend les codes visuels des sections voisines", () => {
     new URL("../../components/sections/Transformations.tsx", import.meta.url),
     "utf8",
   );
-  for (const classe of ["bg-black", "mx-auto max-w-7xl px-6"]) {
+  // Depuis le thème home, la surface est un token (bg-background) : c'est
+  // lui, et non plus bg-black, qui fait le code commun entre voisines.
+  for (const classe of ["bg-background", "mx-auto max-w-7xl px-6"]) {
     assert.ok(transformations.includes(classe), `référence : ${classe}`);
     assert.ok(sectionSource.includes(classe), `la nouvelle section doit reprendre ${classe}`);
   }

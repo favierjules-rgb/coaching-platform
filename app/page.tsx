@@ -5,10 +5,23 @@ import { Newsletter } from "@/components/sections/Newsletter";
 import { PersonalStory } from "@/components/sections/PersonalStory";
 import { PublicPrograms } from "@/components/sections/PublicPrograms";
 import { Transformations } from "@/components/sections/Transformations";
+import { HomeThemeSwitch, homeThemeAntiFlashScript } from "@/components/home/HomeThemeSwitch";
 
 export default function HomePage() {
   return (
-    <>
+    /*
+     * Conteneur du thème de la home (chantier apple-refresh) : le choix
+     * clair/sombre du visiteur vit sur CE div — jamais sur <html>, qui
+     * appartient à ThemeProvider (admin/élève, clé localStorage distincte).
+     * Le script bloquant est le PREMIER enfant : il applique le choix
+     * mémorisé pendant le parsing, avant toute peinture du contenu — pas de
+     * flash, pas d'erreur d'hydratation (`suppressHydrationWarning` couvre
+     * l'attribut que le script peut avoir changé côté client).
+     * Sombre par défaut : sans choix mémorisé, la page est identique à
+     * ce qu'elle a toujours été.
+     */
+    <div id="accueil" data-home-theme="dark" suppressHydrationWarning>
+      <script dangerouslySetInnerHTML={{ __html: homeThemeAntiFlashScript }} />
       {/* Nouvelle direction (retour de Jules, 20/07/2026) : le Hero reste
           sans animation d'ouverture — visible immédiatement, comme avant ce
           chantier. Le rideau noir + étoiles au chargement (`SethStarsIntro`)
@@ -28,6 +41,7 @@ export default function HomePage() {
       <PublicPrograms />
       <Newsletter />
       <PersonalStory />
-    </>
+      <HomeThemeSwitch />
+    </div>
   );
 }

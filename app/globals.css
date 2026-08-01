@@ -62,7 +62,12 @@
   --success-foreground: #052e12;
 }
 
-.light {
+/* La palette claire sert deux maîtres : la classe .light (admin/élève,
+   posée sur <html> par ThemeProvider) et le conteneur de la home en thème
+   clair (attribut posé par le switch flottant — voir HomeThemeSwitch).
+   Un seul jeu de valeurs, jamais dupliqué. */
+.light,
+#accueil[data-home-theme="light"] {
   --background: #f4f4f2;
   --foreground: #111111;
   --card: #ffffff;
@@ -676,6 +681,141 @@ body {
 
 /* Fin motif étoiles */
 
+
+/*
+ * Thème de la page d'accueil — début
+ *
+ * La home est la seule route marketing où le visiteur peut choisir
+ * clair/sombre. Le choix est porté par `data-home-theme` sur le conteneur
+ * `#accueil` (jamais sur <html> : l'admin et l'espace élève ont leur propre
+ * système, ThemeProvider, avec sa propre clé localStorage). En clair, le
+ * conteneur reçoit les mêmes tokens que la classe .light (voir plus haut).
+ *
+ * Les variables --home-* ne portent que ce qui n'existe pas déjà en token :
+ * la matière des cartes (filet, lueur d'arête, ombre, halo). Elles sont
+ * scopées ici et nulle part ailleurs.
+ */
+#accueil {
+  --home-line: rgba(255, 255, 255, 0.1);
+  --home-line-strong: rgba(255, 255, 255, 0.16);
+  --home-edge-light: rgba(255, 255, 255, 0.07);
+  --home-shadow: 0 30px 70px -38px rgba(0, 0, 0, 0.9);
+  --home-glow: rgba(255, 255, 255, 0.06);
+  background: var(--background);
+  color: var(--foreground);
+}
+
+#accueil[data-home-theme="light"] {
+  /* Thème clair CONÇU, pas inversé : filets gris froids, ombres diffuses et
+     retenues, lueur d'arête remplacée par un simple rehaut blanc. */
+  --home-line: rgba(0, 0, 0, 0.1);
+  --home-line-strong: rgba(0, 0, 0, 0.16);
+  --home-edge-light: rgba(255, 255, 255, 0.85);
+  --home-shadow: 0 24px 55px -34px rgba(20, 20, 20, 0.28);
+  --home-glow: rgba(15, 15, 15, 0.05);
+}
+
+/*
+ * Carte du langage commun (Newsletter, Transformations, Programmes,
+ * Piliers) : surface token, filet 1px, rayon fluide, rehaut d'arête haute,
+ * ombre large et douce. Une seule définition, déclinée par les variables —
+ * le thème clair n'a donc rien à redéfinir composant par composant.
+ */
+.home-card {
+  border-radius: clamp(0.75rem, 1.8vw, 1.25rem);
+  border: 1px solid var(--home-line);
+  background: var(--card);
+  box-shadow: inset 0 1px 0 var(--home-edge-light), var(--home-shadow);
+}
+
+/* Élévation discrète au survol et au focus clavier : uniquement transform et
+   box-shadow (propriétés composées), jamais de déplacement brutal. */
+.home-card-hover {
+  transition: transform 200ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 200ms cubic-bezier(0.23, 1, 0.32, 1), border-color 200ms ease-out;
+}
+
+.home-card-hover:hover,
+.home-card-hover:focus-visible {
+  transform: translateY(-2px);
+  border-color: var(--home-line-strong);
+  box-shadow: inset 0 1px 0 var(--home-edge-light), var(--home-shadow), 0 12px 30px -18px var(--home-glow);
+}
+
+.home-card-hover:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-card-hover {
+    transition: none;
+  }
+
+  .home-card-hover:hover,
+  .home-card-hover:focus-visible {
+    transform: none;
+  }
+}
+
+/*
+ * Panneaux photo (héro, carte photo de la newsletter) : le contenu repose
+ * sur une photographie sombre, il doit rester clair QUELS que soient le
+ * thème choisi — on répingle localement les tokens sombres. Aucune couleur
+ * nouvelle : les mêmes valeurs que :root.
+ */
+.theme-pinned-dark {
+  --background: #050505;
+  --foreground: #f5f5f5;
+  --card: #121212;
+  --border: rgba(255, 255, 255, 0.12);
+  --muted-foreground: #9a9a9a;
+  --primary: #f5f5f5;
+  --primary-hover: #d9d9d9;
+  --primary-active: #bdbdbd;
+  --primary-foreground: #050505;
+}
+
+/* Switch flottant : capsule fixe à droite, sous le centre, hors du chemin
+   des CTA. Respecte la safe area iPhone. Purement visuel, aucun contenu
+   recouvert (largeur ~2.75rem, z-index sous les modales éventuelles). */
+.home-theme-switch {
+  position: fixed;
+  right: max(0.75rem, env(safe-area-inset-right));
+  top: 58%;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 9999px;
+  border: 1px solid var(--home-line-strong);
+  background: var(--card);
+  color: var(--foreground);
+  box-shadow: var(--home-shadow);
+  transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), border-color 160ms ease-out;
+}
+
+.home-theme-switch:hover {
+  transform: scale(1.06);
+}
+
+.home-theme-switch:active {
+  transform: scale(0.96);
+}
+
+.home-theme-switch:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-theme-switch {
+    transition: none;
+  }
+}
+/* Thème de la page d'accueil — fin */
+
 /*
  * Mise en avant « Mon bilan offert » — début
  *
@@ -696,6 +836,16 @@ body {
   --bilan-accent: #b4f327;
   --bilan-accent-strong: rgba(180, 243, 39, 0.55);
   --bilan-accent-faint: rgba(180, 243, 39, 0.3);
+  /* Arrêts des anneaux tournants : sur noir, la brillance est un lime pâle
+     tirant vers le blanc ; sur blanc (voir variante claire), c'est
+     l'inverse — un vert profond et dense. D'où des variables plutôt que des
+     valeurs en dur : le mouvement est identique, la matière change. */
+  --bilan-trail-in: rgba(180, 243, 39, 0.12);
+  --bilan-hotspot: rgba(233, 255, 158, 0.95);
+  --bilan-trail-out: rgba(180, 243, 39, 0.09);
+  --bilan-ring2-strong: rgba(180, 243, 39, 0.55);
+  --bilan-ring2-hot: rgba(236, 255, 176, 0.78);
+  --bilan-ring2-soft: rgba(180, 243, 39, 0.32);
   --bilan-glow: rgba(163, 230, 53, 0.17);
   position: relative;
   isolation: isolate;
@@ -719,27 +869,37 @@ body {
 .bilan-highlight::before {
   content: "";
   position: absolute;
-  inset: 0 -6% -10%;
+  inset: 0 -6%;
   z-index: -1;
   pointer-events: none;
   background:
     radial-gradient(56% 46% at 22% 62%, var(--bilan-glow), transparent 70%),
-    radial-gradient(52% 50% at 86% 96%, rgba(180, 243, 39, 0.11), transparent 72%);
+    radial-gradient(52% 50% at 86% 88%, var(--bilan-glow-2, rgba(180, 243, 39, 0.11)), transparent 72%);
+  /* Fondu aux DEUX extrémités : le haut reste noir pur (couture avec les
+     transformations), et le bas s'éteint AVANT le bord de la section — sans
+     quoi l'overflow-hidden tranchait la nappe encore visible, la ligne de
+     cassure repérée en thème clair à la frontière avec les programmes. */
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    transparent 22%,
-    rgba(0, 0, 0, 0.28) 40%,
-    rgba(0, 0, 0, 0.72) 60%,
-    #000 78%
+    transparent 18%,
+    rgba(0, 0, 0, 0.28) 34%,
+    rgba(0, 0, 0, 0.72) 52%,
+    #000 66%,
+    #000 78%,
+    rgba(0, 0, 0, 0.45) 91%,
+    transparent 100%
   );
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    transparent 22%,
-    rgba(0, 0, 0, 0.28) 40%,
-    rgba(0, 0, 0, 0.72) 60%,
-    #000 78%
+    transparent 18%,
+    rgba(0, 0, 0, 0.28) 34%,
+    rgba(0, 0, 0, 0.72) 52%,
+    #000 66%,
+    #000 78%,
+    rgba(0, 0, 0, 0.45) 91%,
+    transparent 100%
   );
 }
 
@@ -811,13 +971,13 @@ body {
   background: conic-gradient(
     from var(--bilan-angle, 0deg),
     transparent 0deg,
-    rgba(180, 243, 39, 0.12) 24deg,
+    var(--bilan-trail-in) 24deg,
     var(--bilan-accent-faint) 50deg,
     var(--bilan-accent) 68deg,
-    rgba(233, 255, 158, 0.95) 77deg,
+    var(--bilan-hotspot) 77deg,
     var(--bilan-accent) 90deg,
     var(--bilan-accent-faint) 132deg,
-    rgba(180, 243, 39, 0.09) 205deg,
+    var(--bilan-trail-out) 205deg,
     transparent 272deg,
     transparent 360deg
   );
@@ -829,9 +989,9 @@ body {
   background: conic-gradient(
     from var(--bilan-angle-inverse, 140deg),
     transparent 0deg,
-    rgba(180, 243, 39, 0.55) 28deg,
-    rgba(236, 255, 176, 0.78) 40deg,
-    rgba(180, 243, 39, 0.32) 62deg,
+    var(--bilan-ring2-strong) 28deg,
+    var(--bilan-ring2-hot) 40deg,
+    var(--bilan-ring2-soft) 62deg,
     transparent 104deg,
     transparent 360deg
   );
@@ -905,6 +1065,67 @@ body {
   color: var(--bilan-accent);
 }
 /* Mise en avant « Mon bilan offert » — fin */
+
+
+/*
+ * Variantes claires des sections « Mon bilan offert » et « Mon histoire »
+ * (thème home uniquement). Sur fond clair, une lueur additive ne se voit
+ * pas : les halos passent en encre très diluée, l'accent lime garde son
+ * rôle mais s'assombrit légèrement pour tenir le contraste sur blanc.
+ */
+#accueil[data-home-theme="light"] .bilan-highlight {
+  --bilan-accent: #65a30d;
+  --bilan-accent-strong: rgba(77, 124, 15, 0.62);
+  --bilan-accent-faint: rgba(77, 124, 15, 0.3);
+  --bilan-glow: rgba(101, 163, 13, 0.16);
+  --bilan-glow-2: rgba(101, 163, 13, 0.12);
+  /* Sur blanc, le point chaud est le point le plus SOMBRE de l'anneau :
+     un vert presque noir, dense, qui accroche l'œil comme le lime pâle le
+     fait sur noir. Alphas plus hauts qu'en sombre — un vert dilué sur
+     blanc disparaît, c'est la faute qui rendait l'animation invisible. */
+  --bilan-trail-in: rgba(77, 124, 15, 0.28);
+  --bilan-hotspot: rgba(54, 83, 20, 0.92);
+  --bilan-trail-out: rgba(77, 124, 15, 0.16);
+  --bilan-ring2-strong: rgba(77, 124, 15, 0.6);
+  --bilan-ring2-hot: rgba(54, 83, 20, 0.85);
+  --bilan-ring2-soft: rgba(77, 124, 15, 0.34);
+}
+
+#accueil[data-home-theme="light"] .bilan-card {
+  border-color: rgba(0, 0, 0, 0.1);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.65));
+  box-shadow: 0 26px 62px -30px rgba(63, 98, 18, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+#accueil[data-home-theme="light"] .bilan-card:focus-within {
+  box-shadow: 0 26px 62px -32px rgba(63, 98, 18, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+
+#accueil[data-home-theme="light"] .bilan-tag {
+  border-color: rgba(63, 98, 18, 0.35);
+  background: linear-gradient(160deg, rgba(77, 124, 15, 0.12), rgba(77, 124, 15, 0.05));
+  color: #2f4a0a;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 0 18px -8px rgba(77, 124, 15, 0.35);
+  text-shadow: none;
+}
+
+#accueil[data-home-theme="light"] .histoire::before {
+  background: radial-gradient(54% 48% at 26% 68%, rgba(15, 15, 15, 0.05), transparent 72%);
+}
+
+#accueil[data-home-theme="light"] .histoire-photo {
+  border-color: rgba(0, 0, 0, 0.1);
+  background: rgba(0, 0, 0, 0.02);
+  box-shadow: 0 24px 55px -34px rgba(20, 20, 20, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+#accueil[data-home-theme="light"] .histoire-compteur::before {
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.06));
+}
+
+#accueil[data-home-theme="light"] .histoire-citation {
+  border-left-color: rgba(0, 0, 0, 0.2);
+}
 
 /*
  * Section « Mon histoire » — début

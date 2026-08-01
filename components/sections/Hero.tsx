@@ -25,7 +25,7 @@ import { SethStarsMark } from "@/components/brand/SethStarsMark";
  */
 export function Hero() {
   return (
-    <section className="relative flex min-h-screen items-center overflow-hidden bg-black">
+    <section className="theme-pinned-dark relative flex min-h-screen items-center overflow-hidden bg-black">
       <div className="absolute inset-0">
         <Image
           src="/brand/backgrounds/hero.webp"
@@ -42,14 +42,14 @@ export function Hero() {
       <div className="relative z-10 mx-auto w-full max-w-7xl px-6 pb-16 pt-32 lg:pb-24 lg:pt-40">
         <div className="max-w-2xl">
           <div className="hero-fade-slide-in mb-6 flex items-center gap-3">
-            <SethStarsMark className="h-5 w-auto" />
+            <SethStarsMark className="text-white h-5 w-auto" />
             <span className="h-0.5 w-8 bg-primary" />
             <span className="font-heading text-xs font-semibold uppercase tracking-[0.4em] text-primary">
               Seth · Préparation Physique
             </span>
           </div>
 
-          <h1 className="hero-fade-slide-in font-heading text-6xl font-extrabold uppercase leading-[0.95] text-foreground sm:text-7xl md:text-8xl">
+          <h1 className="hero-fade-slide-in font-heading text-6xl font-extrabold uppercase leading-[0.92] tracking-[-0.03em] text-foreground sm:text-7xl md:text-8xl">
             Transforme
             <br />
             <span className="italic text-primary">ton physique.</span>
@@ -64,13 +64,13 @@ export function Hero() {
           <div className="hero-fade-slide-in hero-fade-slide-in-delay-2 mt-10 flex flex-wrap gap-4">
             <a
               href="#methode"
-              className="inline-flex items-center gap-2 bg-primary px-8 py-4 font-heading text-sm font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
+              className="home-card-hover inline-flex items-center gap-2 rounded-full bg-primary px-8 py-4 font-heading text-sm font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
             >
               Découvrir la méthode <ArrowRight size={16} />
             </a>
             <a
               href="#transformations"
-              className="inline-flex items-center gap-2 border border-white/30 px-8 py-4 font-heading text-sm font-bold uppercase tracking-widest text-foreground transition-colors hover:border-white"
+              className="home-card-hover inline-flex items-center gap-2 rounded-full border border-white/30 bg-white/[0.04] px-8 py-4 font-heading text-sm font-bold uppercase tracking-widest text-foreground transition-colors hover:border-white/70"
             >
               Voir les transformations
             </a>

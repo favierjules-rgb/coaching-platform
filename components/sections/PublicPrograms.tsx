@@ -36,7 +36,7 @@ export async function PublicPrograms() {
   const { programs } = result;
 
   return (
-    <section id="programmes" className="overflow-hidden bg-black py-24">
+    <section id="programmes" className="overflow-hidden bg-background py-24">
       <div className="mx-auto max-w-7xl px-6">
         <SectionLabel>Accès immédiat</SectionLabel>
         <h2 className="mb-4 font-heading text-4xl font-extrabold uppercase text-foreground md:text-6xl">
@@ -52,7 +52,7 @@ export async function PublicPrograms() {
           <PublicProgramsMarquee programs={programs} durationSeconds={Math.max(28, programs.length * 9)} />
         </div>
 
-        <div className="flex flex-shrink-0 flex-col items-start gap-4 border border-border bg-zinc-950 p-8 lg:w-72">
+        <div className="home-card flex flex-shrink-0 flex-col items-start gap-4 p-8 lg:w-72">
           <h3 className="font-heading text-2xl font-extrabold uppercase text-foreground">Découvrez plus de programmes</h3>
           <p className="text-sm text-muted-foreground">
             Toute la bibliothèque des programmes disponibles en achat unique, gratuits et payants.

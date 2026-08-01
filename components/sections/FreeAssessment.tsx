@@ -35,7 +35,7 @@ const reassurances = [
 
 export function FreeAssessment() {
   return (
-    <section id="bilan-offert" className="bilan-highlight scroll-mt-24 overflow-hidden bg-black py-20 md:py-28">
+    <section id="bilan-offert" className="bilan-highlight scroll-mt-24 overflow-hidden bg-background pt-10 pb-20 md:pt-14 md:pb-28">
       <div className="mx-auto max-w-7xl px-6">
         <div className="grid items-start gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:gap-16">
           {/* Colonne argumentaire — écriture resserrée : interligne court,

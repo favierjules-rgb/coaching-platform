@@ -14,7 +14,7 @@ import type { TransformationPhoto } from "@/types";
 export function TransformationPhotoCard({ transformation }: { transformation: TransformationPhoto }) {
   return (
     <div className="flex w-72 flex-shrink-0 flex-col gap-3 sm:w-80">
-      <div className="relative aspect-[4/5] w-full overflow-hidden border border-border bg-zinc-950">
+      <div className="home-card relative aspect-[4/5] w-full overflow-hidden bg-[color:var(--surface)]">
         <Image
           src={transformation.image}
           alt={transformation.alt}
