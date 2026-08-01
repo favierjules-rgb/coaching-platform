@@ -146,13 +146,13 @@ export function SethStarsIntro() {
         className="absolute left-1/2 top-1/2 h-[92vh] w-auto"
         style={{ transform: starATransform, opacity: STAR_OPACITY, willChange: "transform" }}
       >
-        <SethStarsMark star="A" className="h-[92vh] w-auto" />
+        <SethStarsMark star="A" className="text-white h-[92vh] w-auto" />
       </div>
       <div
         className="absolute left-1/2 top-1/2 h-[92vh] w-auto"
         style={{ transform: starBTransform, opacity: STAR_OPACITY, willChange: "transform" }}
       >
-        <SethStarsMark star="B" className="h-[92vh] w-auto" />
+        <SethStarsMark star="B" className="text-white h-[92vh] w-auto" />
       </div>
     </div>
   );

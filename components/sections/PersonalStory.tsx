@@ -53,7 +53,7 @@ const paragraphes = [
 
 export function PersonalStory() {
   return (
-    <section id="mon-histoire" className="histoire scroll-mt-24 overflow-hidden bg-black py-20 md:py-28">
+    <section id="mon-histoire" className="histoire scroll-mt-24 overflow-hidden bg-background py-20 md:py-28">
       <div className="mx-auto max-w-7xl px-6">
         {/* `items-stretch` : en deux colonnes, la photo prend toute la hauteur
             du texte — c'est ce qui aligne réellement les deux colonnes, la

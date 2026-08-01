@@ -49,14 +49,20 @@ const VIEWBOX_B = "216.92 229.89 424.43 582.25";
  * Purement décoratif et présentational : ce composant ne contient aucune
  * logique de scroll ni d'état, et n'applique lui-même aucun transform.
  * `aria-hidden` : jamais annoncé par un lecteur d'écran, jamais focusable.
+ *
+ * Couleur : `currentColor` (chantier thème home) — chaque point d'appel
+ * choisit sa couleur via `text-*`. Les usages historiques (Hero, intro)
+ * épinglent `text-white` : rendu strictement identique à l'ancien blanc
+ * codé en dur. Dans MethodStorytelling, `text-foreground` rend les
+ * étoiles noires en thème clair — sans quoi elles disparaîtraient.
  */
 export function SethStarsMark({ className, style, star = "both" }: SethStarsMarkProps) {
   const viewBox = star === "A" ? VIEWBOX_A : star === "B" ? VIEWBOX_B : VIEWBOX_BOTH;
 
   return (
     <svg viewBox={viewBox} className={className} style={style} aria-hidden="true" focusable="false">
-      {star !== "B" && <path d={STAR_A_PATH} fill="#fff" />}
-      {star !== "A" && <path d={STAR_B_PATH} fill="#fff" />}
+      {star !== "B" && <path d={STAR_A_PATH} fill="currentColor" />}
+      {star !== "A" && <path d={STAR_B_PATH} fill="currentColor" />}
     </svg>
   );
 }

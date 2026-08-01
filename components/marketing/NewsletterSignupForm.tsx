@@ -55,7 +55,7 @@ export function NewsletterSignupForm() {
     return (
       <div
         role="status"
-        className="border border-border bg-card p-6 text-center"
+        className="home-card p-6 text-center"
       >
         <p className="font-heading text-base font-bold uppercase text-foreground">
           Merci !
@@ -69,7 +69,7 @@ export function NewsletterSignupForm() {
     <form
       onSubmit={handleSubmit}
       noValidate
-      className="relative overflow-hidden border border-border bg-card p-6"
+      className="theme-pinned-dark home-card relative overflow-hidden p-6"
     >
       {/*
         Fond photo (chantier "backgrounds", juillet 2026) — appel unique de

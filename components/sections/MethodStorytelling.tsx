@@ -111,13 +111,13 @@ function StarPair({ sepT }: { sepT: number }) {
         className="pointer-events-none absolute left-1/2 top-1/2 z-20"
         style={{ ...commun, transform: `translate(-50%, -50%) translate(calc(-1 * ${dx}), calc(-1 * ${dy}))` }}
       >
-        <SethStarsMark star="A" className="block" style={taille} />
+        <SethStarsMark star="A" className="text-foreground block" style={taille} />
       </div>
       <div
         className="pointer-events-none absolute left-1/2 top-1/2 z-20"
         style={{ ...commun, transform: `translate(-50%, -50%) translate(${dx}, ${dy})` }}
       >
-        <SethStarsMark star="B" className="block" style={taille} />
+        <SethStarsMark star="B" className="text-foreground block" style={taille} />
       </div>
     </>
   );
@@ -161,7 +161,8 @@ function PillarsContent() {
           jusqu'à ~600px de hauteur visible (iPhone 14 sous Safari en
           affiche ~664). Chaque valeur de base perd un cran ; rien ne bouge
           à partir de `sm`. */}
-      <div className="grid grid-cols-1 gap-px bg-border sm:grid-cols-2 lg:grid-cols-4">
+      <div className="home-card overflow-clip">
+        <div className="grid grid-cols-1 gap-px bg-[color:var(--home-line)] sm:grid-cols-2 lg:grid-cols-4">
         {methodPillars.map(({ icon: Icon, title, description }, index) => (
           <div key={title} className="bg-card p-3 sm:p-5 lg:p-8">
             <div className="mb-1 font-heading text-[10px] font-semibold uppercase tracking-[0.3em] text-primary sm:mb-1.5 sm:text-xs lg:mb-6">
@@ -176,6 +177,7 @@ function PillarsContent() {
             </p>
           </div>
         ))}
+      </div>
       </div>
     </>
   );
@@ -243,7 +245,7 @@ function MethodPillarsStatic() {
     <section id="methode" className="scroll-mt-24 bg-background py-16 sm:py-24">
       <div className="mx-auto max-w-7xl px-6">
         <div className="mb-12 flex justify-center">
-          <SethStarsMark className="h-40 w-auto max-w-[70vw] opacity-90" />
+          <SethStarsMark className="text-foreground h-40 w-auto max-w-[70vw] opacity-90" />
         </div>
 
         <PillarsContent />
