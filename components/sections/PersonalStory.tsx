@@ -35,7 +35,12 @@ import { SectionLabel } from "@/components/ui/SectionLabel";
  * d'une rotation EXIF, et une image redressée par le navigateur ne
  * correspond alors plus aux `width`/`height` du code — ce qui la
  * déformerait. Avec `fill` + `object-cover`, seul le cadre décide de la
- * forme, quelle que soit l'orientation restituée.
+ * forme, quelle que soit l'orientation restituée. `w-full` sur la figure
+ * n'est PAS décoratif : sans largeur définie, Safari refuse de résoudre
+ * `aspect-ratio` sur un élément dont le seul contenu est absolu — hauteur
+ * zéro, photo invisible sur iPhone (régression corrigée, fix/home-story-
+ * photo-iphone). La photo est servie en noir et blanc (`grayscale`), comme
+ * celle du héro.
  *
  * Tant que le fichier n'existe pas, la section rend un cadre neutre plutôt
  * qu'une image cassée (contrôle fait au build, jamais à chaque requête).
@@ -62,14 +67,14 @@ export function PersonalStory() {
             se suivent de près) et retrouve de l'air en deux colonnes. */}
         <div className="grid items-stretch gap-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)] lg:gap-16">
           {/* Photo — première colonne en desktop, quatrième bloc en mobile. */}
-          <figure className="histoire-photo order-4 m-0 aspect-[4/5] lg:order-none lg:aspect-auto lg:h-full lg:min-h-[32rem]">
+          <figure className="histoire-photo order-4 m-0 w-full aspect-[4/5] lg:order-none lg:aspect-auto lg:h-full lg:min-h-[32rem]">
             {portraitDisponible ? (
               <Image
                 src={PORTRAIT}
                 alt="Jules, coach en préparation physique, sur la piste d'athlétisme"
                 fill
                 sizes="(min-width: 1024px) 45vw, 100vw"
-                className="object-cover object-center"
+                className="object-cover object-center grayscale"
               />
             ) : (
               <div

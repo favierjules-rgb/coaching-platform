@@ -103,6 +103,13 @@ test("7. aucune largeur fixe, rayons et rembourrages fluides", () => {
   assert.ok(/max-w-\[\d+ch\]/.test(sectionSource), "mesure du texte bornée en ch");
   const bloc = css.slice(css.indexOf(".histoire-photo {"));
   assert.ok(/border-radius:\s*clamp\(/.test(bloc), "rayon du cadre photo en clamp()");
+  // Safari : aspect-ratio n'est résolu que si la largeur est DÉFINIE — sans
+  // w-full, la figure (dont le seul contenu est absolu) s'effondre à 0 sur
+  // iPhone. Régression réelle corrigée par fix/home-story-photo-iphone.
+  assert.ok(/histoire-photo[^"]*w-full[^"]*aspect-\[4\/5\]/.test(sectionSource),
+    "figure en w-full + aspect-[4/5] : largeur définie exigée par Safari");
+  assert.ok(/object-cover object-center grayscale/.test(sectionSource),
+    "photo servie en noir et blanc (grayscale)");
 });
 
 /* ─── 5. Identité visuelle : monochrome strict ─── */
