@@ -1298,6 +1298,13 @@ export interface AdminStudentFeedback {
   status: FeedbackStatus;
   coachReply: string;
   createdAt: string;
+  /** Photographie du prescrit posée à la première soumission — null pour les
+   *  anciens retours (le récapitulatif retombe alors sur la séance vivante,
+   *  historique non figé). Voir lib/workout-history.ts. */
+  prescribedSnapshot?: unknown;
+  performedAt?: string | null;
+  durationMinutes?: number | null;
+  sessionStatus?: "done" | "missed" | null;
   updatedAt: string;
 }
 
@@ -1329,6 +1336,11 @@ export interface SupabaseWorkoutFeedback {
   submittedAt: string;
   createdAt: string;
   updatedAt: string;
+  /** Historique (phase 1) — null pour les retours antérieurs à la migration. */
+  prescribedSnapshot: unknown;
+  performedAt: string | null;
+  durationMinutes: number | null;
+  sessionStatus: string | null;
 }
 
 export interface SupabaseExerciseFeedback {
@@ -1389,6 +1401,11 @@ export interface WorkoutFeedbackPayload {
   /** FK uuid réelles quand la séance vient d'un programme Supabase migré (voir lib/supabase/programs.ts). */
   sessionId?: string | null;
   programId?: string | null;
+  /** Historique (phase 1, feat/student-workout-history) : date réelle de
+   *  réalisation (AAAA-MM-JJ) et durée déclarées — optionnelles, validées
+   *  côté couche d'écriture (sanitize*). */
+  performedAt?: string | null;
+  durationMinutes?: number | null;
 }
 
 export type AssignableContentType = "programme" | "nutrition" | "document";

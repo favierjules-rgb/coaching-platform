@@ -41,7 +41,8 @@
     "test:authz-behaviour": "NODE_OPTIONS=\"--conditions=react-server --no-warnings\" npx tsx --experimental-test-module-mocks scripts/tests/authz-behaviour.mts",
     "db:local:init": "bash scripts/db-local-init.sh",
     "test:home-personal-story": "npx tsx scripts/tests/home-personal-story.mts",
-    "test:home-theme": "npx tsx scripts/tests/home-theme.mts"
+    "test:home-theme": "npx tsx scripts/tests/home-theme.mts",
+    "test:student-workout-history": "npx tsx scripts/tests/student-workout-history.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

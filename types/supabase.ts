@@ -668,6 +668,10 @@ export interface Database {
           program_id: string | null;
           session_key: string | null;
           session_ref_label: string;
+          prescribed_snapshot: Record<string, unknown> | null;
+          performed_at: string | null;
+          duration_minutes: number | null;
+          session_status: string | null;
           completed: boolean;
           global_rpe: number | null;
           global_comment: string;
@@ -685,6 +689,10 @@ export interface Database {
           program_id?: string | null;
           session_key?: string | null;
           session_ref_label?: string;
+          prescribed_snapshot?: Record<string, unknown> | null;
+          performed_at?: string | null;
+          duration_minutes?: number | null;
+          session_status?: string | null;
           completed?: boolean;
           global_rpe?: number | null;
           global_comment?: string;
@@ -702,6 +710,10 @@ export interface Database {
           program_id?: string | null;
           session_key?: string | null;
           session_ref_label?: string;
+          prescribed_snapshot?: Record<string, unknown> | null;
+          performed_at?: string | null;
+          duration_minutes?: number | null;
+          session_status?: string | null;
           completed?: boolean;
           global_rpe?: number | null;
           global_comment?: string;
@@ -796,6 +808,9 @@ export interface Database {
           duration_weeks: number;
           description: string;
           status: "brouillon" | "actif" | "archivé";
+          owner_student_id: string | null;
+          source_template_id: string | null;
+          source_checkout_session_id: string | null;
           banner_url: string | null;
           program_mode: "individuel" | "groupe";
           group_start_date: string | null;
@@ -813,6 +828,9 @@ export interface Database {
           duration_weeks?: number;
           description?: string;
           status?: "brouillon" | "actif" | "archivé";
+          owner_student_id?: string | null;
+          source_template_id?: string | null;
+          source_checkout_session_id?: string | null;
           banner_url?: string | null;
           program_mode?: "individuel" | "groupe";
           group_start_date?: string | null;
@@ -830,6 +848,9 @@ export interface Database {
           duration_weeks?: number;
           description?: string;
           status?: "brouillon" | "actif" | "archivé";
+          owner_student_id?: string | null;
+          source_template_id?: string | null;
+          source_checkout_session_id?: string | null;
           banner_url?: string | null;
           program_mode?: "individuel" | "groupe";
           group_start_date?: string | null;

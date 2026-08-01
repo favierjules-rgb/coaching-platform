@@ -33,6 +33,7 @@ import {
   markPublicProgramPurchaseEventProcessed,
   recordPublicProgramPurchaseConfirmationEmailResult,
 } from "@/lib/supabase/billing";
+import { programAssignmentTestHooks } from "@/lib/supabase/programs";
 import { provisionPublicProgramAccess, RetryablePublicProgramProvisioningError } from "@/lib/supabase/public-program-provisioning";
 import type { Database } from "@/types/supabase";
 
@@ -355,7 +356,40 @@ const baseProvisionInput = {
 
 function seedExistingStudent(db: FakeDbHandle) {
   db.tables.students = [{ id: "student_1", user_id: "user_1", first_name: "Test", email: "test-verif@example.com" }];
+  // Correction produit (feat/student-workout-history) : prog_1 est un ACHAT
+  // UNIQUE (is_public) — l'acheteur reçoit sa COPIE individuelle, jamais le
+  // programme commercial lui-même (provisionPurchasedProgram).
+  db.tables.programs = [
+    { id: "prog_1", name: "LOL", status: "actif", program_mode: "individuel", is_public: true, owner_student_id: null, source_template_id: null, source_checkout_session_id: null },
+  ];
 }
+
+// Clonage factice branché sur le fake reçu en argument (chaque test crée sa
+// base) — fidèle au contrat de la RPC transactionnelle provision_program_copy :
+// même session d'achat → même copie (bloc SYNCHRONE : vérification + création
+// sans await, comme le verrou advisory + l'index unique
+// programs_source_checkout_session_key sérialisent les webhooks concurrents).
+programAssignmentTestHooks.duplicate = (async (client: unknown, programId: string, o: Record<string, unknown>) => {
+  const fake = client as FakeSupabase;
+  const overrides = o as { name?: string; status?: string; ownerStudentId?: string; sourceTemplateId?: string; sourceCheckoutSessionId?: string };
+  const programmes = fake.tables.programs ?? (fake.tables.programs = []);
+  if (overrides.sourceCheckoutSessionId) {
+    const existante = programmes.find((p) => p.source_checkout_session_id === overrides.sourceCheckoutSessionId);
+    if (existante) return existante.id as string;
+  }
+  const source = programmes.find((p) => p.id === programId);
+  if (!source) return null;
+  const copieId = `copie_${programmes.length}_${programId}`;
+  programmes.push({
+    ...source,
+    id: copieId,
+    is_public: false,
+    owner_student_id: overrides.ownerStudentId ?? null,
+    source_template_id: overrides.sourceTemplateId ?? null,
+    source_checkout_session_id: overrides.sourceCheckoutSessionId ?? null,
+  });
+  return copieId;
+}) as never;
 
 // ═══════════════════════════════════════════════════════════════════════
 // Suite A — verrou d'évènement billing_events (acquisition atomique)
@@ -495,14 +529,18 @@ await test("B1 (happy path) — consentements + activation écrits, aucune dupli
   assert.ok(result, "premier essai doit réussir");
   assert.equal(db.countRows("legal_consents", (r) => r.consent_type === "cgv_programme"), 1);
   assert.equal(db.countRows("legal_consents", (r) => r.consent_type === "retractation_programme"), 1);
-  assert.equal(db.countRows("assignments", (r) => r.content_id === "prog_1"), 1);
+  // Correction produit : l'affectation vise la COPIE individuelle de
+  // l'acheteur, jamais le programme commercial prog_1 lui-même.
+  assert.equal(db.countRows("assignments", (r) => r.student_id === "student_1"), 1);
+  assert.equal(db.countRows("assignments", (r) => r.content_id === "prog_1"), 0, "le produit du catalogue n'est jamais assigné directement");
 
   // Retry avec le MÊME checkoutSessionId (Stripe renvoie le même évènement) :
   const retry = await provisionPublicProgramAccess(db, { ...baseProvisionInput, onConsentsRecorded: async () => {} });
   assert.ok(retry, "un retry après succès doit rester silencieusement réussi (idempotent)");
   assert.equal(db.countRows("legal_consents", (r) => r.consent_type === "cgv_programme"), 1, "pas de doublon consentement CGV");
   assert.equal(db.countRows("legal_consents", (r) => r.consent_type === "retractation_programme"), 1, "pas de doublon consentement rétractation");
-  assert.equal(db.countRows("assignments", (r) => r.content_id === "prog_1"), 1, "pas de doublon d'affectation (setProgramAssignment idempotent)");
+  assert.equal(db.countRows("assignments", (r) => r.student_id === "student_1"), 1, "pas de doublon d'affectation (provisionnement idempotent)");
+  assert.equal(db.countRows("programs", (r) => r.source_template_id === "prog_1"), 1, "pas de deuxième copie au rejeu (même session)");
 });
 
 await test("B2 (a — échec consentement) — insert legal_consents échoue : throw, PAS d'activation", async () => {
@@ -694,7 +732,12 @@ await test("deux activations simultanées : aucune affectation en double (contra
     provisionPublicProgramAccess(db, { ...baseProvisionInput, onConsentsRecorded: async () => {} }),
   ]);
   assert.ok(r1 && r2, "les deux appels concurrents doivent réussir (idempotent)");
-  assert.equal(db.countRows("assignments", (r) => r.content_id === "prog_1"), 1, "une seule affectation malgré la course concurrente");
+  // Correction produit : la course porte désormais sur la COPIE individuelle —
+  // une seule copie (contrat de la RPC/index unique par session) et une seule
+  // affectation malgré les deux livraisons simultanées.
+  assert.equal(db.countRows("programs", (r) => r.source_template_id === "prog_1"), 1, "une seule copie malgré la course concurrente");
+  assert.equal(db.countRows("assignments", (r) => r.student_id === "student_1"), 1, "une seule affectation malgré la course concurrente");
+  assert.equal(db.countRows("assignments", (r) => r.content_id === "prog_1"), 0, "jamais d'affectation directe au produit du catalogue");
 });
 
 // ─── Résumé ───

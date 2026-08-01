@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, type FormEvent } from "react";
+import { resolvePrescription } from "@/lib/workout-history";
 import { CheckCircle } from "lucide-react";
 
 import { ExerciseFeedbackCard } from "@/components/student/ExerciseFeedbackCard";
@@ -447,6 +448,12 @@ export function SessionFeedbackSection({
 
   if (existingFeedback && !editing) {
     const parsed = parseCardioResults(existingFeedback.exerciseEntries);
+    // Historique (phase 1) : si la photographie du prescrit a été posée à la
+    // soumission, le récapitulatif l'affiche — c'est elle qui fait foi, même
+    // si le coach a retravaillé la séance depuis. Sans snapshot (anciens
+    // retours), rien ne change : la séance vivante reste la seule source,
+    // historique non figé assumé.
+    const prescription = resolvePrescription(existingFeedback.prescribedSnapshot, true);
     return (
       <div className="flex flex-col gap-6 animate-fade-in">
         <div className="rounded-card border border-primary/30 bg-card p-8 text-center shadow-soft">
@@ -467,6 +474,41 @@ export function SessionFeedbackSection({
             </button>
           )}
         </div>
+
+        {prescription.source === "snapshot" && prescription.snapshot && (
+          <div className="rounded-card border border-border bg-card p-6 shadow-soft">
+            <h3 className="mb-1 font-heading text-sm font-bold uppercase text-foreground">
+              Prescription au moment de la séance
+            </h3>
+            <p className="mb-4 text-xs text-muted-foreground">
+              Photographie figée le{" "}
+              {new Date(prescription.snapshot.capturedAt).toLocaleDateString("fr-FR")} — les
+              modifications ultérieures du programme ne s&apos;appliquent pas ici.
+            </p>
+            <dl className="flex flex-col gap-2">
+              {prescription.snapshot.blocks.flatMap((bloc) =>
+                bloc.exercises.map((exercice) => (
+                  <div
+                    key={`${bloc.position}-${exercice.order}-${exercice.name}`}
+                    className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-panel border border-border bg-surface-soft/40 px-4 py-3"
+                  >
+                    <dt className="text-sm font-semibold text-foreground">{exercice.name}</dt>
+                    <dd className="text-xs uppercase tracking-wider text-muted-foreground">
+                      {[
+                        exercice.sets !== null ? `${exercice.sets} séries` : null,
+                        exercice.reps ? `${exercice.reps} reps` : null,
+                        exercice.recommendedLoad ? `charge ${exercice.recommendedLoad}` : null,
+                        exercice.restSeconds !== null ? `repos ${exercice.restSeconds}s` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </dd>
+                  </div>
+                )),
+              )}
+            </dl>
+          </div>
+        )}
 
         {parsed.blocks.length > 0 && (
           <div className="flex flex-col gap-4">

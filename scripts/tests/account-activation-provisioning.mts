@@ -18,6 +18,7 @@
  */
 
 import assert from "node:assert/strict";
+import { programAssignmentTestHooks } from "../../lib/supabase/programs";
 import { mock } from "node:test";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -126,13 +127,35 @@ function faireSupabaseProvisionnement(options: {
     from: (table: string) => {
       const chainable: Record<string, unknown> = {};
       const retour = () => chainable;
-      for (const m of ["select", "eq", "ilike", "order", "limit", "is", "lt", "neq", "insert", "update", "upsert", "delete"]) {
+      const colonnesEq: string[] = [];
+      for (const m of ["select", "ilike", "order", "limit", "is", "lt", "neq", "insert", "update", "upsert", "delete"]) {
         chainable[m] = retour;
       }
-      chainable.maybeSingle = async () => ({
-        data: table === "students" ? options.eleveExistant ?? null : null,
-        error: null,
-      });
+      chainable.eq = (colonne: string) => {
+        colonnesEq.push(colonne);
+        return chainable;
+      };
+      chainable.maybeSingle = async () => {
+        if (table === "students") return { data: options.eleveExistant ?? null, error: null };
+        if (table === "programs") {
+          // Recherche d'une copie existante par session d'achat : aucune en
+          // harnais (le stub de clonage en crée une à chaque passage).
+          if (colonnesEq.includes("source_checkout_session_id")) return { data: null, error: null };
+          // Lecture du programme commercial : mode achat unique explicite.
+          return {
+            data: {
+              id: "programme-1",
+              name: "Programme Test",
+              status: "actif",
+              program_mode: "individuel",
+              is_public: true,
+              owner_student_id: null,
+            },
+            error: null,
+          };
+        }
+        return { data: null, error: null };
+      };
       chainable.single = async () => ({
         data: table === "students" ? { id: "student-1" } : null,
         error: null,
@@ -142,6 +165,11 @@ function faireSupabaseProvisionnement(options: {
   };
   return { client, appelsGenerateLink };
 }
+
+// Correction produit : l'achat unique crée une copie individuelle. Le clonage
+// profond est couvert ailleurs ; ici on le remplace par un stub qui rend un id
+// de copie stable, pour tester le PROVISIONNEMENT (ordre, idempotence, reprise).
+programAssignmentTestHooks.duplicate = async () => "copie-programme-1";
 
 function entreeAchat() {
   return {
@@ -220,13 +248,13 @@ await test("24. paiement et attribution restent conservés quand seul l'envoi é
 
   // L'attribution précède la remise du lien : un échec d'envoi la laisse
   // intacte, et rien dans le code ne la retire.
-  const posAssignation = corps.indexOf("setProgramAssignment");
+  const posAssignation = corps.indexOf("provisionPurchasedProgram");
   const posEnvoi = corps.indexOf("envoyerLienAccesInitial");
   assert.ok(posAssignation > 0 && posEnvoi > posAssignation, "le programme est attribué avant l'envoi");
 
   const fonctionEnvoi = source.slice(source.indexOf("async function envoyerLienAccesInitial"));
   const corpsEnvoi = fonctionEnvoi.slice(0, fonctionEnvoi.indexOf("\n}\n"));
-  assert.ok(!/setProgramAssignment\([^)]*false/.test(corpsEnvoi), "l'envoi ne retire jamais l'attribution");
+  assert.ok(!/provisionPurchasedProgram\([^)]*false|assignSharedProgram\([^)]*false|setProgramAssignment\([^)]*false/.test(corpsEnvoi), "l'envoi ne retire jamais l'attribution");
   assert.ok(!/delete\(\)/.test(corpsEnvoi), "l'envoi ne supprime rien");
   assert.ok(!/refund|cancel/i.test(corpsEnvoi), "aucune annulation de paiement");
 });
@@ -421,7 +449,7 @@ await test("34. la reprise ne duplique ni le compte ni l'attribution", async () 
   const source = lire("../../lib/supabase/public-program-provisioning.ts");
   const grant = source.slice(source.indexOf("async function grantExistingStudent"), source.indexOf("async function envoyerLienAccesInitial"));
   assert.equal(
-    (grant.match(/setProgramAssignment/g) ?? []).length,
+    (grant.match(/provisionPurchasedProgram/g) ?? []).length,
     1,
     "une seule attribution par passage",
   );
@@ -547,12 +575,12 @@ await test("40. l'attribution du programme est conservée malgré l'incertitude"
   );
   // L'attribution précède la lecture de l'état Auth : une levée ultérieure
   // ne peut pas la défaire.
-  const posAssignation = grant.indexOf("setProgramAssignment");
+  const posAssignation = grant.indexOf("provisionPurchasedProgram");
   const posEtatAuth = grant.indexOf("getUserById");
   assert.ok(posAssignation > 0 && posEtatAuth > posAssignation, "le programme est attribué avant la lecture Auth");
   // Et rien, dans ce chemin, ne retire ou n'annule quoi que ce soit.
   const depuisEtatAuth = grant.slice(posEtatAuth);
-  assert.ok(!/setProgramAssignment\([^)]*false/.test(depuisEtatAuth), "aucune désattribution");
+  assert.ok(!/provisionPurchasedProgram\([^)]*false|assignSharedProgram\([^)]*false|setProgramAssignment\([^)]*false/.test(depuisEtatAuth), "aucune désattribution");
   assert.ok(!/delete\(\)|refund|cancel/i.test(depuisEtatAuth), "aucune suppression ni annulation");
 });
 
