@@ -13,6 +13,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
+import { workoutFeedbackPayloadSchema } from "../../lib/api/schemas/workout-feedback";
+import { CARDIO_BLOCK_RESULT_VERSION, CARDIO_RESULT_ENTRY_NAME, serializeCardioBlockResult } from "../../lib/cardio-feedback";
 import { individualizeProgramForStudent, programAssignmentTestHooks, provisionPurchasedProgram, setProgramAssignment } from "../../lib/supabase/programs";
 import { isContradictoryProgramMode, resolveProgramProvisioningMode } from "../../lib/program-provisioning";
 import { executerRegularisation, type RegularisationCible } from "../../lib/regularisation-achats";
@@ -584,11 +586,15 @@ await (async () => {
     assert.ok(/auth\.getUser\(\)/.test(route), "authentification serveur obligatoire");
     assert.ok(/from\("students"\)[\s\S]*eq\("user_id", user\.id\)/.test(route),
       "studentId dérivé de students.user_id = auth uid — jamais du corps");
-    assert.ok(/\.strict\(\)/.test(route), "schéma strict : toute clé inconnue rejetée");
+    // Depuis le correctif incident 01/08 : le schéma vit dans
+    // lib/api/schemas/workout-feedback.ts (partagé route ↔ tests).
+    const schemaSource = readFileSync(new URL("../../lib/api/schemas/workout-feedback.ts", import.meta.url), "utf8");
+    assert.ok(/\.strict\(\)/.test(schemaSource), "schéma strict : toute clé inconnue rejetée");
+    assert.ok(/from "@\/lib\/api\/schemas\/workout-feedback"/.test(route), "la route importe le schéma partagé");
     const routeSansCommentaires = route.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
     assert.ok(!/prescribed_snapshot|prescribedSnapshot/.test(routeSansCommentaires),
-      "le schéma n'accepte JAMAIS de snapshot fourni par le client (hors commentaires)");
-    assert.ok(!/studentId:\s*z\./.test(route), "le schéma n'accepte jamais studentId");
+      "la route n'accepte JAMAIS de snapshot fourni par le client (hors commentaires)");
+    assert.ok(!/studentId:\s*z\./.test(schemaSource), "le schéma n'accepte jamais studentId");
     assert.ok(/owner_student_id[\s\S]*assignments/.test(route),
       "l'accessibilité de la séance est vérifiée (possédée OU assignée)");
     assert.ok(/saveWorkoutFeedback\(supabase, \{ \.\.\.payload, studentId: studentRow\.id \}\)/.test(route),
@@ -709,6 +715,70 @@ await (async () => {
     assert.equal(photographie(baseRegul), avant, "refus = zéro écriture, même en mode apply");
     assert.ok(rapport.erreurs.some((e) => /REFUSÉ/.test(e) && /claim-in-place/.test(e)),
       "le refus explique la raison et recommande la stratégie sans cassure");
+  });
+
+  await test("C9. INCIDENT 01/08 — le payload RÉEL du composant (muscu + cardio) passe le schéma de la route", () => {
+    // Entrée cardio produite par le VRAI sérialiseur du dépôt — c'est lui
+    // que la première version du schéma rejetait (exerciseOrder = 900 +
+    // position, enveloppe JSON dans comment) → 400 sur toute séance cardio.
+    const entreeCardio = serializeCardioBlockResult({
+      version: CARDIO_BLOCK_RESULT_VERSION,
+      blockId: "bloc-cardio-1",
+      order: 2,
+      title: "EMOM 20 min",
+      completed: true,
+      durationSeconds: 1930,
+      distanceMeters: 4200,
+      elevationGainMeters: 35,
+      repetitionsDone: 10,
+      rpe: 8,
+      pain: "",
+      // Commentaire libre long : l'enveloppe JSON dépasse largement
+      // l'ancienne borne de 2000 caractères.
+      comment: "Très dure sur la fin. ".repeat(120),
+      prescribed: { durationSeconds: 1800, distanceMeters: 4000, elevationGainMeters: null, repetitions: 10 },
+    });
+    assert.equal(entreeCardio.exerciseName, CARDIO_RESULT_ENTRY_NAME);
+    // Démonstration de l'incident : ces valeurs RÉELLES violaient les
+    // anciennes bornes (max 200 / max 2000) — cause du 400 en production.
+    assert.ok(entreeCardio.exerciseOrder >= 900, "contrat cardio : exerciseOrder = 900 + position");
+    assert.ok(entreeCardio.comment.length > 2000, "l'enveloppe JSON dépasse l'ancienne borne de 2000");
+
+    // Corps EXACT envoyé par le composant + le hook ({ ...payload, sessionKey }).
+    const corpsEnvoye = {
+      sessionRefLabel: "Semaine 1 — Séance cardio",
+      completed: true,
+      globalRpe: 8,
+      globalComment: "Bonne séance",
+      pain: "",
+      exercises: [
+        {
+          exerciseName: "Squat",
+          exerciseOrder: 0,
+          rpe: 8,
+          comment: "",
+          sets: [
+            { setNumber: 1, loadUsed: "100", repsDone: "8" },
+            { setNumber: 2, loadUsed: "100", repsDone: "7" },
+          ],
+        },
+        entreeCardio,
+      ],
+      sessionId: "11111111-1111-4111-8111-111111111111",
+      programId: null,
+      sessionKey: "11111111-1111-4111-8111-111111111111",
+    };
+    const analyse = workoutFeedbackPayloadSchema.safeParse(corpsEnvoye);
+    assert.ok(analyse.success,
+      `le payload réel doit passer : ${analyse.success ? "" : JSON.stringify(analyse.error.issues)}`);
+
+    // La stricte-ness demeure intacte : toute clé hors contrat reste rejetée.
+    assert.equal(workoutFeedbackPayloadSchema.safeParse({ ...corpsEnvoye, prescribed_snapshot: { version: 1 } }).success, false,
+      "prescribed_snapshot fourni par le client : toujours rejeté");
+    assert.equal(workoutFeedbackPayloadSchema.safeParse({ ...corpsEnvoye, studentId: "autre-eleve" }).success, false,
+      "studentId fourni par le client : toujours rejeté");
+    assert.equal(workoutFeedbackPayloadSchema.safeParse({ ...corpsEnvoye, sessionStatus: "done" }).success, false,
+      "sessionStatus fourni par le client : toujours rejeté");
   });
 
 })();
