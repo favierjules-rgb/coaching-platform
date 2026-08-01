@@ -5,7 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { composeProgramAssignedEmail, composePublicProgramWelcomeEmail } from "@/lib/email/templates";
 import { sendTransactionalEmail, wasEmailAlreadySent } from "@/lib/email/send-transactional-email";
 import { hasLegalConsentForCheckoutSession, insertLegalConsent } from "@/lib/legal-consents";
-import { setProgramAssignment } from "@/lib/supabase/programs";
+import { provisionPurchasedProgram } from "@/lib/supabase/programs";
 import type { Database } from "@/types/supabase";
 
 /**
@@ -49,7 +49,7 @@ export class RetryablePublicProgramProvisioningError extends Error {
  *
  * Idempotent : rejouer cette fonction pour le même email/programme (retry
  * webhook) ne crée jamais de compte ni d'assignation en double
- * (setProgramAssignment vérifie déjà l'existence, l'auth invite échoue
+ * (assignSharedProgram vérifie déjà l'existence, l'auth invite échoue
  * proprement si le compte existe déjà — traité comme le chemin "existant" en
  * repli, voir plus bas).
  */
@@ -91,7 +91,7 @@ export interface ProvisionPublicProgramAccessInput {
   checkoutSessionId?: string;
   /**
    * Hook optionnel invoqué juste après l'écriture des lignes de
-   * consentement, et strictement avant `setProgramAssignment` (activation
+   * consentement, et strictement avant `assignSharedProgram` (activation
    * de l'accès) — utilisé exclusivement par le webhook Stripe pour envoyer
    * l'email de confirmation de commande "sur support durable" à ce point
    * précis de la séquence (consentements enregistrés → confirmation
@@ -102,7 +102,7 @@ export interface ProvisionPublicProgramAccessInput {
    * explicitement si `sendTransactionalEmail` renvoie `status: "failed"` — ce
    * rejet n'est volontairement PAS intercepté ici, il se propage jusqu'à
    * `grantExistingStudent`/`createProgramOnlyStudent`, empêchant
-   * `setProgramAssignment` de s'exécuter, jusqu'au webhook Stripe qui répond
+   * `assignSharedProgram` de s'exécuter, jusqu'au webhook Stripe qui répond
    * 500 (retry automatique, évènement jamais marqué "processed"). Un
    * `status: "skipped"` (EMAILS_ENABLED=false, ou Resend non configuré —
    * état délibéré, pas une panne) n'est PAS traité comme un échec : bloquer
@@ -264,7 +264,7 @@ async function grantExistingStudent(
   await insertCgvConsentIfProvided(supabase, student.id, input);
   await insertImmediateAccessAndWaiverConsentIfProvided(supabase, student.id, input);
   await input.onConsentsRecorded?.(student.id);
-  const assigned = await setProgramAssignment(supabase, student.id, input.programId, true);
+  const assigned = await provisionPurchasedProgram(supabase, student.id, input.programId, input.checkoutSessionId ?? null);
   if (!assigned && input.checkoutSessionId) {
     throw new RetryablePublicProgramProvisioningError(`Échec de l'activation de l'accès au programme (session ${input.checkoutSessionId}).`);
   }
@@ -568,7 +568,7 @@ async function createProgramOnlyStudent(
   await insertCgvConsentIfProvided(supabase, studentRow.id, input);
   await insertImmediateAccessAndWaiverConsentIfProvided(supabase, studentRow.id, input);
   await input.onConsentsRecorded?.(studentRow.id);
-  const assigned = await setProgramAssignment(supabase, studentRow.id, input.programId, true);
+  const assigned = await provisionPurchasedProgram(supabase, studentRow.id, input.programId, input.checkoutSessionId ?? null);
   if (!assigned && input.checkoutSessionId) {
     throw new RetryablePublicProgramProvisioningError(`Échec de l'activation de l'accès au programme (session ${input.checkoutSessionId}).`);
   }

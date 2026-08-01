@@ -30,7 +30,7 @@
   "borne": {
     "derniere_migration_incluse": "20260722120000_save_training_session_blocks_session_patch",
     "premiere_migration_a_rejouer": "20260724214500_delete_unused_subscription_template_rpc",
-    "migrations_incluses_dans_le_baseline": 25,
+    "migrations_incluses_dans_le_baseline": 27,
     "methode_de_determination": "vérification objet par objet (tables, colonnes, fonctions, policies, contraintes, buckets) et non par le nom du fichier ; voir le rapport d'audit du 26/07/2026"
   },
   "migrations_post_baseline_attendues": [
@@ -38,7 +38,8 @@
     "20260726120000_calendar_coach_events.sql",
     "20260726120500_calendar_privacy_busy_ranges.sql",
     "20260726121000_calendar_atomic_booking.sql",
-    "20260726220000_fix_profiles_role_escalation.sql"
+    "20260726220000_fix_profiles_role_escalation.sql",
+    "20260801120000_workout_feedback_history_phase1.sql"
   ],
   "garanties_de_contenu": {
     "insert_de_donnees_metier": 0,

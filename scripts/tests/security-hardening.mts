@@ -425,7 +425,9 @@ await test("18. le baseline est HORS de supabase/migrations — impossible à po
   for (const fichier of migrations) {
     assert.ok(!/baseline/i.test(fichier), `un fichier de baseline traîne dans migrations/ : ${fichier}`);
   }
-  assert.equal(migrations.filter((f) => f.endsWith(".sql")).length, 32, "les 32 migrations doivent rester intactes");
+  // 33 depuis la phase 1 de l'historique des séances (migration additive
+  // 20260801120000, déclarée dans le manifeste comme le veut la procédure).
+  assert.equal(migrations.filter((f) => f.endsWith(".sql")).length, 33, "les 33 migrations doivent rester intactes");
 });
 
 await test("19. manifeste : empreintes exactes et borne cohérente", () => {
@@ -440,12 +442,15 @@ await test("19. manifeste : empreintes exactes et borne cohérente", () => {
   assert.equal(manifeste.source.commit, "5bafc50");
   assert.equal(manifeste.borne.derniere_migration_incluse, "20260722120000_save_training_session_blocks_session_patch");
   assert.equal(manifeste.borne.premiere_migration_a_rejouer, "20260724214500_delete_unused_subscription_template_rpc");
-  assert.equal(manifeste.borne.migrations_incluses_dans_le_baseline, 25);
+  // 27 : recompté le 01/08/2026 — le manifeste disait « 25 » alors que 27
+  // fichiers précèdent la borne (chiffre purement documentaire, la borne
+  // par NOMS reste l'unique pilote du bootstrap). Corrigé avec validation.
+  assert.equal(manifeste.borne.migrations_incluses_dans_le_baseline, 27);
 
-  // Les 5 migrations annoncées existent réellement, et ce sont bien celles
+  // Les migrations annoncées existent réellement, et ce sont bien celles
   // qui suivent la borne.
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 5);
+  assert.equal(attendues.length, 6);
   const presentes = readdirSync(new URL("../../supabase/migrations", import.meta.url).pathname)
     .filter((f) => f.endsWith(".sql"))
     .filter((f) => f >= "20260724214500")

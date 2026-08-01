@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { getCurrentStudentId } from "@/lib/supabase/current-student";
-import { getWorkoutFeedbackBySession, saveWorkoutFeedback } from "@/lib/supabase/workout-feedback";
+import { getWorkoutFeedbackBySession } from "@/lib/supabase/workout-feedback";
 import type { AdminStudentFeedback, WorkoutFeedbackPayload } from "@/types";
 
 /**
@@ -51,13 +51,26 @@ export function useSupabaseWorkoutFeedback(sessionKey: string) {
 
   const submit = useCallback(
     async (payload: Omit<WorkoutFeedbackPayload, "studentId" | "sessionKey">) => {
-      const supabase = createSupabaseBrowserClient();
-      if (!supabase || !studentId) return false;
-      const saved = await saveWorkoutFeedback(supabase, { ...payload, studentId, sessionKey });
-      if (saved) {
-        setExistingFeedback(saved);
+      if (!studentId) return false;
+      // Couche SERVEUR obligatoire (contrôle technique phase 1) : le client
+      // n'envoie que le réalisé ; l'identité élève est dérivée de la session
+      // authentifiée côté serveur et le snapshot du prescrit y est construit
+      // à partir des lignes réelles — jamais depuis le navigateur.
+      try {
+        const response = await fetch("/api/student/workout-feedback", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...payload, sessionKey }),
+        });
+        if (!response.ok) return false;
+        const { feedback } = (await response.json()) as { feedback: AdminStudentFeedback | null };
+        if (feedback) {
+          setExistingFeedback(feedback);
+        }
+        return feedback != null;
+      } catch {
+        return false;
       }
-      return saved !== null;
     },
     [studentId, sessionKey],
   );

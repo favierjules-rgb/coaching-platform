@@ -43,6 +43,7 @@ function sessionTypeForColumn(derived: DerivedSessionType): SessionType {
   return derived === "rest" ? "strength" : derived;
 }
 import type { Database } from "@/types/supabase";
+import { isContradictoryProgramMode, resolveProgramProvisioningMode } from "@/lib/program-provisioning";
 
 /**
  * Couche d'accès aux programmes Supabase (tables `programs`, `program_weeks`,
@@ -552,8 +553,26 @@ async function insertProgramStructure(
   }
 }
 
+/**
+ * §5 (contrôle technique) — normalisation d'écriture de la combinaison
+ * contradictoire `groupe` + `is_public=true` : le mode groupe force
+ * `is_public=false`, la combinaison n'est donc JAMAIS stockée par
+ * l'application. Signalée (devWarn) au lieu d'être avalée en silence —
+ * voir isContradictoryProgramMode (lib/program-provisioning.ts).
+ */
+function normalizeIsPublicForWrite(context: string, data: ProgramBuilderData): boolean {
+  if (isContradictoryProgramMode({ programMode: data.programMode ?? null, isPublic: data.isPublic ?? null })) {
+    devWarn(context, {
+      message: "combinaison contradictoire groupe + is_public=true — normalisée en is_public=false (§5)",
+    });
+    return false;
+  }
+  return data.isPublic ?? false;
+}
+
 /** Crée un nouveau programme réel avec toute sa structure (semaines/séances/exercices). */
 export async function createProgram(supabase: TypedSupabaseClient, data: ProgramBuilderData): Promise<string | null> {
+  const isPublicNormalise = normalizeIsPublicForWrite("createProgram", data);
   const { data: programRow, error: programError } = await supabase
     .from("programs")
     .insert({
@@ -566,8 +585,8 @@ export async function createProgram(supabase: TypedSupabaseClient, data: Program
       banner_url: data.bannerUrl ?? null,
       program_mode: data.programMode ?? "individuel",
       group_start_date: data.programMode === "groupe" ? (data.groupStartDate ?? null) : null,
-      is_public: data.isPublic ?? false,
-      public_subscription_template_id: data.isPublic ? (data.publicSubscriptionTemplateId ?? null) : null,
+      is_public: isPublicNormalise,
+      public_subscription_template_id: isPublicNormalise ? (data.publicSubscriptionTemplateId ?? null) : null,
     })
     .select("id")
     .single();
@@ -595,6 +614,29 @@ export async function createProgram(supabase: TypedSupabaseClient, data: Program
  * cardio pour ne jamais partager de référence avec le programme source.
  */
 export async function duplicateProgram(supabase: TypedSupabaseClient, programId: string): Promise<string | null> {
+  return duplicateProgramCore(supabase, programId, {});
+}
+
+/**
+ * Surcharges de la duplication (phase 1, feat/student-workout-history) : la
+ * copie de travail du coach (« {nom} (copie) », brouillon) et la copie
+ * INDIVIDUELLE d'un élève (nom conservé, statut conservé, owner/source
+ * renseignés) partagent exactement le même cœur — un seul chemin de clonage,
+ * donc une seule vérité sur la régénération des identifiants.
+ */
+export interface DuplicateOverrides {
+  name?: string;
+  sourceCheckoutSessionId?: string;
+  status?: Database["public"]["Tables"]["programs"]["Row"]["status"];
+  ownerStudentId?: string;
+  sourceTemplateId?: string;
+}
+
+async function duplicateProgramCore(
+  supabase: TypedSupabaseClient,
+  programId: string,
+  overrides: DuplicateOverrides,
+): Promise<string | null> {
   const { data: sourceRow, error: sourceError } = await supabase.from("programs").select("*").eq("id", programId).single();
   devWarn("duplicateProgram (lecture programme)", sourceError);
   if (!sourceRow) {
@@ -609,12 +651,15 @@ export async function duplicateProgram(supabase: TypedSupabaseClient, programId:
   const { data: newProgramRow, error: insertError } = await supabase
     .from("programs")
     .insert({
-      name: `${program.name} (copie)`,
+      name: overrides.name ?? `${program.name} (copie)`,
       goal: program.goal,
       level: program.level,
       duration_weeks: program.durationWeeks,
       description: program.description,
-      status: "brouillon",
+      status: overrides.status ?? "brouillon",
+      owner_student_id: overrides.ownerStudentId ?? null,
+      source_template_id: overrides.sourceTemplateId ?? null,
+      source_checkout_session_id: overrides.sourceCheckoutSessionId ?? null,
       banner_url: program.bannerUrl ?? null,
       // étape 5 : une copie repart toujours en mode individuel, sans date de
       // groupe — la copie d'un programme de groupe n'est pas automatiquement
@@ -922,6 +967,7 @@ export async function updateProgram(
   programId: string,
   data: ProgramBuilderData,
 ): Promise<boolean> {
+  const isPublicNormalise = normalizeIsPublicForWrite("updateProgram", data);
   const { error: updateError } = await supabase
     .from("programs")
     .update({
@@ -934,8 +980,8 @@ export async function updateProgram(
       banner_url: data.bannerUrl ?? null,
       program_mode: data.programMode ?? "individuel",
       group_start_date: data.programMode === "groupe" ? (data.groupStartDate ?? null) : null,
-      is_public: data.isPublic ?? false,
-      public_subscription_template_id: data.isPublic ? (data.publicSubscriptionTemplateId ?? null) : null,
+      is_public: isPublicNormalise,
+      public_subscription_template_id: isPublicNormalise ? (data.publicSubscriptionTemplateId ?? null) : null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", programId);
@@ -993,6 +1039,231 @@ export async function updateProgramStatus(
  * la source de vérité unique, lue par getAssignedProgramForStudent et par
  * les policies RLS de programs/program_weeks/workout_sessions/workout_exercises.
  */
+/**
+ * Garantit qu'un élève reçoit toujours SA copie individuelle d'un programme
+ * (phase 1, feat/student-workout-history) — une programmation individuelle
+ * n'est jamais partagée entre plusieurs élèves :
+ *
+ * 1. le programme appartient déjà à CET élève → on le rend tel quel, jamais
+ *    de copie inutile ;
+ * 2. l'élève possède déjà une copie issue de ce programme (réaffectation) →
+ *    on la réutilise, jamais de doublon silencieux ;
+ * 3. sinon → duplication complète (nouveaux identifiants à tous les niveaux,
+ *    source intacte), nom et statut conservés, owner_student_id +
+ *    source_template_id posés.
+ *
+ * Le programme source n'est JAMAIS modifié. `duplicate` est injectable pour
+ * les tests hors ligne.
+ */
+export async function individualizeProgramForStudent(
+  supabase: TypedSupabaseClient,
+  programId: string,
+  studentId: string,
+  duplicate: (s: TypedSupabaseClient, id: string, o: DuplicateOverrides) => Promise<string | null> = duplicateProgramCore,
+): Promise<string | null> {
+  const { data: source, error: sourceError } = await supabase
+    .from("programs")
+    .select("id, name, status, owner_student_id")
+    .eq("id", programId)
+    .maybeSingle();
+  devWarn("individualizeProgramForStudent (lecture source)", sourceError);
+  if (!source) return null;
+
+  // 1. Déjà la copie individuelle de cet élève.
+  if (source.owner_student_id === studentId) {
+    return source.id;
+  }
+
+  // 2. Une copie de ce programme existe déjà pour cet élève (réaffectation).
+  const { data: dejaCopie, error: copieError } = await supabase
+    .from("programs")
+    .select("id")
+    .eq("owner_student_id", studentId)
+    .eq("source_template_id", programId)
+    .limit(1)
+    .maybeSingle();
+  devWarn("individualizeProgramForStudent (copie existante)", copieError);
+  if (dejaCopie) {
+    return dejaCopie.id;
+  }
+
+  // 3. Copie individuelle neuve : nom et statut du source conservés (la copie
+  //    doit être immédiatement utilisable par l'élève, pas un brouillon).
+  return duplicate(supabase, programId, {
+    name: source.name,
+    status: source.status,
+    ownerStudentId: studentId,
+    sourceTemplateId: programId,
+  });
+}
+
+/** La RPC de clonage n'existe pas encore sur l'environnement (migration 20260801120000 non appliquée). */
+function isMissingProvisionRpc(error: { code?: string; message: string } | null): boolean {
+  return Boolean(error && (error.code === "PGRST202" || /could not find the function/i.test(error.message)));
+}
+
+/**
+ * Clonage par défaut d'une copie individuelle (§3, contrôle technique) :
+ * tente d'abord la RPC TRANSACTIONNELLE `provision_program_copy` (migration
+ * 20260801120000) — programme, semaines, séances, blocs, exercices et
+ * assignation dans UNE transaction (tout ou rien : jamais de copie partielle
+ * orpheline), verrou advisory contre les webhooks concurrents, idempotence
+ * par session d'achat arbitrée en dernier rempart par l'index unique.
+ *
+ * Repli sur le clonage applicatif historique (duplicateProgramCore)
+ * UNIQUEMENT quand la fonction n'existe pas encore (environnement où la
+ * migration n'est pas appliquée) — jamais sur une autre erreur : un refus
+ * d'autorisation ou un échec réel ne doit pas être « rattrapé » par un
+ * chemin non transactionnel. Une duplication SANS élève propriétaire (copie
+ * de travail du coach) reste sur le cœur applicatif : la RPC est réservée au
+ * provisionnement.
+ */
+async function cloneIndividualProgramCopy(
+  supabase: TypedSupabaseClient,
+  programId: string,
+  overrides: DuplicateOverrides,
+): Promise<string | null> {
+  if (overrides.ownerStudentId) {
+    // @ts-expect-error — RPC ajoutée par la migration 20260801120000, pas encore dans les types générés.
+    const { data, error } = await supabase.rpc("provision_program_copy", {
+      p_program_id: programId,
+      p_student_id: overrides.ownerStudentId,
+      p_checkout_session_id: overrides.sourceCheckoutSessionId ?? null,
+    });
+    if (!error) {
+      return (data as string | null) ?? null;
+    }
+    if (!isMissingProvisionRpc(error as { code?: string; message: string })) {
+      devWarn("cloneIndividualProgramCopy (rpc)", error as { message: string });
+      return null;
+    }
+    // Migration non appliquée sur cet environnement : repli pré-migration.
+  }
+  return duplicateProgramCore(supabase, programId, overrides);
+}
+
+/**
+ * Crochet de test UNIQUEMENT (voir scripts/tests/student-workout-history.mts) :
+ * permet de substituer le clonage profond dans les harnais hors ligne sans
+ * élargir la signature publique de setProgramAssignment, qui doit rester
+ * alignée sur les autres setters d'assignation (useContentAssignment).
+ */
+export const programAssignmentTestHooks: {
+  duplicate: (s: TypedSupabaseClient, id: string, o: DuplicateOverrides) => Promise<string | null>;
+} = { duplicate: cloneIndividualProgramCopy };
+
+/**
+ * Lien d'assignation brut, idempotent, SANS individualisation — réservé aux
+ * programmes de catalogue partagés par conception (achat public : tous les
+ * acheteurs suivent le même programme publié ; l'individualisation des achats
+ * est une décision produit reportée, voir rapport phase 1). L'affectation
+ * COACH passe par setProgramAssignment, qui individualise toujours.
+ */
+/**
+ * Provisionnement d'un ACHAT UNIQUE (correction produit) : l'acheteur ne
+ * reçoit jamais le programme commercial du catalogue — il reçoit sa copie
+ * individuelle, créée à la confirmation du paiement.
+ *
+ * Idempotence : la référence stable est la session Stripe Checkout.
+ *   - webhook rejoué (même session) → la copie existante est retrouvée, le
+ *     lien d'assignation est ré-vérifié, rien n'est dupliqué ; l'index
+ *     unique programs_source_checkout_session_key arbitre même les courses ;
+ *   - NOUVEL achat du même programme par le même élève (autre session) →
+ *     nouveau cycle légitime, nouvelle copie ;
+ *   - échec partiel (copie créée, assignation manquée) → la reprise retrouve
+ *     la copie par sa session et ne refait que l'assignation.
+ *
+ * Sans session (parcours hors Stripe), repli : réutiliser la copie
+ * (owner, source) si elle existe, sinon en créer une.
+ * La décision reste fondée sur le mode explicite du programme : un programme
+ * de groupe passerait en lien partagé, jamais en copie.
+ */
+export async function provisionPurchasedProgram(
+  supabase: TypedSupabaseClient,
+  studentId: string,
+  programId: string,
+  checkoutSessionId: string | null,
+): Promise<boolean> {
+  const { data: source, error: sourceError } = await supabase
+    .from("programs")
+    .select("id, name, status, program_mode, is_public, owner_student_id")
+    .eq("id", programId)
+    .maybeSingle();
+  devWarn("provisionPurchasedProgram (lecture source)", sourceError);
+  if (!source) {
+    return false;
+  }
+
+  if (isContradictoryProgramMode({ programMode: source.program_mode, isPublic: source.is_public })) {
+    // §5 : ligne contradictoire écrite hors application — jamais silencieux.
+    devWarn("provisionPurchasedProgram", {
+      message: `programme ${programId} groupe ET is_public=true — incohérence signalée, le mode groupe explicite l'emporte (partage)`,
+    });
+  }
+  if (resolveProgramProvisioningMode({ programMode: source.program_mode, isPublic: source.is_public }) === "shared") {
+    return assignSharedProgram(supabase, studentId, programId);
+  }
+
+  let copieId: string | null = null;
+
+  if (checkoutSessionId) {
+    const { data: existante, error: lookupError } = await supabase
+      .from("programs")
+      .select("id")
+      .eq("source_checkout_session_id", checkoutSessionId)
+      .maybeSingle();
+    devWarn("provisionPurchasedProgram (copie par session)", lookupError);
+    copieId = existante?.id ?? null;
+  } else {
+    copieId = await individualizeProgramForStudent(supabase, programId, studentId, programAssignmentTestHooks.duplicate);
+  }
+
+  if (!copieId && checkoutSessionId) {
+    copieId = await programAssignmentTestHooks.duplicate(supabase, programId, {
+      name: source.name,
+      status: source.status,
+      ownerStudentId: studentId,
+      sourceTemplateId: programId,
+      sourceCheckoutSessionId: checkoutSessionId,
+    });
+  }
+
+  if (!copieId) {
+    return false;
+  }
+
+  return assignSharedProgram(supabase, studentId, copieId);
+}
+
+export async function assignSharedProgram(
+  supabase: TypedSupabaseClient,
+  studentId: string,
+  programId: string,
+): Promise<boolean> {
+  const { data: existing, error: lookupError } = await supabase
+    .from("assignments")
+    .select("id")
+    .eq("student_id", studentId)
+    .eq("content_type", "programme")
+    .eq("content_id", programId)
+    .maybeSingle();
+  devWarn("assignSharedProgram (lookup)", lookupError);
+  if (existing) {
+    return true;
+  }
+
+  const { error: insertError } = await supabase.from("assignments").insert({
+    student_id: studentId,
+    content_type: "programme",
+    content_id: programId,
+  });
+  if (insertError && insertError.code === "23505") {
+    return true;
+  }
+  devWarn("assignSharedProgram (insert)", insertError);
+  return !insertError;
+}
+
 export async function setProgramAssignment(
   supabase: TypedSupabaseClient,
   studentId: string,
@@ -1010,12 +1281,42 @@ export async function setProgramAssignment(
     return !error;
   }
 
+  // Correction produit (feat/student-workout-history) : la décision
+  // partagé / copie individuelle vient du MODE EXPLICITE du programme
+  // (program_mode + is_public, voir lib/program-provisioning.ts), jamais du
+  // chemin d'appel. Mode groupe → lien direct, partage voulu ; individuel et
+  // achat unique → copie propre à l'élève. Idempotent dans les deux cas.
+  const { data: modeRow, error: modeError } = await supabase
+    .from("programs")
+    .select("id, program_mode, is_public")
+    .eq("id", programId)
+    .maybeSingle();
+  devWarn("setProgramAssignment (lecture mode)", modeError);
+  if (!modeRow) {
+    return false;
+  }
+
+  if (isContradictoryProgramMode({ programMode: modeRow.program_mode, isPublic: modeRow.is_public })) {
+    // §5 : ligne contradictoire écrite hors application — jamais silencieux.
+    devWarn("setProgramAssignment", {
+      message: `programme ${programId} groupe ET is_public=true — incohérence signalée, le mode groupe explicite l'emporte (partage)`,
+    });
+  }
+  const mode = resolveProgramProvisioningMode({ programMode: modeRow.program_mode, isPublic: modeRow.is_public });
+  const effectiveProgramId =
+    mode === "shared"
+      ? programId
+      : await individualizeProgramForStudent(supabase, programId, studentId, programAssignmentTestHooks.duplicate);
+  if (!effectiveProgramId) {
+    return false;
+  }
+
   const { data: existing, error: lookupError } = await supabase
     .from("assignments")
     .select("id")
     .eq("student_id", studentId)
     .eq("content_type", "programme")
-    .eq("content_id", programId)
+    .eq("content_id", effectiveProgramId)
     .maybeSingle();
   devWarn("setProgramAssignment (lookup)", lookupError);
   if (existing) {
@@ -1025,7 +1326,7 @@ export async function setProgramAssignment(
   const { error: insertError } = await supabase.from("assignments").insert({
     student_id: studentId,
     content_type: "programme",
-    content_id: programId,
+    content_id: effectiveProgramId,
   });
   // Violation d'unicité (23505, chantier conformité juridique/RGPD, Lot
   // E-bis technique — vérification des garanties DB réelles, suite audit) :

@@ -11,6 +11,15 @@ import type {
   WorkoutFeedbackPayload,
 } from "@/types";
 import type { Database } from "@/types/supabase";
+import {
+  buildPrescribedSnapshot,
+  sanitizeDurationMinutes,
+  sanitizePerformedAt,
+  type PrescribedSnapshot,
+  type SnapshotBlockRow,
+  type SnapshotExerciseRow,
+  type SnapshotSessionRow,
+} from "@/lib/workout-history";
 
 /**
  * Couche d'accès aux retours d'entraînement Supabase (tables
@@ -33,6 +42,45 @@ type TypedSupabaseClient = SupabaseClient<Database>;
 type WorkoutFeedbackRow = Database["public"]["Tables"]["workout_feedback"]["Row"];
 type ExerciseFeedbackRow = Database["public"]["Tables"]["exercise_feedback"]["Row"];
 type ExerciseSetFeedbackRow = Database["public"]["Tables"]["exercise_set_feedback"]["Row"];
+
+/**
+ * Lignes réelles de la séance pour la photographie du prescrit (phase 1,
+ * feat/student-workout-history). Le snapshot n'est JAMAIS accepté tel quel
+ * depuis le navigateur : il est reconstruit ici à partir de ce que la base
+ * (sous RLS) contient réellement au moment de la soumission. Trois lectures
+ * ciblées — pas de dépendance au chargeur complet des programmes.
+ * Injectable dans saveWorkoutFeedback pour les tests hors ligne.
+ */
+export async function loadSessionRowsForSnapshot(
+  supabase: TypedSupabaseClient,
+  sessionId: string,
+): Promise<{ session: SnapshotSessionRow; blocks: SnapshotBlockRow[]; exercises: SnapshotExerciseRow[] } | null> {
+  const { data: sessionRow, error: sessionError } = await supabase
+    .from("workout_sessions")
+    .select("id, name, day")
+    .eq("id", sessionId)
+    .maybeSingle();
+  devWarn("loadSessionRowsForSnapshot (session)", sessionError);
+  if (!sessionRow) return null;
+
+  const [blocksResult, exercisesResult] = await Promise.all([
+    supabase.from("training_blocks").select("id, title, block_type, position").eq("session_id", sessionId),
+    supabase
+      .from("workout_exercises")
+      .select("block_id, exercise_library_id, name, order_index, sets, reps, recommended_load, rest_seconds, tempo, notes")
+      .eq("session_id", sessionId),
+  ]);
+  devWarn("loadSessionRowsForSnapshot (blocs)", blocksResult.error);
+  devWarn("loadSessionRowsForSnapshot (exercices)", exercisesResult.error);
+
+  return {
+    session: sessionRow,
+    blocks: blocksResult.data ?? [],
+    exercises: exercisesResult.data ?? [],
+  };
+}
+
+export type SnapshotRowsLoader = typeof loadSessionRowsForSnapshot;
 
 function devWarn(context: string, error: { message: string } | null): void {
   if (error && process.env.NODE_ENV === "development") {
@@ -59,6 +107,10 @@ function mapWorkoutFeedbackRow(row: WorkoutFeedbackRow): SupabaseWorkoutFeedback
     submittedAt: row.submitted_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    prescribedSnapshot: row.prescribed_snapshot ?? null,
+    performedAt: row.performed_at ?? null,
+    durationMinutes: row.duration_minutes ?? null,
+    sessionStatus: row.session_status ?? null,
   };
 }
 
@@ -136,6 +188,10 @@ function toAdminStudentFeedback(
     exerciseEntries,
     status: feedback.status,
     coachReply: feedback.coachReply,
+    prescribedSnapshot: feedback.prescribedSnapshot ?? null,
+    performedAt: feedback.performedAt ?? null,
+    durationMinutes: feedback.durationMinutes ?? null,
+    sessionStatus: (feedback.sessionStatus as "done" | "missed" | null) ?? null,
     createdAt: feedback.createdAt,
     updatedAt: feedback.updatedAt,
   };
@@ -294,16 +350,45 @@ export async function getAdminWorkoutFeedbackDetail(
 export async function saveWorkoutFeedback(
   supabase: TypedSupabaseClient,
   payload: WorkoutFeedbackPayload,
+  loadSnapshotRows: SnapshotRowsLoader = loadSessionRowsForSnapshot,
 ): Promise<AdminStudentFeedback | null> {
   const { data: existing, error: lookupError } = await supabase
     .from("workout_feedback")
-    .select("id, status, coach_reply")
+    .select("id, status, coach_reply, prescribed_snapshot, performed_at")
     .eq("student_id", payload.studentId)
     .eq("session_key", payload.sessionKey)
     .maybeSingle();
   devWarn("saveWorkoutFeedback (lookup)", lookupError);
 
   const now = new Date().toISOString();
+
+  // ── Historique (phase 1) ─────────────────────────────────────────────────
+  // La photographie du prescrit n'est prise qu'à la PREMIÈRE soumission d'une
+  // séance terminée, et jamais réécrite ensuite (garde applicative ici, et
+  // trigger workout_feedback_snapshot_immutable côté base) : une nouvelle
+  // soumission met à jour le réalisé, jamais la photographie d'origine.
+  const dejaFige = Boolean(existing?.prescribed_snapshot);
+  let snapshot: PrescribedSnapshot | null = null;
+  if (payload.completed && !dejaFige && payload.sessionId) {
+    const lignes = await loadSnapshotRows(supabase, payload.sessionId);
+    if (lignes) {
+      snapshot = buildPrescribedSnapshot(lignes.session, lignes.blocks, lignes.exercises, now);
+    }
+  }
+  // La date de réalisation est conservée telle que posée à l'origine ; à
+  // défaut, la date (validée) de cette soumission.
+  const performedAt = payload.completed
+    ? (existing?.performed_at ?? sanitizePerformedAt(payload.performedAt))
+    : null;
+  const durationMinutes = sanitizeDurationMinutes(payload.durationMinutes);
+  const sessionStatus = payload.completed ? "done" : null;
+  const champsHistorique = {
+    performed_at: performedAt,
+    duration_minutes: durationMinutes,
+    session_status: sessionStatus,
+    ...(snapshot ? { prescribed_snapshot: snapshot as unknown as Record<string, unknown> } : {}),
+  };
+
   let feedbackId: string;
   let status: FeedbackStatus;
   let coachReply: string;
@@ -324,6 +409,7 @@ export async function saveWorkoutFeedback(
         pain: payload.pain,
         submitted_at: now,
         updated_at: now,
+        ...champsHistorique,
       })
       .eq("id", feedbackId);
     devWarn("saveWorkoutFeedback (update)", updateError);
@@ -344,6 +430,7 @@ export async function saveWorkoutFeedback(
         global_comment: payload.globalComment,
         pain: payload.pain,
         submitted_at: now,
+        ...champsHistorique,
       })
       .select("id, status, coach_reply")
       .single();

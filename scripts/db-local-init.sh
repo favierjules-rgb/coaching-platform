@@ -7,7 +7,7 @@
 # ---------------------------------------------------------------------
 # `supabase start` applique AUTOMATIQUEMENT le contenu de
 # <workdir>/supabase/migrations au démarrage. Lancé depuis le dépôt, il
-# rejoue donc les 32 migrations historiques sur une base vierge et
+# rejoue donc les 33 migrations historiques sur une base vierge et
 # échoue dès la première :
 #     ERROR: relation "public.student_profiles" does not exist
 #
@@ -30,9 +30,10 @@
 # migrations/, donc un baseline rangé ici ne peut structurellement pas
 # partir sur la production, où le schéma existe déjà.
 #
-# Instantané du 24/07/2026, il contient DÉJÀ les 25 premières migrations.
-# Seules les 5 postérieures sont rejouées — les appliquer toutes créerait
-# des doublons de policies, de fonctions et de contraintes.
+# Instantané du 24/07/2026, il contient DÉJÀ les 27 premières migrations
+# (tout ce qui précède la borne du manifeste). Seules les 6 postérieures
+# sont rejouées — les appliquer toutes créerait des doublons de policies,
+# de fonctions et de contraintes.
 #
 # Usage :
 #   npm run db:local:init            # baseline + migrations post-baseline
@@ -305,7 +306,7 @@ run_sql_file "$BASELINE_DIR/01_post_baseline_storage.sql"
 vert "  ✓ buckets Storage"
 
 # ---------------------------------------------------------------------
-# 8c. Les 25 migrations déjà contenues dans le baseline
+# 8c. Les 27 migrations déjà contenues dans le baseline
 # ---------------------------------------------------------------------
 titre "Historique des migrations"
 
