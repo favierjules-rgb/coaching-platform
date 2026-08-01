@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { CheckCircle, UserPlus } from "lucide-react";
 
+import { applySelectionDiff, toggleStudentSelection } from "@/lib/assignment-selection";
 import { Modal, PrimaryButton } from "@/components/admin/Modal";
 import { StudentPickerList } from "@/components/admin/StudentPickerList";
 import type { AdminStudent, AssignableContentType } from "@/types";
@@ -30,6 +31,11 @@ export function AssignStudentsModal({
 }: AssignStudentsModalProps) {
   const [open, setOpen] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+  // Correctif fix/program-assignment-checkbox : la sélection vit ICI,
+  // localement, initialisée depuis les assignations existantes à CHAQUE
+  // ouverture (fermer/rouvrir recharge donc l'état réel). Aucune écriture
+  // pendant la sélection — le diff ne part qu'au clic sur « Terminer ».
+  const [selection, setSelection] = useState<string[]>([]);
 
   function close() {
     setOpen(false);
@@ -42,6 +48,7 @@ export function AssignStudentsModal({
         type="button"
         onClick={(event) => {
           event.stopPropagation();
+          setSelection(assignedStudentIds);
           setOpen(true);
         }}
         className={
@@ -70,10 +77,21 @@ export function AssignStudentsModal({
               </p>
               <StudentPickerList
                 students={students}
-                selectedIds={assignedStudentIds}
-                onToggle={(studentId, checked) => onSetAssignment(studentId, contentType, contentId, checked)}
+                selectedIds={selection}
+                onToggle={(studentId, checked) => setSelection((prev) => toggleStudentSelection(prev, studentId, checked))}
               />
-              <PrimaryButton onClick={() => setConfirmed(true)}>Terminer</PrimaryButton>
+              <PrimaryButton
+                onClick={() => {
+                  // SEUL point d'écriture : le diff sélection ↔ assignations
+                  // initiales (jamais de ré-écriture des inchangés).
+                  applySelectionDiff(assignedStudentIds, selection, (studentId, assigned) =>
+                    onSetAssignment(studentId, contentType, contentId, assigned),
+                  );
+                  setConfirmed(true);
+                }}
+              >
+                Terminer
+              </PrimaryButton>
             </div>
           )}
         </Modal>
