@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 
+import { workoutFeedbackPayloadSchema } from "@/lib/api/schemas/workout-feedback";
 import { parseJsonBody } from "@/lib/api/validate";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { saveWorkoutFeedback } from "@/lib/supabase/workout-feedback";
@@ -27,40 +27,14 @@ export const dynamic = "force-dynamic";
  * politique workout_feedback_student_or_staff reste le dernier rempart.
  */
 
-const setSchema = z.object({
-  setNumber: z.number().int().min(1).max(50),
-  loadUsed: z.string().max(60),
-  repsDone: z.string().max(60),
-});
-
-const exerciseSchema = z.object({
-  exerciseName: z.string().min(1).max(200),
-  exerciseOrder: z.number().int().min(0).max(200),
-  rpe: z.number().int().min(1).max(10).nullable(),
-  comment: z.string().max(2000),
-  sets: z.array(setSchema).max(50),
-});
-
-/** STRICT : toute clé hors contrat (snapshot, studentId, status...) = rejet. */
-const payloadSchema = z
-  .object({
-    sessionKey: z.string().min(1).max(120),
-    sessionRefLabel: z.string().max(300),
-    completed: z.boolean(),
-    globalRpe: z.number().int().min(1).max(10).nullable(),
-    globalComment: z.string().max(4000),
-    pain: z.string().max(2000),
-    exercises: z.array(exerciseSchema).max(60),
-    sessionId: z.uuid().nullable().optional(),
-    programId: z.uuid().nullable().optional(),
-    performedAt: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/)
-      .nullable()
-      .optional(),
-    durationMinutes: z.number().int().min(1).max(600).nullable().optional(),
-  })
-  .strict();
+/**
+ * Schéma STRICT partagé : lib/api/schemas/workout-feedback.ts — bornes
+ * alignées sur le contrat cardio réel (correctif incident du 01/08/2026 :
+ * `exerciseOrder = 900 + position` et enveloppe JSON dans `comment`,
+ * émis par lib/cardio-feedback.ts::serializeCardioBlockResult, étaient
+ * rejetés en 400). Testé contre le payload exact du composant dans
+ * scripts/tests/student-workout-history.mts.
+ */
 
 /** ~256 Ko : très large pour une séance (60 exercices × 50 séries), bloque l'abus. */
 const MAX_BODY_BYTES = 256 * 1024;
@@ -94,7 +68,7 @@ export async function POST(request: Request) {
 
   // 4. Corps strictement borné au réalisé (schéma .strict() : toute clé
   //    inconnue — prescribed_snapshot, studentId, sessionStatus… — = 400).
-  const parsedBody = await parseJsonBody(request, payloadSchema);
+  const parsedBody = await parseJsonBody(request, workoutFeedbackPayloadSchema);
   if (!parsedBody.success) return parsedBody.response;
   const payload = parsedBody.data;
 
