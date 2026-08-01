@@ -609,6 +609,21 @@ await (async () => {
     assert.ok(/pg_advisory_xact_lock/.test(migration), "verrou advisory : les webhooks concurrents se sérialisent");
     assert.ok(/on conflict do nothing/i.test(migration), "assignation idempotente au niveau base");
     assert.ok(/insufficient_privilege/.test(migration), "un élève ne peut pas se provisionner lui-même");
+    // Privilèges (contrôle local du 01/08/2026) : les DEFAULT PRIVILEGES
+    // Supabase donnent EXECUTE à anon à la création — la migration DOIT
+    // révoquer PUBLIC ET anon explicitement, puis n'autoriser que
+    // authenticated (staff, rôle re-vérifié en interne) et service_role.
+    assert.ok(/REVOKE ALL ON FUNCTION public\.provision_program_copy\(uuid, uuid, text\) FROM PUBLIC/.test(migration),
+      "PUBLIC : aucun EXECUTE");
+    assert.ok(/REVOKE EXECUTE ON FUNCTION public\.provision_program_copy\(uuid, uuid, text\) FROM anon/.test(migration),
+      "anon : aucun EXECUTE (grant direct des default privileges révoqué)");
+    assert.ok(/GRANT EXECUTE ON FUNCTION public\.provision_program_copy\(uuid, uuid, text\)\s*\n?TO authenticated, service_role/.test(migration),
+      "authenticated + service_role : EXECUTE");
+    // Et la checklist locale versionnée vérifie ces privilèges en base réelle.
+    const checklist = readFileSync(
+      new URL("../../supabase/tests/workout-feedback-history-phase1.sql", import.meta.url), "utf8");
+    assert.ok(/A5bis/.test(checklist) && /has_function_privilege\('anon'/.test(checklist) && /grantee = 0/.test(checklist),
+      "la checklist contrôle anon ET PUBLIC sur la RPC");
   });
 
   /* Décor régularisation (§8-§10) : base dédiée reproduisant l'état de prod. */

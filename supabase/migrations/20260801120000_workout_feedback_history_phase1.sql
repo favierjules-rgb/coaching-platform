@@ -242,5 +242,13 @@ begin
 end;
 $$;
 
-revoke all on function public.provision_program_copy(uuid, uuid, text) from public;
-grant execute on function public.provision_program_copy(uuid, uuid, text) to authenticated, service_role;
+-- Privilèges : les DEFAULT PRIVILEGES de Supabase accordent EXECUTE à anon,
+-- authenticated et service_role à la création de toute fonction — révoquer
+-- PUBLIC seul ne retire PAS ce grant direct (constat du contrôle local du
+-- 01/08/2026 : anon avait EXECUTE). anon est donc révoqué explicitement.
+-- authenticated reste autorisé : les coachs/staff authentifiés utilisent la
+-- RPC, qui re-vérifie leur rôle en interne (insufficient_privilege sinon).
+REVOKE ALL ON FUNCTION public.provision_program_copy(uuid, uuid, text) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.provision_program_copy(uuid, uuid, text) FROM anon;
+GRANT EXECUTE ON FUNCTION public.provision_program_copy(uuid, uuid, text)
+TO authenticated, service_role;

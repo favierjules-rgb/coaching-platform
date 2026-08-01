@@ -51,6 +51,21 @@ select p.proname, p.prosecdef
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
  where n.nspname = 'public' and p.proname = 'provision_program_copy';
 
+-- A5bis. Privilèges de la RPC : authenticated + service_role SEULEMENT.
+-- Ni anon (grant direct hérité des DEFAULT PRIVILEGES Supabase, révoqué
+-- explicitement par la migration), ni PUBLIC (grantee 0 dans l'ACL).
+select case
+  when has_function_privilege('authenticated', 'public.provision_program_copy(uuid,uuid,text)', 'execute')
+   and has_function_privilege('service_role',  'public.provision_program_copy(uuid,uuid,text)', 'execute')
+   and not has_function_privilege('anon',      'public.provision_program_copy(uuid,uuid,text)', 'execute')
+   and not exists (
+     select 1
+       from pg_proc p cross join lateral aclexplode(p.proacl) a
+      where p.oid = 'public.provision_program_copy(uuid,uuid,text)'::regprocedure
+        and a.grantee = 0 and a.privilege_type = 'EXECUTE')
+  then 'OK — A5bis privilèges RPC : authenticated + service_role, ni anon ni PUBLIC'
+  else 'ECHEC A5bis : privilèges RPC incorrects' end as a5bis;
+
 -- A6. FK session_id : 'n' = ON DELETE SET NULL (comportement pré-existant conservé).
 select confdeltype as fk_session_on_delete
   from pg_constraint
