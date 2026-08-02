@@ -43,6 +43,7 @@ function sessionTypeForColumn(derived: DerivedSessionType): SessionType {
   return derived === "rest" ? "strength" : derived;
 }
 import type { Database } from "@/types/supabase";
+import { mergeAssignedStudentIds } from "@/lib/assignment-selection";
 import { isContradictoryProgramMode, resolveProgramProvisioningMode } from "@/lib/program-provisioning";
 
 /**
@@ -297,14 +298,23 @@ async function loadPrograms(supabase: TypedSupabaseClient, programRows: ProgramR
   }
   const programIds = programRows.map((p) => p.id);
 
-  const [weeksResult, assignmentsResult] = await Promise.all([
+  const [weeksResult, assignmentsResult, copiesResult] = await Promise.all([
     supabase.from("program_weeks").select("*").in("program_id", programIds),
     supabase.from("assignments").select("*").eq("content_type", "programme").in("content_id", programIds),
+    // fix/program-assignment-checkbox : depuis l'individualisation, l'assignation
+    // d'un programme individuel vise la COPIE de l'élève — pour afficher les
+    // cases cochées du MODÈLE, il faut donc aussi ses copies (owner + source).
+    supabase.from("programs").select("owner_student_id, source_template_id").in("source_template_id", programIds),
   ]);
   devWarn("loadPrograms (program_weeks)", weeksResult.error);
   devWarn("loadPrograms (assignments)", assignmentsResult.error);
+  devWarn("loadPrograms (copies individuelles)", copiesResult.error);
   const weekRows = weeksResult.data ?? [];
   const assignmentRows: AssignmentRow[] = assignmentsResult.data ?? [];
+  const copyRows = (copiesResult.data ?? []).filter(
+    (c): c is { owner_student_id: string; source_template_id: string } =>
+      Boolean(c.owner_student_id && c.source_template_id),
+  );
 
   const weekIds = weekRows.map((w) => w.id);
   const { data: sessionRowsRaw, error: sessionsError } =
@@ -343,6 +353,7 @@ async function loadPrograms(supabase: TypedSupabaseClient, programRows: ProgramR
   const blocksBySession = groupBy(blockRows, (b) => b.session_id);
   const segmentsByBlock = groupBy(segmentRows, (p) => p.block_id ?? "");
   const assignmentsByProgram = groupBy(assignmentRows, (a) => a.content_id);
+  const copyOwnersByTemplate = groupBy(copyRows, (c) => c.source_template_id);
 
   return programRows.map((programRow) => {
     const weeksForProgram = weeksByProgram.get(programRow.id) ?? [];
@@ -373,7 +384,10 @@ async function loadPrograms(supabase: TypedSupabaseClient, programRows: ProgramR
           blocks,
         );
       });
-    const assignedStudentIds = (assignmentsByProgram.get(programRow.id) ?? []).map((a) => a.student_id);
+    const assignedStudentIds = mergeAssignedStudentIds(
+      (assignmentsByProgram.get(programRow.id) ?? []).map((a) => a.student_id),
+      (copyOwnersByTemplate.get(programRow.id) ?? []).map((c) => c.owner_student_id),
+    );
     return mapProgramRow(programRow, sessions, assignedStudentIds);
   });
 }
@@ -1271,6 +1285,7 @@ export async function setProgramAssignment(
   assigned: boolean,
 ): Promise<boolean> {
   if (!assigned) {
+    // Lien direct (mode groupe, héritage pré-individualisation).
     const { error } = await supabase
       .from("assignments")
       .delete()
@@ -1278,6 +1293,29 @@ export async function setProgramAssignment(
       .eq("content_type", "programme")
       .eq("content_id", programId);
     devWarn("setProgramAssignment (delete)", error);
+
+    // fix/program-assignment-checkbox : en mode individualisé, l'assignation
+    // réelle vise la COPIE de l'élève — décocher doit retirer CE lien-là.
+    // La copie elle-même (et tout son historique de retours) reste intacte :
+    // seul l'accès saute, une ré-assignation la retrouvera (idempotence).
+    const { data: copie, error: copieError } = await supabase
+      .from("programs")
+      .select("id")
+      .eq("owner_student_id", studentId)
+      .eq("source_template_id", programId)
+      .limit(1)
+      .maybeSingle();
+    devWarn("setProgramAssignment (copie au retrait)", copieError);
+    if (copie) {
+      const { error: retraitError } = await supabase
+        .from("assignments")
+        .delete()
+        .eq("student_id", studentId)
+        .eq("content_type", "programme")
+        .eq("content_id", copie.id);
+      devWarn("setProgramAssignment (delete copie)", retraitError);
+      return !error && !retraitError;
+    }
     return !error;
   }
 

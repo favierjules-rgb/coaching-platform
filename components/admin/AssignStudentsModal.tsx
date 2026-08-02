@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { CheckCircle, UserPlus } from "lucide-react";
 
+import { terminerAssignation, toggleStudentSelection } from "@/lib/assignment-selection";
 import { Modal, PrimaryButton } from "@/components/admin/Modal";
 import { StudentPickerList } from "@/components/admin/StudentPickerList";
 import type { AdminStudent, AssignableContentType } from "@/types";
@@ -13,7 +14,12 @@ interface AssignStudentsModalProps {
   contentId: string;
   students: AdminStudent[];
   assignedStudentIds: string[];
-  onSetAssignment: (studentId: string, contentType: AssignableContentType, contentId: string, assigned: boolean) => void;
+  onSetAssignment: (
+    studentId: string,
+    contentType: AssignableContentType,
+    contentId: string,
+    assigned: boolean,
+  ) => void | boolean | Promise<boolean | void>;
   triggerLabel?: string;
   triggerVariant?: "primary" | "outline";
 }
@@ -30,10 +36,22 @@ export function AssignStudentsModal({
 }: AssignStudentsModalProps) {
   const [open, setOpen] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+  // Correctif fix/program-assignment-checkbox : la sélection vit ICI,
+  // localement, initialisée depuis les assignations existantes à CHAQUE
+  // ouverture (fermer/rouvrir recharge donc l'état réel). Aucune écriture
+  // pendant la sélection — le diff ne part qu'au clic sur « Terminer ».
+  const [selection, setSelection] = useState<string[]>([]);
+  // Atomicité UI : « Terminer » attend TOUTES les écritures (verrou
+  // anti-double-clic), et un échec laisse la modale OUVERTE avec un message
+  // — jamais de faux succès.
+  const [saving, setSaving] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
 
   function close() {
     setOpen(false);
     setConfirmed(false);
+    setSaving(false);
+    setSaveFailed(false);
   }
 
   return (
@@ -42,6 +60,7 @@ export function AssignStudentsModal({
         type="button"
         onClick={(event) => {
           event.stopPropagation();
+          setSelection(assignedStudentIds);
           setOpen(true);
         }}
         className={
@@ -70,10 +89,37 @@ export function AssignStudentsModal({
               </p>
               <StudentPickerList
                 students={students}
-                selectedIds={assignedStudentIds}
-                onToggle={(studentId, checked) => onSetAssignment(studentId, contentType, contentId, checked)}
+                selectedIds={selection}
+                onToggle={(studentId, checked) => setSelection((prev) => toggleStudentSelection(prev, studentId, checked))}
               />
-              <PrimaryButton onClick={() => setConfirmed(true)}>Terminer</PrimaryButton>
+              {saveFailed && (
+                <p className="rounded-panel border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                  L&apos;enregistrement a échoué. Ta sélection est conservée — réessaie, ou vérifie ta connexion.
+                </p>
+              )}
+              <PrimaryButton
+                disabled={saving}
+                onClick={() => {
+                  if (saving) return;
+                  setSaving(true);
+                  setSaveFailed(false);
+                  // SEUL point d'écriture : le diff sélection ↔ assignations
+                  // initiales, TOUTES les écritures attendues avant de
+                  // confirmer — un échec laisse la modale ouverte.
+                  void terminerAssignation(assignedStudentIds, selection, (studentId, assigned) =>
+                    onSetAssignment(studentId, contentType, contentId, assigned),
+                  ).then(({ ok }) => {
+                    setSaving(false);
+                    if (ok) {
+                      setConfirmed(true);
+                    } else {
+                      setSaveFailed(true);
+                    }
+                  });
+                }}
+              >
+                {saving ? "Enregistrement…" : "Terminer"}
+              </PrimaryButton>
             </div>
           )}
         </Modal>

@@ -42,7 +42,8 @@
     "db:local:init": "bash scripts/db-local-init.sh",
     "test:home-personal-story": "npx tsx scripts/tests/home-personal-story.mts",
     "test:home-theme": "npx tsx scripts/tests/home-theme.mts",
-    "test:student-workout-history": "npx tsx scripts/tests/student-workout-history.mts"
+    "test:student-workout-history": "npx tsx scripts/tests/student-workout-history.mts",
+    "test:program-assignment-checkbox": "npx tsx scripts/tests/program-assignment-checkbox.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

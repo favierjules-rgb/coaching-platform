@@ -15,6 +15,18 @@ type SetAssignmentFn = (
   assigned: boolean,
 ) => void;
 
+/**
+ * Écriture AWAITABLE (fix/program-assignment-checkbox) : la modale doit
+ * attendre la fin réelle des écritures avant d'afficher le succès — le
+ * booléen résolu remonte l'échec (ex. RPC refusée) au lieu de le perdre.
+ */
+type AwaitableSetAssignmentFn = (
+  studentId: string,
+  contentType: AssignableContentType,
+  contentId: string,
+  assigned: boolean,
+) => Promise<boolean>;
+
 const WRITERS: Partial<Record<AssignableContentType, typeof setProgramAssignment>> = {
   programme: setProgramAssignment,
   nutrition: setNutritionAssignment,
@@ -35,14 +47,17 @@ export function useContentAssignment(
   active: Partial<Record<AssignableContentType, boolean>>,
   fallback: SetAssignmentFn,
   onWritten?: () => void,
-): SetAssignmentFn {
+): AwaitableSetAssignmentFn {
   return useCallback(
     (studentId, contentType, contentId, assigned) => {
       const write = WRITERS[contentType];
       if (active[contentType] && write) {
         const supabase = createSupabaseBrowserClient();
         if (supabase) {
-          void write(supabase, studentId, contentId, assigned).then((ok) => {
+          // La PROMESSE est rendue à l'appelant : la modale attend la fin
+          // réelle de l'écriture et reçoit son résultat (fix/program-
+          // assignment-checkbox — plus jamais de faux succès fire-and-forget).
+          return write(supabase, studentId, contentId, assigned).then((ok) => {
             onWritten?.();
             // Email envoyé uniquement lors d'une vraie nouvelle attribution
             // (jamais au retrait, "assigned" ci-dessus) — best-effort, ne
@@ -54,11 +69,12 @@ export function useContentAssignment(
                 body: JSON.stringify({ studentId, contentType, contentId }),
               }).catch(() => {});
             }
+            return ok;
           });
-          return;
         }
       }
       fallback(studentId, contentType, contentId, assigned);
+      return Promise.resolve(true);
     },
     [active, fallback, onWritten],
   );
