@@ -388,8 +388,12 @@ function makeProgramsFake(opts?: { store?: Record<string, Record<string, unknown
       }
       if (this.op === "update") {
         writes.push({ table: this.table, op: "update" });
-        for (const r of rows(this.table)) if (matches(r, this.filters)) Object.assign(r, this.payload);
-        return { data: null, error: null };
+        const touchées: Record<string, unknown>[] = [];
+        for (const r of rows(this.table)) if (matches(r, this.filters)) { Object.assign(r, this.payload); touchées.push({ ...r }); }
+        // Comportement PostgREST réel : `.update().select()` renvoie les
+        // lignes modifiées — updateProgram s'appuie dessus depuis le
+        // correctif incident 02/08 (0 ligne = droits insuffisants → échec net).
+        return { data: touchées, error: null };
       }
       if (this.op === "delete") {
         writes.push({ table: this.table, op: "delete" });
@@ -582,6 +586,7 @@ async function runAsync() {
 
   await atest("updateProgram (canonique) — lock SNAPSHOT, session_patch, blocks[] source, 0 écriture, AUCUN update préalable", async () => {
     const store = {
+      programs: [{ id: "prog", name: "Programme", status: "actif" }],
       program_weeks: [{ id: "week-1", program_id: "prog", week_number: 1 }],
       workout_sessions: [{ id: SESS1, program_week_id: "week-1", day: "lundi", updated_at: "u0-snapshot" }],
     };
@@ -613,6 +618,7 @@ async function runAsync() {
 
   await atest("updateProgram (canonique) — C/S/C/S transmis tel quel, aucun tri par catégorie, session_patch", async () => {
     const store = {
+      programs: [{ id: "prog", name: "Programme", status: "actif" }],
       program_weeks: [{ id: "week-1", program_id: "prog", week_number: 1 }],
       workout_sessions: [{ id: SESS1, program_week_id: "week-1", day: "lundi", updated_at: "u0" }],
     };
@@ -636,6 +642,7 @@ async function runAsync() {
 
   await atest("updateProgram (canonique) — tableaux legacy CONTRADICTOIRES ignorés (payload = blocks[])", async () => {
     const store = {
+      programs: [{ id: "prog", name: "Programme", status: "actif" }],
       program_weeks: [{ id: "week-1", program_id: "prog", week_number: 1 }],
       workout_sessions: [{ id: SESS1, program_week_id: "week-1", day: "lundi", updated_at: "u0" }],
     };
@@ -663,7 +670,7 @@ async function runAsync() {
   });
 
   await atest("updateProgram (canonique) — nouvelle séance : INSERT workout_sessions + RPC, 0 insert direct de contenu, pas de session_patch", async () => {
-    const store = { program_weeks: [{ id: "week-1", program_id: "prog", week_number: 1 }], workout_sessions: [] as Record<string, unknown>[] };
+    const store = { programs: [{ id: "prog", name: "Programme", status: "actif" }], program_weeks: [{ id: "week-1", program_id: "prog", week_number: 1 }], workout_sessions: [] as Record<string, unknown>[] };
     const { db, writes, rpcPayloads } = makeProgramsFake({ store });
     await updateProgram(
       db,
@@ -679,6 +686,7 @@ async function runAsync() {
 
   await atest("updateProgram (canonique) — STALE propagé, écritures des séances suivantes stoppées", async () => {
     const store = {
+      programs: [{ id: "prog", name: "Programme", status: "actif" }],
       program_weeks: [{ id: "week-1", program_id: "prog", week_number: 1 }],
       workout_sessions: [
         { id: SESS1, program_week_id: "week-1", day: "lundi", updated_at: "u0" },
@@ -696,6 +704,7 @@ async function runAsync() {
 
   await atest("updateProgram (canonique) — double sauvegarde : ids temporaires → UUID réels, aucune recréation", async () => {
     const store = {
+      programs: [{ id: "prog", name: "Programme", status: "actif" }],
       program_weeks: [{ id: "week-1", program_id: "prog", week_number: 1 }],
       workout_sessions: [{ id: SESS1, program_week_id: "week-1", day: "lundi", updated_at: "u0" }],
     };

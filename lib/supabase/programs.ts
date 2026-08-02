@@ -982,7 +982,7 @@ export async function updateProgram(
   data: ProgramBuilderData,
 ): Promise<boolean> {
   const isPublicNormalise = normalizeIsPublicForWrite("updateProgram", data);
-  const { error: updateError } = await supabase
+  const { data: updatedRows, error: updateError } = await supabase
     .from("programs")
     .update({
       name: data.name,
@@ -998,14 +998,35 @@ export async function updateProgram(
       public_subscription_template_id: isPublicNormalise ? (data.publicSubscriptionTemplateId ?? null) : null,
       updated_at: new Date().toISOString(),
     })
-    .eq("id", programId);
+    .eq("id", programId)
+    .select("id");
   devWarn("updateProgram", updateError);
+  // Incident du 02/08 : sous RLS, un UPDATE émis sans droits coach (session
+  // devenue élève dans le même navigateur, session expirée…) ne renvoie NI
+  // erreur NI ligne — l'ancien code retournait alors true et enchaînait la
+  // structure, qui échouait en cascade (NOT_AUTHORIZED) derrière un message
+  // générique. 0 ligne modifiée = échec NET, AVANT toute écriture de
+  // structure. owner_student_id / source_template_id ne figurent jamais dans
+  // ce payload : une copie individuelle reste possédée et rattachée.
+  if (updateError || !updatedRows || updatedRows.length === 0) {
+    devWarn("updateProgram (tête non modifiée)", {
+      message: `programme ${programId} : 0 ligne mise à jour (droits insuffisants ou programme inconnu) — structure non tentée`,
+    });
+    return false;
+  }
+  // FRONTIÈRE D'ATOMICITÉ ASSUMÉE : tête (ci-dessus) et structure
+  // (ci-dessous) restent des requêtes DISTINCTES — il n'existe pas de
+  // transaction englobante. Seule la RPC est atomique, PAR séance. Une
+  // erreur de structure (ex. STALE) laisse donc la tête et les séances déjà
+  // sauvées commises ; le builder le signale (builderSaveUserMessage) et une
+  // re-sauvegarde après rechargement reconverge : diff par clés stables
+  // (semaine::jour) + RPC idempotente par séance.
 
   // updateProgram est l'entrée du BUILDER multi-blocs (seul appelant) : mode
   // CANONIQUE explicite — la persistance vient de blocks[], jamais de
   // exercises[]/cardioBlocks[]/sessionType.
   await diffProgramStructure(supabase, programId, data.sessions, "canonical");
-  return !updateError;
+  return true;
 }
 
 /**
