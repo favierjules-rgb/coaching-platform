@@ -630,6 +630,17 @@ await (async () => {
       new URL("../../supabase/tests/workout-feedback-history-phase1.sql", import.meta.url), "utf8");
     assert.ok(/A5bis/.test(checklist) && /has_function_privilege\('anon'/.test(checklist) && /grantee = 0/.test(checklist),
       "la checklist contrôle anon ET PUBLIC sur la RPC");
+    // fix/program-copy-training-prescriptions : la version courante de la RPC
+    // copie AUSSI les prescriptions (toutes colonnes via %rowtype, hiérarchie
+    // parent → enfants remappée) — plus jamais de copie cardio vide.
+    const migrationPresc = readFileSync(
+      new URL("../../supabase/migrations/20260802190000_copy_training_prescriptions_in_program_copies.sql", import.meta.url), "utf8");
+    assert.ok(/insert into public\.training_prescriptions values \(v_prescription\.\*\)/.test(migrationPresc),
+      "prescriptions copiées avec TOUTES leurs colonnes (rowtype)");
+    assert.ok(/values \(v_child\.\*\)/.test(migrationPresc) && /parent_prescription_id := v_new_prescription_id/.test(migrationPresc),
+      "hiérarchie parent → enfants copiée et remappée vers les nouveaux ids");
+    assert.ok(/returning id into v_new_exercise_id/.test(migrationPresc),
+      "exercices copiés ligne à ligne (mapping requis par leurs prescriptions)");
   });
 
   /* Décor régularisation (§8-§10) : base dédiée reproduisant l'état de prod. */

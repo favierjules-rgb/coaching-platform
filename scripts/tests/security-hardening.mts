@@ -425,10 +425,10 @@ await test("18. le baseline est HORS de supabase/migrations — impossible à po
   for (const fichier of migrations) {
     assert.ok(!/baseline/i.test(fichier), `un fichier de baseline traîne dans migrations/ : ${fichier}`);
   }
-  // 34 depuis le correctif du chemin staff de provision_program_copy
-  // (migration 20260801210000, fix/program-assignment-checkbox — déclarée
-  // dans le manifeste comme le veut la procédure).
-  assert.equal(migrations.filter((f) => f.endsWith(".sql")).length, 34, "les 34 migrations doivent rester intactes");
+  // 35 depuis la copie des prescriptions dans provision_program_copy
+  // (migration 20260802190000, fix/program-copy-training-prescriptions —
+  // déclarée dans le manifeste comme le veut la procédure).
+  assert.equal(migrations.filter((f) => f.endsWith(".sql")).length, 35, "les 35 migrations doivent rester intactes");
 });
 
 await test("19. manifeste : empreintes exactes et borne cohérente", () => {
@@ -451,7 +451,7 @@ await test("19. manifeste : empreintes exactes et borne cohérente", () => {
   // Les migrations annoncées existent réellement, et ce sont bien celles
   // qui suivent la borne.
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 7);
+  assert.equal(attendues.length, 8);
   const presentes = readdirSync(new URL("../../supabase/migrations", import.meta.url).pathname)
     .filter((f) => f.endsWith(".sql"))
     .filter((f) => f >= "20260724214500")
