@@ -53,3 +53,23 @@ export function applySelectionDiff(
 export function mergeAssignedStudentIds(direct: string[], copyOwners: string[]): string[] {
   return [...new Set([...direct, ...copyOwners])];
 }
+
+/**
+ * Validation du « Terminer » — ATOMICITÉ UI (2e correctif du chantier) :
+ * TOUTES les écritures du diff sont collectées puis ATTENDUES
+ * (Promise.all) ; un rejet ou un `false` (échec d'écriture Supabase,
+ * ex. RPC refusée) rend `ok: false` — jamais d'erreur silencieuse, la
+ * modale reste alors ouverte au lieu d'afficher un faux succès.
+ */
+export async function terminerAssignation(
+  before: string[],
+  after: string[],
+  apply: (studentId: string, assigned: boolean) => boolean | void | Promise<boolean | void>,
+): Promise<{ ok: boolean; added: string[]; removed: string[] }> {
+  const résultats: Array<boolean | void | Promise<boolean | void>> = [];
+  const { added, removed } = applySelectionDiff(before, after, (studentId, assigned) => {
+    résultats.push(apply(studentId, assigned));
+  });
+  const issues = await Promise.all(résultats.map((r) => Promise.resolve(r).catch(() => false as const)));
+  return { ok: issues.every((issue) => issue !== false), added, removed };
+}

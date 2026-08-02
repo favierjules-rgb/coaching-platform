@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 
-import { applySelectionDiff, mergeAssignedStudentIds, toggleStudentSelection } from "../../lib/assignment-selection";
+import { applySelectionDiff, mergeAssignedStudentIds, terminerAssignation, toggleStudentSelection } from "../../lib/assignment-selection";
 import { StudentPickerList } from "../../components/admin/StudentPickerList";
 import { programAssignmentTestHooks, setProgramAssignment } from "../../lib/supabase/programs";
 import type { AdminStudent } from "../../types";
@@ -153,8 +153,8 @@ await (async () => {
     // onSetAssignment n'apparaît que DANS le handler du bouton Terminer.
     const occurrences = sourceModale.match(/onSetAssignment\(/g) ?? [];
     assert.equal(occurrences.length, 1, "un seul point d'écriture");
-    assert.ok(/applySelectionDiff\(assignedStudentIds, selection, \(studentId, assigned\) =>\s*\n?\s*onSetAssignment\(/.test(sourceModale),
-      "l'écriture vit dans le diff appliqué par Terminer");
+    assert.ok(/terminerAssignation\(assignedStudentIds, selection, \(studentId, assigned\) =>\s*\n?\s*onSetAssignment\(/.test(sourceModale),
+      "l'écriture vit dans le diff attendu par Terminer");
   });
 
   await test("7. une affectation existante apparaît cochée à l'ouverture (copies comprises)", () => {
@@ -215,6 +215,104 @@ await (async () => {
     } finally {
       programAssignmentTestHooks.duplicate = précédent;
     }
+  });
+
+  /* ─── 11-16 : intégration Terminer → écriture → relecture (bug Preview) ─── */
+
+  await test("11. flux complet : cocher → Terminer (attendu) → recharger → rouvrir → toujours coché", async () => {
+    const base = creerBase();
+    base.table("programs").push({ id: "prog-int", name: "Force", status: "actif", program_mode: "individuel", is_public: false, owner_student_id: null, source_template_id: null });
+    const précédent = programAssignmentTestHooks.duplicate;
+    programAssignmentTestHooks.duplicate = (async (_c: unknown, programId: string, o: { ownerStudentId?: string; sourceTemplateId?: string }) => {
+      const copieId = `copie-${o.ownerStudentId}`;
+      base.table("programs").push({ id: copieId, name: "Force", status: "actif", program_mode: "individuel", is_public: false, owner_student_id: o.ownerStudentId ?? null, source_template_id: o.sourceTemplateId ?? programId });
+      return copieId;
+    }) as never;
+    try {
+      // Relecture EXACTE de loadPrograms : liens directs + propriétaires de copies.
+      const relire = () =>
+        mergeAssignedStudentIds(
+          base.table("assignments").filter((l) => l.content_id === "prog-int").map((l) => l.student_id as string),
+          base.table("programs").filter((p) => p.source_template_id === "prog-int" && p.owner_student_id).map((p) => p.owner_student_id as string),
+        );
+      // 1-2. Ouverture : sélection initialisée depuis les assignations (vides).
+      let sélection: string[] = relire();
+      assert.deepEqual(sélection, []);
+      sélection = toggleStudentSelection(sélection, "eleve-gaelle", true);
+      // 3-4. Terminer : écritures RÉELLES (setProgramAssignment) toutes attendues.
+      const { ok } = await terminerAssignation([], sélection, (studentId, assigned) =>
+        setProgramAssignment(base.client, studentId, "prog-int", assigned),
+      );
+      assert.ok(ok, "les écritures aboutissent");
+      // 5-8. Rechargement puis réouverture : l'élève apparaît TOUJOURS coché
+      //      (assignation portée par sa copie, relue via source_template_id).
+      const rechargé = relire();
+      assert.deepEqual(rechargé, ["eleve-gaelle"], "réouverture : élève coché via sa copie");
+    } finally {
+      programAssignmentTestHooks.duplicate = précédent;
+    }
+  });
+
+  await test("12. erreur d'affectation → pas de confirmation (la modale reste ouverte)", async () => {
+    const { ok } = await terminerAssignation([], ["eleve-gaelle"], () => false);
+    assert.equal(ok, false, "échec remonté — jamais avalé");
+    // Le handler ne confirme que si ok, sinon message d'erreur et modale ouverte.
+    assert.ok(/if \(ok\) \{\s*\n?\s*setConfirmed\(true\);\s*\n?\s*\} else \{\s*\n?\s*setSaveFailed\(true\);/.test(sourceModale),
+      "échec → setSaveFailed, la modale ne se ferme pas");
+    assert.ok(/saveFailed && \(/.test(sourceModale), "message d'erreur visible");
+  });
+
+  await test("13. deux écritures async sont TOUTES attendues avant le résultat", async () => {
+    let résolues = 0;
+    const lente = (ms: number) => new Promise<boolean>((résoudre) => setTimeout(() => { résolues += 1; résoudre(true); }, ms));
+    const { ok } = await terminerAssignation([], ["a", "b"], () => lente(10));
+    assert.equal(ok, true);
+    assert.equal(résolues, 2, "Terminer n'a rendu la main qu'après LES DEUX écritures");
+  });
+
+  await test("14. mode groupe : deux élèves persistent (assignation directe au programme partagé)", async () => {
+    const base = creerBase();
+    base.table("programs").push({ id: "prog-grp", name: "Groupe", status: "actif", program_mode: "groupe", is_public: false, owner_student_id: null, source_template_id: null });
+    const { ok } = await terminerAssignation([], ["eleve-gaelle", "eleve-jules"], (studentId, assigned) =>
+      setProgramAssignment(base.client, studentId, "prog-grp", assigned),
+    );
+    assert.ok(ok);
+    const liens = base.table("assignments");
+    assert.equal(liens.length, 2, "deux liens");
+    assert.ok(liens.every((l) => l.content_id === "prog-grp"), "directement le programme partagé — jamais de copie en groupe");
+    assert.equal(base.table("programs").length, 1, "aucune copie créée");
+  });
+
+  await test("15. mode individuel : la relecture passe par source_template_id (copie), pas par le modèle", async () => {
+    // Aucun lien direct sur le modèle, une copie possédée → l'élève DOIT apparaître coché.
+    const cochés = mergeAssignedStudentIds([], ["eleve-gaelle"]);
+    assert.deepEqual(cochés, ["eleve-gaelle"]);
+    const programsSource = readFileSync(new URL("../../lib/supabase/programs.ts", import.meta.url), "utf8");
+    assert.ok(/select\("owner_student_id, source_template_id"\)\.in\("source_template_id", programIds\)/.test(programsSource),
+      "loadPrograms interroge réellement les copies individuelles");
+    // Et la RPC corrigée résout le staff par user_id (cause racine du bug Preview).
+    const correctif = readFileSync(
+      new URL("../../supabase/migrations/20260801210000_fix_provision_program_copy_staff_role.sql", import.meta.url), "utf8");
+    const correctifSansCommentaires = correctif.replace(/^\s*--.*$/gm, "");
+    assert.ok(/p\.user_id = auth\.uid\(\)/.test(correctifSansCommentaires), "garde d'autorisation sur profiles.user_id");
+    assert.ok(!/p\.id = auth\.uid\(\)/.test(correctifSansCommentaires), "plus jamais p.id = auth.uid() (hors commentaires)");
+    assert.ok(/REVOKE EXECUTE ON FUNCTION public\.provision_program_copy\(uuid, uuid, text\) FROM anon/.test(correctif),
+      "privilèges ré-affirmés (ni anon ni PUBLIC)");
+  });
+
+  await test("16. aucune fermeture avant résolution, aucune erreur silencieuse", async () => {
+    // Un REJET de promesse devient un échec explicite (jamais une exception perdue).
+    const { ok } = await terminerAssignation([], ["eleve-gaelle"], () => Promise.reject(new Error("réseau")));
+    assert.equal(ok, false, "rejet → ok:false, la modale affiche l'erreur");
+    // Verrou et attente réelle dans le composant.
+    assert.ok(/disabled=\{saving\}/.test(sourceModale), "bouton verrouillé pendant l'enregistrement");
+    assert.ok(/if \(saving\) return;/.test(sourceModale), "anti double-clic");
+    assert.ok(/\{saving \? "Enregistrement…" : "Terminer"\}/.test(sourceModale), "état de chargement visible");
+    // Et le hook d'écriture REND sa promesse (plus de fire-and-forget).
+    const hook = readFileSync(new URL("../../hooks/useContentAssignment.ts", import.meta.url), "utf8");
+    assert.ok(/return write\(supabase, studentId, contentId, assigned\)\.then/.test(hook),
+      "useContentAssignment rend la promesse d'écriture à la modale");
+    assert.ok(!/void write\(/.test(hook), "plus d'écriture lancée sans être attendue");
   });
 })();
 
