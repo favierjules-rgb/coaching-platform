@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 
-import { applySelectionDiff, mergeAssignedStudentIds, terminerAssignation, toggleStudentSelection } from "../../lib/assignment-selection";
+import { applySelectionDiff, keepCopiesWithActiveAssignment, mergeAssignedStudentIds, terminerAssignation, toggleStudentSelection } from "../../lib/assignment-selection";
 import { StudentPickerList } from "../../components/admin/StudentPickerList";
 import { programAssignmentTestHooks, setProgramAssignment } from "../../lib/supabase/programs";
 import type { AdminStudent } from "../../types";
@@ -229,11 +229,16 @@ await (async () => {
       return copieId;
     }) as never;
     try {
-      // Relecture EXACTE de loadPrograms : liens directs + propriétaires de copies.
+      // Relecture EXACTE de loadPrograms : liens directs + propriétaires de
+      // copies portant un lien `assignments` ACTIF (fix/program-assignment-
+      // active-links — une copie désassignée ne coche plus le modèle).
       const relire = () =>
         mergeAssignedStudentIds(
           base.table("assignments").filter((l) => l.content_id === "prog-int").map((l) => l.student_id as string),
-          base.table("programs").filter((p) => p.source_template_id === "prog-int" && p.owner_student_id).map((p) => p.owner_student_id as string),
+          keepCopiesWithActiveAssignment(
+            base.table("programs").filter((p) => p.source_template_id === "prog-int" && p.owner_student_id) as Array<{ id: string; owner_student_id: string }>,
+            base.table("assignments").map((l) => l.content_id as string),
+          ).map((p) => p.owner_student_id),
         );
       // 1-2. Ouverture : sélection initialisée depuis les assignations (vides).
       let sélection: string[] = relire();
@@ -288,8 +293,10 @@ await (async () => {
     const cochés = mergeAssignedStudentIds([], ["eleve-gaelle"]);
     assert.deepEqual(cochés, ["eleve-gaelle"]);
     const programsSource = readFileSync(new URL("../../lib/supabase/programs.ts", import.meta.url), "utf8");
-    assert.ok(/select\("owner_student_id, source_template_id"\)\.in\("source_template_id", programIds\)/.test(programsSource),
+    assert.ok(/select\("id, owner_student_id, source_template_id"\)\.in\("source_template_id", programIds\)/.test(programsSource),
       "loadPrograms interroge réellement les copies individuelles");
+    assert.ok(/keepCopiesWithActiveAssignment\(/.test(programsSource) && /liens actifs des copies/.test(programsSource),
+      "seules les copies au lien assignments ACTIF participent aux cases cochées");
     // Et la RPC corrigée résout le staff par user_id (cause racine du bug Preview).
     const correctif = readFileSync(
       new URL("../../supabase/migrations/20260801210000_fix_provision_program_copy_staff_role.sql", import.meta.url), "utf8");
@@ -313,6 +320,54 @@ await (async () => {
     assert.ok(/return write\(supabase, studentId, contentId, assigned\)\.then/.test(hook),
       "useContentAssignment rend la promesse d'écriture à la modale");
     assert.ok(!/void write\(/.test(hook), "plus d'écriture lancée sans être attendue");
+  });
+
+  await test("17. cycle désassignation/réassignation : la copie survit, l'affichage suit le lien ACTIF", async () => {
+    // 1-2. Pur : copie + lien actif → coché ; copie sans lien → décoché.
+    const copies = [{ id: "copie-1", owner_student_id: "eleve-gaelle" }];
+    assert.deepEqual(
+      mergeAssignedStudentIds([], keepCopiesWithActiveAssignment(copies, ["copie-1"]).map((c) => c.owner_student_id)),
+      ["eleve-gaelle"], "copie + assignment actif → élève coché sur le modèle");
+    assert.deepEqual(
+      mergeAssignedStudentIds([], keepCopiesWithActiveAssignment(copies, []).map((c) => c.owner_student_id)),
+      [], "copie SANS assignment → élève décoché (owner seul ≠ assigné)");
+
+    // 3-6. Intégration : assigner → désassigner → réassigner, sur le vrai code.
+    const base = creerBase();
+    base.table("programs").push({ id: "prog-cycle", name: "Cycle", status: "actif", program_mode: "individuel", is_public: false, owner_student_id: null, source_template_id: null });
+    const précédent = programAssignmentTestHooks.duplicate;
+    programAssignmentTestHooks.duplicate = (async (_c: unknown, programId: string, o: { ownerStudentId?: string; sourceTemplateId?: string }) => {
+      const copieId = `copie-${o.ownerStudentId}`;
+      base.table("programs").push({ id: copieId, name: "Cycle", status: "actif", program_mode: "individuel", is_public: false, owner_student_id: o.ownerStudentId ?? null, source_template_id: o.sourceTemplateId ?? programId });
+      return copieId;
+    }) as never;
+    const relire = () =>
+      mergeAssignedStudentIds(
+        base.table("assignments").filter((l) => l.content_id === "prog-cycle").map((l) => l.student_id as string),
+        keepCopiesWithActiveAssignment(
+          base.table("programs").filter((p) => p.source_template_id === "prog-cycle" && p.owner_student_id) as Array<{ id: string; owner_student_id: string }>,
+          base.table("assignments").map((l) => l.content_id as string),
+        ).map((p) => p.owner_student_id),
+      );
+    try {
+      // Assignation : copie créée, élève coché.
+      assert.ok(await setProgramAssignment(base.client, "eleve-gaelle", "prog-cycle", true));
+      assert.deepEqual(relire(), ["eleve-gaelle"], "assigné → coché via le lien de sa copie");
+      // 3. Désassignation : le LIEN saute, la copie et son owner restent.
+      assert.ok(await setProgramAssignment(base.client, "eleve-gaelle", "prog-cycle", false));
+      assert.equal(base.table("assignments").length, 0, "aucun lien actif vers modèle ou copie");
+      const copie = base.table("programs").find((p) => p.id === "copie-eleve-gaelle")!;
+      assert.equal(copie.owner_student_id, "eleve-gaelle", "copie conservée avec owner (historique intact)");
+      assert.deepEqual(relire(), [], "le modèle affiche l'élève DÉCOCHÉ");
+      // 4-6. Réassignation : copie RÉUTILISÉE, pas de doublon, accès rendu.
+      assert.ok(await setProgramAssignment(base.client, "eleve-gaelle", "prog-cycle", true));
+      assert.equal(base.table("programs").filter((p) => p.owner_student_id === "eleve-gaelle").length, 1, "aucune deuxième copie");
+      assert.equal(base.table("assignments").length, 1);
+      assert.equal(base.table("assignments")[0].content_id, "copie-eleve-gaelle", "l'accès repasse par la MÊME copie");
+      assert.deepEqual(relire(), ["eleve-gaelle"], "re-coché après réassignation");
+    } finally {
+      programAssignmentTestHooks.duplicate = précédent;
+    }
   });
 })();
 
