@@ -10,7 +10,7 @@ import { useAdminData } from "@/hooks/useAdminData";
 import { useSupabaseExerciseLibrary } from "@/hooks/useSupabaseExerciseLibrary";
 import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
 import { useSupabaseSessionTemplates } from "@/hooks/useSupabaseSessionTemplates";
-import { nextBuilderState, orchestrateBuilderSave } from "@/lib/admin-builder-save";
+import { builderSaveUserMessage, nextBuilderState, orchestrateBuilderSave } from "@/lib/admin-builder-save";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { updateProgram as updateProgramSupabase } from "@/lib/supabase/programs";
 import { createSessionTemplate } from "@/lib/supabase/session-templates";
@@ -57,7 +57,7 @@ export default function ProgramBuilderPage() {
     return Boolean(id);
   }
 
-  async function handleSave(data: BuilderData): Promise<boolean> {
+  async function handleSave(data: BuilderData): Promise<boolean | { ok: boolean; userMessage?: string | null }> {
     if (!activeProgram) return false;
     if (!isSupabaseActive) return true;
     const supabase = createSupabaseBrowserClient();
@@ -83,7 +83,11 @@ export default function ProgramBuilderPage() {
       setBuilderRevision(next.revision);
       return true;
     }
-    return false;
+    // Incident du 02/08 : l'erreur TECHNIQUE part en console (diagnostic),
+    // et un message ACTIONNABLE remonte au builder quand la cause est connue
+    // (session sans droits coach, séance STALE, rechargement raté).
+    console.error("[builder] échec d'enregistrement", outcome);
+    return { ok: false, userMessage: builderSaveUserMessage(outcome) };
   }
 
   if (supabasePrograms.loading && !isSupabaseActive && !activeProgram) {

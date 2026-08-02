@@ -53,6 +53,28 @@ export async function orchestrateBuilderSave(deps: {
   return { kind: "success", freshProgram };
 }
 
+/**
+ * Message UTILE pour le coach selon l'issue (incident du 02/08 : trois échecs
+ * « NOT_AUTHORIZED » derrière un libellé générique — la session du navigateur
+ * était passée sur le compte élève de test). `null` = garder le libellé
+ * générique. L'erreur technique complète part en console (dev), jamais ici.
+ */
+export function builderSaveUserMessage(outcome: BuilderSaveOutcome): string | null {
+  if (outcome.kind === "stale") {
+    return "Séance modifiée depuis le chargement — recharge la page puis réapplique tes modifications.";
+  }
+  if (outcome.kind === "refetch-failed") {
+    return "Enregistré, mais le rechargement a échoué — recharge la page pour vérifier l'état.";
+  }
+  if (outcome.kind === "error") {
+    const message = outcome.error instanceof Error ? outcome.error.message : "";
+    if (/NOT_AUTHORIZED|42501|SAVE_FAILED/.test(message)) {
+      return "Ta session n'a plus les droits coach (compte élève connecté dans ce navigateur ?). Reconnecte-toi en admin puis réessaie — tes modifications sont conservées.";
+    }
+  }
+  return null;
+}
+
 export interface BuilderState {
   program: AdminProgram;
   revision: number;

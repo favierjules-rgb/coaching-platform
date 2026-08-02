@@ -160,7 +160,7 @@ export function ProgramBuilderFullscreen({
 }: {
   program: AdminProgram;
   library: ExerciseLibraryItem[];
-  onSave: (data: BuilderData) => Promise<boolean>;
+  onSave: (data: BuilderData) => Promise<boolean | { ok: boolean; userMessage?: string | null }>;
   // Modèles de séance CANONIQUES (dernière passe Lot 4) : le picker et
   // « Enregistrer comme modèle » sont câblés dans SessionBlockPanel ; le contenu
   // est stocké/lu en blocks[] (voir lib/session-template-content.ts).
@@ -202,6 +202,7 @@ export function ProgramBuilderFullscreen({
   const [rightOpen, setRightOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
 
   // Raccourci clavier Cmd/Ctrl+S pour sauvegarder sans quitter le clavier,
@@ -242,7 +243,8 @@ export function ProgramBuilderFullscreen({
 
   async function handleSave() {
     setSaveStatus("saving");
-    const ok = await onSave({
+    setSaveErrorMessage(null);
+    const résultat = await onSave({
       name,
       goal,
       level,
@@ -256,11 +258,15 @@ export function ProgramBuilderFullscreen({
       publicSubscriptionTemplateId,
       sessions,
     });
+    const ok = typeof résultat === "boolean" ? résultat : résultat.ok;
     if (ok) {
       setSaveStatus("saved");
       setSavedAt(new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }));
     } else {
+      // Incident du 02/08 : jamais un échec générique quand une cause
+      // actionnable est connue (session sans droits coach, séance STALE…).
       setSaveStatus("error");
+      setSaveErrorMessage(typeof résultat === "boolean" ? null : (résultat.userMessage ?? null));
     }
   }
 
@@ -384,7 +390,7 @@ export function ProgramBuilderFullscreen({
 
   function saveIndicatorLabel(): string {
     if (saveStatus === "saving") return "Enregistrement…";
-    if (saveStatus === "error") return "Échec de l'enregistrement";
+    if (saveStatus === "error") return saveErrorMessage ?? "Échec de l'enregistrement";
     if (saveStatus === "dirty") return "Modifications non enregistrées";
     if (saveStatus === "saved" && savedAt) return `Enregistré à ${savedAt}`;
     return "À jour";
