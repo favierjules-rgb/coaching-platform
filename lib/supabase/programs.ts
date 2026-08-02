@@ -43,7 +43,7 @@ function sessionTypeForColumn(derived: DerivedSessionType): SessionType {
   return derived === "rest" ? "strength" : derived;
 }
 import type { Database } from "@/types/supabase";
-import { mergeAssignedStudentIds } from "@/lib/assignment-selection";
+import { keepCopiesWithActiveAssignment, mergeAssignedStudentIds } from "@/lib/assignment-selection";
 import { isContradictoryProgramMode, resolveProgramProvisioningMode } from "@/lib/program-provisioning";
 
 /**
@@ -304,16 +304,31 @@ async function loadPrograms(supabase: TypedSupabaseClient, programRows: ProgramR
     // fix/program-assignment-checkbox : depuis l'individualisation, l'assignation
     // d'un programme individuel vise la COPIE de l'élève — pour afficher les
     // cases cochées du MODÈLE, il faut donc aussi ses copies (owner + source).
-    supabase.from("programs").select("owner_student_id, source_template_id").in("source_template_id", programIds),
+    supabase.from("programs").select("id, owner_student_id, source_template_id").in("source_template_id", programIds),
   ]);
   devWarn("loadPrograms (program_weeks)", weeksResult.error);
   devWarn("loadPrograms (assignments)", assignmentsResult.error);
   devWarn("loadPrograms (copies individuelles)", copiesResult.error);
   const weekRows = weeksResult.data ?? [];
   const assignmentRows: AssignmentRow[] = assignmentsResult.data ?? [];
-  const copyRows = (copiesResult.data ?? []).filter(
-    (c): c is { owner_student_id: string; source_template_id: string } =>
-      Boolean(c.owner_student_id && c.source_template_id),
+  const allCopyRows = (copiesResult.data ?? []).filter(
+    (c): c is { id: string; owner_student_id: string; source_template_id: string } =>
+      Boolean(c.id && c.owner_student_id && c.source_template_id),
+  );
+
+  // fix/program-assignment-active-links : une copie DÉSASSIGNÉE est conservée
+  // (owner + historique) mais son lien `assignments` a disparu — elle ne doit
+  // plus cocher l'élève sur le modèle. Seules les copies portant un lien
+  // ACTIF participent à l'affichage ; une réassignation la réutilisera.
+  const copyIds = allCopyRows.map((c) => c.id);
+  const { data: copyLinksRaw, error: copyLinksError } =
+    copyIds.length > 0
+      ? await supabase.from("assignments").select("content_id").eq("content_type", "programme").in("content_id", copyIds)
+      : { data: [] as { content_id: string }[], error: null };
+  devWarn("loadPrograms (liens actifs des copies)", copyLinksError);
+  const copyRows = keepCopiesWithActiveAssignment(
+    allCopyRows,
+    (copyLinksRaw ?? []).map((l) => l.content_id),
   );
 
   const weekIds = weekRows.map((w) => w.id);

@@ -49,9 +49,30 @@ export function applySelectionDiff(
  * propriétaires d'une copie individuelle issue de ce modèle — c'est là que
  * vit l'assignation réelle depuis l'individualisation. Dédupliqué, ordre
  * stable (directs d'abord).
+ *
+ * ATTENTION (bug de désassignation corrigé) : ne passer ici que les
+ * propriétaires de copies portant un lien `assignments` ACTIF — voir
+ * keepCopiesWithActiveAssignment. Une copie désassignée (conservée avec son
+ * historique, owner_student_id toujours posé) ne doit JAMAIS apparaître
+ * cochée sur le modèle.
  */
 export function mergeAssignedStudentIds(direct: string[], copyOwners: string[]): string[] {
   return [...new Set([...direct, ...copyOwners])];
+}
+
+/**
+ * Filtre les copies individuelles sur l'existence d'un lien `assignments`
+ * ACTIF vers la copie. La désassignation supprime le lien mais CONSERVE la
+ * copie (owner_student_id + historique) : `owner_student_id` seul signifie
+ * « a possédé un cycle », pas « est assigné aujourd'hui ». Une future
+ * réassignation réutilise cette copie et la re-rend visible.
+ */
+export function keepCopiesWithActiveAssignment<T extends { id: string }>(
+  copies: T[],
+  activeContentIds: Iterable<string>,
+): T[] {
+  const actifs = new Set(activeContentIds);
+  return copies.filter((copie) => actifs.has(copie.id));
 }
 
 /**
