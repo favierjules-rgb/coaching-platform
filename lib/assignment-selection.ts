@@ -81,6 +81,10 @@ export function keepCopiesWithActiveAssignment<T extends { id: string }>(
  * (Promise.all) ; un rejet ou un `false` (échec d'écriture Supabase,
  * ex. RPC refusée) rend `ok: false` — jamais d'erreur silencieuse, la
  * modale reste alors ouverte au lieu d'afficher un faux succès.
+ *
+ * Générique sur les identifiants : le premier argument de `apply` est l'id
+ * basculé — un élève dans AssignStudentsModal, un CONTENU dans
+ * AssignContentToStudentModal (fix/student-profile-content-assignment).
  */
 export async function terminerAssignation(
   before: string[],
@@ -93,4 +97,73 @@ export async function terminerAssignation(
   });
   const issues = await Promise.all(résultats.map((r) => Promise.resolve(r).catch(() => false as const)));
   return { ok: issues.every((issue) => issue !== false), added, removed };
+}
+
+/* ─── Modale « Attribuer un contenu à [élève] » (fiche élève) —
+   fix/student-profile-content-assignment ─── */
+
+/** Sélection locale de la modale fiche élève, un tableau d'ids par type de contenu. */
+export interface ContentSelection {
+  programme: string[];
+  nutrition: string[];
+  document: string[];
+}
+
+/**
+ * Programmes PROPOSABLES dans la modale : uniquement les MODÈLES. Une copie
+ * individuelle (`ownerStudentId` posé, table `programs.owner_student_id`)
+ * n'est jamais proposée à l'attribution — c'est un artefact d'exécution du
+ * modèle pour UN élève, la lister ferait apparaître le même programme en
+ * double (modèle + copie) et attribuer une copie d'un élève à un autre
+ * serait un non-sens produit. Les programmes mock (sans le champ) restent
+ * proposables.
+ */
+export function filterAssignableProgramModels<T extends { ownerStudentId?: string | null }>(programs: T[]): T[] {
+  return programs.filter((p) => !p.ownerStudentId);
+}
+
+/**
+ * Un modèle est coché pour un élève si une assignation ACTIVE pointe vers
+ * lui — directement, OU vers la copie individuelle de l'élève :
+ * - `program.assignedStudentIds` porte déjà cette fusion côté Supabase
+ *   (liens directs + propriétaires de copies à lien actif, voir
+ *   loadPrograms/mergeAssignedStudentIds/keepCopiesWithActiveAssignment) ;
+ * - `student.assignedProgramIds` (liens `assignments` par élève) couvre le
+ *   chemin mock et le lien direct — un id de copie qu'il contiendrait ne
+ *   matche jamais un modèle de la liste proposable, l'union est donc sûre.
+ * Une copie conservée SANS lien actif (owner seul) ne coche rien.
+ */
+export function isProgramCheckedForStudent(
+  program: { id: string; assignedStudentIds: string[] },
+  student: { id: string; assignedProgramIds: string[] },
+): boolean {
+  return program.assignedStudentIds.includes(student.id) || student.assignedProgramIds.includes(program.id);
+}
+
+/**
+ * Sélection INITIALE de la modale fiche élève, calculée à CHAQUE ouverture
+ * depuis l'état réel (fermer/rouvrir recharge donc les vraies coches).
+ * Nutrition et documents sont intersectés avec les listes AFFICHÉES : le
+ * diff du « Terminer » ne peut ainsi jamais toucher un contenu non proposé.
+ */
+export function initialContentSelection(
+  student: {
+    id: string;
+    assignedProgramIds: string[];
+    assignedNutritionPlanIds: string[];
+    assignedDocumentIds: string[];
+  },
+  contents: {
+    programs: Array<{ id: string; ownerStudentId?: string | null; assignedStudentIds: string[] }>;
+    nutritionPlanIds: string[];
+    documentIds: string[];
+  },
+): ContentSelection {
+  return {
+    programme: filterAssignableProgramModels(contents.programs)
+      .filter((p) => isProgramCheckedForStudent(p, student))
+      .map((p) => p.id),
+    nutrition: contents.nutritionPlanIds.filter((id) => student.assignedNutritionPlanIds.includes(id)),
+    document: contents.documentIds.filter((id) => student.assignedDocumentIds.includes(id)),
+  };
 }

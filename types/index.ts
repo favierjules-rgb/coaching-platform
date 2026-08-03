@@ -1122,6 +1122,15 @@ export interface AdminProgram {
    */
   isPublic?: boolean;
   publicSubscriptionTemplateId?: string | null;
+  /**
+   * Propriétaire d'une COPIE individuelle (`programs.owner_student_id`,
+   * fix/student-profile-content-assignment) : posé = ce programme est la
+   * copie d'exécution d'UN élève, jamais proposable à l'attribution (voir
+   * filterAssignableProgramModels) ; null/absent = modèle (ou programme
+   * mock). Attention : posé ne signifie PAS « assigné aujourd'hui » —
+   * l'assignation active vit dans `assignments`.
+   */
+  ownerStudentId?: string | null;
 }
 
 export interface AdminMealFoodItem {

@@ -288,6 +288,10 @@ function mapProgramRow(row: ProgramRow, sessions: AdminWorkoutSession[], assigne
     groupStartDate: row.group_start_date ?? null,
     isPublic: row.is_public ?? false,
     publicSubscriptionTemplateId: row.public_subscription_template_id ?? null,
+    // fix/student-profile-content-assignment : exposé pour que la modale
+    // « Attribuer un contenu » exclue les copies individuelles de la liste
+    // proposable (le modèle ET sa copie apparaissaient en double).
+    ownerStudentId: row.owner_student_id ?? null,
   };
 }
 
