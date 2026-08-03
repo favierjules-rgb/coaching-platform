@@ -773,6 +773,7 @@ export interface Database {
           set_number: number;
           load_used: string;
           reps_done: string;
+          rpe: number | null;
           created_at: string;
           updated_at: string;
         };
@@ -783,6 +784,7 @@ export interface Database {
           set_number: number;
           load_used?: string;
           reps_done?: string;
+          rpe?: number | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -793,6 +795,7 @@ export interface Database {
           set_number?: number;
           load_used?: string;
           reps_done?: string;
+          rpe?: number | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -1251,6 +1254,9 @@ export interface Database {
           rest_seconds: number;
           tempo: string;
           recommended_load: string;
+          // RPE cible prescrit ("8" ou séquence "8-8-9") — nullable, migration
+          // 20260803190000 (feat/student-previous-set-performance).
+          recommended_rpe: string | null;
           video_url: string;
           notes: string;
           muscle_group: string | null;
@@ -1274,6 +1280,7 @@ export interface Database {
           rest_seconds?: number;
           tempo?: string;
           recommended_load?: string;
+          recommended_rpe?: string | null;
           video_url?: string;
           notes?: string;
           muscle_group?: string | null;
@@ -1293,6 +1300,7 @@ export interface Database {
           rest_seconds?: number;
           tempo?: string;
           recommended_load?: string;
+          recommended_rpe?: string | null;
           video_url?: string;
           notes?: string;
           muscle_group?: string | null;

@@ -131,6 +131,21 @@ export interface Exercise {
    * retombe sur le muscleGroups de la séance parente.
    */
   muscleGroup?: string;
+  /**
+   * Identité STABLE de l'exercice dans la banque (`exercise_library`) —
+   * feat/student-previous-set-performance : clé de correspondance prioritaire
+   * pour retrouver la dernière performance passée du même exercice (le nom
+   * normalisé n'est que le fallback). Optionnelle/null : exercice créé en
+   * texte libre, séance mock ou antérieure à la banque.
+   */
+  libraryExerciseId?: string | null;
+  /**
+   * RPE CIBLE prescrit par le coach ("8" ou séquence "8-8-9" — voir
+   * AdminExercise.recommendedRpe). Le placeholder RPE des séries suit
+   * EXCLUSIVEMENT : saisie élève > cette prescription > « RPE » — le RPE
+   * historique reste cantonné à la ligne « Dernières perfs ».
+   */
+  recommendedRpe?: string | null;
 }
 
 export interface WorkoutSession {
@@ -178,6 +193,12 @@ export interface ExerciseSetFeedback {
   setNumber: number;
   loadUsed: string;
   repsDone: string;
+  /**
+   * RPE de LA série, valeur de champ ("" = non saisi) — chantier
+   * feat/student-previous-set-performance (option B) : le RPE se saisit
+   * désormais par série et s'enregistre dans exercise_set_feedback.rpe.
+   */
+  rpe: string;
 }
 
 /**
@@ -797,6 +818,14 @@ export interface AdminExercise {
   restSeconds: number;
   tempo: string;
   recommendedLoad: string;
+  /**
+   * RPE CIBLE prescrit (`workout_exercises.recommended_rpe`, chantier
+   * feat/student-previous-set-performance) : "8" (toutes les séries) ou
+   * séquence par série "8-8-9" (série N = N-ième valeur ; au-delà de la
+   * séquence, aucune prescription). Entiers 1-10. "" / absent = aucune
+   * prescription — tout l'historique antérieur.
+   */
+  recommendedRpe?: string;
   videoUrl: string;
   notes: string;
   /**
@@ -1274,7 +1303,19 @@ export interface AdminExerciseFeedbackEntry {
   setNumber: number;
   loadUsed: string;
   repsDone: string;
+  /**
+   * RPE de CETTE série (exercise_set_feedback.rpe) — null pour tout retour
+   * antérieur au chantier feat/student-previous-set-performance (aucun
+   * backfill). Ne JAMAIS y recopier le RPE global de l'exercice.
+   */
   rpe: number | null;
+  /**
+   * RPE global de l'exercice (exercise_feedback.rpe) — saisie historique
+   * d'avant le RPE par série (et RPE de bloc pour le cardio). À afficher UNE
+   * seule fois par exercice avec un libellé honnête (« RPE global de
+   * l'exercice : 9 »), jamais répété par série.
+   */
+  exerciseRpe?: number | null;
   comment: string;
 }
 
@@ -1372,6 +1413,8 @@ export interface SupabaseExerciseSetFeedback {
   setNumber: number;
   loadUsed: string;
   repsDone: string;
+  /** RPE de la série (null = non saisi — tout l'historique pré-option B). */
+  rpe: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1388,6 +1431,11 @@ export interface ExerciseSetFeedbackPayload {
   setNumber: number;
   loadUsed: string;
   repsDone: string;
+  /**
+   * RPE de la série (1-10) — optionnel/null (série sans RPE acceptée ; le
+   * cardio n'en émet jamais, son RPE de bloc reste au niveau exercice).
+   */
+  rpe?: number | null;
 }
 
 export interface ExerciseFeedbackPayload {

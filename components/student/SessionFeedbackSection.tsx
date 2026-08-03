@@ -1,7 +1,14 @@
 "use client";
 
-import { useRef, useState, type FormEvent } from "react";
+import { useMemo, useRef, useState, type FormEvent } from "react";
 import { resolvePrescription } from "@/lib/workout-history";
+import {
+  buildPreviousPerformanceIndex,
+  findPreviousPerformance,
+  hasRealizedSetInput,
+  normalizeExerciseName,
+  parseRpeInput,
+} from "@/lib/previous-performance";
 import { CheckCircle } from "lucide-react";
 
 import { ExerciseFeedbackCard } from "@/components/student/ExerciseFeedbackCard";
@@ -17,6 +24,7 @@ import {
   draftFromBlockResult,
   emptyCardioBlockDraft,
   isBlockResultEmpty,
+  isCardioResultEntryName,
   parseCardioResults,
   realizedFromDraft,
   serializeCardioBlockResult,
@@ -61,6 +69,8 @@ function buildInitialFeedback(
           setNumber: index + 1,
           loadUsed: "",
           repsDone: "",
+          // Option B : RPE saisi PAR SÉRIE ("" = non saisi, jamais inventé).
+          rpe: "",
         })),
         rpe: null,
         comment: "",
@@ -203,6 +213,26 @@ export function SessionFeedbackSection({
   const supabaseFeedback = useSupabaseWorkoutFeedback(sessionId);
   const existingFeedback = supabaseFeedback.active ? supabaseFeedback.existingFeedback : mockExistingFeedback;
 
+  // « Dernières perfs » (feat/student-previous-set-performance) : index des
+  // dernières performances passées, construit UNE fois en mémoire depuis
+  // l'historique de l'élève (Supabase : lecture par student_id via le hook,
+  // requêtes groupées — indépendante des assignations ; mock : state.feedback
+  // filtré). AUCUNE requête par exercice. L'identité élève du chemin réel est
+  // celle du compte connecté (getCurrentStudentId) — jamais un id arbitraire.
+  const previousStudentId = supabaseFeedback.active ? (supabaseFeedback.studentId ?? "") : studentId;
+  const previousSource = supabaseFeedback.active
+    ? supabaseFeedback.history
+    : state.feedback.filter((f) => f.studentId === studentId);
+  const previousIndex = useMemo(
+    () =>
+      buildPreviousPerformanceIndex({
+        feedbacks: previousSource,
+        studentId: previousStudentId,
+        currentSessionId: sessionId,
+      }),
+    [previousSource, previousStudentId, sessionId],
+  );
+
   const [exerciseFeedback, setExerciseFeedback] = useState(() =>
     buildInitialFeedback(strengthExercises, studentId, sessionId),
   );
@@ -239,7 +269,7 @@ export function SessionFeedbackSection({
   function handleSetChange(
     exerciseId: string,
     setNumber: number,
-    field: "loadUsed" | "repsDone",
+    field: "loadUsed" | "repsDone" | "rpe",
     value: string,
   ) {
     setExerciseFeedback((prev) => ({
@@ -249,16 +279,6 @@ export function SessionFeedbackSection({
         sets: prev[exerciseId].sets.map((set) =>
           set.setNumber === setNumber ? { ...set, [field]: value } : set,
         ),
-      },
-    }));
-  }
-
-  function handleRpeChange(exerciseId: string, value: string) {
-    setExerciseFeedback((prev) => ({
-      ...prev,
-      [exerciseId]: {
-        ...prev[exerciseId],
-        rpe: value === "" ? null : Number(value),
       },
     }));
   }
@@ -310,6 +330,24 @@ export function SessionFeedbackSection({
 
     const painText = hasCardio ? composePainText(painLevel, painDetail) : pain;
 
+    // Option B — RPE PAR SÉRIE : validation AVANT toute écriture, erreur
+    // VISIBLE, aucune valeur écrêtée ni inventée. "" = null (série sans RPE
+    // acceptée) ; seules les valeurs entières 1-10 passent (mêmes bornes que
+    // le schéma zod de la route et le CHECK SQL).
+    const rpeParSerie = new Map<string, number | null>();
+    for (const exerciseFb of Object.values(exerciseFeedback)) {
+      for (const set of exerciseFb.sets) {
+        const parsed = parseRpeInput(set.rpe);
+        if (!parsed.ok) {
+          setSubmitError(
+            `RPE invalide (série ${set.setNumber} — ${exerciseFb.exerciseName}) : saisis un entier de 1 à 10, ou laisse vide.`,
+          );
+          return;
+        }
+        rpeParSerie.set(`${exerciseFb.exerciseId}#${set.setNumber}`, parsed.rpe);
+      }
+    }
+
     // Verrou one-shot : posé AVANT le travail, il n'est relâché QUE si
     // l'enregistrement échoue (pour permettre un nouvel essai). Après un
     // succès il reste posé — le formulaire est remplacé par le récapitulatif
@@ -329,11 +367,24 @@ export function SessionFeedbackSection({
           .map((exerciseFb, index) => ({
             exerciseName: exerciseFb.exerciseName,
             exerciseOrder: index,
-            rpe: exerciseFb.rpe,
+            // Option B : plus de saisie RPE au niveau exercice pour la
+            // musculation — le RPE vit PAR SÉRIE (exercise_set_feedback.rpe).
+            // Aucune moyenne ni valeur globale inventée. (Le cardio garde son
+            // rpe de bloc au niveau exercice via cardioPayloads, inchangé.)
+            rpe: null,
             comment: exerciseFb.comment,
+            // hasRealizedSetInput : seules les séries réellement SAISIES
+            // partent en base (charge, reps OU RPE) — un placeholder
+            // « Dernières perfs » ne vit que dans l'attribut placeholder du
+            // DOM, jamais dans cet état.
             sets: exerciseFb.sets
-              .filter((set) => set.loadUsed.trim() || set.repsDone.trim())
-              .map((set) => ({ setNumber: set.setNumber, loadUsed: set.loadUsed, repsDone: set.repsDone })),
+              .filter(hasRealizedSetInput)
+              .map((set) => ({
+                setNumber: set.setNumber,
+                loadUsed: set.loadUsed,
+                repsDone: set.repsDone,
+                rpe: rpeParSerie.get(`${exerciseFb.exerciseId}#${set.setNumber}`) ?? null,
+              })),
           }))
           .filter((exerciseFb) => exerciseFb.sets.length > 0);
         exercisesPayload.push(...cardioPayloads);
@@ -366,14 +417,16 @@ export function SessionFeedbackSection({
       const exerciseEntries: AdminExerciseFeedbackEntry[] = Object.values(exerciseFeedback).flatMap(
         (exerciseFb) =>
           exerciseFb.sets
-            .filter((set) => set.loadUsed.trim() || set.repsDone.trim())
+            .filter(hasRealizedSetInput)
             .map((set) => ({
               exerciseId: exerciseFb.exerciseId,
               exerciseName: exerciseFb.exerciseName,
               setNumber: set.setNumber,
               loadUsed: set.loadUsed,
               repsDone: set.repsDone,
-              rpe: exerciseFb.rpe,
+              // Option B : RPE de LA série (jamais un global recopié).
+              rpe: rpeParSerie.get(`${exerciseFb.exerciseId}#${set.setNumber}`) ?? null,
+              exerciseRpe: null,
               comment: exerciseFb.comment,
             })),
       );
@@ -423,6 +476,38 @@ export function SessionFeedbackSection({
     }
     setBlockDrafts(drafts);
     setBlockErrors({});
+    // Option B — édition : restaure les valeurs muscu réellement ENREGISTRÉES
+    // (charge/reps/RPE par série + commentaire d'exercice), pour que la
+    // re-soumission (qui remplace les exercices, chemin idempotent inchangé)
+    // reparte de l'existant. Le RPE GLOBAL d'un ancien retour n'est JAMAIS
+    // réinjecté dans les champs de série — il n'a jamais été saisi par série.
+    setExerciseFeedback(() => {
+      const restauré = buildInitialFeedback(strengthExercises, studentId, sessionId);
+      const parNom = new Map<string, AdminExerciseFeedbackEntry[]>();
+      for (const entry of existingFeedback.exerciseEntries) {
+        if (isCardioResultEntryName(entry.exerciseName)) continue;
+        const cle = normalizeExerciseName(entry.exerciseName);
+        parNom.set(cle, [...(parNom.get(cle) ?? []), entry]);
+      }
+      for (const exercise of strengthExercises) {
+        const entries = parNom.get(normalizeExerciseName(exercise.name));
+        const cible = restauré[exercise.id];
+        if (!entries || !cible) continue;
+        cible.comment = entries[0]?.comment ?? "";
+        cible.sets = cible.sets.map((set) => {
+          const entrée = entries.find((e) => e.setNumber === set.setNumber);
+          return entrée
+            ? {
+                ...set,
+                loadUsed: entrée.loadUsed,
+                repsDone: entrée.repsDone,
+                rpe: entrée.rpe != null ? String(entrée.rpe) : "",
+              }
+            : set;
+        });
+      }
+      return restauré;
+    });
     setCompleted(existingFeedback.completed ?? false);
     setGlobalRpe(existingFeedback.rpe !== null ? String(existingFeedback.rpe) : "");
     setGlobalComment(existingFeedback.comment);
@@ -498,6 +583,7 @@ export function SessionFeedbackSection({
                         exercice.sets !== null ? `${exercice.sets} séries` : null,
                         exercice.reps ? `${exercice.reps} reps` : null,
                         exercice.recommendedLoad ? `charge ${exercice.recommendedLoad}` : null,
+                        exercice.recommendedRpe ? `RPE cible ${exercice.recommendedRpe}` : null,
                         exercice.restSeconds !== null ? `repos ${exercice.restSeconds}s` : null,
                       ]
                         .filter(Boolean)
@@ -599,8 +685,8 @@ export function SessionFeedbackSection({
             exercise={exercise}
             index={index}
             feedback={exerciseFeedback[exercise.id]}
+            previous={findPreviousPerformance(previousIndex, exercise)}
             onSetChange={(setNumber, field, value) => handleSetChange(exercise.id, setNumber, field, value)}
-            onRpeChange={(value) => handleRpeChange(exercise.id, value)}
             onCommentChange={(value) => handleCommentChange(exercise.id, value)}
           />
         )}

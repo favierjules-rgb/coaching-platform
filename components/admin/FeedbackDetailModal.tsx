@@ -9,6 +9,7 @@ import { StatusBadge, feedbackStatusTone } from "@/components/admin/StatusBadge"
 import { feedbackStatusLabels, feedbackTypeLabels, formatDate, fullName } from "@/lib/admin";
 import { isCardioResultEntryName, parseCardioResults, type CardioBlockResult } from "@/lib/cardio-feedback";
 import { formatDistanceMeters, formatDurationSeconds } from "@/lib/cardio";
+import { exerciseGlobalRpeMentions } from "@/lib/previous-performance";
 import type { AdminStudent, AdminStudentFeedback } from "@/types";
 
 /** Ligne prévu/réalisé d'une métrique d'un bloc cardio (valeurs absentes masquées proprement). */
@@ -184,6 +185,10 @@ export function FeedbackDetailModal({
               <div>
                 <h4 className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Détail par exercice</h4>
                 <div className="flex flex-col gap-2">
+                  {/* Option B : `entry.rpe` est le RPE réellement enregistré
+                      POUR LA SÉRIE (null sur tout l'historique antérieur —
+                      jamais un global recopié). Le RPE global d'exercice des
+                      anciens retours s'affiche UNE fois, plus bas. */}
                   {strengthEntries.map((entry, i) => (
                     <div key={i} className="rounded-panel border border-border p-3 text-sm">
                       <div className="flex justify-between text-foreground">
@@ -197,6 +202,11 @@ export function FeedbackDetailModal({
                     </div>
                   ))}
                 </div>
+                {exerciseGlobalRpeMentions(feedback.exerciseEntries).map((mention) => (
+                  <p key={mention.exerciseName} className="mt-2 text-xs text-muted-foreground">
+                    {mention.exerciseName} — RPE global de l&apos;exercice : {mention.rpe}
+                  </p>
+                ))}
               </div>
             )}
 

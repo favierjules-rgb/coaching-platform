@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowLeft, CheckCircle2, CircleSlash, MessageSquare } from "lucide-react";
 
 import { describeCardioBlockResult, isCardioResultEntryName, parseCardioResults } from "@/lib/cardio-feedback";
+import { exerciseGlobalRpeMentions } from "@/lib/previous-performance";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { getCurrentStudentId } from "@/lib/supabase/current-student";
 import { getWorkoutFeedbackForStudent } from "@/lib/supabase/workout-feedback";
@@ -130,6 +131,7 @@ export default function HistoriqueRetoursPage() {
                                 {exercice.sets != null && ` · ${exercice.sets} séries`}
                                 {exercice.reps && ` × ${exercice.reps}`}
                                 {exercice.recommendedLoad && ` · ${exercice.recommendedLoad}`}
+                                {exercice.recommendedRpe && ` · RPE cible ${exercice.recommendedRpe}`}
                               </li>
                             )),
                           )}
@@ -146,6 +148,10 @@ export default function HistoriqueRetoursPage() {
                       <div>
                         <p className="mb-2 text-xs uppercase tracking-widest text-muted-foreground">Réalisé</p>
                         <ul className="flex flex-col gap-2 text-sm">
+                          {/* Option B : `entree.rpe` = RPE réellement enregistré
+                              POUR LA SÉRIE (null sur l'historique antérieur).
+                              Le RPE global d'exercice des anciens retours est
+                              affiché UNE fois ci-dessous, jamais par série. */}
                           {entreesMuscu.map((entree, index) => (
                             <li key={`${feedback.id}-${index}`} className="text-muted-foreground">
                               <span className="text-foreground">{entree.exerciseName}</span>
@@ -156,6 +162,11 @@ export default function HistoriqueRetoursPage() {
                             </li>
                           ))}
                         </ul>
+                        {exerciseGlobalRpeMentions(feedback.exerciseEntries).map((mention) => (
+                          <p key={`${feedback.id}-${mention.exerciseName}`} className="mt-2 text-xs text-muted-foreground">
+                            {mention.exerciseName} — RPE global de l&apos;exercice : {mention.rpe}
+                          </p>
+                        ))}
                       </div>
                     )}
 

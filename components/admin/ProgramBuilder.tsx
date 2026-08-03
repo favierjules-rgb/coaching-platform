@@ -16,6 +16,7 @@ import {
   UntaggedExercisesAlert,
 } from "@/components/shared/TrainingMetricsSummary";
 import { generateId } from "@/lib/admin";
+import { parsePrescribedRpe } from "@/lib/previous-performance";
 import {
   blankCardioBlock,
   blankCardioSegment,
@@ -77,6 +78,7 @@ export function blankExercise(order: number): AdminExercise {
     restSeconds: 60,
     tempo: "2-0-1-0",
     recommendedLoad: "",
+    recommendedRpe: "",
     videoUrl: "",
     notes: "",
   };
@@ -92,6 +94,7 @@ export function exerciseFromLibrary(order: number, item: ExerciseLibraryItem): A
     restSeconds: item.defaultRestSeconds ?? 60,
     tempo: item.defaultTempo || "2-0-1-0",
     recommendedLoad: "",
+    recommendedRpe: "",
     // Copié par valeur au moment de l'ajout — une future modification de
     // l'exercice source dans la banque ne modifie jamais cette séance déjà
     // enregistrée (voir docs/supabase-exercise-library-model.md).
@@ -212,6 +215,21 @@ export function ExerciseRow({
         />
         <Field label="Repos (s)" type="number" value={String(exercise.restSeconds)} onChange={(v) => onChange({ restSeconds: Number(v) || 0 })} />
         <Field label="Tempo" value={exercise.tempo} onChange={(v) => onChange({ tempo: v })} />
+        <div>
+          <Field
+            label="RPE cible (ex : 8 ou 8-8-9)"
+            value={exercise.recommendedRpe ?? ""}
+            onChange={(v) => onChange({ recommendedRpe: v })}
+          />
+          {/* Message clair si la prescription est illisible : valeur unique ou
+              séquence par série, entiers de 1 à 10 uniquement. Une valeur
+              invalide n'est JAMAIS appliquée côté élève (parse défensif). */}
+          {!parsePrescribedRpe(exercise.recommendedRpe ?? "").ok && (
+            <p role="alert" className="mt-1 text-xs text-destructive">
+              RPE cible invalide : une valeur (« 8 ») ou une séquence par série (« 8-8-9 »), entiers de 1 à 10.
+            </p>
+          )}
+        </div>
         <Field label="Lien vidéo" value={exercise.videoUrl} onChange={(v) => onChange({ videoUrl: v })} />
         <SelectField
           label="Groupe musculaire (analyse de charge)"

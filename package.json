@@ -45,7 +45,10 @@
     "test:student-workout-history": "npx tsx scripts/tests/student-workout-history.mts",
     "test:program-assignment-checkbox": "npx tsx scripts/tests/program-assignment-checkbox.mts",
     "test:builder-save-path": "npx tsx scripts/tests/builder-save-path.mts",
-    "test:student-content-assignment": "npx tsx scripts/tests/student-content-assignment.mts"
+    "test:student-content-assignment": "npx tsx scripts/tests/student-content-assignment.mts",
+    "test:previous-performance": "npx tsx scripts/tests/previous-performance.mts",
+    "test:set-rpe-feedback": "npx tsx scripts/tests/set-rpe-feedback.mts",
+    "test:prescribed-rpe": "npx tsx scripts/tests/prescribed-rpe.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",
