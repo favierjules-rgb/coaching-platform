@@ -29,6 +29,8 @@ import { executerRegularisation, CIBLES_REGULARISATION_2026_08 } from "../lib/re
 
 async function main() {
   const apply = process.argv.includes("--apply");
+  const argProgramme = process.argv.find((a) => a.startsWith("--program-id="))?.slice("--program-id=".length)
+    ?? (process.argv.includes("--program-id") ? process.argv[process.argv.indexOf("--program-id") + 1] : undefined);
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !serviceRoleKey) {
@@ -39,9 +41,55 @@ async function main() {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
-  console.log(apply ? "MODE APPLICATION (écritures réelles)" : "MODE DRY-RUN (aucune écriture)");
-  const rapport = await executerRegularisation(supabase, CIBLES_REGULARISATION_2026_08, { dryRun: !apply });
+  // SÉCURITÉS --apply : cible EXPLICITE obligatoire, une seule ACTION
+  // PROPOSÉE attendue, préconditions revérifiées par une passe dry-run
+  // immédiatement avant l'écriture. Les NO-OP sont ignorés, tout REFUS
+  // bloque. Ce script ne supprime jamais un modèle ni ses séances et
+  // n'écrit jamais dans workout_feedback (le module ne le fait pas).
+  let cibles = CIBLES_REGULARISATION_2026_08;
+  if (apply) {
+    if (!argProgramme) {
+      console.error("REFUS : --apply exige un ciblage explicite, ex. --program-id=1b67fc3b-031d-4088-adac-d98b04d2cf95");
+      process.exit(1);
+    }
+    cibles = CIBLES_REGULARISATION_2026_08.filter((c) => c.programId === argProgramme);
+    if (cibles.length !== 1) {
+      console.error(`REFUS : --program-id=${argProgramme} ne correspond à aucune cible connue.`);
+      process.exit(1);
+    }
+    // Revérification des préconditions JUSTE AVANT l'écriture : passe dry-run.
+    const controle = await executerRegularisation(supabase, cibles, { dryRun: true });
+    const actionsProposees = controle.decisions.filter((d) => d.decision === "ACTION PROPOSÉE");
+    if (controle.decisions.some((d) => d.decision === "REFUS")) {
+      console.error("REFUS : la revérification signale un état ambigu — aucune écriture.");
+      for (const d of controle.decisions) console.error(`  ${d.cible} — ${d.decision} : ${d.raison}`);
+      process.exit(1);
+    }
+    if (actionsProposees.length === 0) {
+      console.log("NO-OP : la revérification ne propose aucune action — rien à appliquer.");
+      process.exit(0);
+    }
+    if (actionsProposees.length !== 1) {
+      console.error(`REFUS : ${actionsProposees.length} actions proposées, 1 attendue — aucune écriture.`);
+      process.exit(1);
+    }
+    console.log(`CIBLE CONFIRMÉE : programme ${argProgramme} (${actionsProposees[0].cible})`);
+    console.log(`  avant : ${JSON.stringify(actionsProposees[0].avant)}`);
+    console.log(`  après prévu : ${JSON.stringify(actionsProposees[0].apresPrevu)}`);
+  } else if (argProgramme) {
+    cibles = CIBLES_REGULARISATION_2026_08.filter((c) => c.programId === argProgramme);
+  }
 
+  console.log(apply ? "MODE APPLICATION (écritures réelles)" : "MODE DRY-RUN (aucune écriture)");
+  const rapport = await executerRegularisation(supabase, cibles, { dryRun: !apply });
+
+  for (const d of rapport.decisions) {
+    console.log(`\n═══ ${d.cible} — ${d.decision}`);
+    console.log(`    raison : ${d.raison}`);
+    for (const p of d.preconditions) console.log(`    précondition : ${p}`);
+    console.log(`    avant : ${JSON.stringify(d.avant)}`);
+    console.log(`    après prévu : ${JSON.stringify(d.apresPrevu)}`);
+  }
   for (const action of rapport.actions) {
     console.log(`[${action.statut.padEnd(9)}] ${action.cible} — ${action.type} : ${action.detail}`);
   }

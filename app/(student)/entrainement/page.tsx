@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { NextSessionHighlight } from "@/components/student/NextSessionHighlight";
 import { TrainingProgramCard } from "@/components/student/TrainingProgramCard";
 import {
@@ -39,6 +41,15 @@ export default function EntrainementPage() {
           <p className="text-sm text-muted-foreground">
             Aucun programme attribué pour le moment. Contacte ton coach.
           </p>
+          {/* L'historique reste consultable SANS programme assigné (bascule
+              d'assignation, fin de programme…) — jamais dépendant des
+              assignations actuelles. */}
+          <Link
+            href="/entrainement/historique"
+            className="mt-4 inline-block text-xs uppercase tracking-widest text-primary hover:underline"
+          >
+            Historique des retours →
+          </Link>
         </div>
       );
     }
@@ -63,6 +74,12 @@ export default function EntrainementPage() {
             Programme actif : {eleveActiveProgram.name} · Semaine {eleveActiveProgram.currentWeek} /{" "}
             {eleveActiveProgram.durationWeeks}
           </p>
+          <Link
+            href="/entrainement/historique"
+            className="mt-2 inline-block text-xs uppercase tracking-widest text-primary hover:underline"
+          >
+            Historique des retours →
+          </Link>
         </div>
 
         {highlightedSession && highlightedDay && (

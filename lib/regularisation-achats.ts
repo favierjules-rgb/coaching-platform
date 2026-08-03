@@ -96,9 +96,27 @@ export interface RegularisationAction {
   statut: "a-faire" | "deja-fait" | "applique" | "echec";
 }
 
+/**
+ * Décision par cible (refonte suite au dry-run production du 02/08) :
+ *  - "ACTION PROPOSÉE" : bascule de l'assignation ACTIVE vers la copie —
+ *    les feedbacks ne sont JAMAIS déplacés ni modifiés ;
+ *  - "NO-OP" : aucune régularisation nécessaire (aucune assignation active,
+ *    ou programme historique supprimé — l'historique est conservé tel quel) ;
+ *  - "REFUS" : données ambiguës (cardinalité, propriété), on ne touche à rien.
+ */
+export interface RegularisationDecision {
+  cible: string;
+  decision: "ACTION PROPOSÉE" | "NO-OP" | "REFUS";
+  raison: string;
+  preconditions: string[];
+  avant: { assignDirectes: number; assignCopies: number; copies: number; feedbacks: number };
+  apresPrevu: { assignDirectes: number; assignCopies: number; copies: number; feedbacks: number };
+}
+
 export interface RegularisationRapport {
   dryRun: boolean;
   actions: RegularisationAction[];
+  decisions: RegularisationDecision[];
   erreurs: string[];
 }
 
@@ -185,18 +203,20 @@ async function regulariserCopyAndMove(
   duplicate: NonNullable<RegularisationOptions["duplicate"]>,
   rapport: RegularisationRapport,
 ): Promise<void> {
-  // Précondition vivante : zéro feedback lié, sinon refus (voir §8 en tête).
+  // Refonte (dry-run production du 02/08) : des feedbacks liés aux séances
+  // SOURCES ne sont PLUS un refus — la stratégie est « copier puis basculer
+  // UNIQUEMENT l'assignation active ». Les feedbacks ne sont jamais déplacés
+  // ni modifiés : ils restent rattachés aux séances sources, et ce script ne
+  // supprime jamais ni le modèle ni ses séances. Le retour avec
+  // prescribed_snapshot reste auto-porteur ; l'ancien sans snapshot garde sa
+  // séance source vivante (limitation d'affichage héritée documentée).
   const nbFeedbacks = await compterFeedbacksLies(supabase, cible.programId, studentId);
   if (nbFeedbacks === null) {
     rapport.erreurs.push(`${cible.label} : impossible de vérifier les feedbacks liés — on ne touche à rien`);
     return;
   }
-  if (nbFeedbacks > 0) {
-    rapport.erreurs.push(
-      `${cible.label} : ${nbFeedbacks} feedback(s) référencent les séances du programme source — copy-and-move REFUSÉ (les références seraient cassées), utiliser claim-in-place`,
-    );
-    return;
-  }
+  // (le nombre de feedbacks est porté par la DÉCISION — aucune action ne les
+  // concerne : ce script n'écrit JAMAIS dans workout_feedback.)
 
   const checkoutSessionId = await retrouverCheckoutSession(supabase, cible.programId);
 
@@ -368,6 +388,26 @@ async function regulariserClaimInPlace(
  * `dryRun: false`, applique idempotemment (re-run sûr, reprise après échec
  * partiel comprise).
  */
+/** État observable d'une cible (compteurs du rapport avant/après). */
+async function compterEtat(supabase: TypedSupabaseClient, programId: string) {
+  const { data: directes } = await supabase
+    .from("assignments").select("student_id").eq("content_type", "programme").eq("content_id", programId);
+  const { data: copies } = await supabase
+    .from("programs").select("id").eq("source_template_id", programId);
+  const copieIds = (copies ?? []).map((c) => c.id);
+  let assignCopies = 0;
+  for (const id of copieIds) {
+    const { data } = await supabase
+      .from("assignments").select("student_id").eq("content_type", "programme").eq("content_id", id);
+    assignCopies += (data ?? []).length;
+  }
+  const { data: sessions } = await supabase.from("workout_sessions").select("id").eq("program_id", programId);
+  const idsSeances = new Set((sessions ?? []).map((s) => s.id));
+  const { data: feedbacks } = await supabase.from("workout_feedback").select("id, session_id");
+  const nbFeedbacks = (feedbacks ?? []).filter((f) => f.session_id && idsSeances.has(f.session_id)).length;
+  return { assignDirectes: (directes ?? []).length, assignCopies, copies: copieIds.length, feedbacks: nbFeedbacks };
+}
+
 export async function executerRegularisation(
   supabase: TypedSupabaseClient,
   cibles: RegularisationCible[] = CIBLES_REGULARISATION_2026_08,
@@ -375,31 +415,93 @@ export async function executerRegularisation(
 ): Promise<RegularisationRapport> {
   const dryRun = options.dryRun ?? true;
   const duplicate = options.duplicate ?? programAssignmentTestHooks.duplicate;
-  const rapport: RegularisationRapport = { dryRun, actions: [], erreurs: [] };
+  const rapport: RegularisationRapport = { dryRun, actions: [], decisions: [], erreurs: [] };
 
   for (const cible of cibles) {
+    const avant = await compterEtat(supabase, cible.programId);
+
+    // Programme SUPPRIMÉ : historique orphelin conservé, aucune action —
+    // sauf si une copie issue de lui atteste une régularisation déjà faite.
+    const { data: programme } = await supabase
+      .from("programs").select("id, is_public, owner_student_id").eq("id", cible.programId).maybeSingle();
+    if (!programme) {
+      const dejaRegularise = avant.copies > 0;
+      rapport.decisions.push({
+        cible: cible.label,
+        decision: "NO-OP",
+        raison: dejaRegularise
+          ? "régularisation déjà terminée (copie existante), source disparue"
+          : "programme historique SUPPRIMÉ — feedbacks orphelins conservés tels quels, aucun accès actif à rétablir",
+        preconditions: ["aucune écriture", "feedbacks jamais modifiés"],
+        avant,
+        apresPrevu: avant,
+      });
+      continue;
+    }
+
+    // Aucune assignation ACTIVE : rien à régulariser — owner_student_id seul
+    // ne signifie pas « assigné », et l'historique reste tel quel.
+    if (avant.assignDirectes === 0 && cible.kind === "copy-and-move" && avant.copies > 0 && avant.assignCopies > 0) {
+      rapport.decisions.push({
+        cible: cible.label, decision: "NO-OP",
+        raison: "régularisation déjà terminée : l'accès passe par la copie",
+        preconditions: ["aucune écriture"], avant, apresPrevu: avant,
+      });
+      continue;
+    }
+    if (avant.assignDirectes === 0) {
+      rapport.decisions.push({
+        cible: cible.label, decision: "NO-OP",
+        raison: "aucune assignation active vers le programme — aucune régularisation nécessaire, historique conservé",
+        preconditions: ["aucune écriture", "feedbacks jamais modifiés"], avant, apresPrevu: avant,
+      });
+      continue;
+    }
+    if (avant.assignDirectes > 1) {
+      rapport.decisions.push({
+        cible: cible.label, decision: "REFUS",
+        raison: `${avant.assignDirectes} assignations directes actives — cardinalité ambiguë, on ne touche à rien`,
+        preconditions: [], avant, apresPrevu: avant,
+      });
+      rapport.erreurs.push(`${cible.label} : cardinalité ambiguë (${avant.assignDirectes} assignations)`);
+      continue;
+    }
+
     const { studentId, erreur } = await trouverEleveUnique(supabase, cible.programId);
     if (!studentId) {
-      // "0 assignation" après une régularisation copy-and-move réussie est
-      // l'état FINAL attendu : le re-run doit le reconnaître, pas le signaler.
-      if (cible.kind === "copy-and-move" && erreur?.startsWith("0 assignation")) {
-        const { data: copie } = await supabase
-          .from("programs")
-          .select("id")
-          .eq("source_template_id", cible.programId)
-          .limit(1)
-          .maybeSingle();
-        if (copie) {
-          rapport.actions.push({ cible: cible.label, type: "creer-copie", detail: `régularisation déjà terminée (copie ${copie.id})`, statut: "deja-fait" });
-          continue;
-        }
-      }
+      rapport.decisions.push({
+        cible: cible.label, decision: "REFUS", raison: erreur ?? "élève introuvable",
+        preconditions: [], avant, apresPrevu: avant,
+      });
       rapport.erreurs.push(`${cible.label} : ${erreur ?? "élève introuvable"}`);
       continue;
     }
+
     if (cible.kind === "copy-and-move") {
+      rapport.decisions.push({
+        cible: cible.label,
+        decision: "ACTION PROPOSÉE",
+        raison: `copier puis basculer UNIQUEMENT l'assignation active vers la copie — ${avant.feedbacks} feedback(s) historiques restent rattachés aux séances SOURCES (jamais déplacés)`,
+        preconditions: [
+          "le modèle et ses séances sont CONSERVÉS (aucune suppression)",
+          "aucune écriture sur workout_feedback / session_id / prescribed_snapshot",
+          "copie réutilisée si déjà existante (aucun doublon)",
+          "session Stripe Checkout rattachée si retrouvée dans billing_events",
+          "une seule assignation active, retirée EN DERNIER",
+        ],
+        avant,
+        apresPrevu: { assignDirectes: 0, assignCopies: avant.assignCopies + 1, copies: Math.max(avant.copies, 1), feedbacks: avant.feedbacks },
+      });
       await regulariserCopyAndMove(supabase, cible, studentId, dryRun, duplicate, rapport);
     } else {
+      rapport.decisions.push({
+        cible: cible.label,
+        decision: "ACTION PROPOSÉE",
+        raison: "revendication sur place (owner posé sur le programme existant) — aucune copie, aucune référence déplacée",
+        preconditions: ["programme existant, non possédé par un autre élève", "feedbacks jamais modifiés"],
+        avant,
+        apresPrevu: avant,
+      });
       await regulariserClaimInPlace(supabase, cible, studentId, dryRun, rapport);
     }
   }
