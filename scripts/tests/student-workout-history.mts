@@ -18,7 +18,7 @@ import { CARDIO_BLOCK_RESULT_VERSION, CARDIO_RESULT_ENTRY_NAME, serializeCardioB
 import { individualizeProgramForStudent, programAssignmentTestHooks, provisionPurchasedProgram, setProgramAssignment } from "../../lib/supabase/programs";
 import { isContradictoryProgramMode, resolveProgramProvisioningMode } from "../../lib/program-provisioning";
 import { executerRegularisation, type RegularisationCible } from "../../lib/regularisation-achats";
-import { saveWorkoutFeedback } from "../../lib/supabase/workout-feedback";
+import { getAdminWorkoutFeedbackList, getWorkoutFeedbackForStudent, saveWorkoutFeedback } from "../../lib/supabase/workout-feedback";
 import {
   buildPrescribedSnapshot,
   isPrescribedSnapshot,
@@ -64,7 +64,10 @@ function creerBase() {
       op: "select",
       filtres: [],
     };
-    const correspond = (ligne: Ligne) => état.filtres.every(([c, v]) => ligne[c] === v);
+    const correspond = (ligne: Ligne) =>
+      état.filtres.every(([c, v]) =>
+        c.startsWith("__in__") ? (v as unknown[]).includes(ligne[c.slice(6)]) : ligne[c] === v,
+      );
     const exécuter = () => {
       const lignes = table(nom);
       if (état.op === "select") {
@@ -126,6 +129,11 @@ function creerBase() {
         état.filtres.push([colonne, valeur]);
         return chaîne;
       },
+      in(colonne: string, valeurs: unknown[]) {
+        état.filtres.push([`__in__${colonne}`, valeurs]);
+        return chaîne;
+      },
+      order: () => chaîne,
       limit(n: number) {
         état.limite = n;
         return chaîne;
@@ -658,7 +666,7 @@ await (async () => {
     { id: "lien-u", student_id: "eleve-u", content_type: "programme", content_id: "ultime-prod" },
     { id: "lien-d", student_id: "eleve-d", content_type: "programme", content_id: "dospecs-prod" },
   );
-  baseRegul.table("workout_feedback").push({ id: "fb-d1", student_id: "eleve-d", session_id: "sess-d1", session_key: "sess-d1" });
+  baseRegul.table("workout_feedback").push({ id: "fb-d1", student_id: "eleve-d", session_id: "sess-d1", session_key: "sess-d1", submitted_at: "2026-07-01T10:00:00Z" });
   baseRegul.table("billing_events").push(
     { id: "evt-1", event_type: "checkout.session.completed", created_at: "2026-07-30T10:00:00Z", payload: { data: { object: { id: "cs_regul_001", metadata: { public_program_id: "ultime-prod" } } } } },
     { id: "evt-2", event_type: "checkout.session.completed", created_at: "2026-07-29T10:00:00Z", payload: { data: { object: { id: "cs_autre", metadata: { public_program_id: "autre-prog" } } } } },
@@ -714,18 +722,139 @@ await (async () => {
     assert.ok(rejeu.actions.every((a) => a.statut === "deja-fait"), "idempotence : tout est 'deja-fait'");
   });
 
-  await test("C8. copy-and-move REFUSÉ dès qu'un feedback référence le programme source", async () => {
+  await test("C8. modèle public avec feedbacks historiques : bascule d'assignation SANS déplacement des feedbacks", async () => {
     baseRegul.table("programs").push({ id: "faux-ultime", name: "Faux ULTIME", status: "actif", program_mode: "individuel", is_public: true, owner_student_id: null, source_template_id: null, source_checkout_session_id: null });
     baseRegul.table("workout_sessions").push({ id: "sess-f1", program_id: "faux-ultime", name: "Séance F", day: "Lundi" });
     baseRegul.table("assignments").push({ id: "lien-f", student_id: "eleve-f", content_type: "programme", content_id: "faux-ultime" });
-    baseRegul.table("workout_feedback").push({ id: "fb-f1", student_id: "eleve-f", session_id: "sess-f1", session_key: "sess-f1" });
-    const avant = photographie(baseRegul);
+    baseRegul.table("workout_feedback").push({ id: "fb-f1", student_id: "eleve-f", session_id: "sess-f1", session_key: "cle-f1", submitted_at: "2026-07-02T10:00:00Z", prescribed_snapshot: { version: 1, sessionName: "Séance F" } });
     const rapport = await executerRegularisation(clientRegul as never,
       [{ label: "Faux ULTIME", programId: "faux-ultime", kind: "copy-and-move" }],
       { dryRun: false, duplicate: dupliquerRegul as never });
-    assert.equal(photographie(baseRegul), avant, "refus = zéro écriture, même en mode apply");
-    assert.ok(rapport.erreurs.some((e) => /REFUSÉ/.test(e) && /claim-in-place/.test(e)),
-      "le refus explique la raison et recommande la stratégie sans cassure");
+    assert.equal(rapport.erreurs.length, 0, rapport.erreurs.join(" / "));
+    const décision = rapport.decisions.find((d) => d.cible === "Faux ULTIME")!;
+    assert.equal(décision.decision, "ACTION PROPOSÉE");
+    assert.ok(/jamais déplacés/.test(décision.raison), "la raison explicite le sort des feedbacks");
+    assert.ok(décision.preconditions.some((p) => /workout_feedback/.test(p)), "précondition : aucune écriture feedback");
+    // Bascule : copie créée + lien basculé, modèle et séances CONSERVÉS.
+    const copie = baseRegul.table("programs").find((p) => p.source_template_id === "faux-ultime")!;
+    assert.ok(copie, "copie créée");
+    assert.ok(baseRegul.table("programs").some((p) => p.id === "faux-ultime"), "le modèle public n'est JAMAIS supprimé");
+    assert.ok(baseRegul.table("workout_sessions").some((s) => s.id === "sess-f1"), "la séance source référencée est conservée");
+    assert.ok(!baseRegul.table("assignments").some((l) => l.content_id === "faux-ultime"), "assignation directe retirée");
+    assert.equal(baseRegul.table("assignments").find((l) => l.student_id === "eleve-f")!.content_id, copie.id, "l'accès passe par la copie");
+    // Les feedbacks n'ont PAS bougé : mêmes lignes, même session_id (source),
+    // même snapshot — donc toujours lisibles côté élève (session_key) et côté
+    // coach (par student_id).
+    const fb = baseRegul.table("workout_feedback").find((f) => f.id === "fb-f1")!;
+    assert.equal(fb.session_id, "sess-f1", "session_id INTACT — jamais déplacé");
+    assert.deepEqual(fb.prescribed_snapshot, { version: 1, sessionName: "Séance F" }, "snapshot intact");
+    assert.equal(fb.session_key, "cle-f1", "retrouvable par session_key (élève) et par student_id (coach)");
+    // Compteurs du rapport : avant 1/0/0, après prévu 0/1 copie/1 lien copie.
+    assert.deepEqual(décision.avant, { assignDirectes: 1, assignCopies: 0, copies: 0, feedbacks: 1 });
+    assert.deepEqual(décision.apresPrevu, { assignDirectes: 0, assignCopies: 1, copies: 1, feedbacks: 1 });
+  });
+
+  await test("C8bis. NO-OP sans assignation active, historique supprimé conservé, refus ambigu, idempotence", async () => {
+    // 1. Programme existant SANS assignation active → NO-OP (owner seul ≠ assigné).
+    baseRegul.table("programs").push({ id: "prog-sans-lien", name: "Sans lien", status: "actif", program_mode: "individuel", is_public: false, owner_student_id: null, source_template_id: null, source_checkout_session_id: null });
+    const avant1 = photographie(baseRegul);
+    const r1 = await executerRegularisation(clientRegul as never,
+      [{ label: "Sans lien", programId: "prog-sans-lien", kind: "copy-and-move" }],
+      { dryRun: false, duplicate: dupliquerRegul as never });
+    assert.equal(photographie(baseRegul), avant1, "NO-OP = zéro écriture même en apply");
+    assert.equal(r1.decisions[0].decision, "NO-OP");
+    assert.ok(/aucune assignation active/.test(r1.decisions[0].raison));
+    // 2. Programme SUPPRIMÉ avec historique orphelin → NO-OP, feedbacks conservés.
+    baseRegul.table("workout_feedback").push({ id: "fb-orphelin", student_id: "eleve-h", session_id: null, session_key: "cle-h", submitted_at: "2026-07-03T10:00:00Z" });
+    const r2 = await executerRegularisation(clientRegul as never,
+      [{ label: "Supprimé", programId: "prog-disparu", kind: "claim-in-place" }],
+      { dryRun: false, duplicate: dupliquerRegul as never });
+    assert.equal(r2.decisions[0].decision, "NO-OP");
+    assert.ok(/SUPPRIMÉ/.test(r2.decisions[0].raison), "programme historique sans accès actif");
+    assert.ok(baseRegul.table("workout_feedback").some((f) => f.id === "fb-orphelin"), "l'historique orphelin est conservé");
+    // 3. Cardinalité ambiguë (2 assignations actives) → REFUS, zéro écriture.
+    baseRegul.table("programs").push({ id: "prog-ambigu", name: "Ambigu", status: "actif", program_mode: "individuel", is_public: false, owner_student_id: null, source_template_id: null, source_checkout_session_id: null });
+    baseRegul.table("assignments").push(
+      { id: "lien-x1", student_id: "eleve-x1", content_type: "programme", content_id: "prog-ambigu" },
+      { id: "lien-x2", student_id: "eleve-x2", content_type: "programme", content_id: "prog-ambigu" },
+    );
+    const avant3 = photographie(baseRegul);
+    const r3 = await executerRegularisation(clientRegul as never,
+      [{ label: "Ambigu", programId: "prog-ambigu", kind: "copy-and-move" }],
+      { dryRun: false, duplicate: dupliquerRegul as never });
+    assert.equal(photographie(baseRegul), avant3, "REFUS = zéro écriture");
+    assert.equal(r3.decisions[0].decision, "REFUS");
+    // 4. Idempotence : re-run après la bascule C8 → NO-OP « déjà terminée ».
+    const avant4 = photographie(baseRegul);
+    const r4 = await executerRegularisation(clientRegul as never,
+      [{ label: "Faux ULTIME", programId: "faux-ultime", kind: "copy-and-move" }],
+      { dryRun: false, duplicate: dupliquerRegul as never });
+    assert.equal(photographie(baseRegul), avant4, "re-run strictement inerte");
+    assert.equal(r4.decisions[0].decision, "NO-OP");
+    assert.ok(/déjà terminée/.test(r4.decisions[0].raison), "idempotence reconnue");
+  });
+
+  await test("C8ter. POST-BASCULE : les anciens retours restent LISTÉS et OUVRABLES élève et coach, via les fonctions réelles de l'interface", async () => {
+    // Décor : modèle public, élève assigné DIRECTEMENT, deux retours
+    // historiques sur la séance source — un AVEC snapshot, un SANS.
+    baseRegul.table("programs").push({ id: "ultime-2", name: "ULTIME 2", status: "actif", program_mode: "individuel", is_public: true, owner_student_id: null, source_template_id: null, source_checkout_session_id: null });
+    baseRegul.table("workout_sessions").push({ id: "sess-u2", program_id: "ultime-2", name: "Upper 2", day: "Lundi" });
+    baseRegul.table("assignments").push({ id: "lien-u2", student_id: "eleve-g2", content_type: "programme", content_id: "ultime-2" });
+    baseRegul.table("workout_feedback").push(
+      { id: "fb-snap", student_id: "eleve-g2", session_id: "sess-u2", session_key: "cle-snap", session_ref_label: "S1 — Upper",
+        completed: true, global_rpe: 8, global_comment: "", pain: "", submitted_at: "2026-07-30T10:00:00Z",
+        prescribed_snapshot: { version: 1, sessionId: "sess-u2", sessionName: "Upper 2", day: "Lundi", weekNumber: 1, capturedAt: "t", blocks: [{ title: "Force", category: "strength", position: 0, exercises: [{ exerciseLibraryId: null, name: "Squat", order: 0, sets: 4, reps: "8", recommendedLoad: "100 kg", restSeconds: 120, tempo: null, notes: null }] }] } },
+      { id: "fb-ancien", student_id: "eleve-g2", session_id: "sess-u2", session_key: "cle-ancien", session_ref_label: "S2 — Upper",
+        completed: true, global_rpe: 7, global_comment: "", pain: "", submitted_at: "2026-07-20T10:00:00Z", prescribed_snapshot: null },
+    );
+    baseRegul.table("exercise_feedback").push({ id: "ef-1", workout_feedback_id: "fb-ancien", exercise_name: "Squat", exercise_order: 0, rpe: 7, comment: "" });
+    baseRegul.table("exercise_set_feedback").push({ id: "esf-1", exercise_feedback_id: "ef-1", set_number: 1, load_used: "95", reps_done: "8" });
+
+    // Bascule réelle : copie + assignation copie + retrait du lien direct.
+    const rapport = await executerRegularisation(clientRegul as never,
+      [{ label: "ULTIME 2", programId: "ultime-2", kind: "copy-and-move" }],
+      { dryRun: false, duplicate: dupliquerRegul as never });
+    assert.equal(rapport.erreurs.length, 0, rapport.erreurs.join(" / "));
+    assert.ok(!baseRegul.table("assignments").some((l) => l.content_id === "ultime-2"), "plus AUCUNE assignation vers le modèle");
+    assert.ok(baseRegul.table("programs").some((p) => p.id === "ultime-2"), "modèle conservé");
+    assert.ok(baseRegul.table("workout_sessions").some((s) => s.id === "sess-u2"), "séance source conservée");
+
+    // ÉLÈVE : la page /entrainement/historique lit par getWorkoutFeedbackForStudent
+    // (student_id uniquement — indépendant de toute assignation).
+    const listeEleve = await getWorkoutFeedbackForStudent(clientRegul as never, "eleve-g2");
+    assert.equal(listeEleve.length, 2, "les DEUX retours restent listés côté élève");
+    const avecSnapshot = listeEleve.find((f) => f.id === "fb-snap")!;
+    const sansSnapshot = listeEleve.find((f) => f.id === "fb-ancien")!;
+    // A. retour avec snapshot : OUVRABLE, prescription figée complète.
+    const prescription = resolvePrescription(avecSnapshot.prescribedSnapshot, false);
+    assert.equal(prescription.source, "snapshot");
+    assert.equal(prescription.snapshot?.blocks[0].exercises[0].name, "Squat", "détail complet depuis le snapshot");
+    // B. retour ancien SANS snapshot : OUVRABLE aussi — réalisé complet,
+    //    prescription indisponible signalée (source \"none\" sur cette page).
+    assert.equal(resolvePrescription(sansSnapshot.prescribedSnapshot, false).source, "none");
+    assert.equal(sansSnapshot.exerciseEntries.length, 1, "résultats réalisés lisibles");
+    assert.equal(sansSnapshot.exerciseEntries[0].loadUsed, "95");
+    // C. COACH : mêmes lignes via les fonctions des écrans admin.
+    const listeCoach = await getWorkoutFeedbackForStudent(clientRegul as never, "eleve-g2");
+    assert.equal(listeCoach.length, 2, "les deux retours restent visibles côté coach");
+    const tous = await getAdminWorkoutFeedbackList(clientRegul as never);
+    assert.ok(tous.some((f) => f.id === "fb-snap") && tous.some((f) => f.id === "fb-ancien"), "présents dans /admin/retours");
+    // D + 10. Rien n'a été modifié sur les retours.
+    const brutSnap = baseRegul.table("workout_feedback").find((f) => f.id === "fb-snap")!;
+    const brutAncien = baseRegul.table("workout_feedback").find((f) => f.id === "fb-ancien")!;
+    assert.equal(brutSnap.session_id, "sess-u2");
+    assert.equal(brutAncien.session_id, "sess-u2");
+    assert.equal(brutSnap.session_key, "cle-snap");
+    assert.ok(brutSnap.prescribed_snapshot, "snapshot intact");
+    // Et le module de régularisation n'écrit JAMAIS dans workout_feedback.
+    const moduleRegul = readFileSync(new URL("../../lib/regularisation-achats.ts", import.meta.url), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    assert.ok(!/from\("workout_feedback"\)\s*\n?\s*\.(insert|update|delete)/.test(moduleRegul),
+      "aucune écriture workout_feedback dans le module");
+    // La page élève repose bien sur ce chemin indépendant.
+    const pageHistorique = readFileSync(new URL("../../app/(student)/entrainement/historique/page.tsx", import.meta.url), "utf8");
+    assert.ok(/getWorkoutFeedbackForStudent/.test(pageHistorique) && /resolvePrescription/.test(pageHistorique),
+      "la page historique lit par student_id + snapshot, jamais par assignation");
   });
 
   await test("C9. INCIDENT 01/08 — le payload RÉEL du composant (muscu + cardio) passe le schéma de la route", () => {
