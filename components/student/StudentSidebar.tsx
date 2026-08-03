@@ -74,7 +74,7 @@ export function StudentSidebar({
             type="button"
             onClick={onNavigate}
             aria-label="Fermer le menu"
-            className="text-muted-foreground"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             <X size={20} />
           </button>
@@ -91,9 +91,9 @@ export function StudentSidebar({
               href={href}
               onClick={onNavigate}
               aria-label={locked ? `${label} (accès verrouillé — abonnement requis)` : label}
-              className={`flex items-center gap-3 px-4 py-3 text-sm transition-colors ${
+              className={`flex min-h-11 items-center gap-3 rounded-control px-4 py-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
                 active
-                  ? "bg-primary text-primary-foreground"
+                  ? "bg-primary font-medium text-primary-foreground"
                   : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
               }`}
             >
@@ -105,7 +105,7 @@ export function StudentSidebar({
         })}
       </nav>
 
-      <div className="border-t border-border p-3">
+      <div className="border-t border-border p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         <ThemeToggle />
         <SignOutButton
           onBeforeNavigate={onNavigate}

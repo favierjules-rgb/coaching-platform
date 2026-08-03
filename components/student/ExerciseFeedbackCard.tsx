@@ -31,6 +31,24 @@ interface ExerciseFeedbackCardProps {
   onCommentChange: (value: string) => void;
 }
 
+/**
+ * Carte d'exercice du retour de séance — refonte visuelle
+ * feat/student-training-apple-ui (AUCUN changement de données ni de logique :
+ * mêmes props, mêmes handlers, mêmes placeholders, mêmes règles de priorité).
+ *
+ * Structure : en-tête (numéro, nom, résumé de la prescription, démo) →
+ * séparation discrète → « Retour élève » (mention honnête d'un ancien RPE
+ * global, séries, commentaire).
+ *
+ * « Dernières perfs » : pour chaque série, la ligne est posée AU-DESSUS du
+ * groupe de champs de CETTE série, alignée sur les colonnes de saisie et
+ * centrée (desktop/tablette) — plus jamais collée à gauche sous le titre.
+ * Style secondaire discret, jamais confondable avec une valeur saisie.
+ *
+ * Grille des séries : mobile = libellé pleine largeur, charge + reps côte à
+ * côte puis RPE pleine largeur ; ≥ sm = [libellé | charge | reps | RPE]
+ * avec un RPE plus étroit. `min-w-0` partout : aucun débordement horizontal.
+ */
 export function ExerciseFeedbackCard({
   exercise,
   index,
@@ -39,30 +57,40 @@ export function ExerciseFeedbackCard({
   onSetChange,
   onCommentChange,
 }: ExerciseFeedbackCardProps) {
-  return (
-    <div className="border border-border bg-card p-5">
-      <div className="mb-1 flex items-center gap-2">
-        <span className="font-heading text-xs font-semibold text-primary">
-          {String(index + 1).padStart(2, "0")}
-        </span>
-        <h3 className="text-sm font-medium text-foreground">{exercise.name}</h3>
-      </div>
+  const champ =
+    "w-full min-w-0 rounded-control border border-border bg-background px-3 py-2.5 text-sm text-foreground transition-colors placeholder:text-muted-foreground/60 focus:border-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30";
 
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-          <span>{exercise.sets} séries</span>
-          <span>{exercise.reps} reps</span>
-          <span>{exercise.restSeconds}s repos</span>
-          <span>Tempo {exercise.tempo}</span>
-          <span>Charge conseillée : {exercise.recommendedLoad}</span>
-          {(exercise.recommendedRpe ?? "").trim() && <span>RPE cible : {exercise.recommendedRpe}</span>}
+  return (
+    <div className="rounded-card border border-border bg-card p-4 shadow-soft sm:p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-baseline gap-2.5">
+            <span className="font-heading text-xs font-semibold text-primary">
+              {String(index + 1).padStart(2, "0")}
+            </span>
+            <h3 className="text-base font-semibold leading-snug tracking-tight text-foreground">
+              {exercise.name}
+            </h3>
+          </div>
+          <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+            {[
+              `${exercise.sets} séries`,
+              `${exercise.reps} reps`,
+              `${exercise.restSeconds}s repos`,
+              exercise.tempo ? `tempo ${exercise.tempo}` : null,
+              exercise.recommendedLoad ? `charge conseillée ${exercise.recommendedLoad}` : null,
+              (exercise.recommendedRpe ?? "").trim() ? `RPE cible ${exercise.recommendedRpe}` : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </p>
         </div>
         {exercise.videoUrl.trim() ? (
           <a
             href={exercise.videoUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-2 border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+            className="pressable inline-flex min-h-11 items-center gap-2 rounded-control border border-border px-4 py-2 text-xs font-medium text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             <PlayCircle size={16} />
             Voir la démo
@@ -70,16 +98,16 @@ export function ExerciseFeedbackCard({
         ) : (
           <span
             title="Aucune vidéo disponible"
-            className="flex cursor-not-allowed items-center gap-2 border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground/40"
+            className="inline-flex min-h-11 cursor-not-allowed items-center gap-2 rounded-control border border-border/60 px-4 py-2 text-xs text-muted-foreground/40"
           >
             <PlayCircle size={16} />
-            Aucune vidéo disponible
+            Aucune vidéo
           </span>
         )}
       </div>
 
-      <div className="border-t border-border pt-4">
-        <span className="mb-3 block text-xs font-semibold uppercase tracking-wide text-primary">
+      <div className="mt-4 border-t border-border/70 pt-4">
+        <span className="mb-3 block text-sm font-semibold tracking-tight text-foreground">
           Retour élève
         </span>
 
@@ -87,35 +115,41 @@ export function ExerciseFeedbackCard({
           // Ancien retour (pré-option B) : le RPE n'existait qu'au niveau de
           // l'exercice — affiché UNE fois, avec un libellé honnête, jamais
           // recopié dans les lignes ou placeholders de série.
-          <p className="mb-3 text-[11px] leading-tight text-muted-foreground/70">
+          <p className="mb-3 text-xs leading-tight text-muted-foreground/70">
             Dernières perfs — RPE global de l&apos;exercice : {previous.exerciseRpe}
           </p>
         )}
 
-        <div className="mb-4 flex flex-col gap-2">
+        <div className="mb-4 flex flex-col gap-3">
           {feedback.sets.map((set) => {
-            // Repères « Dernières perfs » : correspondance par INDEX de série
-            // (ancienne série N → série actuelle N). Série sans historique →
-            // aucune ligne. PRIORITÉ champ par champ dans le placeholder :
-            // charge/reps = prescription sinon dernière perf sinon neutre ;
-            // RPE = prescription (RPE CIBLE, par série) sinon « RPE » — le
-            // RPE passé reste UNIQUEMENT dans la ligne « Dernières perfs ».
-            // La saisie réelle (value) masque tout.
+            // Correspondance par INDEX de série (ancienne série N → série N).
+            // PRIORITÉ champ par champ inchangée : charge/reps = prescription
+            // sinon dernière perf sinon neutre ; RPE = prescription (RPE
+            // CIBLE) sinon « RPE » — le RPE passé reste UNIQUEMENT dans la
+            // ligne « Dernières perfs ». La saisie réelle (value) masque tout.
             const previousSet = previous?.sets[set.setNumber] ?? null;
             const previousLabel = formatPreviousSetLabel(previousSet);
             const placeholders = resolveSetPlaceholders(exercise, previousSet, set.setNumber);
             return (
               <div key={set.setNumber} className="flex flex-col gap-1">
                 {previousLabel && (
-                  <span
-                    aria-label={`Dernières performances série ${set.setNumber}`}
-                    className="block text-[11px] leading-tight text-muted-foreground/70"
-                  >
-                    Dernières perfs : {previousLabel}
-                  </span>
+                  // Alignée sur le groupe de champs : sur ≥ sm, la colonne
+                  // libellé est sautée et le texte est centré au-dessus des
+                  // trois champs de CETTE série. Sur mobile, pleine largeur,
+                  // retour à la ligne propre (leading-snug, jamais de
+                  // débordement).
+                  <div className="grid grid-cols-1 sm:grid-cols-[72px_1fr]">
+                    <span className="hidden sm:block" aria-hidden="true" />
+                    <span
+                      aria-label={`Dernières performances série ${set.setNumber}`}
+                      className="block min-w-0 text-xs leading-snug text-muted-foreground/70 sm:text-center"
+                    >
+                      Dernières perfs : {previousLabel}
+                    </span>
+                  </div>
                 )}
-                <div className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[100px_1fr_1fr_88px]">
-                  <span className="text-xs uppercase tracking-wide text-muted-foreground">
+                <div className="grid grid-cols-2 items-center gap-2 sm:grid-cols-[72px_1fr_1fr_84px]">
+                  <span className="col-span-2 text-xs font-medium text-muted-foreground sm:col-span-1">
                     Série {set.setNumber}
                   </span>
                   <input
@@ -124,7 +158,7 @@ export function ExerciseFeedbackCard({
                       onSetChange(set.setNumber, "loadUsed", event.target.value)
                     }
                     placeholder={placeholders.load}
-                    className="w-full border border-border bg-background px-3 py-2 text-sm text-foreground transition-colors placeholder:text-muted-foreground/60 focus:border-primary focus:outline-none"
+                    className={champ}
                   />
                   <input
                     value={set.repsDone}
@@ -132,7 +166,7 @@ export function ExerciseFeedbackCard({
                       onSetChange(set.setNumber, "repsDone", event.target.value)
                     }
                     placeholder={placeholders.reps}
-                    className="w-full border border-border bg-background px-3 py-2 text-sm text-foreground transition-colors placeholder:text-muted-foreground/60 focus:border-primary focus:outline-none"
+                    className={champ}
                   />
                   <input
                     value={set.rpe}
@@ -142,7 +176,7 @@ export function ExerciseFeedbackCard({
                     inputMode="numeric"
                     aria-label={`RPE série ${set.setNumber} (1 à 10)`}
                     placeholder={placeholders.rpe}
-                    className="w-full border border-border bg-background px-3 py-2 text-sm text-foreground transition-colors placeholder:text-muted-foreground/60 focus:border-primary focus:outline-none"
+                    className={`${champ} col-span-2 sm:col-span-1`}
                   />
                 </div>
               </div>
@@ -154,7 +188,7 @@ export function ExerciseFeedbackCard({
           value={feedback.comment}
           onChange={(event) => onCommentChange(event.target.value)}
           placeholder="Commentaire exercice (optionnel)"
-          className="w-full border border-border bg-background px-3 py-2 text-sm text-foreground transition-colors focus:border-primary focus:outline-none"
+          className={champ}
         />
       </div>
     </div>

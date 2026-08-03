@@ -48,7 +48,8 @@
     "test:student-content-assignment": "npx tsx scripts/tests/student-content-assignment.mts",
     "test:previous-performance": "npx tsx scripts/tests/previous-performance.mts",
     "test:set-rpe-feedback": "npx tsx scripts/tests/set-rpe-feedback.mts",
-    "test:prescribed-rpe": "npx tsx scripts/tests/prescribed-rpe.mts"
+    "test:prescribed-rpe": "npx tsx scripts/tests/prescribed-rpe.mts",
+    "test:student-training-ui": "npx tsx scripts/tests/student-training-ui.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

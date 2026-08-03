@@ -540,7 +540,8 @@ export function SessionFeedbackSection({
     // historique non figé assumé.
     const prescription = resolvePrescription(existingFeedback.prescribedSnapshot, true);
     return (
-      <div className="flex flex-col gap-6 animate-fade-in">
+      // Refonte apple-ui : récapitulatif recentré dans la colonne principale.
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 animate-fade-in">
         <div className="rounded-card border border-primary/30 bg-card p-8 text-center shadow-soft">
           <CheckCircle size={32} className="mx-auto mb-3 text-primary" />
           <h3 className="mb-1 font-heading text-base font-bold uppercase text-foreground">
@@ -674,7 +675,9 @@ export function SessionFeedbackSection({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+    // Refonte apple-ui : formulaire recentré dans une colonne principale à
+    // largeur maximale cohérente (grand écran) — purement visuel.
+    <form onSubmit={handleSubmit} className="mx-auto flex w-full max-w-3xl flex-col gap-6">
       {/* SEULE source de rendu : la liste ordonnée de blocs. Chaque bloc
           Strength affiche ses propres exercices (ordre canonique) ; chaque bloc
           Cardio est rendu à sa position. Jamais de liste globale aplatie. */}

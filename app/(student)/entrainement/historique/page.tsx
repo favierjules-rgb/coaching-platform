@@ -61,7 +61,8 @@ export default function HistoriqueRetoursPage() {
   }, []);
 
   return (
-    <div>
+    // Refonte apple-ui : colonne principale recentrée, largeur de lecture.
+    <div className="mx-auto w-full max-w-3xl">
       <div className="mb-8">
         <Link
           href="/entrainement"
