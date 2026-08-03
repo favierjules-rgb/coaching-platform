@@ -55,6 +55,7 @@ export function ExerciseFeedbackCard({
           <span>{exercise.restSeconds}s repos</span>
           <span>Tempo {exercise.tempo}</span>
           <span>Charge conseillée : {exercise.recommendedLoad}</span>
+          {(exercise.recommendedRpe ?? "").trim() && <span>RPE cible : {exercise.recommendedRpe}</span>}
         </div>
         {exercise.videoUrl.trim() ? (
           <a
@@ -96,11 +97,13 @@ export function ExerciseFeedbackCard({
             // Repères « Dernières perfs » : correspondance par INDEX de série
             // (ancienne série N → série actuelle N). Série sans historique →
             // aucune ligne. PRIORITÉ champ par champ dans le placeholder :
-            // prescription du coach (libellé existant) sinon dernière perf,
-            // sinon libellé vide — la saisie réelle (value) masque tout.
+            // charge/reps = prescription sinon dernière perf sinon neutre ;
+            // RPE = prescription (RPE CIBLE, par série) sinon « RPE » — le
+            // RPE passé reste UNIQUEMENT dans la ligne « Dernières perfs ».
+            // La saisie réelle (value) masque tout.
             const previousSet = previous?.sets[set.setNumber] ?? null;
             const previousLabel = formatPreviousSetLabel(previousSet);
-            const placeholders = resolveSetPlaceholders(exercise, previousSet);
+            const placeholders = resolveSetPlaceholders(exercise, previousSet, set.setNumber);
             return (
               <div key={set.setNumber} className="flex flex-col gap-1">
                 {previousLabel && (

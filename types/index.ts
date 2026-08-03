@@ -139,6 +139,13 @@ export interface Exercise {
    * texte libre, séance mock ou antérieure à la banque.
    */
   libraryExerciseId?: string | null;
+  /**
+   * RPE CIBLE prescrit par le coach ("8" ou séquence "8-8-9" — voir
+   * AdminExercise.recommendedRpe). Le placeholder RPE des séries suit
+   * EXCLUSIVEMENT : saisie élève > cette prescription > « RPE » — le RPE
+   * historique reste cantonné à la ligne « Dernières perfs ».
+   */
+  recommendedRpe?: string | null;
 }
 
 export interface WorkoutSession {
@@ -811,6 +818,14 @@ export interface AdminExercise {
   restSeconds: number;
   tempo: string;
   recommendedLoad: string;
+  /**
+   * RPE CIBLE prescrit (`workout_exercises.recommended_rpe`, chantier
+   * feat/student-previous-set-performance) : "8" (toutes les séries) ou
+   * séquence par série "8-8-9" (série N = N-ième valeur ; au-delà de la
+   * séquence, aucune prescription). Entiers 1-10. "" / absent = aucune
+   * prescription — tout l'historique antérieur.
+   */
+  recommendedRpe?: string;
   videoUrl: string;
   notes: string;
   /**

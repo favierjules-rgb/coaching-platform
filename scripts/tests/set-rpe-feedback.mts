@@ -192,12 +192,14 @@ await (async () => {
     assert.ok(relu.exerciseEntries.every((e) => e.exerciseRpe === null), "pas de global fantôme");
   });
 
-  await test("3. placeholder RPE par série — uniquement quand un vrai RPE de série existe", () => {
-    assert.equal(resolveSetPlaceholders({ recommendedLoad: "", reps: "" }, { loadUsed: "45 kg", repsDone: "10", rpe: 5 }).rpe, "RPE 5");
-    // Ancien retour : la série n'a PAS de rpe propre → placeholder neutre,
-    // même si l'exercice portait un RPE global (jamais recopié).
-    assert.equal(resolveSetPlaceholders({ recommendedLoad: "", reps: "" }, { loadUsed: "45 kg", repsDone: "10", rpe: null }).rpe, "RPE");
-    assert.equal(resolveSetPlaceholders({ recommendedLoad: "", reps: "" }, null).rpe, "RPE");
+  await test("3. placeholder RPE par série — la PRESCRIPTION du coach seulement (volet builder), jamais l'historique", () => {
+    // RPE CIBLE prescrit → placeholder par série.
+    assert.equal(resolveSetPlaceholders({ recommendedLoad: "", reps: "", recommendedRpe: "7" }, { loadUsed: "45 kg", repsDone: "10", rpe: 5 }, 1).rpe, "RPE 7");
+    // Sans prescription : neutre — même quand un RPE passé de série existe
+    // (il reste dans la ligne « Dernières perfs », jamais dans le champ).
+    assert.equal(resolveSetPlaceholders({ recommendedLoad: "", reps: "" }, { loadUsed: "45 kg", repsDone: "10", rpe: 5 }, 1).rpe, "RPE");
+    assert.equal(resolveSetPlaceholders({ recommendedLoad: "", reps: "" }, { loadUsed: "45 kg", repsDone: "10", rpe: null }, 1).rpe, "RPE");
+    assert.equal(resolveSetPlaceholders({ recommendedLoad: "", reps: "" }, null, 1).rpe, "RPE");
   });
 
   await test("4. les placeholders ne partent jamais dans le payload (champ RPE inclus)", () => {
@@ -407,16 +409,17 @@ await (async () => {
   });
 
   await test("18. charge, répétitions et RPE indépendants champ par champ (priorité par champ)", () => {
-    // Prescription partielle (charge seulement) + historique complet par série.
+    // Prescription charge + RPE cible, pas de reps prescrites, historique complet.
     const placeholders = resolveSetPlaceholders(
-      { recommendedLoad: "50 kg", reps: "" },
-      { loadUsed: "45 kg", repsDone: "10", rpe: 9 },
+      { recommendedLoad: "50 kg", reps: "", recommendedRpe: "9" },
+      { loadUsed: "45 kg", repsDone: "10", rpe: 8 },
+      1,
     );
     assert.equal(placeholders.load, "Charge (50 kg)", "charge : prescription prioritaire");
     assert.equal(placeholders.reps, "10", "répétitions : historique (pas de prescription)");
-    assert.equal(placeholders.rpe, "RPE 9", "RPE : historique de série (aucune prescription possible)");
-    // Historique partiel : un champ absent reste neutre, les autres vivent.
-    const partiel = resolveSetPlaceholders({ recommendedLoad: "", reps: "" }, { loadUsed: "", repsDone: "9", rpe: null });
+    assert.equal(placeholders.rpe, "RPE 9", "RPE : la PRESCRIPTION (jamais le RPE passé 8)");
+    // Historique partiel sans prescription : un champ absent reste neutre.
+    const partiel = resolveSetPlaceholders({ recommendedLoad: "", reps: "" }, { loadUsed: "", repsDone: "9", rpe: null }, 1);
     assert.deepEqual(partiel, { load: "Charge", reps: "9", rpe: "RPE" });
   });
 })();

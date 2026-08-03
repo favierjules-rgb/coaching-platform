@@ -116,6 +116,9 @@ function mapExerciseRow(row: WorkoutExerciseRow): AdminExercise {
     restSeconds: row.rest_seconds,
     tempo: row.tempo,
     recommendedLoad: row.recommended_load,
+    // RPE cible prescrit ("8" ou "8-8-9") — "" côté app = aucune prescription
+    // (NULL en base, migration 20260803190000).
+    recommendedRpe: row.recommended_rpe ?? "",
     videoUrl: row.video_url,
     notes: row.notes,
     muscleGroup: row.muscle_group ?? undefined,

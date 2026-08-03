@@ -229,28 +229,68 @@ export function formatPreviousSetLabel(set: PreviousSetPerf | null | undefined):
   return morceaux.length > 0 ? morceaux.join(" · ") : null;
 }
 
+/* ─── Prescription RPE CIBLE du coach (workout_exercises.recommended_rpe) ─── */
+
 /**
- * Placeholders d'une série, PRIORITÉ champ par champ :
- * prescription du coach (comportement existant, libellé explicite) sinon
- * dernière performance passée, sinon libellé vide. La saisie réelle de
+ * Analyse le RPE CIBLE prescrit : "" / null = aucune prescription (ok,
+ * values null) ; "8" = valeur unique ; "8-8-9" = séquence par série
+ * (séparateur tiret, espaces tolérés — même esprit que les répétitions
+ * "8-10", mais ici une SÉQUENCE par index de série). Chaque valeur doit
+ * être un entier de 1 à 10, sinon la prescription est invalide (ok: false)
+ * — jamais écrêtée, jamais devinée.
+ */
+export function parsePrescribedRpe(
+  value: string | null | undefined,
+): { ok: true; values: number[] | null } | { ok: false } {
+  const brut = (value ?? "").trim();
+  if (brut === "") return { ok: true, values: null };
+  const morceaux = brut.split("-").map((part) => part.trim());
+  const values: number[] = [];
+  for (const part of morceaux) {
+    if (!/^(10|[1-9])$/.test(part)) return { ok: false };
+    values.push(Number(part));
+  }
+  return { ok: true, values };
+}
+
+/**
+ * RPE prescrit pour LA série `setNumber` (1-based) :
+ * - valeur unique → toutes les séries ;
+ * - séquence → N-ième valeur ; au-delà de la séquence → aucune prescription ;
+ * - vide ou invalide → null (une prescription illisible n'est jamais
+ *   appliquée — elle est signalée côté builder, pas côté élève).
+ */
+export function prescribedRpeForSet(value: string | null | undefined, setNumber: number): number | null {
+  const parsed = parsePrescribedRpe(value);
+  if (!parsed.ok || parsed.values === null) return null;
+  if (parsed.values.length === 1) return parsed.values[0];
+  return parsed.values[setNumber - 1] ?? null;
+}
+
+/**
+ * Placeholders d'une série, PRIORITÉ champ par champ (la saisie réelle de
  * l'élève est portée par `value` — un placeholder n'apparaît que dans un
- * champ vide, par construction du DOM.
+ * champ vide, par construction du DOM) :
+ * - charge :      prescription coach > dernière charge passée > « Charge » ;
+ * - répétitions : prescription coach > dernières reps passées > « Reps » ;
+ * - RPE :         prescription coach (RPE CIBLE, par série) > « RPE » —
+ *   le RPE PASSÉ n'est JAMAIS un placeholder : il reste cantonné à la
+ *   ligne « Dernières perfs » (règle produit du volet builder).
  */
 export function resolveSetPlaceholders(
-  exercise: { recommendedLoad: string; reps: string },
+  exercise: { recommendedLoad: string; reps: string; recommendedRpe?: string | null },
   previousSet: PreviousSetPerf | null | undefined,
+  setNumber: number,
 ): { load: string; reps: string; rpe: string } {
   const prescriptionCharge = exercise.recommendedLoad.trim();
   const prescriptionReps = exercise.reps.trim();
+  const prescriptionRpe = prescribedRpeForSet(exercise.recommendedRpe, setNumber);
   const histoCharge = previousSet?.loadUsed.trim() ?? "";
   const histoReps = previousSet?.repsDone.trim() ?? "";
   return {
     load: prescriptionCharge ? `Charge (${prescriptionCharge})` : histoCharge || "Charge",
     reps: prescriptionReps ? `Reps (${prescriptionReps})` : histoReps || "Reps",
-    // RPE : aucune prescription dans le modèle — placeholder = RPE passé
-    // UNIQUEMENT s'il a réellement été enregistré POUR CETTE SÉRIE (jamais
-    // le RPE global d'un ancien retour), sinon libellé neutre.
-    rpe: previousSet?.rpe != null ? `RPE ${previousSet.rpe}` : "RPE",
+    rpe: prescriptionRpe !== null ? `RPE ${prescriptionRpe}` : "RPE",
   };
 }
 

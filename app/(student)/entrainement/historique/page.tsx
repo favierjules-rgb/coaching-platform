@@ -131,6 +131,7 @@ export default function HistoriqueRetoursPage() {
                                 {exercice.sets != null && ` · ${exercice.sets} séries`}
                                 {exercice.reps && ` × ${exercice.reps}`}
                                 {exercice.recommendedLoad && ` · ${exercice.recommendedLoad}`}
+                                {exercice.recommendedRpe && ` · RPE cible ${exercice.recommendedRpe}`}
                               </li>
                             )),
                           )}

@@ -90,6 +90,8 @@ function serializeBlock(block: TrainingBlock): Record<string, unknown> {
         rest_seconds: ex.restSeconds,
         tempo: ex.tempo,
         recommended_load: ex.recommendedLoad,
+        // RPE cible — la RPC normalise "" en NULL (aucune prescription).
+        recommended_rpe: ex.recommendedRpe ?? "",
         video_url: ex.videoUrl,
         notes: ex.notes,
         muscle_group: ex.muscleGroup ?? null,

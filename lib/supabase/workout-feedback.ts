@@ -67,7 +67,7 @@ export async function loadSessionRowsForSnapshot(
     supabase.from("training_blocks").select("id, title, block_type, position").eq("session_id", sessionId),
     supabase
       .from("workout_exercises")
-      .select("block_id, exercise_library_id, name, order_index, sets, reps, recommended_load, rest_seconds, tempo, notes")
+      .select("block_id, exercise_library_id, name, order_index, sets, reps, recommended_load, recommended_rpe, rest_seconds, tempo, notes")
       .eq("session_id", sessionId),
   ]);
   devWarn("loadSessionRowsForSnapshot (blocs)", blocksResult.error);

@@ -91,6 +91,8 @@ function toEleveExercise(exercise: AdminWorkoutSession["exercises"][number]): Ex
     restSeconds: exercise.restSeconds,
     tempo: exercise.tempo,
     recommendedLoad: exercise.recommendedLoad,
+    // RPE cible prescrit — placeholder RPE des séries côté élève.
+    recommendedRpe: exercise.recommendedRpe ?? "",
     videoUrl: exercise.videoUrl,
     muscleGroup: exercise.muscleGroup,
     // feat/student-previous-set-performance : propagée pour la recherche de

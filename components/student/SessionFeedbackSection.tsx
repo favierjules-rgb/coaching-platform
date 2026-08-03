@@ -583,6 +583,7 @@ export function SessionFeedbackSection({
                         exercice.sets !== null ? `${exercice.sets} séries` : null,
                         exercice.reps ? `${exercice.reps} reps` : null,
                         exercice.recommendedLoad ? `charge ${exercice.recommendedLoad}` : null,
+                        exercice.recommendedRpe ? `RPE cible ${exercice.recommendedRpe}` : null,
                         exercice.restSeconds !== null ? `repos ${exercice.restSeconds}s` : null,
                       ]
                         .filter(Boolean)

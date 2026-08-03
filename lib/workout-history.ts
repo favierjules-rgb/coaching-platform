@@ -27,6 +27,12 @@ export interface SnapshotExercise {
   sets: number | null;
   reps: string | null;
   recommendedLoad: string | null;
+  /**
+   * RPE cible prescrit au moment de la séance ("8" ou "8-8-9") — ajout
+   * ADDITIF (volet builder de feat/student-previous-set-performance) :
+   * absent des snapshots antérieurs, jamais réécrit dans ceux-ci.
+   */
+  recommendedRpe?: string | null;
   restSeconds: number | null;
   tempo: string | null;
   notes: string | null;
@@ -72,6 +78,7 @@ export interface SnapshotExerciseRow {
   sets: number | null;
   reps: string | null;
   recommended_load: string | null;
+  recommended_rpe?: string | null;
   rest_seconds: number | null;
   tempo: string | null;
   notes: string | null;
@@ -112,6 +119,7 @@ export function buildPrescribedSnapshot(
           sets: exercise.sets ?? null,
           reps: exercise.reps ?? null,
           recommendedLoad: exercise.recommended_load ?? null,
+          recommendedRpe: exercise.recommended_rpe ?? null,
           restSeconds: exercise.rest_seconds ?? null,
           tempo: exercise.tempo ?? null,
           notes: exercise.notes ?? null,

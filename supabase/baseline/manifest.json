@@ -42,7 +42,8 @@
     "20260801120000_workout_feedback_history_phase1.sql",
     "20260801210000_fix_provision_program_copy_staff_role.sql",
     "20260802190000_copy_training_prescriptions_in_program_copies.sql",
-    "20260803120000_add_rpe_to_exercise_set_feedback.sql"
+    "20260803120000_add_rpe_to_exercise_set_feedback.sql",
+    "20260803190000_add_recommended_rpe_to_workout_exercises.sql"
   ],
   "garanties_de_contenu": {
     "insert_de_donnees_metier": 0,

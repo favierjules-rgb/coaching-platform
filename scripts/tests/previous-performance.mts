@@ -234,7 +234,7 @@ await (async () => {
     assert.ok(perf.sets[3]);
     assert.equal(perf.sets[4], undefined, "série 4 sans repère");
     assert.equal(formatPreviousSetLabel(perf.sets[4]), null, "aucune ligne « Dernières perfs » pour la série 4");
-    const placeholders = resolveSetPlaceholders({ recommendedLoad: "", reps: "" }, perf.sets[4]);
+    const placeholders = resolveSetPlaceholders({ recommendedLoad: "", reps: "" }, perf.sets[4], 4);
     assert.deepEqual(placeholders, { load: "Charge", reps: "Reps", rpe: "RPE" }, "champ vide (libellés neutres)");
   });
 
@@ -256,26 +256,26 @@ await (async () => {
     ]);
     const perf = findPreviousPerformance(idx, { name: "Squat" })!;
     assert.equal(formatPreviousSetLabel(perf.sets[1]), "9", "répétitions seules — rien d'inventé");
-    const placeholders = resolveSetPlaceholders({ recommendedLoad: "", reps: "" }, perf.sets[1]);
+    const placeholders = resolveSetPlaceholders({ recommendedLoad: "", reps: "" }, perf.sets[1], 1);
     assert.equal(placeholders.load, "Charge", "pas de charge historique → libellé neutre");
     assert.equal(placeholders.reps, "9");
   });
 
   await test("11. une valeur PRESCRITE par le coach masque le placeholder historique du même champ", () => {
     const historique = { loadUsed: "45 kg", repsDone: "10", rpe: 9 };
-    const placeholders = resolveSetPlaceholders({ recommendedLoad: "50 kg", reps: "8" }, historique);
+    const placeholders = resolveSetPlaceholders({ recommendedLoad: "50 kg", reps: "8" }, historique, 1);
     assert.equal(placeholders.load, "Charge (50 kg)", "prescription affichée normalement");
     assert.equal(placeholders.reps, "Reps (8)");
   });
 
   await test("12. priorité appliquée CHAMP PAR CHAMP (prescription partielle + historique)", () => {
-    // Exemple du cahier des charges : programmation 50 kg × 8, aucun RPE
-    // prescrit ; performance passée 45 kg × 10 · RPE 9.
+    // Programmation 50 kg × 8, aucun RPE prescrit ; passé 45 kg × 10 · RPE 9.
     const historique = { loadUsed: "45 kg", repsDone: "10", rpe: 9 };
-    const mixte = resolveSetPlaceholders({ recommendedLoad: "50 kg", reps: "" }, historique);
+    const mixte = resolveSetPlaceholders({ recommendedLoad: "50 kg", reps: "" }, historique, 1);
     assert.equal(mixte.load, "Charge (50 kg)", "charge : prescription");
     assert.equal(mixte.reps, "10", "répétitions : historique (aucune prescription)");
-    assert.equal(formatPreviousSetLabel(historique), "45 kg × 10 · RPE 9", "RPE 9 visible comme repère (aucun RPE prescrit)");
+    assert.equal(mixte.rpe, "RPE", "RPE : sans prescription, libellé neutre — l'historique ne va JAMAIS dans le champ");
+    assert.equal(formatPreviousSetLabel(historique), "45 kg × 10 · RPE 9", "RPE 9 visible comme repère (ligne « Dernières perfs »)");
   });
 
   await test("13. la SAISIE de l'élève est prioritaire sur tout (value masque le placeholder, rendu réel)", () => {
@@ -399,11 +399,13 @@ await (async () => {
     assert.equal(html.split("Dernières perfs").length - 1, 1);
     assert.ok(html.includes("text-[11px]") && html.includes("text-muted-foreground/70"));
     assert.ok(html.includes("45 kg × 10 · RPE 5"));
-    // Placeholders historiques dans les champs libres (aucune prescription) —
-    // y compris le RPE de série 1, réellement enregistré par série.
+    // Placeholders historiques dans les champs charge/reps (aucune
+    // prescription) ; le RPE passé, lui, reste dans la ligne repère — le
+    // placeholder RPE ne vient QUE d'une prescription (volet builder).
     assert.ok(html.includes('placeholder="45 kg"'));
     assert.ok(html.includes('placeholder="10"'));
-    assert.ok(html.includes('placeholder="RPE 5"'));
+    assert.ok(!html.includes('placeholder="RPE 5"'), "le RPE passé n'est plus jamais un placeholder");
+    assert.ok(html.includes('placeholder="RPE"'), "sans prescription : libellé neutre exact");
   });
 })();
 
