@@ -137,6 +137,7 @@ function mapExerciseSetFeedbackRow(row: ExerciseSetFeedbackRow): SupabaseExercis
     setNumber: row.set_number,
     loadUsed: row.load_used,
     repsDone: row.reps_done,
+    rpe: row.rpe ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -168,7 +169,13 @@ function toAdminStudentFeedback(
         setNumber: set.setNumber,
         loadUsed: set.loadUsed,
         repsDone: set.repsDone,
-        rpe: exercise.rpe,
+        // Option B (feat/student-previous-set-performance) : `rpe` est le
+        // RPE de LA série (exercise_set_feedback.rpe) — null pour tout
+        // retour antérieur. Le RPE global d'exercice n'est PLUS recopié sur
+        // chaque série : il est exposé séparément (exerciseRpe) pour être
+        // affiché UNE fois, avec un libellé honnête.
+        rpe: set.rpe,
+        exerciseRpe: exercise.rpe,
         comment: exercise.comment,
       }));
     });
@@ -468,6 +475,10 @@ export async function saveWorkoutFeedback(
         set_number: set.setNumber,
         load_used: set.loadUsed,
         reps_done: set.repsDone,
+        // RPE PAR SÉRIE (option B) — null si non saisi, jamais inventé ni
+        // moyenné. Le cardio n'émet pas cette clé (rpe de bloc au niveau
+        // exercice, inchangé).
+        rpe: set.rpe ?? null,
       })),
     );
     devWarn("saveWorkoutFeedback (sets insert)", setsError);
@@ -478,7 +489,8 @@ export async function saveWorkoutFeedback(
         setNumber: set.setNumber,
         loadUsed: set.loadUsed,
         repsDone: set.repsDone,
-        rpe: exercise.rpe,
+        rpe: set.rpe ?? null,
+        exerciseRpe: exercise.rpe,
         comment: exercise.comment,
       });
     }

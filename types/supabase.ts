@@ -773,6 +773,7 @@ export interface Database {
           set_number: number;
           load_used: string;
           reps_done: string;
+          rpe: number | null;
           created_at: string;
           updated_at: string;
         };
@@ -783,6 +784,7 @@ export interface Database {
           set_number: number;
           load_used?: string;
           reps_done?: string;
+          rpe?: number | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -793,6 +795,7 @@ export interface Database {
           set_number?: number;
           load_used?: string;
           reps_done?: string;
+          rpe?: number | null;
           created_at?: string;
           updated_at?: string;
         };

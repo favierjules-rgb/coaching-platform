@@ -93,6 +93,10 @@ function toEleveExercise(exercise: AdminWorkoutSession["exercises"][number]): Ex
     recommendedLoad: exercise.recommendedLoad,
     videoUrl: exercise.videoUrl,
     muscleGroup: exercise.muscleGroup,
+    // feat/student-previous-set-performance : propagée pour la recherche de
+    // la dernière performance (le chemin blocks[] la transporte déjà via
+    // AdminExercise ; ce chemin legacy la perdait).
+    libraryExerciseId: exercise.libraryExerciseId ?? null,
   };
 }
 

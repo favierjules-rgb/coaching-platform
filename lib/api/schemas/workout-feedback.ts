@@ -22,6 +22,11 @@ const setSchema = z.object({
   setNumber: z.number().int().min(1).max(50),
   loadUsed: z.string().max(200),
   repsDone: z.string().max(200),
+  // RPE PAR SÉRIE (option B, feat/student-previous-set-performance) —
+  // optionnel/null : une série sans RPE est acceptée, et le contrat cardio
+  // existant (serializeCardioBlockResult) n'émet pas cette clé. Mêmes
+  // bornes que le CHECK exercise_set_feedback_rpe_check (1-10).
+  rpe: z.number().int().min(1).max(10).nullable().optional(),
 });
 
 const exerciseSchema = z.object({
