@@ -3,6 +3,13 @@
 import { useState } from "react";
 import { CheckCircle, Info, UserPlus } from "lucide-react";
 
+import {
+  filterAssignableProgramModels,
+  initialContentSelection,
+  terminerAssignation,
+  toggleStudentSelection,
+  type ContentSelection,
+} from "@/lib/assignment-selection";
 import { CheckboxField } from "@/components/admin/AdminFormFields";
 import { Modal, PrimaryButton } from "@/components/admin/Modal";
 import type { AdminDocument, AdminNutritionPlan, AdminProgram, AdminStudent, AssignableContentType } from "@/types";
@@ -17,7 +24,7 @@ interface AssignContentToStudentModalProps {
     contentType: AssignableContentType,
     contentId: string,
     assigned: boolean,
-  ) => void;
+  ) => void | boolean | Promise<boolean | void>;
   /** true si l'élève affiché est lui-même réel (Supabase). */
   isSupabaseStudent?: boolean;
   /** true si `programs` contient de vrais programmes Supabase et que cet élève est lui-même réel. */
@@ -28,6 +35,27 @@ interface AssignContentToStudentModalProps {
   canAssignRealDocuments?: boolean;
 }
 
+const SELECTION_VIDE: ContentSelection = { programme: [], nutrition: [], document: [] };
+
+/**
+ * Modale « Attribuer un contenu à [élève] » de la fiche élève admin —
+ * réécrite (fix/student-profile-content-assignment) sur le pattern validé
+ * d'AssignStudentsModal :
+ *
+ * - la sélection vit LOCALEMENT, initialisée depuis l'état réel à CHAQUE
+ *   ouverture (fermer/rouvrir recharge les vraies coches) ;
+ * - cocher/décocher ne modifie QUE la sélection locale — AUCUNE écriture ;
+ * - « Terminer » est le SEUL point d'écriture : diff sélection ↔ état
+ *   initial par type de contenu, toutes les écritures attendues, un échec
+ *   laisse la modale ouverte avec la sélection conservée ;
+ * - fermer par la croix abandonne la sélection sans rien écrire ;
+ * - la liste des programmes n'affiche que les MODÈLES (les copies
+ *   individuelles — ownerStudentId posé — sont exclues) ; un modèle est
+ *   coché si une assignation ACTIVE pointe vers lui ou vers la copie de
+ *   l'élève (isProgramCheckedForStudent) ;
+ * - aucun email, achat ni webhook n'est déclenché ici (la page passe
+ *   notifyByEmail: false à useContentAssignment).
+ */
 export function AssignContentToStudentModal({
   student,
   programs,
@@ -41,17 +69,75 @@ export function AssignContentToStudentModal({
 }: AssignContentToStudentModalProps) {
   const [open, setOpen] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+  // État initial figé à l'ouverture (base du diff du « Terminer ») et
+  // sélection locale visible — voir lib/assignment-selection.
+  const [initial, setInitial] = useState<ContentSelection>(SELECTION_VIDE);
+  const [selection, setSelection] = useState<ContentSelection>(SELECTION_VIDE);
+  // Atomicité UI : « Terminer » attend TOUTES les écritures (verrou
+  // anti-double-clic), un échec laisse la modale OUVERTE avec un message.
+  const [saving, setSaving] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
 
+  // Seuls les MODÈLES sont proposables — jamais les copies individuelles
+  // (elles dupliqueraient la ligne du modèle, et attribuer la copie d'un
+  // élève n'a pas de sens produit). Les programmes mock restent listés.
+  const modeles = filterAssignableProgramModels(programs);
+
+  function ouvrir() {
+    const état = initialContentSelection(student, {
+      programs,
+      nutritionPlanIds: nutritionPlans.map((p) => p.id),
+      documentIds: documents.map((d) => d.id),
+    });
+    setInitial(état);
+    setSelection(état);
+    setConfirmed(false);
+    setSaving(false);
+    setSaveFailed(false);
+    setOpen(true);
+  }
+
+  // Fermeture (croix, ou après confirmation) : AUCUNE écriture — la
+  // sélection locale est simplement abandonnée.
   function close() {
     setOpen(false);
     setConfirmed(false);
+    setSaving(false);
+    setSaveFailed(false);
+  }
+
+  function basculer(type: AssignableContentType, contentId: string, checked: boolean) {
+    setSelection((prev) => ({ ...prev, [type]: toggleStudentSelection(prev[type], contentId, checked) }));
+  }
+
+  function terminer() {
+    if (saving) return;
+    setSaving(true);
+    setSaveFailed(false);
+    // SEUL point d'écriture de la modale : un diff par type de contenu,
+    // toutes les écritures attendues (terminerAssignation) — un `false` ou
+    // un rejet quelconque rend l'ensemble en échec, jamais de faux succès.
+    void Promise.all(
+      (["programme", "nutrition", "document"] as const).map((type) =>
+        terminerAssignation(initial[type], selection[type], (contentId, assigned) =>
+          onSetAssignment(student.id, type, contentId, assigned),
+        ),
+      ),
+    ).then((résultats) => {
+      setSaving(false);
+      if (résultats.every(({ ok }) => ok)) {
+        setConfirmed(true);
+      } else {
+        setSaveFailed(true);
+      }
+    });
   }
 
   return (
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={ouvrir}
         className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
       >
         <UserPlus size={13} />
@@ -76,15 +162,15 @@ export function AssignContentToStudentModal({
                   </div>
                 ) : (
                   <div className="flex flex-col gap-2">
-                    {programs.length === 0 && (
+                    {modeles.length === 0 && (
                       <p className="text-sm text-muted-foreground">Aucun programme créé pour le moment.</p>
                     )}
-                    {programs.map((p) => (
+                    {modeles.map((p) => (
                       <CheckboxField
                         key={p.id}
                         label={p.name}
-                        checked={student.assignedProgramIds.includes(p.id)}
-                        onChange={(checked) => onSetAssignment(student.id, "programme", p.id, checked)}
+                        checked={selection.programme.includes(p.id)}
+                        onChange={(checked) => basculer("programme", p.id, checked)}
                       />
                     ))}
                   </div>
@@ -108,8 +194,8 @@ export function AssignContentToStudentModal({
                       <CheckboxField
                         key={p.id}
                         label={p.name}
-                        checked={student.assignedNutritionPlanIds.includes(p.id)}
-                        onChange={(checked) => onSetAssignment(student.id, "nutrition", p.id, checked)}
+                        checked={selection.nutrition.includes(p.id)}
+                        onChange={(checked) => basculer("nutrition", p.id, checked)}
                       />
                     ))}
                   </div>
@@ -133,15 +219,22 @@ export function AssignContentToStudentModal({
                       <CheckboxField
                         key={d.id}
                         label={d.title}
-                        checked={student.assignedDocumentIds.includes(d.id)}
-                        onChange={(checked) => onSetAssignment(student.id, "document", d.id, checked)}
+                        checked={selection.document.includes(d.id)}
+                        onChange={(checked) => basculer("document", d.id, checked)}
                       />
                     ))}
                   </div>
                 )}
               </div>
 
-              <PrimaryButton onClick={() => setConfirmed(true)}>Terminer</PrimaryButton>
+              {saveFailed && (
+                <p className="rounded-panel border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                  L&apos;enregistrement a échoué. Ta sélection est conservée — réessaie, ou vérifie ta connexion.
+                </p>
+              )}
+              <PrimaryButton disabled={saving} onClick={terminer}>
+                {saving ? "Enregistrement…" : "Terminer"}
+              </PrimaryButton>
             </div>
           )}
         </Modal>

@@ -148,6 +148,11 @@ export default function AdminStudentDetailPage() {
       void supabaseDocuments.refetch();
       void studentDocuments.refetch();
     },
+    // fix/student-profile-content-assignment : la modale « Attribuer un
+    // contenu » de cette page ne doit déclencher AUCUN email (ni achat, ni
+    // webhook) — seule l'attribution elle-même est écrite. Les retraits
+    // directs de la fiche n'envoyaient déjà rien (assigned=false).
+    { notifyByEmail: false },
   );
 
   const rawStudent = isSupabaseStudent ? supabaseDetail.student : students.find((s) => s.id === params.studentId);

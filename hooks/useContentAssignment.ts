@@ -47,7 +47,17 @@ export function useContentAssignment(
   active: Partial<Record<AssignableContentType, boolean>>,
   fallback: SetAssignmentFn,
   onWritten?: () => void,
+  options?: {
+    /**
+     * false = ne JAMAIS envoyer l'email « contenu assigné » depuis ce point
+     * d'entrée (fix/student-profile-content-assignment : la modale de la
+     * fiche élève ne doit déclencher aucun email). Défaut true — la modale
+     * « Assigner » de /admin/programmes conserve son comportement.
+     */
+    notifyByEmail?: boolean;
+  },
 ): AwaitableSetAssignmentFn {
+  const notifyByEmail = options?.notifyByEmail ?? true;
   return useCallback(
     (studentId, contentType, contentId, assigned) => {
       const write = WRITERS[contentType];
@@ -62,7 +72,7 @@ export function useContentAssignment(
             // Email envoyé uniquement lors d'une vraie nouvelle attribution
             // (jamais au retrait, "assigned" ci-dessus) — best-effort, ne
             // bloque jamais l'action d'attribution elle-même.
-            if (ok && assigned) {
+            if (ok && assigned && notifyByEmail) {
               fetch("/api/email/content-assigned", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -76,6 +86,6 @@ export function useContentAssignment(
       fallback(studentId, contentType, contentId, assigned);
       return Promise.resolve(true);
     },
-    [active, fallback, onWritten],
+    [active, fallback, onWritten, notifyByEmail],
   );
 }
