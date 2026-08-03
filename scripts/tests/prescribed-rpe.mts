@@ -265,7 +265,7 @@ await (async () => {
 
   await test("20. mobile et clavier non régressés (grille, champs, mention RPE cible unique)", () => {
     const html = carteHtml({ recommendedRpe: "8-8-9", previousRpe: 8 });
-    assert.equal(html.split("sm:grid-cols-[100px_1fr_1fr_88px]").length - 1, 3, "une grille responsive par série");
+    assert.equal(html.split("sm:grid-cols-[72px_1fr_1fr_84px]").length - 1, 3, "une grille responsive par série");
     assert.equal(html.split('inputMode="numeric"').length - 1, 3, "clavier numérique sur chaque RPE de série");
     assert.equal(html.split("RPE cible").length - 1, 1, "mention « RPE cible : 8-8-9 » affichée une fois dans l'en-tête");
     // Séquence appliquée par index dans les placeholders.

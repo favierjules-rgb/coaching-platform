@@ -404,7 +404,7 @@ await (async () => {
     assert.equal(html.split('inputMode="numeric"').length - 1, 3, "clavier numérique mobile sur chaque RPE");
     assert.equal(html.split("aria-label").length - 1, 3, "chaque RPE de série est étiqueté");
     assert.ok(html.includes('value="5"'), "la saisie RPE est un état contrôlé");
-    assert.equal(html.split("grid-cols-1").length - 1, 3, "une colonne en mobile, par série");
+    assert.equal(html.split("grid-cols-2").length - 1, 3, "grille mobile charge+reps côte à côte, par série (refonte apple-ui)");
     assert.ok(!html.includes("<select"), "plus de sélecteur RPE d'exercice : la saisie vit par série");
   });
 

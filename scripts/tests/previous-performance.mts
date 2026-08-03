@@ -386,9 +386,10 @@ await (async () => {
       previous: { sets: { 1: { loadUsed: "45 kg", repsDone: "10", rpe: 5 } }, exerciseRpe: null, performedAt: "2026-07-20", matchedBy: "name" },
       onSetChange: () => {}, onCommentChange: () => {},
     }));
-    // Grille responsive (une colonne mobile, quatre colonnes ≥ sm avec le
-    // champ RPE par série — option B) et toujours de vrais <input>.
-    assert.equal(html.split("sm:grid-cols-[100px_1fr_1fr_88px]").length - 1, 2, "une grille par série");
+    // Grille responsive (refonte apple-ui : charge+reps côte à côte sur
+    // mobile, [libellé | charge | reps | RPE] ≥ sm) et toujours de vrais
+    // <input>.
+    assert.equal(html.split("sm:grid-cols-[72px_1fr_1fr_84px]").length - 1, 2, "une grille par série");
     assert.equal(html.split("<input").length - 1, 7, "2 séries × 3 champs + commentaire");
     assert.equal(html.split('inputMode="numeric"').length - 1, 2, "clavier numérique mobile sur chaque RPE de série");
     // 3 aria-label : la ligne repère de la série 1 + les 2 champs RPE.
@@ -397,7 +398,7 @@ await (async () => {
     // (petite taille, gris translucide) — lisible dans les deux thèmes via
     // les tokens (muted-foreground) sans couleur codée en dur.
     assert.equal(html.split("Dernières perfs").length - 1, 1);
-    assert.ok(html.includes("text-[11px]") && html.includes("text-muted-foreground/70"));
+    assert.ok(html.includes("text-xs") && html.includes("text-muted-foreground/70"));
     assert.ok(html.includes("45 kg × 10 · RPE 5"));
     // Placeholders historiques dans les champs charge/reps (aucune
     // prescription) ; le RPE passé, lui, reste dans la ligne repère — le
