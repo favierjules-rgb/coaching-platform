@@ -11,11 +11,14 @@
  */
 import assert from "node:assert/strict";
 
+import { readFileSync } from "node:fs";
+
 import {
   CARDIO_RESULT_ENTRY_NAME,
   buildCardioResultPayload,
   cardioPrescribedTotals,
   composePainText,
+  describeCardioBlockResult,
   distanceMetersFromKmInput,
   draftFromBlockResult,
   durationFromParts,
@@ -358,6 +361,53 @@ test("douleur : aucune → champ vide ; niveau + détail → texte lisible", () 
   assert.equal(composePainText("aucune", "peu importe"), "");
   assert.equal(composePainText("légère", ""), "Gêne légère");
   assert.equal(composePainText("modérée", "mollet droit"), "Gêne modérée — mollet droit");
+});
+
+/* ─── Historique élève : rendu lisible, JAMAIS l'enveloppe JSON ───────── */
+
+test("historique — cardio JSON valide : rendu lisible, sans accolades ni clés techniques", () => {
+  const resultat: CardioBlockResult = {
+    version: 2, blockId: "f5d331ff-4c05-4c60-8760-9969cf86bc1f", order: 1, title: "Bloc 1 — Course continue",
+    completed: true, durationSeconds: 21600, distanceMeters: 45000, elevationGainMeters: 34,
+    repetitionsDone: null, rpe: 7, pain: "", comment: "Belles sensations",
+    prescribed: { durationSeconds: 600, distanceMeters: 4569, elevationGainMeters: 34, repetitions: null },
+  };
+  const enveloppe = JSON.stringify(resultat);
+  const { blocks } = parseCardioResults([
+    { exerciseName: CARDIO_RESULT_ENTRY_NAME, setNumber: 1, loadUsed: "Durée 6h00", repsDone: "Distance 45 km", comment: enveloppe, rpe: 7 },
+  ]);
+  assert.equal(blocks.length, 1, "enveloppe parsée sûrement");
+  const lisible = describeCardioBlockResult(blocks[0]);
+  const rendu = `${lisible.title} · ${lisible.details} — ${lisible.comment}`;
+  assert.ok(/Bloc 1 — Course continue/.test(rendu), "titre du bloc");
+  assert.ok(/Durée/.test(rendu) && /Distance/.test(rendu) && /RPE 7/.test(rendu) && /D\+ 34 m/.test(rendu),
+    "durée, distance, D+ et RPE lisibles");
+  assert.ok(/Belles sensations/.test(rendu), "commentaire RÉEL de l'élève");
+  assert.ok(!/[{}"]/.test(rendu), "aucune accolade ni guillemet JSON");
+  assert.ok(!/blockId|version|prescribed/.test(rendu), "aucune clé technique visible");
+});
+
+test("historique — cardio JSON invalide : fallback propre (résumé lisible, jamais le brut)", () => {
+  const { blocks, legacy } = parseCardioResults([
+    { exerciseName: CARDIO_RESULT_ENTRY_NAME, setNumber: 1, loadUsed: "Durée 45 min", repsDone: "Distance 8 km", comment: "{json cassé", rpe: 6 },
+  ]);
+  assert.equal(blocks.length, 0, "JSON invalide : jamais interprété comme un bloc");
+  assert.ok(legacy, "repli sur le résumé lisible");
+  assert.equal(legacy?.durationLabel, "45 min");
+  assert.equal(legacy?.distanceLabel, "8 km");
+  assert.ok(!JSON.stringify(legacy).includes("{json"), "le brut invalide n'apparaît nulle part dans le fallback");
+});
+
+test("historique — commentaire musculation classique inchangé, page sans JSON brut", () => {
+  assert.equal(isCardioResultEntryName("Développé couché barre"), false, "un exercice muscu n'est jamais capté");
+  const page = readFileSync(new URL("../../app/(student)/entrainement/historique/page.tsx", import.meta.url), "utf8");
+  assert.ok(/entreesMuscu = feedback\.exerciseEntries\.filter\(\(e\) => !isCardioResultEntryName/.test(page),
+    "les commentaires muscu restent rendus tels quels, séparés du cardio");
+  assert.ok(/parseCardioResults\(feedback\.exerciseEntries\)/.test(page) && /describeCardioBlockResult/.test(page),
+    "le cardio passe TOUJOURS par le parseur + la description lisible");
+  assert.ok(!/exerciseEntries\.map/.test(page.replace(/entreesMuscu\.map/g, "")),
+    "aucun rendu direct des entrées brutes hors du chemin muscu filtré");
+  assert.ok(/détail complet indisponible/.test(page), "fallback propre affiché pour les entrées non parsables");
 });
 
 console.log(`\n${passed} test(s) réussi(s), ${failed} échec(s).`);

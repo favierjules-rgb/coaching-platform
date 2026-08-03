@@ -483,6 +483,28 @@ export function parseCardioResults(
   };
 }
 
+/**
+ * Description LISIBLE d'un résultat de bloc cardio pour l'historique élève
+ * (fix : le JSON sérialisé de l'enveloppe apparaissait brut à l'écran).
+ * Ne rend JAMAIS l'enveloppe : uniquement titre, durée, distance, dénivelé,
+ * répétitions, RPE et le commentaire RÉEL de l'élève.
+ */
+export function describeCardioBlockResult(result: CardioBlockResult): { title: string; details: string; comment: string } {
+  const parts: string[] = [];
+  if (result.durationSeconds !== null) parts.push(`Durée ${formatDurationSeconds(result.durationSeconds)}`);
+  if (result.distanceMeters !== null) parts.push(`Distance ${formatDistanceMeters(result.distanceMeters)}`);
+  if (result.elevationGainMeters !== null) parts.push(`D+ ${result.elevationGainMeters} m`);
+  if (result.repetitionsDone !== null) {
+    parts.push(`${result.repetitionsDone} répétition${result.repetitionsDone > 1 ? "s" : ""}`);
+  }
+  if (result.rpe !== null) parts.push(`RPE ${result.rpe}`);
+  return {
+    title: result.title.trim() || "Bloc cardio",
+    details: parts.join(" · "),
+    comment: result.comment.trim(),
+  };
+}
+
 /* ─── Douleur / gêne structurée ───────────────────────────────────────── */
 
 export const PAIN_LEVELS = ["aucune", "légère", "modérée", "importante"] as const;

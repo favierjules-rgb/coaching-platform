@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, CheckCircle2, CircleSlash, MessageSquare } from "lucide-react";
 
+import { describeCardioBlockResult, isCardioResultEntryName, parseCardioResults } from "@/lib/cardio-feedback";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { getCurrentStudentId } from "@/lib/supabase/current-student";
 import { getWorkoutFeedbackForStudent } from "@/lib/supabase/workout-feedback";
@@ -86,6 +87,12 @@ export default function HistoriqueRetoursPage() {
             const estOuvert = ouvert === feedback.id;
             const prescription = resolvePrescription(feedback.prescribedSnapshot, false);
             const date = feedback.performedAt ?? feedback.date ?? "";
+            // Les entrées CARDIO portent une enveloppe JSON versionnée dans
+            // `comment` (contrat lib/cardio-feedback) : JAMAIS rendue brute.
+            // parseCardioResults la parse sûrement ; un JSON invalide ou v1
+            // retombe sur le résumé lisible (legacy), sans accolades.
+            const entreesMuscu = feedback.exerciseEntries.filter((e) => !isCardioResultEntryName(e.exerciseName));
+            const cardio = parseCardioResults(feedback.exerciseEntries);
             return (
               <li key={feedback.id} className="rounded-panel border border-border bg-surface">
                 <button
@@ -135,11 +142,11 @@ export default function HistoriqueRetoursPage() {
                       </p>
                     )}
 
-                    {feedback.exerciseEntries.length > 0 && (
+                    {entreesMuscu.length > 0 && (
                       <div>
                         <p className="mb-2 text-xs uppercase tracking-widest text-muted-foreground">Réalisé</p>
                         <ul className="flex flex-col gap-2 text-sm">
-                          {feedback.exerciseEntries.map((entree, index) => (
+                          {entreesMuscu.map((entree, index) => (
                             <li key={`${feedback.id}-${index}`} className="text-muted-foreground">
                               <span className="text-foreground">{entree.exerciseName}</span>
                               {" · série "}
@@ -148,6 +155,34 @@ export default function HistoriqueRetoursPage() {
                               {entree.comment && ` — ${entree.comment}`}
                             </li>
                           ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {(cardio.blocks.length > 0 || cardio.legacy) && (
+                      <div>
+                        <p className="mb-2 text-xs uppercase tracking-widest text-muted-foreground">Cardio réalisé</p>
+                        <ul className="flex flex-col gap-2 text-sm">
+                          {cardio.blocks.map((bloc) => {
+                            const lisible = describeCardioBlockResult(bloc);
+                            return (
+                              <li key={bloc.blockId} className="text-muted-foreground">
+                                <span className="text-foreground">{lisible.title}</span>
+                                {lisible.details && ` · ${lisible.details}`}
+                                {!bloc.completed && " · non terminé"}
+                                {lisible.comment && ` — ${lisible.comment}`}
+                              </li>
+                            );
+                          })}
+                          {cardio.legacy && (
+                            <li className="text-muted-foreground">
+                              <span className="text-foreground">Cardio</span>
+                              {cardio.legacy.durationLabel && ` · Durée ${cardio.legacy.durationLabel}`}
+                              {cardio.legacy.distanceLabel && ` · Distance ${cardio.legacy.distanceLabel}`}
+                              {cardio.legacy.elevationLabel && ` · D+ ${cardio.legacy.elevationLabel}`}
+                              {" · détail complet indisponible"}
+                            </li>
+                          )}
                         </ul>
                       </div>
                     )}
