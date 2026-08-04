@@ -1425,6 +1425,9 @@ export interface Database {
           hydration_tip: string;
           supplements: string[] | null;
           goal_type: "perte-de-poids" | "maintien" | "prise-de-masse" | "performance";
+          /** 1 = format historique, 2 = répartition structurée (migration 20260804090000). */
+          nutrition_model_version: number;
+          /** Projection de compatibilité. Pour un plan v2, REGÉNÉRÉE par save_nutrition_plan_v2 — jamais éditée directement. */
           daily_target: { calories?: number; protein?: number; carbs?: number; fat?: number } | null;
           weekly_target_calories: number | null;
           status: "actif" | "ancien" | "prochain";
@@ -1442,6 +1445,7 @@ export interface Database {
           hydration_tip?: string;
           supplements?: string[] | null;
           goal_type?: "perte-de-poids" | "maintien" | "prise-de-masse" | "performance";
+          nutrition_model_version?: number;
           daily_target?: { calories?: number; protein?: number; carbs?: number; fat?: number } | null;
           weekly_target_calories?: number | null;
           status?: "actif" | "ancien" | "prochain";
@@ -1459,10 +1463,114 @@ export interface Database {
           hydration_tip?: string;
           supplements?: string[] | null;
           goal_type?: "perte-de-poids" | "maintien" | "prise-de-masse" | "performance";
+          nutrition_model_version?: number;
           daily_target?: { calories?: number; protein?: number; carbs?: number; fat?: number } | null;
           weekly_target_calories?: number | null;
           status?: "actif" | "ancien" | "prochain";
           shopping_list?: string[] | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      /**
+       * Profil de répartition d'un plan v2 (migration 20260804090000).
+       * Aujourd'hui un seul profil par plan (`default`) ; la clé permettra
+       * d'ajouter `training`/`rest` sans restructurer.
+       * Les pourcentages sont des ENTIERS en points de base (10 000 = 100 %).
+       */
+      nutrition_plan_profiles: {
+        Row: {
+          id: string;
+          plan_id: string;
+          profile_key: string;
+          daily_calories: number;
+          protein_bp: number;
+          carb_bp: number;
+          fat_bp: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          plan_id: string;
+          profile_key?: string;
+          daily_calories?: number;
+          protein_bp?: number;
+          carb_bp?: number;
+          fat_bp?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          plan_id?: string;
+          profile_key?: string;
+          daily_calories?: number;
+          protein_bp?: number;
+          carb_bp?: number;
+          fat_bp?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      /**
+       * Part de chaque créneau de repas dans un profil v2, macro par macro,
+       * en points de base entiers (migration 20260804090000).
+       */
+      nutrition_meal_slot_targets: {
+        Row: {
+          id: string;
+          profile_id: string;
+          slot:
+            | "breakfast"
+            | "morning_snack"
+            | "lunch"
+            | "afternoon_snack"
+            | "dinner"
+            | "dessert";
+          enabled: boolean;
+          protein_bp: number;
+          carb_bp: number;
+          fat_bp: number;
+          display_order: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          profile_id: string;
+          slot:
+            | "breakfast"
+            | "morning_snack"
+            | "lunch"
+            | "afternoon_snack"
+            | "dinner"
+            | "dessert";
+          enabled?: boolean;
+          protein_bp?: number;
+          carb_bp?: number;
+          fat_bp?: number;
+          display_order?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          profile_id?: string;
+          slot?:
+            | "breakfast"
+            | "morning_snack"
+            | "lunch"
+            | "afternoon_snack"
+            | "dinner"
+            | "dessert";
+          enabled?: boolean;
+          protein_bp?: number;
+          carb_bp?: number;
+          fat_bp?: number;
+          display_order?: number;
           created_at?: string;
           updated_at?: string;
         };

@@ -49,7 +49,11 @@
     "test:previous-performance": "npx tsx scripts/tests/previous-performance.mts",
     "test:set-rpe-feedback": "npx tsx scripts/tests/set-rpe-feedback.mts",
     "test:prescribed-rpe": "npx tsx scripts/tests/prescribed-rpe.mts",
-    "test:student-training-ui": "npx tsx scripts/tests/student-training-ui.mts"
+    "test:student-training-ui": "npx tsx scripts/tests/student-training-ui.mts",
+    "test:nutrition-macro-targets": "npx tsx scripts/tests/nutrition-macro-targets.mts",
+    "test:nutrition-meal-distribution": "npx tsx scripts/tests/nutrition-meal-distribution.mts",
+    "test:nutrition-recipe-solver": "npx tsx scripts/tests/nutrition-recipe-solver.mts",
+    "test:nutrition-plan-v2-guards": "npx tsx scripts/tests/nutrition-plan-v2-guards.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",
