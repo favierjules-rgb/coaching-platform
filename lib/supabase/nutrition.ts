@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { buildStudentActivityLink, logActivityEvent } from "@/lib/supabase/activity";
+import { evaluateLegacyWrite, LEGACY_WRITE_ON_V2_MESSAGE_FR } from "@/lib/nutrition/plan-v2-guards";
 import type { NutritionPlanBuilderData } from "@/components/admin/NutritionPlanBuilder";
 import type { AdminMeal, AdminNutritionDay, AdminNutritionPlan, MealSlot } from "@/types";
 import type { Database } from "@/types/supabase";
@@ -214,6 +215,41 @@ export async function getAssignedNutritionPlanIdsByStudent(
   return map;
 }
 
+/**
+ * Lit `nutrition_plans.nutrition_model_version` et décide si le chemin
+ * d'écriture HISTORIQUE (v1) a le droit d'écrire sur ce plan.
+ *
+ * Un plan introuvable (supprimé, ou masqué par RLS) est traité comme
+ * autorisé : l'UPDATE qui suit ne touchera aucune ligne, et c'est lui —
+ * pas la garde — qui doit rapporter l'échec. La garde ne sert qu'à empêcher
+ * une désynchronisation de `daily_target` sur un plan v2 RÉELLEMENT présent.
+ *
+ * Exporté pour que la matrice v1/v2 soit testable sans réseau
+ * (scripts/tests/nutrition-plan-v2-guards.mts).
+ */
+export async function evaluateLegacyWriteForPlan(
+  supabase: TypedSupabaseClient,
+  planId: string,
+): Promise<{ allowed: boolean; message: string }> {
+  const { data, error } = await supabase
+    .from("nutrition_plans")
+    .select("nutrition_model_version")
+    .eq("id", planId)
+    .maybeSingle();
+  devWarn("evaluateLegacyWriteForPlan", error);
+  if (!data) {
+    return { allowed: true, message: "" };
+  }
+  const decision = evaluateLegacyWrite(data.nutrition_model_version);
+  if (decision.allowed) {
+    return { allowed: true, message: "" };
+  }
+  return { allowed: false, message: decision.message };
+}
+
+/** Message unique de refus, réexporté pour l'interface d'administration. */
+export { LEGACY_WRITE_ON_V2_MESSAGE_FR };
+
 /* ─── Écriture ─── */
 
 /** Insère les jours/repas d'un plan déjà créé (partagé par create/update). */
@@ -289,6 +325,20 @@ export async function updateNutritionPlan(
   planId: string,
   data: NutritionPlanBuilderData,
 ): Promise<boolean> {
+  // ── GARDE DE COMPATIBILITÉ v1 / v2 ──────────────────────────────────────
+  // Ce chemin d'écriture est celui du modèle HISTORIQUE : il réécrit
+  // `daily_target` directement. Sur un plan passé en v2, ce JSONB n'est plus
+  // éditable — il est REGÉNÉRÉ par `save_nutrition_plan_v2` depuis le profil
+  // `default`. Laisser cette fonction l'écraser désynchroniserait
+  // silencieusement le suivi nutritionnel de l'élève de la répartition réelle
+  // du plan. Refus EXPLICITE, avant toute écriture, jamais de délégation
+  // implicite ni de conversion automatique (voir lib/nutrition/plan-v2-guards.ts).
+  const decision = await evaluateLegacyWriteForPlan(supabase, planId);
+  if (!decision.allowed) {
+    console.error(`[Supabase] updateNutritionPlan : ${decision.message}`);
+    return false;
+  }
+
   const { error: updateError } = await supabase
     .from("nutrition_plans")
     .update({ ...planFields(data), updated_at: new Date().toISOString() })
