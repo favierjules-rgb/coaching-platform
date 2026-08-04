@@ -1197,6 +1197,21 @@ export interface AdminNutritionDay {
 export interface AdminNutritionPlan {
   id: string;
   name: string;
+  /**
+   * Version du modèle nutritionnel (migration 20260804090000) :
+   * 1 = format historique, 2 = répartition structurée.
+   *
+   * OPTIONNEL À DESSEIN : le type est partagé avec les données mock
+   * (data/admin.ts) et avec tout l'espace élève, qui l'ignorent. Absent
+   * ⇒ plan v1, conformément au DEFAULT 1 de la colonne et à l'absence de
+   * backfill.
+   */
+  nutritionModelVersion?: number;
+  /**
+   * Description courte du plan (colonne `nutrition_plans.description`).
+   * OPTIONNELLE : le flux v1 ne la collecte pas, le constructeur v2 oui.
+   */
+  description?: string;
   goalType: NutritionGoalType;
   caloriesPerDay: number;
   protein: number;

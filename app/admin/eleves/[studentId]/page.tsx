@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Activity, AlertTriangle, ArrowLeft, Archive, History, Lock, Pause, Play, Trash2, TrendingUp, Unlock } from "lucide-react";
@@ -36,6 +36,7 @@ import {
 } from "@/data/student";
 import { useAdminData } from "@/hooks/useAdminData";
 import { useContentAssignment } from "@/hooks/useContentAssignment";
+import { useGuardedNutritionAssignment } from "@/hooks/useGuardedNutritionAssignment";
 import { useStudentProfile } from "@/hooks/useStudentProfile";
 import { useSupabaseDocuments } from "@/hooks/useSupabaseDocuments";
 import { useSupabaseDocumentsForStudent } from "@/hooks/useSupabaseDocumentsForStudent";
@@ -139,7 +140,7 @@ export default function AdminStudentDetailPage() {
     isSupabaseStudent ? (supabaseDetail.student?.startDate ?? null) : null,
   );
 
-  const handleSetAssignment = useContentAssignment(
+  const baseSetAssignment = useContentAssignment(
     { programme: canAssignRealPrograms, nutrition: canAssignRealNutrition, document: canAssignRealDocuments },
     setAssignment,
     () => {
@@ -154,6 +155,16 @@ export default function AdminStudentDetailPage() {
     // directs de la fiche n'envoyaient déjà rien (assigned=false).
     { notifyByEmail: false },
   );
+
+  // MÊME garde d'assignation que /admin/nutrition : un plan v2 incomplet est
+  // refusé AVANT toute écriture, donc sans jamais retirer le plan déjà
+  // assigné à l'élève. Les programmes et les documents passent inchangés.
+  const nutritionVersionsById = useMemo(
+    () => Object.fromEntries(nutritionPlans.map((p) => [p.id, p.nutritionModelVersion])),
+    [nutritionPlans],
+  );
+  const guardedNutrition = useGuardedNutritionAssignment(baseSetAssignment, nutritionVersionsById);
+  const handleSetAssignment = guardedNutrition.setAssignment;
 
   const rawStudent = isSupabaseStudent ? supabaseDetail.student : students.find((s) => s.id === params.studentId);
 
@@ -554,6 +565,11 @@ export default function AdminStudentDetailPage() {
             </Link>
           )}
           <EditStudentModal student={student} onSave={applyStudentUpdate} />
+          {guardedNutrition.refusal && (
+            <p className="mb-4 w-full rounded-panel border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive" role="alert">
+              {guardedNutrition.refusal}
+            </p>
+          )}
           <AssignContentToStudentModal
             student={student}
             programs={programs}

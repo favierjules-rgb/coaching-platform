@@ -64,7 +64,13 @@ const STATUS_DB_TO_APP: Record<NutritionPlanRow["status"], AdminNutritionPlan["s
   ancien: "archivé",
 };
 
-const STATUS_APP_TO_DB: Record<AdminNutritionPlan["status"], NutritionPlanRow["status"]> = {
+/**
+ * Exporté pour le constructeur v2 : la RPC `save_nutrition_plan_v2` écrit
+ * `nutrition_plans.status` DIRECTEMENT, donc son payload doit porter la
+ * valeur BASE ('actif' | 'ancien' | 'prochain'), pas le libellé applicatif.
+ * Réutiliser cette table évite une seconde traduction divergente.
+ */
+export const STATUS_APP_TO_DB: Record<AdminNutritionPlan["status"], NutritionPlanRow["status"]> = {
   brouillon: "prochain",
   actif: "actif",
   "archivé": "ancien",
@@ -92,12 +98,31 @@ function mapNutritionPlanRow(row: NutritionPlanRow, days: AdminNutritionDay[], a
   return {
     id: row.id,
     name: row.name,
+    // `select("*")` remonte déjà la colonne : on l'expose simplement au
+    // modèle admin pour que l'interface puisse router v1 / v2. Aucune
+    // requête supplémentaire, aucune migration.
+    nutritionModelVersion: row.nutrition_model_version,
+    description: row.description,
     goalType: row.goal_type,
     caloriesPerDay: dailyTarget.calories ?? 0,
     protein: dailyTarget.protein ?? 0,
     carbs: dailyTarget.carbs ?? 0,
     fat: dailyTarget.fat ?? 0,
-    weeklyTargetCalories: row.weekly_target_calories ?? 0,
+    // OBJECTIF HEBDOMADAIRE — la BASE fait autorité.
+    //
+    // Depuis la migration 20260805090000, `save_nutrition_plan_v2` écrit
+    // elle-même `weekly_target_calories = daily_calories * 7`, à la création
+    // comme à la modification, dans la même transaction que le plan, le
+    // profil et les six créneaux. La ligne lue ici porte donc la vraie
+    // valeur.
+    //
+    // Le repli ci-dessous n'est plus la correction : c'est un FILET
+    // DÉFENSIF, pour un plan v2 qui aurait été écrit avant cette migration
+    // (aucun en Production) ou par un chemin qui contournerait la RPC. Les
+    // plans v1 conservent EXACTEMENT leur comportement d'origine (`?? 0`).
+    weeklyTargetCalories:
+      row.weekly_target_calories ??
+      (row.nutrition_model_version === 2 ? (dailyTarget.calories ?? 0) * 7 : 0),
     status: STATUS_DB_TO_APP[row.status] ?? "brouillon",
     coachNotes: row.coach_notes,
     hydrationTip: row.hydration_tip,

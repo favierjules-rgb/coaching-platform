@@ -1,40 +1,72 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, CheckCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle, SlidersHorizontal, UtensilsCrossed } from "lucide-react";
 
 import { AssignStudentsModal } from "@/components/admin/AssignStudentsModal";
 import { NutritionPlanBuilder, type NutritionPlanBuilderData } from "@/components/admin/NutritionPlanBuilder";
+import { NutritionPlanV2Builder } from "@/components/admin/NutritionPlanV2Builder";
 import { useAdminData } from "@/hooks/useAdminData";
 import { useContentAssignment } from "@/hooks/useContentAssignment";
+import { useGuardedNutritionAssignment } from "@/hooks/useGuardedNutritionAssignment";
 import { useSupabaseNutritionPlans } from "@/hooks/useSupabaseNutritionPlans";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
+import { createBlankFormState, toSaveInput, type PlanV2FormState } from "@/lib/nutrition/plan-v2-form";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
-import { createNutritionPlan as createNutritionPlanSupabase } from "@/lib/supabase/nutrition";
+import { STATUS_APP_TO_DB, createNutritionPlan as createNutritionPlanSupabase } from "@/lib/supabase/nutrition";
+import { saveNutritionPlanV2 } from "@/lib/supabase/nutrition-v2";
+import type { AdminContentStatus } from "@/types";
+
+/**
+ * Création d'un plan alimentaire — DEUX MODES EXPLICITES.
+ *
+ *   « Plan classique »            → constructeur v1, strictement inchangé.
+ *   « Plan avec répartition avancée » → constructeur v2, sans plan
+ *                                   intermédiaire d'aucune sorte.
+ *
+ * Le mode classique n'est jamais remplacé silencieusement : le coach choisit.
+ *
+ * MODE AVANCÉ — invariant central : tant que le coach n'a pas cliqué sur
+ * Enregistrer, AUCUNE ligne n'existe en base. Le formulaire vit avec
+ * `planId: null` ; la première écriture est un appel UNIQUE à
+ * `save_nutrition_plan_v2`, qui crée le plan, le profil `default` et les six
+ * créneaux dans la même transaction. Ni `createNutritionPlan` ni
+ * `updateNutritionPlan` ne sont appelées sur ce chemin.
+ */
+
+type Mode = "choix" | "classique" | "avance";
 
 export default function NewNutritionPlanPage() {
   const router = useRouter();
   const { state, createNutritionPlan, setAssignment } = useAdminData();
+  const [mode, setMode] = useState<Mode>("choix");
   const [createdId, setCreatedId] = useState<string | null>(null);
   const [saveError, setSaveError] = useState(false);
 
-  // Dès que Supabase est configuré, la création doit produire une vraie
-  // ligne nutrition_plans — jamais de repli mock silencieux (voir
-  // /admin/nutrition). Si l'insertion réelle échoue, on affiche une erreur
-  // plutôt que de créer un plan mock invisible qui masquerait le problème.
+  const [formState, setFormState] = useState<PlanV2FormState | null>(null);
+  const [savingV2, setSavingV2] = useState(false);
+  const [v2Error, setV2Error] = useState<string | null>(null);
+
   const supabaseActive = isSupabaseConfigured();
   const supabaseNutritionPlans = useSupabaseNutritionPlans();
   const supabaseStudents = useSupabaseStudents();
   const students = supabaseActive ? supabaseStudents.students : state.students;
-  const handleSetAssignment = useContentAssignment(
+  const baseSetAssignment = useContentAssignment(
     { nutrition: supabaseActive },
     setAssignment,
     supabaseNutritionPlans.refetch,
   );
+  const plans = supabaseActive ? supabaseNutritionPlans.plans : state.nutritionPlans;
+  const versionsById = useMemo(
+    () => Object.fromEntries(plans.map((p) => [p.id, p.nutritionModelVersion])),
+    [plans],
+  );
+  const guarded = useGuardedNutritionAssignment(baseSetAssignment, versionsById);
 
+  /** Chemin v1, INCHANGÉ. */
   async function handleSave(data: NutritionPlanBuilderData) {
     setSaveError(false);
     if (supabaseActive) {
@@ -58,7 +90,37 @@ export default function NewNutritionPlanPage() {
     setCreatedId(id);
   }
 
-  const plans = supabaseActive ? supabaseNutritionPlans.plans : state.nutritionPlans;
+  /**
+   * Première et unique écriture du mode avancé. `planId` vaut `null` : c'est
+   * la RPC qui crée le plan. En cas d'échec, toutes les valeurs locales sont
+   * conservées et aucune ligne partielle n'est laissée (la transaction de la
+   * RPC est annulée en bloc).
+   */
+  async function handleCreateV2() {
+    if (!formState) return;
+    setSavingV2(true);
+    setV2Error(null);
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) {
+      setV2Error("Supabase n'est pas configuré : impossible de créer ce plan.");
+      setSavingV2(false);
+      return;
+    }
+    const input = toSaveInput(formState);
+    const statutBase =
+      STATUS_APP_TO_DB[input.status as AdminContentStatus] ?? STATUS_APP_TO_DB.brouillon;
+    const resultat = await saveNutritionPlanV2(supabase, { ...input, planId: null, status: statutBase });
+    if (!resultat.ok) {
+      setV2Error(resultat.message);
+      setSavingV2(false);
+      return;
+    }
+    await supabaseNutritionPlans.refetch();
+    setSavingV2(false);
+    // Succès : on rejoint l'URL canonique du plan réellement créé.
+    router.push(`/admin/nutrition/${resultat.plan.id}`);
+  }
+
   const createdPlan = createdId ? plans.find((p) => p.id === createdId) : null;
 
   return (
@@ -73,7 +135,9 @@ export default function NewNutritionPlanPage() {
           Créer un plan alimentaire
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Construis la semaine type, repas par repas.
+          {mode === "avance"
+            ? "Répartition avancée : calories, macronutriments et parts par repas."
+            : "Construis la semaine type, repas par repas."}
         </p>
       </div>
 
@@ -81,6 +145,66 @@ export default function NewNutritionPlanPage() {
         <p className="mb-6 flex items-center gap-2 rounded-panel border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive" role="alert">
           Échec de l&apos;enregistrement du plan. Réessaie.
         </p>
+      )}
+
+      {guarded.refusal && (
+        <p className="mb-6 rounded-panel border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive" role="alert">
+          {guarded.refusal}
+        </p>
+      )}
+
+      {/* ── Choix du format, jamais implicite ─────────────────────────── */}
+      {mode === "choix" && !createdPlan && (
+        <div className="grid max-w-4xl grid-cols-1 gap-4 md:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => setMode("classique")}
+            className="pressable flex min-h-[44px] flex-col items-start gap-2 rounded-card border border-border bg-card p-6 text-left shadow-soft transition-colors hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          >
+            <UtensilsCrossed size={20} className="text-muted-foreground" />
+            <span className="font-heading text-lg font-bold uppercase text-foreground">Plan classique</span>
+            <span className="text-sm text-muted-foreground">
+              Construis la semaine type, jour par jour et repas par repas. Format historique, inchangé.
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setFormState(
+                createBlankFormState({
+                  name: "",
+                  description: "",
+                  goalType: "maintien",
+                  status: "brouillon",
+                  coachNotes: "",
+                  hydrationTip: "",
+                }),
+              );
+              setMode("avance");
+            }}
+            className="pressable flex min-h-[44px] flex-col items-start gap-2 rounded-card border border-primary bg-card p-6 text-left shadow-soft transition-colors hover:border-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          >
+            <SlidersHorizontal size={20} className="text-primary" />
+            <span className="font-heading text-lg font-bold uppercase text-foreground">
+              Plan avec répartition avancée
+            </span>
+            <span className="text-sm text-muted-foreground">
+              Définis les calories, les macronutriments et leur répartition entre les repas. Ce format
+              sera compatible avec les recettes personnalisées.
+            </span>
+          </button>
+        </div>
+      )}
+
+      {mode === "avance" && formState && !createdPlan && (
+        <NutritionPlanV2Builder
+          state={formState}
+          onChange={setFormState}
+          onSave={handleCreateV2}
+          saving={savingV2}
+          serverError={v2Error}
+        />
       )}
 
       {createdPlan ? (
@@ -96,7 +220,7 @@ export default function NewNutritionPlanPage() {
               contentId={createdPlan.id}
               students={students}
               assignedStudentIds={createdPlan.assignedStudentIds}
-              onSetAssignment={handleSetAssignment}
+              onSetAssignment={guarded.setAssignment}
               triggerLabel="Assigner à des élèves"
               triggerVariant="primary"
             />
@@ -109,7 +233,7 @@ export default function NewNutritionPlanPage() {
             </button>
           </div>
         </div>
-      ) : (
+      ) : mode === "classique" ? (
         <NutritionPlanBuilder
           initial={{
             name: "",
@@ -129,7 +253,7 @@ export default function NewNutritionPlanPage() {
           onSave={handleSave}
           saveLabel="Enregistrer le plan"
         />
-      )}
+      ) : null}
     </div>
   );
 }

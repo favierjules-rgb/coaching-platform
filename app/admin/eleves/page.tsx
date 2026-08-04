@@ -10,6 +10,7 @@ import { FilterButtons, SearchInput } from "@/components/admin/SearchAndFilters"
 import { StatusBadge, studentStatusTone } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
 import { useContentAssignment } from "@/hooks/useContentAssignment";
+import { useGuardedNutritionAssignment } from "@/hooks/useGuardedNutritionAssignment";
 import { useSupabaseNutritionPlans } from "@/hooks/useSupabaseNutritionPlans";
 import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
@@ -47,7 +48,7 @@ export default function AdminStudentsPage() {
   const canAssignRealPrograms = supabaseStudents.students.length > 0 && supabasePrograms.programs.length > 0;
   const canAssignRealNutrition =
     supabaseStudents.students.length > 0 && supabaseNutritionActive && supabaseNutritionPlans.plans.length > 0;
-  const handleSetAssignment = useContentAssignment(
+  const baseSetAssignment = useContentAssignment(
     { programme: canAssignRealPrograms, nutrition: canAssignRealNutrition },
     setAssignment,
     () => {
@@ -55,6 +56,14 @@ export default function AdminStudentsPage() {
       void supabaseNutritionPlans.refetch();
     },
   );
+  // MÊME garde d'assignation que partout ailleurs : un plan v2 incomplet est
+  // refusé avant toute écriture ; les programmes passent inchangés.
+  const nutritionVersionsById = useMemo(
+    () => Object.fromEntries(nutritionPlans.map((p) => [p.id, p.nutritionModelVersion])),
+    [nutritionPlans],
+  );
+  const guardedNutrition = useGuardedNutritionAssignment(baseSetAssignment, nutritionVersionsById);
+  const handleSetAssignment = guardedNutrition.setAssignment;
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("tous");
@@ -153,6 +162,11 @@ export default function AdminStudentsPage() {
                     <Eye size={13} />
                     Voir profil
                   </Link>
+                  {guardedNutrition.refusal && (
+                    <p className="mb-2 w-full rounded-panel border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive" role="alert">
+                      {guardedNutrition.refusal}
+                    </p>
+                  )}
                   <AssignContentToStudentModal
                     student={student}
                     programs={programs}

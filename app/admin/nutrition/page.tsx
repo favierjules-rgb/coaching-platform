@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Plus, UtensilsCrossed } from "lucide-react";
 
@@ -9,9 +9,11 @@ import { FilterButtons, SearchInput } from "@/components/admin/SearchAndFilters"
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
 import { useContentAssignment } from "@/hooks/useContentAssignment";
+import { useGuardedNutritionAssignment } from "@/hooks/useGuardedNutritionAssignment";
 import { useSupabaseNutritionPlans } from "@/hooks/useSupabaseNutritionPlans";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { contentStatusLabels, matchesTextSearch } from "@/lib/admin";
+import { NUTRITION_MODEL_VERSION_STRUCTURED } from "@/lib/nutrition/plan-v2-guards";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import type { AdminContentStatus } from "@/types";
 
@@ -44,11 +46,19 @@ export default function AdminNutritionPlansPage() {
   const nutritionPlans = supabaseActive ? supabaseNutritionPlans.plans : state.nutritionPlans;
   const supabaseStudents = useSupabaseStudents();
   const students = supabaseActive ? supabaseStudents.students : state.students;
-  const handleSetAssignment = useContentAssignment(
+  const baseSetAssignment = useContentAssignment(
     { nutrition: supabaseActive },
     setAssignment,
     supabaseNutritionPlans.refetch,
   );
+  // MÊME garde qu'ailleurs : un plan v2 incomplet est refusé AVANT toute
+  // écriture, donc sans jamais désassigner le plan précédent de l'élève.
+  const versionsById = useMemo(
+    () => Object.fromEntries(nutritionPlans.map((p) => [p.id, p.nutritionModelVersion])),
+    [nutritionPlans],
+  );
+  const guarded = useGuardedNutritionAssignment(baseSetAssignment, versionsById);
+  const handleSetAssignment = guarded.setAssignment;
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("tous");
@@ -79,6 +89,12 @@ export default function AdminNutritionPlansPage() {
         </Link>
       </div>
 
+      {guarded.refusal && (
+        <p className="mb-6 rounded-panel border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive" role="alert">
+          {guarded.refusal}
+        </p>
+      )}
+
       <div className="mb-6 flex flex-col gap-4">
         <SearchInput value={query} onChange={setQuery} placeholder="Rechercher un plan..." />
         <FilterButtons options={statusFilters} active={statusFilter} onChange={setStatusFilter} />
@@ -98,7 +114,14 @@ export default function AdminNutritionPlansPage() {
                   <h2 className="font-heading text-lg font-bold uppercase text-foreground">{plan.name}</h2>
                   <p className="text-sm text-muted-foreground">{goalLabels[plan.goalType]}</p>
                 </div>
-                <StatusBadge label={contentStatusLabels[plan.status]} tone={contentStatusTone(plan.status)} />
+                <div className="flex flex-col items-end gap-1">
+                  <StatusBadge label={contentStatusLabels[plan.status]} tone={contentStatusTone(plan.status)} />
+                  {plan.nutritionModelVersion === NUTRITION_MODEL_VERSION_STRUCTURED && (
+                    <span className="rounded-control border border-border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                      Répartition avancée
+                    </span>
+                  )}
+                </div>
               </div>
               <div className="grid grid-cols-4 gap-3 text-sm text-foreground">
                 <div>
