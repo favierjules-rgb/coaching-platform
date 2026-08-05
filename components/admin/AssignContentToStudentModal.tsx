@@ -7,6 +7,8 @@ import {
   filterAssignableProgramModels,
   initialContentSelection,
   terminerAssignation,
+  terminerAssignationUnique,
+  toggleSingleSelection,
   toggleStudentSelection,
   type ContentSelection,
 } from "@/lib/assignment-selection";
@@ -107,7 +109,12 @@ export function AssignContentToStudentModal({
   }
 
   function basculer(type: AssignableContentType, contentId: string, checked: boolean) {
-    setSelection((prev) => ({ ...prev, [type]: toggleStudentSelection(prev[type], contentId, checked) }));
+    // NUTRITION = CHOIX UNIQUE. Un élève n'a qu'un seul plan nutritionnel
+    // assigné à la fois (index unique partiel sur nutrition_plans.student_id) :
+    // cocher un plan remplace le précédent au lieu de s'y ajouter.
+    // Programmes et documents restent en sélection multiple, inchangés.
+    const bascule = type === "nutrition" ? toggleSingleSelection : toggleStudentSelection;
+    setSelection((prev) => ({ ...prev, [type]: bascule(prev[type], contentId, checked) }));
   }
 
   function terminer() {
@@ -117,12 +124,19 @@ export function AssignContentToStudentModal({
     // SEUL point d'écriture de la modale : un diff par type de contenu,
     // toutes les écritures attendues (terminerAssignation) — un `false` ou
     // un rejet quelconque rend l'ensemble en échec, jamais de faux succès.
+    //
+    // NUTRITION : `terminerAssignationUnique` n'émet AUCUN retrait quand un
+    // plan est sélectionné — la RPC assign_nutrition_plan retire l'ancien
+    // dans la même transaction. Émettre les deux recréerait un enchaînement
+    // « désassigner puis assigner » non transactionnel, avec une fenêtre
+    // pendant laquelle l'élève n'a aucun plan.
     void Promise.all(
-      (["programme", "nutrition", "document"] as const).map((type) =>
-        terminerAssignation(initial[type], selection[type], (contentId, assigned) =>
+      (["programme", "nutrition", "document"] as const).map((type) => {
+        const terminerType = type === "nutrition" ? terminerAssignationUnique : terminerAssignation;
+        return terminerType(initial[type], selection[type], (contentId, assigned) =>
           onSetAssignment(student.id, type, contentId, assigned),
-        ),
-      ),
+        );
+      }),
     ).then((résultats) => {
       setSaving(false);
       if (résultats.every(({ ok }) => ok)) {

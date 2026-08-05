@@ -54,7 +54,8 @@
     "test:nutrition-meal-distribution": "npx tsx scripts/tests/nutrition-meal-distribution.mts",
     "test:nutrition-recipe-solver": "npx tsx scripts/tests/nutrition-recipe-solver.mts",
     "test:nutrition-plan-v2-guards": "npx tsx scripts/tests/nutrition-plan-v2-guards.mts",
-    "test:nutrition-plan-v2-builder": "npx tsx scripts/tests/nutrition-plan-v2-builder.mts"
+    "test:nutrition-plan-v2-builder": "npx tsx scripts/tests/nutrition-plan-v2-builder.mts",
+    "test:nutrition-single-assigned-plan": "tsx scripts/tests/nutrition-single-assigned-plan.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

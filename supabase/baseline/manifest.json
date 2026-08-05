@@ -45,7 +45,8 @@
     "20260803120000_add_rpe_to_exercise_set_feedback.sql",
     "20260803190000_add_recommended_rpe_to_workout_exercises.sql",
     "20260804090000_nutrition_plan_profiles_v2.sql",
-    "20260805090000_nutrition_plan_v2_weekly_target.sql"
+    "20260805090000_nutrition_plan_v2_weekly_target.sql",
+    "20260806090000_assign_nutrition_plan_unique.sql"
   ],
   "garanties_de_contenu": {
     "insert_de_donnees_metier": 0,

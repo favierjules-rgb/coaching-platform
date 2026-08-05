@@ -539,7 +539,10 @@ await test("34. un plan v2 invalide est refusé AVANT toute écriture", () => {
   const hook = sansCommentaires(lire("../../hooks/useGuardedNutritionAssignment.ts"));
   const indexGarde = hook.indexOf("const decision = await guardNutritionAssignment");
   const indexRefus = hook.indexOf("return false;");
-  const indexBase = hook.indexOf("return base(studentId, contentType, contentId, assigned);", indexRefus);
+  // Depuis fix/nutrition-single-assigned-plan, l'écriture est awaitée pour
+  // pouvoir afficher un refus venu de la base : le point d'écriture reste
+  // `base(...)`, toujours APRÈS le refus.
+  const indexBase = hook.indexOf("await base(studentId, contentType, contentId, assigned);", indexRefus);
   assert.ok(indexGarde < indexRefus && indexRefus < indexBase, "le refus précède l'appel d'écriture");
   assert.ok(hook.includes('if (contentType !== "nutrition")'), "programmes et documents non impactés");
   // La garde est branchée sur les DEUX points d'entrée admin.
@@ -792,8 +795,12 @@ await test("55. aucune assignation existante n'est retirée avant validation", (
   const hook = sansCommentaires(lire("../../hooks/useGuardedNutritionAssignment.ts"));
   const indexGarde = hook.indexOf("await guardNutritionAssignment");
   const indexRefus = hook.indexOf("return false;");
-  const indexEcriture = hook.indexOf("return base(studentId, contentType, contentId, assigned);", indexRefus);
-  assert.ok(indexGarde < indexRefus && indexRefus < indexEcriture);
+  const indexEcriture = hook.indexOf("await base(studentId, contentType, contentId, assigned);", indexRefus);
+  assert.ok(indexGarde < indexRefus && indexRefus < indexEcriture, "aucune écriture avant le refus");
+  // Et désormais, le retrait de l'ancien plan n'est plus fait par le client
+  // du tout : il appartient à la transaction de la RPC.
+  const couche = sansCommentaires(lire("../../lib/supabase/nutrition.ts"));
+  assert.ok(!/\.update\(\{\s*student_id/.test(couche), "plus aucune écriture directe de student_id");
   // Le retrait n'est JAMAIS bloqué.
   const garde = sansCommentaires(lire("../../lib/supabase/nutrition-assignment-guard.ts"));
   assert.ok(garde.includes("if (!assigned) {\n    return { allowed: true };\n  }"));
@@ -920,11 +927,11 @@ await test("63. toutes les garanties de sécurité sont reconduites", () => {
 await test("64. la migration est déclarée au manifeste et comptée", () => {
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 12);
+  assert.equal(attendues.length, 13);
   assert.ok(attendues.includes("20260805090000_nutrition_plan_v2_weekly_target.sql"));
   const secu = lire("../../scripts/tests/security-hardening.mts");
-  assert.ok(secu.includes(".length, 39,"), "le compteur de migrations passe à 39");
-  assert.ok(secu.includes("assert.equal(attendues.length, 12);"));
+  assert.ok(secu.includes(".length, 40,"), "le compteur de migrations suit les migrations réelles");
+  assert.ok(secu.includes("assert.equal(attendues.length, 13);"));
 });
 
 console.log(`\n${réussis} réussis, ${échecs} échecs`);

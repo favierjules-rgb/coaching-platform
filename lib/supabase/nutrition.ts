@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { buildStudentActivityLink, logActivityEvent } from "@/lib/supabase/activity";
+import { assignNutritionPlan, unassignNutritionPlan } from "@/lib/supabase/nutrition-assignment";
 import { evaluateLegacyWrite, LEGACY_WRITE_ON_V2_MESSAGE_FR } from "@/lib/nutrition/plan-v2-guards";
 import type { NutritionPlanBuilderData } from "@/components/admin/NutritionPlanBuilder";
 import type { AdminMeal, AdminNutritionDay, AdminNutritionPlan, MealSlot } from "@/types";
@@ -391,11 +392,25 @@ export async function updateNutritionPlanStatus(
 }
 
 /**
- * Assigne/retire un plan alimentaire réel à un élève réel en écrivant
- * directement `nutrition_plans.student_id` — source de vérité unique pour
+ * Assigne/retire un plan alimentaire réel à un élève réel.
+ * `nutrition_plans.student_id` est la source de vérité unique de
  * l'assignation nutrition (PAS la table `assignments`, réservée aux
- * programmes). Assigner = `student_id = studentId` ; retirer =
- * `student_id = null`. Un plan n'a jamais plus d'un élève assigné à la fois.
+ * programmes).
+ *
+ * ⚠️ CETTE FONCTION N'ÉCRIT PLUS DIRECTEMENT. Elle délègue aux RPC
+ * `assign_nutrition_plan` / `unassign_nutrition_plan`
+ * (lib/supabase/nutrition-assignment.ts, migration 20260806090000).
+ *
+ * POURQUOI. L'ancienne version faisait un UPDATE sur le seul plan ciblé :
+ * assigner un plan B à un élève qui avait déjà un plan A laissait les DEUX
+ * lignes avec le même `student_id`, et l'espace élève affichait deux plans
+ * « ACTIF ». La RPC verrouille, valide AVANT d'écrire, retire les autres
+ * plans de l'élève puis assigne le nouveau — dans UNE transaction. Un refus
+ * ne modifie aucune ligne ; il n'existe aucune fenêtre sans plan.
+ *
+ * La signature est INCHANGÉE pour que tous les appelants existants
+ * (`useContentAssignment` et les cinq points d'entrée) soient reroutés sans
+ * modification.
  */
 export async function setNutritionAssignment(
   supabase: TypedSupabaseClient,
@@ -403,10 +418,10 @@ export async function setNutritionAssignment(
   planId: string,
   assigned: boolean,
 ): Promise<boolean> {
-  const { error } = await supabase
-    .from("nutrition_plans")
-    .update({ student_id: assigned ? studentId : null, updated_at: new Date().toISOString() })
-    .eq("id", planId);
+  const résultat = assigned
+    ? await assignNutritionPlan(supabase, planId, studentId)
+    : await unassignNutritionPlan(supabase, planId);
+  const error = résultat.ok ? null : { message: résultat.message, code: résultat.code };
   devWarn("setNutritionAssignment", error);
   if (!error && assigned) {
     const { data: plan } = await supabase.from("nutrition_plans").select("name").eq("id", planId).maybeSingle();
