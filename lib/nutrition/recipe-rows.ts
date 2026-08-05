@@ -65,7 +65,20 @@ export const RECIPE_TAG_VOCABULARY: Readonly<Record<RecipeTagKind, readonly stri
   ],
 };
 
-const ROLES: readonly RecipeIngredientRole[] = ["protein", "carbohydrate", "fat", "fixed", "free"];
+/**
+ * Les cinq rôles d'ingrédient, dans l'ordre canonique. Source unique : toute
+ * interface qui propose un choix de rôle lit CETTE liste — elle ne la réécrit
+ * pas.
+ */
+export const RECIPE_INGREDIENT_ROLES: readonly RecipeIngredientRole[] = [
+  "protein",
+  "carbohydrate",
+  "fat",
+  "fixed",
+  "free",
+];
+
+const ROLES = RECIPE_INGREDIENT_ROLES;
 
 /* ─────────────────────────── Lignes de base ─────────────────────────── */
 
@@ -76,6 +89,8 @@ export interface NutritionRecipeRow {
   readonly description: string | null;
   readonly slot_key: string | null;
   readonly status: string;
+  /** Identité technique stable d'une recette importée (migration 20260808090000). */
+  readonly source_key?: string | null;
   readonly created_at?: string;
   readonly updated_at?: string;
 }
@@ -259,6 +274,12 @@ export interface RecipeWithTags {
   readonly slotKey: RecipeSlotKey | null;
   readonly status: RecipeStatus;
   readonly tags: readonly RecipeTag[];
+  /** Texte libre du coach — non utilisé par le solveur. */
+  readonly description: string | null;
+  /** `null` = recette saisie à la main ; sinon « fixture:<cle> ». */
+  readonly sourceKey: string | null;
+  /** Horodatage brut, tel que rendu par la base. Aucune reformulation ici. */
+  readonly updatedAt: string | null;
 }
 
 export function assembleRecipeWithTags(
@@ -272,6 +293,9 @@ export function assembleRecipeWithTags(
     slotKey: (row.slot_key as RecipeSlotKey | null) ?? null,
     status: row.status as RecipeStatus,
     tags: tagRows.map(mapRecipeTagRow),
+    description: row.description ?? null,
+    sourceKey: row.source_key ?? null,
+    updatedAt: row.updated_at ?? null,
   };
 }
 
