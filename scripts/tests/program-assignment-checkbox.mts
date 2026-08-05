@@ -148,13 +148,21 @@ await (async () => {
   });
 
   await test("6. aucune assignation avant « Terminer » (la sélection n'écrit jamais)", () => {
-    assert.ok(/onToggle=\{\(studentId, checked\) => setSelection\(\(prev\) => toggleStudentSelection\(prev, studentId, checked\)\)\}/.test(sourceModale),
+    // Le clic ne fait QUE mettre à jour la sélection locale — jamais
+    // d'écriture. Depuis fix/nutrition-single-assigned-plan, la bascule
+    // dépend du type de contenu (choix unique pour la nutrition), mais elle
+    // reste enfermée dans un `setSelection`.
+    assert.ok(/onToggle=\{\(studentId, checked\) =>\s*\n?\s*setSelection\(/.test(sourceModale),
       "le clic met à jour la sélection LOCALE uniquement");
+    assert.ok(/toggleStudentSelection\(prev, studentId, checked\)/.test(sourceModale),
+      "programmes et documents gardent la bascule multi-sélection");
     // onSetAssignment n'apparaît que DANS le handler du bouton Terminer.
     const occurrences = sourceModale.match(/onSetAssignment\(/g) ?? [];
     assert.equal(occurrences.length, 1, "un seul point d'écriture");
-    assert.ok(/terminerAssignation\(assignedStudentIds, selection, \(studentId, assigned\) =>\s*\n?\s*onSetAssignment\(/.test(sourceModale),
+    assert.ok(/terminerType\(assignedStudentIds, selection, \(studentId, assigned\) =>\s*\n?\s*onSetAssignment\(/.test(sourceModale),
       "l'écriture vit dans le diff attendu par Terminer");
+    assert.ok(/contentType === "nutrition" \? terminerAssignationUnique : terminerAssignation/.test(sourceModale),
+      "seule la nutrition passe par le diff à choix unique");
   });
 
   await test("7. une affectation existante apparaît cochée à l'ouverture (copies comprises)", () => {

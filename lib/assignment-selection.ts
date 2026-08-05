@@ -43,6 +43,76 @@ export function applySelectionDiff(
   return { added, removed };
 }
 
+/* ─── Sélection à CHOIX UNIQUE — nutrition (fix/nutrition-single-assigned-plan) ─── */
+
+/**
+ * Bascule à CHOIX UNIQUE : cocher remplace la sélection au lieu de s'y
+ * ajouter. Utilisée pour la nutrition, où la règle produit est « un élève,
+ * au plus un plan assigné ». Laisser une sélection multiple ferait miroiter
+ * un état que la base refuse désormais (index unique partiel sur
+ * `student_id`).
+ *
+ * Immuable comme `toggleStudentSelection` : toujours une nouvelle référence.
+ */
+export function toggleSingleSelection(ids: string[], id: string, checked: boolean): string[] {
+  if (checked) {
+    return ids.length === 1 && ids[0] === id ? ids : [id];
+  }
+  return ids.filter((autre) => autre !== id);
+}
+
+/**
+ * Écritures à émettre pour une assignation à CHOIX UNIQUE.
+ *
+ * POINT CLÉ : quand un nouvel élément est sélectionné, AUCUN retrait n'est
+ * émis. C'est la RPC `assign_nutrition_plan` qui retire l'ancien plan, dans
+ * la MÊME transaction que l'assignation du nouveau. Émettre en plus un
+ * retrait côté client recréerait exactement ce qu'on corrige : deux
+ * écritures indépendantes, donc une fenêtre pendant laquelle l'élève n'a
+ * aucun plan.
+ *
+ * Un retrait n'est émis que lorsque la sélection devient VIDE — c'est la
+ * désassignation volontaire, qui reste autorisée.
+ *
+ * Fonction PURE.
+ */
+export function planSingleAssignmentWrites(
+  before: string[],
+  after: string[],
+): { assign: string | null; unassign: string[] } {
+  const avant = new Set(before);
+  const ajoutes = after.filter((id) => !avant.has(id));
+  if (ajoutes.length > 0) {
+    // Choix unique : le dernier ajouté gagne. L'interface empêche déjà d'en
+    // cocher deux (toggleSingleSelection), ce cas reste un filet.
+    return { assign: ajoutes[ajoutes.length - 1], unassign: [] };
+  }
+  const apres = new Set(after);
+  return { assign: null, unassign: before.filter((id) => !apres.has(id)) };
+}
+
+/**
+ * Équivalent de `terminerAssignation` pour une assignation à choix unique :
+ * même contrat de retour, mais AUCUN enchaînement « désassigner puis
+ * assigner ». Une seule écriture part quand un élément est sélectionné.
+ */
+export async function terminerAssignationUnique(
+  before: string[],
+  after: string[],
+  apply: (id: string, assigned: boolean) => boolean | void | Promise<boolean | void>,
+): Promise<{ ok: boolean; added: string[]; removed: string[] }> {
+  const { assign, unassign } = planSingleAssignmentWrites(before, after);
+  const résultats: Array<boolean | void | Promise<boolean | void>> = [];
+  if (assign !== null) résultats.push(apply(assign, true));
+  for (const id of unassign) résultats.push(apply(id, false));
+  const issues = await Promise.all(résultats.map((r) => Promise.resolve(r).catch(() => false as const)));
+  return {
+    ok: issues.every((issue) => issue !== false),
+    added: assign !== null ? [assign] : [],
+    removed: unassign,
+  };
+}
+
 /**
  * Élèves « assignés » d'un programme tels qu'affichés (cases cochées à
  * l'ouverture) : les liens directs (mode groupe, héritage) PLUS les

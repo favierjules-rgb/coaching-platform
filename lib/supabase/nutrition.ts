@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { buildStudentActivityLink, logActivityEvent } from "@/lib/supabase/activity";
+import { assignNutritionPlan, unassignNutritionPlan } from "@/lib/supabase/nutrition-assignment";
 import { evaluateLegacyWrite, LEGACY_WRITE_ON_V2_MESSAGE_FR } from "@/lib/nutrition/plan-v2-guards";
 import type { NutritionPlanBuilderData } from "@/components/admin/NutritionPlanBuilder";
 import type { AdminMeal, AdminNutritionDay, AdminNutritionPlan, MealSlot } from "@/types";
@@ -64,7 +65,13 @@ const STATUS_DB_TO_APP: Record<NutritionPlanRow["status"], AdminNutritionPlan["s
   ancien: "archivé",
 };
 
-const STATUS_APP_TO_DB: Record<AdminNutritionPlan["status"], NutritionPlanRow["status"]> = {
+/**
+ * Exporté pour le constructeur v2 : la RPC `save_nutrition_plan_v2` écrit
+ * `nutrition_plans.status` DIRECTEMENT, donc son payload doit porter la
+ * valeur BASE ('actif' | 'ancien' | 'prochain'), pas le libellé applicatif.
+ * Réutiliser cette table évite une seconde traduction divergente.
+ */
+export const STATUS_APP_TO_DB: Record<AdminNutritionPlan["status"], NutritionPlanRow["status"]> = {
   brouillon: "prochain",
   actif: "actif",
   "archivé": "ancien",
@@ -92,12 +99,31 @@ function mapNutritionPlanRow(row: NutritionPlanRow, days: AdminNutritionDay[], a
   return {
     id: row.id,
     name: row.name,
+    // `select("*")` remonte déjà la colonne : on l'expose simplement au
+    // modèle admin pour que l'interface puisse router v1 / v2. Aucune
+    // requête supplémentaire, aucune migration.
+    nutritionModelVersion: row.nutrition_model_version,
+    description: row.description,
     goalType: row.goal_type,
     caloriesPerDay: dailyTarget.calories ?? 0,
     protein: dailyTarget.protein ?? 0,
     carbs: dailyTarget.carbs ?? 0,
     fat: dailyTarget.fat ?? 0,
-    weeklyTargetCalories: row.weekly_target_calories ?? 0,
+    // OBJECTIF HEBDOMADAIRE — la BASE fait autorité.
+    //
+    // Depuis la migration 20260805090000, `save_nutrition_plan_v2` écrit
+    // elle-même `weekly_target_calories = daily_calories * 7`, à la création
+    // comme à la modification, dans la même transaction que le plan, le
+    // profil et les six créneaux. La ligne lue ici porte donc la vraie
+    // valeur.
+    //
+    // Le repli ci-dessous n'est plus la correction : c'est un FILET
+    // DÉFENSIF, pour un plan v2 qui aurait été écrit avant cette migration
+    // (aucun en Production) ou par un chemin qui contournerait la RPC. Les
+    // plans v1 conservent EXACTEMENT leur comportement d'origine (`?? 0`).
+    weeklyTargetCalories:
+      row.weekly_target_calories ??
+      (row.nutrition_model_version === 2 ? (dailyTarget.calories ?? 0) * 7 : 0),
     status: STATUS_DB_TO_APP[row.status] ?? "brouillon",
     coachNotes: row.coach_notes,
     hydrationTip: row.hydration_tip,
@@ -366,11 +392,25 @@ export async function updateNutritionPlanStatus(
 }
 
 /**
- * Assigne/retire un plan alimentaire réel à un élève réel en écrivant
- * directement `nutrition_plans.student_id` — source de vérité unique pour
+ * Assigne/retire un plan alimentaire réel à un élève réel.
+ * `nutrition_plans.student_id` est la source de vérité unique de
  * l'assignation nutrition (PAS la table `assignments`, réservée aux
- * programmes). Assigner = `student_id = studentId` ; retirer =
- * `student_id = null`. Un plan n'a jamais plus d'un élève assigné à la fois.
+ * programmes).
+ *
+ * ⚠️ CETTE FONCTION N'ÉCRIT PLUS DIRECTEMENT. Elle délègue aux RPC
+ * `assign_nutrition_plan` / `unassign_nutrition_plan`
+ * (lib/supabase/nutrition-assignment.ts, migration 20260806090000).
+ *
+ * POURQUOI. L'ancienne version faisait un UPDATE sur le seul plan ciblé :
+ * assigner un plan B à un élève qui avait déjà un plan A laissait les DEUX
+ * lignes avec le même `student_id`, et l'espace élève affichait deux plans
+ * « ACTIF ». La RPC verrouille, valide AVANT d'écrire, retire les autres
+ * plans de l'élève puis assigne le nouveau — dans UNE transaction. Un refus
+ * ne modifie aucune ligne ; il n'existe aucune fenêtre sans plan.
+ *
+ * La signature est INCHANGÉE pour que tous les appelants existants
+ * (`useContentAssignment` et les cinq points d'entrée) soient reroutés sans
+ * modification.
  */
 export async function setNutritionAssignment(
   supabase: TypedSupabaseClient,
@@ -378,10 +418,10 @@ export async function setNutritionAssignment(
   planId: string,
   assigned: boolean,
 ): Promise<boolean> {
-  const { error } = await supabase
-    .from("nutrition_plans")
-    .update({ student_id: assigned ? studentId : null, updated_at: new Date().toISOString() })
-    .eq("id", planId);
+  const résultat = assigned
+    ? await assignNutritionPlan(supabase, planId, studentId)
+    : await unassignNutritionPlan(supabase, planId);
+  const error = résultat.ok ? null : { message: résultat.message, code: résultat.code };
   devWarn("setNutritionAssignment", error);
   if (!error && assigned) {
     const { data: plan } = await supabase.from("nutrition_plans").select("name").eq("id", planId).maybeSingle();

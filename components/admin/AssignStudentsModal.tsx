@@ -3,7 +3,12 @@
 import { useState } from "react";
 import { CheckCircle, UserPlus } from "lucide-react";
 
-import { terminerAssignation, toggleStudentSelection } from "@/lib/assignment-selection";
+import {
+  terminerAssignation,
+  terminerAssignationUnique,
+  toggleSingleSelection,
+  toggleStudentSelection,
+} from "@/lib/assignment-selection";
 import { Modal, PrimaryButton } from "@/components/admin/Modal";
 import { StudentPickerList } from "@/components/admin/StudentPickerList";
 import type { AdminStudent, AssignableContentType } from "@/types";
@@ -85,12 +90,25 @@ export function AssignStudentsModal({
           ) : (
             <div className="flex flex-col gap-4">
               <p className="text-sm leading-relaxed text-muted-foreground">
-                Coche les élèves qui doivent avoir accès à ce contenu.
+                {contentType === "nutrition"
+                  ? "Choisis l'élève qui doit suivre ce plan. Un plan nutritionnel ne peut être suivi que par un seul élève à la fois."
+                  : "Coche les élèves qui doivent avoir accès à ce contenu."}
               </p>
               <StudentPickerList
                 students={students}
                 selectedIds={selection}
-                onToggle={(studentId, checked) => setSelection((prev) => toggleStudentSelection(prev, studentId, checked))}
+                onToggle={(studentId, checked) =>
+                  setSelection((prev) =>
+                    // NUTRITION = CHOIX UNIQUE : `nutrition_plans.student_id`
+                    // est une colonne scalaire, un plan ne peut pas viser
+                    // deux élèves. Laisser cocher plusieurs élèves ferait
+                    // miroiter un état impossible et le dernier écrit
+                    // gagnerait silencieusement.
+                    contentType === "nutrition"
+                      ? toggleSingleSelection(prev, studentId, checked)
+                      : toggleStudentSelection(prev, studentId, checked),
+                  )
+                }
               />
               {saveFailed && (
                 <p className="rounded-panel border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
@@ -106,7 +124,12 @@ export function AssignStudentsModal({
                   // SEUL point d'écriture : le diff sélection ↔ assignations
                   // initiales, TOUTES les écritures attendues avant de
                   // confirmer — un échec laisse la modale ouverte.
-                  void terminerAssignation(assignedStudentIds, selection, (studentId, assigned) =>
+                  //
+                  // NUTRITION : aucune écriture de retrait quand un élève est
+                  // choisi — la RPC déplace l'assignation en une transaction.
+                  const terminerType =
+                    contentType === "nutrition" ? terminerAssignationUnique : terminerAssignation;
+                  void terminerType(assignedStudentIds, selection, (studentId, assigned) =>
                     onSetAssignment(studentId, contentType, contentId, assigned),
                   ).then(({ ok }) => {
                     setSaving(false);

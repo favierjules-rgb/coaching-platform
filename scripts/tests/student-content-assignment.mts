@@ -128,7 +128,38 @@ function creerBase() {
     };
     return chaîne;
   }
-  return { client: { from } as never, table };
+
+  /**
+   * Les RPC d'assignation nutrition (migration 20260806090000). Elles
+   * reproduisent le contrat : validation avant écriture, RETRAIT des autres
+   * plans de l'élève, puis assignation — d'un seul bloc. C'est ce contrat
+   * que `setNutritionAssignment` doit désormais emprunter, au lieu d'écrire
+   * `student_id` elle-même.
+   */
+  const rpcAppels: Array<[string, Record<string, unknown>]> = [];
+  async function rpc(nom: string, args: Record<string, unknown>) {
+    rpcAppels.push([nom, args]);
+    const plans = table("nutrition_plans");
+    const cible = plans.find((p) => p.id === args.p_plan_id);
+    if (!cible) return { data: null, error: { message: `PLAN_NOT_FOUND: ${String(args.p_plan_id)}` } };
+    if (nom === "assign_nutrition_plan") {
+      const élèveId = args.p_student_id as string;
+      const retirés = plans.filter((p) => p.student_id === élèveId && p.id !== cible.id);
+      for (const p of retirés) p.student_id = null;
+      cible.student_id = élèveId;
+      return {
+        data: { plan: { id: cible.id, student_id: élèveId }, unassigned_plan_ids: retirés.map((p) => p.id), assigned: true },
+        error: null,
+      };
+    }
+    if (nom === "unassign_nutrition_plan") {
+      cible.student_id = null;
+      return { data: { plan: { id: cible.id, student_id: null }, unassigned_plan_ids: [], assigned: false }, error: null };
+    }
+    return { data: null, error: { message: "UNKNOWN_RPC" } };
+  }
+
+  return { client: { from, rpc } as never, table, rpcAppels };
 }
 
 /* ─── Jeux de données ─── */
@@ -329,22 +360,44 @@ await (async () => {
 
   /* ─── D. Écritures réelles nutrition / documents (base factice) ─── */
 
-  await test("16. setNutritionAssignment(true) pose student_id sur LE plan visé (source de vérité nutrition_plans)", async () => {
-    const { client, table } = creerBase();
-    table("nutrition_plans").push({ id: "plan-1", name: "Plan A", student_id: null }, { id: "plan-2", name: "Plan B", student_id: null });
+  await test("16. setNutritionAssignment(true) passe par la RPC et laisse UN SEUL plan assigné", async () => {
+    // ⚠️ CE TEST A CHANGÉ DE CONTRAT (fix/nutrition-single-assigned-plan).
+    // Il affirmait auparavant que « l'autre plan n'est pas touché » — c'était
+    // exactement le bug : deux plans finissaient avec le même student_id.
+    // La règle produit est : un élève, au plus un plan assigné.
+    const { client, table, rpcAppels } = creerBase();
+    table("nutrition_plans").push(
+      { id: "plan-1", name: "Plan A", student_id: null },
+      { id: "plan-2", name: "Plan B", student_id: "eleve-1" },
+    );
     const ok = await setNutritionAssignment(client, "eleve-1", "plan-1", true);
     assert.equal(ok, true);
     assert.equal(table("nutrition_plans").find((p) => p.id === "plan-1")!.student_id, "eleve-1");
-    assert.equal(table("nutrition_plans").find((p) => p.id === "plan-2")!.student_id, null, "l'autre plan n'est pas touché");
+    assert.equal(
+      table("nutrition_plans").find((p) => p.id === "plan-2")!.student_id,
+      null,
+      "l'ancien plan de l'élève est retiré dans la même transaction",
+    );
+    assert.equal(
+      table("nutrition_plans").filter((p) => p.student_id === "eleve-1").length,
+      1,
+      "jamais deux plans pour le même élève",
+    );
+    assert.deepEqual(
+      rpcAppels.map(([nom]) => nom),
+      ["assign_nutrition_plan"],
+      "une seule écriture, et c'est la RPC",
+    );
     assert.equal(table("activity_events").length, 1, "activité loggée à l'attribution");
   });
 
-  await test("17. setNutritionAssignment(false) remet student_id à null (retrait), sans log d'activité", async () => {
-    const { client, table } = creerBase();
+  await test("17. setNutritionAssignment(false) passe par la RPC de retrait, sans log d'activité", async () => {
+    const { client, table, rpcAppels } = creerBase();
     table("nutrition_plans").push({ id: "plan-1", name: "Plan A", student_id: "eleve-1" });
     const ok = await setNutritionAssignment(client, "eleve-1", "plan-1", false);
     assert.equal(ok, true);
     assert.equal(table("nutrition_plans")[0].student_id, null);
+    assert.deepEqual(rpcAppels.map(([nom]) => nom), ["unassign_nutrition_plan"]);
     assert.equal(table("activity_events").length, 0, "jamais d'événement au retrait");
   });
 
@@ -374,7 +427,12 @@ await (async () => {
     assert.ok(source.includes("filterAssignableProgramModels(programs)"));
     assert.ok(source.includes("modeles.map((p)"), "la liste rendue est bien la liste filtrée");
     // « Terminer » : diff + attente de TOUTES les écritures + verrou + échec visible.
-    assert.ok(source.includes("terminerAssignation(initial[type], selection[type]"));
+    // Depuis fix/nutrition-single-assigned-plan, le diff dépend du type :
+    // `terminerAssignationUnique` pour la nutrition (aucun retrait émis quand
+    // un plan est choisi — la RPC s'en charge), `terminerAssignation` sinon.
+    assert.ok(source.includes("terminerType(initial[type], selection[type]"));
+    assert.ok(source.includes('type === "nutrition" ? terminerAssignationUnique : terminerAssignation'));
+    assert.ok(source.includes('type === "nutrition" ? toggleSingleSelection : toggleStudentSelection'));
     assert.ok(source.includes("if (saving) return;"));
     assert.ok(source.includes("setSaveFailed(true)"));
     assert.ok(source.includes("L&apos;enregistrement a échoué"));
@@ -395,7 +453,8 @@ await (async () => {
     // Non-régression : la modale « Assigner » de /admin/programmes garde son
     // pattern validé (sélection locale + terminerAssignation) — non cassée.
     const programmes = sansCommentaires(sourceModaleProgrammes);
-    assert.ok(programmes.includes("terminerAssignation(assignedStudentIds, selection"));
+    assert.ok(programmes.includes("terminerType(assignedStudentIds, selection"));
+    assert.ok(programmes.includes('contentType === "nutrition" ? terminerAssignationUnique : terminerAssignation'));
     assert.ok(programmes.includes("toggleStudentSelection(prev, studentId, checked)"));
   });
 })();
