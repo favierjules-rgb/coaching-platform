@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Download } from "lucide-react";
 
 import { CheckboxField } from "@/components/admin/AdminFormFields";
@@ -34,12 +34,42 @@ export function RecipeFixtureImportDialog({
   const [mettreÀJour, setMettreÀJour] = useState(false);
   const [enCours, setEnCours] = useState(false);
   const [rapport, setRapport] = useState<FixtureImportReport | null>(null);
+  const [erreur, setErreur] = useState<string | null>(null);
+
+  // Numéro de l'import en cours. Fermer la modale l'incrémente : un rapport
+  // qui arrive après coup porte un numéro périmé et n'est plus affiché.
+  // Sans cela, rouvrir la modale montrait le rapport d'un import abandonné
+  // à la place de l'écran de confirmation.
+  const tentative = useRef(0);
 
   function fermer() {
+    tentative.current += 1;
     setOuvert(false);
     setRapport(null);
+    setErreur(null);
     setEnCours(false);
     setMettreÀJour(false);
+  }
+
+  function lancer() {
+    const numéro = tentative.current;
+    setEnCours(true);
+    setErreur(null);
+    void onImport(mettreÀJour)
+      .then((r) => {
+        if (tentative.current === numéro) setRapport(r);
+      })
+      .catch(() => {
+        // Un rejet non traité laissait la modale revenir à l'écran de
+        // confirmation SANS le moindre message : l'échec passait pour un
+        // clic sans effet.
+        if (tentative.current === numéro) {
+          setErreur("L'import a échoué. Rien n'a été laissé à moitié écrit — réessaie.");
+        }
+      })
+      .finally(() => {
+        if (tentative.current === numéro) setEnCours(false);
+      });
   }
 
   return (
@@ -101,16 +131,20 @@ export function RecipeFixtureImportDialog({
                 checked={mettreÀJour}
                 onChange={setMettreÀJour}
               />
-              <div className="flex flex-col gap-3">
-                <PrimaryButton
-                  disabled={enCours}
-                  onClick={() => {
-                    setEnCours(true);
-                    void onImport(mettreÀJour)
-                      .then(setRapport)
-                      .finally(() => setEnCours(false));
-                  }}
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                La mise à jour rafraîchit le nom, le créneau et les ingrédients d&apos;origine. Ton
+                statut, ta description et tes étiquettes sont conservés.
+              </p>
+              {erreur && (
+                <p
+                  className="rounded-panel border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+                  role="alert"
                 >
+                  {erreur}
+                </p>
+              )}
+              <div className="flex flex-col gap-3">
+                <PrimaryButton disabled={enCours} onClick={lancer}>
                   {enCours ? "Import en cours…" : "Importer"}
                 </PrimaryButton>
                 <OutlineButton onClick={fermer}>Annuler</OutlineButton>

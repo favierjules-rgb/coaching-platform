@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
@@ -47,9 +47,12 @@ export default function AdminNutritionRecipeDetailPage() {
   const [blockingIssue, setBlockingIssue] = useState<string | null>(null);
 
   // État construit à la demande depuis la recette lue — jamais dans un effet.
-  const formulaire =
-    state ??
-    (recipe && coachId ? createRecipeFormFromRecord(recipe, coachId, recipe.sourceKey) : null);
+  // Mémoïsé pour que l'identité de l'objet reste stable entre deux rendus.
+  const relu = useMemo(
+    () => (recipe && coachId ? createRecipeFormFromRecord(recipe, coachId, recipe.sourceKey) : null),
+    [recipe, coachId],
+  );
+  const formulaire = state ?? relu;
 
   async function écrire(status: RecipeStatus, archiver = false) {
     if (!formulaire) return;

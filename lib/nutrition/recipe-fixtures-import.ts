@@ -87,9 +87,17 @@ function slotDeFixture(recipe: Recipe): RecipeSlotKey | null {
  * client en génère de vrais et conserve la correspondance, sans quoi
  * `linked_to_ingredient_id` ne pourrait pas être traduit.
  *
- * Le statut est TOUJOURS `draft` : une fixture importée est une base de
+ * À la CRÉATION, le statut est `draft` : une fixture importée est une base de
  * travail, pas une recette validée par le coach. L'activation reste une
  * décision humaine, arbitrée par la base.
+ *
+ * À la MISE À JOUR, la charge utile ne mentionne NI statut, NI description,
+ * NI étiquettes. Ces trois-là appartiennent au coach : les renvoyer
+ * remettrait en brouillon une recette qu'il a activée, effacerait le texte
+ * qu'il a écrit et supprimerait les étiquettes qu'il a posées. La RPC ne
+ * touche que ce que la charge utile mentionne (migration 20260809090000) ;
+ * on ne mentionne donc que ce que la fixture définit vraiment : son nom, son
+ * créneau et ses ingrédients.
  */
 export function buildFixturePayload(
   recipe: Recipe,
@@ -100,16 +108,22 @@ export function buildFixturePayload(
   const traduire = (id: string | null | undefined): string | null =>
     id ? (ingredientIds.get(id) ?? null) : null;
 
+  const miseÀJour = recipeId !== null;
+
+  const recette: Record<string, unknown> = {
+    id: recipeId,
+    coach_id: coachId,
+    name: recipe.name,
+    slot_key: slotDeFixture(recipe),
+    source_key: fixtureSourceKey(recipe),
+  };
+  if (!miseÀJour) {
+    recette.description = null;
+    recette.status = "draft";
+  }
+
   return {
-    recipe: {
-      id: recipeId,
-      coach_id: coachId,
-      name: recipe.name,
-      description: null,
-      slot_key: slotDeFixture(recipe),
-      status: "draft",
-      source_key: fixtureSourceKey(recipe),
-    },
+    recipe: recette,
     ingredients: recipe.ingredients.map((ing, index) => ({
       id: ingredientIds.get(ing.id),
       position: index + 1,
@@ -131,8 +145,10 @@ export function buildFixturePayload(
       link_ratio_bp: ing.linkedToIngredientId ? (ing.linkRatioBp ?? null) : null,
     })),
     // Les fixtures ne portent aucune étiquette : le vocabulaire contrôlé est
-    // une décision de coach, pas une donnée du prototype. On n'en invente pas.
-    tags: [],
+    // une décision de coach, pas une donnée du prototype. On n'en invente pas
+    // à la création — et à la mise à jour, la clé est absente, donc les
+    // étiquettes posées par le coach restent en place.
+    ...(miseÀJour ? {} : { tags: [] }),
   };
 }
 

@@ -4,10 +4,11 @@ import { useMemo, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 
 import { Field } from "@/components/admin/AdminFormFields";
+import { NBSP, formatIntegerFr } from "@/lib/nutrition/basis-points";
 import { computeCaloriesFromGrams } from "@/lib/nutrition/macro-targets";
 import { toPreviewRecipe, type RecipeFormState } from "@/lib/nutrition/recipe-form";
 import { describeRecipeFit } from "@/lib/nutrition/recipe-matching";
-import { solveRecipe } from "@/lib/nutrition/recipe-solver";
+import { solveRecipe, type SolvedIngredient } from "@/lib/nutrition/recipe-solver";
 
 /**
  * APERÇU ADAPTATIF — entièrement en LECTURE SEULE.
@@ -25,10 +26,30 @@ import { solveRecipe } from "@/lib/nutrition/recipe-solver";
  * la RPC de sauvegarde.
  */
 
-const NBSP = " ";
+/**
+ * Formatage français, repris de `basis-points` : mêmes séparateurs de
+ * milliers insécables que le constructeur de plans v2, dans la même section
+ * de l'administration. `NBSP` vient de la même source.
+ */
+const arrondir = formatIntegerFr;
 
-function arrondir(valeur: number): string {
-  return String(Math.round(valeur));
+/**
+ * Quantité affichée d'un ingrédient résolu — unité, nombre d'œufs, ou grammes.
+ * Une seule définition, partagée par la vue carte et la vue tableau : deux
+ * copies finiraient par diverger.
+ */
+function quantite(ing: SolvedIngredient): string {
+  if (ing.unitLabel) return ing.unitLabel;
+  if (ing.eggCount !== null) return `${ing.eggCount} œuf${ing.eggCount > 1 ? "s" : ""}`;
+  return `${ing.displayGrams}${NBSP}g`;
+}
+
+/** `null` = saisie inexploitable. Jamais 0 par défaut : ce serait un mensonge. */
+function lireCible(texte: string): number | null {
+  const nettoye = texte.trim().replace(",", ".");
+  if (nettoye === "") return null;
+  const n = Number(nettoye);
+  return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
 export function RecipeAdaptivePreview({ state }: { state: RecipeFormState }) {
@@ -37,13 +58,20 @@ export function RecipeAdaptivePreview({ state }: { state: RecipeFormState }) {
   const [glucides, setGlucides] = useState("80");
   const [lipides, setLipides] = useState("20");
 
-  const cible = useMemo(() => {
-    const lire = (t: string) => {
-      const n = Number(t.trim().replace(",", "."));
-      return Number.isFinite(n) && n >= 0 ? n : 0;
-    };
-    return { proteinGrams: lire(protéines), carbGrams: lire(glucides), fatGrams: lire(lipides) };
-  }, [protéines, glucides, lipides]);
+  // Une saisie négative ou illisible était silencieusement ramenée à 0 : la
+  // simulation annonçait alors « exact » sur une cible de 0 g, sans le moindre
+  // message. On la signale, et on ne résout pas.
+  const cibleValide =
+    lireCible(protéines) !== null && lireCible(glucides) !== null && lireCible(lipides) !== null;
+
+  const cible = useMemo(
+    () => ({
+      proteinGrams: lireCible(protéines) ?? 0,
+      carbGrams: lireCible(glucides) ?? 0,
+      fatGrams: lireCible(lipides) ?? 0,
+    }),
+    [protéines, glucides, lipides],
+  );
 
   const caloriesCible = useMemo(
     () =>
@@ -58,8 +86,11 @@ export function RecipeAdaptivePreview({ state }: { state: RecipeFormState }) {
   // La résolution travaille sur une COPIE construite à la volée. L'état du
   // formulaire n'est jamais touché — `toPreviewRecipe` ne mute rien.
   const solution = useMemo(
-    () => (ouvert && state.ingredients.length > 0 ? solveRecipe(toPreviewRecipe(state), { target: cible }) : null),
-    [ouvert, state, cible],
+    () =>
+      ouvert && cibleValide && state.ingredients.length > 0
+        ? solveRecipe(toPreviewRecipe(state), { target: cible })
+        : null,
+    [ouvert, cibleValide, state, cible],
   );
   const fit = useMemo(() => (solution ? describeRecipeFit(solution) : null), [solution]);
 
@@ -90,11 +121,20 @@ export function RecipeAdaptivePreview({ state }: { state: RecipeFormState }) {
             <Field label="Cible glucides (g)" value={glucides} onChange={setGlucides} type="number" step="1" />
             <Field label="Cible lipides (g)" value={lipides} onChange={setLipides} type="number" step="1" />
           </div>
-          <p className="text-xs text-muted-foreground">
-            Soit {arrondir(caloriesCible)}{NBSP}kcal visées (4{NBSP}/{NBSP}4{NBSP}/{NBSP}9).
-          </p>
+          {cibleValide ? (
+            <p className="text-xs text-muted-foreground">
+              Soit {arrondir(caloriesCible)}{NBSP}kcal visées (4{NBSP}/{NBSP}4{NBSP}/{NBSP}9).
+            </p>
+          ) : (
+            <p
+              className="rounded-panel border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning"
+              role="alert"
+            >
+              Renseigne les trois cibles en grammes, positives ou nulles, pour lancer la simulation.
+            </p>
+          )}
 
-          {!solution && (
+          {cibleValide && !solution && (
             <p className="text-sm text-muted-foreground">
               Ajoute au moins un ingrédient pour voir l&apos;adaptation.
             </p>
@@ -114,8 +154,65 @@ export function RecipeAdaptivePreview({ state }: { state: RecipeFormState }) {
               >
                 {fit.summary}
               </p>
+              {/* Sans cette phrase, « ne peut pas atteindre la cible » et
+                  « cette recette est exploitable », affichés à quelques
+                  centimètres l'un de l'autre, se lisent comme une
+                  contradiction. Ce sont deux questions différentes. */}
+              <p className="-mt-2 text-xs text-muted-foreground">
+                Ce verdict porte sur la cible saisie ci-dessus, pas sur la validité de la recette :
+                une recette parfaitement formée peut ne pas atteindre une cible donnée.
+              </p>
 
-              <div className="overflow-x-auto">
+              {/* Téléphone : une carte par ingrédient — aucun défilement
+                  horizontal, comme le constructeur de plans v2. */}
+              <ul className="flex flex-col gap-3 md:hidden">
+                {solution.ingredients.map((ing) => (
+                  <li
+                    key={ing.ingredientId}
+                    className="rounded-panel border border-border bg-surface-soft/50 px-4 py-3"
+                  >
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <span className="text-sm text-foreground">
+                        {ing.name}
+                        {ing.boundHit && (
+                          <span className="ml-2 rounded-full border border-warning/50 px-2 py-0.5 text-[10px] uppercase tracking-widest text-warning">
+                            {ing.boundHit === "max" ? "plafond" : "plancher"}
+                          </span>
+                        )}
+                      </span>
+                      <span className="text-sm font-bold text-foreground">{quantite(ing)}</span>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      P{NBSP}{arrondir(ing.proteinGrams)}
+                      {" · "}G{NBSP}{arrondir(ing.carbGrams)}
+                      {" · "}L{NBSP}{arrondir(ing.fatGrams)}
+                      {" · "}{arrondir(ing.calories)}{NBSP}kcal
+                    </p>
+                  </li>
+                ))}
+                <li className="rounded-panel border border-border-strong bg-surface-soft px-4 py-3">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <span className="text-sm font-bold uppercase tracking-wide text-foreground">Total</span>
+                    <span className="text-sm font-bold text-foreground">
+                      {arrondir(solution.totals.calories)}{NBSP}kcal
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    P{NBSP}{arrondir(solution.totals.proteinGrams)}
+                    {" · "}G{NBSP}{arrondir(solution.totals.carbGrams)}
+                    {" · "}L{NBSP}{arrondir(solution.totals.fatGrams)}
+                  </p>
+                </li>
+              </ul>
+
+              {/* Tablette et ordinateur : le tableau. `tabIndex` rend la zone
+                  défilante atteignable au clavier (WCAG 2.1.1). */}
+              <div
+                className="hidden overflow-x-auto md:block"
+                tabIndex={0}
+                role="region"
+                aria-label="Détail des quantités adaptées"
+              >
                 <table className="w-full min-w-[520px] text-left text-sm">
                   <thead>
                     <tr className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
@@ -138,12 +235,7 @@ export function RecipeAdaptivePreview({ state }: { state: RecipeFormState }) {
                             </span>
                           )}
                         </td>
-                        <td className="py-2 pr-3 text-foreground">
-                          {ing.unitLabel ??
-                            (ing.eggCount !== null
-                              ? `${ing.eggCount} œuf${ing.eggCount > 1 ? "s" : ""}`
-                              : `${ing.displayGrams}${NBSP}g`)}
-                        </td>
+                        <td className="py-2 pr-3 text-foreground">{quantite(ing)}</td>
                         <td className="py-2 pr-3 text-muted-foreground">{arrondir(ing.proteinGrams)}</td>
                         <td className="py-2 pr-3 text-muted-foreground">{arrondir(ing.carbGrams)}</td>
                         <td className="py-2 pr-3 text-muted-foreground">{arrondir(ing.fatGrams)}</td>

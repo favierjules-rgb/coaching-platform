@@ -19,24 +19,29 @@ import type { FixtureImportReport } from "@/lib/nutrition/recipe-fixtures-import
  * L'IMPORT N'EST JAMAIS AUTOMATIQUE : il part uniquement du bouton, après
  * confirmation dans la modale. Aucun `useEffect` de cette page ne l'appelle.
  *
- * La colonne « exploitable / à compléter » est calculée localement à partir
- * des mêmes règles que la base ; l'arbitre de l'ACTIVATION reste
- * `nutrition_recipe_blocking_issue`, appelée dans la transaction de
- * sauvegarde.
+ * La colonne « exploitable / à compléter » est un verdict LOCAL, miroir des
+ * règles de `nutrition_recipe_blocking_issue` — pas sa réponse. L'arbitre de
+ * l'ACTIVATION reste la base, appelée dans la transaction de sauvegarde.
+ * Toute règle ajoutée à `nutrition_recipe_blocking_issue` doit donc avoir son
+ * équivalent dans `validateRecipeForm`, sinon l'écran annoncerait une recette
+ * exploitable que la base refuserait d'activer.
  */
 export default function AdminNutritionRecipesPage() {
   const { recipes, invalid, loading, error, refetch } = useNutritionRecipes();
   const { coachId } = useCurrentCoachId();
   const [importError, setImportError] = useState<string | null>(null);
 
+  // `coachId` n'intervient pas dans la validation, mais lui passer
+  // l'identifiant de la RECETTE fabriquait un état de formulaire faux : le
+  // jour où une règle s'appuiera sur le coach, le verdict serait erroné.
   const blockingByRecipe = useMemo(() => {
     const map: Record<string, string | null> = {};
     for (const r of recipes) {
-      const issues = validateRecipeForm(createRecipeFormFromRecord(r, r.recipe.id, r.sourceKey));
+      const issues = validateRecipeForm(createRecipeFormFromRecord(r, coachId ?? "", r.sourceKey));
       map[r.recipe.id] = issues.length > 0 ? issues[0].code : null;
     }
     return map;
-  }, [recipes]);
+  }, [recipes, coachId]);
 
   async function importer(updateExisting: boolean): Promise<FixtureImportReport> {
     const supabase = createSupabaseBrowserClient();

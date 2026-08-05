@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
@@ -37,7 +37,14 @@ export default function AdminNutritionRecipeNewPage() {
 
   // État construit à la DEMANDE, jamais dans un effet : pas de re-rendu
   // inutile, et aucune écriture au chargement.
-  const formulaire = state ?? (coachId ? createBlankRecipeForm(coachId) : null);
+  //
+  // MÉMOÏSÉ : `createBlankRecipeForm` appelle `crypto.randomUUID()` pour son
+  // ingrédient vide. Sans `useMemo`, chaque rendu — un clic sur « Enregistrer »
+  // suffit — fabriquait un NOUVEL identifiant, la clé React de la ligne
+  // changeait et le bloc était remonté pendant que la charge utile déjà
+  // partie portait l'ancien.
+  const vierge = useMemo(() => (coachId ? createBlankRecipeForm(coachId) : null), [coachId]);
+  const formulaire = state ?? vierge;
 
   async function enregistrer(status: RecipeStatus) {
     if (!formulaire) return;

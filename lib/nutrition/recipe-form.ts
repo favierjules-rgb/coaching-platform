@@ -130,7 +130,10 @@ export function createRecipeFormFromRecord(
     coachId,
     sourceKey,
     name: record.recipe.name,
-    description: "",
+    // La description est une donnée du coach : elle est relue telle quelle.
+    // La perdre ici la ferait écraser en base au premier enregistrement,
+    // puisque `toRecipeSavePayload` réémet toujours ce champ.
+    description: record.description ?? "",
     slotKey: record.slotKey,
     status: record.status,
     ingredients: record.recipe.ingredients.map((i) => ({
@@ -294,6 +297,8 @@ export type RecipeFormIssueCode =
   | "bounds_incoherent"
   | "scalable_without_reference"
   | "unit_without_name"
+  | "unit_scalable_incoherent"
+  | "egg_fields_incoherent"
   | "link_ratio_invalid"
   | "link_unknown"
   | "link_cycle";
@@ -386,6 +391,39 @@ export function validateRecipeForm(state: RecipeFormState): readonly RecipeFormI
       });
     }
 
+    // Miroir de `unit_scalable_incoherent`. Sans ces deux règles, l'écran
+    // annonçait « exploitable » sur une recette que la base refuse d'activer.
+    if (ing.unitScalable) {
+      if (référence !== null && !Number.isNaN(référence) && référence <= 0) {
+        issues.push({
+          code: "unit_scalable_incoherent", ingredientId: ing.id, field: "referenceGrams",
+          message: "Un ingrédient en mode unité a besoin du poids d'une unité, supérieur à 0.",
+        });
+      }
+      const maxUnités = lireNombre(ing.maxUnits);
+      if (
+        maxUnités !== null &&
+        (Number.isNaN(maxUnités) || maxUnités < 1 || !Number.isInteger(maxUnités))
+      ) {
+        issues.push({
+          code: "unit_scalable_incoherent", ingredientId: ing.id, field: "maxUnits",
+          message: "Le nombre maximal d'unités doit être un entier supérieur ou égal à 1.",
+        });
+      }
+    }
+
+    // Miroir de `egg_fields_incoherent`. Un poids d'œuf nul produisait une
+    // division par zéro dans l'aperçu avant que la base ne refuse la recette.
+    if (ing.egg) {
+      const poidsOeuf = lireNombre(ing.eggGrams);
+      if (poidsOeuf !== null && (Number.isNaN(poidsOeuf) || poidsOeuf <= 0)) {
+        issues.push({
+          code: "egg_fields_incoherent", ingredientId: ing.id, field: "eggGrams",
+          message: "Le poids d'un œuf doit être strictement supérieur à 0.",
+        });
+      }
+    }
+
     if (ing.linkedToIngredientId !== null) {
       if (!ids.has(ing.linkedToIngredientId)) {
         issues.push({
@@ -435,6 +473,12 @@ function versNombre(texte: string, défaut: number | null = null): number | null
   const n = lireNombre(texte);
   if (n === null || Number.isNaN(n)) return défaut;
   return n;
+}
+
+/** Poids d'un œuf utilisable par le solveur, ou `null` — jamais 0. */
+function poidsOeufValide(texte: string): number | null {
+  const n = versNombre(texte);
+  return n !== null && n > 0 ? n : null;
 }
 
 /**
@@ -505,7 +549,11 @@ export function toPreviewRecipe(state: RecipeFormState): Recipe {
     unitName: ing.unitScalable ? (ing.unitName.trim() === "" ? null : ing.unitName.trim()) : null,
     fixedLabel: ing.fixedLabel.trim() === "" ? null : ing.fixedLabel.trim(),
     egg: ing.egg,
-    eggGrams: ing.egg ? versNombre(ing.eggGrams) : null,
+    // Un poids d'œuf nul ou négatif est une saisie en cours, pas une donnée :
+    // le passer au solveur produirait une division par zéro visible à l'écran
+    // (Infinity, NaN). On retombe sur le poids par défaut du solveur, et la
+    // validation signale la saisie près du champ.
+    eggGrams: ing.egg ? poidsOeufValide(ing.eggGrams) : null,
     linkedToIngredientId: ing.linkedToIngredientId,
     linkRatioBp: ing.linkedToIngredientId ? versNombre(ing.linkRatioBp) : null,
   }));

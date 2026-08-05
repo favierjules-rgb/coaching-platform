@@ -48,7 +48,7 @@ export interface CatalogFilters {
   readonly tagKind: TagFilter;
 }
 
-/** Nombre d'ingrédients et étiquettes — la colonne « exploitable » vient de la base. */
+/** Nombre d'ingrédients et étiquettes affichés pour une ligne du catalogue. */
 export interface CatalogRow {
   readonly record: RecipeWithTags;
   readonly ingredientCount: number;
@@ -119,7 +119,12 @@ export function RecipeCatalog({
   invalid,
   loading,
   error,
-  /** `null` = exploitable, sinon le code rendu par la base, par identifiant. */
+  /**
+   * `null` = exploitable, sinon un code de blocage, par identifiant de
+   * recette. Verdict LOCAL, miroir des règles de la base — jamais sa réponse :
+   * l'arbitre de l'activation reste `nutrition_recipe_blocking_issue`, dans la
+   * transaction de sauvegarde.
+   */
   blockingByRecipe,
 }: {
   recipes: readonly RecipeWithTags[];

@@ -10,6 +10,7 @@ import {
   type RecipeFormState,
 } from "@/lib/nutrition/recipe-form";
 import { RECIPE_ROLE_HINTS_FR, RECIPE_ROLE_LABELS_FR } from "@/lib/nutrition/recipe-labels";
+import { RECIPE_INGREDIENT_ROLES } from "@/lib/nutrition/recipe-rows";
 import type { RecipeIngredientRole } from "@/lib/nutrition/recipe-types";
 
 /**
@@ -23,12 +24,12 @@ import type { RecipeIngredientRole } from "@/lib/nutrition/recipe-types";
  * les ingrédients qui en dépendent. Le retrait rompt alors leurs liaisons
  * explicitement — jamais de parent pendant.
  *
- * Les rôles viennent de `recipe-types.ts` (PR A) : aucune liste réécrite ici.
+ * Les rôles viennent de `RECIPE_INGREDIENT_ROLES` (PR A) : aucune liste
+ * réécrite ici. Ajouter un rôle en PR A l'ajoute automatiquement au menu.
  */
 
-const ROLE_OPTIONS: { value: RecipeIngredientRole; label: string }[] = (
-  ["protein", "carbohydrate", "fat", "fixed", "free"] as const
-).map((role) => ({ value: role, label: RECIPE_ROLE_LABELS_FR[role] }));
+const ROLE_OPTIONS: { value: RecipeIngredientRole; label: string }[] =
+  RECIPE_INGREDIENT_ROLES.map((role) => ({ value: role, label: RECIPE_ROLE_LABELS_FR[role] }));
 
 function ErreurChamp({ issues, field }: { issues: readonly RecipeFormIssue[]; field: string }) {
   const erreur = issues.find((i) => i.field === field);
@@ -240,6 +241,7 @@ export function RecipeIngredientsPanel({
                       step="1"
                       placeholder="2"
                     />
+                    <ErreurChamp issues={erreurs} field="maxUnits" />
                   </>
                 )}
               </div>
@@ -250,14 +252,17 @@ export function RecipeIngredientsPanel({
                   onChange={(checked) => onChange(ing.id, { egg: checked })}
                 />
                 {ing.egg && (
-                  <Field
-                    label="Poids d'un œuf (g)"
-                    value={ing.eggGrams}
-                    onChange={(v) => onChange(ing.id, { eggGrams: v })}
-                    type="number"
-                    step="1"
-                    placeholder="50"
-                  />
+                  <>
+                    <Field
+                      label="Poids d'un œuf (g)"
+                      value={ing.eggGrams}
+                      onChange={(v) => onChange(ing.id, { eggGrams: v })}
+                      type="number"
+                      step="1"
+                      placeholder="50"
+                    />
+                    <ErreurChamp issues={erreurs} field="eggGrams" />
+                  </>
                 )}
                 <Field
                   label="Libellé fixe (facultatif)"

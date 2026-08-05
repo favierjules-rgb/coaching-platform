@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
@@ -9,6 +9,38 @@ import {
   type InvalidRecipe,
 } from "@/lib/supabase/nutrition-recipes";
 import { RECIPE_STATUSES, type RecipeWithTags } from "@/lib/nutrition/recipe-rows";
+
+/**
+ * Lecture du catalogue — sans le moindre état React : cette fonction rend le
+ * résultat, elle n'écrit rien. Le montage initial ET `refetch` l'appellent,
+ * ce qui supprime les deux copies divergentes de la version précédente (l'une
+ * réinitialisait `invalid`, l'autre non ; l'une repassait par `loading`,
+ * l'autre non).
+ *
+ * `null` = échec de lecture.
+ */
+async function lireCatalogue(): Promise<{
+  recipes: readonly RecipeWithTags[];
+  invalid: readonly InvalidRecipe[];
+} | null> {
+  const supabase = createSupabaseBrowserClient();
+  if (!supabase) return { recipes: [], invalid: [] };
+  try {
+    return await readNutritionRecipes(supabase, { statuses: RECIPE_STATUSES });
+  } catch {
+    return null;
+  }
+}
+
+/** Lecture d'une recette. Sans identifiant ou sans client : rien à lire. */
+async function lireRecette(
+  recipeId: string | null,
+): Promise<{ recipe: RecipeWithTags | null; invalid: InvalidRecipe | null }> {
+  if (!recipeId) return { recipe: null, invalid: null };
+  const supabase = createSupabaseBrowserClient();
+  if (!supabase) return { recipe: null, invalid: null };
+  return readNutritionRecipe(supabase, recipeId);
+}
 
 /**
  * Catalogue des recettes pour l'administration.
@@ -22,6 +54,11 @@ import { RECIPE_STATUSES, type RecipeWithTags } from "@/lib/nutrition/recipe-row
  *
  * `invalid` n'est jamais masqué. Une recette illisible apparaît dans le
  * catalogue avec sa raison, plutôt que de disparaître sans explication.
+ *
+ * `loading` NE REPASSE JAMAIS À VRAI. Il décrit le PREMIER chargement, rien
+ * d'autre. Un rechargement après sauvegarde ne doit pas démonter le formulaire
+ * en cours d'édition — sinon l'aperçu se referme et la cible saisie est perdue
+ * à chaque enregistrement.
  */
 export function useNutritionRecipes() {
   const [loading, setLoading] = useState(true);
@@ -29,114 +66,83 @@ export function useNutritionRecipes() {
   const [recipes, setRecipes] = useState<RecipeWithTags[]>([]);
   const [invalid, setInvalid] = useState<InvalidRecipe[]>([]);
 
-  const charger = useCallback(async () => {
-    const supabase = createSupabaseBrowserClient();
-    if (!supabase) {
-      setRecipes([]);
-      setInvalid([]);
+  // Numéro de la requête en cours : une réponse arrivée dans le désordre est
+  // ignorée, quelle qu'en soit la cause.
+  const requête = useRef(0);
+
+  const appliquer = useCallback(
+    (numéro: number, résultat: Awaited<ReturnType<typeof lireCatalogue>>) => {
+      if (requête.current !== numéro) return;
+      if (résultat === null) {
+        setError("Le catalogue n'a pas pu être chargé. Vérifie ta connexion puis réessaie.");
+      } else {
+        setRecipes([...résultat.recipes]);
+        setInvalid([...résultat.invalid]);
+        setError(null);
+      }
       setLoading(false);
-      return;
-    }
-    try {
-      const résultat = await readNutritionRecipes(supabase, { statuses: RECIPE_STATUSES });
-      setRecipes([...résultat.recipes]);
-      setInvalid([...résultat.invalid]);
-      setError(null);
-    } catch {
-      setError("Le catalogue n'a pas pu être chargé. Vérifie ta connexion puis réessaie.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    },
+    [],
+  );
 
   useEffect(() => {
-    let annule = false;
-    async function load() {
-      const supabase = createSupabaseBrowserClient();
-      if (!supabase) {
-        if (!annule) {
-          setRecipes([]);
-          setLoading(false);
-        }
-        return;
-      }
-      try {
-        const résultat = await readNutritionRecipes(supabase, { statuses: RECIPE_STATUSES });
-        if (!annule) {
-          setRecipes([...résultat.recipes]);
-          setInvalid([...résultat.invalid]);
-          setError(null);
-        }
-      } catch {
-        if (!annule) setError("Le catalogue n'a pas pu être chargé. Vérifie ta connexion puis réessaie.");
-      } finally {
-        if (!annule) setLoading(false);
-      }
-    }
-    load();
+    let annulé = false;
+    const numéro = ++requête.current;
+    void lireCatalogue().then((résultat) => {
+      if (!annulé) appliquer(numéro, résultat);
+    });
     return () => {
-      annule = true;
+      annulé = true;
     };
-  }, []);
+  }, [appliquer]);
 
-  return { loading, error, recipes, invalid, refetch: charger };
+  const refetch = useCallback(async () => {
+    const numéro = ++requête.current;
+    appliquer(numéro, await lireCatalogue());
+  }, [appliquer]);
+
+  return { loading, error, recipes, invalid, refetch };
 }
 
-/** Une recette précise, avec ses ingrédients et ses étiquettes. */
+/**
+ * Une recette précise, avec ses ingrédients et ses étiquettes.
+ *
+ * Mêmes garanties que ci-dessus : une seule lecture partagée, et un `refetch`
+ * qui ne repasse pas par l'état « chargement », donc qui ne démonte pas le
+ * formulaire en cours d'édition.
+ */
 export function useNutritionRecipe(recipeId: string | null) {
   const [loading, setLoading] = useState(recipeId !== null);
   const [recipe, setRecipe] = useState<RecipeWithTags | null>(null);
   const [invalid, setInvalid] = useState<InvalidRecipe | null>(null);
 
-  const charger = useCallback(async () => {
-    if (!recipeId) {
-      setRecipe(null);
+  const requête = useRef(0);
+
+  const appliquer = useCallback(
+    (numéro: number, résultat: Awaited<ReturnType<typeof lireRecette>>) => {
+      if (requête.current !== numéro) return;
+      setRecipe(résultat.recipe);
+      setInvalid(résultat.invalid);
       setLoading(false);
-      return;
-    }
-    const supabase = createSupabaseBrowserClient();
-    if (!supabase) {
-      setRecipe(null);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    const résultat = await readNutritionRecipe(supabase, recipeId);
-    setRecipe(résultat.recipe);
-    setInvalid(résultat.invalid);
-    setLoading(false);
-  }, [recipeId]);
+    },
+    [],
+  );
 
   useEffect(() => {
-    let annule = false;
-    async function load() {
-      if (!recipeId) {
-        if (!annule) {
-          setRecipe(null);
-          setLoading(false);
-        }
-        return;
-      }
-      const supabase = createSupabaseBrowserClient();
-      if (!supabase) {
-        if (!annule) {
-          setRecipe(null);
-          setLoading(false);
-        }
-        return;
-      }
-      const résultat = await readNutritionRecipe(supabase, recipeId);
-      if (!annule) {
-        setRecipe(résultat.recipe);
-        setInvalid(résultat.invalid);
-        setLoading(false);
-      }
-    }
-    load();
+    let annulé = false;
+    const numéro = ++requête.current;
+    void lireRecette(recipeId).then((résultat) => {
+      if (!annulé) appliquer(numéro, résultat);
+    });
     return () => {
-      annule = true;
+      annulé = true;
     };
-  }, [recipeId]);
+  }, [recipeId, appliquer]);
 
-  return { loading, recipe, invalid, refetch: charger };
+  const refetch = useCallback(async () => {
+    const numéro = ++requête.current;
+    appliquer(numéro, await lireRecette(recipeId));
+  }, [recipeId, appliquer]);
+
+  return { loading, recipe, invalid, refetch };
 }

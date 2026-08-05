@@ -217,11 +217,28 @@ export async function importNutritionRecipeFixtures(
 
   // UNE requête pour connaître ce qui est déjà importé — pas une par fixture.
   const clés = RECIPE_FIXTURES.map(fixtureSourceKey);
-  const { data: existantes } = await supabase
+  const { data: existantes, error: erreurLecture } = await supabase
     .from("nutrition_recipes")
     .select("id, source_key")
     .eq("coach_id", coachId)
     .in("source_key", clés);
+
+  // Sans cette lecture, on ne SAIT PAS ce qui est déjà importé. Continuer
+  // traiterait chaque fixture déjà présente comme une création : l'index
+  // unique partiel les rejetterait une par une, et le rapport annoncerait
+  // « 11 en échec » là où la réalité est « je n'ai pas pu vérifier ». On
+  // s'arrête donc, avec la vraie cause.
+  if (erreurLecture) {
+    return summarizeFixtureImport(
+      RECIPE_FIXTURES.map((fixture) => ({
+        sourceKey: fixtureSourceKey(fixture),
+        name: fixture.name,
+        outcome: "failed" as const,
+        message:
+          "Impossible de vérifier les recettes déjà importées : rien n'a été écrit. Réessaie.",
+      })),
+    );
+  }
 
   const parClé = new Map<string, string>();
   for (const ligne of (existantes ?? []) as { id: string; source_key: string | null }[]) {

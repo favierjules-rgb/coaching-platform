@@ -48,7 +48,8 @@
     "20260805090000_nutrition_plan_v2_weekly_target.sql",
     "20260806090000_assign_nutrition_plan_unique.sql",
     "20260807090000_nutrition_recipes.sql",
-    "20260808090000_save_nutrition_recipe.sql"
+    "20260808090000_save_nutrition_recipe.sql",
+    "20260809090000_save_nutrition_recipe_partial_payload.sql"
   ],
   "garanties_de_contenu": {
     "insert_de_donnees_metier": 0,

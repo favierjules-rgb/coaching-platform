@@ -69,16 +69,37 @@ export function RecipeBuilder({
   const [retraitDemandé, setRetraitDemandé] = useState<string | null>(null);
   const [archivageDemandé, setArchivageDemandé] = useState(false);
 
+  // Une recette VIERGE affichait sept messages d'erreur avant la première
+  // frappe : accueil hostile, et sept `role="alert"` annoncés en rafale par un
+  // lecteur d'écran. On attend donc une interaction — ou une tentative
+  // d'enregistrement. Sur une recette EXISTANTE, au contraire, les points à
+  // compléter sont une information utile dès l'ouverture.
+  const [interagi, setInteragi] = useState(false);
+
   const issues = useMemo(() => validateRecipeForm(state), [state]);
   const bloquant = issues.length > 0;
+  const afficherValidation = interagi || state.recipeId !== null;
+  const issuesAffichées = afficherValidation ? issues : [];
   const dépendants = retraitDemandé ? dependentsOf(state, retraitDemandé) : [];
+
+  // Toute modification vient d'ici : l'état « le coach a commencé » est donc
+  // exact, sans dépendre du focus ni d'un `onBlur` par champ.
+  function modifier(next: RecipeFormState) {
+    setInteragi(true);
+    onChange(next);
+  }
+
+  function enregistrer(status: RecipeStatus) {
+    setInteragi(true);
+    void onSave(status);
+  }
 
   function retirer(id: string) {
     if (dependentsOf(state, id).length > 0) {
       setRetraitDemandé(id);
       return;
     }
-    onChange(removeIngredient(state, id));
+    modifier(removeIngredient(state, id));
   }
 
   return (
@@ -90,11 +111,11 @@ export function RecipeBuilder({
             <Field
               label="Nom de la recette"
               value={state.name}
-              onChange={(v) => onChange({ ...state, name: v })}
+              onChange={(v) => modifier({ ...state, name: v })}
               placeholder="Bol riz poulet curry"
               required
             />
-            {issues.some((i) => i.code === "name_empty") && (
+            {issuesAffichées.some((i) => i.code === "name_empty") && (
               <p className="mt-1 text-xs text-destructive" role="alert">
                 Donne un nom à la recette.
               </p>
@@ -103,7 +124,7 @@ export function RecipeBuilder({
           <TextareaField
             label="Description"
             value={state.description}
-            onChange={(v) => onChange({ ...state, description: v })}
+            onChange={(v) => modifier({ ...state, description: v })}
             rows={2}
             placeholder="Notes de préparation, remarques pour l'élève…"
           />
@@ -111,7 +132,7 @@ export function RecipeBuilder({
             <SelectField
               label="Créneau conseillé"
               value={state.slotKey ?? ""}
-              onChange={(v) => onChange({ ...state, slotKey: v === "" ? null : (v as RecipeSlotKey) })}
+              onChange={(v) => modifier({ ...state, slotKey: v === "" ? null : (v as RecipeSlotKey) })}
               options={SLOT_OPTIONS}
             />
             <div>
@@ -131,13 +152,13 @@ export function RecipeBuilder({
         <h2 className="mb-4 font-heading text-base font-bold uppercase text-foreground">Ingrédients</h2>
         <RecipeIngredientsPanel
           state={state}
-          issues={issues}
-          onAdd={() => onChange(addIngredient(state))}
-          onDuplicate={(id) => onChange(duplicateIngredient(state, id))}
+          issues={issuesAffichées}
+          onAdd={() => modifier(addIngredient(state))}
+          onDuplicate={(id) => modifier(duplicateIngredient(state, id))}
           onRemove={retirer}
-          onMove={(id, direction) => onChange(moveIngredient(state, id, direction))}
+          onMove={(id, direction) => modifier(moveIngredient(state, id, direction))}
           onChange={(id, patch: Partial<RecipeFormIngredient>) =>
-            onChange(updateIngredient(state, id, patch))
+            modifier(updateIngredient(state, id, patch))
           }
         />
       </section>
@@ -147,14 +168,28 @@ export function RecipeBuilder({
         <RecipeTagsPanel
           state={state}
           onToggle={(kind: RecipeTagKind, value: string, checked: boolean) =>
-            onChange(toggleTag(state, kind, value, checked))
+            modifier(toggleTag(state, kind, value, checked))
           }
         />
       </section>
 
       <RecipeAdaptivePreview state={state} />
 
-      <RecipeValidationSummary issues={issues} blockingIssue={blockingIssue} saveError={saveError} />
+      {/* Sur un formulaire VIERGE, on ne dit ni « exploitable » (ce serait
+          faux) ni « 7 points à compléter » (ce serait hostile avant la
+          première frappe). On indique quoi faire. */}
+      {afficherValidation ? (
+        <RecipeValidationSummary
+          issues={issuesAffichées}
+          blockingIssue={blockingIssue}
+          saveError={saveError}
+        />
+      ) : (
+        <p className="rounded-panel border border-border bg-surface-soft/50 px-4 py-3 text-sm text-muted-foreground">
+          Renseigne le nom de la recette, puis ses ingrédients et leurs valeurs pour 100 g. Les
+          points à compléter s&apos;afficheront au fil de la saisie.
+        </p>
+      )}
 
       {/* Boutons natifs plutôt que PrimaryButton/OutlineButton : ces derniers
           sont pleine largeur et sans état désactivé — ils conviennent aux
@@ -164,7 +199,7 @@ export function RecipeBuilder({
         <button
           type="button"
           disabled={saving}
-          onClick={() => onSave("draft")}
+          onClick={() => enregistrer("draft")}
           className="pressable flex min-h-[44px] items-center gap-2 rounded-control border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         >
           <Save size={14} />
@@ -173,7 +208,7 @@ export function RecipeBuilder({
         <button
           type="button"
           disabled={saving || bloquant}
-          onClick={() => onSave("active")}
+          onClick={() => enregistrer("active")}
           title={bloquant ? "Complète la recette avant de l'activer." : undefined}
           className="pressable flex min-h-[44px] items-center gap-2 rounded-control border border-border px-4 py-2 text-xs font-bold uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         >
@@ -209,7 +244,7 @@ export function RecipeBuilder({
           <div className="mt-6 flex flex-wrap gap-3">
             <PrimaryButton
               onClick={() => {
-                onChange(removeIngredient(state, retraitDemandé));
+                modifier(removeIngredient(state, retraitDemandé));
                 setRetraitDemandé(null);
               }}
             >

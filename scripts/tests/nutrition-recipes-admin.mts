@@ -23,6 +23,7 @@ import { computeCaloriesFromGrams } from "../../lib/nutrition/macro-targets";
 import { solveRecipe } from "../../lib/nutrition/recipe-solver";
 import { describeRecipeFit } from "../../lib/nutrition/recipe-matching";
 import {
+  RECIPE_INGREDIENT_ROLES,
   RECIPE_TAG_KINDS,
   RECIPE_TAG_VOCABULARY,
   type RecipeWithTags,
@@ -64,11 +65,13 @@ import {
 } from "../../lib/nutrition/recipe-fixtures-import";
 import {
   describeRecipeWriteError,
+  importNutritionRecipeFixtures,
   parseRecipeWriteResult,
 } from "../../lib/supabase/nutrition-recipes-write";
 import { RecipeCatalog, filterCatalog, formatUpdatedAt } from "../../components/admin/RecipeCatalog";
 import { RecipeTagsPanel } from "../../components/admin/RecipeTagsPanel";
 import { RecipeAdaptivePreview } from "../../components/admin/RecipeAdaptivePreview";
+import { RecipeBuilder } from "../../components/admin/RecipeBuilder";
 import { RECETTE_SIMPLE_PGL, RECETTE_MAXIMUM } from "./fixtures/nutrition-recipes";
 
 let réussis = 0;
@@ -98,6 +101,11 @@ function sansCommentairesTs(s: string): string {
 }
 
 const MIGRATION = lire("../../supabase/migrations/20260808090000_save_nutrition_recipe.sql");
+const MIGRATION_B1 = lire(
+  "../../supabase/migrations/20260809090000_save_nutrition_recipe_partial_payload.sql",
+);
+const HOOKS_RECETTES = lire("../../hooks/useNutritionRecipes.ts");
+const PANNEAU_INGRÉDIENTS = lire("../../components/admin/RecipeIngredientsPanel.tsx");
 const CHECKLIST = lire("../../supabase/tests/nutrition_recipes_admin_checklist.sql");
 const COUCHE_ÉCRITURE = lire("../../lib/supabase/nutrition-recipes-write.ts");
 const COUCHE_LECTURE = lire("../../lib/supabase/nutrition-recipes.ts");
@@ -553,8 +561,14 @@ await test("29. un BROUILLON incomplet est enregistrable", () => {
   s = { ...s, name: "En cours" };
   const payload = toRecipeSavePayload(s, "draft") as { recipe: { status: string } };
   assert.equal(payload.recipe.status, "draft");
-  // Le bouton brouillon n'est jamais désactivé par la validation.
-  assert.ok(BUILDER.includes('disabled={saving}\n          onClick={() => onSave("draft")}'));
+  // Le bouton brouillon n'est jamais désactivé par la validation : il ne
+  // dépend QUE de `saving`, contrairement au bouton d'activation qui, lui,
+  // ajoute `|| bloquant`.
+  const boutons = BUILDER.split("<button");
+  const brouillon = boutons.find((b) => b.includes('enregistrer("draft")'));
+  assert.ok(brouillon, "le bouton brouillon existe");
+  assert.ok(brouillon!.includes("disabled={saving}"), "désactivé uniquement pendant l'écriture");
+  assert.ok(!brouillon!.includes("bloquant"), "la validation ne bloque JAMAIS le brouillon");
 });
 
 await test("30. l'ACTIVATION est bloquée localement, et arbitrée par la base", () => {
@@ -676,15 +690,59 @@ await test("38. le rapport distingue importées, mises à jour, ignorées et en 
 });
 
 await test("39. l'import est MANUEL : jamais déclenché par un chargement de page", () => {
-  for (const [nom, source] of Object.entries({ PAGE_LISTE, DIALOGUE_IMPORT })) {
+  // Les trois fichiers du chemin d'import, HOOKS COMPRIS : la version
+  // précédente ne scannait que la page et le dialogue, qui ne contiennent
+  // aucun useEffect — la boucle tournait donc à vide et le test ne pouvait
+  // pas échouer. Les seuls useEffect réels vivent dans les hooks.
+  const sources = { PAGE_LISTE, DIALOGUE_IMPORT, HOOKS_RECETTES };
+  let effetsInspectés = 0;
+
+  for (const [nom, source] of Object.entries(sources)) {
     const code = sansCommentairesTs(source);
-    // Aucun useEffect n'appelle l'import.
-    const effets = [...code.matchAll(/useEffect\([\s\S]*?\)\s*;/g)].map((m) => m[0]);
-    for (const effet of effets) {
+    // Découpage par accolades appariées : un `useEffect` contenant lui-même
+    // des `);` n'est plus tronqué comme le faisait la version non gourmande.
+    for (let i = code.indexOf("useEffect("); i !== -1; i = code.indexOf("useEffect(", i + 1)) {
+      let profondeur = 0;
+      let fin = i;
+      for (let j = code.indexOf("(", i); j < code.length; j += 1) {
+        if (code[j] === "(") profondeur += 1;
+        else if (code[j] === ")") {
+          profondeur -= 1;
+          if (profondeur === 0) {
+            fin = j;
+            break;
+          }
+        }
+      }
+      const effet = code.slice(i, fin + 1);
+      effetsInspectés += 1;
       assert.ok(!/import/i.test(effet), `${nom} : un useEffect déclenche l'import`);
     }
-    assert.ok(!/importNutritionRecipeFixtures\(\s*\)/.test(code), `${nom} : appel sans intention`);
+    // Aucun appel, quelle que soit sa forme — la version précédente exigeait
+    // une parenthèse VIDE, que l'appel réel (trois arguments) ne peut pas
+    // avoir : elle ne détectait donc rien.
+    if (nom !== "PAGE_LISTE") {
+      assert.ok(
+        !/importNutritionRecipeFixtures\s*\(/.test(code),
+        `${nom} : aucun appel d'import ne doit exister ici`,
+      );
+    }
   }
+
+  // Garde-fou : si ce compteur retombe à zéro, c'est que le test a cessé de
+  // regarder quoi que ce soit — exactement le défaut corrigé ici.
+  assert.ok(effetsInspectés >= 2, `au moins deux useEffect inspectés (vu : ${effetsInspectés})`);
+
+  // Dans la page, l'appel existe — mais UNIQUEMENT dans `importer()`, la
+  // fonction passée au bouton, jamais dans un effet.
+  const pageListe = sansCommentairesTs(PAGE_LISTE);
+  const appels = [...pageListe.matchAll(/importNutritionRecipeFixtures\s*\(/g)];
+  assert.equal(appels.length, 1, "un seul appel dans la page");
+  const avant = pageListe.slice(0, appels[0].index ?? 0);
+  assert.ok(
+    avant.lastIndexOf("async function importer") > avant.lastIndexOf("useEffect("),
+    "l'appel est dans importer(), pas dans un effet",
+  );
   // L'import part d'un clic, après confirmation.
   assert.ok(DIALOGUE_IMPORT.includes("Importer les recettes de démonstration"));
   assert.ok(DIALOGUE_IMPORT.includes("Importer les recettes de démonstration ?"), "modale de confirmation");
@@ -780,6 +838,22 @@ await test("45. le formulaire relit une recette sans rien perdre", () => {
   // Et le payload régénéré conserve la clé d'import.
   const payload = toRecipeSavePayload(s) as { recipe: { source_key: string | null } };
   assert.equal(payload.recipe.source_key, "fixture:proto-1");
+
+  // Le RECORD PORTE UNE DESCRIPTION, et l'aller-retour la conserve.
+  // La fabrique fixait `description: null` en dur, si bien que ce test ne
+  // POUVAIT PAS voir la perte — c'était l'angle mort qui a laissé passer
+  // l'effacement de la description à chaque enregistrement.
+  const avecTexte: RecipeWithTags = { ...record, description: "Notes du coach" };
+  const relu = createRecipeFormFromRecord(avecTexte, "coach-1", null);
+  assert.equal(relu.description, "Notes du coach", "la description est relue");
+  const renvoi = toRecipeSavePayload(relu) as { recipe: { description: string | null } };
+  assert.equal(renvoi.recipe.description, "Notes du coach", "et repart telle quelle");
+
+  // Une description absente reste absente — sans devenir une chaîne vide.
+  const sansTexte = createRecipeFormFromRecord({ ...record, description: null }, "coach-1", null);
+  assert.equal(sansTexte.description, "");
+  const renvoiVide = toRecipeSavePayload(sansTexte) as { recipe: { description: string | null } };
+  assert.equal(renvoiVide.recipe.description, null);
 });
 
 await test("46. les calories de l'aperçu viennent des fonctions existantes", () => {
@@ -819,12 +893,373 @@ await test("48. la checklist PostgreSQL couvre le périmètre exigé", () => {
 await test("49. la migration est déclarée au manifeste et comptée", () => {
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 15);
+  assert.equal(attendues.length, 16);
   assert.ok(attendues.includes("20260808090000_save_nutrition_recipe.sql"));
+  assert.ok(attendues.includes("20260809090000_save_nutrition_recipe_partial_payload.sql"));
   const secu = lire("../../scripts/tests/security-hardening.mts");
-  assert.ok(secu.includes(".length, 42,"), "le compteur de migrations suit les migrations réelles");
-  assert.ok(secu.includes("assert.equal(attendues.length, 15);"));
+  assert.ok(secu.includes(".length, 43,"), "le compteur de migrations suit les migrations réelles");
+  assert.ok(secu.includes("assert.equal(attendues.length, 16);"));
 });
+
+/* ═══════════ 9. PR B.1 — correctifs de conformité ═══════════ */
+
+/**
+ * Client Supabase factice — juste assez pour exercer RÉELLEMENT
+ * `importNutritionRecipeFixtures` : la pré-lecture par clé, la boucle, et
+ * chaque appel de RPC. La version précédente de cette suite ne l'appelait
+ * jamais ; c'est exactement par là que passait le défaut de pré-lecture.
+ */
+function clientFactice(options: {
+  existantes?: { id: string; source_key: string }[];
+  erreurLecture?: { message: string };
+  échouerSur?: (payload: Record<string, unknown>) => string | null;
+}) {
+  const appelsRpc: Record<string, unknown>[] = [];
+  const lectures: { table: string; colonnes: string; filtres: Record<string, unknown> }[] = [];
+
+  function requête(table: string) {
+    const filtres: Record<string, unknown> = {};
+    const chaîne = {
+      select(colonnes: string) {
+        lectures.push({ table, colonnes, filtres });
+        return chaîne;
+      },
+      eq(colonne: string, valeur: unknown) {
+        filtres[colonne] = valeur;
+        return chaîne;
+      },
+      in(colonne: string, valeurs: unknown[]) {
+        filtres[colonne] = valeurs;
+        return Promise.resolve(
+          options.erreurLecture
+            ? { data: null, error: options.erreurLecture }
+            : { data: options.existantes ?? [], error: null },
+        );
+      },
+    };
+    return chaîne;
+  }
+
+  const client = {
+    from: requête,
+    rpc(_fn: string, args: { p_payload: Record<string, unknown> }) {
+      appelsRpc.push(args.p_payload);
+      const message = options.échouerSur?.(args.p_payload) ?? null;
+      if (message) return Promise.resolve({ data: null, error: { message } });
+      const recette = args.p_payload.recipe as Record<string, unknown>;
+      return Promise.resolve({
+        data: {
+          recipe: {
+            id: (recette.id as string) ?? `créée-${appelsRpc.length}`,
+            status: (recette.status as string) ?? "draft",
+            source_key: recette.source_key ?? null,
+          },
+          ingredient_count: (args.p_payload.ingredients as unknown[] | undefined)?.length ?? 0,
+          tag_count: (args.p_payload.tags as unknown[] | undefined)?.length ?? 0,
+          blocking_issue: null,
+        },
+        error: null,
+      });
+    },
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return { client: client as any, appelsRpc, lectures };
+}
+
+await test("50. IMPORT RÉELLEMENT EXÉCUTÉ : 11 fixtures, 11 transactions, aucune écriture directe", async () => {
+  const { client, appelsRpc, lectures } = clientFactice({});
+  const rapport = await importNutritionRecipeFixtures(client, "coach-1", { generateId: idFactice });
+
+  assert.equal(rapport.imported, 11, "les 11 fixtures sont importées");
+  assert.equal(rapport.updated + rapport.skipped + rapport.failed, 0);
+  assert.equal(appelsRpc.length, 11, "une transaction par fixture, pas une de plus");
+
+  // UNE seule lecture, sur la table des recettes, filtrée par coach ET par clé.
+  assert.equal(lectures.length, 1, "une seule requête de pré-lecture");
+  assert.equal(lectures[0].table, "nutrition_recipes");
+  assert.equal(lectures[0].filtres.coach_id, "coach-1");
+  assert.equal((lectures[0].filtres.source_key as string[]).length, 11);
+
+  // Chaque charge utile porte sa clé stable, en création (id null) et en brouillon.
+  const clés = appelsRpc.map((p) => (p.recipe as { source_key: string }).source_key);
+  assert.equal(new Set(clés).size, 11, "11 clés distinctes");
+  assert.ok(clés.every((c) => c.startsWith("fixture:")), clés.join(","));
+  for (const payload of appelsRpc) {
+    const recette = payload.recipe as Record<string, unknown>;
+    assert.equal(recette.id, null, "création : aucun identifiant");
+    assert.equal(recette.status, "draft", "une fixture arrive en brouillon");
+    assert.equal(recette.coach_id, "coach-1");
+  }
+});
+
+await test("51. SECOND IMPORT : ignoré par défaut, aucune transaction, aucun doublon", async () => {
+  const existantes = RECIPE_FIXTURES.map((f, i) => ({
+    id: `déjà-${i}`,
+    source_key: fixtureSourceKey(f),
+  }));
+  const { client, appelsRpc } = clientFactice({ existantes });
+  const rapport = await importNutritionRecipeFixtures(client, "coach-1", { generateId: idFactice });
+
+  assert.equal(rapport.skipped, 11, "les 11 sont ignorées");
+  assert.equal(rapport.imported + rapport.updated + rapport.failed, 0);
+  assert.equal(appelsRpc.length, 0, "aucune écriture : rien n'est retouché");
+  assert.ok(rapport.entries.every((e) => e.outcome === "skipped"));
+});
+
+await test("52. MISE À JOUR EXPLICITE : le statut, la description et les étiquettes du coach sont préservés", async () => {
+  const existantes = RECIPE_FIXTURES.map((f, i) => ({
+    id: `déjà-${i}`,
+    source_key: fixtureSourceKey(f),
+  }));
+  const { client, appelsRpc } = clientFactice({ existantes });
+  const rapport = await importNutritionRecipeFixtures(client, "coach-1", {
+    generateId: idFactice,
+    updateExisting: true,
+  });
+
+  assert.equal(rapport.updated, 11);
+  assert.equal(appelsRpc.length, 11);
+
+  for (const payload of appelsRpc) {
+    const recette = payload.recipe as Record<string, unknown>;
+    assert.ok(typeof recette.id === "string", "une mise à jour cible la ligne existante");
+    // Une clé ABSENTE laisse la colonne intacte côté base (migration B.1).
+    assert.ok(!("status" in recette), "le statut du coach n'est pas réécrit");
+    assert.ok(!("description" in recette), "la description du coach n'est pas effacée");
+    assert.ok(!("tags" in payload), "les étiquettes du coach ne sont pas supprimées");
+    // Ce que la fixture définit VRAIMENT est bien rafraîchi.
+    assert.ok(typeof recette.name === "string" && (recette.name as string).length > 0);
+    assert.ok(Array.isArray(payload.ingredients));
+  }
+
+  // À la CRÉATION, en revanche, les trois clés sont présentes et explicites.
+  const création = buildFixturePayload(
+    RECIPE_FIXTURES[0],
+    "coach-1",
+    null,
+    buildIngredientIdMap(RECIPE_FIXTURES[0], idFactice),
+  ) as Record<string, unknown>;
+  const recetteCréée = création.recipe as Record<string, unknown>;
+  assert.equal(recetteCréée.status, "draft");
+  assert.equal(recetteCréée.description, null);
+  assert.deepEqual(création.tags, []);
+});
+
+await test("53. PRÉ-LECTURE EN ÉCHEC : rien n'est écrit, et le rapport dit la vraie cause", async () => {
+  const { client, appelsRpc } = clientFactice({
+    erreurLecture: { message: "réseau indisponible" },
+  });
+  const rapport = await importNutritionRecipeFixtures(client, "coach-1", { generateId: idFactice });
+
+  assert.equal(appelsRpc.length, 0, "AUCUNE écriture tentée à l'aveugle");
+  assert.equal(rapport.failed, 11);
+  assert.equal(rapport.imported + rapport.updated + rapport.skipped, 0);
+  for (const entrée of rapport.entries) {
+    assert.equal(entrée.outcome, "failed");
+    assert.ok(
+      entrée.message?.includes("déjà importées") && entrée.message.includes("rien n'a été écrit"),
+      `le message doit expliquer la cause : ${entrée.message ?? "(vide)"}`,
+    );
+  }
+});
+
+await test("54. la validation locale couvre les règles de blocage de la base", () => {
+  // Mode unité sans poids d'unité : `unit_scalable_incoherent` côté base.
+  let s = formulaireComplet();
+  s = updateIngredient(s, s.ingredients[0].id, {
+    unitScalable: true,
+    unitName: "wrap",
+    referenceGrams: "0",
+  });
+  const codes = validateRecipeForm(s).map((i) => i.code);
+  assert.ok(codes.includes("unit_scalable_incoherent"), codes.join(","));
+
+  // Nombre maximal d'unités inférieur à 1.
+  let t = formulaireComplet();
+  t = updateIngredient(t, t.ingredients[0].id, {
+    unitScalable: true,
+    unitName: "wrap",
+    maxUnits: "0",
+  });
+  const codesT = validateRecipeForm(t).map((i) => i.code);
+  assert.ok(codesT.includes("unit_scalable_incoherent"), codesT.join(","));
+
+  // Poids d'un œuf nul : `egg_fields_incoherent`, et surtout la division par
+  // zéro que le solveur ne pouvait pas éviter (`?? DEFAULT` ne filtre pas 0).
+  let u = formulaireComplet();
+  u = updateIngredient(u, u.ingredients[0].id, { egg: true, eggGrams: "0" });
+  const problème = validateRecipeForm(u).find((i) => i.code === "egg_fields_incoherent");
+  assert.ok(problème, "le poids d'un œuf nul est signalé");
+  assert.equal(problème?.field, "eggGrams", "l'erreur est rattachée à SON champ");
+
+  // Une recette saine ne déclenche aucune de ces règles.
+  const sain = validateRecipeForm(formulaireComplet()).map((i) => i.code);
+  assert.ok(!sain.includes("unit_scalable_incoherent") && !sain.includes("egg_fields_incoherent"));
+
+  // Chaque code local a un libellé français côté base.
+  for (const code of ["unit_scalable_incoherent", "egg_fields_incoherent"]) {
+    assert.ok(describeBlockingIssue(code) !== null && !describeBlockingIssue(code)!.includes(code));
+  }
+});
+
+await test("55. l'aperçu ne peut PAS diviser par zéro sur un poids d'œuf", () => {
+  let s = formulaireComplet();
+  s = updateIngredient(s, s.ingredients[0].id, { egg: true, eggGrams: "0" });
+  const copie = toPreviewRecipe(s);
+  assert.equal(copie.ingredients[0].eggGrams, null, "0 est neutralisé avant le solveur");
+
+  const solution = solveRecipe(copie, {
+    target: { proteinGrams: 40, carbGrams: 80, fatGrams: 20 },
+  });
+  for (const ing of solution.ingredients) {
+    assert.ok(Number.isFinite(ing.grams), `grammes finis : ${ing.grams}`);
+    assert.ok(ing.eggCount === null || Number.isFinite(ing.eggCount), "aucun Infinity");
+  }
+  assert.ok(Number.isFinite(solution.totals.calories), "aucun NaN dans les totaux");
+
+  // Un poids d'œuf RENSEIGNÉ, lui, est bien transmis.
+  let t = formulaireComplet();
+  t = updateIngredient(t, t.ingredients[0].id, { egg: true, eggGrams: "50" });
+  assert.equal(toPreviewRecipe(t).ingredients[0].eggGrams, 50);
+});
+
+await test("56. les rôles ne sont PAS réécrits dans l'interface", () => {
+  const code = sansCommentairesTs(PANNEAU_INGRÉDIENTS);
+  assert.ok(code.includes("RECIPE_INGREDIENT_ROLES"), "la liste vient de la PR A");
+  assert.ok(
+    !/\[\s*"protein"\s*,\s*"carbohydrate"/.test(code),
+    "aucune liste de rôles réécrite dans le composant",
+  );
+  assert.deepEqual([...RECIPE_INGREDIENT_ROLES], ["protein", "carbohydrate", "fat", "fixed", "free"]);
+  // Et chaque rôle exposé a bien un libellé.
+  for (const role of RECIPE_INGREDIENT_ROLES) {
+    assert.ok(RECIPE_ROLE_LABELS_FR[role].length > 3, role);
+  }
+});
+
+await test("57. migration B.1 : une clé ABSENTE ne touche à rien, et l'upsert est borné à la recette", () => {
+  const sql = sansCommentairesSql(MIGRATION_B1);
+
+  // Contrat « clé absente = colonne intacte », pour les trois champs perdus.
+  for (const colonne of ["description", "slot_key", "name"]) {
+    assert.ok(
+      new RegExp(`${colonne} = case when v_recipe \\? '${colonne}'`).test(sql),
+      `${colonne} distingue clé absente et clé vide`,
+    );
+  }
+  assert.ok(sql.includes("v_status := coalesce(v_status_demande, v_status_courant, 'draft')"),
+    "le statut absent est CONSERVÉ à la modification");
+  assert.ok(sql.includes("v_sync_ingredients := p_payload ? 'ingredients'"));
+  assert.ok(sql.includes("v_sync_tags := p_payload ? 'tags'"));
+
+  // L'upsert ne peut plus toucher l'enfant d'une autre recette…
+  assert.ok(
+    sql.includes("where nutrition_recipe_ingredients.recipe_id = v_recipe_id"),
+    "on conflict do update borné à la recette",
+  );
+  // …et un ingrédient ignoré fait échouer la transaction, au lieu de passer.
+  assert.ok(sql.includes("if v_ecrits <> coalesce(array_length(v_ids, 1), 0) then"));
+  assert.ok(sql.includes("INGREDIENT_FROM_ANOTHER_RECIPE: écriture ignorée"));
+
+  // Les garanties de sécurité de la version précédente sont RECONDUITES.
+  assert.ok(sql.includes("security invoker"));
+  assert.ok(sql.includes("set search_path = ''"));
+  assert.ok(sql.includes("alter function public.save_nutrition_recipe(jsonb) owner to postgres;"));
+  assert.ok(sql.includes("revoke all on function public.save_nutrition_recipe(jsonb) from public;"));
+  assert.ok(sql.includes("revoke execute on function public.save_nutrition_recipe(jsonb) from anon;"));
+  assert.ok(sql.includes("grant execute on function public.save_nutrition_recipe(jsonb) to authenticated;"));
+  assert.ok(sql.includes("if not public.is_coach_or_admin() then"));
+  assert.ok(!/security definer/i.test(sql));
+
+  // Migration STRICTEMENT additive : aucune modification de schéma, aucune
+  // donnée. On regarde HORS du corps de la fonction — les `insert` qui s'y
+  // trouvent sont ceux que la RPC exécute pour le compte de l'appelant, pas
+  // des écritures faites par la migration elle-même.
+  const corps = sql.slice(sql.indexOf("as $fn$"), sql.lastIndexOf("$fn$") + 4);
+  const horsCorps = sql.replace(corps, "").toLowerCase();
+  for (const interdit of [
+    "create table", "drop table", "drop column", "alter table", "create policy",
+    "drop policy", "truncate", "delete from", "insert into",
+    "create index", "drop index",
+  ]) {
+    assert.ok(!horsCorps.includes(interdit), `la migration B.1 ne doit pas contenir : ${interdit}`);
+  }
+  // Et dans le corps, aucune suppression de recette : l'archivage est un statut.
+  assert.ok(!/delete from public\.nutrition_recipes\b/.test(corps), "aucun hard delete de recette");
+});
+
+await test("58. un formulaire VIERGE n'agresse pas : aucune erreur avant la première saisie", () => {
+  const vierge = createBlankRecipeForm("coach-1");
+  const htmlVierge = renderToString(
+    createElement(RecipeBuilder, {
+      state: vierge,
+      onChange: () => {},
+      onSave: () => {},
+      saving: false,
+      saveError: null,
+      blockingIssue: null,
+    }),
+  );
+  assert.ok(!htmlVierge.includes('role="alert"'), "aucun message d'erreur au premier rendu");
+  // React insère `<!-- -->` entre deux nœuds texte : on les retire avant de
+  // chercher le décompte, sinon la recherche ne trouverait jamais rien.
+  const texteVierge = htmlVierge.replace(/<!-- -->/g, "");
+  assert.ok(
+    !/\d+\s*points?\s*à compléter/.test(texteVierge),
+    "aucun décompte de points à compléter",
+  );
+  // Et surtout : on ne prétend PAS que la recette vide est exploitable.
+  assert.ok(!htmlVierge.includes("elle peut être activée"), "aucune promesse fausse");
+  assert.ok(htmlVierge.includes("au fil de la saisie"), "on indique quoi faire");
+  // Le bouton d'activation reste refusé, lui, dès le premier rendu.
+  assert.ok(/Activer la recette/.test(htmlVierge));
+  assert.ok(htmlVierge.includes("disabled"), "l'activation est bloquée");
+
+  // Une recette EXISTANTE incomplète, elle, affiche ses points dès l'ouverture.
+  const existante: RecipeFormState = { ...vierge, recipeId: "r1" };
+  const htmlExistante = renderToString(
+    createElement(RecipeBuilder, {
+      state: existante,
+      onChange: () => {},
+      onSave: () => {},
+      saving: false,
+      saveError: null,
+      blockingIssue: null,
+    }),
+  );
+  assert.ok(
+    /\d+\s*points?\s*à compléter/.test(htmlExistante.replace(/<!-- -->/g, "")),
+    "les points restants sont utiles ici",
+  );
+});
+
+await test("59. le rechargement après sauvegarde ne démonte pas le formulaire", () => {
+  const hooks = sansCommentairesTs(HOOKS_RECETTES);
+  // `loading` ne repasse jamais à vrai : un seul `setLoading(false)` par hook,
+  // aucun `setLoading(true)`.
+  assert.ok(!/setLoading\(true\)/.test(hooks), "loading ne redevient jamais vrai");
+  assert.equal((hooks.match(/setLoading\(false\)/g) ?? []).length, 2, "un par hook");
+  // Et la lecture est partagée entre le montage et le rechargement.
+  assert.ok(hooks.includes("async function lireCatalogue()"));
+  assert.ok(hooks.includes("async function lireRecette("));
+  // La page de détail ne recharge qu'en cas de SUCCÈS.
+  const detail = sansCommentairesTs(PAGE_DETAIL);
+  const échec = detail.slice(detail.indexOf("if (!résultat.ok)"));
+  const finBloc = échec.indexOf("return;");
+  assert.ok(!échec.slice(0, finBloc).includes("refetch("), "aucun rechargement après un échec");
+});
+
+await test("60. le dialogue d'import traite l'échec et ignore un rapport périmé", () => {
+  const code = sansCommentairesTs(DIALOGUE_IMPORT);
+  assert.ok(code.includes(".catch("), "un rejet ne peut plus passer inaperçu");
+  assert.ok(code.includes("tentative.current"), "un numéro de tentative distingue les rapports");
+  assert.ok(/fermer\(\)[\s\S]{0,200}tentative\.current \+= 1/.test(code),
+    "fermer la modale périme la tentative en cours");
+  assert.ok(code.includes('role="alert"'), "l'échec est annoncé");
+  // La promesse d'origine reste inchangée : l'import part toujours d'un clic.
+  assert.ok(code.includes("onClick={lancer}"));
+});
+
 
 console.log(`\n${réussis} réussis, ${échecs} échecs`);
 if (échecs > 0) process.exit(1);

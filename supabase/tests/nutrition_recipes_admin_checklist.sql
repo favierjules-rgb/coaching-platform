@@ -1,6 +1,8 @@
 -- ============================================================================
--- Checklist PostgreSQL — feat/nutrition-recipes-admin, PR B
--- Migration couverte : 20260808090000_save_nutrition_recipe.sql
+-- Checklist PostgreSQL — feat/nutrition-recipes-admin, PR B puis PR B.1
+-- Migrations couvertes :
+--   20260808090000_save_nutrition_recipe.sql
+--   20260809090000_save_nutrition_recipe_partial_payload.sql
 --
 -- CE QU'ELLE VÉRIFIE
 --   A. source_key et son index unique PARTIEL ;
@@ -15,6 +17,8 @@
 --      aucun TRUNCATE pour authenticated ;
 --   I. import rejouable : même source_key, aucun doublon, recette manuelle
 --      de même nom intacte ;
+--   K. contrat de charge utile PARTIELLE (PR B.1) : une clé ABSENTE ne
+--      touche à rien — ni la description, ni le statut, ni les enfants ;
 --   J. aucune donnée de test persistante après le ROLLBACK.
 --
 -- EXÉCUTION (base LOCALE uniquement) :
@@ -50,12 +54,16 @@ end $$;
 -- Jeu d'essai
 insert into auth.users (id, email) values
   ('aaaa9999-9999-4999-8999-999999999991', 'ra.coach@test.local'),
-  ('aaaa9999-9999-4999-8999-999999999992', 'ra.eleve@test.local')
+  ('aaaa9999-9999-4999-8999-999999999992', 'ra.eleve@test.local'),
+  ('aaaa9999-9999-4999-8999-999999999993', 'ra.admin@test.local')
 on conflict (id) do nothing;
 
+-- Un ADMINISTRATEUR en plus du coach : `is_coach_or_admin()` a deux branches,
+-- et la version précédente de cette checklist n'en exerçait qu'une.
 insert into public.profiles (user_id, role, first_name, last_name, email) values
   ('aaaa9999-9999-4999-8999-999999999991', 'coach', 'Rina', 'A', 'ra.coach@test.local'),
-  ('aaaa9999-9999-4999-8999-999999999992', 'student', 'Ella', 'B', 'ra.eleve@test.local');
+  ('aaaa9999-9999-4999-8999-999999999992', 'student', 'Ella', 'B', 'ra.eleve@test.local'),
+  ('aaaa9999-9999-4999-8999-999999999993', 'admin', 'Adam', 'C', 'ra.admin@test.local');
 
 insert into public.students (id, user_id, first_name, last_name, email, status, access_type)
 values ('bbbb9999-9999-4999-8999-999999999992', 'aaaa9999-9999-4999-8999-999999999992',
@@ -174,9 +182,23 @@ declare
   v_message text;
 begin
   select id into v_id from public.nutrition_recipes where name = 'Poulet riz crème';
+  -- INSTANTANÉ COMPLET. La version précédente ne capturait que (nom, position)
+  -- par ingrédient : or la tentative fautive ci-dessous modifie justement
+  -- `reference_grams` (140 → 0), qui n'était donc PAS comparé. Une régression
+  -- qui aurait laissé passer l'UPDATE tout en annulant le DELETE serait
+  -- passée inaperçue.
   select jsonb_build_object(
     'statut', (select status from public.nutrition_recipes where id = v_id),
-    'ingredients', (select jsonb_agg(jsonb_build_object('n', name, 'p', position) order by position)
+    'nom', (select name from public.nutrition_recipes where id = v_id),
+    'description', (select description from public.nutrition_recipes where id = v_id),
+    'creneau', (select slot_key from public.nutrition_recipes where id = v_id),
+    'ingredients', (select jsonb_agg(jsonb_build_object(
+                        'n', name, 'p', position, 'role', role,
+                        'prot', protein_per_100g, 'gluc', carb_per_100g, 'lip', fat_per_100g,
+                        'ref', reference_grams, 'min', min_grams, 'max', max_grams,
+                        'unite', unit_scalable, 'nb_unites', max_units, 'nom_unite', unit_name,
+                        'libelle', fixed_label, 'oeuf', egg, 'g_oeuf', egg_grams,
+                        'lien', linked_to_ingredient_id, 'ratio', link_ratio_bp) order by position)
                       from public.nutrition_recipe_ingredients where recipe_id = v_id),
     'tags', (select jsonb_agg(kind || '/' || value order by kind) from public.nutrition_recipe_tags where recipe_id = v_id))
     into v_avant;
@@ -202,13 +224,31 @@ begin
 
   select jsonb_build_object(
     'statut', (select status from public.nutrition_recipes where id = v_id),
-    'ingredients', (select jsonb_agg(jsonb_build_object('n', name, 'p', position) order by position)
+    'nom', (select name from public.nutrition_recipes where id = v_id),
+    'description', (select description from public.nutrition_recipes where id = v_id),
+    'creneau', (select slot_key from public.nutrition_recipes where id = v_id),
+    'ingredients', (select jsonb_agg(jsonb_build_object(
+                        'n', name, 'p', position, 'role', role,
+                        'prot', protein_per_100g, 'gluc', carb_per_100g, 'lip', fat_per_100g,
+                        'ref', reference_grams, 'min', min_grams, 'max', max_grams,
+                        'unite', unit_scalable, 'nb_unites', max_units, 'nom_unite', unit_name,
+                        'libelle', fixed_label, 'oeuf', egg, 'g_oeuf', egg_grams,
+                        'lien', linked_to_ingredient_id, 'ratio', link_ratio_bp) order by position)
                       from public.nutrition_recipe_ingredients where recipe_id = v_id),
     'tags', (select jsonb_agg(kind || '/' || value order by kind) from public.nutrition_recipe_tags where recipe_id = v_id))
     into v_apres;
   perform pg_temp.noter('D', 'D3. ROLLBACK complet : l''ancienne version est INTACTE', v_avant = v_apres);
   perform pg_temp.noter('D', 'D4. le nom n''a pas été modifié', exists (
     select 1 from public.nutrition_recipes where id = v_id and name = 'Poulet riz crème'));
+  perform pg_temp.noter('D', 'D5. la quantité de référence visée par la tentative est INTACTE', (
+    select reference_grams from public.nutrition_recipe_ingredients
+     where id = '11119999-0000-4000-8000-000000000001') = 140);
+  perform pg_temp.noter('D', 'D6. l''ingrédient que la tentative supprimait est TOUJOURS là', exists (
+    select 1 from public.nutrition_recipe_ingredients
+     where id = '11119999-0000-4000-8000-000000000002' and recipe_id = v_id));
+  perform pg_temp.noter('D', 'D7. l''étiquette que la tentative retirait est TOUJOURS là', exists (
+    select 1 from public.nutrition_recipe_tags
+     where recipe_id = v_id and kind = 'allergen' and value = 'milk'));
 end $$;
 
 do $$
@@ -299,8 +339,14 @@ begin
           'protein_per_100g',25,'carb_per_100g',0,'fat_per_100g',1,'reference_grams',140,
           'linked_to_ingredient_id','22229999-0000-4000-8000-000000000001','link_ratio_bp',1500)),
       'tags', '[]'::jsonb));
-  exception when others then v_refuse := true; end;
+  exception when others then v_refuse := true; v_message := sqlerrm; end;
   perform pg_temp.noter('F', 'F4. lien vers une AUTRE recette REFUSÉ', v_refuse);
+  -- « quelque chose a échoué » ne prouve rien : on exige que ce soit bien la
+  -- clé étrangère COMPOSITE (linked_to_ingredient_id, recipe_id) qui refuse.
+  perform pg_temp.noter('F', 'F4 bis. le refus vient de la clé étrangère composite',
+    coalesce(v_message, '') like '%nutrition_recipe_ingredients_link_same_recipe_fkey%'
+    or coalesce(v_message, '') like '%foreign key%'
+    or coalesce(v_message, '') like '%clé étrangère%');
 
   -- F5. CYCLE de liaison : accepté en brouillon, mais l'activation est refusée.
   perform public.save_nutrition_recipe(jsonb_build_object(
@@ -400,6 +446,117 @@ begin
      where name = 'Porridge Protéiné' and source_key is null and status = 'draft'));
 end $$;
 
+-- ---------------------------------------------------------------------
+-- Section K — contrat de charge utile PARTIELLE (PR B.1)
+--
+-- « Clé ABSENTE = rien n'est touché ; clé PRÉSENTE = la valeur est écrite,
+--   y compris pour effacer. »
+--
+-- La version 20260808090000 ne distinguait pas les deux : une charge utile
+-- sans `description` effaçait la description, une charge utile sans `status`
+-- rétrogradait la recette en brouillon, et une charge utile sans `tags`
+-- supprimait toutes les étiquettes. Le chemin de réimport des fixtures
+-- empruntait les trois.
+-- ---------------------------------------------------------------------
+do $$
+declare v_res jsonb; v_id uuid; v_refuse boolean := false; v_message text;
+begin
+  -- Une recette COMPLÈTE, activée, avec description et étiquettes.
+  v_res := public.save_nutrition_recipe(jsonb_build_object(
+    'recipe', jsonb_build_object('coach_id','dddd9999-9999-4999-8999-999999999991',
+      'name','Charge partielle','description','Notes du coach','slot_key','dinner','status','draft'),
+    'ingredients', jsonb_build_array(
+      jsonb_build_object('id','33339999-0000-4000-8000-000000000001','position',1,'name','Poulet','role','protein',
+        'protein_per_100g',25,'carb_per_100g',0,'fat_per_100g',1,'reference_grams',140)),
+    'tags', jsonb_build_array(jsonb_build_object('kind','diet','value','halal'))));
+  v_id := (v_res->'recipe'->>'id')::uuid;
+
+  -- K0. TRANSITION brouillon → actif sur une recette EXISTANTE : c'est le
+  -- cas d'usage réel de l'écran, et il n'était couvert par aucun contrôle
+  -- (seule une création directe en `active` l'était).
+  v_res := public.save_nutrition_recipe(jsonb_build_object(
+    'recipe', jsonb_build_object('id', v_id, 'coach_id','dddd9999-9999-4999-8999-999999999991',
+      'status','active'),
+    'ingredients', jsonb_build_array(
+      jsonb_build_object('id','33339999-0000-4000-8000-000000000001','position',1,'name','Poulet','role','protein',
+        'protein_per_100g',25,'carb_per_100g',0,'fat_per_100g',1,'reference_grams',140))));
+  perform pg_temp.noter('K', 'K0. transition brouillon → ACTIF sur une recette existante',
+    (v_res->'recipe'->>'status') = 'active');
+
+  -- Charge utile MINIMALE : uniquement l'identifiant, le coach et le nom.
+  -- Ni description, ni créneau, ni statut, ni ingredients, ni tags.
+  v_res := public.save_nutrition_recipe(jsonb_build_object(
+    'recipe', jsonb_build_object('id', v_id, 'coach_id','dddd9999-9999-4999-8999-999999999991',
+      'name','Charge partielle renommée')));
+
+  perform pg_temp.noter('K', 'K1. le nom mentionné EST écrit',
+    (v_res->'recipe'->>'name') = 'Charge partielle renommée');
+  perform pg_temp.noter('K', 'K2. la description NON mentionnée est CONSERVÉE',
+    (v_res->'recipe'->>'description') = 'Notes du coach');
+  perform pg_temp.noter('K', 'K3. le créneau NON mentionné est CONSERVÉ',
+    (v_res->'recipe'->>'slot_key') = 'dinner');
+  perform pg_temp.noter('K', 'K4. le statut NON mentionné est CONSERVÉ (pas de retour en brouillon)',
+    (v_res->'recipe'->>'status') = 'active');
+  perform pg_temp.noter('K', 'K5. les ingrédients NON mentionnés sont CONSERVÉS',
+    (v_res->>'ingredient_count') = '1');
+  perform pg_temp.noter('K', 'K6. les étiquettes NON mentionnées sont CONSERVÉES',
+    (v_res->>'tag_count') = '1');
+
+  -- Et l'inverse : une clé PRÉSENTE écrit, y compris pour effacer.
+  v_res := public.save_nutrition_recipe(jsonb_build_object(
+    'recipe', jsonb_build_object('id', v_id, 'coach_id','dddd9999-9999-4999-8999-999999999991',
+      'description', null, 'slot_key', null),
+    'tags', '[]'::jsonb));
+  perform pg_temp.noter('K', 'K7. une description PRÉSENTE à null efface bien',
+    (v_res->'recipe'->'description') = 'null'::jsonb);
+  perform pg_temp.noter('K', 'K8. un créneau PRÉSENT à null efface bien',
+    (v_res->'recipe'->'slot_key') = 'null'::jsonb);
+  perform pg_temp.noter('K', 'K9. des étiquettes PRÉSENTES à [] suppriment bien',
+    (v_res->>'tag_count') = '0');
+  perform pg_temp.noter('K', 'K10. et le statut, toujours non mentionné, reste ACTIF',
+    (v_res->'recipe'->>'status') = 'active');
+
+  -- Un statut inconnu reste refusé, mentionné ou non.
+  begin
+    perform public.save_nutrition_recipe(jsonb_build_object(
+      'recipe', jsonb_build_object('id', v_id, 'coach_id','dddd9999-9999-4999-8999-999999999991',
+        'status','publie')));
+  exception when others then v_refuse := true; v_message := sqlerrm; end;
+  perform pg_temp.noter('K', 'K11. un statut inconnu est toujours refusé',
+    v_refuse and coalesce(v_message, '') like '%INVALID_STATUS%');
+end $$;
+
+-- L'upsert des ingrédients est borné à la recette : un identifiant appartenant
+-- à une AUTRE recette ne peut ni être déplacé, ni être réécrit.
+do $$
+declare v_autre uuid; v_refuse boolean := false; v_message text; v_nom_avant text;
+begin
+  select id into v_autre from public.nutrition_recipes where name = 'Charge partielle renommée';
+  select name into v_nom_avant from public.nutrition_recipe_ingredients
+   where id = '33339999-0000-4000-8000-000000000001';
+
+  begin
+    perform public.save_nutrition_recipe(jsonb_build_object(
+      'recipe', jsonb_build_object('coach_id','dddd9999-9999-4999-8999-999999999991',
+        'name','Voleuse d''ingrédient','status','draft'),
+      'ingredients', jsonb_build_array(
+        jsonb_build_object('id','33339999-0000-4000-8000-000000000001','position',1,'name','VOLÉ','role','fixed',
+          'protein_per_100g',99,'carb_per_100g',99,'fat_per_100g',99,'reference_grams',99)),
+      'tags', '[]'::jsonb));
+  exception when others then v_refuse := true; v_message := sqlerrm; end;
+
+  perform pg_temp.noter('K', 'K12. réécrire l''enfant d''une AUTRE recette est refusé', v_refuse);
+  perform pg_temp.noter('K', 'K13. le refus est explicite',
+    coalesce(v_message, '') like '%INGREDIENT_FROM_ANOTHER_RECIPE%');
+  perform pg_temp.noter('K', 'K14. l''ingrédient visé est INTACT (nom, rôle, macros)', exists (
+    select 1 from public.nutrition_recipe_ingredients
+     where id = '33339999-0000-4000-8000-000000000001'
+       and recipe_id = v_autre and name = v_nom_avant and role = 'protein'
+       and protein_per_100g = 25 and reference_grams = 140));
+  perform pg_temp.noter('K', 'K15. la recette voleuse n''existe pas', not exists (
+    select 1 from public.nutrition_recipes where name = 'Voleuse d''ingrédient'));
+end $$;
+
 reset role;
 
 -- ---------------------------------------------------------------------
@@ -422,6 +579,23 @@ begin
     select 1 from public.nutrition_recipes where name = 'Écrite par un élève'));
   perform pg_temp.noter('H', 'H3. l''ÉLÈVE ne lit toujours AUCUNE recette', (
     select count(*) from public.nutrition_recipes) = 0);
+  reset role;
+end $$;
+
+-- L'ADMINISTRATEUR : l'autre branche de is_coach_or_admin(), jamais exercée
+-- jusqu'ici. Elle doit autoriser, exactement comme le coach.
+do $$
+declare v_res jsonb;
+begin
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"aaaa9999-9999-4999-8999-999999999993","role":"authenticated"}', true);
+  v_res := public.save_nutrition_recipe(jsonb_build_object(
+    'recipe', jsonb_build_object('coach_id','dddd9999-9999-4999-8999-999999999991',
+      'name','Écrite par un administrateur','status','draft'),
+    'ingredients', '[]'::jsonb, 'tags', '[]'::jsonb));
+  perform pg_temp.noter('H', 'H0. l''ADMINISTRATEUR peut enregistrer une recette',
+    (v_res->'recipe'->>'id') is not null);
   reset role;
 end $$;
 
@@ -485,15 +659,23 @@ do $$
 declare nb int;
 begin
   select count(*) into nb from public.nutrition_recipes
-   where name in ('Poulet riz crème', 'Poulet panure', 'Brouillon incomplet', 'Porridge Protéiné');
+   where name in ('Poulet riz crème', 'Poulet panure', 'Brouillon incomplet', 'Porridge Protéiné',
+                  'Charge partielle', 'Charge partielle renommée', 'Voleuse d''ingrédient',
+                  'Écrite par un administrateur');
   if nb <> 0 then
     raise exception 'ÉCHEC   — J1. des recettes de test ont survécu au ROLLBACK (% lignes)', nb;
   end if;
-  select count(*) into nb from public.nutrition_recipe_ingredients;
+  -- On compte les ingrédients DE TEST, identifiés par leurs préfixes d'UUID,
+  -- et non la table entière : depuis l'import des fixtures, une base locale
+  -- contient légitimement des recettes, et l'ancienne assertion « la table est
+  -- vide » aurait échoué sans qu'aucune donnée de test n'ait survécu.
+  select count(*) into nb from public.nutrition_recipe_ingredients
+   where id::text like '11119999-%' or id::text like '22229999-%' or id::text like '33339999-%';
   if nb <> 0 then
-    raise exception 'ÉCHEC   — J2. des ingrédients de test ont survécu au ROLLBACK';
+    raise exception 'ÉCHEC   — J2. des ingrédients de test ont survécu au ROLLBACK (% lignes)', nb;
   end if;
-  select count(*) into nb from auth.users where email in ('ra.coach@test.local', 'ra.eleve@test.local');
+  select count(*) into nb from auth.users
+   where email in ('ra.coach@test.local', 'ra.eleve@test.local', 'ra.admin@test.local');
   if nb <> 0 then
     raise exception 'ÉCHEC   — J3. des comptes de test ont survécu au ROLLBACK';
   end if;

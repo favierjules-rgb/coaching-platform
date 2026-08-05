@@ -65,7 +65,20 @@ export const RECIPE_TAG_VOCABULARY: Readonly<Record<RecipeTagKind, readonly stri
   ],
 };
 
-const ROLES: readonly RecipeIngredientRole[] = ["protein", "carbohydrate", "fat", "fixed", "free"];
+/**
+ * Les cinq rôles d'ingrédient, dans l'ordre canonique. Source unique : toute
+ * interface qui propose un choix de rôle lit CETTE liste — elle ne la réécrit
+ * pas.
+ */
+export const RECIPE_INGREDIENT_ROLES: readonly RecipeIngredientRole[] = [
+  "protein",
+  "carbohydrate",
+  "fat",
+  "fixed",
+  "free",
+];
+
+const ROLES = RECIPE_INGREDIENT_ROLES;
 
 /* ─────────────────────────── Lignes de base ─────────────────────────── */
 
