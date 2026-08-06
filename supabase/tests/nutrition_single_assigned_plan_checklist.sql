@@ -190,6 +190,25 @@ values ('77770000-0000-4000-8000-00000000000c', 'breakfast',      true, 2000, 20
        ('77770000-0000-4000-8000-00000000000c', 'dinner',         true, 1500, 2500, 2500, 5),
        ('77770000-0000-4000-8000-00000000000c', 'dessert',        true,  500,  500,  500, 6);
 
+-- Les SEPT jours des plans A, B et C.
+--
+-- MIS À JOUR par la migration 20260814090000 : la garde d'assignation ne
+-- contrôle plus un seul profil mais les SEPT jours du plan. Un plan sans
+-- journée serait donc bloqué sur `monday:missing_day`, ce qui masquerait la
+-- règle que cette section veut prouver. On matérialise donc les sept jours,
+-- comme le fait `save_nutrition_plan_v2` pour tout plan réel — et comme la
+-- migration 20260811090000 l'a fait pour tous les plans existants.
+-- Chaque jour désigne le profil de SON plan — plan A porte `legacy_default`,
+-- B et C portent `default` : on lit la clé plutôt que de la supposer, sinon la
+-- clé étrangère composite (plan_id, profile_key) refuserait l'insertion.
+insert into public.nutrition_days (plan_id, day, profile_key, status, target)
+select pr.plan_id, j, pr.profile_key, 'non-commence', '{}'::jsonb
+  from public.nutrition_plan_profiles pr,
+       unnest(array['monday','tuesday','wednesday','thursday','friday','saturday','sunday']) as j
+ where pr.plan_id in ('66660000-0000-4000-8000-00000000000a',
+                      '66660000-0000-4000-8000-00000000000b',
+                      '66660000-0000-4000-8000-00000000000c');
+
 -- Programme et document témoins : ils ne doivent jamais bouger.
 insert into public.programs (id, name, goal, level, duration_weeks, description, status)
 values ('88880000-0000-4000-8000-000000000001', 'Programme témoin', 'maintien', 'debutant', 4,
@@ -279,8 +298,11 @@ end $$;
 -- Détail des règles v2 reproduites en SQL.
 do $$
 begin
-  perform pg_temp.noter('E', 'E6. la règle violée est bien identifiée (protein_split_incomplete)',
-    public.nutrition_plan_v2_blocking_issue('66660000-0000-4000-8000-00000000000c') = 'protein_split_incomplete');
+  -- MIS À JOUR (20260814090000) : le code porte désormais le JOUR concerné en
+  -- préfixe. Les sept jours du plan C partagent le profil `default` incomplet,
+  -- c'est donc lundi — le premier de l'ordre canonique — qui est rapporté.
+  perform pg_temp.noter('E', 'E6. la règle violée est identifiée, avec le jour (monday:protein_split_incomplete)',
+    public.nutrition_plan_v2_blocking_issue('66660000-0000-4000-8000-00000000000c') = 'monday:protein_split_incomplete');
   perform pg_temp.noter('E', 'E7. un plan v2 complet ne remonte aucun problème',
     public.nutrition_plan_v2_blocking_issue('66660000-0000-4000-8000-00000000000b') is null);
 end $$;

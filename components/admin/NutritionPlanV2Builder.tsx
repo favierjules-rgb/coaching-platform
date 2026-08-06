@@ -1,55 +1,53 @@
 "use client";
 
 import { useId, useMemo, useState } from "react";
-import { Save, ShieldCheck } from "lucide-react";
+import { Save, ShieldCheck, Sparkles } from "lucide-react";
 
 import { Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
-import {
-  MACRO_LABELS_FR,
-  MacroSliderRow,
-  NutritionMacroDistributionPanel,
-} from "@/components/admin/NutritionMacroDistributionPanel";
+import { MACRO_LABELS_FR, MacroSliderRow } from "@/components/admin/NutritionMacroDistributionPanel";
 import { NBSP, formatDecimalFr, formatIntegerFr } from "@/lib/nutrition/basis-points";
 import { NutritionPlanV2WeekPanel } from "@/components/admin/NutritionPlanV2WeekPanel";
-import { computeDailyMacroTargets, formatSplitBalanceMessage } from "@/lib/nutrition/macro-targets";
-import type { WeekFormState } from "@/lib/nutrition/plan-v2-week-form";
+import { computeDailyMacroTargets } from "@/lib/nutrition/macro-targets";
+import { rebalanceDailyMacros } from "@/lib/nutrition/macro-rebalance";
+import { MACRO_KEYS, type MacroKey } from "@/lib/nutrition/meal-distribution";
 import {
-  MACRO_KEYS,
-  MEAL_SLOT_LABELS_FR,
-  describeMacroBalance,
-  type MacroKey,
-  type MealSlotKey,
-} from "@/lib/nutrition/meal-distribution";
-import {
-  buildRecap,
-  deriveDailyTargets,
-  distributeRestForMacro,
-  readDailyMacroBp,
-  setDailyCalories,
-  setDailyMacroBp,
-  setSlotEnabled,
-  setSlotMacroBp,
+  initializeAllDays,
   toValidationPlan,
-  toggleSlotLock,
-  type PlanV2FormState,
-} from "@/lib/nutrition/plan-v2-form";
+  toValidationPlanForDay,
+  weeklyCaloriesFromForm,
+  type WeekFormState,
+} from "@/lib/nutrition/plan-v2-week-form";
+import type { PlanV2FormState } from "@/lib/nutrition/plan-v2-form";
 import {
-  formatPlanV2AssignabilityMessage,
   validatePlanV2Assignable,
   validatePlanV2Draft,
 } from "@/lib/nutrition/plan-v2-validation";
+import { WEEKDAY_KEYS, WEEKDAY_LABELS_FR } from "@/lib/nutrition/weekdays";
 import type { AdminContentStatus, NutritionGoalType } from "@/types";
 
 /**
- * Constructeur du modèle nutrition v2 (répartition structurée).
+ * CONSTRUCTEUR DU PLAN NUTRITION — la semaine d'abord.
  *
- * ARCHITECTURE. Tout le métier vit dans `lib/nutrition/plan-v2-form.ts` et
- * dans les bibliothèques pures de la PR 1 ; ce composant ne fait que
- * projeter l'état et remonter les intentions. Aucune règle de calcul, aucun
- * seuil, aucune comparaison de pourcentage n'est réécrit ici.
+ * CE QUI A DISPARU DE CET ÉCRAN, et pourquoi :
  *
- * L'interface affiche des POURCENTAGES ; l'état métier ne connaît que des
- * POINTS DE BASE ENTIERS.
+ *   « Objectif quotidien » global .......... un plan n'a plus d'objectif
+ *       unique : chaque jour porte le sien. Le panneau est remplacé par une
+ *       action FACULTATIVE d'initialisation, qui écrit une fois dans les sept
+ *       jours puis n'existe plus. Elle n'est jamais relue : la source de
+ *       vérité, ce sont les sept jours.
+ *   « Repas proposés » ..................... les créneaux se choisissent
+ *       maintenant jour par jour, dans la zone 2 du jour ouvert.
+ *   Trois panneaux P/G/L pleine page ....... remplacés par un panneau unique
+ *       à trois onglets internes, dans le jour ouvert.
+ *   « Récapitulatif » global ............... il agrégeait un objectif unique
+ *       qui n'existe plus ; les grammes et les totaux sont affichés dans le
+ *       jour, au plus près des curseurs qui les produisent.
+ *   « Profils de la semaine » .............. supprimé entièrement, avec tout
+ *       son vocabulaire.
+ *
+ * ARCHITECTURE INCHANGÉE : tout le métier vit dans les bibliothèques pures ;
+ * ce composant projette un état et remonte des intentions. Aucune formule,
+ * aucun seuil, aucune comparaison de pourcentage n'est réécrit ici.
  *
  * AUCUNE ÉCRITURE implicite : rien ne part vers Supabase avant un clic sur
  * l'un des deux boutons d'enregistrement.
@@ -69,6 +67,7 @@ const statusOptions: { value: AdminContentStatus; label: string }[] = [
 ];
 
 export interface NutritionPlanV2BuilderProps {
+  /** Métadonnées du plan : nom, description, objectif, statut, notes. */
   readonly state: PlanV2FormState;
   readonly onChange: (state: PlanV2FormState) => void;
   readonly onSave: (makeAssignable: boolean) => void;
@@ -76,9 +75,114 @@ export interface NutritionPlanV2BuilderProps {
   readonly serverError: string | null;
   /** Bandeau affiché en mode conversion d'un plan v1. */
   readonly conversionNotice?: string | null;
-  /** SECTION C — la semaine alimentaire. Absente = panneau non rendu. */
-  readonly week?: WeekFormState;
-  readonly onWeekChange?: (next: WeekFormState) => void;
+  /** LA SEMAINE — désormais la seule source de vérité nutritionnelle. */
+  readonly week: WeekFormState;
+  readonly onWeekChange: (next: WeekFormState) => void;
+}
+
+/**
+ * Action facultative d'initialisation : les mêmes objectifs dans les sept
+ * jours, en une fois. Repliée par défaut — elle ne doit pas ressembler à un
+ * réglage global permanent.
+ */
+function InitialiserLaSemaine({
+  onApply,
+}: {
+  readonly onApply: (objectifs: {
+    dailyCalories: number;
+    proteinBp: number;
+    carbBp: number;
+    fatBp: number;
+  }) => void;
+}) {
+  const [ouvert, setOuvert] = useState(false);
+  const [calories, setCalories] = useState("2200");
+  const [split, setSplit] = useState({ proteinBp: 3000, carbBp: 4500, fatBp: 2500 });
+  const titreId = useId();
+
+  const cibles = computeDailyMacroTargets({
+    dailyCalories: Number(calories) || 0,
+    proteinBp: split.proteinBp,
+    carbBp: split.carbBp,
+    fatBp: split.fatBp,
+  });
+  const grammes: Record<MacroKey, number> = {
+    protein: cibles.grams.proteinGrams,
+    carb: cibles.grams.carbGrams,
+    fat: cibles.grams.fatGrams,
+  };
+  const bp: Record<MacroKey, number> = {
+    protein: split.proteinBp,
+    carb: split.carbBp,
+    fat: split.fatBp,
+  };
+
+  if (!ouvert) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOuvert(true)}
+        className="pressable flex min-h-[44px] w-full items-center justify-center gap-2 rounded-control border border-dashed border-border px-4 py-3 text-[11px] font-bold uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+      >
+        <Sparkles size={14} />
+        Initialiser les sept jours avec les mêmes objectifs
+      </button>
+    );
+  }
+
+  return (
+    <section aria-labelledby={titreId} className="rounded-panel border border-border p-4 sm:p-5">
+      <h3 id={titreId} className="mb-1 text-xs font-bold uppercase tracking-widest text-muted-foreground">
+        Initialiser les sept jours
+      </h3>
+      <p className="mb-4 text-xs text-muted-foreground">
+        Point de départ, pas un réglage permanent : après application, chaque jour reste modifiable
+        indépendamment.
+      </p>
+
+      <div className="mb-4 max-w-xs">
+        <Field label="Calories par jour (kcal)" type="number" value={calories} onChange={setCalories} />
+      </div>
+
+      <div className="mb-4 flex flex-col">
+        {MACRO_KEYS.map((macro) => (
+          <MacroSliderRow
+            key={macro}
+            label={MACRO_LABELS_FR[macro]}
+            bp={bp[macro]}
+            grams={grammes[macro]}
+            onChangeBp={(valeur) => setSplit((actuel) => rebalanceDailyMacros(actuel, macro, valeur))}
+          />
+        ))}
+      </div>
+
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <button
+          type="button"
+          onClick={() => {
+            onApply({
+              dailyCalories: Number(calories) || 0,
+              proteinBp: split.proteinBp,
+              carbBp: split.carbBp,
+              fatBp: split.fatBp,
+            });
+            setOuvert(false);
+          }}
+          className="pressable flex min-h-[44px] flex-1 items-center justify-center gap-2 rounded-control border border-primary bg-primary px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        >
+          <Sparkles size={13} />
+          Appliquer aux sept jours
+        </button>
+        <button
+          type="button"
+          onClick={() => setOuvert(false)}
+          className="pressable flex min-h-[44px] items-center justify-center rounded-control border border-border px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        >
+          Annuler
+        </button>
+      </div>
+    </section>
+  );
 }
 
 export function NutritionPlanV2Builder({
@@ -91,43 +195,32 @@ export function NutritionPlanV2Builder({
   week,
   onWeekChange,
 }: NutritionPlanV2BuilderProps) {
-  const [distributeErrors, setDistributeErrors] = useState<Partial<Record<MacroKey, string>>>({});
   const [showAssignErrors, setShowAssignErrors] = useState(false);
-  const recapTitreId = useId();
-  const objectifTitreId = useId();
-  const creneauxTitreId = useId();
+  const semaineTitreId = useId();
 
-  const cibles = useMemo(() => deriveDailyTargets(state), [state]);
-  const recap = useMemo(() => buildRecap(state), [state]);
-  const brouillon = useMemo(() => validatePlanV2Draft(toValidationPlan(state)), [state]);
-  const assignable = useMemo(() => validatePlanV2Assignable(toValidationPlan(state)), [state]);
-  const messageQuotidien = formatSplitBalanceMessage({
-    proteinBp: state.proteinBp,
-    carbBp: state.carbBp,
-    fatBp: state.fatBp,
-  });
+  // Brouillon : contrôles de domaine sur les SEPT jours d'un coup.
+  const brouillon = useMemo(
+    () => validatePlanV2Draft(toValidationPlan(week, state.planId, state.name)),
+    [week, state.planId, state.name],
+  );
 
-  const grammesJour: Record<MacroKey, number> = {
-    protein: cibles.grams.proteinGrams,
-    carb: cibles.grams.carbGrams,
-    fat: cibles.grams.fatGrams,
-  };
-
-  function repartirLeReste(macro: MacroKey) {
-    const resultat = distributeRestForMacro(state, macro);
-    if (!resultat.ok) {
-      setDistributeErrors((e) => ({ ...e, [macro]: resultat.message }));
-      return;
-    }
-    setDistributeErrors((e) => ({ ...e, [macro]: undefined }));
-    onChange(resultat.state);
-  }
+  // Assignabilité : `validatePlanV2Assignable` ne juge qu'un profil à la fois.
+  // On l'appelle donc SEPT fois, une par jour, ce qui donne à la fois le bon
+  // verdict et un message situé — sans réécrire la moindre règle.
+  const parJour = useMemo(
+    () =>
+      WEEKDAY_KEYS.map((jour) => {
+        const plan = toValidationPlanForDay(week, jour, state.planId, state.name);
+        return { jour, résultat: plan ? validatePlanV2Assignable(plan) : null };
+      }),
+    [week, state.planId, state.name],
+  );
+  const joursIncomplets = parJour.filter((p) => p.résultat && !p.résultat.ok);
+  const assignable = joursIncomplets.length === 0;
 
   function demanderAssignable() {
     setShowAssignErrors(true);
-    if (!assignable.ok) {
-      return;
-    }
+    if (!assignable) return;
     onSave(true);
   }
 
@@ -189,250 +282,66 @@ export function NutritionPlanV2Builder({
         </div>
       </section>
 
-      {/* ── 2. Objectif quotidien ────────────────────────────────────── */}
+      {/* ── 2. LA SEMAINE ALIMENTAIRE — section unique ───────────────── */}
       <section
-        aria-labelledby={objectifTitreId}
+        aria-labelledby={semaineTitreId}
         className="rounded-card border border-border bg-card p-4 shadow-soft sm:p-6"
       >
-        <h2 id={objectifTitreId} className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
-          Objectif quotidien
-        </h2>
-
-        <div className="mb-5 max-w-xs">
-          <Field
-            label="Énergie quotidienne (kcal)"
-            type="number"
-            value={String(state.dailyCalories)}
-            onChange={(v) => onChange(setDailyCalories(state, Number(v)))}
-          />
-        </div>
-
-        <h3 className="mb-1 text-xs font-bold uppercase tracking-widest text-muted-foreground">
-          Répartition calorique
-        </h3>
-        <div className="flex flex-col">
-          {MACRO_KEYS.map((macro) => (
-            <MacroSliderRow
-              key={macro}
-              label={MACRO_LABELS_FR[macro]}
-              bp={readDailyMacroBp(state, macro)}
-              grams={grammesJour[macro]}
-              onChangeBp={(bp) => onChange(setDailyMacroBp(state, macro, bp))}
-            />
-          ))}
-        </div>
-
-        <p className="mt-3 text-xs text-muted-foreground">
-          Réparti : {formatDecimalFr((state.proteinBp + state.carbBp + state.fatBp) / 100, 2)}
-          {NBSP}%
-        </p>
-        {messageQuotidien && (
-          <p role="alert" className="mt-1 text-xs text-destructive">
-            {messageQuotidien}
-          </p>
-        )}
-      </section>
-
-      {/* ── 3. Créneaux actifs ───────────────────────────────────────── */}
-      <section
-        aria-labelledby={creneauxTitreId}
-        className="rounded-card border border-border bg-card p-4 shadow-soft sm:p-6"
-      >
-        <h2 id={creneauxTitreId} className="mb-1 font-heading text-lg font-bold uppercase text-foreground">
-          Repas proposés
+        <h2 id={semaineTitreId} className="mb-1 font-heading text-lg font-bold uppercase text-foreground">
+          Semaine alimentaire
         </h2>
         <p className="mb-4 text-xs text-muted-foreground">
-          Désactiver un repas remet ses trois parts à zéro. Rien n&apos;est enregistré avant Enregistrer.
+          Chaque jour porte ses propres calories, sa propre répartition et ses propres repas. Le total
+          hebdomadaire est la somme des sept jours.
         </p>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {state.slots.map((allocation) => (
-            <label
-              key={allocation.slot}
-              className="pressable flex min-h-[44px] cursor-pointer items-center gap-3 rounded-control border border-border px-3 py-2 transition-colors hover:border-primary focus-within:ring-2 focus-within:ring-primary/40"
-            >
-              <input
-                type="checkbox"
-                checked={allocation.enabled}
-                onChange={(event) => onChange(setSlotEnabled(state, allocation.slot, event.target.checked))}
-                className="h-5 w-5 shrink-0 accent-primary"
-              />
-              <span className="text-sm text-foreground">{MEAL_SLOT_LABELS_FR[allocation.slot]}</span>
-            </label>
-          ))}
+
+        <div className="mb-4">
+          <InitialiserLaSemaine onApply={(objectifs) => onWeekChange(initializeAllDays(week, objectifs))} />
         </div>
+
+        <NutritionPlanV2WeekPanel state={week} onChange={onWeekChange} />
       </section>
 
-      {/* ── 4-6. Une répartition INDÉPENDANTE par macro ──────────────── */}
-      {MACRO_KEYS.map((macro) => (
-        <NutritionMacroDistributionPanel
-          key={macro}
-          state={state}
-          macro={macro}
-          dailyGrams={grammesJour[macro]}
-          onChangeSlotBp={(slot: MealSlotKey, bp: number) => onChange(setSlotMacroBp(state, slot, macro, bp))}
-          onToggleLock={(slot: MealSlotKey) => onChange(toggleSlotLock(state, macro, slot))}
-          onDistributeRest={() => repartirLeReste(macro)}
-          distributeError={distributeErrors[macro] ?? null}
-        />
-      ))}
-
-      {/* ── 7. Récapitulatif ─────────────────────────────────────────── */}
-      <section
-        aria-labelledby={recapTitreId}
-        className="rounded-card border border-border bg-card p-4 shadow-soft sm:p-6"
-      >
-        <h2 id={recapTitreId} className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
-          Récapitulatif
-        </h2>
-
-        {/* Mobile : une carte par repas — aucun défilement horizontal. */}
-        <ul className="flex flex-col gap-3 md:hidden">
-          {recap.rows
-            .filter((r) => r.enabled)
-            .map((row) => (
-              <li key={row.slot} className="rounded-panel border border-border p-3">
-                <span className="mb-2 block text-xs font-bold uppercase tracking-wide text-foreground">
-                  {MEAL_SLOT_LABELS_FR[row.slot]}
-                </span>
-                <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-                  <span>Protéines : {formatDecimalFr(row.proteinGrams, 1)}{NBSP}g</span>
-                  <span>Glucides : {formatDecimalFr(row.carbGrams, 1)}{NBSP}g</span>
-                  <span>Lipides : {formatDecimalFr(row.fatGrams, 1)}{NBSP}g</span>
-                  <span>{formatIntegerFr(row.calories)}{NBSP}kcal</span>
-                </div>
-              </li>
-            ))}
-          <li className="rounded-panel border border-border-strong p-3">
-            <span className="mb-2 block text-xs font-bold uppercase tracking-wide text-foreground">Total</span>
-            <div className="grid grid-cols-2 gap-2 text-xs text-foreground">
-              <span>Protéines : {formatDecimalFr(recap.totals.proteinGrams, 1)}{NBSP}g</span>
-              <span>Glucides : {formatDecimalFr(recap.totals.carbGrams, 1)}{NBSP}g</span>
-              <span>Lipides : {formatDecimalFr(recap.totals.fatGrams, 1)}{NBSP}g</span>
-              <span>{formatIntegerFr(recap.totals.calories)}{NBSP}kcal</span>
-            </div>
-          </li>
-        </ul>
-
-        {/* Desktop : tableau, défilement interne contrôlé si nécessaire. */}
-        <div className="hidden overflow-x-auto md:block">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
-                <th scope="col" className="py-2 pr-3 font-medium">Repas</th>
-                <th scope="col" className="py-2 pr-3 font-medium">Protéines</th>
-                <th scope="col" className="py-2 pr-3 font-medium">Glucides</th>
-                <th scope="col" className="py-2 pr-3 font-medium">Lipides</th>
-                <th scope="col" className="py-2 font-medium">Calories</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recap.rows
-                .filter((r) => r.enabled)
-                .map((row) => (
-                  <tr key={row.slot} className="border-b border-border text-muted-foreground">
-                    <th scope="row" className="py-2 pr-3 font-normal text-foreground">
-                      {MEAL_SLOT_LABELS_FR[row.slot]}
-                    </th>
-                    <td className="py-2 pr-3">{formatDecimalFr(row.proteinGrams, 1)}{NBSP}g</td>
-                    <td className="py-2 pr-3">{formatDecimalFr(row.carbGrams, 1)}{NBSP}g</td>
-                    <td className="py-2 pr-3">{formatDecimalFr(row.fatGrams, 1)}{NBSP}g</td>
-                    <td className="py-2">{formatIntegerFr(row.calories)}</td>
-                  </tr>
-                ))}
-              <tr className="text-foreground">
-                <th scope="row" className="py-2 pr-3 font-bold uppercase">Total</th>
-                <td className="py-2 pr-3 font-bold">{formatDecimalFr(recap.totals.proteinGrams, 1)}{NBSP}g</td>
-                <td className="py-2 pr-3 font-bold">{formatDecimalFr(recap.totals.carbGrams, 1)}{NBSP}g</td>
-                <td className="py-2 pr-3 font-bold">{formatDecimalFr(recap.totals.fatGrams, 1)}{NBSP}g</td>
-                <td className="py-2 font-bold">{formatIntegerFr(recap.totals.calories)}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <dl className="mt-4 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
+      {/* ── 3. Actions ───────────────────────────────────────────────── */}
+      <section className="rounded-card border border-border bg-card p-4 shadow-soft sm:p-6">
+        <dl className="mb-4 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
           <div className="flex justify-between gap-2">
-            <dt className="text-muted-foreground">Calories demandées</dt>
-            <dd className="text-foreground">{formatIntegerFr(recap.requestedCalories)}{NBSP}kcal</dd>
-          </div>
-          <div className="flex justify-between gap-2">
-            <dt className="text-muted-foreground">Calories calculées</dt>
-            <dd className="text-foreground">{formatIntegerFr(recap.derivedCalories)}{NBSP}kcal</dd>
-          </div>
-          <div className="flex justify-between gap-2">
-            <dt className="text-muted-foreground">Écart d&apos;affichage</dt>
+            <dt className="text-muted-foreground">Total de la semaine</dt>
             <dd className="text-foreground">
-              {formatDecimalFr(recap.displayGapCalories, 1)}{NBSP}kcal
+              {formatIntegerFr(weeklyCaloriesFromForm(week))}
+              {NBSP}kcal
             </dd>
           </div>
-          {MACRO_KEYS.map((macro) => {
-            const balance = describeMacroBalance(state.slots, macro);
-            return (
-              <div key={macro} className="flex justify-between gap-2">
-                <dt className="text-muted-foreground">Statut {MACRO_LABELS_FR[macro].toLowerCase()}</dt>
-                <dd className={balance.status === "complete" ? "text-success" : "text-foreground"}>
-                  {balance.status === "complete" ? "Complet" : "À compléter"}
-                </dd>
-              </div>
-            );
-          })}
+          <div className="flex justify-between gap-2">
+            <dt className="text-muted-foreground">Moyenne par jour</dt>
+            <dd className="text-foreground">
+              {formatDecimalFr(weeklyCaloriesFromForm(week) / WEEKDAY_KEYS.length, 0)}
+              {NBSP}kcal
+            </dd>
+          </div>
           <div className="flex justify-between gap-2 sm:col-span-2">
             <dt className="text-muted-foreground">Statut du plan</dt>
-            <dd className={assignable.ok ? "text-success" : "text-foreground"}>
-              {assignable.ok ? "Assignable" : "Brouillon — non assignable"}
+            <dd className={assignable ? "text-success" : "text-foreground"}>
+              {assignable ? "Assignable" : "Brouillon — non assignable"}
             </dd>
           </div>
         </dl>
 
-        <p className="mt-3 text-xs text-muted-foreground">
-          Un léger écart d&apos;affichage dû à l&apos;arrondi des grammes ne bloque pas le plan : seuls
-          les points de base font foi.
-        </p>
-      </section>
-
-      {/* ── 7 bis. SECTION C — la semaine alimentaire ─────────────────
-          Les objectifs affichés par jour sont dérivés du profil du jour :
-          calories du profil, parts P/G/L du profil principal. Aucun calcul
-          propre au panneau — il reçoit une fonction et l'appelle. */}
-      {week && onWeekChange && (
-        <section className="rounded-card border border-border bg-card p-4 shadow-soft sm:p-6">
-          <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
-            Semaine alimentaire
-          </h2>
-          <NutritionPlanV2WeekPanel
-            state={week}
-            onChange={onWeekChange}
-            dailyTargetsFor={(profileKey) => {
-              const profil = week.profiles.find((p) => p.profileKey === profileKey);
-              if (!profil) return null;
-              const cible = computeDailyMacroTargets({
-                dailyCalories: profil.dailyCalories,
-                proteinBp: state.proteinBp,
-                carbBp: state.carbBp,
-                fatBp: state.fatBp,
-              });
-              return {
-                calories: cible.calories.totalCalories,
-                protein: cible.grams.proteinGrams,
-                carbs: cible.grams.carbGrams,
-                fat: cible.grams.fatGrams,
-              };
-            }}
-          />
-        </section>
-      )}
-
-      {/* ── 8. Actions ───────────────────────────────────────────────── */}
-      <section className="rounded-card border border-border bg-card p-4 shadow-soft sm:p-6">
-        {showAssignErrors && !assignable.ok && (
+        {showAssignErrors && !assignable && (
           <div
             role="alert"
             className="mb-4 rounded-panel border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
           >
-            <p className="font-bold">{formatPlanV2AssignabilityMessage(assignable)}</p>
+            <p className="font-bold">
+              {joursIncomplets.length === 1
+                ? "Un jour est incomplet : ce plan ne peut pas encore être assigné."
+                : `${joursIncomplets.length} jours sont incomplets : ce plan ne peut pas encore être assigné.`}
+            </p>
             <ul className="mt-2 flex list-disc flex-col gap-1 pl-4 text-xs">
-              {assignable.issues.map((issue, index) => (
-                <li key={`${issue.code}-${issue.slot ?? issue.field ?? index}`}>{issue.message}</li>
+              {joursIncomplets.map(({ jour, résultat }) => (
+                <li key={jour}>
+                  <strong>{WEEKDAY_LABELS_FR[jour]}</strong> — {résultat?.issues[0]?.message}
+                </li>
               ))}
             </ul>
           </div>

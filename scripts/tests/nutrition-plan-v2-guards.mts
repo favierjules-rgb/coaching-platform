@@ -1,25 +1,38 @@
 /**
- * Harnais — feat/nutrition-adaptive-recipes, PR 1, volets G et H.
+ * Harnais — feat/nutrition-adaptive-recipes, PR 1, volets G et H,
+ * MIS À JOUR PAR LA PR C.1.
  *
- * MATRICE DE COMPATIBILITÉ v1 / v2 :
+ * MATRICE DE COMPATIBILITÉ v1 / v2, telle qu'elle est RÉELLEMENT appliquée
+ * depuis la PR C.1 :
  *
- *   écriture v1 sur plan v1 ........................ autorisée
- *   écriture v1 sur plan v2 ........................ REFUSÉE, sans écriture
+ *   écriture v1 sur plan v1 ........................ N'EXISTE PLUS
+ *   écriture v1 sur plan v2 ........................ N'EXISTE PLUS
  *   RPC v2 sur plan v2 ............................. autorisée
  *   RPC v2 sur plan v1 (conversion explicite) ...... autorisée
  *   conversion automatique au chargement ........... jamais
  *
- * Vérifie aussi la parité du `daily_target` de compatibilité entre le
- * TypeScript et la formule de la RPC (migration 20260804090000), et la
- * lecture canonique d'un plan v2.
+ * CE QUI A CHANGÉ, ET POURQUOI CES TESTS ONT ÉTÉ RÉÉCRITS PLUTÔT QUE
+ * SUPPRIMÉS. Les cas 6, 7 et 8 vérifiaient qu'une garde EMPÊCHAIT le chemin
+ * d'écriture historique d'abîmer un plan v2. Depuis la migration
+ * 20260811090000, `nutrition_days.profile_key` est NOT NULL avec clé
+ * étrangère composite : ce chemin ne peut plus écrire une ligne valide, et
+ * il a été supprimé de lib/supabase/nutrition.ts (PR C.1). Une garde sur un
+ * chemin inexistant ne prouve plus rien ; les trois cas vérifient donc
+ * désormais la garantie PLUS FORTE qui l'a remplacée : il n'existe plus
+ * AUCUN chemin applicatif capable d'insérer une journée ou un repas hors de
+ * la RPC `save_nutrition_plan_v2`.
  *
- * Aucun réseau : le client Supabase est remplacé par un double qui journalise
- * les appels, ce qui permet de prouver qu'un refus n'écrit RIEN.
+ * La règle v1/v2 elle-même n'a pas disparu : elle vit dans le module pur
+ * lib/nutrition/plan-v2-guards.ts et reste couverte à l'identique par les
+ * cas 1 à 5.
+ *
+ * Aucun réseau : les cas 6 à 8 lisent les sources du dépôt et interrogent
+ * les exports réels du module, sans client Supabase.
  *
  * Lancement : npx tsx scripts/tests/nutrition-plan-v2-guards.mts
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 
 import {
   LEGACY_WRITE_ON_V2_MESSAGE_FR,
@@ -32,14 +45,13 @@ import {
   shouldConvertOnRead,
 } from "../../lib/nutrition/plan-v2-guards";
 import { createEmptyAllocations, distributeRemainingEqually } from "../../lib/nutrition/meal-distribution";
-import { evaluateLegacyWriteForPlan, updateNutritionPlan } from "../../lib/supabase/nutrition";
+import * as coucheNutrition from "../../lib/supabase/nutrition";
 import {
   buildLegacyDailyTarget,
   buildSaveNutritionPlanV2Payload,
   composeProfile,
   parseCanonicalRpcResult,
 } from "../../lib/supabase/nutrition-v2";
-import type { NutritionPlanBuilderData } from "../../components/admin/NutritionPlanBuilder";
 
 let réussis = 0;
 let échecs = 0;
@@ -61,66 +73,47 @@ function lire(chemin: string): string {
   return readFileSync(new URL(chemin, import.meta.url), "utf8");
 }
 
-/* ─────────────── Double de client Supabase ─────────────── */
+/* ─────────────── Balayage des sources applicatives ─────────────── */
 
-type LigneVersion = { nutrition_model_version: number } | null;
+const RACINES_APPLICATIVES = ["app", "components", "hooks", "lib"] as const;
 
-/**
- * Double minimal : journalise chaque opération pour PROUVER qu'un refus
- * n'entraîne aucune écriture. Toute méthode de chaînage renvoie le même
- * objet, comme le fait le vrai client.
- */
-function clientDouble(version: LigneVersion, journal: string[]) {
-  const chaîne = {
-    select: () => chaîne,
-    eq: () => chaîne,
-    in: () => chaîne,
-    order: () => chaîne,
-    maybeSingle: async () => ({ data: version, error: null }),
-    single: async () => ({ data: version, error: null }),
-    then: undefined,
+/** Tous les fichiers .ts/.tsx des quatre racines applicatives. */
+function fichiersApplicatifs(): { chemin: string; code: string }[] {
+  const trouvés: { chemin: string; code: string }[] = [];
+  const parcourir = (relatif: string) => {
+    const url = new URL(`../../${relatif}`, import.meta.url);
+    for (const entrée of readdirSync(url, { withFileTypes: true })) {
+      if (entrée.name === "node_modules" || entrée.name.startsWith(".")) continue;
+      const suivant = `${relatif}/${entrée.name}`;
+      if (entrée.isDirectory()) parcourir(suivant);
+      else if (/\.(ts|tsx)$/.test(entrée.name)) trouvés.push({ chemin: suivant, code: lire(`../../${suivant}`) });
+    }
   };
-  const client = {
-    from(table: string) {
-      journal.push(`from:${table}`);
-      return {
-        ...chaîne,
-        update: (valeurs: Record<string, unknown>) => {
-          journal.push(`update:${table}:${Object.keys(valeurs).sort().join(",")}`);
-          return { eq: async () => ({ error: null }) };
-        },
-        delete: () => {
-          journal.push(`delete:${table}`);
-          return { eq: async () => ({ error: null }) };
-        },
-        insert: (valeurs: unknown) => {
-          journal.push(`insert:${table}`);
-          void valeurs;
-          return {
-            select: () => ({ single: async () => ({ data: { id: "id-factice" }, error: null }) }),
-          };
-        },
-      };
-    },
-  };
-  return client as unknown as Parameters<typeof evaluateLegacyWriteForPlan>[0];
+  for (const racine of RACINES_APPLICATIVES) parcourir(racine);
+  return trouvés;
 }
 
-const DONNEES_V1: NutritionPlanBuilderData = {
-  name: "Plan historique",
-  goalType: "maintien",
-  caloriesPerDay: 1700,
-  protein: 119,
-  carbs: 204,
-  fat: 45,
-  weeklyTargetCalories: 11900,
-  status: "brouillon",
-  coachNotes: "",
-  hydrationTip: "",
-  supplements: [],
-  shoppingList: [],
-  days: [],
-};
+/**
+ * Toutes les opérations enchaînées derrière `.from("<table>")` dans un
+ * fichier. On coupe au prochain `.from(` ou au prochain `;` : suffisant pour
+ * une couche d'accès écrite en chaînes courtes, et volontairement plus
+ * bavard que précis — un faux positif fait échouer le test, jamais l'inverse.
+ */
+function opérationsSurTable(code: string, table: string): string[] {
+  const opérations: string[] = [];
+  const motif = new RegExp(`\\.from\\(\\s*["'\`]${table}["'\`]\\s*\\)`, "g");
+  for (const correspondance of code.matchAll(motif)) {
+    const début = (correspondance.index ?? 0) + correspondance[0].length;
+    const suite = code.slice(début, début + 400);
+    const fin = Math.min(
+      ...[suite.indexOf(".from("), suite.indexOf(";")].filter((i) => i >= 0).concat([suite.length]),
+    );
+    for (const op of ["insert", "upsert", "update", "delete"]) {
+      if (new RegExp(`\\.${op}\\s*\\(`).test(suite.slice(0, fin))) opérations.push(op);
+    }
+  }
+  return opérations;
+}
 
 /* ─────────────── 1-5. La matrice, à l'état pur ─────────────── */
 
@@ -162,37 +155,78 @@ await test("5. aucune conversion automatique au chargement", () => {
   assert.equal(evaluateStructuredWrite(99).allowed, false);
 });
 
-/* ─────────────── 6-8. La matrice, branchée sur la couche Supabase ────── */
+/* ─────────────── 6-8. Le chemin d'écriture v1 n'existe plus ─────────────── */
 
-await test("6. la garde lit bien nutrition_model_version avant toute écriture", async () => {
-  const journal: string[] = [];
-  const décision = await evaluateLegacyWriteForPlan(
-    clientDouble({ nutrition_model_version: 2 }, journal),
-    "plan-v2",
+await test("6. la couche nutrition n'exporte plus AUCUNE écriture de structure", () => {
+  // Interrogation des exports RÉELS du module, pas de son texte : une
+  // fonction réintroduite serait détectée même renommée dans un commentaire.
+  const exports = Object.keys(coucheNutrition);
+  for (const disparue of [
+    "createNutritionPlan",
+    "updateNutritionPlan",
+    "insertNutritionStructure",
+    "evaluateLegacyWriteForPlan",
+  ]) {
+    assert.ok(!exports.includes(disparue), `${disparue} ne doit plus être exportée`);
+  }
+  // Les lectures et les deux écritures encore légitimes restent en place.
+  for (const conservée of [
+    "getNutritionPlans",
+    "getAssignedNutritionPlansForStudent",
+    "getAssignedNutritionPlanForStudent",
+    "getAssignedNutritionPlanIdsByStudent",
+    "updateNutritionPlanStatus",
+    "setNutritionAssignment",
+    "STATUS_APP_TO_DB",
+  ]) {
+    assert.ok(exports.includes(conservée), `${conservée} doit rester exportée`);
+  }
+  // Et le module ne touche plus du tout à la structure.
+  const source = lire("../../lib/supabase/nutrition.ts");
+  assert.deepEqual(opérationsSurTable(source, "nutrition_days"), []);
+  assert.deepEqual(opérationsSurTable(source, "meals"), []);
+  // Le seul `update` restant sur les plans est celui du statut.
+  assert.ok(!source.includes("daily_target:"), "plus aucune écriture de daily_target");
+});
+
+await test("7. aucun fichier applicatif n'insère de journée ni de repas", () => {
+  const coupables: string[] = [];
+  for (const { chemin, code } of fichiersApplicatifs()) {
+    for (const table of ["nutrition_days", "meals"]) {
+      const opérations = opérationsSurTable(code, table);
+      if (opérations.length > 0) coupables.push(`${chemin} → ${table}.${opérations.join("/")}`);
+    }
+  }
+  assert.deepEqual(
+    coupables,
+    [],
+    `écriture directe interdite (passer par save_nutrition_plan_v2) : ${coupables.join(" | ")}`,
   );
-  assert.equal(décision.allowed, false);
-  assert.equal(décision.message, LEGACY_WRITE_ON_V2_MESSAGE_FR);
-  assert.deepEqual(journal, ["from:nutrition_plans"]);
 });
 
-await test("7. updateNutritionPlan refuse un plan v2 SANS écrire une seule ligne", async () => {
-  const journal: string[] = [];
-  const ok = await updateNutritionPlan(clientDouble({ nutrition_model_version: 2 }, journal), "plan-v2", DONNEES_V1);
-  assert.equal(ok, false);
-  assert.deepEqual(journal, ["from:nutrition_plans"], `journal inattendu : ${journal.join(" | ")}`);
-  assert.ok(!journal.some((l) => l.startsWith("update:")), "aucun UPDATE ne doit partir");
-  assert.ok(!journal.some((l) => l.startsWith("delete:")), "aucun DELETE ne doit partir");
-  assert.ok(!journal.some((l) => l.startsWith("insert:")), "aucun INSERT ne doit partir");
-});
+await test("8. la sauvegarde complète d'un plan passe UNIQUEMENT par save_nutrition_plan_v2", () => {
+  // Un seul appelant de RPC pour l'enregistrement d'un plan, un seul nom.
+  const couche = lire("../../lib/supabase/nutrition-v2.ts");
+  assert.ok(couche.includes(`rpc("save_nutrition_plan_v2"`), "la RPC v2 doit rester l'unique écriture");
 
-await test("8. updateNutritionPlan écrit normalement sur un plan v1", async () => {
-  const journal: string[] = [];
-  const ok = await updateNutritionPlan(clientDouble({ nutrition_model_version: 1 }, journal), "plan-v1", DONNEES_V1);
-  assert.equal(ok, true);
-  assert.ok(journal.some((l) => l.startsWith("update:nutrition_plans")), journal.join(" | "));
-  assert.ok(journal.some((l) => l.startsWith("delete:nutrition_days")), journal.join(" | "));
-  // Le chemin v1 continue bien d'écrire daily_target — c'est sa raison d'être.
-  assert.ok(journal.some((l) => l.includes("daily_target")), journal.join(" | "));
+  // Les deux seuls écrans qui enregistrent un plan l'appellent.
+  for (const page of ["../../app/admin/nutrition/nouveau/page.tsx", "../../app/admin/nutrition/[planId]/page.tsx"]) {
+    const code = lire(page);
+    assert.ok(code.includes("saveNutritionPlanV2("), `${page} doit enregistrer via la RPC v2`);
+  }
+
+  // Et personne n'appelle une autre RPC d'écriture de plan.
+  for (const { chemin, code } of fichiersApplicatifs()) {
+    for (const appel of code.matchAll(/\.rpc\(\s*["'`]([a-z0-9_]+)["'`]/g)) {
+      const nom = appel[1];
+      if (nom.includes("nutrition_plan") && nom !== "save_nutrition_plan_v2") {
+        assert.ok(
+          ["assign_nutrition_plan", "unassign_nutrition_plan"].includes(nom),
+          `RPC d'écriture de plan inattendue dans ${chemin} : ${nom}`,
+        );
+      }
+    }
+  }
 });
 
 /* ─────────────── 9-11. daily_target de compatibilité ─────────────── */

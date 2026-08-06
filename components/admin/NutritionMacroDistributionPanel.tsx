@@ -1,13 +1,12 @@
 "use client";
 
 import { useId, useState } from "react";
-import { Lock, LockOpen, Scale } from "lucide-react";
+import { Lock, LockOpen } from "lucide-react";
 
-import { NBSP, formatDecimalFr } from "@/lib/nutrition/basis-points";
+import { BASIS_POINTS_TOTAL, NBSP, applyBasisPoints, formatDecimalFr } from "@/lib/nutrition/basis-points";
 import {
   MEAL_SLOT_LABELS_FR,
   describeMacroBalance,
-  formatMacroBalanceMessage,
   type MacroKey,
   type MealSlotKey,
 } from "@/lib/nutrition/meal-distribution";
@@ -15,7 +14,6 @@ import {
   formatPercentInput,
   isSlotLocked,
   parsePercentInput,
-  remainingGramsForMacro,
   slotBasisPointsFor,
   type PlanV2FormState,
 } from "@/lib/nutrition/plan-v2-form";
@@ -165,98 +163,89 @@ export function MacroSliderRow({
 }
 
 interface PanelProps {
+  /**
+   * L'état de macros du JOUR ouvert, présenté sous la forme attendue par les
+   * fonctions pures de `plan-v2-form.ts` (voir `dayTargetsAsFormState`).
+   * Le panneau ne sait pas qu'il s'agit d'un jour : il ne voit qu'une
+   * répartition, ce qui le rend indifférent au modèle qui l'entoure.
+   */
   readonly state: PlanV2FormState;
   readonly macro: MacroKey;
   readonly dailyGrams: number;
   readonly onChangeSlotBp: (slot: MealSlotKey, bp: number) => void;
   readonly onToggleLock: (slot: MealSlotKey) => void;
-  readonly onDistributeRest: () => void;
-  readonly distributeError: string | null;
 }
 
+/**
+ * Contenu de l'onglet d'UNE macro dans la répartition par créneau.
+ *
+ * Ce n'est PLUS une section autonome : les trois macros vivent dans un seul
+ * panneau à onglets (`NutritionDaySlotDistribution`), et une seule est rendue
+ * à la fois.
+ *
+ * CURSEURS SOLIDAIRES ICI AUSSI. Déplacer un créneau redistribue le reste sur
+ * les créneaux actifs non verrouillés : la somme de la macro vaut toujours
+ * 10 000 points de base. Trois affichages ont donc disparu, parce qu'ils
+ * décrivaient un état devenu impossible :
+ *
+ *   « Réparti / Restant »  ............ le restant est toujours nul ;
+ *   « Grammes restants »  ............. idem, en grammes ;
+ *   « Répartir le reste équitablement » il n'y a plus de reste à répartir.
+ *
+ * Ne restent que ce qui informe encore : le pourcentage de chaque créneau,
+ * ses grammes, les verrous, et le total.
+ *
+ * Le total AFFICHÉ est le total RÉEL, pas un « 100 % » écrit en dur : un plan
+ * enregistré avant cette refonte peut arriver à 92 %, et le coach doit le
+ * voir. Il repasse à 100 % dès qu'un curseur est touché.
+ */
 export function NutritionMacroDistributionPanel({
   state,
   macro,
   dailyGrams,
   onChangeSlotBp,
   onToggleLock,
-  onDistributeRest,
-  distributeError,
 }: PanelProps) {
   const balance = describeMacroBalance(state.slots, macro);
-  const message = formatMacroBalanceMessage(state.slots, macro);
-  const grammesRestants = remainingGramsForMacro(state, macro);
   const actifs = state.slots.filter((s) => s.enabled);
-  const titreId = useId();
+  const complet = balance.totalBp === BASIS_POINTS_TOTAL;
 
   return (
-    <section
-      aria-labelledby={titreId}
-      className="rounded-card border border-border bg-card p-4 shadow-soft sm:p-6"
-    >
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 id={titreId} className="font-heading text-lg font-bold uppercase text-foreground">
-            {MACRO_LABELS_FR[macro]} — {formatDecimalFr(dailyGrams, 1)}
-            {NBSP}g/jour
-          </h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Réparti : {formatPercentInput(balance.totalBp)}
-            {NBSP}% · Restant : {formatPercentInput(balance.remainingBp)}
-            {NBSP}% · {formatDecimalFr(grammesRestants, 1)}
-            {NBSP}g
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={onDistributeRest}
-          disabled={actifs.length === 0}
-          className="pressable flex min-h-[44px] items-center gap-2 rounded-control border border-primary px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          <Scale size={13} />
-          Répartir le reste équitablement
-        </button>
-      </div>
-
+    <div>
       {actifs.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           Active au moins un repas pour répartir les {MACRO_LABELS_FR[macro].toLowerCase()}.
         </p>
       ) : (
-        <div className="flex flex-col">
-          {state.slots
-            .filter((s) => s.enabled)
-            .map((allocation) => {
-              const bp = slotBasisPointsFor(state, allocation.slot, macro);
-              return (
-                <MacroSliderRow
-                  key={allocation.slot}
-                  label={MEAL_SLOT_LABELS_FR[allocation.slot]}
-                  bp={bp}
-                  grams={(dailyGrams * bp) / 10000}
-                  locked={isSlotLocked(state, macro, allocation.slot)}
-                  onToggleLock={() => onToggleLock(allocation.slot)}
-                  onChangeBp={(valeur) => onChangeSlotBp(allocation.slot, valeur)}
-                />
-              );
-            })}
-        </div>
-      )}
+        <>
+          <div className="flex flex-col">
+            {state.slots
+              .filter((s) => s.enabled)
+              .map((allocation) => {
+                const bp = slotBasisPointsFor(state, allocation.slot, macro);
+                return (
+                  <MacroSliderRow
+                    key={allocation.slot}
+                    label={MEAL_SLOT_LABELS_FR[allocation.slot]}
+                    bp={bp}
+                    grams={applyBasisPoints(dailyGrams, bp)}
+                    locked={isSlotLocked(state, macro, allocation.slot)}
+                    onToggleLock={() => onToggleLock(allocation.slot)}
+                    onChangeBp={(valeur) => onChangeSlotBp(allocation.slot, valeur)}
+                  />
+                );
+              })}
+          </div>
 
-      {distributeError && (
-        <p role="alert" className="mt-3 rounded-panel border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-          {distributeError}
-        </p>
+          <p className="mt-3 flex flex-wrap items-baseline gap-x-2 text-xs">
+            <span className="text-muted-foreground">Total réparti :</span>
+            <strong className={complet ? "text-success" : "text-destructive"}>
+              {formatPercentInput(balance.totalBp)}
+              {NBSP}%
+            </strong>
+          </p>
+        </>
       )}
-
-      {message && (
-        <p
-          role={balance.status === "overflow" ? "alert" : undefined}
-          className={`mt-3 text-xs ${balance.status === "overflow" ? "text-destructive" : "text-muted-foreground"}`}
-        >
-          {message}
-        </p>
-      )}
-    </section>
+    </div>
   );
 }

@@ -725,6 +725,136 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------
+-- Section H — la garde serveur contrôle les SEPT jours
+--             (migration 20260814090000)
+-- ---------------------------------------------------------------------
+-- Un plan « nouvelle forme » : sept profils internes day_<jour>, sept jours,
+-- chacun désignant le sien. On casse ensuite un jour à la fois et on vérifie
+-- que la garde le nomme — puis qu'elle se tait dès qu'il est réparé.
+insert into public.nutrition_plans (id, coach_id, name, nutrition_model_version, status, daily_target)
+values ('92220000-0000-4000-8000-00000000000a', 'c1110000-0000-4000-8000-00000000000a',
+        'Plan semaine complet', 2, 'actif', '{}'::jsonb);
+
+insert into public.nutrition_plan_profiles (plan_id, profile_key, daily_calories, protein_bp, carb_bp, fat_bp)
+select '92220000-0000-4000-8000-00000000000a', 'day_' || j, 2100, 3000, 4500, 2500
+  from unnest(array['monday','tuesday','wednesday','thursday','friday','saturday','sunday']) as j;
+
+insert into public.nutrition_meal_slot_targets
+  (profile_id, slot, enabled, protein_bp, carb_bp, fat_bp, display_order)
+select pr.id, s.slot, true, s.bp, s.bp, s.bp, s.ord
+  from public.nutrition_plan_profiles pr,
+       (values ('breakfast', 1667, 0), ('morning_snack', 1667, 1), ('lunch', 1667, 2),
+               ('afternoon_snack', 1667, 3), ('dinner', 1666, 4), ('dessert', 1666, 5))
+         as s(slot, bp, ord)
+ where pr.plan_id = '92220000-0000-4000-8000-00000000000a';
+
+insert into public.nutrition_days (plan_id, day, profile_key, status, target)
+select '92220000-0000-4000-8000-00000000000a', j, 'day_' || j, 'non-commence', '{}'::jsonb
+  from unnest(array['monday','tuesday','wednesday','thursday','friday','saturday','sunday']) as j;
+
+do $$
+declare
+  c_plan constant uuid := '92220000-0000-4000-8000-00000000000a';
+  v_issue text;
+begin
+  -- H1. Les sept jours valides passent.
+  perform pg_temp.noter('H', 'H1. les sept jours valides : aucun problème remonté',
+    public.nutrition_plan_v2_blocking_issue(c_plan) is null);
+
+  -- H2. Lundi invalide bloque, et la garde le NOMME.
+  update public.nutrition_plan_profiles set daily_calories = 0
+   where plan_id = c_plan and profile_key = 'day_monday';
+  v_issue := public.nutrition_plan_v2_blocking_issue(c_plan);
+  perform pg_temp.noter('H', 'H2. monday invalide bloque et est nommé',
+    v_issue = 'monday:calories_not_positive');
+
+  -- H3. Réparé, le plan redevient assignable — le jour suivant ne prend pas
+  --     silencieusement le relais.
+  update public.nutrition_plan_profiles set daily_calories = 2100
+   where plan_id = c_plan and profile_key = 'day_monday';
+  perform pg_temp.noter('H', 'H3. la correction de monday rend le plan assignable',
+    public.nutrition_plan_v2_blocking_issue(c_plan) is null);
+
+  -- H4. Mardi invalide bloque — un jour du MILIEU, que l'ancienne garde
+  --     ignorait complètement.
+  update public.nutrition_plan_profiles set protein_bp = 2000
+   where plan_id = c_plan and profile_key = 'day_tuesday';
+  v_issue := public.nutrition_plan_v2_blocking_issue(c_plan);
+  perform pg_temp.noter('H', 'H4. tuesday invalide bloque et est nommé',
+    v_issue = 'tuesday:daily_split_incomplete');
+  update public.nutrition_plan_profiles set protein_bp = 3000
+   where plan_id = c_plan and profile_key = 'day_tuesday';
+
+  -- H5. Dimanche invalide bloque — le DERNIER jour parcouru, et un contrôle
+  --     différent : plus aucun créneau actif.
+  update public.nutrition_meal_slot_targets t set enabled = false
+   where t.profile_id = (select pr.id from public.nutrition_plan_profiles pr
+                          where pr.plan_id = c_plan and pr.profile_key = 'day_sunday');
+  v_issue := public.nutrition_plan_v2_blocking_issue(c_plan);
+  perform pg_temp.noter('H', 'H5. sunday invalide bloque et est nommé',
+    v_issue = 'sunday:no_enabled_slot');
+  update public.nutrition_meal_slot_targets t set enabled = true
+   where t.profile_id = (select pr.id from public.nutrition_plan_profiles pr
+                          where pr.plan_id = c_plan and pr.profile_key = 'day_sunday');
+
+  -- H6. Une répartition de créneau différente de 10 000 bloque, sur le jour
+  --     concerné et sur la MACRO concernée.
+  update public.nutrition_meal_slot_targets t set carb_bp = 1000
+   where t.slot = 'lunch'
+     and t.profile_id = (select pr.id from public.nutrition_plan_profiles pr
+                          where pr.plan_id = c_plan and pr.profile_key = 'day_wednesday');
+  v_issue := public.nutrition_plan_v2_blocking_issue(c_plan);
+  perform pg_temp.noter('H', 'H6. une macro de créneau ≠ 10 000 bloque le jour concerné',
+    v_issue = 'wednesday:carb_split_incomplete');
+  update public.nutrition_meal_slot_targets t set carb_bp = 1667
+   where t.slot = 'lunch'
+     and t.profile_id = (select pr.id from public.nutrition_plan_profiles pr
+                          where pr.plan_id = c_plan and pr.profile_key = 'day_wednesday');
+
+  -- H7. Un jour manquant bloque, et il est nommé.
+  delete from public.nutrition_days d where d.plan_id = c_plan and d.day = 'friday';
+  v_issue := public.nutrition_plan_v2_blocking_issue(c_plan);
+  perform pg_temp.noter('H', 'H7. un jour absent bloque et est nommé',
+    v_issue = 'friday:missing_day');
+  insert into public.nutrition_days (plan_id, day, profile_key, status, target)
+  values (c_plan, 'friday', 'day_friday', 'non-commence', '{}'::jsonb);
+
+  -- H8. Un plan SANS aucun profil rend le code historique — les messages
+  --     d'assign_nutrition_plan restent intelligibles.
+  perform pg_temp.noter('H', 'H8. un plan sans profil rend missing_default_profile',
+    public.nutrition_plan_v2_blocking_issue('91110000-0000-4000-8000-00000000000b') is not null);
+
+  -- H9. Ordre DÉTERMINISTE : deux jours cassés, c'est le PREMIER dans
+  --     l'ordre lundi → dimanche qui est rapporté.
+  update public.nutrition_plan_profiles set daily_calories = 0
+   where plan_id = c_plan and profile_key in ('day_thursday', 'day_saturday');
+  v_issue := public.nutrition_plan_v2_blocking_issue(c_plan);
+  perform pg_temp.noter('H', 'H9. deux jours cassés : le premier dans l''ordre est rapporté',
+    v_issue = 'thursday:calories_not_positive');
+  update public.nutrition_plan_profiles set daily_calories = 2100
+   where plan_id = c_plan and profile_key in ('day_thursday', 'day_saturday');
+
+  -- H10. Tout réparé : le plan est de nouveau assignable.
+  perform pg_temp.noter('H', 'H10. tout réparé, le plan est de nouveau assignable',
+    public.nutrition_plan_v2_blocking_issue(c_plan) is null);
+end $$;
+
+-- H11. La garde n'écrit RIEN : elle est déclarée `stable`, et son corps ne
+--      contient aucune écriture.
+do $$
+declare v_stable boolean; v_lecture boolean;
+begin
+  select p.provolatile = 's' into v_stable
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public' and p.proname = 'nutrition_plan_v2_blocking_issue';
+  select p.prosrc !~* '(insert into|update\s+public\.|delete from|truncate)' into v_lecture
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public' and p.proname = 'nutrition_plan_v2_blocking_issue';
+  perform pg_temp.noter('H', 'H11. la garde est `stable` et n''écrit rien',
+    coalesce(v_stable, false) and coalesce(v_lecture, false));
+end $$;
+
+-- ---------------------------------------------------------------------
 -- Bilan
 -- ---------------------------------------------------------------------
 do $$
@@ -750,7 +880,8 @@ do $$
 declare nb int;
 begin
   select count(*) into nb from public.nutrition_plans
-   where name in ('Plan hérité v1', 'Plan unifié', 'Plan unifié renommé', 'NE DOIT PAS SURVIVRE');
+   where name in ('Plan hérité v1', 'Plan unifié', 'Plan unifié renommé',
+                  'NE DOIT PAS SURVIVRE', 'Plan semaine complet');
   if nb <> 0 then
     raise exception 'ÉCHEC   — G1. des plans de test ont survécu au ROLLBACK (% lignes)', nb;
   end if;
@@ -775,7 +906,8 @@ begin
   if to_regprocedure('public.save_nutrition_plan_v2(jsonb)') is null
      or to_regprocedure('public.current_coach_id()') is null
      or to_regprocedure('public.nutrition_v2_backfill_plan(uuid)') is null
-     or to_regprocedure('public.nutrition_v2_normalize_vocabulary()') is null then
+     or to_regprocedure('public.nutrition_v2_normalize_vocabulary()') is null
+     or to_regprocedure('public.nutrition_plan_v2_blocking_issue(uuid)') is null then
     raise exception 'ÉCHEC   — G4. une fonction de migration a disparu';
   end if;
   if not exists (

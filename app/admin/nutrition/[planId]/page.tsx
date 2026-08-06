@@ -25,10 +25,14 @@ import {
   type PlanV2FormState,
 } from "@/lib/nutrition/plan-v2-form";
 import {
+  createBlankWeek,
   createWeekFormFromPlan,
+  initializeAllDays,
+  mainDayTargets,
   toWeekSavePayload,
   type WeekFormState,
 } from "@/lib/nutrition/plan-v2-week-form";
+import { MAIN_DAY_PROFILE_KEY } from "@/lib/nutrition/day-profile-keys";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { readNutritionPlanV2Week } from "@/lib/supabase/nutrition-week";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
@@ -168,9 +172,12 @@ export default function NutritionPlanDetailPage() {
     const supabase = createSupabaseBrowserClient();
     if (!supabase || !params.planId) return;
     const semaine = await readNutritionPlanV2Week(supabase, params.planId);
-    if (semaine) {
-      setWeekState(createWeekFormFromPlan(semaine, canonique.plan?.profiles[0]?.profileKey ?? "default"));
-    }
+    // REPRISE D'UN PLAN EXISTANT : chaque jour reçoit une COPIE des valeurs du
+    // profil qu'il utilisait, et devient indépendant. Deux jours qui
+    // partageaient un profil ne se déplacent donc plus ensemble. La
+    // normalisation vers les clés internes `day_<jour>` n'a lieu qu'à la
+    // prochaine sauvegarde — rien n'est réécrit à la lecture.
+    setWeekState(semaine ? createWeekFormFromPlan(semaine) : createBlankWeek());
   }
 
   /** Ouvre le constructeur v2 en mode conversion. AUCUNE écriture ici. */
@@ -186,6 +193,17 @@ export default function NutritionPlanDetailPage() {
         prefill,
         metaFor(plan!.name, plan!.goalType, plan!.status, plan!.coachNotes, plan!.hydrationTip),
       ),
+    );
+    // La conversion démarre sur une semaine complète : les objectifs hérités
+    // du plan v1 sont recopiés dans les SEPT jours, qui deviennent aussitôt
+    // indépendants. Le coach peut ensuite faire diverger chaque jour.
+    setWeekState(
+      initializeAllDays(createBlankWeek(), {
+        dailyCalories: prefill.dailyCalories,
+        proteinBp: prefill.proteinBp,
+        carbBp: prefill.carbBp,
+        fatBp: prefill.fatBp,
+      }),
     );
     setConversionDialogOpen(false);
     setConversionMode(true);
@@ -210,17 +228,25 @@ export default function NutritionPlanDetailPage() {
     const input = toSaveInput(formState);
     const statutBase =
       STATUS_APP_TO_DB[input.status as AdminContentStatus] ?? STATUS_APP_TO_DB.brouillon;
-    const semaine = weekState
-      ? toWeekSavePayload(weekState, {
-          proteinBp: input.proteinBp,
-          carbBp: input.carbBp,
-          fatBp: input.fatBp,
-          slots: input.slots,
-        })
-      : undefined;
+    // La semaine est la source de vérité : sept profils internes, sept jours.
+    // Le profil de premier niveau reprend les objectifs de LUNDI, uniquement
+    // pour que le `daily_target` de compatibilité reste cohérent — la RPC
+    // privilégie `profiles` dès qu'il est présent.
+    const semaine = weekState ? toWeekSavePayload(weekState) : undefined;
+    const principal = weekState ? mainDayTargets(weekState) : null;
     const resultat = await saveNutritionPlanV2(supabase, {
       ...input,
       status: statutBase,
+      ...(principal
+        ? {
+            profileKey: MAIN_DAY_PROFILE_KEY,
+            dailyCalories: principal.dailyCalories,
+            proteinBp: principal.proteinBp,
+            carbBp: principal.carbBp,
+            fatBp: principal.fatBp,
+            slots: principal.slots,
+          }
+        : {}),
       week: semaine,
     });
     if (!resultat.ok) {
@@ -243,9 +269,13 @@ export default function NutritionPlanDetailPage() {
     await canonique.refetch();
   }
 
-  const enConstructeurV2 = (conversionMode || (isV2 && editingV2)) && formState !== null;
+  // La semaine est OBLIGATOIRE pour ouvrir le constructeur : elle en est
+  // désormais la seule source de vérité nutritionnelle. Tant qu'elle n'est pas
+  // chargée (lecture en cours), on n'affiche pas un éditeur à moitié rempli.
+  const enConstructeurV2 =
+    (conversionMode || (isV2 && editingV2)) && formState !== null && weekState !== null;
 
-  if (enConstructeurV2 && formState) {
+  if (enConstructeurV2 && formState && weekState) {
     return (
       <div>
         <Link href="/admin/nutrition" className="mb-6 inline-flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-foreground">
@@ -264,7 +294,7 @@ export default function NutritionPlanDetailPage() {
           saving={savingV2}
           serverError={v2Error}
           conversionNotice={conversionMode ? CONVERSION_NOTICE_FR : null}
-          week={weekState ?? undefined}
+          week={weekState}
           onWeekChange={setWeekState}
         />
       </div>

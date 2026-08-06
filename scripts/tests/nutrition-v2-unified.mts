@@ -33,21 +33,34 @@ import {
   type PlanV2Week,
 } from "../../lib/nutrition/plan-v2-week";
 import {
-  PROFILE_KEY_PATTERN,
   addMeal,
-  addProfile,
+  applyDayToWholeWeek,
+  toggleDaySlotLock,
   createBlankWeek,
+  createWeekFormFromPlan,
   duplicateDay,
+  initializeAllDays,
   itemsToText,
+  mainDayTargets,
   removeMeal,
-  removeProfile,
-  setDayProfile,
-  setProfileCalories,
+  resetDay,
+  setDayCalories,
+  setDayMacroBp,
+  setDaySlotEnabled,
+  setDaySlotMacroBp,
   textToItems,
   toWeekSavePayload,
   updateMeal,
   weeklyCaloriesFromForm,
+  type WeekFormState,
 } from "../../lib/nutrition/plan-v2-week-form";
+import {
+  DAY_PROFILE_KEYS,
+  MAIN_DAY_PROFILE_KEY,
+  internalProfileKeyForDay,
+} from "../../lib/nutrition/day-profile-keys";
+import { rebalanceDailyMacros, rebalanceToTotal } from "../../lib/nutrition/macro-rebalance";
+import { BASIS_POINTS_TOTAL } from "../../lib/nutrition/basis-points";
 import {
   WEEKDAY_KEYS,
   WEEKDAY_LABELS_FR,
@@ -99,6 +112,11 @@ const PAGE_ELEVE_DETAIL = lire("../../app/(student)/nutrition/[planId]/page.tsx"
 const RECETTES_ELEVE = lire("../../components/student/StudentAdaptiveRecipes.tsx");
 const SEMAINE_ELEVE = lire("../../components/student/StudentPrescribedWeek.tsx");
 const PANNEAU_SEMAINE = lire("../../components/admin/NutritionPlanV2WeekPanel.tsx");
+const CONSTRUCTEUR = lire("../../components/admin/NutritionPlanV2Builder.tsx");
+const JOUR_ONGLETS = lire("../../components/admin/NutritionDayTabs.tsx");
+const JOUR_OBJECTIFS = lire("../../components/admin/NutritionDayTargets.tsx");
+const JOUR_REPARTITION = lire("../../components/admin/NutritionDaySlotDistribution.tsx");
+const JOUR_REPAS = lire("../../components/admin/NutritionDayManualMeals.tsx");
 const PAGE_NOUVEAU = lire("../../app/admin/nutrition/nouveau/page.tsx");
 const PAGE_ADMIN_PLAN = lire("../../app/admin/nutrition/[planId]/page.tsx");
 const APERCU_ADMIN = lire("../../components/admin/RecipeAdaptivePreview.tsx");
@@ -216,14 +234,18 @@ await test("4. AUCUNE troisième liste de créneaux n'est créée", () => {
   for (const cle of MEAL_SLOT_KEYS) {
     assert.ok(sql.includes(`'${cle}'`), `la migration connaît ${cle}`);
   }
-  for (const source of [RECETTES_ELEVE, SEMAINE_ELEVE, PANNEAU_SEMAINE]) {
+  for (const source of [RECETTES_ELEVE, SEMAINE_ELEVE, PANNEAU_SEMAINE, JOUR_REPAS, JOUR_REPARTITION]) {
     const code = sansCommentairesTs(source);
     assert.ok(
       !/\[\s*"breakfast"\s*,\s*"morning_snack"/.test(code),
       "aucune liste de créneaux réécrite dans un composant",
     );
   }
-  assert.ok(PANNEAU_SEMAINE.includes("MEAL_SLOT_KEYS"), "le panneau importe la liste");
+  // La liste vient de `meal-distribution.ts` : le composant qui propose un
+  // créneau l'importe, il ne la redéclare pas. Depuis la refonte « semaine
+  // d'abord », c'est la carte de repas qui la porte.
+  assert.ok(JOUR_REPAS.includes("MEAL_SLOT_KEYS"), "la carte de repas importe la liste");
+  assert.ok(JOUR_REPARTITION.includes("MEAL_SLOT_LABELS_FR"), "la répartition importe les libellés");
 });
 
 /* ═══════════ 2. Objectifs par jour ═══════════ */
@@ -499,10 +521,8 @@ await test("24. la couche de lecture de la semaine n'écrit RIEN non plus", () =
 });
 
 await test("25. la charge utile de sauvegarde ne contient AUCUNE quantité calculée", () => {
-  const semaine = createBlankWeek("standard", 2000);
-  const payload = toWeekSavePayload(semaine, {
-    proteinBp: 2800, carbBp: 4400, fatBp: 2800, slots: CRENEAUX_STANDARD,
-  });
+  const semaine = createBlankWeek();
+  const payload = toWeekSavePayload(semaine);
   const texte = JSON.stringify(payload);
   for (const interdit of ["displayGrams", "solvedGrams", "boundHit", "warnings", "deltas", "unitLabel"]) {
     assert.ok(!texte.includes(interdit), `aucune trace de ${interdit}`);
@@ -515,16 +535,24 @@ await test("25. la charge utile de sauvegarde ne contient AUCUNE quantité calcu
 
 /* ═══════════ 7. La semaine manuelle du coach ═══════════ */
 
-await test("26. sept jours, tous rattachés au profil principal, dès la création", () => {
-  const semaine = createBlankWeek("standard", 2000);
+await test("26. sept jours INDÉPENDANTS dès la création, sans le moindre profil", () => {
+  // RÉÉCRIT PAR LA REFONTE « SEMAINE D'ABORD ». Ce contrôle vérifiait que les
+  // sept jours étaient rattachés au profil principal ; le coach ne manipule
+  // plus de profil du tout, et l'état de formulaire n'en porte plus aucun.
+  const semaine = createBlankWeek();
   assert.equal(semaine.days.length, 7);
   assert.deepEqual(semaine.days.map((d) => d.day), [...WEEKDAY_KEYS]);
-  assert.ok(semaine.days.every((d) => d.profileKey === "standard"));
   assert.ok(semaine.days.every((d) => d.meals.length === 0));
+  // Chaque jour porte SA configuration, pas une référence partagée.
+  assert.ok(semaine.days.every((d) => d.slots.length === 6));
+  assert.ok(!("profiles" in semaine), "l'état de formulaire n'expose plus de profils");
+  assert.ok(!("mainProfileKey" in semaine));
+  // Aucun tableau n'est partagé entre deux jours.
+  assert.notEqual(semaine.days[0].slots, semaine.days[1].slots);
 });
 
 await test("27. ajout, modification et retrait d'un repas", () => {
-  let s = createBlankWeek("standard", 2000);
+  let s = createBlankWeek();
   s = addMeal(s, "monday", "lunch");
   const repas = s.days.find((d) => d.day === "monday")!.meals[0];
   assert.equal(repas.slot, "lunch");
@@ -547,52 +575,113 @@ await test("27. ajout, modification et retrait d'un repas", () => {
   assert.equal(s.days.find((d) => d.day === "monday")!.meals.length, 0);
 });
 
-await test("28. dupliquer un jour donne de NOUVEAUX identifiants de repas", () => {
-  let s = createBlankWeek("standard", 2000);
+await test("28. dupliquer un jour copie TOUT et renouvelle les identifiants de repas", () => {
+  let s = createBlankWeek();
+  s = setDayCalories(s, "monday", 2300);
+  s = setDayMacroBp(s, "monday", "protein", 3000);
+  s = setDaySlotMacroBp(s, "monday", "lunch", "protein", 4000);
   s = addMeal(s, "monday", "lunch");
-  const source = s.days.find((d) => d.day === "monday")!.meals[0];
-  s = duplicateDay(s, "monday", "tuesday");
+  const source = s.days.find((d) => d.day === "monday")!;
+  const repasSource = source.meals[0];
+  s = updateMeal(s, "monday", repasSource.id, { name: "Poulet riz", coachNotes: "Peser cru." });
 
-  const copie = s.days.find((d) => d.day === "tuesday")!.meals[0];
-  assert.equal(copie.slot, source.slot);
-  assert.notEqual(copie.id, source.id, "sans identifiant neuf, la RPC refuserait l'écriture");
+  s = duplicateDay(s, "monday", ["tuesday"]);
+  const lundi = s.days.find((d) => d.day === "monday")!;
+  const mardi = s.days.find((d) => d.day === "tuesday")!;
+
+  // Calories, répartition, allocations, repas ET notes.
+  assert.equal(mardi.dailyCalories, 2300);
+  assert.equal(mardi.proteinBp, lundi.proteinBp);
+  assert.equal(mardi.carbBp, lundi.carbBp);
+  assert.equal(mardi.fatBp, lundi.fatBp);
+  assert.deepEqual(
+    mardi.slots.map((a) => a.proteinBp),
+    lundi.slots.map((a) => a.proteinBp),
+  );
+  assert.equal(mardi.meals[0].name, "Poulet riz");
+  assert.equal(mardi.meals[0].coachNotes, "Peser cru.");
+  assert.notEqual(mardi.meals[0].id, lundi.meals[0].id, "sans identifiant neuf, la RPC refuserait");
+  // L'identifiant de la JOURNÉE de destination est conservé : on remplit une
+  // ligne existante, on n'en crée pas une seconde.
+  assert.equal(mardi.id, createBlankWeek().days.find((d) => d.day === "tuesday")!.id);
   // Le jour source est intact.
-  assert.equal(s.days.find((d) => d.day === "monday")!.meals[0].id, source.id);
+  assert.equal(lundi.meals[0].id, repasSource.id);
 });
 
-await test("29. le profil d'un jour se change, et un profil retiré libère ses jours", () => {
-  let s = createBlankWeek("standard", 2000);
-  s = addProfile(s, "training_high", 2200);
-  s = setDayProfile(s, "tuesday", "training_high");
-  assert.equal(s.days.find((d) => d.day === "tuesday")!.profileKey, "training_high");
+await test("29. modifier mardi ne modifie JAMAIS lundi", () => {
+  // RÉÉCRIT. Ce contrôle vérifiait le changement de profil d'un jour et la
+  // libération des jours quand un profil disparaissait. Ces deux gestes
+  // n'existent plus : chaque jour possède son propre profil interne, dérivé
+  // de son nom. La garantie qui compte désormais est l'INDÉPENDANCE.
+  let s = createBlankWeek();
+  s = initializeAllDays(s, { dailyCalories: 2000, proteinBp: 3000, carbBp: 4500, fatBp: 2500 });
+  s = addMeal(s, "monday", "lunch");
 
-  // Un profil inconnu est refusé silencieusement : l'état ne change pas.
-  const avant = s;
-  s = setDayProfile(s, "wednesday", "inexistant");
-  assert.equal(s, avant);
+  const lundiAvant = s.days.find((d) => d.day === "monday")!;
+  s = setDayCalories(s, "tuesday", 2600);
+  s = setDayMacroBp(s, "tuesday", "protein", 4000);
+  s = setDaySlotEnabled(s, "tuesday", "dessert", false);
+  s = addMeal(s, "tuesday", "dinner");
 
-  s = removeProfile(s, "training_high");
-  assert.equal(s.days.find((d) => d.day === "tuesday")!.profileKey, "standard",
-    "le jour retombe sur le principal, sinon la clé étrangère refuserait");
-  assert.ok(!s.profiles.some((p) => p.profileKey === "training_high"));
+  const lundiAprès = s.days.find((d) => d.day === "monday")!;
+  assert.equal(lundiAprès.dailyCalories, lundiAvant.dailyCalories);
+  assert.equal(lundiAprès.proteinBp, lundiAvant.proteinBp);
+  assert.equal(lundiAprès.meals.length, 1, "le repas de lundi n'a pas bougé");
+  assert.deepEqual(
+    lundiAprès.slots.map((a) => a.enabled),
+    lundiAvant.slots.map((a) => a.enabled),
+  );
+  assert.equal(s.days.find((d) => d.day === "tuesday")!.dailyCalories, 2600);
 
-  // Le profil PRINCIPAL n'est jamais retirable.
-  const intact = removeProfile(s, "standard");
-  assert.equal(intact, s);
+  // Duplication vers PLUSIEURS jours, puis application à toute la semaine.
+  s = duplicateDay(s, "tuesday", ["wednesday", "friday"]);
+  for (const jour of ["wednesday", "friday"] as const) {
+    assert.equal(s.days.find((d) => d.day === jour)!.dailyCalories, 2600);
+  }
+  assert.equal(s.days.find((d) => d.day === "thursday")!.dailyCalories, 2000, "jeudi n'était pas ciblé");
+
+  s = applyDayToWholeWeek(s, "tuesday");
+  assert.ok(s.days.every((d) => d.dailyCalories === 2600));
+  // Les repas dupliqués ont tous des identifiants distincts.
+  const ids = s.days.flatMap((d) => d.meals.map((m) => m.id));
+  assert.equal(new Set(ids).size, ids.length, "aucun identifiant de repas partagé");
+
+  // Réinitialiser un jour ne touche que lui.
+  s = resetDay(s, "sunday");
+  assert.equal(s.days.find((d) => d.day === "sunday")!.dailyCalories, 0);
+  assert.equal(s.days.find((d) => d.day === "sunday")!.meals.length, 0);
+  assert.equal(s.days.find((d) => d.day === "saturday")!.dailyCalories, 2600);
 });
 
-await test("30. la clé d'un profil respecte le format de la base", () => {
-  assert.ok(PROFILE_KEY_PATTERN.test("training_high"));
-  assert.ok(PROFILE_KEY_PATTERN.test("rest"));
-  assert.ok(!PROFILE_KEY_PATTERN.test("Training"), "pas de majuscule");
-  assert.ok(!PROFILE_KEY_PATTERN.test("2000kcal"), "ne commence pas par un chiffre");
-  assert.ok(!PROFILE_KEY_PATTERN.test("a".repeat(33)), "32 caractères au plus");
-  // Le miroir SQL.
+await test("30. sept clés de profil INTERNES, automatiques et conformes à la base", () => {
+  // RÉÉCRIT. Le contrôle vérifiait le format d'une clé SAISIE par le coach.
+  // Plus aucune clé n'est saisie : elles sont dérivées du jour.
+  assert.equal(DAY_PROFILE_KEYS.length, 7);
+  assert.equal(new Set(DAY_PROFILE_KEYS).size, 7, "aucun doublon possible");
+  assert.deepEqual(DAY_PROFILE_KEYS, WEEKDAY_KEYS.map((j) => `day_${j}`));
+  assert.equal(MAIN_DAY_PROFILE_KEY, "day_monday");
+
+  // Miroir EXACT de la contrainte CHECK de la base.
+  const format = /^[a-z][a-z0-9_]{0,31}$/;
+  for (const clé of DAY_PROFILE_KEYS) {
+    assert.ok(format.test(clé), `clé refusée par la base : ${clé}`);
+  }
   assert.ok(sansCommentairesSql(M_SAUVEGARDE).includes("^[a-z][a-z0-9_]{0,31}$"));
 
-  // Une clé invalide n'entre pas dans l'état.
-  const s = addProfile(createBlankWeek("standard", 2000), "Training", 2200);
-  assert.equal(s.profiles.length, 1);
+  // Elles n'apparaissent nulle part dans l'interface.
+  for (const [nom, code] of [
+    ["constructeur", CONSTRUCTEUR],
+    ["panneau de semaine", PANNEAU_SEMAINE],
+    ["objectifs du jour", JOUR_OBJECTIFS],
+    ["répartition du jour", JOUR_REPARTITION],
+    ["repas du jour", JOUR_REPAS],
+    ["onglets de jour", JOUR_ONGLETS],
+  ] as const) {
+    const texte = sansCommentairesTs(code);
+    for (const interdit of ["day_monday", "profile_key", "profileKey", "legacy_default"]) {
+      assert.ok(!texte.includes(interdit), `${nom} ne doit pas mentionner ${interdit}`);
+    }
+  }
 });
 
 await test("31. les aliments font l'aller-retour texte ↔ objets sans perte", () => {
@@ -608,40 +697,48 @@ await test("31. les aliments font l'aller-retour texte ↔ objets sans perte", (
   assert.deepEqual([...textToItems("Riz - 100 g")], [{ name: "Riz", quantity: "100 g" }]);
 });
 
-await test("32. le total hebdomadaire du formulaire suit les profils par jour", () => {
-  let s = createBlankWeek("standard", 2000);
+await test("32. le total hebdomadaire est la SOMME des sept jours, jamais un produit", () => {
+  let s = createBlankWeek();
+  assert.equal(weeklyCaloriesFromForm(s), 0);
+
+  s = initializeAllDays(s, { dailyCalories: 2000, proteinBp: 3000, carbBp: 4500, fatBp: 2500 });
   assert.equal(weeklyCaloriesFromForm(s), 14000);
 
-  s = addProfile(s, "training_high", 2200);
-  s = setDayProfile(s, "tuesday", "training_high");
-  s = setDayProfile(s, "thursday", "training_high");
-  assert.equal(weeklyCaloriesFromForm(s), 14400);
+  s = setDayCalories(s, "tuesday", 2200);
+  s = setDayCalories(s, "thursday", 2200);
+  assert.equal(weeklyCaloriesFromForm(s), 2000 * 5 + 2200 * 2);
 
-  s = setProfileCalories(s, "standard", 1900);
-  assert.equal(weeklyCaloriesFromForm(s), 1900 * 5 + 2200 * 2);
+  s = setDayCalories(s, "sunday", 1500);
+  assert.equal(weeklyCaloriesFromForm(s), 2000 * 4 + 2200 * 2 + 1500);
+  // Et surtout : ce n'est pas « calories du jour ouvert × 7 ».
+  assert.notEqual(weeklyCaloriesFromForm(s), mainDayTargets(s).dailyCalories * 7);
 });
 
-await test("33. la charge utile porte les SEPT jours, dans l'ordre, avec leur profil", () => {
-  let s = createBlankWeek("standard", 2000);
-  s = addProfile(s, "rest", 1900);
-  s = setDayProfile(s, "sunday", "rest");
+await test("33. la charge utile porte SEPT profils internes et SEPT jours", () => {
+  let s = createBlankWeek();
+  s = initializeAllDays(s, { dailyCalories: 2000, proteinBp: 2800, carbBp: 4400, fatBp: 2800 });
+  s = setDayCalories(s, "sunday", 1900);
   s = addMeal(s, "monday", "dinner");
   s = addMeal(s, "monday", "breakfast");
 
-  const payload = toWeekSavePayload(s, {
-    proteinBp: 2800, carbBp: 4400, fatBp: 2800, slots: CRENEAUX_STANDARD,
-  }) as {
+  const payload = toWeekSavePayload(s) as {
     days: { day: string; profile_key: string; meals: { slot: string; id: string | null }[] }[];
-    profiles: { profile_key: string; slots: unknown[] }[];
+    profiles: { profile_key: string; daily_calories: number; slots: unknown[] }[];
     main_profile_key: string;
   };
 
   assert.equal(payload.days.length, 7);
+  assert.equal(payload.profiles.length, 7, "un profil interne par jour");
   assert.deepEqual(payload.days.map((d) => d.day), [...WEEKDAY_KEYS]);
-  assert.equal(payload.days.find((d) => d.day === "sunday")!.profile_key, "rest");
-  assert.equal(payload.main_profile_key, "standard");
-  assert.equal(payload.profiles.length, 2);
+  assert.deepEqual(payload.profiles.map((p) => p.profile_key), [...DAY_PROFILE_KEYS]);
+  assert.equal(payload.main_profile_key, MAIN_DAY_PROFILE_KEY);
   assert.ok(payload.profiles.every((p) => p.slots.length === 6), "six créneaux par profil");
+
+  // Chaque jour désigne SON profil : aucun partage, donc aucune contagion.
+  for (const jour of payload.days) {
+    assert.equal(jour.profile_key, internalProfileKeyForDay(jour.day as (typeof WEEKDAY_KEYS)[number]));
+  }
+  assert.equal(payload.profiles.find((p) => p.profile_key === "day_sunday")!.daily_calories, 1900);
 
   // Les repas sont triés par créneau.
   const lundi = payload.days.find((d) => d.day === "monday")!;
@@ -655,12 +752,15 @@ await test("33. la charge utile porte les SEPT jours, dans l'ordre, avec leur pr
       `identifiant transmis : ${String(repas.id)}`,
     );
   }
-  const localFactice = toWeekSavePayload(
-    { ...s, days: s.days.map((d) => (d.day === "monday" ? { ...d, meals: [{ ...d.meals[0], id: "nouveau:monday" }] } : d)) },
-    { proteinBp: 2800, carbBp: 4400, fatBp: 2800, slots: CRENEAUX_STANDARD },
-  ) as { days: { day: string; meals: { id: string | null }[] }[] };
-  assert.equal(localFactice.days.find((d) => d.day === "monday")!.meals[0].id, null,
-    "un identifiant non-UUID n'est jamais envoyé");
+  const localFactice = toWeekSavePayload({
+    ...s,
+    days: s.days.map((d) => (d.day === "monday" ? { ...d, meals: [{ ...d.meals[0], id: "nouveau:monday" }] } : d)),
+  }) as { days: { day: string; meals: { id: string | null }[] }[] };
+  assert.equal(
+    localFactice.days.find((d) => d.day === "monday")!.meals[0].id,
+    null,
+    "un identifiant non-UUID n'est jamais envoyé",
+  );
 });
 
 await test("34. la charge utile RPC transporte la semaine sans la déformer", () => {
@@ -834,17 +934,20 @@ await test("47. une erreur réseau n'est plus présentée comme « aucun plan »
   assert.ok(!/setLoading\(true\)/.test(hook), "le rechargement est silencieux");
 });
 
-await test("48. le panneau de semaine du coach conserve la carte de repas v1", () => {
+await test("48. la carte de repas manuelle est conservée, SANS sélecteur de profil", () => {
+  // MIS À JOUR PAR LA REFONTE « SEMAINE D'ABORD ». La carte de repas a été
+  // extraite du panneau de semaine vers `NutritionDayManualMeals` : elle est
+  // désormais rendue pour le SEUL jour ouvert. Ses champs sont inchangés ;
+  // seule disparaît la ligne « Profil du jour » qui la surplombait.
   for (const champ of ["Moment", "Nom du repas", "Aliments", "Kcal", "Prot (g)", "Gluc (g)", "Lip (g)", "Notes coach"]) {
-    assert.ok(PANNEAU_SEMAINE.includes(champ), `champ « ${champ} » conservé`);
+    assert.ok(JOUR_REPAS.includes(champ), `champ « ${champ} » conservé`);
   }
-  assert.ok(PANNEAU_SEMAINE.includes("Profil du jour"), "le sélecteur de profil est ajouté");
+  assert.ok(JOUR_REPAS.includes("Ajouter un repas"));
+  assert.ok(!JOUR_REPAS.includes("Profil du jour"), "plus aucun sélecteur de profil");
   assert.ok(PANNEAU_SEMAINE.includes("Dupliquer"));
-  assert.ok(PANNEAU_SEMAINE.includes("Ajouter un repas"));
-  assert.ok(
-    !sansCommentairesTs(PANNEAU_SEMAINE).includes("solveRecipe"),
-    "l'outil 3 reste entièrement manuel",
-  );
+  for (const source of [PANNEAU_SEMAINE, JOUR_REPAS]) {
+    assert.ok(!sansCommentairesTs(source).includes("solveRecipe"), "l'outil 3 reste entièrement manuel");
+  }
 });
 
 await test("49. responsive et accessibilité : cibles tactiles et repli en cartes", () => {
@@ -883,7 +986,7 @@ await test("50. la checklist PostgreSQL couvre le périmètre exigé", () => {
 await test("51. les quatre migrations sont déclarées au manifeste et comptées", () => {
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 20);
+  assert.equal(attendues.length, 21);
   for (const nom of [
     "20260810090000_harden_nutrition_privileges.sql",
     "20260811090000_nutrition_v2_unification.sql",
@@ -893,8 +996,565 @@ await test("51. les quatre migrations sont déclarées au manifeste et comptées
     assert.ok(attendues.includes(nom), nom);
   }
   const secu = lire("../../scripts/tests/security-hardening.mts");
-  assert.ok(secu.includes(".length, 47,"), "le compteur de migrations suit les migrations réelles");
-  assert.ok(secu.includes("assert.equal(attendues.length, 20);"));
+  assert.ok(secu.includes(".length, 48,"), "le compteur de migrations suit les migrations réelles");
+  assert.ok(secu.includes("assert.equal(attendues.length, 21);"));
+});
+
+/* ─── 52-53. Outils 1 et 3 après la PR C.1 ─────────────────────────────── */
+
+await test("52. Outil 1 (nutrition_daily_logs) est resté strictement intact", async () => {
+  // La suppression du chemin d'écriture v1 ne devait toucher en RIEN la
+  // saisie quotidienne de l'élève : même couche, mêmes exports, et toujours
+  // un seul module autorisé à y écrire.
+  const logs = await import("../../lib/supabase/nutrition-logs");
+  assert.deepEqual(
+    Object.keys(logs).sort(),
+    ["getLatestNutritionLog", "getNutritionLogsForDates", "upsertNutritionDailyLog"],
+    "la surface de l'Outil 1 ne doit pas bouger",
+  );
+
+  const couche = lire("../../lib/supabase/nutrition-logs.ts");
+  assert.ok(couche.includes("upsert("), "l'écriture quotidienne reste un upsert");
+  assert.ok(couche.includes("protein_g") && couche.includes("carbs_g") && couche.includes("fat_g"));
+
+  // Aucune écriture ailleurs : progress.ts et delete-student.ts ne font que
+  // lire ou supprimer un compte entier.
+  const progression = sansCommentairesTs(lire("../../lib/supabase/progress.ts"));
+  const indice = progression.indexOf(`from("nutrition_daily_logs")`);
+  assert.ok(indice > 0);
+  assert.ok(
+    /^\s*\.select\(/m.test(progression.slice(indice, indice + 200)),
+    "progress.ts ne fait que lire nutrition_daily_logs",
+  );
+
+  // Et la couche des plans ne l'a jamais touché — elle ne commence pas.
+  const plans = sansCommentairesTs(lire("../../lib/supabase/nutrition.ts"));
+  assert.ok(!plans.includes("nutrition_daily_logs"), "la couche plan ne touche pas à l'Outil 1");
+});
+
+await test("53. Outil 3 (journées + repas prescrits) n'est écrit que par la RPC v2", () => {
+  const rpc = lire("../../supabase/migrations/20260812090000_save_nutrition_plan_v2_full.sql");
+  // La seule insertion de journée du dépôt porte profile_key, et la valeur
+  // vient du payload ou du profil principal déterministe — jamais d'un
+  // littéral arbitraire.
+  assert.ok(rpc.includes("insert into public.nutrition_days (plan_id, day, status, target, profile_key)"));
+  assert.ok(rpc.includes("v_profile_key := coalesce(nullif(v_day->>'profile_key', ''), v_main_profile_key);"));
+  assert.ok(rpc.includes("insert into public.meals ("));
+  // Un profil inconnu est refusé AVANT toute écriture.
+  assert.ok(rpc.includes("UNKNOWN_PROFILE_FOR_DAY"));
+
+  // Côté TypeScript, le payload hebdomadaire part bien vers cette RPC.
+  const couche = lire("../../lib/supabase/nutrition-v2.ts");
+  assert.ok(couche.includes(`rpc("save_nutrition_plan_v2"`));
+  assert.ok(couche.includes("week"), "le volet hebdomadaire est transmis dans le payload");
+
+  // Et la couche historique n'a plus aucune écriture de structure.
+  const plans = sansCommentairesTs(lire("../../lib/supabase/nutrition.ts"));
+  const écritureDirecte = /\.from\(\s*["'](nutrition_days|meals)["']\s*\)[\s\S]{0,80}?\.(insert|upsert|delete|update)\(/;
+  assert.ok(!écritureDirecte.test(plans), "écriture directe de structure réintroduite");
+});
+
+/* ═══════════ 12. La refonte « semaine d'abord » ═══════════ */
+
+await test("54. les curseurs P/G/L sont SOLIDAIRES : le total ne quitte jamais 100 %", () => {
+  // Le cœur de la simplification : le coach n'a plus à faire l'appoint.
+  let s = createBlankWeek();
+  s = setDayMacroBp(s, "monday", "protein", 3000);
+  const après = (jour = "monday") => s.days.find((d) => d.day === jour)!;
+  assert.equal(après().proteinBp + après().carbBp + après().fatBp, BASIS_POINTS_TOTAL);
+  assert.equal(après().proteinBp, 3000);
+
+  // Depuis un état à zéro, le reste part à parts ÉGALES.
+  assert.equal(après().carbBp, 3500);
+  assert.equal(après().fatBp, 3500);
+
+  // Puis proportionnellement à ce qui existe.
+  s = setDayMacroBp(s, "monday", "fat", 2000);
+  assert.equal(après().fatBp, 2000);
+  assert.equal(après().proteinBp + après().carbBp + après().fatBp, BASIS_POINTS_TOTAL);
+
+  // Balayage exhaustif : aucune combinaison ne casse l'invariant, et toutes
+  // les valeurs restent des entiers.
+  for (const macro of ["protein", "carb", "fat"] as const) {
+    for (let pourcent = 0; pourcent <= 100; pourcent += 1) {
+      const t = setDayMacroBp(s, "monday", macro, pourcent * 100);
+      const j = t.days.find((d) => d.day === "monday")!;
+      assert.equal(j.proteinBp + j.carbBp + j.fatBp, BASIS_POINTS_TOTAL, `${macro} à ${pourcent} %`);
+      for (const v of [j.proteinBp, j.carbBp, j.fatBp]) {
+        assert.ok(Number.isInteger(v) && v >= 0 && v <= BASIS_POINTS_TOTAL, `valeur hors domaine : ${v}`);
+      }
+    }
+  }
+
+  // Une demande hors bornes est ramenée au disponible, pas refusée : un
+  // curseur ne peut physiquement pas demander plus.
+  const saturé = rebalanceDailyMacros({ proteinBp: 0, carbBp: 0, fatBp: 0 }, "protein", 99_999);
+  assert.equal(saturé.proteinBp, BASIS_POINTS_TOTAL);
+  assert.equal(saturé.carbBp + saturé.fatBp, 0);
+
+  // Une entrée figée est préservée au point de base près.
+  const avecVerrou = rebalanceToTotal(
+    [
+      { key: "a", bp: 2000, adjustable: false },
+      { key: "b", bp: 4000, adjustable: true },
+      { key: "c", bp: 4000, adjustable: true },
+    ],
+    "b",
+    7000,
+  );
+  assert.equal(avecVerrou.find((e) => e.key === "a")!.bp, 2000, "le verrou est intact");
+  assert.equal(avecVerrou.reduce((t, e) => t + e.bp, 0), BASIS_POINTS_TOTAL);
+});
+
+await test("55. l'initialisation remplit les sept jours puis s'efface", () => {
+  let s = initializeAllDays(createBlankWeek(), {
+    dailyCalories: 2300,
+    proteinBp: 3000,
+    carbBp: 4200,
+    fatBp: 2800,
+  });
+  assert.ok(s.days.every((d) => d.dailyCalories === 2300));
+  assert.ok(s.days.every((d) => d.proteinBp === 3000 && d.carbBp === 4200 && d.fatBp === 2800));
+  // Les créneaux actifs sont répartis, donc les sept jours sont utilisables
+  // immédiatement : chaque macro totalise 100 % sur les créneaux.
+  for (const jour of s.days) {
+    for (const macro of ["proteinBp", "carbBp", "fatBp"] as const) {
+      const total = jour.slots.filter((a) => a.enabled).reduce((t, a) => t + a[macro], 0);
+      assert.equal(total, BASIS_POINTS_TOTAL, `${jour.day}/${macro}`);
+    }
+  }
+
+  // APRÈS l'initialisation, chaque jour est indépendant : ce n'est pas une
+  // seconde source de vérité.
+  s = setDayCalories(s, "wednesday", 1800);
+  assert.equal(s.days.find((d) => d.day === "wednesday")!.dailyCalories, 1800);
+  assert.ok(
+    s.days.filter((d) => d.day !== "wednesday").every((d) => d.dailyCalories === 2300),
+    "les six autres jours n'ont pas bougé",
+  );
+
+  // Les repas déjà saisis survivent à une réinitialisation des objectifs.
+  let t = addMeal(createBlankWeek(), "friday", "dinner");
+  t = updateMeal(t, "friday", t.days.find((d) => d.day === "friday")!.meals[0].id, { name: "Saumon" });
+  t = initializeAllDays(t, { dailyCalories: 2000, proteinBp: 3000, carbBp: 4500, fatBp: 2500 });
+  assert.equal(t.days.find((d) => d.day === "friday")!.meals[0].name, "Saumon");
+});
+
+await test("56. la reprise d'un plan existant rend les jours indépendants sans rien perdre", () => {
+  // Deux jours partagent le profil `default` en base — cas le plus courant.
+  const repasLundi = {
+    id: "11111111-1111-4111-8111-111111111111",
+    slot: "lunch" as const,
+    name: "Poulet riz",
+    items: [{ name: "Riz", quantity: "100 g" }],
+    calories: 600,
+    protein: 40,
+    carbs: 70,
+    fat: 12,
+    coachNotes: "Peser cru.",
+  };
+  const profil = {
+    profileKey: "default",
+    dailyCalories: 2100,
+    proteinBp: 3000,
+    carbBp: 4500,
+    fatBp: 2500,
+    slots: CRENEAUX_STANDARD,
+  };
+  const semaineBase: PlanV2Week = {
+    planId: "plan-1",
+    profiles: [profil],
+    days: WEEKDAY_KEYS.map((jour) => ({
+      id: `jour-${jour}`,
+      day: jour,
+      profileKey: "default",
+      status: "non-commence",
+      meals: jour === "monday" ? [repasLundi] : [],
+    })),
+  };
+
+  let s = createWeekFormFromPlan(semaineBase);
+  // 1. Les valeurs du profil sont reprises telles quelles, dans CHAQUE jour.
+  assert.ok(s.days.every((d) => d.dailyCalories === 2100 && d.proteinBp === 3000));
+  // 2. Les identifiants de journée et les repas sont conservés.
+  assert.equal(s.days.find((d) => d.day === "monday")!.id, "jour-monday");
+  assert.equal(s.days.find((d) => d.day === "monday")!.meals[0].coachNotes, "Peser cru.");
+  // 3. Le profil d'origine est mémorisé, mais jamais affiché.
+  assert.equal(s.days.find((d) => d.day === "monday")!.sourceProfileKey, "default");
+
+  // 4. Modifier mardi ne bouge pas lundi, alors qu'ils partageaient le profil.
+  s = setDayCalories(s, "tuesday", 2600);
+  assert.equal(s.days.find((d) => d.day === "monday")!.dailyCalories, 2100);
+  assert.equal(s.days.find((d) => d.day === "tuesday")!.dailyCalories, 2600);
+
+  // 5. À la sauvegarde, la normalisation vers les clés internes est complète,
+  //    et le repas existant garde son UUID — donc il est mis à jour, pas
+  //    dupliqué.
+  const payload = toWeekSavePayload(s) as {
+    profiles: { profile_key: string; daily_calories: number }[];
+    days: { day: string; profile_key: string; meals: { id: string | null; coach_notes: string }[] }[];
+  };
+  assert.deepEqual(payload.profiles.map((p) => p.profile_key), [...DAY_PROFILE_KEYS]);
+  assert.equal(payload.profiles.find((p) => p.profile_key === "day_tuesday")!.daily_calories, 2600);
+  assert.equal(payload.profiles.find((p) => p.profile_key === "day_monday")!.daily_calories, 2100);
+  const lundi = payload.days.find((d) => d.day === "monday")!;
+  assert.equal(lundi.meals[0].id, repasLundi.id, "le repas existant est mis à jour, pas recréé");
+  assert.equal(lundi.meals[0].coach_notes, "Peser cru.");
+});
+
+await test("57. l'interface ne parle plus JAMAIS de profil", () => {
+  const interdits = [
+    "Profils de la semaine",
+    "Profil du jour",
+    "Clé du nouveau profil",
+    "Ajouter un profil",
+    "profil principal",
+    "profil additionnel",
+    "legacy_default",
+    "profile_key",
+  ];
+  // On assertionne le CODE, pas la prose : le commentaire d'en-tête du
+  // constructeur DOCUMENTE ce qui a été supprimé, il ne doit pas déclencher
+  // l'interdiction qu'il explique.
+  for (const [nom, code] of [
+    ["constructeur", CONSTRUCTEUR],
+    ["panneau de semaine", PANNEAU_SEMAINE],
+    ["objectifs du jour", JOUR_OBJECTIFS],
+    ["répartition du jour", JOUR_REPARTITION],
+    ["repas du jour", JOUR_REPAS],
+    ["onglets de jour", JOUR_ONGLETS],
+  ] as const) {
+    const texte = sansCommentairesTs(code);
+    for (const interdit of interdits) {
+      assert.ok(!texte.includes(interdit), `${nom} contient encore « ${interdit} »`);
+    }
+  }
+  // Les panneaux supprimés ne sont pas simplement masqués : ils ont disparu.
+  const constructeur = sansCommentairesTs(CONSTRUCTEUR);
+  for (const supprimé of ["Objectif quotidien", "Récapitulatif", "Repas proposés"]) {
+    assert.ok(!constructeur.includes(supprimé), `« ${supprimé} » subsiste dans le constructeur`);
+  }
+  // Et l'action d'initialisation, elle, existe bien.
+  assert.ok(constructeur.includes("Initialiser les sept jours"));
+});
+
+await test("58. un SEUL panneau à onglets remplace les trois listes P/G/L", () => {
+  // Le constructeur ne rend plus trois panneaux successifs.
+  const code = sansCommentairesTs(CONSTRUCTEUR);
+  assert.ok(
+    !/MACRO_KEYS\.map\([\s\S]{0,120}NutritionMacroDistributionPanel/.test(code),
+    "les trois panneaux successifs ont disparu du constructeur",
+  );
+  // Ils vivent dans un panneau unique, à trois onglets, dont un seul est rendu.
+  assert.ok(JOUR_REPARTITION.includes('role="tablist"'));
+  assert.equal(
+    (JOUR_REPARTITION.match(/<NutritionMacroDistributionPanel/g) ?? []).length,
+    1,
+    "une seule liste est rendue à la fois",
+  );
+  assert.ok(JOUR_REPARTITION.includes("macroActive"));
+
+  // MIS À JOUR : les curseurs de créneau sont devenus solidaires, eux aussi.
+  // Trois affichages ont donc disparu du panneau — ils décrivaient un reste
+  // qui ne peut plus exister. On assertionne le CODE, pas la prose : le
+  // commentaire qui documente leur suppression ne doit pas la déclencher.
+  const panneau = sansCommentairesTs(lire("../../components/admin/NutritionMacroDistributionPanel.tsx"));
+  for (const supprimé of ["Répartir le reste équitablement", "Restant", "Grammes restants"]) {
+    assert.ok(!panneau.includes(supprimé), `« ${supprimé} » ne doit plus être rendu`);
+  }
+  // Ne restent que le pourcentage, les grammes, le total et les verrous.
+  assert.ok(panneau.includes("Total réparti"));
+  assert.ok(panneau.includes("aria-pressed"), "les boutons de verrouillage restent");
+  assert.ok(panneau.includes("MacroSliderRow"));
+});
+
+await test("59. sept jours, un seul ouvert, un seul composant de jour", () => {
+  // Le sélecteur rend les sept jours…
+  assert.ok(JOUR_ONGLETS.includes("WEEKDAY_KEYS.map"));
+  assert.ok(JOUR_ONGLETS.includes('role="tablist"') && JOUR_ONGLETS.includes('role="tab"'));
+  assert.ok(JOUR_ONGLETS.includes("aria-selected"));
+  // …avec un défilement horizontal sur mobile et une rangée sur desktop.
+  assert.ok(JOUR_ONGLETS.includes("overflow-x-auto") && JOUR_ONGLETS.includes("sm:flex-wrap"));
+  // …et une navigation au clavier conforme au motif « tabs ».
+  for (const touche of ["ArrowRight", "ArrowLeft", "Home", "End"]) {
+    assert.ok(JOUR_ONGLETS.includes(touche), `touche ${touche} gérée`);
+  }
+
+  // Le panneau ne monte QU'UN jour : les zones sont rendues une seule fois.
+  for (const zone of ["<NutritionDayTargets", "<NutritionDaySlotDistribution", "<NutritionDayManualMeals"]) {
+    assert.equal(
+      (PANNEAU_SEMAINE.match(new RegExp(zone, "g")) ?? []).length,
+      1,
+      `${zone} ne doit être monté qu'une fois`,
+    );
+  }
+  assert.ok(!/WEEKDAY_KEYS\.map\([\s\S]{0,200}<NutritionDayTargets/.test(PANNEAU_SEMAINE));
+  // Les quatre actions du jour sont présentes.
+  for (const action of ["Dupliquer ce jour vers", "Appliquer à toute la semaine", "Réinitialiser ce jour"]) {
+    assert.ok(PANNEAU_SEMAINE.includes(action), `action « ${action} » absente`);
+  }
+});
+
+await test("60. une même recette donne des quantités DIFFÉRENTES selon le jour", () => {
+  // Le chemin élève complet : jour → objectifs du jour → créneau → solveur.
+  const semaine: PlanV2Week = {
+    planId: "plan-1",
+    profiles: [
+      { profileKey: "day_monday", dailyCalories: 2000, proteinBp: 3000, carbBp: 4500, fatBp: 2500, slots: CRENEAUX_STANDARD },
+      { profileKey: "day_tuesday", dailyCalories: 3000, proteinBp: 3000, carbBp: 4500, fatBp: 2500, slots: CRENEAUX_STANDARD },
+    ],
+    days: [
+      { id: "j1", day: "monday", profileKey: "day_monday", status: "non-commence", meals: [] },
+      { id: "j2", day: "tuesday", profileKey: "day_tuesday", status: "non-commence", meals: [] },
+    ],
+  };
+
+  const cibleLundi = slotTargetForDay(semaine, semaine.days[0], "lunch");
+  const cibleMardi = slotTargetForDay(semaine, semaine.days[1], "lunch");
+  assert.ok(cibleLundi.ok && cibleMardi.ok);
+  if (!cibleLundi.ok || !cibleMardi.ok) return;
+  assert.notDeepEqual(cibleLundi.target, cibleMardi.target, "deux jours, deux cibles");
+
+  const lundi = solveRecipe(RECETTE_SIMPLE_PGL, { target: cibleLundi.target });
+  const mardi = solveRecipe(RECETTE_SIMPLE_PGL, { target: cibleMardi.target });
+  assert.notDeepEqual(
+    lundi.ingredients.map((i) => i.grams),
+    mardi.ingredients.map((i) => i.grams),
+    "la même recette doit s'adapter au jour choisi",
+  );
+  // Et rien n'est persisté : le solveur ne sort que des objets éphémères.
+  assert.ok(!sansCommentairesTs(SEMAINE_FORM).includes("solveRecipe"));
+});
+
+await test("61. aucun nouveau chemin d'écriture, aucune migration ajoutée", () => {
+  // La refonte est purement applicative : elle n'écrit toujours que par la RPC.
+  for (const [nom, code] of [
+    ["constructeur", CONSTRUCTEUR],
+    ["panneau de semaine", PANNEAU_SEMAINE],
+    ["objectifs du jour", JOUR_OBJECTIFS],
+    ["répartition du jour", JOUR_REPARTITION],
+    ["repas du jour", JOUR_REPAS],
+    ["onglets de jour", JOUR_ONGLETS],
+    ["formulaire de semaine", SEMAINE_FORM],
+  ] as const) {
+    const texte = sansCommentairesTs(code);
+    assert.ok(!/\.from\(|\.rpc\(|createSupabaseBrowserClient/.test(texte), `${nom} ne parle pas à Supabase`);
+  }
+  for (const page of [PAGE_NOUVEAU, PAGE_ADMIN_PLAN]) {
+    assert.ok(page.includes("saveNutritionPlanV2("), "l'enregistrement reste la RPC v2");
+    assert.ok(!/\.from\("(nutrition_days|meals|nutrition_plan_profiles)"\)/.test(page));
+  }
+  // La refonte de l'interface n'a ajouté AUCUNE migration. La seule migration
+  // postérieure est celle de la garde serveur (20260814090000), et elle est
+  // strictement additive : elle ne remplace qu'une fonction.
+  const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
+  const attendues = manifeste.migrations_post_baseline_attendues as string[];
+  assert.equal(attendues.length, 21);
+  assert.ok(attendues.includes("20260814090000_nutrition_plan_v2_blocking_issue_week.sql"));
+});
+
+/* ═══════════ 13. Curseurs de créneau solidaires (zone 2) ═══════════ */
+
+/** Somme d'une macro sur les créneaux ACTIFS — la cible est 10 000. */
+function sommeActifs(jour: { slots: readonly MealSlotAllocation[] }, macro: "protein" | "carb" | "fat"): number {
+  const champ = macro === "protein" ? "proteinBp" : macro === "carb" ? "carbBp" : "fatBp";
+  return jour.slots.filter((a) => a.enabled).reduce((t, a) => t + a[champ], 0);
+}
+
+/** Les six créneaux actifs, chaque macro déjà répartie à 100 %. */
+function jourRéparti(): WeekFormState {
+  return initializeAllDays(createBlankWeek(), {
+    dailyCalories: 2000,
+    proteinBp: 3000,
+    carbBp: 4500,
+    fatBp: 2500,
+  });
+}
+
+await test("62. créneau solidaire : CHAQUE position, sur les TROIS macros", () => {
+  // Balayage exhaustif : 6 créneaux × 3 macros × 101 positions = 1 818 cas.
+  // À chaque fois : somme exacte, entiers, aucune valeur négative, et la
+  // valeur demandée conservée telle quelle.
+  const base = jourRéparti();
+  let cas = 0;
+  for (const macro of ["protein", "carb", "fat"] as const) {
+    for (const slot of MEAL_SLOT_KEYS) {
+      for (let pourcent = 0; pourcent <= 100; pourcent += 1) {
+        const bp = pourcent * 100;
+        const suivant = setDaySlotMacroBp(base, "monday", slot, macro, bp);
+        const jour = suivant.days.find((d) => d.day === "monday")!;
+        const champ = macro === "protein" ? "proteinBp" : macro === "carb" ? "carbBp" : "fatBp";
+
+        assert.equal(sommeActifs(jour, macro), BASIS_POINTS_TOTAL, `${macro}/${slot}/${pourcent}% : somme`);
+        assert.equal(
+          jour.slots.find((a) => a.slot === slot)![champ],
+          bp,
+          `${macro}/${slot}/${pourcent}% : la valeur demandée est conservée`,
+        );
+        for (const a of jour.slots) {
+          assert.ok(Number.isInteger(a[champ]), `${macro}/${slot} : ${a.slot} n'est pas entier`);
+          assert.ok(a[champ] >= 0, `${macro}/${slot} : ${a.slot} est négatif`);
+          assert.ok(a[champ] <= BASIS_POINTS_TOTAL, `${macro}/${slot} : ${a.slot} dépasse 100 %`);
+        }
+        // Les DEUX autres macros ne bougent jamais : les trois répartitions
+        // restent strictement indépendantes.
+        for (const autre of ["protein", "carb", "fat"] as const) {
+          if (autre === macro) continue;
+          assert.equal(sommeActifs(jour, autre), BASIS_POINTS_TOTAL, `${autre} a bougé`);
+        }
+        cas += 1;
+      }
+    }
+  }
+  assert.equal(cas, 3 * MEAL_SLOT_KEYS.length * 101);
+});
+
+await test("63. verrous : aucun, un, plusieurs, et tous les autres", () => {
+  const lire5 = (s: WeekFormState) =>
+    s.days.find((d) => d.day === "monday")!.slots.map((a) => a.proteinBp);
+
+  // ── Aucun verrou : le reste se répartit au prorata.
+  let s = jourRéparti();
+  s = setDaySlotMacroBp(s, "monday", "breakfast", "protein", 4000);
+  let jour = s.days.find((d) => d.day === "monday")!;
+  assert.equal(jour.slots.find((a) => a.slot === "breakfast")!.proteinBp, 4000);
+  assert.equal(sommeActifs(jour, "protein"), BASIS_POINTS_TOTAL);
+
+  // ── UN verrou : il est préservé au point de base près.
+  s = jourRéparti();
+  s = setDaySlotMacroBp(s, "monday", "lunch", "protein", 3000);
+  s = toggleDaySlotLock(s, "monday", "protein", "lunch");
+  s = setDaySlotMacroBp(s, "monday", "breakfast", "protein", 5000);
+  jour = s.days.find((d) => d.day === "monday")!;
+  assert.equal(jour.slots.find((a) => a.slot === "lunch")!.proteinBp, 3000, "le verrou est intact");
+  assert.equal(jour.slots.find((a) => a.slot === "breakfast")!.proteinBp, 5000);
+  assert.equal(sommeActifs(jour, "protein"), BASIS_POINTS_TOTAL);
+
+  // ── PLUSIEURS verrous.
+  s = jourRéparti();
+  s = setDaySlotMacroBp(s, "monday", "lunch", "protein", 3000);
+  s = setDaySlotMacroBp(s, "monday", "dinner", "protein", 2000);
+  s = toggleDaySlotLock(s, "monday", "protein", "lunch");
+  s = toggleDaySlotLock(s, "monday", "protein", "dinner");
+  const avant = lire5(s);
+  s = setDaySlotMacroBp(s, "monday", "breakfast", "protein", 1000);
+  jour = s.days.find((d) => d.day === "monday")!;
+  assert.equal(jour.slots.find((a) => a.slot === "lunch")!.proteinBp, avant[2]);
+  assert.equal(jour.slots.find((a) => a.slot === "dinner")!.proteinBp, avant[4]);
+  assert.equal(sommeActifs(jour, "protein"), BASIS_POINTS_TOTAL);
+
+  // ── ÉCRÊTAGE : les verrous rendent la valeur demandée impossible.
+  //    Le disponible est 10 000 − somme des verrouillés, lue en direct.
+  const verrous = jour.slots
+    .filter((a) => a.slot === "lunch" || a.slot === "dinner")
+    .reduce((t, a) => t + a.proteinBp, 0);
+  s = setDaySlotMacroBp(s, "monday", "breakfast", "protein", 9999);
+  jour = s.days.find((d) => d.day === "monday")!;
+  assert.equal(
+    jour.slots.find((a) => a.slot === "breakfast")!.proteinBp,
+    BASIS_POINTS_TOTAL - verrous,
+    "la demande est ramenée à 10 000 − somme des verrouillés",
+  );
+  assert.equal(sommeActifs(jour, "protein"), BASIS_POINTS_TOTAL);
+
+  // ── TOUS les autres verrouillés : le curseur est borné à
+  //    10 000 − somme des verrouillés, exactement.
+  s = jourRéparti();
+  s = setDaySlotMacroBp(s, "monday", "breakfast", "protein", 4000);
+  const verrouillés = MEAL_SLOT_KEYS.filter((slot) => slot !== "breakfast");
+  for (const slot of verrouillés) s = toggleDaySlotLock(s, "monday", "protein", slot);
+  const sommeVerrous = s.days
+    .find((d) => d.day === "monday")!
+    .slots.filter((a) => a.slot !== "breakfast")
+    .reduce((t, a) => t + a.proteinBp, 0);
+
+  s = setDaySlotMacroBp(s, "monday", "breakfast", "protein", 9999);
+  jour = s.days.find((d) => d.day === "monday")!;
+  assert.equal(
+    jour.slots.find((a) => a.slot === "breakfast")!.proteinBp,
+    BASIS_POINTS_TOTAL - sommeVerrous,
+    "le curseur est borné à 10 000 − somme des verrouillés",
+  );
+  assert.equal(sommeActifs(jour, "protein"), BASIS_POINTS_TOTAL);
+
+  // Un créneau VERROUILLÉ ne peut pas être déplacé.
+  const gelé = setDaySlotMacroBp(s, "monday", "lunch", "protein", 0);
+  assert.deepEqual(lire5(gelé), lire5(s), "un créneau verrouillé est immobile");
+});
+
+await test("64. créneaux désactivés : exclus de la répartition, jamais négatifs", () => {
+  let s = jourRéparti();
+  s = setDaySlotEnabled(s, "monday", "dessert", false);
+  s = setDaySlotEnabled(s, "monday", "morning_snack", false);
+  s = setDaySlotMacroBp(s, "monday", "lunch", "carb", 6000);
+  const jour = s.days.find((d) => d.day === "monday")!;
+
+  // Les désactivés restent à zéro et n'entrent pas dans la cible.
+  for (const slot of ["dessert", "morning_snack"] as const) {
+    const a = jour.slots.find((x) => x.slot === slot)!;
+    assert.equal(a.enabled, false);
+    assert.equal(a.proteinBp + a.carbBp + a.fatBp, 0);
+  }
+  // Les quatre restants totalisent 10 000.
+  assert.equal(sommeActifs(jour, "carb"), BASIS_POINTS_TOTAL);
+  assert.equal(jour.slots.find((a) => a.slot === "lunch")!.carbBp, 6000);
+  assert.ok(jour.slots.every((a) => a.carbBp >= 0));
+
+  // Un créneau désactivé ne peut pas être déplacé.
+  const inchangé = setDaySlotMacroBp(s, "monday", "dessert", "carb", 5000);
+  assert.equal(inchangé.days.find((d) => d.day === "monday")!.slots.find((a) => a.slot === "dessert")!.carbBp, 0);
+});
+
+await test("65. la garde serveur contrôle les SEPT jours, dans l'ordre", () => {
+  const migration = lire("../../supabase/migrations/20260814090000_nutrition_plan_v2_blocking_issue_week.sql");
+  const sql = sansCommentairesSql(migration);
+
+  // Strictement additive : une seule fonction remplacée, rien d'autre.
+  assert.equal((sql.match(/create or replace function/gi) ?? []).length, 1);
+  for (const interdit of [
+    /alter table/i, /drop\s+(table|function|policy|column|index)/i,
+    /create\s+(table|index|policy|trigger)/i,
+    /insert into/i, /update\s+public\./i, /delete from/i, /truncate/i,
+  ]) {
+    assert.ok(!interdit.test(sql), `la migration doit rester additive : ${interdit}`);
+  }
+
+  // Les sept jours, dans l'ordre canonique.
+  assert.ok(
+    sql.includes("'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'"),
+    "les sept jours sont parcourus dans l'ordre",
+  );
+  // Les contrôles exigés, chacun avec le jour en préfixe.
+  for (const code of [
+    "missing_day", "missing_profile_key", "unknown_profile", "calories_not_positive",
+    "daily_split_incomplete", "missing_slot", "no_enabled_slot",
+    "disabled_slot_with_allocation",
+    "protein_split_incomplete", "carb_split_incomplete", "fat_split_incomplete",
+  ]) {
+    assert.ok(sql.includes(`v_jour || ':${code}'`), `contrôle absent : ${code}`);
+  }
+  // Le plan sans profil garde le code historique.
+  assert.ok(sql.includes("return 'missing_default_profile';"));
+  // Conventions de sécurité du dépôt, inchangées.
+  assert.ok(sql.includes("security invoker") && sql.includes("set search_path = ''"));
+  assert.ok(sql.includes("revoke execute on function public.nutrition_plan_v2_blocking_issue(uuid) from anon;"));
+  assert.ok(sql.includes("grant execute on function public.nutrition_plan_v2_blocking_issue(uuid) to authenticated;"));
+  assert.ok(!/grant execute on function public\.nutrition_plan_v2_blocking_issue\(uuid\) to (public|anon)/i.test(sql));
+
+  // Et la checklist exerce bien les cas exigés.
+  for (const attendu of [
+    "H1. les sept jours valides",
+    "monday:calories_not_positive",
+    "tuesday:daily_split_incomplete",
+    "sunday:no_enabled_slot",
+    "wednesday:carb_split_incomplete",
+    "friday:missing_day",
+    "missing_default_profile",
+    "H10. tout réparé",
+  ]) {
+    assert.ok(CHECKLIST.includes(attendu), `la checklist doit couvrir : ${attendu}`);
+  }
+  assert.ok(/^rollback;$/m.test(CHECKLIST), "la checklist se termine par un ROLLBACK");
 });
 
 console.log(`\n${réussis} réussis, ${échecs} échecs`);

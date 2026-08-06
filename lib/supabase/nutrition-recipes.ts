@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   RecipeMappingError,
   assembleRecipeWithTags,
+  toNutritionRecipeIngredientRow,
   type NutritionRecipeIngredientRow,
   type NutritionRecipeRow,
   type NutritionRecipeTagRow,
@@ -159,7 +160,22 @@ async function readIngredientsFor(
     .order("recipe_id", { ascending: true })
     .order("position", { ascending: true });
   devWarn("readNutritionRecipes (ingrédients)", error);
-  return (data ?? []) as NutritionRecipeIngredientRow[];
+  // PAS D'AFFIRMATION DE TYPE ICI. `nutrition_recipe_ingredients` n'est pas
+  // décrite dans types/supabase.ts (tenu à la main), donc le client ne peut
+  // pas typer `data` ; l'écrire `data as NutritionRecipeIngredientRow[]` ne
+  // vérifiait rien et cassait dès la régénération du fichier de types. La
+  // projection champ par champ est faite par `toNutritionRecipeIngredientRow`
+  // (lib/nutrition/recipe-rows.ts), adossée au schéma de la migration
+  // 20260807090000 : elle ne lève jamais, ne convertit rien, et laisse le
+  // jugement de validité à `mapRecipeIngredientRow` — donc une ligne
+  // incohérente continue d'être isolée recette par recette dans `invalid[]`.
+  //
+  // `Array.isArray` plutôt que `data ?? []` : il donne le même résultat sur
+  // les deux seules valeurs réellement produites par le client (un tableau,
+  // ou `null` en cas d'erreur) tout en restant vrai quel que soit le type
+  // que le client inférera une fois types/supabase.ts régénéré.
+  const lignes: readonly unknown[] = Array.isArray(data) ? data : [];
+  return lignes.map(toNutritionRecipeIngredientRow);
 }
 
 async function readTagsFor(

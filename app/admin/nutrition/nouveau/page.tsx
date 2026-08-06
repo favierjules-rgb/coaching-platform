@@ -15,10 +15,11 @@ import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { createBlankFormState, toSaveInput, type PlanV2FormState } from "@/lib/nutrition/plan-v2-form";
 import {
   createBlankWeek,
+  mainDayTargets,
   toWeekSavePayload,
   type WeekFormState,
 } from "@/lib/nutrition/plan-v2-week-form";
-import { DEFAULT_PROFILE_KEY } from "@/lib/nutrition/plan-v2-validation";
+import { MAIN_DAY_PROFILE_KEY } from "@/lib/nutrition/day-profile-keys";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { STATUS_APP_TO_DB } from "@/lib/supabase/nutrition";
@@ -46,10 +47,9 @@ export default function NewNutritionPlanPage() {
   const router = useRouter();
   const { state, setAssignment } = useAdminData();
   // PR C — le modèle v1 n'existe plus : il n'y a qu'un seul parcours de
-  // création, et donc plus aucun choix à faire.
-  const [weekState, setWeekState] = useState<WeekFormState>(() =>
-    createBlankWeek(DEFAULT_PROFILE_KEY, 2200),
-  );
+  // création, et donc plus aucun choix à faire. La semaine est la source de
+  // vérité nutritionnelle : sept jours vierges et indépendants.
+  const [weekState, setWeekState] = useState<WeekFormState>(() => createBlankWeek());
   const [createdId] = useState<string | null>(null);
   const [saveError] = useState<string | null>(null);
 
@@ -105,18 +105,23 @@ export default function NewNutritionPlanPage() {
     const input = toSaveInput(formState);
     const statutBase =
       STATUS_APP_TO_DB[input.status as AdminContentStatus] ?? STATUS_APP_TO_DB.brouillon;
-    // La semaine part dans la MÊME transaction que le plan et les profils :
-    // sept jours, leur profil, et les repas prescrits.
-    const semaine = toWeekSavePayload(weekState, {
-      proteinBp: input.proteinBp,
-      carbBp: input.carbBp,
-      fatBp: input.fatBp,
-      slots: input.slots,
-    });
+    // La semaine part dans la MÊME transaction que le plan : sept profils
+    // internes (un par jour), sept jours, et leurs repas prescrits.
+    const semaine = toWeekSavePayload(weekState);
+    // Le profil de premier niveau n'est qu'une compatibilité : la RPC
+    // privilégie `profiles` dès qu'il est présent. On lui donne les objectifs
+    // de LUNDI, pour que le `daily_target` hérité reste cohérent.
+    const principal = mainDayTargets(weekState);
     const resultat = await saveNutritionPlanV2(supabase, {
       ...input,
       planId: null,
       status: statutBase,
+      profileKey: MAIN_DAY_PROFILE_KEY,
+      dailyCalories: principal.dailyCalories,
+      proteinBp: principal.proteinBp,
+      carbBp: principal.carbBp,
+      fatBp: principal.fatBp,
+      slots: principal.slots,
       week: semaine,
     });
     if (!resultat.ok) {
