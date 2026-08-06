@@ -29,6 +29,12 @@
 -- ⚠️ NE JAMAIS exécuter sur la Production.
 -- ============================================================================
 
+-- ⚠️ PR C — le modèle v1 n'existe plus. La migration 20260811090000 a converti
+-- tous les plans et la contrainte `nutrition_plans_model_version_check`
+-- interdit désormais toute valeur autre que 2. Les insertions de test qui
+-- créaient des plans « v1 » ont donc été portées en v2 : elles décrivent la
+-- même situation métier, dans le seul modèle qui subsiste.
+
 \timing off
 
 begin;
@@ -69,13 +75,17 @@ insert into public.students (id, user_id, first_name, last_name, email, status, 
 values ('bbbb9999-9999-4999-8999-999999999992', 'aaaa9999-9999-4999-8999-999999999992',
         'Ella', 'B', 'ra.eleve@test.local', 'active', 'coaching');
 
-insert into public.coaches (id, name, email)
-values ('dddd9999-9999-4999-8999-999999999991', 'Rina', 'ra.coach@test.local');
+-- `user_id` est désormais indispensable : depuis la migration 20260813090000,
+-- un coach ne gère que les recettes dont `coach_id` correspond à SA fiche,
+-- résolue par `current_coach_id()` (coaches.user_id = auth.uid()).
+insert into public.coaches (id, user_id, name, email)
+values ('dddd9999-9999-4999-8999-999999999991',
+        'aaaa9999-9999-4999-8999-999999999991', 'Rina', 'ra.coach@test.local');
 
 -- Plan v1 témoin — il ne doit jamais bouger.
 insert into public.nutrition_plans (id, name, goal_type, status, daily_target, nutrition_model_version)
 values ('eeee9999-9999-4999-8999-999999999991', 'Témoin v1 PR B', 'maintien', 'actif',
-        '{"calories":2000,"protein":150,"carbs":200,"fat":60}'::jsonb, 1);
+        '{"calories":2000,"protein":150,"carbs":200,"fat":60}'::jsonb, 2);
 
 -- ---------------------------------------------------------------------
 -- Section A — source_key et son index
@@ -619,14 +629,17 @@ begin
   perform pg_temp.noter('H', 'H5. le plan v1 témoin est inchangé', exists (
     select 1 from public.nutrition_plans
      where id = 'eeee9999-9999-4999-8999-999999999991'
-       and nutrition_model_version = 1
+       and nutrition_model_version = 2
        and daily_target = '{"calories":2000,"protein":150,"carbs":200,"fat":60}'::jsonb));
   perform pg_temp.noter('H', 'H6. aucune table de portion calculée n''existe', (
     select count(*) = 0 from pg_tables
      where schemaname = 'public'
        and (tablename like '%solved%' or tablename like '%portion%' or tablename like '%serving%')));
-  perform pg_temp.noter('H', 'H7. aucune policy de lecture élève sur les recettes', not exists (
-    select 1 from pg_policy
+  -- ⚠️ PR C — la lecture élève est désormais VOULUE, et chaînée jusqu'au coach
+  -- du plan assigné (migration 20260813090000). Le contrôle vérifie donc sa
+  -- présence sur les trois tables, au lieu de son absence.
+  perform pg_temp.noter('H', 'H7. la lecture élève existe, et sur les TROIS tables', (
+    select count(*) = 3 from pg_policy
      where polrelid in ('public.nutrition_recipes'::regclass,
                         'public.nutrition_recipe_ingredients'::regclass,
                         'public.nutrition_recipe_tags'::regclass)

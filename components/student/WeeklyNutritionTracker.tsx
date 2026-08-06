@@ -65,7 +65,12 @@ export function WeeklyNutritionTracker({ studentId, planId, target }: WeeklyNutr
             <div className="font-heading text-2xl font-bold leading-none text-foreground">
               {calories.adjustedDaily !== null ? `${formatKcal(calories.adjustedDaily)} kcal` : "—"}
             </div>
-            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Objectif ajusté jours restants</div>
+            {/* MOYENNE, et le mot compte : chaque jour restant a désormais SON
+                objectif, au prorata de ce que le coach a prescrit. Afficher
+                « objectif ajusté » ici laissait croire à un chiffre unique
+                valable pour les sept jours — c'était la source de confusion.
+                Les objectifs réels sont sur les cartes, jour par jour. */}
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Moyenne par jour restant</div>
           </div>
         </div>
 

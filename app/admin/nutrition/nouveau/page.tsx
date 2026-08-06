@@ -3,10 +3,9 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, CheckCircle, SlidersHorizontal, UtensilsCrossed } from "lucide-react";
+import { ArrowLeft, CheckCircle } from "lucide-react";
 
 import { AssignStudentsModal } from "@/components/admin/AssignStudentsModal";
-import { NutritionPlanBuilder, type NutritionPlanBuilderData } from "@/components/admin/NutritionPlanBuilder";
 import { NutritionPlanV2Builder } from "@/components/admin/NutritionPlanV2Builder";
 import { useAdminData } from "@/hooks/useAdminData";
 import { useContentAssignment } from "@/hooks/useContentAssignment";
@@ -14,9 +13,16 @@ import { useGuardedNutritionAssignment } from "@/hooks/useGuardedNutritionAssign
 import { useSupabaseNutritionPlans } from "@/hooks/useSupabaseNutritionPlans";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { createBlankFormState, toSaveInput, type PlanV2FormState } from "@/lib/nutrition/plan-v2-form";
+import {
+  createBlankWeek,
+  mainDayTargets,
+  toWeekSavePayload,
+  type WeekFormState,
+} from "@/lib/nutrition/plan-v2-week-form";
+import { MAIN_DAY_PROFILE_KEY } from "@/lib/nutrition/day-profile-keys";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
-import { STATUS_APP_TO_DB, createNutritionPlan as createNutritionPlanSupabase } from "@/lib/supabase/nutrition";
+import { STATUS_APP_TO_DB } from "@/lib/supabase/nutrition";
 import { saveNutritionPlanV2 } from "@/lib/supabase/nutrition-v2";
 import type { AdminContentStatus } from "@/types";
 
@@ -37,16 +43,28 @@ import type { AdminContentStatus } from "@/types";
  * `updateNutritionPlan` ne sont appelées sur ce chemin.
  */
 
-type Mode = "choix" | "classique" | "avance";
-
 export default function NewNutritionPlanPage() {
   const router = useRouter();
-  const { state, createNutritionPlan, setAssignment } = useAdminData();
-  const [mode, setMode] = useState<Mode>("choix");
-  const [createdId, setCreatedId] = useState<string | null>(null);
-  const [saveError, setSaveError] = useState(false);
+  const { state, setAssignment } = useAdminData();
+  // PR C — le modèle v1 n'existe plus : il n'y a qu'un seul parcours de
+  // création, et donc plus aucun choix à faire. La semaine est la source de
+  // vérité nutritionnelle : sept jours vierges et indépendants.
+  const [weekState, setWeekState] = useState<WeekFormState>(() => createBlankWeek());
+  const [createdId] = useState<string | null>(null);
+  const [saveError] = useState<string | null>(null);
 
-  const [formState, setFormState] = useState<PlanV2FormState | null>(null);
+  // Le formulaire est prêt dès l'ouverture : il n'y a plus d'étape de choix
+  // qui l'initialisait au clic.
+  const [formState, setFormState] = useState<PlanV2FormState | null>(() =>
+    createBlankFormState({
+      name: "",
+      description: "",
+      goalType: "maintien",
+      status: "brouillon",
+      coachNotes: "",
+      hydrationTip: "",
+    }),
+  );
   const [savingV2, setSavingV2] = useState(false);
   const [v2Error, setV2Error] = useState<string | null>(null);
 
@@ -67,28 +85,6 @@ export default function NewNutritionPlanPage() {
   const guarded = useGuardedNutritionAssignment(baseSetAssignment, versionsById);
 
   /** Chemin v1, INCHANGÉ. */
-  async function handleSave(data: NutritionPlanBuilderData) {
-    setSaveError(false);
-    if (supabaseActive) {
-      const supabase = createSupabaseBrowserClient();
-      if (supabase) {
-        const id = await createNutritionPlanSupabase(supabase, data);
-        if (id) {
-          await supabaseNutritionPlans.refetch();
-          setCreatedId(id);
-          return;
-        }
-        setSaveError(true);
-        return;
-      }
-    }
-    const id = createNutritionPlan({
-      ...data,
-      assignedStudentIds: [],
-      days: data.days.map((d) => ({ ...d, planId: "" })),
-    });
-    setCreatedId(id);
-  }
 
   /**
    * Première et unique écriture du mode avancé. `planId` vaut `null` : c'est
@@ -109,7 +105,25 @@ export default function NewNutritionPlanPage() {
     const input = toSaveInput(formState);
     const statutBase =
       STATUS_APP_TO_DB[input.status as AdminContentStatus] ?? STATUS_APP_TO_DB.brouillon;
-    const resultat = await saveNutritionPlanV2(supabase, { ...input, planId: null, status: statutBase });
+    // La semaine part dans la MÊME transaction que le plan : sept profils
+    // internes (un par jour), sept jours, et leurs repas prescrits.
+    const semaine = toWeekSavePayload(weekState);
+    // Le profil de premier niveau n'est qu'une compatibilité : la RPC
+    // privilégie `profiles` dès qu'il est présent. On lui donne les objectifs
+    // de LUNDI, pour que le `daily_target` hérité reste cohérent.
+    const principal = mainDayTargets(weekState);
+    const resultat = await saveNutritionPlanV2(supabase, {
+      ...input,
+      planId: null,
+      status: statutBase,
+      profileKey: MAIN_DAY_PROFILE_KEY,
+      dailyCalories: principal.dailyCalories,
+      proteinBp: principal.proteinBp,
+      carbBp: principal.carbBp,
+      fatBp: principal.fatBp,
+      slots: principal.slots,
+      week: semaine,
+    });
     if (!resultat.ok) {
       setV2Error(resultat.message);
       setSavingV2(false);
@@ -135,7 +149,7 @@ export default function NewNutritionPlanPage() {
           Créer un plan alimentaire
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          {mode === "avance"
+          {true
             ? "Répartition avancée : calories, macronutriments et parts par repas."
             : "Construis la semaine type, repas par repas."}
         </p>
@@ -154,56 +168,15 @@ export default function NewNutritionPlanPage() {
       )}
 
       {/* ── Choix du format, jamais implicite ─────────────────────────── */}
-      {mode === "choix" && !createdPlan && (
-        <div className="grid max-w-4xl grid-cols-1 gap-4 md:grid-cols-2">
-          <button
-            type="button"
-            onClick={() => setMode("classique")}
-            className="pressable flex min-h-[44px] flex-col items-start gap-2 rounded-card border border-border bg-card p-6 text-left shadow-soft transition-colors hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-          >
-            <UtensilsCrossed size={20} className="text-muted-foreground" />
-            <span className="font-heading text-lg font-bold uppercase text-foreground">Plan classique</span>
-            <span className="text-sm text-muted-foreground">
-              Construis la semaine type, jour par jour et repas par repas. Format historique, inchangé.
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setFormState(
-                createBlankFormState({
-                  name: "",
-                  description: "",
-                  goalType: "maintien",
-                  status: "brouillon",
-                  coachNotes: "",
-                  hydrationTip: "",
-                }),
-              );
-              setMode("avance");
-            }}
-            className="pressable flex min-h-[44px] flex-col items-start gap-2 rounded-card border border-primary bg-card p-6 text-left shadow-soft transition-colors hover:border-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-          >
-            <SlidersHorizontal size={20} className="text-primary" />
-            <span className="font-heading text-lg font-bold uppercase text-foreground">
-              Plan avec répartition avancée
-            </span>
-            <span className="text-sm text-muted-foreground">
-              Définis les calories, les macronutriments et leur répartition entre les repas. Ce format
-              sera compatible avec les recettes personnalisées.
-            </span>
-          </button>
-        </div>
-      )}
-
-      {mode === "avance" && formState && !createdPlan && (
+      {formState && !createdPlan && (
         <NutritionPlanV2Builder
           state={formState}
           onChange={setFormState}
           onSave={handleCreateV2}
           saving={savingV2}
           serverError={v2Error}
+          week={weekState}
+          onWeekChange={setWeekState}
         />
       )}
 
@@ -233,26 +206,6 @@ export default function NewNutritionPlanPage() {
             </button>
           </div>
         </div>
-      ) : mode === "classique" ? (
-        <NutritionPlanBuilder
-          initial={{
-            name: "",
-            goalType: "maintien",
-            caloriesPerDay: 2200,
-            protein: 150,
-            carbs: 220,
-            fat: 70,
-            weeklyTargetCalories: 15400,
-            status: "brouillon",
-            coachNotes: "",
-            hydrationTip: "",
-            supplements: [],
-            shoppingList: [],
-            days: [],
-          }}
-          onSave={handleSave}
-          saveLabel="Enregistrer le plan"
-        />
       ) : null}
     </div>
   );

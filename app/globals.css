@@ -1206,3 +1206,75 @@ body {
   border-left: 1px solid rgba(255, 255, 255, 0.18);
 }
 /* Section « Mon histoire » — fin */
+
+/* ════════════════════════════════════════════════════════════════════════
+   ENTRÉE « RECETTES » — le filet lumineux qui la met en avant.
+   ════════════════════════════════════════════════════════════════════════
+
+   Même technique que `.bilan-card` plus haut : un dégradé conique masqué en
+   bordure, dont l'angle tourne. Rien de nouveau à maintenir, seulement une
+   transposition en vert et à l'échelle d'un bouton.
+
+   La couleur vient du token `--success`, la seule teinte que l'interface
+   utilise déjà comme signal positif : la surbrillance reste donc cohérente
+   avec le reste, en clair comme en sombre, sans couleur codée en dur.
+
+   UN SEUL élément de la page porte cette animation. Une mise en avant qui se
+   répète n'en est plus une, et une boucle permanente multipliée par cinq
+   deviendrait du bruit.
+*/
+@property --recettes-halo-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+.recettes-halo::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  pointer-events: none;
+  background: conic-gradient(
+    from var(--recettes-halo-angle, 0deg),
+    transparent 0deg,
+    color-mix(in srgb, var(--success) 22%, transparent) 26deg,
+    color-mix(in srgb, var(--success) 78%, transparent) 58deg,
+    var(--success) 72deg,
+    color-mix(in srgb, var(--success) 55%, transparent) 100deg,
+    color-mix(in srgb, var(--success) 12%, transparent) 168deg,
+    transparent 236deg,
+    transparent 360deg
+  );
+  /* Le masque ne garde que le liseré : le centre du bouton reste lisible. */
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: recettes-halo-tour 6s linear infinite;
+}
+
+/* Halo diffus, immobile : il donne la surbrillance sans ajouter de mouvement. */
+.recettes-halo {
+  box-shadow: 0 0 24px -10px color-mix(in srgb, var(--success) 70%, transparent);
+}
+
+@keyframes recettes-halo-tour {
+  to {
+    --recettes-halo-angle: 360deg;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* On ne retire pas la mise en avant, on l'immobilise : le liseré vert reste
+     entier, simplement figé sur un angle choisi. */
+  .recettes-halo::before {
+    animation: none;
+    --recettes-halo-angle: 118deg;
+  }
+}

@@ -172,9 +172,12 @@ begin
     from information_schema.columns
    where table_schema = 'public' and table_name = 'nutrition_plans'
      and column_name = 'nutrition_model_version';
+  -- ⚠️ PR C — le DEFAULT est passé à 2 (migration 20260811090000) : le modèle
+  -- v1 n'existe plus, et un insert qui ne mentionne pas la colonne doit
+  -- produire un plan v2, pas un plan refusé par la contrainte.
   perform pg_temp.verifier(
-    'A1. nutrition_plans.nutrition_model_version : integer NOT NULL DEFAULT 1',
-    v.data_type = 'integer' and v.is_nullable = 'NO' and v.column_default like '1%');
+    'A1. nutrition_plans.nutrition_model_version : integer NOT NULL DEFAULT 2',
+    v.data_type = 'integer' and v.is_nullable = 'NO' and v.column_default like '2%');
 end $$;
 
 do $$
@@ -398,8 +401,12 @@ end $$;
 
 do $$
 begin
-  perform pg_temp.verifier('C1. conversion v1 → v2 signalée par la RPC',
-    (select valeur from _faits where cle='c_converted') = 'true');
+  -- ⚠️ PR C — il n'y a plus rien à convertir : tous les plans sont en v2 et
+  -- la contrainte l'impose. Le drapeau `converted` est conservé dans le
+  -- retour de la RPC pour ne pas casser les appelants, mais il vaut désormais
+  -- toujours `false`. C'est CELA que le contrôle vérifie.
+  perform pg_temp.verifier('C1. aucune conversion : le modèle v1 n''existe plus',
+    (select valeur from _faits where cle='c_converted') = 'false');
   perform pg_temp.verifier('C2. le plan est passé en version 2',
     (select valeur from _faits where cle='c_version') = '2');
   perform pg_temp.verifier('C3. le retour canonique porte les six créneaux',
@@ -468,8 +475,12 @@ begin
   select np.nutrition_model_version as version, np.daily_target as cible,
          (select count(*) from public.nutrition_plan_profiles pr where pr.plan_id = np.id) as nb
     into v from public.nutrition_plans np where np.id='22220000-0000-4000-8000-000000000002';
-  perform pg_temp.verifier('C12. le plan v1 voisin reste en v1, sans profil ni répartition inventée',
-    v.version = 1 and v.nb = 0 and (v.cible->>'calories')::numeric = 1800);
+  -- ⚠️ PR C — tous les plans sont en v2. Ce qui reste vrai, et qui était le
+  -- fond du contrôle : la RPC ne touche QUE le plan qu'on lui désigne. Le
+  -- plan voisin garde donc sa cible d'origine et n'a reçu ni profil, ni
+  -- répartition inventée.
+  perform pg_temp.verifier('C12. le plan voisin n''a PAS été touché : aucune répartition inventée',
+    v.version = 2 and v.nb = 0 and (v.cible->>'calories')::numeric = 1800);
 end $$;
 
 -- =====================================================================

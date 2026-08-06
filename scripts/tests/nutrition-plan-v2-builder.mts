@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 
-import { NBSP } from "../../lib/nutrition/basis-points";
+import { BASIS_POINTS_TOTAL } from "../../lib/nutrition/basis-points";
 import {
   MEAL_SLOT_KEYS,
   describeMacroBalance,
@@ -47,6 +47,13 @@ import {
   validatePlanV2Draft,
   PLAN_V2_DISTRIBUTION_MESSAGE_FR,
 } from "../../lib/nutrition/plan-v2-validation";
+import {
+  createBlankWeek,
+  initializeAllDays,
+  setDayCalories,
+  setDayMacroBp,
+  type WeekFormState,
+} from "../../lib/nutrition/plan-v2-week-form";
 import { evaluateLegacyWrite } from "../../lib/nutrition/plan-v2-guards";
 import { guardNutritionAssignment } from "../../lib/supabase/nutrition-assignment-guard";
 import { NutritionPlanV2Builder } from "../../components/admin/NutritionPlanV2Builder";
@@ -113,7 +120,24 @@ function étatComplet(): PlanV2FormState {
   return s;
 }
 
-function rendre(state: PlanV2FormState, options: { serverError?: string | null } = {}): string {
+/**
+ * Semaine complète et valide : sept jours à 2 000 kcal, 28/48/24, six
+ * créneaux répartis à 100 %. Depuis la refonte « semaine d'abord », c'est
+ * elle — et non plus l'objectif global — qui rend un plan assignable.
+ */
+function semaineComplète(): WeekFormState {
+  return initializeAllDays(createBlankWeek(), {
+    dailyCalories: 2000,
+    proteinBp: 2800,
+    carbBp: 4800,
+    fatBp: 2400,
+  });
+}
+
+function rendre(
+  state: PlanV2FormState,
+  options: { serverError?: string | null; week?: WeekFormState } = {},
+): string {
   return renderToString(
     createElement(NutritionPlanV2Builder, {
       state,
@@ -121,17 +145,24 @@ function rendre(state: PlanV2FormState, options: { serverError?: string | null }
       onSave: () => {},
       saving: false,
       serverError: options.serverError ?? null,
+      week: options.week ?? semaineComplète(),
+      onWeekChange: () => {},
     }),
   );
 }
 
 /* ══════════ Cohabitation v1 / v2 ══════════ */
 
-await test("1. un plan v1 utilise encore l'ancien éditeur", () => {
+await test("1. il n'existe PLUS d'ancien éditeur : la cohabitation v1/v2 est terminée", () => {
+  // PR C — le modèle v1 a disparu (migration 20260811090000, contrainte
+  // `nutrition_model_version = 2`). Ce test affirmait l'inverse ; il affirme
+  // maintenant la nouvelle garantie, plutôt que d'être supprimé pour obtenir
+  // du vert.
   const src = sansCommentaires(PAGE_PLAN);
-  assert.ok(src.includes("editing && !isV2"), "l'ancien éditeur doit être conditionné à !isV2");
-  assert.ok(src.includes("<NutritionPlanBuilder"), "NutritionPlanBuilder reste monté pour le v1");
-  assert.ok(src.includes("updateNutritionPlanSupabase(supabase, plan!.id, data)"));
+  assert.ok(!src.includes("editing && !isV2"), "plus aucun branchement sur !isV2");
+  assert.ok(!src.includes("<NutritionPlanBuilder"), "le constructeur v1 n'est plus monté");
+  assert.ok(!src.includes("updateNutritionPlanSupabase("), "l'écriture v1 n'a plus d'appelant");
+  assert.ok(src.includes("<NutritionPlanV2Builder"), "il ne reste qu'un constructeur");
 });
 
 await test("2. aucune conversion au chargement", () => {
@@ -246,18 +277,42 @@ await test("10. le champ numérique et les points de base sont réversibles", ()
   assert.equal(setDailyMacroBp(s, "protein", 20000), s, "une valeur hors domaine ne change rien");
 });
 
-await test("11. un déficit quotidien est affiché", () => {
-  let s = étatComplet();
-  s = setDailyMacroBp(s, "fat", 1600); // 28 + 48 + 16 = 92 %
-  const html = rendre(s);
-  assert.ok(html.includes(`Il reste 800 points de base, soit 8${NBSP}%, à répartir.`), html.slice(0, 200));
+await test("11. un jour dont les macros ne totalisent pas 100 % est signalé", () => {
+  // RÉÉCRIT PAR LA REFONTE « SEMAINE D'ABORD ». Ce contrôle vérifiait le
+  // message de déficit de l'objectif quotidien GLOBAL, qui n'existe plus :
+  // chaque jour porte le sien. Un jour vierge (0 / 0 / 0) est le seul état
+  // incomplet encore atteignable, puisque les curseurs sont solidaires.
+  const html = rendre(étatComplet(), { week: createBlankWeek() });
+  assert.ok(
+    html.includes("doivent totaliser exactement 100"),
+    "le jour ouvert signale son total incomplet",
+  );
+  // Et un jour complet ne dit rien.
+  assert.ok(!rendre(étatComplet()).includes("doivent totaliser exactement 100"));
 });
 
-await test("12. un dépassement quotidien est affiché", () => {
-  let s = étatComplet();
-  s = setDailyMacroBp(s, "fat", 3000); // 28 + 48 + 30 = 106 %
-  const html = rendre(s);
-  assert.ok(html.includes(`dépasse 100${NBSP}% de 600 points de base`));
+await test("12. les curseurs solidaires rendent tout dépassement IMPOSSIBLE", () => {
+  // RÉÉCRIT. Le message de dépassement quotidien n'a plus de raison d'être :
+  // la solidarité des trois curseurs garantit un total de 100 % à chaque
+  // mouvement. On vérifie la garantie qui l'a remplacé, pas le message.
+  let s = createBlankWeek();
+  for (const [macro, valeur] of [
+    ["protein", 9000],
+    ["carb", 8000],
+    ["fat", 7000],
+  ] as const) {
+    s = setDayCalories(s, "monday", 2000);
+    const t = setDayMacroBp(s, "monday", macro, valeur);
+    const jour = t.days.find((d) => d.day === "monday")!;
+    assert.equal(
+      jour.proteinBp + jour.carbBp + jour.fatBp,
+      BASIS_POINTS_TOTAL,
+      `${macro} porté à ${valeur} bp`,
+    );
+    s = t;
+  }
+  // Aucun message de dépassement n'est donc rendu.
+  assert.ok(!rendre(étatComplet(), { week: s }).includes("dépasse 100"));
 });
 
 /* ══════════ Créneaux ══════════ */
@@ -469,7 +524,9 @@ await test("29. une erreur RPC conserve le formulaire et ses valeurs", () => {
   assert.ok(!bloc.includes("setConversionMode(false)"), "l'éditeur ne se referme pas sur échec");
   const html = rendre(étatComplet(), { serverError: "INVALID_PAYLOAD: profile manquant" });
   assert.ok(html.includes("INVALID_PAYLOAD: profile manquant"));
-  assert.ok(html.includes("Récapitulatif"), "le formulaire reste affiché");
+  // Le « Récapitulatif » global a disparu avec l'objectif quotidien global :
+  // c'est la semaine qui prouve désormais que le formulaire est resté ouvert.
+  assert.ok(html.includes("Semaine alimentaire"), "le formulaire reste affiché");
 });
 
 await test("30. un succès recharge le retour canonique de la RPC", () => {
@@ -479,15 +536,12 @@ await test("30. un succès recharge le retour canonique de la RPC", () => {
   assert.ok(src.includes("await supabaseNutritionPlans.refetch();"));
 });
 
-await test("31. updateNutritionPlan n'est jamais appelée pour un plan v2", () => {
+await test("31. updateNutritionPlan n'a plus AUCUN appelant dans l'écran de plan", () => {
   const src = sansCommentaires(PAGE_PLAN);
-  // Le seul appel vit dans handleSave, atteignable uniquement via l'éditeur v1.
-  assert.equal(src.split("updateNutritionPlanSupabase(").length - 1, 1);
-  const indexAppel = src.indexOf("updateNutritionPlanSupabase(supabase");
-  const indexHandleSave = src.indexOf("async function handleSave(data: NutritionPlanBuilderData)");
-  const indexHandleArchive = src.indexOf("async function handleArchive()");
-  assert.ok(indexHandleSave < indexAppel && indexAppel < indexHandleArchive);
-  assert.ok(src.includes("editing && !isV2"), "l'éditeur v1 est inaccessible sur un plan v2");
+  // Le chemin d'écriture v1 a été retiré avec l'éditeur v1 : il n'y a plus
+  // un seul appel à contenir, il n'y en a plus du tout.
+  assert.equal(src.split("updateNutritionPlanSupabase(").length - 1, 0);
+  assert.ok(src.includes("saveNutritionPlanV2("), "la RPC v2 est le seul chemin d'écriture");
   // Et la garde de la PR 1 refuse toujours au niveau de la couche d'accès.
   assert.equal(evaluateLegacyWrite(NUTRITION_MODEL_VERSION_STRUCTURED).allowed, false);
 });
@@ -581,7 +635,13 @@ await test("36. le suivi nutritionnel élève est inchangé", () => {
 await test("37. les sliders sont accessibles", () => {
   const html = rendre(étatComplet());
   const sliders = html.split('type="range"').length - 1;
-  assert.ok(sliders >= 3 + 6 * 3, `attendu au moins 21 sliders, obtenu ${sliders}`);
+  // MIS À JOUR PAR LA REFONTE « SEMAINE D'ABORD ». La page rendait
+  // 3 + 6 × 3 = 21 curseurs : l'objectif global, puis les trois listes de
+  // créneaux empilées. C'était précisément la surcharge à supprimer. Un seul
+  // jour est désormais ouvert, et une seule macro à la fois : 3 curseurs de
+  // macros + 6 créneaux de l'onglet actif = 9. Moins de curseurs à l'écran,
+  // exactement les mêmes garanties d'accessibilité sur chacun.
+  assert.equal(sliders, 3 + 6, `attendu 9 curseurs pour le jour ouvert, obtenu ${sliders}`);
   assert.ok(html.includes("aria-valuemin"));
   assert.ok(html.includes("aria-valuemax"));
   assert.ok(html.includes("aria-valuenow"));
@@ -600,9 +660,14 @@ await test("37. les sliders sont accessibles", () => {
 
 await test("38. la structure mobile évite tout débordement horizontal", () => {
   const html = rendre(étatComplet());
-  // Récapitulatif : cartes sous md, tableau au-delà — jamais de scroll global.
-  assert.ok(BUILDER.includes('className="flex flex-col gap-3 md:hidden"'));
-  assert.ok(BUILDER.includes('className="hidden overflow-x-auto md:block"'));
+  // RÉÉCRIT. Le récapitulatif « cartes sous md, tableau au-delà » a disparu
+  // avec l'objectif quotidien global qu'il agrégeait. Ce qui défile
+  // horizontalement sur mobile, désormais, c'est la BARRE DE JOURS — et elle
+  // seule, avec accrochage, jamais la page.
+  const onglets = lire("../../components/admin/NutritionDayTabs.tsx");
+  assert.ok(onglets.includes("overflow-x-auto"), "la barre de jours défile");
+  assert.ok(onglets.includes("snap-x") && onglets.includes("snap-start"), "avec accrochage");
+  assert.ok(onglets.includes("sm:overflow-visible"), "et cesse de défiler dès sm");
   // Sliders pleine largeur, jamais de largeur fixe en pixels.
   assert.ok(PANNEAU.includes("w-full min-w-0 flex-1"));
   assert.ok(!/\bw-\[\d+px\]/.test(BUILDER + PANNEAU), "aucune largeur figée en pixels");
@@ -623,7 +688,13 @@ await test("39. la structure tablette empile puis dégroupe", () => {
 
 await test("40. la structure desktop reste lisible et bornée", () => {
   assert.ok(BUILDER.includes("max-w-4xl"), "la colonne de lecture est bornée");
-  assert.ok(BUILDER.includes("md:hidden") && BUILDER.includes("md:block"));
+  // RÉÉCRIT : le couple md:hidden / md:block servait le tableau du
+  // récapitulatif supprimé. Sur desktop, les sept jours tiennent maintenant
+  // sur une rangée d'onglets, et les créneaux sur deux colonnes.
+  const onglets = lire("../../components/admin/NutritionDayTabs.tsx");
+  assert.ok(onglets.includes("sm:flex-wrap") && onglets.includes("sm:flex-1"));
+  const repartition = lire("../../components/admin/NutritionDaySlotDistribution.tsx");
+  assert.ok(repartition.includes("sm:grid-cols-2"));
 });
 
 await test("41. aucune couleur codée en dur : uniquement des tokens", () => {
@@ -646,33 +717,35 @@ await test("41. aucune couleur codée en dur : uniquement des tokens", () => {
 
 /* ══════════ Création directe d'un plan v2 (ajout post-audit) ══════════ */
 
-await test("42. /nouveau propose explicitement les deux formats", () => {
+await test("42. /nouveau n'offre plus AUCUN choix de format", () => {
+  // PR C — « Il ne doit exister qu'un seul bouton et un seul parcours ».
   const src = sansCommentaires(PAGE_NOUVEAU);
-  assert.ok(src.includes("Plan classique"));
-  assert.ok(src.includes("Plan avec répartition avancée"));
-  assert.ok(
-    src.includes("Définis les calories, les macronutriments et leur répartition entre les repas. Ce format"),
-    "le texte explicatif du mode avancé doit être présent",
-  );
-  assert.ok(src.includes('sera compatible avec les recettes personnalisées.'));
-  // Le mode classique n'est jamais remplacé silencieusement : rien n'est
-  // pré-sélectionné, le coach choisit.
-  assert.ok(src.includes('useState<Mode>("choix")'));
+  assert.ok(!src.includes("Plan classique"), "le format classique a disparu");
+  assert.ok(!src.includes('useState<Mode>'), "il n'y a plus d'état de mode");
+  assert.ok(!src.includes("<NutritionPlanBuilder"), "le constructeur v1 n'est plus monté");
+  assert.ok(src.includes("<NutritionPlanV2Builder"), "un seul constructeur reste");
+  // Le formulaire est prêt dès l'ouverture, sans étape de sélection.
+  assert.ok(src.includes("createBlankFormState({"));
 });
 
-await test("43. le plan classique conserve le constructeur v1", () => {
+await test("43. le chemin de création v1 a été RETIRÉ, pas neutralisé", () => {
   const src = sansCommentaires(PAGE_NOUVEAU);
-  assert.ok(src.includes('mode === "classique" ? (\n        <NutritionPlanBuilder') || src.includes("<NutritionPlanBuilder"));
-  assert.ok(src.includes("createNutritionPlanSupabase(supabase, data)"), "le chemin v1 est intact");
-  assert.ok(src.includes('saveLabel="Enregistrer le plan"'));
+  assert.ok(!src.includes("<NutritionPlanBuilder"), "le constructeur v1 n'est plus monté");
+  assert.ok(!src.includes("createNutritionPlanSupabase("), "l'écriture v1 n'a plus d'appelant");
+  assert.ok(!src.includes("handleSave"), "le handler v1 a disparu");
 });
 
-await test("44. choisir le mode avancé ne crée AUCUNE ligne", () => {
+await test("44. ouvrir /nouveau ne crée AUCUNE ligne", () => {
   const src = sansCommentaires(PAGE_NOUVEAU);
-  // Le clic ne fait qu'initialiser un état local.
-  const bloc = src.slice(src.indexOf("setFormState(\n                createBlankFormState("), src.indexOf('setMode("avance");'));
-  assert.ok(!bloc.includes("supabase"), "aucun accès Supabase au moment du choix");
-  assert.ok(!bloc.includes("await"), "aucune écriture au moment du choix");
+  // Le formulaire est initialisé dans un `useState` paresseux : aucun accès
+  // Supabase, aucun `await`, tant que le coach n'a pas cliqué.
+  const debut = src.indexOf("useState<PlanV2FormState | null>(() =>");
+  assert.ok(debut !== -1, "l'état est initialisé paresseusement");
+  // On borne la tranche à l'initialiseur lui-même : `),\n  );` le referme.
+  const fin = src.indexOf("  );", debut);
+  const bloc = src.slice(debut, fin);
+  assert.ok(!bloc.includes("supabase"), "aucun accès Supabase à l'ouverture");
+  assert.ok(!bloc.includes("await"), "aucune écriture à l'ouverture");
   // L'état neuf n'a pas d'identifiant de plan : rien n'existe encore en base.
   const neuf = createBlankFormState({ name: "", goalType: "maintien", status: "brouillon" });
   assert.equal(neuf.planId, null);
@@ -694,19 +767,18 @@ await test("45. le formulaire neuf porte les six créneaux, désactivés et à z
 
 await test("46. la première sauvegarde passe uniquement par la RPC v2", () => {
   const src = sansCommentaires(PAGE_NOUVEAU);
-  assert.ok(src.includes("saveNutritionPlanV2(supabase, { ...input, planId: null"), "planId null ⇒ création par la RPC");
+  assert.ok(src.includes("planId: null,"), "planId null ⇒ création par la RPC");
   assert.equal(src.split("saveNutritionPlanV2(").length - 1, 1, "un seul appel");
+  // La semaine part dans la MÊME transaction.
+  assert.ok(src.includes("week: semaine,"), "les sept jours accompagnent la création");
 });
 
-await test("47. createNutritionPlan n'est jamais utilisée pour un plan v2", () => {
+await test("47. createNutritionPlan n'est plus utilisée NULLE PART", () => {
   const src = sansCommentaires(PAGE_NOUVEAU);
-  const indexCreate = src.indexOf("createNutritionPlanSupabase(supabase, data)");
-  const debutV1 = src.indexOf("async function handleSave(data: NutritionPlanBuilderData)");
+  assert.ok(!src.includes("createNutritionPlanSupabase"), "l'import a disparu avec son appel");
   const debutV2 = src.indexOf("async function handleCreateV2()");
-  assert.ok(debutV1 < indexCreate && indexCreate < debutV2, "l'appel v1 vit dans le seul handler v1");
-  const blocV2 = src.slice(debutV2);
-  assert.ok(!blocV2.includes("createNutritionPlanSupabase"));
-  assert.ok(!blocV2.includes("createNutritionPlan("));
+  assert.ok(debutV2 !== -1, "le seul handler de création est le v2");
+  assert.ok(!src.slice(debutV2).includes("createNutritionPlan("));
 });
 
 await test("48. updateNutritionPlan n'est jamais utilisée pour un plan v2", () => {
@@ -736,7 +808,7 @@ await test("50. une erreur de la RPC conserve le formulaire", () => {
   assert.ok(!blocEchec.includes('setMode("choix")'), "on ne revient pas au choix");
   const html = rendre(étatComplet(), { serverError: "INVALID_PAYLOAD: profile manquant" });
   assert.ok(html.includes("INVALID_PAYLOAD: profile manquant"));
-  assert.ok(html.includes("Récapitulatif"));
+  assert.ok(html.includes("Semaine alimentaire"));
 });
 
 await test("51. une erreur de la RPC ne laisse aucun état partiel", () => {
@@ -808,11 +880,12 @@ await test("55. aucune assignation existante n'est retirée avant validation", (
 
 /* ══════════ Non-régression v1 et forme canonique ══════════ */
 
-await test("56. la création v1 reste fonctionnelle", () => {
+await test("56. la création v1 a été RETIRÉE, y compris son repli local", () => {
   const src = sansCommentaires(PAGE_NOUVEAU);
-  assert.ok(src.includes("createNutritionPlanSupabase(supabase, data)"));
-  assert.ok(src.includes("weeklyTargetCalories: 15400"), "les valeurs par défaut du v1 sont conservées");
-  assert.ok(src.includes("createNutritionPlan({"), "le repli mock est conservé");
+  assert.ok(!src.includes("createNutritionPlanSupabase"), "plus d'écriture v1");
+  assert.ok(!src.includes("weeklyTargetCalories: 15400"), "plus de valeurs par défaut v1");
+  assert.ok(!src.includes("createNutritionPlan({"), "plus de repli mock v1");
+  assert.ok(src.includes("handleCreateV2"), "un seul chemin de création subsiste");
 });
 
 await test("57. la conversion v1 → v2 reste fonctionnelle", () => {
@@ -927,11 +1000,68 @@ await test("63. toutes les garanties de sécurité sont reconduites", () => {
 await test("64. la migration est déclarée au manifeste et comptée", () => {
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 16);
+  assert.equal(attendues.length, 21);
   assert.ok(attendues.includes("20260805090000_nutrition_plan_v2_weekly_target.sql"));
   const secu = lire("../../scripts/tests/security-hardening.mts");
-  assert.ok(secu.includes(".length, 43,"), "le compteur de migrations suit les migrations réelles");
-  assert.ok(secu.includes("assert.equal(attendues.length, 16);"));
+  assert.ok(secu.includes(".length, 48,"), "le compteur de migrations suit les migrations réelles");
+  assert.ok(secu.includes("assert.equal(attendues.length, 21);"));
+});
+
+/* ══════════ Refonte « semaine d'abord » — rendu réel ══════════ */
+
+await test("65. la page rend SEPT onglets de jour et UN SEUL panneau ouvert", () => {
+  const html = rendre(étatComplet());
+  const onglets = html.split('role="tab"').length - 1;
+  // Sept jours + trois macronutriments : deux barres d'onglets, pas plus.
+  assert.equal(onglets, 7 + 3, `attendu 10 onglets, obtenu ${onglets}`);
+  assert.equal(html.split('role="tabpanel"').length - 1, 2, "un panneau de jour, un panneau de macro");
+  // Un seul onglet sélectionné par barre.
+  assert.equal(html.split('aria-selected="true"').length - 1, 2);
+  for (const jour of ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]) {
+    assert.ok(html.includes(jour), `jour absent du sélecteur : ${jour}`);
+  }
+  // Et le jour ouvert est lundi. `renderToString` insère un commentaire vide
+  // entre un texte littéral et une expression : on cherche donc les deux
+  // fragments, pas la chaîne recomposée.
+  assert.ok(/Objectifs\s*—[\s\S]{0,30}Lundi/.test(html), "le titre de la zone 1 nomme le jour ouvert");
+  assert.ok(/Actions\s*—[\s\S]{0,30}Lundi/.test(html), "le titre de la zone 4 aussi");
+});
+
+await test("66. les quatre zones du jour ouvert sont rendues, et rien d'autre", () => {
+  const html = rendre(étatComplet());
+  for (const zone of [
+    "Calories du jour",
+    "Répartition par créneau",
+    "Repas prescrits",
+    "Dupliquer ce jour vers",
+    "Appliquer à toute la semaine",
+    "Réinitialiser ce jour",
+  ]) {
+    assert.ok(html.includes(zone), `zone absente : ${zone}`);
+  }
+  // Une seule fois chacune : le jour ouvert, pas sept copies.
+  assert.equal(html.split("Répartition par créneau").length - 1, 1);
+  assert.equal(html.split("Repas prescrits").length - 1, 1);
+  // Le total hebdomadaire est bien la somme des sept jours.
+  assert.ok(html.includes("Total de la semaine"));
+  assert.ok(html.includes("somme des sept jours"));
+  // Aucun vocabulaire de profil, nulle part dans le rendu.
+  for (const interdit of ["Profil", "profile_key", "default", "legacy_default"]) {
+    assert.ok(!html.includes(interdit), `le rendu contient encore « ${interdit} »`);
+  }
+});
+
+await test("67. l'initialisation de la semaine est facultative et repliée", () => {
+  const html = rendre(étatComplet());
+  assert.ok(html.includes("Initialiser les sept jours avec les mêmes objectifs"));
+  // Repliée : son formulaire n'est pas monté tant qu'on ne l'ouvre pas, donc
+  // elle ne peut pas être prise pour un réglage global permanent.
+  assert.ok(!html.includes("Appliquer aux sept jours"));
+  assert.ok(!html.includes("Calories par jour (kcal)"));
+  // Et elle n'est jamais relue : le constructeur ne dérive rien d'elle.
+  const src = sansCommentaires(BUILDER);
+  assert.ok(src.includes("initializeAllDays(week, objectifs)"));
+  assert.equal(src.split("initializeAllDays").length - 1, 2, "un import, un seul appel");
 });
 
 console.log(`\n${réussis} réussis, ${échecs} échecs`);

@@ -31,6 +31,7 @@ import {
   mapRecipeIngredientRow,
   mapRecipeRow,
   mapRecipeTagRow,
+  toNutritionRecipeIngredientRow,
   type NutritionRecipeIngredientRow,
   type NutritionRecipeRow,
   type NutritionRecipeTagRow,
@@ -583,15 +584,29 @@ await test("35. les codes de blocage SQL sont tous couverts par la checklist", (
 
 /* ═══════════════════ 7. Non-régression v1 et v2 ═══════════════════ */
 
-await test("36. le modèle v1 est TOTALEMENT inchangé", () => {
+await test("36. la migration des recettes est ADDITIVE et ne touche aucune table de plan", () => {
+  // FORMULATION CORRIGÉE (PR C.1). Ce contrôle s'intitulait « le modèle v1 est
+  // TOTALEMENT inchangé ». C'est devenu faux : la PR C a intégré
+  // `nutrition_days` et `meals` au modèle v2 (colonne `profile_key` NOT NULL,
+  // clé étrangère composite vers `nutrition_plan_profiles`), et la PR C.1 a
+  // supprimé le chemin d'écriture v1 qui les alimentait.
+  //
+  // La garantie réellement utile n'a pas disparu pour autant, et c'est elle
+  // qui est vérifiée ici : la migration fondatrice des recettes
+  // (20260807090000) reste STRICTEMENT ADDITIVE. Elle crée ses trois tables
+  // et ne supprime, n'altère ni ne réécrit aucune des tables de plan — y
+  // compris `nutrition_days` et `meals`, désormais portées par le v2. Les
+  // assertions sont inchangées ; seul leur énoncé l'est.
   const sql = sansCommentairesSql(MIGRATION);
   for (const table of ["nutrition_days", "meals", "nutrition_daily_logs", "nutrition_plans"]) {
     assert.ok(!new RegExp(`(alter|drop|insert into|update|delete from)\\s+(table\\s+)?public\\.${table}\\b`, "i").test(sql),
       `la migration ne touche pas ${table}`);
   }
-  // Aucun fichier v1 modifié : le socle recettes n'importe rien de v1.
-  assert.ok(!/nutrition_days|meals/.test(COUCHE_LECTURE), "la couche recettes ignore les jours et repas v1");
-  assert.ok(!/nutrition_days|meals/.test(MATCHING), "le matching aussi");
+  // Et la séparation des domaines tient dans l'autre sens : le socle recettes
+  // ne lit ni n'écrit les journées et les repas prescrits (« Outil 3 »), qui
+  // ne sont écrits que par la RPC `save_nutrition_plan_v2`.
+  assert.ok(!/nutrition_days|meals/.test(COUCHE_LECTURE), "la couche recettes ne touche ni aux journées ni aux repas");
+  assert.ok(!/nutrition_days|meals/.test(MATCHING), "le matching non plus");
 });
 
 await test("37. les recettes sont réservées au modèle v2", () => {
@@ -613,11 +628,11 @@ await test("38. les 11 fixtures ne sont JAMAIS insérées en base", () => {
 await test("39. la migration est déclarée au manifeste et comptée", () => {
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 16);
+  assert.equal(attendues.length, 21);
   assert.ok(attendues.includes("20260807090000_nutrition_recipes.sql"));
   const secu = lire("../../scripts/tests/security-hardening.mts");
-  assert.ok(secu.includes(".length, 43,"), "le compteur de migrations suit les migrations réelles");
-  assert.ok(secu.includes("assert.equal(attendues.length, 16);"));
+  assert.ok(secu.includes(".length, 48,"), "le compteur de migrations suit les migrations réelles");
+  assert.ok(secu.includes("assert.equal(attendues.length, 21);"));
 });
 
 await test("40. la checklist PostgreSQL couvre le périmètre exigé", () => {
@@ -636,6 +651,157 @@ await test("40. la checklist PostgreSQL couvre le périmètre exigé", () => {
   }
   assert.ok(/^rollback;$/m.test(CHECKLIST), "elle se termine par un ROLLBACK");
   assert.ok(CHECKLIST.indexOf("begin;") < CHECKLIST.indexOf("\nrollback;"), "tout tient dans une transaction");
+});
+
+/* ─── 41-45. Adaptateur de ligne d'ingrédient (PR C.1) ─────────────────── */
+
+/**
+ * Ligne BRUTE de référence, telle que PostgREST la rend réellement : les
+ * `numeric` en chaînes, les colonnes nullables présentes et à `null`. Elle
+ * n'est PAS typée `NutritionRecipeIngredientRow` — c'est justement ce que
+ * l'adaptateur doit établir, on ne peut pas le présupposer.
+ */
+const LIGNE_VALIDE = {
+  id: "i1",
+  recipe_id: "r1",
+  position: 1,
+  name: "Blanc de poulet",
+  role: "protein",
+  protein_per_100g: "23",
+  carb_per_100g: "0",
+  fat_per_100g: "1.5",
+  reference_grams: "120",
+  min_grams: null,
+  max_grams: null,
+  unit_scalable: false,
+  max_units: null,
+  unit_name: null,
+  fixed_label: null,
+  egg: false,
+  egg_grams: null,
+  linked_to_ingredient_id: null,
+  link_ratio_bp: null,
+};
+
+await test("41. la lecture d'ingrédients n'affirme plus aucun type", () => {
+  const code = sansCommentairesTs(COUCHE_LECTURE);
+  assert.ok(
+    !/as\s+NutritionRecipeIngredientRow\[\]/.test(code),
+    "le cast aveugle `data as NutritionRecipeIngredientRow[]` doit avoir disparu",
+  );
+  assert.ok(code.includes("toNutritionRecipeIngredientRow"), "la projection explicite doit être utilisée");
+  // Aucune échappatoire de typage sur ce chemin.
+  assert.ok(!/@ts-(ignore|expect-error|nocheck)/.test(COUCHE_LECTURE), "aucune directive @ts-* ");
+  assert.ok(!/as\s+unknown\s+as\s+NutritionRecipeIngredientRow/.test(code), "aucun double cast");
+  const adaptateur = sansCommentairesTs(ROWS).slice(
+    sansCommentairesTs(ROWS).indexOf("export function toNutritionRecipeIngredientRow"),
+  );
+  assert.ok(!/\bany\b/.test(adaptateur.slice(0, adaptateur.indexOf("export function mapRecipeIngredientRow"))),
+    "l'adaptateur n'utilise aucun `any`");
+});
+
+await test("42. la lecture conserve EXACTEMENT ses 20 colonnes et son ordre", () => {
+  // Les colonnes et l'ordre sont une garantie fonctionnelle : le solveur
+  // attribue les unités entières dans l'ordre reçu.
+  for (const colonne of [
+    "id", "recipe_id", "position", "name", "role",
+    "protein_per_100g", "carb_per_100g", "fat_per_100g", "reference_grams",
+    "min_grams", "max_grams", "unit_scalable", "max_units", "unit_name",
+    "fixed_label", "egg", "egg_grams", "linked_to_ingredient_id", "link_ratio_bp",
+  ]) {
+    assert.ok(COUCHE_LECTURE.includes(colonne), `colonne perdue : ${colonne}`);
+  }
+  assert.ok(COUCHE_LECTURE.includes(`.order("recipe_id", { ascending: true })`));
+  assert.ok(COUCHE_LECTURE.includes(`.order("position", { ascending: true })`));
+});
+
+await test("43. l'adaptateur recopie une ligne conforme à l'identique", () => {
+  // Cas réel PostgREST : les `numeric` arrivent en chaînes, et elles doivent
+  // ressortir en chaînes — c'est `toNumber` qui convertit, pas l'adaptateur.
+  const brute = {
+    id: "i1",
+    recipe_id: "r1",
+    position: 2,
+    name: "Riz basmati",
+    role: "carbohydrate",
+    protein_per_100g: "7.5",
+    carb_per_100g: "78.2",
+    fat_per_100g: "0.6",
+    reference_grams: "80",
+    min_grams: "40",
+    max_grams: null,
+    unit_scalable: false,
+    max_units: null,
+    unit_name: null,
+    fixed_label: null,
+    egg: false,
+    egg_grams: null,
+    linked_to_ingredient_id: null,
+    link_ratio_bp: null,
+  };
+  const adaptée = toNutritionRecipeIngredientRow(brute);
+  assert.deepEqual({ ...adaptée }, brute, "aucune valeur ne doit être transformée");
+  // Et elle traverse le mapper du domaine sans perte.
+  const ingrédient = mapRecipeIngredientRow(adaptée);
+  assert.equal(ingrédient.proteinPer100g, 7.5);
+  assert.equal(ingrédient.referenceGrams, 80);
+  assert.equal(ingrédient.minGrams, 40);
+  assert.equal(ingrédient.maxGrams, null);
+});
+
+await test("44. l'adaptateur ne lève JAMAIS et laisse le mapper juger", () => {
+  // Une ligne aberrante ne doit pas faire échouer la lecture du catalogue :
+  // elle doit produire la MÊME RecipeMappingError qu'avant, en aval.
+  const cas: { ligne: unknown; code: string }[] = [
+    { ligne: {}, code: "invalid_ingredient_row" },
+    { ligne: null, code: "invalid_ingredient_row" },
+    { ligne: { ...LIGNE_VALIDE, id: 42 }, code: "invalid_ingredient_row" },
+    { ligne: { ...LIGNE_VALIDE, name: "   " }, code: "invalid_ingredient_row" },
+    { ligne: { ...LIGNE_VALIDE, role: "sucre" }, code: "invalid_role" },
+    { ligne: { ...LIGNE_VALIDE, role: 3 }, code: "invalid_role" },
+    { ligne: { ...LIGNE_VALIDE, protein_per_100g: null }, code: "invalid_numeric" },
+    { ligne: { ...LIGNE_VALIDE, reference_grams: {} }, code: "invalid_numeric" },
+    { ligne: { ...LIGNE_VALIDE, min_grams: "abc" }, code: "invalid_numeric" },
+  ];
+  for (const { ligne, code } of cas) {
+    const adaptée = toNutritionRecipeIngredientRow(ligne); // ne doit pas lever
+    assert.throws(
+      () => mapRecipeIngredientRow(adaptée),
+      (erreur: unknown) =>
+        erreur instanceof RecipeMappingError && erreur.code === code,
+      `attendu ${code} pour ${JSON.stringify(ligne)}`,
+    );
+  }
+  // Les booléens sont projetés par le même test que le mapper : identité.
+  for (const valeur of [true, false, null, undefined, 1, "true", {}]) {
+    const adaptée = toNutritionRecipeIngredientRow({ ...LIGNE_VALIDE, unit_scalable: valeur, egg: valeur });
+    assert.equal(adaptée.unit_scalable, valeur === true);
+    assert.equal(adaptée.egg, valeur === true);
+  }
+});
+
+await test("45. une recette invalide reste isolée, le catalogue reste lisible", () => {
+  // Comportement d'erreur INCHANGÉ : l'assemblage isole la recette fautive
+  // au lieu de vider le catalogue — c'est ce que l'ancien cast permettait
+  // déjà, et l'adaptateur ne doit pas l'avoir changé.
+  const lignesBrutes: unknown[] = [
+    { ...LIGNE_VALIDE, id: "ok1", recipe_id: "r1", position: 1 },
+    { ...LIGNE_VALIDE, id: "ko1", recipe_id: "r2", position: 1, role: "sucre" },
+  ];
+  const adaptées = lignesBrutes.map(toNutritionRecipeIngredientRow);
+  const résultat = assembler(
+    [
+      { ...RECETTE_ROW, id: "r1", name: "Recette saine" },
+      { ...RECETTE_ROW, id: "r2", name: "Recette cassée" },
+    ],
+    adaptées,
+    [],
+  );
+  assert.equal(résultat.recipes.length, 1);
+  assert.equal(résultat.recipes[0].recipe.id, "r1");
+  assert.equal(résultat.invalid.length, 1);
+  assert.equal(résultat.invalid[0].recipeId, "r2");
+  assert.equal(résultat.invalid[0].code, "invalid_role");
 });
 
 console.log(`\n${réussis} réussis, ${échecs} échecs`);

@@ -2,8 +2,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { buildStudentActivityLink, logActivityEvent } from "@/lib/supabase/activity";
 import { assignNutritionPlan, unassignNutritionPlan } from "@/lib/supabase/nutrition-assignment";
-import { evaluateLegacyWrite, LEGACY_WRITE_ON_V2_MESSAGE_FR } from "@/lib/nutrition/plan-v2-guards";
-import type { NutritionPlanBuilderData } from "@/components/admin/NutritionPlanBuilder";
 import type { AdminMeal, AdminNutritionDay, AdminNutritionPlan, MealSlot } from "@/types";
 import type { Database } from "@/types/supabase";
 
@@ -16,15 +14,32 @@ import type { Database } from "@/types/supabase";
  * (tableau, pour rester compatible avec le type mock partagé) ne contient
  * donc jamais plus d'un id.
  *
- * Même principe que lib/supabase/programs.ts : lectures toujours "vides"
- * plutôt que d'exception, écritures en delete+reinsert pour la structure
- * (jours/repas) car NutritionPlanBuilder renvoie systématiquement le jeu
- * complet des 7 jours.
+ * ⚠️ CE MODULE N'ÉCRIT PLUS AUCUNE STRUCTURE (jours / repas).
  *
- * Le suivi jour par jour de l'élève ("actual", validation de journée,
- * ajustement calorique — hooks/useNutritionTracking.ts côté mock) reste
- * volontairement hors périmètre : non demandé pour cette étape (lecture
- * seule côté élève), et une future migration séparée.
+ * POURQUOI. Depuis la migration 20260811090000, `nutrition_days.profile_key`
+ * est NOT NULL et porte une clé étrangère COMPOSITE
+ * `(plan_id, profile_key) → nutrition_plan_profiles(plan_id, profile_key)`.
+ * Le chemin d'écriture historique insérait `{ plan_id, day }` SANS
+ * `profile_key` : il ne peut donc plus produire une seule ligne valide, et
+ * l'insert échouerait en base. Plutôt que de le rafistoler avec une valeur
+ * de profil arbitraire — ce qui rattacherait silencieusement des journées au
+ * mauvais profil calorique — il a été SUPPRIMÉ (PR C.1).
+ *
+ * DÉCISION MÉTIER. Toute création ou modification complète d'un plan passe
+ * désormais par la RPC transactionnelle `save_nutrition_plan_v2`
+ * (lib/supabase/nutrition-v2.ts → `saveNutritionPlanV2`), qui écrit le plan,
+ * ses profils, ses créneaux, ses journées et ses repas dans UNE transaction,
+ * et qui est la seule à connaître la règle de profil par défaut.
+ *
+ * CE QUI RESTE ICI : les LECTURES (catalogue admin, plans assignés à un
+ * élève, ids par élève), le changement de statut seul — qui ne touche ni
+ * `daily_target`, ni les journées, ni les repas, et reste donc légitime sur
+ * un plan v2 (archivage) — et l'assignation, elle-même déjà déléguée aux RPC
+ * `assign_nutrition_plan` / `unassign_nutrition_plan`.
+ *
+ * Le suivi jour par jour de l'élève (`nutrition_daily_logs`, « Outil 1 »)
+ * vit dans lib/supabase/nutrition-logs.ts et n'est pas concerné : ce module
+ * ne l'a jamais lu ni écrit.
  */
 
 type TypedSupabaseClient = SupabaseClient<Database>;
@@ -241,143 +256,44 @@ export async function getAssignedNutritionPlanIdsByStudent(
   return map;
 }
 
-/**
- * Lit `nutrition_plans.nutrition_model_version` et décide si le chemin
- * d'écriture HISTORIQUE (v1) a le droit d'écrire sur ce plan.
- *
- * Un plan introuvable (supprimé, ou masqué par RLS) est traité comme
- * autorisé : l'UPDATE qui suit ne touchera aucune ligne, et c'est lui —
- * pas la garde — qui doit rapporter l'échec. La garde ne sert qu'à empêcher
- * une désynchronisation de `daily_target` sur un plan v2 RÉELLEMENT présent.
- *
- * Exporté pour que la matrice v1/v2 soit testable sans réseau
- * (scripts/tests/nutrition-plan-v2-guards.mts).
- */
-export async function evaluateLegacyWriteForPlan(
-  supabase: TypedSupabaseClient,
-  planId: string,
-): Promise<{ allowed: boolean; message: string }> {
-  const { data, error } = await supabase
-    .from("nutrition_plans")
-    .select("nutrition_model_version")
-    .eq("id", planId)
-    .maybeSingle();
-  devWarn("evaluateLegacyWriteForPlan", error);
-  if (!data) {
-    return { allowed: true, message: "" };
-  }
-  const decision = evaluateLegacyWrite(data.nutrition_model_version);
-  if (decision.allowed) {
-    return { allowed: true, message: "" };
-  }
-  return { allowed: false, message: decision.message };
-}
-
-/** Message unique de refus, réexporté pour l'interface d'administration. */
-export { LEGACY_WRITE_ON_V2_MESSAGE_FR };
-
 /* ─── Écriture ─── */
 
-/** Insère les jours/repas d'un plan déjà créé (partagé par create/update). */
-async function insertNutritionStructure(
-  supabase: TypedSupabaseClient,
-  planId: string,
-  days: AdminNutritionDay[],
-): Promise<void> {
-  for (const day of days) {
-    const { data: dayRow, error: dayError } = await supabase
-      .from("nutrition_days")
-      .insert({ plan_id: planId, day: day.day })
-      .select("id")
-      .single();
-    devWarn("insertNutritionStructure (nutrition_days)", dayError);
-    if (!dayRow) continue;
-
-    if (day.meals.length > 0) {
-      const { error: mealsError } = await supabase.from("meals").insert(
-        day.meals.map((meal) => ({
-          nutrition_day_id: dayRow.id,
-          slot: meal.slot,
-          name: meal.name,
-          items: meal.items,
-          macros: { calories: meal.calories, protein: meal.protein, carbs: meal.carbs, fat: meal.fat },
-          coach_notes: meal.coachNotes,
-        })),
-      );
-      devWarn("insertNutritionStructure (meals)", mealsError);
-    }
-  }
-}
-
-function planFields(data: NutritionPlanBuilderData) {
-  return {
-    name: data.name,
-    goal_type: data.goalType,
-    daily_target: { calories: data.caloriesPerDay, protein: data.protein, carbs: data.carbs, fat: data.fat },
-    weekly_target_calories: data.weeklyTargetCalories,
-    status: STATUS_APP_TO_DB[data.status],
-    coach_notes: data.coachNotes,
-    hydration_tip: data.hydrationTip,
-    supplements: data.supplements,
-    shopping_list: data.shoppingList,
-  };
-}
-
-/** Crée un nouveau plan alimentaire réel avec toute sa structure (jours/repas). */
-export async function createNutritionPlan(supabase: TypedSupabaseClient, data: NutritionPlanBuilderData): Promise<string | null> {
-  const { data: planRow, error: planError } = await supabase
-    .from("nutrition_plans")
-    .insert(planFields(data))
-    .select("id")
-    .single();
-  devWarn("createNutritionPlan", planError);
-  if (!planRow) {
-    return null;
-  }
-
-  await insertNutritionStructure(supabase, planRow.id, data.days);
-  return planRow.id;
-}
+/*
+ * ┌───────────────────────────────────────────────────────────────────────┐
+ * │ CE QUI A ÉTÉ SUPPRIMÉ ICI, ET POURQUOI (PR C.1)                       │
+ * ├───────────────────────────────────────────────────────────────────────┤
+ * │ `insertNutritionStructure`  insérait `nutrition_days { plan_id, day }` │
+ * │                             puis `meals` en direct ;                  │
+ * │ `planFields`                composait la charge utile v1 ;            │
+ * │ `createNutritionPlan`       créait un plan + sa structure ;           │
+ * │ `updateNutritionPlan`       remplaçait la structure en delete+insert ; │
+ * │ `evaluateLegacyWriteForPlan` gardait ce chemin contre les plans v2.   │
+ * │                                                                       │
+ * │ Les quatre premières écrivaient `nutrition_days` SANS `profile_key`,  │
+ * │ colonne devenue NOT NULL avec clé étrangère composite vers            │
+ * │ `nutrition_plan_profiles` (migration 20260811090000) : elles ne       │
+ * │ peuvent plus produire une ligne valide. La cinquième n'avait plus     │
+ * │ d'objet une fois les quatre autres parties.                           │
+ * │                                                                       │
+ * │ Aucune n'avait d'appelant applicatif : l'écran de création            │
+ * │ (app/admin/nutrition/nouveau) et l'écran de plan                      │
+ * │ (app/admin/nutrition/[planId]) passent tous deux par                  │
+ * │ `saveNutritionPlanV2` depuis la PR précédente.                        │
+ * │                                                                       │
+ * │ La règle de compatibilité v1/v2 elle-même n'est PAS supprimée : elle  │
+ * │ reste dans lib/nutrition/plan-v2-guards.ts, module pur, et reste      │
+ * │ testée (scripts/tests/nutrition-plan-v2-guards.mts, cas 1 à 5).       │
+ * └───────────────────────────────────────────────────────────────────────┘
+ */
 
 /**
- * Met à jour un plan existant : les champs du plan sont modifiés en place,
- * mais sa structure (jours/repas) est entièrement remplacée (delete +
- * reinsert) — NutritionPlanBuilder renvoie systématiquement le jeu complet
- * des 7 jours, et la suppression des nutrition_days cascade jusqu'aux repas
- * (voir supabase/schema.sql). Même choix que updateProgram.
+ * Change le seul statut d'un plan (brouillon / actif / archivé).
+ *
+ * Volontairement conservée pour les DEUX modèles : ce `update` ne touche ni
+ * `daily_target`, ni `nutrition_days`, ni `meals`. Archiver un plan v2 est
+ * une opération légitime, et la lui interdire casserait le bouton
+ * « Archiver » de l'écran de plan.
  */
-export async function updateNutritionPlan(
-  supabase: TypedSupabaseClient,
-  planId: string,
-  data: NutritionPlanBuilderData,
-): Promise<boolean> {
-  // ── GARDE DE COMPATIBILITÉ v1 / v2 ──────────────────────────────────────
-  // Ce chemin d'écriture est celui du modèle HISTORIQUE : il réécrit
-  // `daily_target` directement. Sur un plan passé en v2, ce JSONB n'est plus
-  // éditable — il est REGÉNÉRÉ par `save_nutrition_plan_v2` depuis le profil
-  // `default`. Laisser cette fonction l'écraser désynchroniserait
-  // silencieusement le suivi nutritionnel de l'élève de la répartition réelle
-  // du plan. Refus EXPLICITE, avant toute écriture, jamais de délégation
-  // implicite ni de conversion automatique (voir lib/nutrition/plan-v2-guards.ts).
-  const decision = await evaluateLegacyWriteForPlan(supabase, planId);
-  if (!decision.allowed) {
-    console.error(`[Supabase] updateNutritionPlan : ${decision.message}`);
-    return false;
-  }
-
-  const { error: updateError } = await supabase
-    .from("nutrition_plans")
-    .update({ ...planFields(data), updated_at: new Date().toISOString() })
-    .eq("id", planId);
-  devWarn("updateNutritionPlan", updateError);
-
-  const { error: deleteError } = await supabase.from("nutrition_days").delete().eq("plan_id", planId);
-  devWarn("updateNutritionPlan (delete previous structure)", deleteError);
-
-  await insertNutritionStructure(supabase, planId, data.days);
-  return !updateError;
-}
-
 export async function updateNutritionPlanStatus(
   supabase: TypedSupabaseClient,
   planId: string,

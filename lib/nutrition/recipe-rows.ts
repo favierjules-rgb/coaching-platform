@@ -176,6 +176,126 @@ function toNullableNumber(valeur: number | string | null, champ: string): number
   return valeur === null || valeur === undefined ? null : toNumber(valeur, champ);
 }
 
+/* ──────────────────── Adaptateur de ligne brute ──────────────────── */
+
+/**
+ * ADAPTATEUR LOCAL — ligne brute PostgREST → `NutritionRecipeIngredientRow`.
+ *
+ * POURQUOI IL EXISTE. `types/supabase.ts` est tenu à la main, table par
+ * table ; les trois tables de recettes (`nutrition_recipes`,
+ * `nutrition_recipe_ingredients`, `nutrition_recipe_tags`, migration
+ * 20260807090000) n'y figurent pas. Le client Supabase ne peut donc pas
+ * typer le résultat de la lecture, et lib/supabase/nutrition-recipes.ts s'en
+ * remettait à une AFFIRMATION nue — `data as NutritionRecipeIngredientRow[]`
+ * — qui ne vérifie rien et qui casse dès que le fichier de types est
+ * régénéré. Cette fonction remplace l'affirmation par une PROJECTION
+ * explicite, champ par champ, adossée au schéma réel.
+ *
+ * CONTRAT — trois propriétés, verrouillées par `test:nutrition-recipes` :
+ *
+ *   1. TOTALE. Elle ne lève JAMAIS. Le jugement de validité appartient à
+ *      `mapRecipeIngredientRow` seul : une ligne incohérente doit continuer
+ *      d'être isolée recette par recette dans `invalid[]`, pas faire échouer
+ *      la lecture entière du catalogue.
+ *   2. FIDÈLE. Une valeur conforme au schéma est recopiée TELLE QUELLE :
+ *      aucun arrondi, aucune conversion `numeric` (les `string` PostgREST
+ *      restent des `string`, c'est `toNumber` qui les convertit plus loin).
+ *   3. ÉQUIVALENTE. Une valeur non conforme est remplacée par une valeur de
+ *      repli CHOISIE pour provoquer exactement le même `RecipeMappingError`
+ *      qu'avant, en aval — voir la colonne « repli » ci-dessous.
+ *
+ * TABLE DES CHAMPS — 20 colonnes, dans l'ordre du `select` de
+ * lib/supabase/nutrition-recipes.ts :
+ *
+ *   colonne                  schéma                 repli    erreur conservée
+ *   ───────────────────────────────────────────────────────────────────────
+ *   id                       uuid     not null      ""       invalid_ingredient_row/id
+ *   recipe_id                uuid     not null      ""       ingredient_recipe_mismatch
+ *   position                 integer  not null      NaN      (tri seul, jamais validé)
+ *   name                     text     not null      ""       invalid_ingredient_row/name
+ *   role                     text     not null      ""       invalid_role
+ *   protein_per_100g         numeric  not null      NaN      invalid_numeric
+ *   carb_per_100g            numeric  not null      NaN      invalid_numeric
+ *   fat_per_100g             numeric  not null      NaN      invalid_numeric
+ *   reference_grams          numeric  not null      NaN      invalid_numeric
+ *   min_grams                numeric  null          NaN      invalid_numeric
+ *   max_grams                numeric  null          NaN      invalid_numeric
+ *   unit_scalable            boolean  not null      false    (`=== true` en aval)
+ *   max_units                integer  null          null     (`?? null` en aval)
+ *   unit_name                text     null          null     (`?? null` en aval)
+ *   fixed_label              text     null          null     (`?? null` en aval)
+ *   egg                      boolean  not null      false    (`=== true` en aval)
+ *   egg_grams                numeric  null          NaN      invalid_numeric
+ *   linked_to_ingredient_id  uuid     null          null     (`?? null` en aval)
+ *   link_ratio_bp            integer  null          null     (`?? null` en aval)
+ *
+ * Les deux `boolean` sont projetés par `=== true`, c'est-à-dire EXACTEMENT
+ * le test que `mapRecipeIngredientRow` applique ensuite : la projection ne
+ * peut donc rien changer, quelle que soit l'entrée.
+ */
+export function toNutritionRecipeIngredientRow(ligne: unknown): NutritionRecipeIngredientRow {
+  const brut: Record<string, unknown> =
+    typeof ligne === "object" && ligne !== null ? (ligne as Record<string, unknown>) : {};
+
+  return {
+    id: texteStrict(brut.id),
+    recipe_id: texteStrict(brut.recipe_id),
+    position: nombreStrict(brut.position),
+    name: texteStrict(brut.name),
+    role: texteStrict(brut.role),
+    protein_per_100g: numériqueStrict(brut.protein_per_100g),
+    carb_per_100g: numériqueStrict(brut.carb_per_100g),
+    fat_per_100g: numériqueStrict(brut.fat_per_100g),
+    reference_grams: numériqueStrict(brut.reference_grams),
+    min_grams: numériqueNullable(brut.min_grams),
+    max_grams: numériqueNullable(brut.max_grams),
+    unit_scalable: brut.unit_scalable === true,
+    max_units: entierNullable(brut.max_units),
+    unit_name: texteNullable(brut.unit_name),
+    fixed_label: texteNullable(brut.fixed_label),
+    egg: brut.egg === true,
+    egg_grams: numériqueNullable(brut.egg_grams),
+    linked_to_ingredient_id: texteNullable(brut.linked_to_ingredient_id),
+    link_ratio_bp: entierNullable(brut.link_ratio_bp),
+  };
+}
+
+/** `text`/`uuid` NOT NULL. Repli `""` : rejeté en aval comme avant. */
+function texteStrict(valeur: unknown): string {
+  return typeof valeur === "string" ? valeur : "";
+}
+
+/** `integer` NOT NULL. Repli `NaN` : jamais confondu avec un vrai zéro. */
+function nombreStrict(valeur: unknown): number {
+  return typeof valeur === "number" ? valeur : Number.NaN;
+}
+
+/**
+ * `numeric` NOT NULL. PostgREST rend `string`, un pilote direct rend
+ * `number` : les DEUX sont conservés tels quels, c'est `toNumber` qui
+ * tranche. Repli `NaN` → `invalid_numeric`, exactement comme un `null`
+ * auparavant.
+ */
+function numériqueStrict(valeur: unknown): number | string {
+  return typeof valeur === "number" || typeof valeur === "string" ? valeur : Number.NaN;
+}
+
+/** `numeric` NULL. `null` et `undefined` valent absence, comme avant. */
+function numériqueNullable(valeur: unknown): number | string | null {
+  if (valeur === null || valeur === undefined) return null;
+  return numériqueStrict(valeur);
+}
+
+/** `text`/`uuid` NULL. */
+function texteNullable(valeur: unknown): string | null {
+  return typeof valeur === "string" ? valeur : null;
+}
+
+/** `integer` NULL. */
+function entierNullable(valeur: unknown): number | null {
+  return typeof valeur === "number" ? valeur : null;
+}
+
 /* ─────────────────────────── Mappers ─────────────────────────── */
 
 /** Ligne d'ingrédient → `RecipeIngredient`. Pure, sans mutation. */

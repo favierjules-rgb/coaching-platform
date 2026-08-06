@@ -6,7 +6,6 @@ import Link from "next/link";
 import { ArrowLeft, Archive, Pencil, SlidersHorizontal } from "lucide-react";
 
 import { AssignStudentsModal } from "@/components/admin/AssignStudentsModal";
-import { NutritionPlanBuilder, type NutritionPlanBuilderData } from "@/components/admin/NutritionPlanBuilder";
 import { NutritionPlanV2Builder } from "@/components/admin/NutritionPlanV2Builder";
 import { NutritionPlanV2ConversionDialog } from "@/components/admin/NutritionPlanV2ConversionDialog";
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
@@ -18,7 +17,6 @@ import { useNutritionPlanV2 } from "@/hooks/useNutritionPlanV2";
 import { useSupabaseNutritionPlans } from "@/hooks/useSupabaseNutritionPlans";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { contentStatusLabels, fullName } from "@/lib/admin";
-import { NUTRITION_MODEL_VERSION_STRUCTURED } from "@/lib/nutrition/plan-v2-guards";
 import { prefillFromLegacyDailyTarget } from "@/lib/nutrition/plan-v2-conversion";
 import {
   createFormStateFromCanonical,
@@ -26,11 +24,20 @@ import {
   toSaveInput,
   type PlanV2FormState,
 } from "@/lib/nutrition/plan-v2-form";
+import {
+  createBlankWeek,
+  createWeekFormFromPlan,
+  initializeAllDays,
+  mainDayTargets,
+  toWeekSavePayload,
+  type WeekFormState,
+} from "@/lib/nutrition/plan-v2-week-form";
+import { MAIN_DAY_PROFILE_KEY } from "@/lib/nutrition/day-profile-keys";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { readNutritionPlanV2Week } from "@/lib/supabase/nutrition-week";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import {
   STATUS_APP_TO_DB,
-  updateNutritionPlan as updateNutritionPlanSupabase,
   updateNutritionPlanStatus as updateNutritionPlanStatusSupabase,
 } from "@/lib/supabase/nutrition";
 import { saveNutritionPlanV2 } from "@/lib/supabase/nutrition-v2";
@@ -49,10 +56,10 @@ const CONVERSION_NOTICE_FR =
 export default function NutritionPlanDetailPage() {
   const params = useParams<{ planId: string }>();
   const { state, updateNutritionPlan, setAssignment } = useAdminData();
-  const [editing, setEditing] = useState(false);
   const [saveError, setSaveError] = useState(false);
 
   // ── État propre au modèle v2 ──────────────────────────────────────────
+  const [weekState, setWeekState] = useState<WeekFormState | null>(null);
   const [conversionDialogOpen, setConversionDialogOpen] = useState(false);
   const [conversionMode, setConversionMode] = useState(false);
   const [editingV2, setEditingV2] = useState(false);
@@ -72,7 +79,10 @@ export default function NutritionPlanDetailPage() {
   );
 
   const plan = plans.find((p) => p.id === params.planId);
-  const isV2 = plan?.nutritionModelVersion === NUTRITION_MODEL_VERSION_STRUCTURED;
+  // PR C — le modèle v1 n'existe plus : la migration 20260811090000 a converti
+  // tous les plans et la contrainte de base interdit désormais toute autre
+  // valeur. Il n'y a donc plus rien à router : tout plan lisible est un v2.
+  const isV2 = plan !== null;
 
   // Lecture CANONIQUE : uniquement pour un plan déjà v2. Un plan v1 n'est
   // jamais chargé par ce loader — donc jamais converti au chargement.
@@ -118,24 +128,6 @@ export default function NutritionPlanDetailPage() {
   const assignedStudents = students.filter((s) => plan.assignedStudentIds.includes(s.id));
 
   /** Chemin v1 INCHANGÉ : un plan v2 n'entre jamais ici (bouton non rendu). */
-  async function handleSave(data: NutritionPlanBuilderData) {
-    setSaveError(false);
-    if (isSupabasePlansActive) {
-      const supabase = createSupabaseBrowserClient();
-      if (supabase) {
-        const ok = await updateNutritionPlanSupabase(supabase, plan!.id, data);
-        if (!ok) {
-          setSaveError(true);
-          return;
-        }
-        await supabaseNutritionPlans.refetch();
-        setEditing(false);
-        return;
-      }
-    }
-    updateNutritionPlan(plan!.id, { ...data, days: data.days.map((d) => ({ ...d, planId: plan!.id })) });
-    setEditing(false);
-  }
 
   async function handleArchive() {
     setSaveError(false);
@@ -169,6 +161,23 @@ export default function NutritionPlanDetailPage() {
     );
     setEditingV2(true);
     setV2Error(null);
+    // La semaine est chargée À LA DEMANDE, au moment d'ouvrir l'éditeur :
+    // aucun effet ne la charge au montage, donc aucune requête inutile sur la
+    // fiche en lecture.
+    void chargerSemaine();
+  }
+
+  /** Lecture de la semaine (sept jours + repas prescrits) pour l'éditeur. */
+  async function chargerSemaine() {
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase || !params.planId) return;
+    const semaine = await readNutritionPlanV2Week(supabase, params.planId);
+    // REPRISE D'UN PLAN EXISTANT : chaque jour reçoit une COPIE des valeurs du
+    // profil qu'il utilisait, et devient indépendant. Deux jours qui
+    // partageaient un profil ne se déplacent donc plus ensemble. La
+    // normalisation vers les clés internes `day_<jour>` n'a lieu qu'à la
+    // prochaine sauvegarde — rien n'est réécrit à la lecture.
+    setWeekState(semaine ? createWeekFormFromPlan(semaine) : createBlankWeek());
   }
 
   /** Ouvre le constructeur v2 en mode conversion. AUCUNE écriture ici. */
@@ -184,6 +193,17 @@ export default function NutritionPlanDetailPage() {
         prefill,
         metaFor(plan!.name, plan!.goalType, plan!.status, plan!.coachNotes, plan!.hydrationTip),
       ),
+    );
+    // La conversion démarre sur une semaine complète : les objectifs hérités
+    // du plan v1 sont recopiés dans les SEPT jours, qui deviennent aussitôt
+    // indépendants. Le coach peut ensuite faire diverger chaque jour.
+    setWeekState(
+      initializeAllDays(createBlankWeek(), {
+        dailyCalories: prefill.dailyCalories,
+        proteinBp: prefill.proteinBp,
+        carbBp: prefill.carbBp,
+        fatBp: prefill.fatBp,
+      }),
     );
     setConversionDialogOpen(false);
     setConversionMode(true);
@@ -208,7 +228,27 @@ export default function NutritionPlanDetailPage() {
     const input = toSaveInput(formState);
     const statutBase =
       STATUS_APP_TO_DB[input.status as AdminContentStatus] ?? STATUS_APP_TO_DB.brouillon;
-    const resultat = await saveNutritionPlanV2(supabase, { ...input, status: statutBase });
+    // La semaine est la source de vérité : sept profils internes, sept jours.
+    // Le profil de premier niveau reprend les objectifs de LUNDI, uniquement
+    // pour que le `daily_target` de compatibilité reste cohérent — la RPC
+    // privilégie `profiles` dès qu'il est présent.
+    const semaine = weekState ? toWeekSavePayload(weekState) : undefined;
+    const principal = weekState ? mainDayTargets(weekState) : null;
+    const resultat = await saveNutritionPlanV2(supabase, {
+      ...input,
+      status: statutBase,
+      ...(principal
+        ? {
+            profileKey: MAIN_DAY_PROFILE_KEY,
+            dailyCalories: principal.dailyCalories,
+            proteinBp: principal.proteinBp,
+            carbBp: principal.carbBp,
+            fatBp: principal.fatBp,
+            slots: principal.slots,
+          }
+        : {}),
+      week: semaine,
+    });
     if (!resultat.ok) {
       // Échec : l'éditeur reste ouvert et les valeurs locales sont conservées.
       setV2Error(resultat.message);
@@ -229,9 +269,13 @@ export default function NutritionPlanDetailPage() {
     await canonique.refetch();
   }
 
-  const enConstructeurV2 = (conversionMode || (isV2 && editingV2)) && formState !== null;
+  // La semaine est OBLIGATOIRE pour ouvrir le constructeur : elle en est
+  // désormais la seule source de vérité nutritionnelle. Tant qu'elle n'est pas
+  // chargée (lecture en cours), on n'affiche pas un éditeur à moitié rempli.
+  const enConstructeurV2 =
+    (conversionMode || (isV2 && editingV2)) && formState !== null && weekState !== null;
 
-  if (enConstructeurV2 && formState) {
+  if (enConstructeurV2 && formState && weekState) {
     return (
       <div>
         <Link href="/admin/nutrition" className="mb-6 inline-flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-foreground">
@@ -250,6 +294,8 @@ export default function NutritionPlanDetailPage() {
           saving={savingV2}
           serverError={v2Error}
           conversionNotice={conversionMode ? CONVERSION_NOTICE_FR : null}
+          week={weekState}
+          onWeekChange={setWeekState}
         />
       </div>
     );
@@ -286,34 +332,7 @@ export default function NutritionPlanDetailPage() {
         />
       )}
 
-      {editing && !isV2 ? (
-        <>
-          <div className="mb-8">
-            <h1 className="font-heading text-3xl font-extrabold uppercase text-foreground md:text-4xl">
-              Modifier — {plan.name}
-            </h1>
-          </div>
-          <NutritionPlanBuilder
-            initial={{
-              name: plan.name,
-              goalType: plan.goalType,
-              caloriesPerDay: plan.caloriesPerDay,
-              protein: plan.protein,
-              carbs: plan.carbs,
-              fat: plan.fat,
-              weeklyTargetCalories: plan.weeklyTargetCalories,
-              status: plan.status,
-              coachNotes: plan.coachNotes,
-              hydrationTip: plan.hydrationTip,
-              supplements: plan.supplements,
-              shoppingList: plan.shoppingList,
-              days: plan.days,
-            }}
-            onSave={handleSave}
-            saveLabel="Enregistrer les modifications"
-          />
-        </>
-      ) : (
+      {(
         <>
           <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
             <div>
@@ -345,7 +364,7 @@ export default function NutritionPlanDetailPage() {
                 <>
                   <button
                     type="button"
-                    onClick={() => setEditing(true)}
+                    onClick={() => undefined}
                     className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                   >
                     <Pencil size={13} />
@@ -399,34 +418,6 @@ export default function NutritionPlanDetailPage() {
             {plan.coachNotes && <p className="mt-2 text-sm text-foreground">{plan.coachNotes}</p>}
           </div>
 
-          {!isV2 && (
-            <div className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
-              <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
-                Semaine alimentaire
-              </h2>
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                {plan.days.map((day) => (
-                  <div key={day.id} className="rounded-panel border border-border p-4">
-                    <span className="mb-2 block text-xs font-bold uppercase tracking-widest text-primary">
-                      {day.day}
-                    </span>
-                    {day.meals.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">Aucun repas planifié.</p>
-                    ) : (
-                      <ul className="flex flex-col gap-2">
-                        {day.meals.map((meal) => (
-                          <li key={meal.id} className="text-sm text-muted-foreground">
-                            <span className="text-foreground">{meal.slot}</span> — {meal.name || "(sans nom)"} ·{" "}
-                            {meal.calories} kcal
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
           <div className="rounded-card border border-border bg-card p-6 shadow-soft">
             <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">

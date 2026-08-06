@@ -1,0 +1,248 @@
+import { computeDailyMacroTargets, type DailyMacroTargets } from "@/lib/nutrition/macro-targets";
+import { MEAL_SLOT_KEYS, computeMealDistribution, type MealSlotKey } from "@/lib/nutrition/meal-distribution";
+import { buildRecipeTargetForMealSlot } from "@/lib/nutrition/recipe-matching";
+import type { NutritionPlanV2Profile } from "@/lib/nutrition/plan-v2-validation";
+import type { RecipeWithTags } from "@/lib/nutrition/recipe-rows";
+import { WEEKDAY_KEYS, compareWeekdays, type WeekdayKey } from "@/lib/nutrition/weekdays";
+
+/**
+ * LA SEMAINE D'UN PLAN V2 — assemblage pur, sans Supabase et sans React.
+ *
+ * Le modèle v2 possédait déjà tout ce qu'il faut pour des objectifs
+ * différents d'un jour à l'autre : plusieurs profils, et une répartition par
+ * créneau pour chacun. Il ne lui manquait que le lien jour → profil, posé par
+ * la migration 20260811090000.
+ *
+ * Ce module fait exactement ce lien, et rien d'autre :
+ *   jour → profil → objectifs du jour → cible d'un créneau.
+ *
+ * AUCUNE FORMULE N'EST RÉÉCRITE ICI. Les calories viennent de
+ * `computeDailyMacroTargets`, la cible d'un créneau de
+ * `buildRecipeTargetForMealSlot`, les créneaux de `MEAL_SLOT_KEYS`. Ce
+ * fichier n'a pas le droit de connaître 4, 4 et 9.
+ */
+
+/** Un aliment prescrit à la main par le coach. Texte libre, jamais calculé. */
+export interface PrescribedFoodItem {
+  readonly name: string;
+  readonly quantity: string;
+}
+
+/** Un repas prescrit à la main par le coach — l'outil 3. */
+export interface PrescribedMeal {
+  readonly id: string;
+  readonly slot: MealSlotKey;
+  readonly name: string;
+  readonly items: readonly PrescribedFoodItem[];
+  readonly calories: number;
+  readonly protein: number;
+  readonly carbs: number;
+  readonly fat: number;
+  readonly coachNotes: string;
+}
+
+/** Un jour du plan : son profil, et ses repas prescrits. */
+export interface PlanV2Day {
+  readonly id: string;
+  readonly day: WeekdayKey;
+  readonly profileKey: string;
+  readonly status: string;
+  readonly meals: readonly PrescribedMeal[];
+}
+
+/** Le plan v2 complet, tel que l'élève et le coach le lisent. */
+export interface PlanV2Week {
+  readonly planId: string;
+  readonly profiles: readonly NutritionPlanV2Profile[];
+  readonly days: readonly PlanV2Day[];
+}
+
+/**
+ * Le profil d'un jour. `null` si le jour désigne un profil absent — ce que la
+ * clé étrangère composite rend impossible en base, mais qu'une lecture
+ * partielle pourrait produire. On ne devine pas de repli.
+ */
+export function profileForDay(
+  week: Pick<PlanV2Week, "profiles">,
+  day: Pick<PlanV2Day, "profileKey">,
+): NutritionPlanV2Profile | null {
+  return week.profiles.find((p) => p.profileKey === day.profileKey) ?? null;
+}
+
+/**
+ * Objectifs quotidiens d'un jour, dérivés de SON profil.
+ * `null` quand le profil est introuvable.
+ */
+export function dailyTargetsForDay(
+  week: Pick<PlanV2Week, "profiles">,
+  day: Pick<PlanV2Day, "profileKey">,
+): DailyMacroTargets | null {
+  const profil = profileForDay(week, day);
+  if (!profil) return null;
+  return computeDailyMacroTargets({
+    dailyCalories: profil.dailyCalories,
+    proteinBp: profil.proteinBp,
+    carbBp: profil.carbBp,
+    fatBp: profil.fatBp,
+  });
+}
+
+/**
+ * Total calorique de la semaine : la SOMME des sept jours, chacun selon son
+ * profil. Jamais `dailyCalories × 7` — ce serait faux dès que deux jours
+ * utilisent deux profils différents, ce qui est précisément le but du modèle.
+ *
+ * Miroir exact du calcul de `save_nutrition_plan_v2` (migration
+ * 20260812090000, étape 9) : les deux doivent rendre la même valeur, et un
+ * test le vérifie.
+ */
+export function weeklyCaloriesFromDays(week: PlanV2Week): number {
+  return week.days.reduce((total, jour) => {
+    const profil = profileForDay(week, jour);
+    return total + (profil?.dailyCalories ?? 0);
+  }, 0);
+}
+
+/**
+ * Les objectifs des SEPT jours, dans l'ordre lundi → dimanche.
+ *
+ * Un jour absent de la semaine, ou dont le profil est introuvable, rend
+ * `null` : on ne devine pas un objectif, et l'appelant décide quoi en faire.
+ *
+ * C'est ce que lit le suivi hebdomadaire de l'élève, pour que chaque journée
+ * affiche SON objectif prescrit — et non la moyenne de la semaine.
+ */
+export function dailyTargetsByWeekday(
+  week: PlanV2Week,
+): readonly (DailyMacroTargets | null)[] {
+  const parJour = new Map(week.days.map((d) => [d.day, d]));
+  return WEEKDAY_KEYS.map((jour) => {
+    const journée = parJour.get(jour);
+    return journée ? dailyTargetsForDay(week, journée) : null;
+  });
+}
+
+/**
+ * Les grammes et les calories d'UN créneau, pour UN jour.
+ *
+ * C'est la part du créneau appliquée aux objectifs du jour — exactement ce
+ * que le constructeur affiche au coach sous chaque curseur de la zone 2.
+ * Aucune formule ici : `computeMealDistribution` fait tout le calcul, et
+ * `dailyTargetsForDay` fournit la journée non arrondie.
+ *
+ * `null` quand le profil du jour est introuvable, ou quand le créneau est
+ * désactivé — un créneau désactivé n'a pas d'objectif, il n'en a pas « zéro ».
+ */
+export function slotMacrosForDay(
+  week: Pick<PlanV2Week, "profiles">,
+  day: Pick<PlanV2Day, "profileKey">,
+  slot: MealSlotKey,
+): { readonly calories: number; readonly proteinGrams: number; readonly carbGrams: number; readonly fatGrams: number } | null {
+  const profil = profileForDay(week, day);
+  const cibles = dailyTargetsForDay(week, day);
+  if (!profil || !cibles) return null;
+
+  const part = computeMealDistribution(cibles, profil.slots).slots.find((s) => s.slot === slot);
+  if (!part || !part.enabled) return null;
+
+  return {
+    calories: part.calories,
+    proteinGrams: part.proteinGrams,
+    carbGrams: part.carbGrams,
+    fatGrams: part.fatGrams,
+  };
+}
+
+/** Les créneaux ACTIVÉS d'un jour, dans l'ordre canonique. */
+export function enabledSlotsForDay(
+  week: Pick<PlanV2Week, "profiles">,
+  day: Pick<PlanV2Day, "profileKey">,
+): readonly MealSlotKey[] {
+  const profil = profileForDay(week, day);
+  if (!profil) return [];
+  const actifs = new Set(profil.slots.filter((s) => s.enabled).map((s) => s.slot));
+  return MEAL_SLOT_KEYS.filter((slot) => actifs.has(slot));
+}
+
+/**
+ * Cible du solveur pour un jour ET un créneau.
+ *
+ * Simple composition : on résout le profil du jour, puis on délègue
+ * INTÉGRALEMENT à `buildRecipeTargetForMealSlot`. Aucun calcul propre.
+ */
+export function slotTargetForDay(
+  week: Pick<PlanV2Week, "profiles">,
+  day: Pick<PlanV2Day, "profileKey">,
+  slot: MealSlotKey,
+): ReturnType<typeof buildRecipeTargetForMealSlot> {
+  const profil = profileForDay(week, day);
+  if (!profil) return { ok: false, reason: "slot_not_found" };
+  return buildRecipeTargetForMealSlot(profil, slot);
+}
+
+/**
+ * Les recettes proposables pour un créneau.
+ *
+ * Une recette GÉNÉRIQUE (`slotKey === null`) convient à tous les créneaux ;
+ * une recette rattachée à un créneau n'apparaît que dans celui-là. C'est la
+ * même règle que `filterRecipesForProfile` applique côté administration
+ * (`slot_mismatch`), réécrite ici sous forme de simple filtre parce que
+ * l'élève n'a pas besoin du diagnostic entrée par entrée.
+ *
+ * Le STATUT n'est pas filtré ici : la RLS ne rend que des recettes `active` à
+ * un élève. Filtrer une seconde fois côté client donnerait l'illusion que
+ * c'est le client qui protège.
+ *
+ * Tri DÉTERMINISTE : nom en français, puis identifiant pour départager.
+ */
+export function recipesForSlot(
+  recipes: readonly RecipeWithTags[],
+  slot: MealSlotKey,
+): readonly RecipeWithTags[] {
+  return recipes
+    .filter((r) => r.slotKey === null || r.slotKey === slot)
+    .slice()
+    .sort(
+      (a, b) =>
+        a.recipe.name.localeCompare(b.recipe.name, "fr") || a.recipe.id.localeCompare(b.recipe.id),
+    );
+}
+
+/** Les jours dans l'ordre canonique lundi → dimanche. */
+export function orderedDays(days: readonly PlanV2Day[]): readonly PlanV2Day[] {
+  return days.slice().sort((a, b) => compareWeekdays(a.day, b.day));
+}
+
+/** Les repas d'un jour, dans l'ordre des créneaux puis du nom. */
+export function orderedMeals(meals: readonly PrescribedMeal[]): readonly PrescribedMeal[] {
+  return meals
+    .slice()
+    .sort(
+      (a, b) =>
+        MEAL_SLOT_KEYS.indexOf(a.slot) - MEAL_SLOT_KEYS.indexOf(b.slot) ||
+        a.name.localeCompare(b.name, "fr") ||
+        a.id.localeCompare(b.id),
+    );
+}
+
+/**
+ * Un jour vide pour chacune des sept clés manquantes. Utilisé par le
+ * constructeur coach : la base garantit sept jours, mais un état de
+ * formulaire en cours de construction peut être incomplet.
+ */
+export function completeWeek(
+  days: readonly PlanV2Day[],
+  profileKeyParDéfaut: string,
+): readonly PlanV2Day[] {
+  const parJour = new Map(days.map((d) => [d.day, d]));
+  return WEEKDAY_KEYS.map(
+    (jour) =>
+      parJour.get(jour) ?? {
+        id: `nouveau:${jour}`,
+        day: jour,
+        profileKey: profileKeyParDéfaut,
+        status: "non-commence",
+        meals: [],
+      },
+  );
+}
