@@ -127,11 +127,16 @@ function rendre(state: PlanV2FormState, options: { serverError?: string | null }
 
 /* ══════════ Cohabitation v1 / v2 ══════════ */
 
-await test("1. un plan v1 utilise encore l'ancien éditeur", () => {
+await test("1. il n'existe PLUS d'ancien éditeur : la cohabitation v1/v2 est terminée", () => {
+  // PR C — le modèle v1 a disparu (migration 20260811090000, contrainte
+  // `nutrition_model_version = 2`). Ce test affirmait l'inverse ; il affirme
+  // maintenant la nouvelle garantie, plutôt que d'être supprimé pour obtenir
+  // du vert.
   const src = sansCommentaires(PAGE_PLAN);
-  assert.ok(src.includes("editing && !isV2"), "l'ancien éditeur doit être conditionné à !isV2");
-  assert.ok(src.includes("<NutritionPlanBuilder"), "NutritionPlanBuilder reste monté pour le v1");
-  assert.ok(src.includes("updateNutritionPlanSupabase(supabase, plan!.id, data)"));
+  assert.ok(!src.includes("editing && !isV2"), "plus aucun branchement sur !isV2");
+  assert.ok(!src.includes("<NutritionPlanBuilder"), "le constructeur v1 n'est plus monté");
+  assert.ok(!src.includes("updateNutritionPlanSupabase("), "l'écriture v1 n'a plus d'appelant");
+  assert.ok(src.includes("<NutritionPlanV2Builder"), "il ne reste qu'un constructeur");
 });
 
 await test("2. aucune conversion au chargement", () => {
@@ -479,15 +484,12 @@ await test("30. un succès recharge le retour canonique de la RPC", () => {
   assert.ok(src.includes("await supabaseNutritionPlans.refetch();"));
 });
 
-await test("31. updateNutritionPlan n'est jamais appelée pour un plan v2", () => {
+await test("31. updateNutritionPlan n'a plus AUCUN appelant dans l'écran de plan", () => {
   const src = sansCommentaires(PAGE_PLAN);
-  // Le seul appel vit dans handleSave, atteignable uniquement via l'éditeur v1.
-  assert.equal(src.split("updateNutritionPlanSupabase(").length - 1, 1);
-  const indexAppel = src.indexOf("updateNutritionPlanSupabase(supabase");
-  const indexHandleSave = src.indexOf("async function handleSave(data: NutritionPlanBuilderData)");
-  const indexHandleArchive = src.indexOf("async function handleArchive()");
-  assert.ok(indexHandleSave < indexAppel && indexAppel < indexHandleArchive);
-  assert.ok(src.includes("editing && !isV2"), "l'éditeur v1 est inaccessible sur un plan v2");
+  // Le chemin d'écriture v1 a été retiré avec l'éditeur v1 : il n'y a plus
+  // un seul appel à contenir, il n'y en a plus du tout.
+  assert.equal(src.split("updateNutritionPlanSupabase(").length - 1, 0);
+  assert.ok(src.includes("saveNutritionPlanV2("), "la RPC v2 est le seul chemin d'écriture");
   // Et la garde de la PR 1 refuse toujours au niveau de la couche d'accès.
   assert.equal(evaluateLegacyWrite(NUTRITION_MODEL_VERSION_STRUCTURED).allowed, false);
 });
@@ -646,33 +648,35 @@ await test("41. aucune couleur codée en dur : uniquement des tokens", () => {
 
 /* ══════════ Création directe d'un plan v2 (ajout post-audit) ══════════ */
 
-await test("42. /nouveau propose explicitement les deux formats", () => {
+await test("42. /nouveau n'offre plus AUCUN choix de format", () => {
+  // PR C — « Il ne doit exister qu'un seul bouton et un seul parcours ».
   const src = sansCommentaires(PAGE_NOUVEAU);
-  assert.ok(src.includes("Plan classique"));
-  assert.ok(src.includes("Plan avec répartition avancée"));
-  assert.ok(
-    src.includes("Définis les calories, les macronutriments et leur répartition entre les repas. Ce format"),
-    "le texte explicatif du mode avancé doit être présent",
-  );
-  assert.ok(src.includes('sera compatible avec les recettes personnalisées.'));
-  // Le mode classique n'est jamais remplacé silencieusement : rien n'est
-  // pré-sélectionné, le coach choisit.
-  assert.ok(src.includes('useState<Mode>("choix")'));
+  assert.ok(!src.includes("Plan classique"), "le format classique a disparu");
+  assert.ok(!src.includes('useState<Mode>'), "il n'y a plus d'état de mode");
+  assert.ok(!src.includes("<NutritionPlanBuilder"), "le constructeur v1 n'est plus monté");
+  assert.ok(src.includes("<NutritionPlanV2Builder"), "un seul constructeur reste");
+  // Le formulaire est prêt dès l'ouverture, sans étape de sélection.
+  assert.ok(src.includes("createBlankFormState({"));
 });
 
-await test("43. le plan classique conserve le constructeur v1", () => {
+await test("43. le chemin de création v1 a été RETIRÉ, pas neutralisé", () => {
   const src = sansCommentaires(PAGE_NOUVEAU);
-  assert.ok(src.includes('mode === "classique" ? (\n        <NutritionPlanBuilder') || src.includes("<NutritionPlanBuilder"));
-  assert.ok(src.includes("createNutritionPlanSupabase(supabase, data)"), "le chemin v1 est intact");
-  assert.ok(src.includes('saveLabel="Enregistrer le plan"'));
+  assert.ok(!src.includes("<NutritionPlanBuilder"), "le constructeur v1 n'est plus monté");
+  assert.ok(!src.includes("createNutritionPlanSupabase("), "l'écriture v1 n'a plus d'appelant");
+  assert.ok(!src.includes("handleSave"), "le handler v1 a disparu");
 });
 
-await test("44. choisir le mode avancé ne crée AUCUNE ligne", () => {
+await test("44. ouvrir /nouveau ne crée AUCUNE ligne", () => {
   const src = sansCommentaires(PAGE_NOUVEAU);
-  // Le clic ne fait qu'initialiser un état local.
-  const bloc = src.slice(src.indexOf("setFormState(\n                createBlankFormState("), src.indexOf('setMode("avance");'));
-  assert.ok(!bloc.includes("supabase"), "aucun accès Supabase au moment du choix");
-  assert.ok(!bloc.includes("await"), "aucune écriture au moment du choix");
+  // Le formulaire est initialisé dans un `useState` paresseux : aucun accès
+  // Supabase, aucun `await`, tant que le coach n'a pas cliqué.
+  const debut = src.indexOf("useState<PlanV2FormState | null>(() =>");
+  assert.ok(debut !== -1, "l'état est initialisé paresseusement");
+  // On borne la tranche à l'initialiseur lui-même : `),\n  );` le referme.
+  const fin = src.indexOf("  );", debut);
+  const bloc = src.slice(debut, fin);
+  assert.ok(!bloc.includes("supabase"), "aucun accès Supabase à l'ouverture");
+  assert.ok(!bloc.includes("await"), "aucune écriture à l'ouverture");
   // L'état neuf n'a pas d'identifiant de plan : rien n'existe encore en base.
   const neuf = createBlankFormState({ name: "", goalType: "maintien", status: "brouillon" });
   assert.equal(neuf.planId, null);
@@ -694,19 +698,18 @@ await test("45. le formulaire neuf porte les six créneaux, désactivés et à z
 
 await test("46. la première sauvegarde passe uniquement par la RPC v2", () => {
   const src = sansCommentaires(PAGE_NOUVEAU);
-  assert.ok(src.includes("saveNutritionPlanV2(supabase, { ...input, planId: null"), "planId null ⇒ création par la RPC");
+  assert.ok(src.includes("planId: null,"), "planId null ⇒ création par la RPC");
   assert.equal(src.split("saveNutritionPlanV2(").length - 1, 1, "un seul appel");
+  // La semaine part dans la MÊME transaction.
+  assert.ok(src.includes("week: semaine,"), "les sept jours accompagnent la création");
 });
 
-await test("47. createNutritionPlan n'est jamais utilisée pour un plan v2", () => {
+await test("47. createNutritionPlan n'est plus utilisée NULLE PART", () => {
   const src = sansCommentaires(PAGE_NOUVEAU);
-  const indexCreate = src.indexOf("createNutritionPlanSupabase(supabase, data)");
-  const debutV1 = src.indexOf("async function handleSave(data: NutritionPlanBuilderData)");
+  assert.ok(!src.includes("createNutritionPlanSupabase"), "l'import a disparu avec son appel");
   const debutV2 = src.indexOf("async function handleCreateV2()");
-  assert.ok(debutV1 < indexCreate && indexCreate < debutV2, "l'appel v1 vit dans le seul handler v1");
-  const blocV2 = src.slice(debutV2);
-  assert.ok(!blocV2.includes("createNutritionPlanSupabase"));
-  assert.ok(!blocV2.includes("createNutritionPlan("));
+  assert.ok(debutV2 !== -1, "le seul handler de création est le v2");
+  assert.ok(!src.slice(debutV2).includes("createNutritionPlan("));
 });
 
 await test("48. updateNutritionPlan n'est jamais utilisée pour un plan v2", () => {
@@ -808,11 +811,12 @@ await test("55. aucune assignation existante n'est retirée avant validation", (
 
 /* ══════════ Non-régression v1 et forme canonique ══════════ */
 
-await test("56. la création v1 reste fonctionnelle", () => {
+await test("56. la création v1 a été RETIRÉE, y compris son repli local", () => {
   const src = sansCommentaires(PAGE_NOUVEAU);
-  assert.ok(src.includes("createNutritionPlanSupabase(supabase, data)"));
-  assert.ok(src.includes("weeklyTargetCalories: 15400"), "les valeurs par défaut du v1 sont conservées");
-  assert.ok(src.includes("createNutritionPlan({"), "le repli mock est conservé");
+  assert.ok(!src.includes("createNutritionPlanSupabase"), "plus d'écriture v1");
+  assert.ok(!src.includes("weeklyTargetCalories: 15400"), "plus de valeurs par défaut v1");
+  assert.ok(!src.includes("createNutritionPlan({"), "plus de repli mock v1");
+  assert.ok(src.includes("handleCreateV2"), "un seul chemin de création subsiste");
 });
 
 await test("57. la conversion v1 → v2 reste fonctionnelle", () => {
@@ -927,11 +931,11 @@ await test("63. toutes les garanties de sécurité sont reconduites", () => {
 await test("64. la migration est déclarée au manifeste et comptée", () => {
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 16);
+  assert.equal(attendues.length, 20);
   assert.ok(attendues.includes("20260805090000_nutrition_plan_v2_weekly_target.sql"));
   const secu = lire("../../scripts/tests/security-hardening.mts");
-  assert.ok(secu.includes(".length, 43,"), "le compteur de migrations suit les migrations réelles");
-  assert.ok(secu.includes("assert.equal(attendues.length, 16);"));
+  assert.ok(secu.includes(".length, 47,"), "le compteur de migrations suit les migrations réelles");
+  assert.ok(secu.includes("assert.equal(attendues.length, 20);"));
 });
 
 console.log(`\n${réussis} réussis, ${échecs} échecs`);

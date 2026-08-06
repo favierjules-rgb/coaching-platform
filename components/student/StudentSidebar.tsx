@@ -19,6 +19,7 @@ import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { Logo } from "@/components/ui/Logo";
 import { useSupabaseAccessType } from "@/hooks/useSupabaseAccessType";
 import { useSupabaseMyAccess } from "@/hooks/useSupabaseMyAccess";
+import { isStudentRouteActive } from "@/lib/student-shell-nav";
 
 const studentLinks = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, requiresAccess: false },
@@ -83,7 +84,8 @@ export function StudentSidebar({
 
       <nav className="flex flex-1 flex-col gap-1 px-3 py-4">
         {visibleLinks.map(({ href, label, icon: Icon, requiresAccess }) => {
-          const active = pathname === href;
+          // Préfixe sûr : /nutrition reste actif sur /nutrition/[planId].
+          const active = isStudentRouteActive(pathname, href);
           const locked = requiresAccess && isBlocked;
           return (
             <Link

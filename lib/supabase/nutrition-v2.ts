@@ -239,6 +239,17 @@ export interface SaveNutritionPlanV2Input {
   readonly carbBp: number;
   readonly fatBp: number;
   readonly slots: readonly MealSlotAllocation[];
+  /**
+   * La SEMAINE : profils, sept jours et repas prescrits, tels que
+   * `toWeekSavePayload` les construit. Clé ABSENTE = la RPC ne touche ni aux
+   * profils additionnels, ni aux jours, ni aux repas — même doctrine que
+   * `save_nutrition_recipe`.
+   */
+  readonly week?: {
+    readonly profiles: readonly unknown[];
+    readonly days: readonly unknown[];
+    readonly main_profile_key: string;
+  };
 }
 
 export interface SaveNutritionPlanV2Success {
@@ -260,7 +271,20 @@ export type SaveNutritionPlanV2Result = SaveNutritionPlanV2Success | SaveNutriti
 export function buildSaveNutritionPlanV2Payload(
   input: SaveNutritionPlanV2Input,
 ): Record<string, unknown> {
+  // Avec une semaine : `profiles` (N profils) + `days` (sept jours et leurs
+  // repas). La forme historique `profile` + `slots` reste émise pour que la
+  // RPC puisse déduire le profil principal si `main_profile_key` manquait, et
+  // pour que les tests existants continuent de décrire la même charge utile.
+  const semaine = input.week
+    ? {
+        profiles: input.week.profiles,
+        days: input.week.days,
+        main_profile_key: input.week.main_profile_key,
+      }
+    : {};
+
   return {
+    ...semaine,
     plan_id: input.planId,
     plan: {
       name: input.name,

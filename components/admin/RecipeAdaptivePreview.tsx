@@ -8,7 +8,8 @@ import { NBSP, formatIntegerFr } from "@/lib/nutrition/basis-points";
 import { computeCaloriesFromGrams } from "@/lib/nutrition/macro-targets";
 import { toPreviewRecipe, type RecipeFormState } from "@/lib/nutrition/recipe-form";
 import { describeRecipeFit } from "@/lib/nutrition/recipe-matching";
-import { solveRecipe, type SolvedIngredient } from "@/lib/nutrition/recipe-solver";
+import { formatSolvedIngredientQuantity } from "@/lib/nutrition/recipe-quantity";
+import { solveRecipe } from "@/lib/nutrition/recipe-solver";
 
 /**
  * APERÇU ADAPTATIF — entièrement en LECTURE SEULE.
@@ -32,17 +33,6 @@ import { solveRecipe, type SolvedIngredient } from "@/lib/nutrition/recipe-solve
  * de l'administration. `NBSP` vient de la même source.
  */
 const arrondir = formatIntegerFr;
-
-/**
- * Quantité affichée d'un ingrédient résolu — unité, nombre d'œufs, ou grammes.
- * Une seule définition, partagée par la vue carte et la vue tableau : deux
- * copies finiraient par diverger.
- */
-function quantite(ing: SolvedIngredient): string {
-  if (ing.unitLabel) return ing.unitLabel;
-  if (ing.eggCount !== null) return `${ing.eggCount} œuf${ing.eggCount > 1 ? "s" : ""}`;
-  return `${ing.displayGrams}${NBSP}g`;
-}
 
 /** `null` = saisie inexploitable. Jamais 0 par défaut : ce serait un mensonge. */
 function lireCible(texte: string): number | null {
@@ -180,7 +170,7 @@ export function RecipeAdaptivePreview({ state }: { state: RecipeFormState }) {
                           </span>
                         )}
                       </span>
-                      <span className="text-sm font-bold text-foreground">{quantite(ing)}</span>
+                      <span className="text-sm font-bold text-foreground">{formatSolvedIngredientQuantity(ing)}</span>
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">
                       P{NBSP}{arrondir(ing.proteinGrams)}
@@ -235,7 +225,7 @@ export function RecipeAdaptivePreview({ state }: { state: RecipeFormState }) {
                             </span>
                           )}
                         </td>
-                        <td className="py-2 pr-3 text-foreground">{quantite(ing)}</td>
+                        <td className="py-2 pr-3 text-foreground">{formatSolvedIngredientQuantity(ing)}</td>
                         <td className="py-2 pr-3 text-muted-foreground">{arrondir(ing.proteinGrams)}</td>
                         <td className="py-2 pr-3 text-muted-foreground">{arrondir(ing.carbGrams)}</td>
                         <td className="py-2 pr-3 text-muted-foreground">{arrondir(ing.fatGrams)}</td>

@@ -113,16 +113,17 @@ on conflict (id) do nothing;
 insert into public.profiles (user_id, role, first_name, last_name, email)
 values ('eeee5555-5555-4555-8555-555555555555', 'coach', 'Wanda', 'T', 'wt.coach@test.local');
 
--- Un plan v1 TÉMOIN, avec son objectif hebdomadaire d'origine : il ne doit
--- jamais bouger.
+-- ⚠️ PR C — tous les plans sont en v2 (migration 20260811090000) et la
+-- contrainte interdit toute autre valeur. Les deux plans de test restent les
+-- mêmes cas métier — un témoin qui ne doit pas bouger, un plan que la RPC va
+-- réécrire — exprimés dans le seul modèle qui subsiste.
 insert into public.nutrition_plans (id, name, goal_type, status, daily_target, weekly_target_calories, nutrition_model_version)
 values ('99990000-0000-4000-8000-000000000001', 'Témoin v1', 'maintien', 'actif',
-        '{"calories":2000,"protein":150,"carbs":200,"fat":60}'::jsonb, 14000, 1);
+        '{"calories":2000,"protein":150,"carbs":200,"fat":60}'::jsonb, 14000, 2);
 
--- Un plan v1 à CONVERTIR.
 insert into public.nutrition_plans (id, name, goal_type, status, daily_target, weekly_target_calories, nutrition_model_version)
 values ('99990000-0000-4000-8000-000000000002', 'À convertir', 'maintien', 'actif',
-        '{"calories":1800,"protein":135,"carbs":180,"fat":50}'::jsonb, null, 1);
+        '{"calories":1800,"protein":135,"carbs":180,"fat":50}'::jsonb, null, 2);
 
 -- =====================================================================
 -- A. FONCTION RECRÉÉE — sécurité, owner, search_path, privilèges
@@ -322,10 +323,15 @@ declare v record;
 begin
   select np.weekly_target_calories as hebdo, np.nutrition_model_version as version
     into v from public.nutrition_plans np where np.id = '99990000-0000-4000-8000-000000000002';
-  perform pg_temp.verifier('E1. la conversion est signalée',
-    (select valeur from _faits where cle='e_converted') = 'true');
-  perform pg_temp.verifier('E2. le plan converti passe en v2', v.version = 2);
-  perform pg_temp.verifier('E3. conversion à 2200 kcal ⇒ 15400 EN BASE (était NULL)', v.hebdo = 15400);
+  -- ⚠️ PR C — plus aucune conversion : `converted` vaut toujours false.
+  perform pg_temp.verifier('E1. aucune conversion : le modèle v1 n''existe plus',
+    (select valeur from _faits where cle='e_converted') = 'false');
+  perform pg_temp.verifier('E2. le plan reste en v2', v.version = 2);
+  -- ⚠️ PR C — l'objectif hebdomadaire est la SOMME des sept jours, chacun
+  -- selon son profil, et non plus `daily_calories × 7`. Le plan n'ayant qu'un
+  -- profil à 2 200 kcal, les sept jours donnent 15 400 : la valeur est la
+  -- même, mais elle est atteinte par un chemin différent.
+  perform pg_temp.verifier('E3. 2200 kcal sur sept jours ⇒ 15400 EN BASE (était NULL)', v.hebdo = 15400);
 end $$;
 
 -- =====================================================================
@@ -381,7 +387,11 @@ begin
          (select count(*) from public.nutrition_plan_profiles pr where pr.plan_id = np.id) as profils
     into v from public.nutrition_plans np where np.id = '99990000-0000-4000-8000-000000000001';
   perform pg_temp.verifier('G1. le plan v1 témoin conserve son objectif hebdomadaire (14000)', v.hebdo = 14000);
-  perform pg_temp.verifier('G2. le plan v1 témoin reste en v1, sans profil', v.version = 1 and v.profils = 0);
+  -- ⚠️ PR C — le témoin est en v2 comme tous les plans. Ce que le contrôle
+  -- prouve reste le même : la RPC n'a pas touché à un plan qu'on ne lui a pas
+  -- désigné, donc il n'a reçu aucun profil.
+  perform pg_temp.verifier('G2. le plan témoin n''a PAS été touché, et n''a reçu aucun profil',
+    v.version = 2 and v.profils = 0);
 end $$;
 
 \echo ''

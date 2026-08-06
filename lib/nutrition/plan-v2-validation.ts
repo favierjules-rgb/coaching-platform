@@ -201,9 +201,31 @@ function collectDomainIssues(profile: NutritionPlanV2Profile): PlanV2Issue[] {
   return issues;
 }
 
-/** Retrouve le profil `default` d'un plan, ou `null`. */
+/** Clé du profil créé par la conversion d'un ancien plan (migration 20260811090000). */
+export const LEGACY_PROFILE_KEY = "legacy_default";
+
+/**
+ * Retrouve le profil PRINCIPAL d'un plan, ou `null`.
+ *
+ * ORDRE DÉTERMINISTE, identique à celui de la migration 20260811090000 et de
+ * la RPC `save_nutrition_plan_v2` :
+ *   1. `default` — celui qu'écrivait la RPC avant la PR C ;
+ *   2. `legacy_default` — celui que la conversion crée pour un ancien plan ;
+ *   3. le premier par ordre alphabétique — ordre total, donc reproductible.
+ *
+ * Chercher UNIQUEMENT `default`, comme avant la PR C, rendait tout plan
+ * converti « non assignable » : la conversion nomme son profil
+ * `legacy_default`, et la validation ne le trouvait pas.
+ */
 export function findDefaultProfile(plan: NutritionPlanV2): NutritionPlanV2Profile | null {
-  return plan.profiles.find((p) => p.profileKey === DEFAULT_PROFILE_KEY) ?? null;
+  return (
+    plan.profiles.find((p) => p.profileKey === DEFAULT_PROFILE_KEY) ??
+    plan.profiles.find((p) => p.profileKey === LEGACY_PROFILE_KEY) ??
+    plan.profiles
+      .slice()
+      .sort((a, b) => a.profileKey.localeCompare(b.profileKey))[0] ??
+    null
+  );
 }
 
 /**

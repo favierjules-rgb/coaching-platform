@@ -24,6 +24,12 @@
 -- ⚠️ NE JAMAIS exécuter sur la Production.
 -- ============================================================================
 
+-- ⚠️ PR C — le modèle v1 n'existe plus. La migration 20260811090000 a converti
+-- tous les plans et la contrainte `nutrition_plans_model_version_check`
+-- interdit désormais toute valeur autre que 2. Les insertions de test qui
+-- créaient des plans « v1 » ont donc été portées en v2 : elles décrivent la
+-- même situation métier, dans le seul modèle qui subsiste.
+
 \timing off
 
 begin;
@@ -132,21 +138,25 @@ begin
       and has_table_privilege('service_role', 'public.' || t, 'TRUNCATE'));
   end loop;
 
-  perform pg_temp.noter('B', 'B6. trois policies staff, et AUCUNE lecture élève', (
-    select count(*) = 3 from pg_policy
+  -- ⚠️ PR C — la lecture élève a été AJOUTÉE (migration 20260813090000), et le
+  -- staff a été cloisonné par coach. Ces trois contrôles affirmaient l'état
+  -- de la PR A : ils affirment maintenant l'état voulu, plutôt que d'être
+  -- supprimés pour obtenir du vert.
+  perform pg_temp.noter('B', 'B6. neuf policies : admin, coach propriétaire, et lecture élève', (
+    select count(*) = 9 from pg_policy
      where polrelid in ('public.nutrition_recipes'::regclass,
                         'public.nutrition_recipe_ingredients'::regclass,
                         'public.nutrition_recipe_tags'::regclass)));
 
-  perform pg_temp.noter('B', 'B7. aucune policy ne référence current_student_id()', not exists (
-    select 1 from pg_policy
+  perform pg_temp.noter('B', 'B7. les TROIS tables portent une lecture élève chaînée', (
+    select count(*) = 3 from pg_policy
      where polrelid in ('public.nutrition_recipes'::regclass,
                         'public.nutrition_recipe_ingredients'::regclass,
                         'public.nutrition_recipe_tags'::regclass)
        and coalesce(pg_get_expr(polqual, polrelid), '') like '%current_student_id%'));
 
-  perform pg_temp.noter('B', 'B8. les policies staff s''appuient sur is_coach_or_admin()', (
-    select count(*) = 3 from pg_policy
+  perform pg_temp.noter('B', 'B8. plus AUCUNE policy « tout le staff » ne subsiste', not exists (
+    select 1 from pg_policy
      where polrelid in ('public.nutrition_recipes'::regclass,
                         'public.nutrition_recipe_ingredients'::regclass,
                         'public.nutrition_recipe_tags'::regclass)
@@ -201,14 +211,17 @@ insert into public.students (id, user_id, first_name, last_name, email, status, 
 values ('99990000-0000-4000-8000-000000000009', 'eeee8888-8888-4888-8888-888888888888',
         'Elsa', 'E', 'rc.eleve@test.local', 'active', 'coaching');
 
-insert into public.coaches (id, name, email)
-values ('cccc0000-0000-4000-8000-000000000009', 'Rémi', 'rc.coach@test.local');
+-- `user_id` est désormais indispensable : depuis la migration 20260813090000,
+-- un coach ne gère que les recettes dont `coach_id` correspond à SA fiche.
+insert into public.coaches (id, user_id, name, email)
+values ('cccc0000-0000-4000-8000-000000000009',
+        'eeee7777-7777-4777-8777-777777777777', 'Rémi', 'rc.coach@test.local');
 
 -- Plan v1 TÉMOIN : il ne doit jamais bouger.
 insert into public.nutrition_plans (id, student_id, name, goal_type, status, daily_target, nutrition_model_version)
 values ('77770000-0000-4000-8000-000000000009', '99990000-0000-4000-8000-000000000009',
         'Témoin v1', 'maintien', 'actif',
-        '{"calories":2000,"protein":150,"carbs":200,"fat":60}'::jsonb, 1);
+        '{"calories":2000,"protein":150,"carbs":200,"fat":60}'::jsonb, 2);
 
 -- ---------------------------------------------------------------------
 -- Section D — les invariants de table refusent réellement
@@ -489,7 +502,7 @@ begin
   perform pg_temp.noter('H', 'H1. le plan v1 témoin est inchangé', exists (
     select 1 from public.nutrition_plans
      where id = '77770000-0000-4000-8000-000000000009'
-       and nutrition_model_version = 1
+       and nutrition_model_version = 2
        and daily_target = '{"calories":2000,"protein":150,"carbs":200,"fat":60}'::jsonb));
 
   perform pg_temp.noter('H', 'H2. aucun nutrition_days créé par ce chantier', (

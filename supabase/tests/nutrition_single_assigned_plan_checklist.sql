@@ -25,6 +25,12 @@
 --    ROLLBACK, mais le principe reste : base locale uniquement.
 -- ============================================================================
 
+-- ⚠️ PR C — le modèle v1 n'existe plus. La migration 20260811090000 a converti
+-- tous les plans et la contrainte `nutrition_plans_model_version_check`
+-- interdit désormais toute valeur autre que 2. Les insertions de test qui
+-- créaient des plans « v1 » ont donc été portées en v2 : elles décrivent la
+-- même situation métier, dans le seul modèle qui subsiste.
+
 \timing off
 \set ON_ERROR_STOP 0
 
@@ -141,10 +147,22 @@ insert into public.students (id, first_name, last_name, email, status, access_ty
 values ('55550000-0000-4000-8000-000000000001', 'Léa', 'L', 'lea@test.local', 'active', 'coaching'),
        ('55550000-0000-4000-8000-000000000002', 'Théo', 'T', 'theo@test.local', 'active', 'coaching');
 
--- Plan A : v1, assignable par définition.
+-- Plan A : converti en v2 comme tous les plans (PR C). Il reçoit le profil
+-- `legacy_default` que la migration 20260811090000 crée pour un ancien plan,
+-- et les six créneaux qui le rendent assignable.
 insert into public.nutrition_plans (id, name, goal_type, status, daily_target, nutrition_model_version)
-values ('66660000-0000-4000-8000-00000000000a', 'Plan A (v1)', 'maintien', 'actif',
-        '{"calories":2000,"protein":150,"carbs":200,"fat":60}'::jsonb, 1);
+values ('66660000-0000-4000-8000-00000000000a', 'Plan A (converti)', 'maintien', 'actif',
+        '{"calories":2000,"protein":150,"carbs":200,"fat":60}'::jsonb, 2);
+insert into public.nutrition_plan_profiles (id, plan_id, profile_key, daily_calories, protein_bp, carb_bp, fat_bp)
+values ('77770000-0000-4000-8000-00000000000a', '66660000-0000-4000-8000-00000000000a',
+        'legacy_default', 2000, 3000, 4300, 2700);
+insert into public.nutrition_meal_slot_targets (profile_id, slot, enabled, protein_bp, carb_bp, fat_bp, display_order)
+values ('77770000-0000-4000-8000-00000000000a', 'breakfast',       true,  2500, 2500, 2500, 0),
+       ('77770000-0000-4000-8000-00000000000a', 'morning_snack',   false,    0,    0,    0, 1),
+       ('77770000-0000-4000-8000-00000000000a', 'lunch',           true,  3500, 3500, 3500, 2),
+       ('77770000-0000-4000-8000-00000000000a', 'afternoon_snack', true,  1000, 1000, 1000, 3),
+       ('77770000-0000-4000-8000-00000000000a', 'dinner',          true,  3000, 3000, 3000, 4),
+       ('77770000-0000-4000-8000-00000000000a', 'dessert',         false,    0,    0,    0, 5);
 
 -- Plan B : v2 COMPLET.
 insert into public.nutrition_plans (id, name, goal_type, status, daily_target, nutrition_model_version)
@@ -405,7 +423,7 @@ do $$
 declare nb int;
 begin
   select count(*) into nb from public.nutrition_plans
-   where name in ('Plan A (v1)', 'Plan B (v2 complet)', 'Plan C (v2 incomplet)');
+   where name in ('Plan A (converti)', 'Plan B (v2 complet)', 'Plan C (v2 incomplet)');
   if nb <> 0 then
     raise exception 'ÉCHEC   — I1. des plans de test ont survécu au ROLLBACK (% lignes)', nb;
   end if;

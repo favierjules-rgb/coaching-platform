@@ -10,7 +10,9 @@ import {
   NutritionMacroDistributionPanel,
 } from "@/components/admin/NutritionMacroDistributionPanel";
 import { NBSP, formatDecimalFr, formatIntegerFr } from "@/lib/nutrition/basis-points";
-import { formatSplitBalanceMessage } from "@/lib/nutrition/macro-targets";
+import { NutritionPlanV2WeekPanel } from "@/components/admin/NutritionPlanV2WeekPanel";
+import { computeDailyMacroTargets, formatSplitBalanceMessage } from "@/lib/nutrition/macro-targets";
+import type { WeekFormState } from "@/lib/nutrition/plan-v2-week-form";
 import {
   MACRO_KEYS,
   MEAL_SLOT_LABELS_FR,
@@ -74,6 +76,9 @@ export interface NutritionPlanV2BuilderProps {
   readonly serverError: string | null;
   /** Bandeau affiché en mode conversion d'un plan v1. */
   readonly conversionNotice?: string | null;
+  /** SECTION C — la semaine alimentaire. Absente = panneau non rendu. */
+  readonly week?: WeekFormState;
+  readonly onWeekChange?: (next: WeekFormState) => void;
 }
 
 export function NutritionPlanV2Builder({
@@ -83,6 +88,8 @@ export function NutritionPlanV2Builder({
   saving,
   serverError,
   conversionNotice = null,
+  week,
+  onWeekChange,
 }: NutritionPlanV2BuilderProps) {
   const [distributeErrors, setDistributeErrors] = useState<Partial<Record<MacroKey, string>>>({});
   const [showAssignErrors, setShowAssignErrors] = useState(false);
@@ -382,6 +389,38 @@ export function NutritionPlanV2Builder({
           les points de base font foi.
         </p>
       </section>
+
+      {/* ── 7 bis. SECTION C — la semaine alimentaire ─────────────────
+          Les objectifs affichés par jour sont dérivés du profil du jour :
+          calories du profil, parts P/G/L du profil principal. Aucun calcul
+          propre au panneau — il reçoit une fonction et l'appelle. */}
+      {week && onWeekChange && (
+        <section className="rounded-card border border-border bg-card p-4 shadow-soft sm:p-6">
+          <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
+            Semaine alimentaire
+          </h2>
+          <NutritionPlanV2WeekPanel
+            state={week}
+            onChange={onWeekChange}
+            dailyTargetsFor={(profileKey) => {
+              const profil = week.profiles.find((p) => p.profileKey === profileKey);
+              if (!profil) return null;
+              const cible = computeDailyMacroTargets({
+                dailyCalories: profil.dailyCalories,
+                proteinBp: state.proteinBp,
+                carbBp: state.carbBp,
+                fatBp: state.fatBp,
+              });
+              return {
+                calories: cible.calories.totalCalories,
+                protein: cible.grams.proteinGrams,
+                carbs: cible.grams.carbGrams,
+                fat: cible.grams.fatGrams,
+              };
+            }}
+          />
+        </section>
+      )}
 
       {/* ── 8. Actions ───────────────────────────────────────────────── */}
       <section className="rounded-card border border-border bg-card p-4 shadow-soft sm:p-6">
