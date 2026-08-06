@@ -86,10 +86,17 @@ export function StudentPrescribedWeek({ week }: { week: PlanV2Week }) {
                       <span className="text-xs uppercase tracking-wide text-muted-foreground">
                         {MEAL_SLOT_LABELS_FR[repas.slot]}
                       </span>
-                      <span className="text-sm font-bold text-foreground">
-                        {formatIntegerFr(repas.calories)}
-                        {NBSP}kcal
-                      </span>
+                      {/* Les kcal et les macros d'un repas ne sont plus saisies
+                          par le coach : elles sont définies au niveau du JOUR.
+                          On n'affiche donc ces valeurs que pour un repas
+                          enregistré avant ce changement, qui les porte encore —
+                          jamais une série de zéros. */}
+                      {repas.calories > 0 && (
+                        <span className="text-sm font-bold text-foreground">
+                          {formatIntegerFr(repas.calories)}
+                          {NBSP}kcal
+                        </span>
+                      )}
                     </div>
 
                     {repas.name && (
@@ -109,15 +116,17 @@ export function StudentPrescribedWeek({ week }: { week: PlanV2Week }) {
                       </ul>
                     )}
 
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      P{NBSP}
-                      {formatIntegerFr(repas.protein)}
-                      {NBSP}g · G{NBSP}
-                      {formatIntegerFr(repas.carbs)}
-                      {NBSP}g · L{NBSP}
-                      {formatIntegerFr(repas.fat)}
-                      {NBSP}g
-                    </p>
+                    {repas.protein + repas.carbs + repas.fat > 0 && (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        P{NBSP}
+                        {formatIntegerFr(repas.protein)}
+                        {NBSP}g · G{NBSP}
+                        {formatIntegerFr(repas.carbs)}
+                        {NBSP}g · L{NBSP}
+                        {formatIntegerFr(repas.fat)}
+                        {NBSP}g
+                      </p>
+                    )}
 
                     {repas.coachNotes && (
                       <p className="mt-3 flex items-start gap-2 rounded-control border border-border bg-card px-3 py-2 text-xs italic leading-relaxed text-muted-foreground">

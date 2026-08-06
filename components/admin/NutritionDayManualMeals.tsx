@@ -11,14 +11,24 @@ import { itemsToText, textToItems } from "@/lib/nutrition/plan-v2-week-form";
 /**
  * ZONE 3 — LES REPAS PRESCRITS DU JOUR OUVERT.
  *
- * Outil ENTIÈREMENT MANUEL, repris à l'identique de l'existant : moment, nom,
- * aliments un par ligne, kcal, P, G, L, notes coach, suppression. Ce que le
- * coach écrit est ce que l'élève lira.
+ * Outil ENTIÈREMENT MANUEL : moment, nom du repas, aliments un par ligne,
+ * notes coach, suppression. Ce que le coach écrit est ce que l'élève lira.
+ *
+ * PAS DE KCAL NI DE MACROS PAR REPAS. Elles étaient saisies quatre fois par
+ * repas alors que le jour ouvert les définit déjà, deux zones plus haut :
+ * les calories et la répartition P/G/L en zone 1, la part de chaque créneau
+ * en zone 2. Redemander les mêmes chiffres au niveau du repas, c'était offrir
+ * au coach l'occasion de se contredire lui-même — et l'obliger à ressaisir à
+ * la main ce que le système calcule déjà.
+ *
+ * Les champs `calories`, `protein`, `carbs` et `fat` restent dans le modèle et
+ * dans la charge utile : un repas enregistré avant ce changement conserve ses
+ * valeurs, et rien n'a besoin d'être migré. Un repas créé maintenant les porte
+ * simplement à zéro, et l'écran élève n'affiche alors aucune ligne de macros.
  *
  * `solveRecipe` n'est PAS appelé ici, et la bibliothèque de recettes n'est pas
- * lue : ce sont deux autres outils. Seule différence avec la version
- * précédente : les repas appartiennent directement au jour ouvert, il n'y a
- * plus de sélecteur de profil au-dessus d'eux.
+ * lue : ce sont deux autres outils. Les repas appartiennent directement au
+ * jour ouvert, sans sélecteur de profil au-dessus d'eux.
  */
 
 const SLOT_OPTIONS = MEAL_SLOT_KEYS.map((slot) => ({
@@ -72,32 +82,6 @@ function MealEditor({
           rows={3}
           placeholder={"Blanc de poulet — 150 g\nRiz basmati — 100 g cru"}
         />
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Field
-            label="Kcal"
-            type="number"
-            value={String(meal.calories)}
-            onChange={(v) => onChange({ calories: Number(v) || 0 })}
-          />
-          <Field
-            label="Prot (g)"
-            type="number"
-            value={String(meal.protein)}
-            onChange={(v) => onChange({ protein: Number(v) || 0 })}
-          />
-          <Field
-            label="Gluc (g)"
-            type="number"
-            value={String(meal.carbs)}
-            onChange={(v) => onChange({ carbs: Number(v) || 0 })}
-          />
-          <Field
-            label="Lip (g)"
-            type="number"
-            value={String(meal.fat)}
-            onChange={(v) => onChange({ fat: Number(v) || 0 })}
-          />
-        </div>
         <TextareaField
           label="Notes coach"
           value={meal.coachNotes}

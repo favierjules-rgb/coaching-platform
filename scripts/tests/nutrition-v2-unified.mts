@@ -934,20 +934,39 @@ await test("47. une erreur réseau n'est plus présentée comme « aucun plan »
   assert.ok(!/setLoading\(true\)/.test(hook), "le rechargement est silencieux");
 });
 
-await test("48. la carte de repas manuelle est conservée, SANS sélecteur de profil", () => {
-  // MIS À JOUR PAR LA REFONTE « SEMAINE D'ABORD ». La carte de repas a été
-  // extraite du panneau de semaine vers `NutritionDayManualMeals` : elle est
-  // désormais rendue pour le SEUL jour ouvert. Ses champs sont inchangés ;
-  // seule disparaît la ligne « Profil du jour » qui la surplombait.
-  for (const champ of ["Moment", "Nom du repas", "Aliments", "Kcal", "Prot (g)", "Gluc (g)", "Lip (g)", "Notes coach"]) {
-    assert.ok(JOUR_REPAS.includes(champ), `champ « ${champ} » conservé`);
+await test("48. la carte de repas ne demande QUE ce que le jour ne définit pas", () => {
+  // MIS À JOUR DEUX FOIS. D'abord par la refonte « semaine d'abord » : la
+  // carte a quitté le panneau de semaine pour `NutritionDayManualMeals`, et a
+  // perdu la ligne « Profil du jour » qui la surplombait. Puis par le retrait
+  // des kcal et des macros par repas : le jour ouvert les définit déjà, deux
+  // zones plus haut. Les redemander ici invitait le coach à se contredire.
+  const code = sansCommentairesTs(JOUR_REPAS);
+  for (const champ of ["Moment", "Nom du repas", "Aliments", "Notes coach"]) {
+    assert.ok(code.includes(champ), `champ « ${champ} » conservé`);
   }
-  assert.ok(JOUR_REPAS.includes("Ajouter un repas"));
-  assert.ok(!JOUR_REPAS.includes("Profil du jour"), "plus aucun sélecteur de profil");
+  for (const retiré of ["Kcal", "Prot (g)", "Gluc (g)", "Lip (g)"]) {
+    assert.ok(!code.includes(retiré), `« ${retiré} » ne doit plus être saisi par repas`);
+  }
+  assert.ok(code.includes("Ajouter un repas"));
+  assert.ok(!code.includes("Profil du jour"), "plus aucun sélecteur de profil");
   assert.ok(PANNEAU_SEMAINE.includes("Dupliquer"));
   for (const source of [PANNEAU_SEMAINE, JOUR_REPAS]) {
     assert.ok(!sansCommentairesTs(source).includes("solveRecipe"), "l'outil 3 reste entièrement manuel");
   }
+
+  // Le MODÈLE, lui, est intact : un repas déjà enregistré garde ses valeurs,
+  // et elles continuent de partir dans la charge utile. Rien à migrer.
+  const forme = sansCommentairesTs(SEMAINE_FORM);
+  for (const champ of ["calories", "protein", "carbs", "fat"]) {
+    assert.ok(forme.includes(`${champ}:`), `le modèle conserve ${champ}`);
+  }
+  // Et l'écran élève n'affiche pas une série de zéros pour un repas neuf.
+  const eleve = sansCommentairesTs(SEMAINE_ELEVE);
+  assert.ok(eleve.includes("repas.calories > 0"), "les kcal ne s'affichent que si elles existent");
+  assert.ok(
+    eleve.includes("repas.protein + repas.carbs + repas.fat > 0"),
+    "la ligne de macros ne s'affiche que si elle porte une valeur",
+  );
 });
 
 await test("49. responsive et accessibilité : cibles tactiles et repli en cartes", () => {
