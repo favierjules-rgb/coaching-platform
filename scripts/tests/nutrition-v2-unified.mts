@@ -115,6 +115,8 @@ const M_SAUVEGARDE = lire("../../supabase/migrations/20260812090000_save_nutriti
 const M_RECETTES = lire("../../supabase/migrations/20260813090000_student_recipe_read_access.sql");
 const CHECKLIST = lire("../../supabase/tests/nutrition_v2_unified_checklist.sql");
 const PAGE_ELEVE_DETAIL = lire("../../app/(student)/nutrition/[planId]/page.tsx");
+const PAGE_ELEVE_LISTE = lire("../../app/(student)/nutrition/page.tsx");
+const PAGE_RECETTES = lire("../../app/(student)/nutrition/[planId]/recettes/page.tsx");
 const RECETTES_ELEVE = lire("../../components/student/StudentAdaptiveRecipes.tsx");
 const SEMAINE_ELEVE = lire("../../components/student/StudentPrescribedWeek.tsx");
 const PANNEAU_SEMAINE = lire("../../components/admin/NutritionPlanV2WeekPanel.tsx");
@@ -914,13 +916,64 @@ await test("44. l'entrée Nutrition reste active sur /nutrition/[planId]", () =>
   assert.equal(isStudentRouteActive(null, "/nutrition"), false);
 });
 
-await test("45. l'écran élève affiche les TROIS sections, séparées", () => {
-  for (const titre of ["Suivi de la semaine", "Semaine alimentaire", "Recettes adaptatives"]) {
+await test("45. les TROIS outils restent séparés, les recettes ayant leur écran", () => {
+  // MIS À JOUR. Les outils 1 et 2 restent sur la fiche du plan ; les recettes
+  // adaptatives ont désormais leur PROPRE parcours,
+  // /nutrition/[planId]/recettes, atteint depuis un bouton mis en avant. La
+  // séparation des trois outils est donc plus nette qu'avant, pas moins.
+  for (const titre of ["Suivi de la semaine", "Semaine alimentaire"]) {
     assert.ok(PAGE_ELEVE_DETAIL.includes(titre), `section « ${titre} »`);
   }
   assert.ok(PAGE_ELEVE_DETAIL.includes("WeeklyNutritionTracker"), "l'outil 1 est réutilisé tel quel");
   assert.ok(PAGE_ELEVE_DETAIL.includes("StudentPrescribedWeek"));
-  assert.ok(PAGE_ELEVE_DETAIL.includes("StudentAdaptiveRecipes"));
+  // Les recettes ne sont plus montées sur la fiche…
+  assert.ok(
+    !sansCommentairesTs(PAGE_ELEVE_DETAIL).includes("StudentAdaptiveRecipes"),
+    "l'outil 2 a quitté la fiche du plan",
+  );
+  // …mais sur leur page, INCHANGÉ : même composant, même hook, même solveur.
+  assert.ok(PAGE_RECETTES.includes("<StudentAdaptiveRecipes"), "l'outil 2 est monté sur son écran");
+  assert.ok(PAGE_RECETTES.includes("useStudentNutritionPlanV2"), "mêmes données qu'avant");
+  assert.ok(PAGE_RECETTES.includes("Choisis un jour puis un créneau"), "même parcours jour → créneau");
+  assert.ok(!sansCommentairesTs(PAGE_RECETTES).includes(".from("), "toujours aucune écriture");
+});
+
+await test("45 bis. l'entrée « Recettes » est mise en avant, en haut, une seule fois", () => {
+  // Le bouton mène à la page dédiée depuis les DEUX écrans de nutrition.
+  for (const [nom, page] of [["liste", PAGE_ELEVE_LISTE], ["fiche", PAGE_ELEVE_DETAIL]] as const) {
+    assert.ok(page.includes("<RecipesHighlightLink"), `${nom} : le bouton est monté`);
+    assert.equal(
+      (page.match(/<RecipesHighlightLink/g) ?? []).length,
+      1,
+      `${nom} : une seule mise en avant — répétée, elle n'en serait plus une`,
+    );
+  }
+  // Il est placé AVANT le suivi de la semaine : visible sans défiler.
+  assert.ok(
+    PAGE_ELEVE_LISTE.indexOf("<RecipesHighlightLink") < PAGE_ELEVE_LISTE.indexOf("<WeeklyNutritionTracker"),
+    "le bouton précède le suivi",
+  );
+
+  // Surbrillance verte prise au thème, jamais codée en dur.
+  const bouton = lire("../../components/student/RecipesHighlightLink.tsx");
+  assert.ok(bouton.includes("border-success/50") && bouton.includes("bg-success/10"));
+  assert.ok(!/#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(/.test(bouton), "aucune couleur codée en dur");
+  assert.ok(bouton.includes("recettes-halo"), "le filet lumineux est appliqué");
+  assert.ok(bouton.includes('href={`/nutrition/${planId}/recettes`}'), "il mène au parcours dédié");
+  assert.ok(bouton.includes("min-h-[44px]"), "cible tactile suffisante");
+
+  // Le rayon tourne, et il S'IMMOBILISE sous prefers-reduced-motion — il ne
+  // disparaît pas : la mise en avant reste, seul le mouvement s'arrête.
+  const styles = lire("../../app/globals.css");
+  const halo = styles.slice(styles.indexOf("@property --recettes-halo-angle"));
+  assert.ok(halo.includes("conic-gradient"), "le rayon est un dégradé conique masqué en bordure");
+  assert.ok(halo.includes("animation: recettes-halo-tour"));
+  assert.ok(halo.includes("@keyframes recettes-halo-tour"));
+  assert.ok(halo.includes("prefers-reduced-motion: reduce"), "le mouvement est réductible");
+  const repli = halo.slice(halo.indexOf("prefers-reduced-motion"));
+  assert.ok(repli.includes("animation: none"), "l'animation s'arrête");
+  assert.ok(repli.includes("--recettes-halo-angle: 118deg"), "mais le liseré reste visible, figé");
+  assert.ok(halo.includes("var(--success)"), "la couleur vient du thème");
 });
 
 await test("46. la semaine prescrite est en LECTURE SEULE côté élève", () => {

@@ -5,8 +5,8 @@ import { useParams } from "next/navigation";
 import { ArrowLeft, ShoppingCart } from "lucide-react";
 
 import { NutritionPlanWorkspace } from "@/components/student/NutritionPlanWorkspace";
+import { RecipesHighlightLink } from "@/components/student/RecipesHighlightLink";
 import { StatusBadge } from "@/components/student/StatusBadge";
-import { StudentAdaptiveRecipes } from "@/components/student/StudentAdaptiveRecipes";
 import { StudentPrescribedWeek } from "@/components/student/StudentPrescribedWeek";
 import { WeeklyNutritionTracker } from "@/components/student/WeeklyNutritionTracker";
 import { StatCard } from "@/components/shared/StatCard";
@@ -96,6 +96,12 @@ export default function NutritionPlanDetailPage() {
           <StatCard label="kcal / semaine" value={caloriesSemaine.toLocaleString("fr-FR")} size="lg" />
         </div>
 
+        {/* L'entrée vers les recettes, en haut : l'outil le plus utile au
+            quotidien ne doit pas être celui qu'on atteint en dernier. */}
+        <div className="mb-8">
+          <RecipesHighlightLink planId={plan.id} className="w-full sm:max-w-sm" />
+        </div>
+
         {plan.coachNotes && (
           <div className="mb-8 border border-border bg-card p-6">
             <h2 className="mb-2 font-heading text-lg font-bold uppercase text-foreground">Consignes du coach</h2>
@@ -151,25 +157,9 @@ export default function NutritionPlanDetailPage() {
           )}
         </section>
 
-        {/* ─────────────── SECTION 3 — RECETTES ADAPTATIVES ───────────────
-            La bibliothèque du coach, adaptée aux objectifs du jour et du
-            créneau choisis. Rien n'est enregistré. */}
-        <section className="mb-8">
-          <h2 className="mb-1 font-heading text-lg font-bold uppercase text-foreground">
-            Recettes adaptatives
-          </h2>
-          <p className="mb-4 text-xs leading-relaxed text-muted-foreground">
-            Choisis un jour puis un créneau : les quantités sont recalculées pour tes objectifs de
-            ce jour-là. Rien n&apos;est enregistré — c&apos;est une aide, pas un journal.
-          </p>
-          {v2.loading ? (
-            <p className="text-sm text-muted-foreground">Chargement des recettes…</p>
-          ) : v2.error ? (
-            <ÉtatErreur message={v2.error} onRéessayer={() => void v2.refetch()} />
-          ) : v2.week ? (
-            <StudentAdaptiveRecipes week={v2.week} recipes={v2.recipes} />
-          ) : null}
-        </section>
+        {/* SECTION 3 — RECETTES ADAPTATIVES : déplacée sur son propre écran,
+            /nutrition/[planId]/recettes, atteint par le bouton mis en avant
+            en haut de page. Rien n'a changé dans l'outil lui-même. */}
 
         {plan.shoppingList.length > 0 && (
           <div className="border border-border bg-card p-6">

@@ -5,6 +5,7 @@ import { Droplet, Lightbulb, Pill } from "lucide-react";
 
 import { StatusBadge } from "@/components/student/StatusBadge";
 import { NutritionPlansListClient } from "@/components/student/NutritionPlansListClient";
+import { RecipesHighlightLink } from "@/components/student/RecipesHighlightLink";
 import { NutritionWeekStatusClient } from "@/components/student/NutritionWeekStatusClient";
 import { WeeklyNutritionTracker } from "@/components/student/WeeklyNutritionTracker";
 import {
@@ -103,6 +104,13 @@ export default function NutritionPage() {
             {(v2.week ? weeklyCaloriesFromDays(v2.week) : activePlan.weeklyTargetCalories).toLocaleString("fr-FR")}{" "}
             kcal/semaine
           </p>
+        </div>
+
+        {/* L'ENTRÉE MISE EN AVANT VERS LES RECETTES.
+            Placée avant le suivi, donc visible sans défiler : c'est l'outil
+            qu'on ouvre le plus souvent. Elle mène à son propre écran. */}
+        <div className="mb-8">
+          <RecipesHighlightLink planId={activePlan.id} className="w-full sm:max-w-sm" />
         </div>
 
         {studentId && (
