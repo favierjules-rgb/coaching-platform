@@ -7,6 +7,7 @@ import { MEAL_SLOT_LABELS_FR } from "@/lib/nutrition/meal-distribution";
 import {
   dailyTargetsForDay,
   orderedDays,
+  slotMacrosForDay,
   type PlanV2Week,
 } from "@/lib/nutrition/plan-v2-week";
 import { WEEKDAY_LABELS_FR } from "@/lib/nutrition/weekdays";
@@ -77,7 +78,29 @@ export function StudentPrescribedWeek({ week }: { week: PlanV2Week }) {
                   Aucun repas prescrit ce jour-là.
                 </p>
               ) : (
-                jour.meals.map((repas) => (
+                jour.meals.map((repas) => {
+                  // CE QUE CE REPAS DOIT APPORTER. Le coach ne saisit plus de
+                  // kcal ni de macros par repas : il règle les objectifs du
+                  // JOUR, puis la part de chaque créneau. On applique donc
+                  // simplement cette part aux objectifs du jour —
+                  // `slotMacrosForDay` compose les fonctions existantes, aucune
+                  // formule n'est réécrite ici.
+                  //
+                  // Un repas enregistré AVANT ce changement porte encore ses
+                  // propres valeurs : elles priment, pour ne rien réécrire du
+                  // passé.
+                  const créneau = slotMacrosForDay(week, jour, repas.slot);
+                  const saisiParLeCoach = repas.calories > 0 || repas.protein + repas.carbs + repas.fat > 0;
+                  const cible = saisiParLeCoach
+                    ? {
+                        calories: repas.calories,
+                        proteinGrams: repas.protein,
+                        carbGrams: repas.carbs,
+                        fatGrams: repas.fat,
+                      }
+                    : créneau;
+
+                  return (
                   <article
                     key={repas.id}
                     className="rounded-panel border border-border bg-surface-soft/40 p-4"
@@ -86,14 +109,9 @@ export function StudentPrescribedWeek({ week }: { week: PlanV2Week }) {
                       <span className="text-xs uppercase tracking-wide text-muted-foreground">
                         {MEAL_SLOT_LABELS_FR[repas.slot]}
                       </span>
-                      {/* Les kcal et les macros d'un repas ne sont plus saisies
-                          par le coach : elles sont définies au niveau du JOUR.
-                          On n'affiche donc ces valeurs que pour un repas
-                          enregistré avant ce changement, qui les porte encore —
-                          jamais une série de zéros. */}
-                      {repas.calories > 0 && (
+                      {cible && (
                         <span className="text-sm font-bold text-foreground">
-                          {formatIntegerFr(repas.calories)}
+                          {formatIntegerFr(cible.calories)}
                           {NBSP}kcal
                         </span>
                       )}
@@ -101,6 +119,18 @@ export function StudentPrescribedWeek({ week }: { week: PlanV2Week }) {
 
                     {repas.name && (
                       <h4 className="mt-1 text-sm font-bold text-foreground">{repas.name}</h4>
+                    )}
+
+                    {cible && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        P{NBSP}
+                        {formatIntegerFr(cible.proteinGrams)}
+                        {NBSP}g · G{NBSP}
+                        {formatIntegerFr(cible.carbGrams)}
+                        {NBSP}g · L{NBSP}
+                        {formatIntegerFr(cible.fatGrams)}
+                        {NBSP}g
+                      </p>
                     )}
 
                     {repas.items.length > 0 && (
@@ -116,18 +146,6 @@ export function StudentPrescribedWeek({ week }: { week: PlanV2Week }) {
                       </ul>
                     )}
 
-                    {repas.protein + repas.carbs + repas.fat > 0 && (
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        P{NBSP}
-                        {formatIntegerFr(repas.protein)}
-                        {NBSP}g · G{NBSP}
-                        {formatIntegerFr(repas.carbs)}
-                        {NBSP}g · L{NBSP}
-                        {formatIntegerFr(repas.fat)}
-                        {NBSP}g
-                      </p>
-                    )}
-
                     {repas.coachNotes && (
                       <p className="mt-3 flex items-start gap-2 rounded-control border border-border bg-card px-3 py-2 text-xs italic leading-relaxed text-muted-foreground">
                         <NotebookPen size={14} className="mt-0.5 flex-shrink-0" />
@@ -135,7 +153,8 @@ export function StudentPrescribedWeek({ week }: { week: PlanV2Week }) {
                       </p>
                     )}
                   </article>
-                ))
+                  );
+                })
               )}
             </div>
           </section>

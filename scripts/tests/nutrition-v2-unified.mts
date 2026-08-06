@@ -21,12 +21,14 @@ import { KCAL_PER_GRAM, computeDailyMacroTargets } from "../../lib/nutrition/mac
 import { MEAL_SLOT_KEYS, type MealSlotAllocation } from "../../lib/nutrition/meal-distribution";
 import {
   completeWeek,
+  dailyTargetsByWeekday,
   dailyTargetsForDay,
   enabledSlotsForDay,
   orderedDays,
   orderedMeals,
   profileForDay,
   recipesForSlot,
+  slotMacrosForDay,
   slotTargetForDay,
   weeklyCaloriesFromDays,
   type PlanV2Day,
@@ -73,6 +75,10 @@ import { formatSolvedIngredientQuantity } from "../../lib/nutrition/recipe-quant
 import { describeRecipeFit } from "../../lib/nutrition/recipe-matching";
 import { solveRecipe } from "../../lib/nutrition/recipe-solver";
 import type { RecipeWithTags } from "../../lib/nutrition/recipe-rows";
+import {
+  computeWeeklyNutritionAdjustment,
+  getCurrentWeekDates,
+} from "../../lib/nutrition-weekly";
 import { isStudentRouteActive } from "../../lib/student-shell-nav";
 import { buildSaveNutritionPlanV2Payload } from "../../lib/supabase/nutrition-v2";
 import { RECETTE_SIMPLE_PGL, RECETTE_MAXIMUM } from "./fixtures/nutrition-recipes";
@@ -960,13 +966,12 @@ await test("48. la carte de repas ne demande QUE ce que le jour ne définit pas"
   for (const champ of ["calories", "protein", "carbs", "fat"]) {
     assert.ok(forme.includes(`${champ}:`), `le modèle conserve ${champ}`);
   }
-  // Et l'écran élève n'affiche pas une série de zéros pour un repas neuf.
+  // Et l'écran élève ne montre pas des zéros : il DÉRIVE les kcal et les
+  // macros de chaque repas depuis la part de son créneau, un repas saisi
+  // avant ce changement gardant ses propres valeurs.
   const eleve = sansCommentairesTs(SEMAINE_ELEVE);
-  assert.ok(eleve.includes("repas.calories > 0"), "les kcal ne s'affichent que si elles existent");
-  assert.ok(
-    eleve.includes("repas.protein + repas.carbs + repas.fat > 0"),
-    "la ligne de macros ne s'affiche que si elle porte une valeur",
-  );
+  assert.ok(eleve.includes("slotMacrosForDay(week, jour, repas.slot)"), "la part du créneau est appliquée");
+  assert.ok(eleve.includes("saisiParLeCoach"), "les valeurs héritées priment quand elles existent");
 });
 
 await test("49. responsive et accessibilité : cibles tactiles et repli en cartes", () => {
@@ -1574,6 +1579,165 @@ await test("65. la garde serveur contrôle les SEPT jours, dans l'ordre", () => 
     assert.ok(CHECKLIST.includes(attendu), `la checklist doit couvrir : ${attendu}`);
   }
   assert.ok(/^rollback;$/m.test(CHECKLIST), "la checklist se termine par un ROLLBACK");
+});
+
+/* ═══════ 14. Le suivi et l'affichage élève suivent le jour prescrit ═══════ */
+
+/** Une semaine v2 : lundi 3 000 kcal, mardi 2 000, les cinq autres 3 000. */
+function semaineInégale(): PlanV2Week {
+  const profil = (jour: string, kcal: number) => ({
+    profileKey: `day_${jour}`,
+    dailyCalories: kcal,
+    proteinBp: 3000,
+    carbBp: 4500,
+    fatBp: 2500,
+    slots: MEAL_SLOT_KEYS.map((slot, i): MealSlotAllocation => ({
+      slot,
+      enabled: slot === "lunch" || slot === "dinner",
+      proteinBp: slot === "lunch" ? 4000 : slot === "dinner" ? 6000 : 0,
+      carbBp: slot === "lunch" ? 4000 : slot === "dinner" ? 6000 : 0,
+      fatBp: slot === "lunch" ? 4000 : slot === "dinner" ? 6000 : 0,
+      displayOrder: i,
+    })),
+  });
+  const kcal = (jour: string) => (jour === "tuesday" ? 2000 : 3000);
+  return {
+    planId: "plan-1",
+    profiles: WEEKDAY_KEYS.map((j) => profil(j, kcal(j))),
+    days: WEEKDAY_KEYS.map((j) => ({
+      id: `jour-${j}`,
+      day: j,
+      profileKey: `day_${j}`,
+      status: "non-commence",
+      meals: [],
+    })),
+  };
+}
+
+await test("66. chaque jour du suivi porte SON objectif, pas la moyenne", () => {
+  // LE BUG CORRIGÉ : un plan à 3 000 kcal sauf le mardi à 2 000 affichait
+  // 2 857 kcal — la moyenne — pour les SEPT jours.
+  const semaine = semaineInégale();
+  const parJour = dailyTargetsByWeekday(semaine).map((c) =>
+    c
+      ? {
+          calories: c.calories.totalCalories,
+          protein: c.grams.proteinGrams,
+          carbs: c.grams.carbGrams,
+          fat: c.grams.fatGrams,
+        }
+      : null,
+  );
+  assert.equal(parJour.length, 7);
+  assert.equal(Math.round(parJour[0]!.calories), 3000, "lundi");
+  assert.equal(Math.round(parJour[1]!.calories), 2000, "mardi");
+  assert.equal(weeklyCaloriesFromDays(semaine), 20000, "3 000 × 6 + 2 000");
+
+  const dates = getCurrentWeekDates(new Date("2026-08-03T12:00:00"));
+  const ajustement = computeWeeklyNutritionAdjustment(
+    { calories: 3000, protein: 0, carbs: 0, fat: 0, weeklyTargetCalories: 20000, perDay: parJour },
+    [],
+    dates,
+  );
+
+  // Aucun jour rempli : chacun retrouve EXACTEMENT son objectif prescrit.
+  assert.equal(ajustement.calories.weeklyTarget, 20000);
+  assert.equal(ajustement.days[0].targetCalories, 3000, "lundi");
+  assert.equal(ajustement.days[1].targetCalories, 2000, "mardi");
+  assert.equal(ajustement.days[6].targetCalories, 3000, "dimanche");
+  assert.notEqual(ajustement.days[1].targetCalories, ajustement.days[0].targetCalories,
+    "les sept jours ne peuvent plus être identiques");
+  // La somme des sept objectifs reconstitue la semaine.
+  assert.equal(
+    ajustement.days.reduce((t, j) => t + (j.targetCalories ?? 0), 0),
+    20000,
+  );
+});
+
+await test("67. l'ajustement respecte la FORME de la semaine, pas un partage égal", () => {
+  const semaine = semaineInégale();
+  const parJour = dailyTargetsByWeekday(semaine).map((c) =>
+    c ? { calories: c.calories.totalCalories, protein: c.grams.proteinGrams, carbs: c.grams.carbGrams, fat: c.grams.fatGrams } : null,
+  );
+  const dates = getCurrentWeekDates(new Date("2026-08-03T12:00:00"));
+
+  // Lundi dépassé : 3 500 consommés au lieu de 3 000.
+  const ajustement = computeWeeklyNutritionAdjustment(
+    { calories: 3000, protein: 0, carbs: 0, fat: 0, weeklyTargetCalories: 20000, perDay: parJour },
+    [{ logDate: dates[0], calories: 3500, proteinG: null, carbsG: null, fatG: null, note: "" }],
+    dates,
+  );
+
+  assert.equal(ajustement.days[0].filled, true);
+  assert.equal(ajustement.days[0].targetCalories, 3000, "un jour rempli garde son objectif prescrit");
+  assert.equal(ajustement.days[0].varianceCalories, 500, "l'écart se mesure contre SON objectif");
+
+  const restant = 20000 - 3500; // 16 500 à répartir sur six jours
+  assert.equal(ajustement.calories.remaining, restant);
+
+  const mardi = ajustement.days[1].targetCalories!;
+  const mercredi = ajustement.days[2].targetCalories!;
+  // Mardi reste PLUS BAS que mercredi : la forme prescrite est préservée.
+  assert.ok(mardi < mercredi, `mardi ${mardi} devrait rester sous mercredi ${mercredi}`);
+  // Et au prorata : mardi vaut 2 000/17 000 du restant.
+  assert.equal(mardi, Math.round((restant * 2000) / 17000));
+  assert.equal(mercredi, Math.round((restant * 3000) / 17000));
+  // Aucune valeur négative, jamais.
+  assert.ok(ajustement.days.every((j) => (j.targetCalories ?? 0) >= 0));
+});
+
+await test("68. sans les sept jours, l'ancien comportement est INCHANGÉ", () => {
+  // Les plans mock et les plans sans semaine chargée doivent continuer de
+  // fonctionner exactement comme avant : un objectif quotidien unique.
+  const dates = getCurrentWeekDates(new Date("2026-08-03T12:00:00"));
+  const ajustement = computeWeeklyNutritionAdjustment(
+    { calories: 2000, protein: 150, carbs: 200, fat: 60, weeklyTargetCalories: 14000 },
+    [],
+    dates,
+  );
+  assert.equal(ajustement.calories.weeklyTarget, 14000);
+  assert.ok(ajustement.days.every((j) => j.targetCalories === 2000), "partage égal, comme avant");
+  assert.equal(ajustement.days[0].targetProtein, 150);
+
+  // Une liste incomplète est ignorée : on ne devine pas les jours manquants.
+  const partiel = computeWeeklyNutritionAdjustment(
+    {
+      calories: 2000, protein: 150, carbs: 200, fat: 60, weeklyTargetCalories: 14000,
+      perDay: [{ calories: 3000, protein: 0, carbs: 0, fat: 0 }],
+    },
+    [],
+    dates,
+  );
+  assert.ok(partiel.days.every((j) => j.targetCalories === 2000));
+});
+
+await test("69. chaque repas affiche la part de SON créneau, pour SON jour", () => {
+  // LE SECOND BUG : les repas de l'élève n'affichaient plus rien depuis que le
+  // coach ne saisit plus de macros par repas. La part du créneau, appliquée
+  // aux objectifs du jour, redonne la valeur — et elle DIFFÈRE d'un jour à
+  // l'autre puisque les objectifs diffèrent.
+  const semaine = semaineInégale();
+  const lundi = semaine.days[0];
+  const mardi = semaine.days[1];
+
+  const déjeunerLundi = slotMacrosForDay(semaine, lundi, "lunch");
+  const déjeunerMardi = slotMacrosForDay(semaine, mardi, "lunch");
+  const dînerLundi = slotMacrosForDay(semaine, lundi, "dinner");
+  assert.ok(déjeunerLundi && déjeunerMardi && dînerLundi);
+  if (!déjeunerLundi || !déjeunerMardi || !dînerLundi) return;
+
+  // 40 % du lundi, 60 % pour le dîner : le déjeuner est plus léger.
+  assert.ok(déjeunerLundi.calories < dînerLundi.calories);
+  // Et le déjeuner du mardi est plus léger que celui du lundi (2 000 vs 3 000).
+  assert.ok(
+    déjeunerMardi.calories < déjeunerLundi.calories,
+    `mardi ${déjeunerMardi.calories} devrait rester sous lundi ${déjeunerLundi.calories}`,
+  );
+  // Les deux créneaux actifs reconstituent la journée, sans dérive d'arrondi.
+  assert.ok(Math.abs(déjeunerLundi.calories + dînerLundi.calories - 3000) < 1);
+
+  // Un créneau DÉSACTIVÉ n'a pas d'objectif — il n'en a pas « zéro ».
+  assert.equal(slotMacrosForDay(semaine, lundi, "dessert"), null);
 });
 
 console.log(`\n${réussis} réussis, ${échecs} échecs`);

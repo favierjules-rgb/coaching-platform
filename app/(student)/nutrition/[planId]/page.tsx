@@ -11,7 +11,7 @@ import { StudentPrescribedWeek } from "@/components/student/StudentPrescribedWee
 import { WeeklyNutritionTracker } from "@/components/student/WeeklyNutritionTracker";
 import { StatCard } from "@/components/shared/StatCard";
 import { nutritionGoalLabels } from "@/lib/nutrition";
-import { weeklyCaloriesFromDays } from "@/lib/nutrition/plan-v2-week";
+import { dailyTargetsByWeekday, weeklyCaloriesFromDays } from "@/lib/nutrition/plan-v2-week";
 import { getNutritionPlan, student } from "@/data/student";
 import { useStudentNutritionPlanV2 } from "@/hooks/useStudentNutritionPlanV2";
 import { useSupabaseNutritionForStudent } from "@/hooks/useSupabaseNutritionForStudent";
@@ -50,6 +50,23 @@ export default function NutritionPlanDetailPage() {
     // jours utilisent deux profils différents. On retombe sur la valeur
     // stockée tant que la semaine n'est pas chargée.
     const caloriesSemaine = v2.week ? weeklyCaloriesFromDays(v2.week) : plan.weeklyTargetCalories;
+
+    // Les objectifs des SEPT jours, lundi → dimanche, tels que le coach les a
+    // prescrits. `undefined` tant que la semaine n'est pas chargée : le suivi
+    // retombe alors sur l'objectif unique, sans jamais afficher de valeur
+    // inventée.
+    const objectifsParJour = v2.week
+      ? dailyTargetsByWeekday(v2.week).map((cible) =>
+          cible
+            ? {
+                calories: cible.calories.totalCalories,
+                protein: cible.grams.proteinGrams,
+                carbs: cible.grams.carbGrams,
+                fat: cible.grams.fatGrams,
+              }
+            : null,
+        )
+      : undefined;
 
     return (
       <div>
@@ -104,6 +121,11 @@ export default function NutritionPlanDetailPage() {
                 carbs: plan.carbs,
                 fat: plan.fat,
                 weeklyTargetCalories: caloriesSemaine,
+                // Les SEPT objectifs réellement prescrits. Sans eux, le suivi
+                // affichait la même moyenne hebdomadaire pour les sept jours,
+                // alors que le coach a pu prescrire 3 000 kcal le lundi et
+                // 2 000 le mardi.
+                perDay: objectifsParJour,
               }}
             />
           </section>

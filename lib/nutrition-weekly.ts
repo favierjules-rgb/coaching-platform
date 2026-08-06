@@ -21,6 +21,14 @@ export interface DailyNutritionLog {
   note: string;
 }
 
+/** Les quatre objectifs d'UNE journée prescrite. */
+export interface NutritionDayValues {
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+}
+
 export interface NutritionDailyTarget {
   calories: number;
   protein: number;
@@ -28,6 +36,20 @@ export interface NutritionDailyTarget {
   fat: number;
   /** Objectif hebdomadaire calories du plan, si renseigné (sinon calories × 7). */
   weeklyTargetCalories: number;
+  /**
+   * Les SEPT objectifs PRESCRITS, lundi → dimanche.
+   *
+   * POURQUOI. Depuis que le coach construit une semaine où chaque jour porte
+   * ses propres calories, « l'objectif du jour » n'est plus un nombre unique.
+   * Sans cette liste, tous les jours affichaient la même moyenne — un plan à
+   * 3 000 kcal du lundi au dimanche sauf 2 000 le mardi montrait 2 857 kcal
+   * SEPT FOIS, ce qui ne correspondait à aucune journée réellement prescrite.
+   *
+   * Absente ou de longueur ≠ 7 : on retombe sur l'ancien comportement, un
+   * objectif quotidien unique. Les plans mock et les plans sans semaine
+   * continuent donc de fonctionner à l'identique.
+   */
+  perDay?: readonly (NutritionDayValues | null)[];
 }
 
 export interface WeekDayAdjustment {
@@ -100,6 +122,60 @@ function computeMacroAdjustment(
   return { weeklyTarget, consumed, remaining, adjustedDaily };
 }
 
+/** Les sept jours prescrits, ou `null` si le plan n'en fournit pas sept. */
+function septJoursPrescrits(
+  target: NutritionDailyTarget,
+): readonly (NutritionDayValues | null)[] | null {
+  return target.perDay && target.perDay.length === 7 ? target.perDay : null;
+}
+
+function lireMacroJour(jour: NutritionDayValues, cle: keyof NutritionDayValues): number {
+  const valeur = jour[cle];
+  return Number.isFinite(valeur) && valeur > 0 ? valeur : 0;
+}
+
+/**
+ * Répartit ce qu'il reste sur les jours NON REMPLIS, **au prorata de ce qui
+ * a été prescrit pour chacun**.
+ *
+ * C'est le cœur du correctif : un mardi prescrit à 2 000 kcal reste plus bas
+ * qu'un lundi à 3 000, même après ajustement. La répartition à parts égales
+ * écrasait la forme de la semaine construite par le coach.
+ *
+ * Quand la somme prescrite des jours restants est nulle (aucun objectif
+ * saisi), on retombe sur un partage égal : c'est le seul repli possible, et
+ * il ne peut concerner qu'un plan vide.
+ *
+ * Rendu : un tableau de 7 valeurs, `null` pour un jour déjà rempli ou quand
+ * l'objectif hebdomadaire est déjà dépassé.
+ */
+function repartirAuProrata(
+  prescrits: readonly (NutritionDayValues | null)[],
+  cle: keyof NutritionDayValues,
+  restant: number,
+  jourRempli: readonly boolean[],
+): readonly (number | null)[] {
+  const indices = prescrits.map((_, i) => i).filter((i) => !jourRempli[i]);
+  if (indices.length === 0 || restant < 0) {
+    return prescrits.map(() => null);
+  }
+
+  const poids = indices.map((i) => lireMacroJour(prescrits[i] ?? { calories: 0, protein: 0, carbs: 0, fat: 0 }, cle));
+  const sommePoids = poids.reduce((t, p) => t + p, 0);
+
+  const valeurs = new Map<number, number>();
+  if (sommePoids <= 0) {
+    const part = Math.round(restant / indices.length);
+    for (const i of indices) valeurs.set(i, part);
+  } else {
+    for (let rang = 0; rang < indices.length; rang += 1) {
+      valeurs.set(indices[rang], Math.round((restant * poids[rang]) / sommePoids));
+    }
+  }
+
+  return prescrits.map((_, i) => valeurs.get(i) ?? null);
+}
+
 export function computeWeeklyNutritionAdjustment(
   target: NutritionDailyTarget,
   logs: DailyNutritionLog[],
@@ -116,31 +192,79 @@ export function computeWeeklyNutritionAdjustment(
   const daysFilled = filledLogs.length;
   const daysRemaining = 7 - daysFilled;
 
-  const calories = computeMacroAdjustment(target.calories, target.weeklyTargetCalories, sum("calories"), daysRemaining);
-  const protein = computeMacroAdjustment(target.protein, null, sum("proteinG"), daysRemaining);
-  const carbs = computeMacroAdjustment(target.carbs, null, sum("carbsG"), daysRemaining);
-  const fat = computeMacroAdjustment(target.fat, null, sum("fatG"), daysRemaining);
+  const prescrits = septJoursPrescrits(target);
+
+  // Objectif hebdomadaire : la SOMME des sept jours prescrits quand ils sont
+  // fournis. Jamais « objectif du jour × 7 », qui est faux dès que deux jours
+  // diffèrent — précisément ce que le nouveau constructeur permet.
+  const semaineCalories =
+    prescrits !== null
+      ? prescrits.reduce((t, j) => t + (j ? lireMacroJour(j, "calories") : 0), 0)
+      : 0;
+  const semaineProteines =
+    prescrits !== null ? prescrits.reduce((t, j) => t + (j ? lireMacroJour(j, "protein") : 0), 0) : 0;
+  const semaineGlucides =
+    prescrits !== null ? prescrits.reduce((t, j) => t + (j ? lireMacroJour(j, "carbs") : 0), 0) : 0;
+  const semaineLipides =
+    prescrits !== null ? prescrits.reduce((t, j) => t + (j ? lireMacroJour(j, "fat") : 0), 0) : 0;
+
+  const calories = computeMacroAdjustment(
+    target.calories,
+    target.weeklyTargetCalories > 0 ? target.weeklyTargetCalories : semaineCalories,
+    sum("calories"),
+    daysRemaining,
+  );
+  const protein = computeMacroAdjustment(target.protein, semaineProteines || null, sum("proteinG"), daysRemaining);
+  const carbs = computeMacroAdjustment(target.carbs, semaineGlucides || null, sum("carbsG"), daysRemaining);
+  const fat = computeMacroAdjustment(target.fat, semaineLipides || null, sum("fatG"), daysRemaining);
 
   const overBudget = calories.remaining < 0;
   const lowCalorieWarning =
     calories.adjustedDaily !== null && calories.adjustedDaily < Math.max(LOW_CALORIE_FLOOR, target.calories * 0.5);
 
   const todayIso = toDateString(new Date());
+  const rempli = weekDates.map((date) => {
+    const log = logsByDate.get(date);
+    return !!log && log.calories !== null;
+  });
+
+  // Objectifs ajustés PAR JOUR, au prorata de ce qui a été prescrit.
+  const ajustés =
+    prescrits !== null
+      ? {
+          calories: repartirAuProrata(prescrits, "calories", calories.remaining, rempli),
+          protein: repartirAuProrata(prescrits, "protein", protein.remaining, rempli),
+          carbs: repartirAuProrata(prescrits, "carbs", carbs.remaining, rempli),
+          fat: repartirAuProrata(prescrits, "fat", fat.remaining, rempli),
+        }
+      : null;
 
   const days: WeekDayAdjustment[] = weekDates.map((date, index) => {
     const log = logsByDate.get(date) ?? null;
-    const filled = !!log && log.calories !== null;
+    const filled = rempli[index];
+    const jourPrescrit = prescrits?.[index] ?? null;
+
+    // Un jour REMPLI garde son objectif prescrit — on ne réécrit jamais le
+    // passé. Un jour à venir reçoit sa part du restant.
+    const prescritCalories = jourPrescrit ? lireMacroJour(jourPrescrit, "calories") : target.calories;
+
     return {
       date,
       label: WEEKDAY_LABELS[index],
       isToday: date === todayIso,
       filled,
       log,
-      targetCalories: filled ? target.calories : calories.adjustedDaily,
-      targetProtein: filled ? target.protein : protein.adjustedDaily,
-      targetCarbs: filled ? target.carbs : carbs.adjustedDaily,
-      targetFat: filled ? target.fat : fat.adjustedDaily,
-      varianceCalories: filled && log ? (log.calories as number) - target.calories : null,
+      targetCalories: filled ? prescritCalories : (ajustés?.calories[index] ?? calories.adjustedDaily),
+      targetProtein: filled
+        ? (jourPrescrit ? lireMacroJour(jourPrescrit, "protein") : target.protein)
+        : (ajustés?.protein[index] ?? protein.adjustedDaily),
+      targetCarbs: filled
+        ? (jourPrescrit ? lireMacroJour(jourPrescrit, "carbs") : target.carbs)
+        : (ajustés?.carbs[index] ?? carbs.adjustedDaily),
+      targetFat: filled
+        ? (jourPrescrit ? lireMacroJour(jourPrescrit, "fat") : target.fat)
+        : (ajustés?.fat[index] ?? fat.adjustedDaily),
+      varianceCalories: filled && log ? (log.calories as number) - prescritCalories : null,
     };
   });
 

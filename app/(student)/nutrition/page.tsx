@@ -13,7 +13,9 @@ import {
   nutritionPlans,
   student,
 } from "@/data/student";
+import { useStudentNutritionPlanV2 } from "@/hooks/useStudentNutritionPlanV2";
 import { useSupabaseNutritionForStudent } from "@/hooks/useSupabaseNutritionForStudent";
+import { dailyTargetsByWeekday, weeklyCaloriesFromDays } from "@/lib/nutrition/plan-v2-week";
 
 /**
  * Priorité Supabase dès qu'un compte élève réel est identifié (même
@@ -24,8 +26,46 @@ import { useSupabaseNutritionForStudent } from "@/hooks/useSupabaseNutritionForS
  * suivi. Le suivi jour par jour (validation, ajustement calorique) reste
  * hors périmètre pour un plan réel — lecture seule.
  */
+/**
+ * « 3 000 kcal/jour » quand les sept jours sont identiques, « 2 000 – 3 000
+ * kcal/jour » dès qu'ils diffèrent. Le nombre unique était trompeur : il
+ * venait du `daily_target` hérité, qui ne reflète qu'un seul jour.
+ */
+function décrireObjectifQuotidien(
+  parJour: readonly ({ calories: number } | null)[] | undefined,
+  repli: number,
+): string {
+  const valeurs = (parJour ?? []).filter((j): j is { calories: number } => j !== null).map((j) => j.calories);
+  if (valeurs.length === 0) {
+    return `${repli.toLocaleString("fr-FR")} kcal/jour`;
+  }
+  const min = Math.round(Math.min(...valeurs));
+  const max = Math.round(Math.max(...valeurs));
+  return min === max
+    ? `${min.toLocaleString("fr-FR")} kcal/jour`
+    : `${min.toLocaleString("fr-FR")} – ${max.toLocaleString("fr-FR")} kcal/jour`;
+}
+
 export default function NutritionPage() {
   const supabaseNutrition = useSupabaseNutritionForStudent();
+
+  // Appelé à CHAQUE rendu, avant toute sortie anticipée : un hook ne peut pas
+  // être conditionnel. La semaine du plan actif est nécessaire ici parce que
+  // le suivi hebdomadaire doit connaître les SEPT objectifs prescrits, et non
+  // une moyenne — voir NutritionDailyTarget.perDay.
+  const v2 = useStudentNutritionPlanV2(supabaseNutrition.activePlan?.id ?? null);
+  const objectifsParJour = v2.week
+    ? dailyTargetsByWeekday(v2.week).map((cible) =>
+        cible
+          ? {
+              calories: cible.calories.totalCalories,
+              protein: cible.grams.proteinGrams,
+              carbs: cible.grams.carbGrams,
+              fat: cible.grams.fatGrams,
+            }
+          : null,
+      )
+    : undefined;
 
   if (!supabaseNutrition.ready) {
     return <p className="text-sm text-muted-foreground">Chargement…</p>;
@@ -55,9 +95,13 @@ export default function NutritionPage() {
           <h1 className="font-heading text-3xl font-extrabold uppercase text-foreground md:text-4xl">
             Nutrition
           </h1>
+          {/* « X kcal/jour » n'a plus de sens dès que deux jours diffèrent :
+              on affiche alors la FOURCHETTE réellement prescrite, et le total
+              hebdomadaire recalculé depuis les sept jours. */}
           <p className="mt-1 text-sm text-muted-foreground">
-            Plan actif : {activePlan.name} · {activePlan.caloriesPerDay} kcal/jour ·{" "}
-            {activePlan.weeklyTargetCalories.toLocaleString("fr-FR")} kcal/semaine
+            Plan actif : {activePlan.name} · {décrireObjectifQuotidien(objectifsParJour, activePlan.caloriesPerDay)} ·{" "}
+            {(v2.week ? weeklyCaloriesFromDays(v2.week) : activePlan.weeklyTargetCalories).toLocaleString("fr-FR")}{" "}
+            kcal/semaine
           </p>
         </div>
 
@@ -70,7 +114,8 @@ export default function NutritionPage() {
               protein: activePlan.protein,
               carbs: activePlan.carbs,
               fat: activePlan.fat,
-              weeklyTargetCalories: activePlan.weeklyTargetCalories,
+              weeklyTargetCalories: v2.week ? weeklyCaloriesFromDays(v2.week) : activePlan.weeklyTargetCalories,
+              perDay: objectifsParJour,
             }}
           />
         )}

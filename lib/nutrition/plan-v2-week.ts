@@ -1,5 +1,5 @@
 import { computeDailyMacroTargets, type DailyMacroTargets } from "@/lib/nutrition/macro-targets";
-import { MEAL_SLOT_KEYS, type MealSlotKey } from "@/lib/nutrition/meal-distribution";
+import { MEAL_SLOT_KEYS, computeMealDistribution, type MealSlotKey } from "@/lib/nutrition/meal-distribution";
 import { buildRecipeTargetForMealSlot } from "@/lib/nutrition/recipe-matching";
 import type { NutritionPlanV2Profile } from "@/lib/nutrition/plan-v2-validation";
 import type { RecipeWithTags } from "@/lib/nutrition/recipe-rows";
@@ -101,6 +101,56 @@ export function weeklyCaloriesFromDays(week: PlanV2Week): number {
     const profil = profileForDay(week, jour);
     return total + (profil?.dailyCalories ?? 0);
   }, 0);
+}
+
+/**
+ * Les objectifs des SEPT jours, dans l'ordre lundi → dimanche.
+ *
+ * Un jour absent de la semaine, ou dont le profil est introuvable, rend
+ * `null` : on ne devine pas un objectif, et l'appelant décide quoi en faire.
+ *
+ * C'est ce que lit le suivi hebdomadaire de l'élève, pour que chaque journée
+ * affiche SON objectif prescrit — et non la moyenne de la semaine.
+ */
+export function dailyTargetsByWeekday(
+  week: PlanV2Week,
+): readonly (DailyMacroTargets | null)[] {
+  const parJour = new Map(week.days.map((d) => [d.day, d]));
+  return WEEKDAY_KEYS.map((jour) => {
+    const journée = parJour.get(jour);
+    return journée ? dailyTargetsForDay(week, journée) : null;
+  });
+}
+
+/**
+ * Les grammes et les calories d'UN créneau, pour UN jour.
+ *
+ * C'est la part du créneau appliquée aux objectifs du jour — exactement ce
+ * que le constructeur affiche au coach sous chaque curseur de la zone 2.
+ * Aucune formule ici : `computeMealDistribution` fait tout le calcul, et
+ * `dailyTargetsForDay` fournit la journée non arrondie.
+ *
+ * `null` quand le profil du jour est introuvable, ou quand le créneau est
+ * désactivé — un créneau désactivé n'a pas d'objectif, il n'en a pas « zéro ».
+ */
+export function slotMacrosForDay(
+  week: Pick<PlanV2Week, "profiles">,
+  day: Pick<PlanV2Day, "profileKey">,
+  slot: MealSlotKey,
+): { readonly calories: number; readonly proteinGrams: number; readonly carbGrams: number; readonly fatGrams: number } | null {
+  const profil = profileForDay(week, day);
+  const cibles = dailyTargetsForDay(week, day);
+  if (!profil || !cibles) return null;
+
+  const part = computeMealDistribution(cibles, profil.slots).slots.find((s) => s.slot === slot);
+  if (!part || !part.enabled) return null;
+
+  return {
+    calories: part.calories,
+    proteinGrams: part.proteinGrams,
+    carbGrams: part.carbGrams,
+    fatGrams: part.fatGrams,
+  };
 }
 
 /** Les créneaux ACTIVÉS d'un jour, dans l'ordre canonique. */
