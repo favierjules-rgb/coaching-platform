@@ -91,6 +91,8 @@ export interface NutritionRecipeRow {
   readonly status: string;
   /** Identité technique stable d'une recette importée (migration 20260808090000). */
   readonly source_key?: string | null;
+  /** Chemin Storage de l'unique photo, ou null (migration 20260819090000). */
+  readonly image_path?: string | null;
   readonly created_at?: string;
   readonly updated_at?: string;
 }
@@ -398,6 +400,13 @@ export interface RecipeWithTags {
   readonly description: string | null;
   /** `null` = recette saisie à la main ; sinon « fixture:<cle> ». */
   readonly sourceKey: string | null;
+  /**
+   * Chemin Storage de l'unique photo, ou `null`. JAMAIS une URL : l'adresse
+   * publique se dérive à l'affichage (`recipeImagePublicUrl`). Aucune
+   * fonction du solveur ne lit ce champ — une photo ne change ni les
+   * quantités, ni la compatibilité, ni le classement.
+   */
+  readonly imagePath: string | null;
   /** Horodatage brut, tel que rendu par la base. Aucune reformulation ici. */
   readonly updatedAt: string | null;
 }
@@ -415,6 +424,7 @@ export function assembleRecipeWithTags(
     tags: tagRows.map(mapRecipeTagRow),
     description: row.description ?? null,
     sourceKey: row.source_key ?? null,
+    imagePath: row.image_path ?? null,
     updatedAt: row.updated_at ?? null,
   };
 }

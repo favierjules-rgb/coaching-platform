@@ -52,7 +52,26 @@ export default function StudentRecipesPage() {
     );
   }
 
+  // L'URL N'EST PAS UNE AUTORISATION.
+  //
+  // `plans` ne contient que les plans ASSIGNÉS à l'élève connecté (lus avec
+  // `.eq("student_id", …)`, et de toute façon filtrés par la RLS). Un planId
+  // recopié depuis l'écran d'un autre élève n'y figure donc pas.
+  //
+  // La RLS refusait déjà toute donnée — mais l'écran affichait « ce plan n'a
+  // pas encore de semaine », ce qui laisse croire que le plan existe et qu'il
+  // est simplement vide. On s'arrête ici, avec le même message que la fiche du
+  // plan : introuvable, ce qui est exact du point de vue de cet élève.
   const plan = supabaseNutrition.plans.find((p) => p.id === params.planId) ?? null;
+
+  if (!plan) {
+    return (
+      <div>
+        {retour}
+        <p className="text-sm text-muted-foreground">Plan introuvable.</p>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -63,7 +82,7 @@ export default function StudentRecipesPage() {
           Recettes
         </h1>
         <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-          {plan ? `${plan.name} · ` : ""}Choisis un jour puis un créneau : les quantités sont
+          {plan.name} · Choisis un jour puis un créneau : les quantités sont
           recalculées pour tes objectifs de ce jour-là. Rien n&apos;est enregistré — c&apos;est une
           aide, pas un journal.
         </p>

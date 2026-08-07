@@ -77,16 +77,7 @@ import {
   tagOptionsFor,
 } from "../../lib/nutrition/recipe-labels";
 import {
-  RECIPE_FIXTURES,
-  buildFixturePayload,
-  buildIngredientIdMap,
-  describeFixtureImport,
-  fixtureSourceKey,
-  summarizeFixtureImport,
-} from "../../lib/nutrition/recipe-fixtures-import";
-import {
   describeRecipeWriteError,
-  importNutritionRecipeFixtures,
   parseRecipeWriteResult,
 } from "../../lib/supabase/nutrition-recipes-write";
 import {
@@ -140,7 +131,6 @@ const APERÇU = lire("../../components/admin/RecipeAdaptivePreview.tsx");
 const BUILDER = lire("../../components/admin/RecipeBuilder.tsx");
 const CATALOGUE = lire("../../components/admin/RecipeCatalog.tsx");
 const PANNEAU_TAGS = lire("../../components/admin/RecipeTagsPanel.tsx");
-const DIALOGUE_IMPORT = lire("../../components/admin/RecipeFixtureImportDialog.tsx");
 const CYCLE_DE_VIE = lire("../../components/admin/LifecycleActions.tsx");
 const CYCLE_DE_VIE_DOMAINE = lire("../../lib/nutrition/lifecycle.ts");
 const CYCLE_DE_VIE_SERVICE = lire("../../lib/supabase/nutrition-lifecycle.ts");
@@ -158,8 +148,6 @@ const PAGE_PLANS = lire("../../app/admin/nutrition/page.tsx");
 
 /* ────────────────────────── Aides ────────────────────────── */
 
-let compteur = 0;
-const idFactice = () => `00000000-0000-4000-8000-${String((compteur += 1)).padStart(12, "0")}`;
 
 function formulaireComplet(): RecipeFormState {
   let s = createBlankRecipeForm("coach-1");
@@ -201,6 +189,7 @@ function recordFactice(id: string, nom: string, slot: string | null, statut: str
     tags: tags as RecipeWithTags["tags"],
     description: null,
     sourceKey: null,
+    imagePath: null,
     updatedAt: "2026-08-05T09:00:00Z",
   };
 }
@@ -213,9 +202,13 @@ await test("1. la sauvegarde principale passe par UNE RPC, jamais par des écrit
   for (const interdit of [".from(\"nutrition_recipe_ingredients\")", ".from(\"nutrition_recipe_tags\")"]) {
     assert.ok(!code.includes(interdit), `aucune écriture directe des enfants : ${interdit}`);
   }
-  // Le seul `.from(...)` autorisé est la LECTURE des recettes déjà importées.
+  // PLUS AUCUN `.from(...)` depuis la PR E.1. Le seul qui subsistait servait
+  // à la pré-lecture des fixtures déjà importées ; ce chemin a été supprimé
+  // avec l'import de démonstration. La couche d'écriture ne parle donc plus
+  // qu'en RPC — c'est une propriété plus forte qu'avant, et ce test la
+  // verrouille.
   const froms = [...code.matchAll(/\.from\("([a-z_]+)"\)/g)].map((m) => m[1]);
-  assert.deepEqual([...new Set(froms)], ["nutrition_recipes"], froms.join(","));
+  assert.deepEqual(froms, [], froms.join(","));
   assert.ok(!/\.insert\(|\.update\(|\.delete\(|\.upsert\(/.test(code), "aucun chemin d'écriture direct");
 });
 
@@ -696,139 +689,6 @@ await test("34. le retour canonique de la RPC est lu sans supposition", () => {
   assert.equal(parseRecipeWriteResult({ recipe: {} }).ok, false);
 });
 
-/* ═══════════ 7. Import des fixtures ═══════════ */
-
-await test("35. les 11 fixtures ont des clés SOURCE stables et distinctes", () => {
-  assert.equal(RECIPE_FIXTURES.length, 11, "11 recettes distinctes");
-  const clés = RECIPE_FIXTURES.map(fixtureSourceKey);
-  assert.equal(new Set(clés).size, 11, `clés dupliquées : ${clés.join(",")}`);
-  for (const clé of clés) {
-    assert.ok(/^fixture:[A-Za-z0-9_.:-]+$/.test(clé), clé);
-    // La clé ne se déduit JAMAIS du nom affiché.
-    const fixture = RECIPE_FIXTURES.find((f) => fixtureSourceKey(f) === clé)!;
-    assert.ok(!clé.toLowerCase().includes(fixture.name.toLowerCase().slice(0, 5)), `${clé} vs « ${fixture.name} »`);
-  }
-});
-
-await test("36. la charge utile d'une fixture traduit bien les liaisons", () => {
-  const avecLien = RECIPE_FIXTURES.find((f) => f.ingredients.some((i) => i.linkedToIngredientId))!;
-  const ids = buildIngredientIdMap(avecLien, idFactice);
-  const payload = buildFixturePayload(avecLien, "coach-1", null, ids) as {
-    recipe: { status: string; source_key: string; id: string | null };
-    ingredients: { id: string; position: number; linked_to_ingredient_id: string | null }[];
-    tags: unknown[];
-  };
-  assert.equal(payload.recipe.status, "draft", "une fixture importée est toujours un brouillon");
-  assert.equal(payload.recipe.id, null, "création");
-  assert.equal(payload.recipe.source_key, fixtureSourceKey(avecLien));
-  assert.deepEqual(payload.ingredients.map((i) => i.position), avecLien.ingredients.map((_, i) => i + 1));
-  const lié = payload.ingredients.find((i) => i.linked_to_ingredient_id !== null)!;
-  assert.ok(payload.ingredients.some((i) => i.id === lié.linked_to_ingredient_id), "le parent est dans le même payload");
-  assert.deepEqual(payload.tags, [], "aucune étiquette inventée");
-});
-
-await test("37. un SECOND import ne crée aucun doublon", () => {
-  const fixture = RECIPE_FIXTURES[0];
-  const premier = buildFixturePayload(fixture, "coach-1", null, buildIngredientIdMap(fixture, idFactice)) as { recipe: { id: string | null; source_key: string } };
-  const second = buildFixturePayload(fixture, "coach-1", "deja-la", buildIngredientIdMap(fixture, idFactice)) as { recipe: { id: string | null; source_key: string } };
-  assert.equal(premier.recipe.id, null, "première fois : création");
-  assert.equal(second.recipe.id, "deja-la", "seconde fois : mise à jour de la MÊME ligne");
-  assert.equal(premier.recipe.source_key, second.recipe.source_key, "clé stable entre deux imports");
-  // L'unicité est garantie EN BASE, pas seulement par le code.
-  assert.ok(MIGRATION.includes("create unique index if not exists nutrition_recipes_source_key_unique"));
-});
-
-await test("38. le rapport distingue importées, mises à jour, ignorées et en échec", () => {
-  const rapport = summarizeFixtureImport([
-    { sourceKey: "fixture:a", name: "A", outcome: "imported", message: null },
-    { sourceKey: "fixture:b", name: "B", outcome: "imported", message: null },
-    { sourceKey: "fixture:c", name: "C", outcome: "updated", message: null },
-    { sourceKey: "fixture:d", name: "D", outcome: "skipped", message: "déjà là" },
-    { sourceKey: "fixture:e", name: "E", outcome: "failed", message: "boum" },
-  ]);
-  assert.deepEqual(
-    { i: rapport.imported, u: rapport.updated, s: rapport.skipped, f: rapport.failed },
-    { i: 2, u: 1, s: 1, f: 1 },
-  );
-  const phrase = describeFixtureImport(rapport);
-  assert.ok(phrase.includes("2 importées") && phrase.includes("1 mise à jour"), phrase);
-  assert.ok(phrase.includes("1 ignorée") && phrase.includes("1 en échec"), phrase);
-});
-
-await test("39. l'import est MANUEL : jamais déclenché par un chargement de page", () => {
-  // Les trois fichiers du chemin d'import, HOOKS COMPRIS : la version
-  // précédente ne scannait que la page et le dialogue, qui ne contiennent
-  // aucun useEffect — la boucle tournait donc à vide et le test ne pouvait
-  // pas échouer. Les seuls useEffect réels vivent dans les hooks.
-  const sources = { PAGE_LISTE, DIALOGUE_IMPORT, HOOKS_RECETTES };
-  let effetsInspectés = 0;
-
-  for (const [nom, source] of Object.entries(sources)) {
-    const code = sansCommentairesTs(source);
-    // Découpage par accolades appariées : un `useEffect` contenant lui-même
-    // des `);` n'est plus tronqué comme le faisait la version non gourmande.
-    for (let i = code.indexOf("useEffect("); i !== -1; i = code.indexOf("useEffect(", i + 1)) {
-      let profondeur = 0;
-      let fin = i;
-      for (let j = code.indexOf("(", i); j < code.length; j += 1) {
-        if (code[j] === "(") profondeur += 1;
-        else if (code[j] === ")") {
-          profondeur -= 1;
-          if (profondeur === 0) {
-            fin = j;
-            break;
-          }
-        }
-      }
-      const effet = code.slice(i, fin + 1);
-      effetsInspectés += 1;
-      assert.ok(!/import/i.test(effet), `${nom} : un useEffect déclenche l'import`);
-    }
-    // Aucun appel, quelle que soit sa forme — la version précédente exigeait
-    // une parenthèse VIDE, que l'appel réel (trois arguments) ne peut pas
-    // avoir : elle ne détectait donc rien.
-    if (nom !== "PAGE_LISTE") {
-      assert.ok(
-        !/importNutritionRecipeFixtures\s*\(/.test(code),
-        `${nom} : aucun appel d'import ne doit exister ici`,
-      );
-    }
-  }
-
-  // Garde-fou : si ce compteur retombe à zéro, c'est que le test a cessé de
-  // regarder quoi que ce soit — exactement le défaut corrigé ici.
-  assert.ok(effetsInspectés >= 2, `au moins deux useEffect inspectés (vu : ${effetsInspectés})`);
-
-  // Dans la page, l'appel existe — mais UNIQUEMENT dans `importer()`, la
-  // fonction passée au bouton, jamais dans un effet.
-  const pageListe = sansCommentairesTs(PAGE_LISTE);
-  const appels = [...pageListe.matchAll(/importNutritionRecipeFixtures\s*\(/g)];
-  assert.equal(appels.length, 1, "un seul appel dans la page");
-  const avant = pageListe.slice(0, appels[0].index ?? 0);
-  assert.ok(
-    avant.lastIndexOf("async function importer") > avant.lastIndexOf("useEffect("),
-    "l'appel est dans importer(), pas dans un effet",
-  );
-  // L'import part d'un clic, après confirmation.
-  assert.ok(DIALOGUE_IMPORT.includes("Importer les recettes de démonstration"));
-  assert.ok(DIALOGUE_IMPORT.includes("Importer les recettes de démonstration ?"), "modale de confirmation");
-  assert.ok(PAGE_LISTE.includes("onImport={importer}"));
-  // Et la migration n'insère aucune donnée : pas une seule clé de fixture.
-  assert.ok(!/'fixture:/.test(sansCommentairesSql(MIGRATION)));
-});
-
-await test("40. une recette MANUELLE portant le même nom qu'une fixture n'est jamais touchée", () => {
-  // L'identité vient de source_key, jamais du nom : une recette manuelle a
-  // source_key = null, donc elle ne peut pas être reconnue comme fixture.
-  const code = sansCommentairesTs(lire("../../lib/supabase/nutrition-recipes-write.ts"));
-  assert.ok(code.includes('.in("source_key", clés)'), "la recherche des existantes se fait par clé");
-  assert.ok(!/\.eq\("name"|ilike\("name"/.test(code), "jamais par le nom");
-  const manuel = createBlankRecipeForm("coach-1");
-  assert.equal(manuel.sourceKey, null, "une recette créée à la main n'a pas de clé d'import");
-  const payload = toRecipeSavePayload({ ...manuel, name: RECIPE_FIXTURES[0].name }) as { recipe: { source_key: string | null } };
-  assert.equal(payload.recipe.source_key, null);
-});
-
 /* ═══════════ 8. Non-régression ═══════════ */
 
 await test("41. les plans v1 et le constructeur v2 sont INCHANGÉS", () => {
@@ -854,7 +714,6 @@ await test("42. AUCUN écran élève n'est modifié, aucune policy de lecture é
     "../../components/admin/RecipeTagsPanel.tsx",
     "../../components/admin/RecipeAdaptivePreview.tsx",
     "../../components/admin/RecipeValidationSummary.tsx",
-    "../../components/admin/RecipeFixtureImportDialog.tsx",
   ]) {
     assert.ok(lire(chemin).length > 0, chemin);
   }
@@ -864,7 +723,7 @@ await test("43. accessibilité et responsive : cibles tactiles, clavier, pas de 
   // CYCLE_DE_VIE est ajouté à la liste : le catalogue et la fiche lui
   // délèguent désormais tous leurs boutons d'action, et un composant partagé
   // qui manquerait la cible de 44 px la manquerait sur les deux écrans.
-  const sources = { BUILDER, CATALOGUE, PANNEAU_TAGS, DIALOGUE_IMPORT, APERÇU, CYCLE_DE_VIE };
+  const sources = { BUILDER, CATALOGUE, PANNEAU_TAGS, DIALOGUE_IMPORT_FICHIER, APERÇU, CYCLE_DE_VIE };
   for (const [nom, source] of Object.entries(sources)) {
     const boutons = (source.match(/<button/g) ?? []).length;
     if (boutons > 0) {
@@ -962,175 +821,15 @@ await test("48. la checklist PostgreSQL couvre le périmètre exigé", () => {
 await test("49. la migration est déclarée au manifeste et comptée", () => {
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 25);
+  assert.equal(attendues.length, 26);
   assert.ok(attendues.includes("20260808090000_save_nutrition_recipe.sql"));
   assert.ok(attendues.includes("20260809090000_save_nutrition_recipe_partial_payload.sql"));
   const secu = lire("../../scripts/tests/security-hardening.mts");
-  assert.ok(secu.includes(".length, 52,"), "le compteur de migrations suit les migrations réelles");
-  assert.ok(secu.includes("assert.equal(attendues.length, 25);"));
+  assert.ok(secu.includes(".length, 53,"), "le compteur de migrations suit les migrations réelles");
+  assert.ok(secu.includes("assert.equal(attendues.length, 26);"));
 });
 
 /* ═══════════ 9. PR B.1 — correctifs de conformité ═══════════ */
-
-/**
- * Client Supabase factice — juste assez pour exercer RÉELLEMENT
- * `importNutritionRecipeFixtures` : la pré-lecture par clé, la boucle, et
- * chaque appel de RPC. La version précédente de cette suite ne l'appelait
- * jamais ; c'est exactement par là que passait le défaut de pré-lecture.
- */
-function clientFactice(options: {
-  existantes?: { id: string; source_key: string }[];
-  erreurLecture?: { message: string };
-  échouerSur?: (payload: Record<string, unknown>) => string | null;
-}) {
-  const appelsRpc: Record<string, unknown>[] = [];
-  const lectures: { table: string; colonnes: string; filtres: Record<string, unknown> }[] = [];
-
-  function requête(table: string) {
-    const filtres: Record<string, unknown> = {};
-    const chaîne = {
-      select(colonnes: string) {
-        lectures.push({ table, colonnes, filtres });
-        return chaîne;
-      },
-      eq(colonne: string, valeur: unknown) {
-        filtres[colonne] = valeur;
-        return chaîne;
-      },
-      in(colonne: string, valeurs: unknown[]) {
-        filtres[colonne] = valeurs;
-        return Promise.resolve(
-          options.erreurLecture
-            ? { data: null, error: options.erreurLecture }
-            : { data: options.existantes ?? [], error: null },
-        );
-      },
-    };
-    return chaîne;
-  }
-
-  const client = {
-    from: requête,
-    rpc(_fn: string, args: { p_payload: Record<string, unknown> }) {
-      appelsRpc.push(args.p_payload);
-      const message = options.échouerSur?.(args.p_payload) ?? null;
-      if (message) return Promise.resolve({ data: null, error: { message } });
-      const recette = args.p_payload.recipe as Record<string, unknown>;
-      return Promise.resolve({
-        data: {
-          recipe: {
-            id: (recette.id as string) ?? `créée-${appelsRpc.length}`,
-            status: (recette.status as string) ?? "draft",
-            source_key: recette.source_key ?? null,
-          },
-          ingredient_count: (args.p_payload.ingredients as unknown[] | undefined)?.length ?? 0,
-          tag_count: (args.p_payload.tags as unknown[] | undefined)?.length ?? 0,
-          blocking_issue: null,
-        },
-        error: null,
-      });
-    },
-  };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return { client: client as any, appelsRpc, lectures };
-}
-
-await test("50. IMPORT RÉELLEMENT EXÉCUTÉ : 11 fixtures, 11 transactions, aucune écriture directe", async () => {
-  const { client, appelsRpc, lectures } = clientFactice({});
-  const rapport = await importNutritionRecipeFixtures(client, "coach-1", { generateId: idFactice });
-
-  assert.equal(rapport.imported, 11, "les 11 fixtures sont importées");
-  assert.equal(rapport.updated + rapport.skipped + rapport.failed, 0);
-  assert.equal(appelsRpc.length, 11, "une transaction par fixture, pas une de plus");
-
-  // UNE seule lecture, sur la table des recettes, filtrée par coach ET par clé.
-  assert.equal(lectures.length, 1, "une seule requête de pré-lecture");
-  assert.equal(lectures[0].table, "nutrition_recipes");
-  assert.equal(lectures[0].filtres.coach_id, "coach-1");
-  assert.equal((lectures[0].filtres.source_key as string[]).length, 11);
-
-  // Chaque charge utile porte sa clé stable, en création (id null) et en brouillon.
-  const clés = appelsRpc.map((p) => (p.recipe as { source_key: string }).source_key);
-  assert.equal(new Set(clés).size, 11, "11 clés distinctes");
-  assert.ok(clés.every((c) => c.startsWith("fixture:")), clés.join(","));
-  for (const payload of appelsRpc) {
-    const recette = payload.recipe as Record<string, unknown>;
-    assert.equal(recette.id, null, "création : aucun identifiant");
-    assert.equal(recette.status, "draft", "une fixture arrive en brouillon");
-    assert.equal(recette.coach_id, "coach-1");
-  }
-});
-
-await test("51. SECOND IMPORT : ignoré par défaut, aucune transaction, aucun doublon", async () => {
-  const existantes = RECIPE_FIXTURES.map((f, i) => ({
-    id: `déjà-${i}`,
-    source_key: fixtureSourceKey(f),
-  }));
-  const { client, appelsRpc } = clientFactice({ existantes });
-  const rapport = await importNutritionRecipeFixtures(client, "coach-1", { generateId: idFactice });
-
-  assert.equal(rapport.skipped, 11, "les 11 sont ignorées");
-  assert.equal(rapport.imported + rapport.updated + rapport.failed, 0);
-  assert.equal(appelsRpc.length, 0, "aucune écriture : rien n'est retouché");
-  assert.ok(rapport.entries.every((e) => e.outcome === "skipped"));
-});
-
-await test("52. MISE À JOUR EXPLICITE : le statut, la description et les étiquettes du coach sont préservés", async () => {
-  const existantes = RECIPE_FIXTURES.map((f, i) => ({
-    id: `déjà-${i}`,
-    source_key: fixtureSourceKey(f),
-  }));
-  const { client, appelsRpc } = clientFactice({ existantes });
-  const rapport = await importNutritionRecipeFixtures(client, "coach-1", {
-    generateId: idFactice,
-    updateExisting: true,
-  });
-
-  assert.equal(rapport.updated, 11);
-  assert.equal(appelsRpc.length, 11);
-
-  for (const payload of appelsRpc) {
-    const recette = payload.recipe as Record<string, unknown>;
-    assert.ok(typeof recette.id === "string", "une mise à jour cible la ligne existante");
-    // Une clé ABSENTE laisse la colonne intacte côté base (migration B.1).
-    assert.ok(!("status" in recette), "le statut du coach n'est pas réécrit");
-    assert.ok(!("description" in recette), "la description du coach n'est pas effacée");
-    assert.ok(!("tags" in payload), "les étiquettes du coach ne sont pas supprimées");
-    // Ce que la fixture définit VRAIMENT est bien rafraîchi.
-    assert.ok(typeof recette.name === "string" && (recette.name as string).length > 0);
-    assert.ok(Array.isArray(payload.ingredients));
-  }
-
-  // À la CRÉATION, en revanche, les trois clés sont présentes et explicites.
-  const création = buildFixturePayload(
-    RECIPE_FIXTURES[0],
-    "coach-1",
-    null,
-    buildIngredientIdMap(RECIPE_FIXTURES[0], idFactice),
-  ) as Record<string, unknown>;
-  const recetteCréée = création.recipe as Record<string, unknown>;
-  assert.equal(recetteCréée.status, "draft");
-  assert.equal(recetteCréée.description, null);
-  assert.deepEqual(création.tags, []);
-});
-
-await test("53. PRÉ-LECTURE EN ÉCHEC : rien n'est écrit, et le rapport dit la vraie cause", async () => {
-  const { client, appelsRpc } = clientFactice({
-    erreurLecture: { message: "réseau indisponible" },
-  });
-  const rapport = await importNutritionRecipeFixtures(client, "coach-1", { generateId: idFactice });
-
-  assert.equal(appelsRpc.length, 0, "AUCUNE écriture tentée à l'aveugle");
-  assert.equal(rapport.failed, 11);
-  assert.equal(rapport.imported + rapport.updated + rapport.skipped, 0);
-  for (const entrée of rapport.entries) {
-    assert.equal(entrée.outcome, "failed");
-    assert.ok(
-      entrée.message?.includes("déjà importées") && entrée.message.includes("rien n'a été écrit"),
-      `le message doit expliquer la cause : ${entrée.message ?? "(vide)"}`,
-    );
-  }
-});
 
 await test("54. la validation locale couvre les règles de blocage de la base", () => {
   // Mode unité sans poids d'unité : `unit_scalable_incoherent` côté base.
@@ -1319,19 +1018,6 @@ await test("59. le rechargement après sauvegarde ne démonte pas le formulaire"
   const finBloc = échec.indexOf("return;");
   assert.ok(!échec.slice(0, finBloc).includes("refetch("), "aucun rechargement après un échec");
 });
-
-await test("60. le dialogue d'import traite l'échec et ignore un rapport périmé", () => {
-  const code = sansCommentairesTs(DIALOGUE_IMPORT);
-  assert.ok(code.includes(".catch("), "un rejet ne peut plus passer inaperçu");
-  assert.ok(code.includes("tentative.current"), "un numéro de tentative distingue les rapports");
-  assert.ok(/fermer\(\)[\s\S]{0,200}tentative\.current \+= 1/.test(code),
-    "fermer la modale périme la tentative en cours");
-  assert.ok(code.includes('role="alert"'), "l'échec est annoncé");
-  // La promesse d'origine reste inchangée : l'import part toujours d'un clic.
-  assert.ok(code.includes("onClick={lancer}"));
-});
-
-/* ═══════════ 12. Cycle de vie des recettes (PR D) ═══════════ */
 
 await test("61. les actions proposées suivent le statut, et rien d'autre", () => {
   assert.deepEqual(recipeLifecycleActions("draft"), ["publish", "archive", "duplicate"]);

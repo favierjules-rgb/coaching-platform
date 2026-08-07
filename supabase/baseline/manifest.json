@@ -58,7 +58,8 @@
     "20260815090000_nutrition_lifecycle.sql",
     "20260816090000_nutrition_plan_coach_ownership.sql",
     "20260817090000_nutrition_plan_deletion_history.sql",
-    "20260818090000_nutrition_recipe_catalog.sql"
+    "20260818090000_nutrition_recipe_catalog.sql",
+    "20260819090000_nutrition_recipe_images.sql"
   ],
   "garanties_de_contenu": {
     "insert_de_donnees_metier": 0,

@@ -428,7 +428,7 @@ await test("18. le baseline est HORS de supabase/migrations — impossible à po
   // 39 depuis la persistance de l'objectif hebdomadaire des plans v2
   // (migration 20260805090000, feat/nutrition-plan-v2-builder — déclarée
   // dans le manifeste comme le veut la procédure).
-  assert.equal(migrations.filter((f) => f.endsWith(".sql")).length, 52, "les 52 migrations doivent rester intactes");
+  assert.equal(migrations.filter((f) => f.endsWith(".sql")).length, 53, "les 53 migrations doivent rester intactes");
 });
 
 await test("19. manifeste : empreintes exactes et borne cohérente", () => {
@@ -451,7 +451,7 @@ await test("19. manifeste : empreintes exactes et borne cohérente", () => {
   // Les migrations annoncées existent réellement, et ce sont bien celles
   // qui suivent la borne.
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 25);
+  assert.equal(attendues.length, 26);
   const presentes = readdirSync(new URL("../../supabase/migrations", import.meta.url).pathname)
     .filter((f) => f.endsWith(".sql"))
     .filter((f) => f >= "20260724214500")

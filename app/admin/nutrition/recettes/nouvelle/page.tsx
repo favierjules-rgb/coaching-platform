@@ -6,9 +6,14 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
 import { RecipeBuilder } from "@/components/admin/RecipeBuilder";
+import {
+  RecipeImageField,
+  type PendingRecipeImage,
+} from "@/components/admin/RecipeImageField";
 import { useCurrentCoachId } from "@/hooks/useCurrentCoachId";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { saveNutritionRecipe } from "@/lib/supabase/nutrition-recipes-write";
+import { attachRecipeImage } from "@/lib/supabase/storage-recipe-images";
 import {
   createBlankRecipeForm,
   toRecipeSavePayload,
@@ -26,6 +31,17 @@ import type { RecipeStatus } from "@/lib/nutrition/recipe-rows";
  * ÉCHEC : le formulaire est conservé intégralement. On n'efface rien, on ne
  * recharge rien — le coach retrouve exactement sa saisie et le message
  * canonique de la base.
+ *
+ * LA PHOTO ARRIVE APRÈS, ET C'EST VOULU. Le chemin Storage d'une image
+ * contient l'identifiant de la recette, et la policy d'écriture exige que
+ * cette recette existe : rien ne peut donc être envoyé avant la création.
+ * L'image choisie est optimisée puis GARDÉE EN MÉMOIRE, et n'est envoyée
+ * qu'une fois l'identifiant obtenu. Si l'enregistrement échoue, aucun fichier
+ * n'a été déposé — il n'y a pas d'orphelin à nettoyer, par construction.
+ *
+ * Si l'envoi de la photo échoue APRÈS la création, la recette existe sans
+ * photo : on le dit, et on n'annule pas une création réussie pour une image
+ * facultative.
  */
 export default function AdminNutritionRecipeNewPage() {
   const router = useRouter();
@@ -34,6 +50,8 @@ export default function AdminNutritionRecipeNewPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [blockingIssue, setBlockingIssue] = useState<string | null>(null);
+  // L'image optimisée, en attente de la naissance de la recette.
+  const [photo, setPhoto] = useState<PendingRecipeImage | null>(null);
 
   // État construit à la DEMANDE, jamais dans un effet : pas de re-rendu
   // inutile, et aucune écriture au chargement.
@@ -64,6 +82,24 @@ export default function AdminNutritionRecipeNewPage() {
       return;
     }
     setBlockingIssue(résultat.blockingIssue);
+
+    // La recette existe : son identifiant permet enfin de composer le chemin
+    // Storage. Un échec ici ne remet pas la création en cause — la fiche
+    // s'ouvre, sans photo, et le coach la repose en un clic.
+    if (photo !== null && coachId !== null) {
+      const envoi = await attachRecipeImage(supabase, {
+        recipeId: résultat.recipeId,
+        coachId,
+        blob: photo.blob,
+        mime: photo.mime,
+        fileId: crypto.randomUUID(),
+      });
+      URL.revokeObjectURL(photo.previewUrl);
+      setPhoto(null);
+      if (!envoi.ok) {
+        setSaveError(`Recette créée, mais la photo n'a pas pu être envoyée : ${envoi.message}`);
+      }
+    }
     router.push(`/admin/nutrition/recettes/${résultat.recipeId}`);
   }
 
@@ -116,6 +152,16 @@ export default function AdminNutritionRecipeNewPage() {
         saving={saving}
         saveError={saveError}
         blockingIssue={blockingIssue}
+        imageSlot={
+          <RecipeImageField
+            recipeId={null}
+            coachId={coachId}
+            imagePath={null}
+            recipeName={formulaire.name}
+            onPending={setPhoto}
+            disabled={saving}
+          />
+        }
       />
     </div>
   );

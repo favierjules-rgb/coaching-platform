@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Save } from "lucide-react";
 
 import { Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
@@ -56,6 +56,7 @@ export function RecipeBuilder({
   saving,
   saveError,
   blockingIssue,
+  imageSlot,
 }: {
   state: RecipeFormState;
   onChange: (next: RecipeFormState) => void;
@@ -63,6 +64,17 @@ export function RecipeBuilder({
   saving: boolean;
   saveError: string | null;
   blockingIssue: string | null;
+  /**
+   * La zone « Photo de la recette », injectée par la page.
+   *
+   * POURQUOI UN EMPLACEMENT ET NON UN CHAMP. La photo ne fait pas partie de
+   * `RecipeFormState` : elle ne part jamais dans `save_nutrition_recipe`, et
+   * son écriture (Storage + RPC dédiée) demande un client Supabase. Ce
+   * composant, lui, est resté purement présentationnel depuis la PR B — il
+   * n'importe rien de `lib/supabase`, ce qui le rend testable sans base. Un
+   * emplacement préserve cette propriété.
+   */
+  imageSlot?: ReactNode;
 }) {
   const [retraitDemandé, setRetraitDemandé] = useState<string | null>(null);
 
@@ -144,6 +156,8 @@ export function RecipeBuilder({
           </div>
         </div>
       </section>
+
+      {imageSlot}
 
       <section className="rounded-card border border-border bg-card p-4 shadow-soft sm:p-6">
         <h2 className="mb-4 font-heading text-base font-bold uppercase text-foreground">Ingrédients</h2>

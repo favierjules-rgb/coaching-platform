@@ -169,6 +169,13 @@ export interface DeletionSuccess {
   readonly name: string;
   /** Ce que la base a réellement supprimé, table par table. */
   readonly deleted: Readonly<Record<string, number>>;
+  /**
+   * L'objet Storage qui n'a plus de propriétaire — `null` pour un plan, et
+   * pour une recette sans photo. PostgreSQL et Storage ne partageant aucune
+   * transaction, la base tranche d'abord et l'appelant nettoie ensuite :
+   * un fichier orphelin est inerte, une référence cassée ne l'est pas.
+   */
+  readonly imagePath: string | null;
 }
 
 export interface DeletionRefusal {
@@ -210,6 +217,7 @@ export function parseDeletionResult(data: unknown, idAttendu: string): DeletionR
       id: texteOuNull(ligne.plan_id) ?? texteOuNull(ligne.recipe_id) ?? idAttendu,
       name: typeof ligne.name === "string" ? ligne.name : "",
       deleted: compté,
+      imagePath: texteOuNull(ligne.image_path),
     };
   }
 

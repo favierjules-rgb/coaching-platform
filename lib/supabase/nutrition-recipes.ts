@@ -86,7 +86,7 @@ export async function readNutritionRecipes(
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let requête = (supabase.from(TABLE_RECIPES) as any)
-    .select("id, coach_id, name, description, slot_key, status, source_key, created_at, updated_at")
+    .select("id, coach_id, name, description, slot_key, status, source_key, image_path, created_at, updated_at")
     .in("status", statuses as readonly string[]);
 
   if (options.slot !== undefined) {
@@ -121,7 +121,7 @@ export async function readNutritionRecipe(
 ): Promise<{ recipe: RecipeWithTags | null; invalid: InvalidRecipe | null }> {
   const { data, error } = await supabase
     .from(TABLE_RECIPES)
-    .select("id, coach_id, name, description, slot_key, status, source_key, created_at, updated_at")
+    .select("id, coach_id, name, description, slot_key, status, source_key, image_path, created_at, updated_at")
     .eq("id", recipeId)
     .maybeSingle();
   devWarn("readNutritionRecipe (recette)", error);
