@@ -54,6 +54,18 @@ import {
   setDayMacroBp,
   type WeekFormState,
 } from "../../lib/nutrition/plan-v2-week-form";
+import { toDuplicateWeekPayload, toWeekSavePayload } from "../../lib/nutrition/plan-v2-week-form";
+import { ConfirmActionModal } from "../../components/admin/LifecycleActions";
+import {
+  describeHidingFromStudent,
+  describePlanDeletionBlock,
+  duplicateName,
+  hidesPlanFromAssignedStudent,
+  planLifecycleActions,
+  planStatusAfter,
+  PLAN_ACTION_LABELS_FR,
+  DELETE_ACTION_LABEL_FR,
+} from "../../lib/nutrition/lifecycle";
 import { evaluateLegacyWrite } from "../../lib/nutrition/plan-v2-guards";
 import { guardNutritionAssignment } from "../../lib/supabase/nutrition-assignment-guard";
 import { NutritionPlanV2Builder } from "../../components/admin/NutritionPlanV2Builder";
@@ -500,7 +512,16 @@ await test("26. un plan complet est assignable", () => {
 await test("27. la sauvegarde v2 passe EXCLUSIVEMENT par la RPC", () => {
   const src = sansCommentaires(PAGE_PLAN);
   assert.ok(src.includes("saveNutritionPlanV2(supabase,"), "la RPC est le seul chemin d'écriture v2");
-  assert.equal(src.split("saveNutritionPlanV2(").length - 1, 1);
+  // DEUX appels depuis la PR D — l'enregistrement et la duplication — mais un
+  // seul chemin : le second passe par la MÊME fonction, avec `planId: null`.
+  // Ce qui compte n'est donc plus le nombre d'appels mais l'absence de tout
+  // autre chemin d'écriture, vérifiée juste après et au contrôle 28.
+  assert.equal(src.split("saveNutritionPlanV2(").length - 1, 2);
+  assert.ok(src.includes("planId: null,"), "la duplication crée un plan par la même RPC");
+  assert.ok(
+    !/\.from\(\s*"nutrition_plans"\s*\)[\s\S]{0,80}\.(insert|update|upsert|delete)\(/.test(src),
+    "aucune écriture directe dans nutrition_plans depuis la page",
+  );
   const wrapper = sansCommentaires(lire("../../lib/supabase/nutrition-v2.ts"));
   assert.ok(wrapper.includes('rpc("save_nutrition_plan_v2"'), "le wrapper appelle bien la RPC");
 });
@@ -1000,11 +1021,11 @@ await test("63. toutes les garanties de sécurité sont reconduites", () => {
 await test("64. la migration est déclarée au manifeste et comptée", () => {
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 21);
+  assert.equal(attendues.length, 23);
   assert.ok(attendues.includes("20260805090000_nutrition_plan_v2_weekly_target.sql"));
   const secu = lire("../../scripts/tests/security-hardening.mts");
-  assert.ok(secu.includes(".length, 48,"), "le compteur de migrations suit les migrations réelles");
-  assert.ok(secu.includes("assert.equal(attendues.length, 21);"));
+  assert.ok(secu.includes(".length, 50,"), "le compteur de migrations suit les migrations réelles");
+  assert.ok(secu.includes("assert.equal(attendues.length, 23);"));
 });
 
 /* ══════════ Refonte « semaine d'abord » — rendu réel ══════════ */
@@ -1063,6 +1084,195 @@ await test("67. l'initialisation de la semaine est facultative et repliée", () 
   assert.ok(src.includes("initializeAllDays(week, objectifs)"));
   assert.equal(src.split("initializeAllDays").length - 1, 2, "un import, un seul appel");
 });
+/* ═══════════ Cycle de vie du plan (PR D) ═══════════ */
+
+await test("68. les actions du plan suivent son statut, et la suppression n'en fait pas partie", () => {
+  assert.deepEqual(planLifecycleActions("brouillon"), ["activate", "duplicate"]);
+  assert.deepEqual(planLifecycleActions("actif"), ["archive", "duplicate"]);
+  // « Restaurer » ramène en BROUILLON : un plan archivé ne redevient jamais
+  // assignable sans qu'on l'ait relu.
+  assert.deepEqual(planLifecycleActions("archivé"), ["restore", "duplicate"]);
+  assert.equal(planStatusAfter("restore"), "brouillon");
+  assert.equal(planStatusAfter("activate"), "actif");
+  assert.equal(planStatusAfter("archive"), "archivé");
+  assert.equal(planStatusAfter("duplicate"), null);
+  assert.equal(PLAN_ACTION_LABELS_FR.archive, "Archiver");
+  assert.equal(DELETE_ACTION_LABEL_FR, "Supprimer définitivement");
+  // Aucune liste d'actions ne contient la suppression : elle vit ailleurs.
+  for (const statut of ["brouillon", "actif", "archivé"] as const) {
+    assert.ok(!(planLifecycleActions(statut) as readonly string[]).includes("delete"));
+  }
+  // La liste des plans ne propose PAS la suppression — seulement le statut.
+  assert.ok(!PAGE_LISTE.includes("DeleteTriggerButton"));
+  assert.ok(PAGE_LISTE.includes('filter((action) => action !== "duplicate")'));
+  // Le motif de blocage nomme la dépendance, au singulier comme au pluriel.
+  assert.ok(describePlanDeletionBlock("assigned", { assignedStudents: 1, dailyLogs: 0 }).includes("Un élève"));
+  assert.ok(describePlanDeletionBlock("used_in_history", { assignedStudents: 0, dailyLogs: 12 }).includes("12 journées"));
+  assert.ok(describePlanDeletionBlock("used_in_history", { assignedStudents: 0, dailyLogs: 12 }).includes("archive"));
+});
+
+await test("69. dupliquer un plan crée un BROUILLON indépendant, par la MÊME RPC", () => {
+  const semaine = initializeAllDays(createBlankWeek(), {
+    dailyCalories: 2400,
+    proteinBp: 3000,
+    carbBp: 4500,
+    fatBp: 2500,
+  });
+  // Un repas DÉJÀ enregistré porte un vrai UUID : c'est le cas dangereux.
+  const uuid = "11111111-2222-4333-8444-555555555555";
+  const avecRepas: typeof semaine = {
+    ...semaine,
+    days: semaine.days.map((jour, i) =>
+      i === 0
+        ? {
+            ...jour,
+            meals: [
+              {
+                id: uuid,
+                slot: "breakfast" as const,
+                name: "Petit déjeuner",
+                items: [{ name: "Flocons", quantity: "80 g" }],
+                calories: 500,
+                protein: 30,
+                carbs: 60,
+                fat: 12,
+                coachNotes: "",
+              },
+            ],
+          }
+        : jour,
+    ),
+  };
+
+  // La sauvegarde NORMALE conserve l'identifiant : le repas est mis à jour.
+  const normal = toWeekSavePayload(avecRepas);
+  const repasNormal = (normal.days[0] as { meals: { id: string | null }[] }).meals[0];
+  assert.equal(repasNormal.id, uuid, "une sauvegarde met à jour le repas existant");
+
+  // La DUPLICATION, elle, le neutralise : sans quoi le repas du plan d'origine
+  // serait déplacé dans la copie.
+  const copie = toDuplicateWeekPayload(avecRepas);
+  const repasCopie = (copie.days[0] as { meals: { id: string | null }[] }).meals[0];
+  assert.equal(repasCopie.id, null, "la copie demande un identifiant neuf");
+  assert.equal(copie.days.length, 7, "les sept jours sont copiés");
+  assert.equal(copie.profiles.length, 7, "et les sept profils internes");
+  assert.equal(copie.main_profile_key, normal.main_profile_key);
+  // Le reste du repas est copié sans perte.
+  const contenu = repasCopie as unknown as { name: string; calories: number };
+  assert.equal(contenu.name, "Petit déjeuner");
+  assert.equal(contenu.calories, 500);
+  // L'original n'a pas été muté.
+  assert.equal(avecRepas.days[0].meals[0].id, uuid);
+
+  // La page duplique en BROUILLON, sans élève, par la RPC.
+  const src = sansCommentaires(PAGE_PLAN);
+  assert.ok(src.includes("status: STATUS_APP_TO_DB.brouillon"), "une copie naît en brouillon");
+  assert.ok(src.includes("week: toDuplicateWeekPayload(formulaire)"));
+  assert.ok(!/studentId|student_id/.test(src.slice(src.indexOf("async function dupliquer"), src.indexOf("function lancerAction"))),
+    "dupliquer n'assigne jamais d'élève");
+  assert.equal(duplicateName("Semaine sèche"), "Semaine sèche (copie)");
+  assert.equal(duplicateName("   "), "Sans nom (copie)");
+});
+
+await test("70. retirer un plan de l'écran d'un élève se confirme, et nomme l'élève", () => {
+  // SEUL le retour en brouillon masque le plan. L'archivage, lui, conserve
+  // l'accès de l'élève déjà affecté : confondre les deux ferait apparaître une
+  // confirmation là où il n'y a rien à confirmer.
+  assert.equal(hidesPlanFromAssignedStudent("brouillon", 1), true);
+  assert.equal(hidesPlanFromAssignedStudent("brouillon", 0), false, "sans élève, rien à prévenir");
+  assert.equal(hidesPlanFromAssignedStudent("archivé", 1), false, "archiver ne masque rien");
+  assert.equal(hidesPlanFromAssignedStudent("actif", 1), false);
+
+  // Le message NOMME. « un élève » est une abstraction, un prénom est une
+  // conséquence.
+  const seul = describeHidingFromStudent(["Marie Dupont"]);
+  assert.ok(seul.startsWith("Marie Dupont"), seul);
+  assert.ok(seul.includes("ne verra plus ce plan"));
+  assert.ok(seul.includes("recettes"), "on dit ce qui disparaît");
+  assert.ok(seul.includes("archive"), "et on nomme l'alternative qui préserve l'accès");
+  const deux = describeHidingFromStudent(["Marie Dupont", "Léo Martin"]);
+  assert.ok(deux.includes("Marie Dupont et Léo Martin"));
+  assert.ok(deux.includes("ne verront plus"));
+  assert.ok(describeHidingFromStudent([]).startsWith("L'élève affecté"), "repli sans nom");
+
+  // La modale rend le message et laisse une sortie.
+  const html = renderToString(
+    createElement(ConfirmActionModal, {
+      title: "Ce plan disparaîtra de l'espace de l'élève",
+      message: "Marie Dupont ne verra plus ce plan.",
+      confirmLabel: "Repasser en brouillon",
+      onCancel: () => {},
+      onConfirm: () => {},
+    }),
+  );
+  assert.ok(html.includes("Marie Dupont ne verra plus ce plan."));
+  assert.ok(html.includes("Repasser en brouillon"));
+  assert.ok(html.includes("Annuler"), "on peut toujours renoncer");
+  assert.ok(html.includes('role="dialog"'), "c'est bien une modale accessible");
+  assert.ok(html.includes("min-h-[44px]"), "cibles tactiles");
+
+  // LES TROIS CHEMINS qui peuvent ramener un plan en brouillon la déclenchent.
+  // Un seul oubli suffirait à rendre la garantie fausse.
+  const fiche = sansCommentaires(PAGE_PLAN);
+  const liste = sansCommentaires(PAGE_LISTE);
+  assert.equal((fiche.match(/hidesPlanFromAssignedStudent\(/g) ?? []).length, 2,
+    "la fiche couvre l'action de cycle de vie ET l'enregistrement du constructeur");
+  assert.ok(liste.includes("hidesPlanFromAssignedStudent("), "la liste aussi");
+  // Et la modale est montée dans les DEUX branches de rendu de la fiche : la
+  // branche « constructeur » sort avant le reste de la page.
+  assert.equal((fiche.match(/<ConfirmActionModal/g) ?? []).length, 2,
+    "une modale déclenchée mais non montée ne s'ouvrirait jamais");
+  assert.equal((liste.match(/<ConfirmActionModal/g) ?? []).length, 1);
+});
+
+await test("71. le propriétaire d'un plan est posé par la BASE, jamais par l'écran", () => {
+  const sql = lire("../../supabase/migrations/20260816090000_nutrition_plan_coach_ownership.sql");
+
+  // Un trigger, pas une retouche de RPC : il est SOUS tous les chemins.
+  assert.ok(sql.includes("create trigger nutrition_plans_fill_coach_id"));
+  assert.ok(sql.includes("create trigger nutrition_plans_fill_coach_id_on_assign"));
+  assert.ok(sql.includes("before insert on public.nutrition_plans"));
+  assert.ok(sql.includes("before update of student_id on public.nutrition_plans"));
+  // Sur UPDATE, le déclenchement est BORNÉ à un vrai changement d'élève : sans
+  // cette clause, le détachement provoqué par la suppression d'un coach
+  // (ON DELETE SET NULL) réattribuerait aussitôt le plan.
+  assert.ok(sql.includes("when (new.student_id is not null and new.student_id is distinct from old.student_id)"));
+
+  // La règle : l'élève d'abord, l'appelant ensuite, et JAMAIS d'écrasement.
+  const corps = sql.slice(sql.indexOf("create or replace function public.nutrition_plans_fill_coach_id"));
+  assert.ok(/if new\.coach_id is not null then\s+return new;/.test(corps),
+    "un propriétaire déjà désigné n'est jamais réécrit");
+  assert.ok(corps.indexOf("from public.students s") < corps.indexOf("public.current_coach_id()"),
+    "le coach de l'élève prime sur celui qui écrit");
+
+  // Conventions du dépôt, et aucune exposition applicative.
+  assert.ok(/^security invoker$/m.test(corps));
+  assert.ok(/^set search_path = ''$/m.test(corps));
+  assert.ok(sql.includes("alter function public.nutrition_plans_fill_coach_id() owner to postgres;"));
+  for (const rôle of ["public", "anon", "authenticated"]) {
+    assert.ok(
+      sql.includes(`revoke all on function public.nutrition_plans_fill_coach_id() from ${rôle};`) ||
+        sql.includes(`revoke execute on function public.nutrition_plans_fill_coach_id() from ${rôle};`),
+      `le trigger ne doit pas être exécutable par ${rôle}`,
+    );
+  }
+
+  // AUCUNE reprise en masse, AUCUNE destruction : les plans existants se
+  // réparent à leur réassignation, ou se suppriment par le chemin de la PR D.
+  const horsCorps = sql
+    .split("\n")
+    .filter((l) => !l.trimStart().startsWith("--"))
+    .join("\n");
+  assert.ok(!/delete from/i.test(horsCorps), "la migration ne supprime rien");
+  assert.ok(!/^update public\.nutrition_plans/m.test(horsCorps), "aucune reprise en masse");
+  assert.ok(!/drop table|drop column|truncate/i.test(sql));
+
+  // Et la migration refuse de s'appliquer si la policy qu'elle débloque
+  // cessait de dépendre de la colonne.
+  assert.ok(sql.includes("nutrition_recipes_select_student"));
+  assert.ok(sql.includes("ce trigger est à revoir"));
+});
+
 
 console.log(`\n${réussis} réussis, ${échecs} échecs`);
 if (échecs > 0) process.exit(1);

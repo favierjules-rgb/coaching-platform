@@ -4,9 +4,16 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, ChefHat } from "lucide-react";
 
+import { LifecycleActionBar, type LifecycleActionSpec } from "@/components/admin/LifecycleActions";
 import { FilterButtons, SearchInput } from "@/components/admin/SearchAndFilters";
 import { StatusBadge } from "@/components/admin/StatusBadge";
+import {
+  recipeLifecycleActions,
+  RECIPE_ACTION_LABELS_FR,
+  type RecipeLifecycleAction,
+} from "@/lib/nutrition/lifecycle";
 import type { InvalidRecipe } from "@/lib/supabase/nutrition-recipes";
+import type { RecipeLifecycleInfo } from "@/lib/supabase/nutrition-lifecycle";
 import {
   RECIPE_SLOT_KEYS,
   RECIPE_STATUSES,
@@ -126,12 +133,23 @@ export function RecipeCatalog({
    * transaction de sauvegarde.
    */
   blockingByRecipe,
+  /**
+   * Le CYCLE DE VIE, calculé par la base et lu en une seule requête
+   * (`nutrition_lifecycle_overview`). Optionnel : sans lui, le catalogue
+   * s'affiche exactement comme avant, sans compteur ni action de statut.
+   */
+  lifecycleFor,
+  onLifecycleAction,
+  busyRecipeId,
 }: {
   recipes: readonly RecipeWithTags[];
   invalid: readonly InvalidRecipe[];
   loading: boolean;
   error: string | null;
   blockingByRecipe?: Readonly<Record<string, string | null>>;
+  lifecycleFor?: (recipeId: string) => RecipeLifecycleInfo | null;
+  onLifecycleAction?: (recipe: RecipeWithTags, action: RecipeLifecycleAction) => void;
+  busyRecipeId?: string | null;
 }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("tous");
@@ -197,20 +215,35 @@ export function RecipeCatalog({
           {filtrées.map((r) => {
             const blocage = blockingByRecipe?.[r.recipe.id] ?? null;
             const étiquettes = r.tags.slice(0, 3);
+            const cycle = lifecycleFor?.(r.recipe.id) ?? null;
             return (
-              <Link
+              // LA CARTE N'EST PLUS UN LIEN ENTIER. Elle porte désormais des
+              // boutons d'action, et imbriquer un bouton dans un lien est un
+              // balisage invalide que les lecteurs d'écran et le clavier
+              // interprètent mal. Le lien s'est donc replié sur le titre, qui
+              // est ce qu'on vise pour ouvrir la fiche.
+              <div
                 key={r.recipe.id}
-                href={`/admin/nutrition/recettes/${r.recipe.id}`}
-                className="flex flex-col gap-3 rounded-card border border-border bg-card p-4 shadow-soft transition-colors hover:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 sm:p-6"
+                className="flex flex-col gap-3 rounded-card border border-border bg-card p-4 shadow-soft transition-colors hover:border-border-strong sm:p-6"
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <h2 className="truncate font-heading text-base font-bold uppercase text-foreground">
+                    <Link
+                      href={`/admin/nutrition/recettes/${r.recipe.id}`}
+                      className="block truncate font-heading text-base font-bold uppercase text-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                    >
                       {r.recipe.name}
-                    </h2>
+                    </Link>
                     <p className="text-sm text-muted-foreground">{describeSlot(r.slotKey)}</p>
                   </div>
-                  <StatusBadge label={RECIPE_STATUS_LABELS_FR[r.status]} tone={statusTone(r.status)} />
+                  <div className="flex flex-col items-end gap-1">
+                    <StatusBadge label={RECIPE_STATUS_LABELS_FR[r.status]} tone={statusTone(r.status)} />
+                    {r.status === "archived" && cycle?.archivedAt && (
+                      <span className="text-[10px] uppercase tracking-widest text-muted-foreground">
+                        Le {formatUpdatedAt(cycle.archivedAt)}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
@@ -225,6 +258,20 @@ export function RecipeCatalog({
                       <span className="text-warning">À compléter</span>
                     )}
                   </span>
+                  {/* Les deux compteurs demandés : combien d'élèves peuvent
+                      l'ouvrir, et si elle est supprimable. Ils viennent du
+                      serveur — ce n'est pas l'écran qui en décide. */}
+                  {cycle && (
+                    <>
+                      <span>
+                        {cycle.dependencies.studentsWithAccess} élève
+                        {cycle.dependencies.studentsWithAccess > 1 ? "s" : ""} y ont accès
+                      </span>
+                      <span className={cycle.deletionBlock === null ? "text-muted-foreground" : "text-warning"}>
+                        {cycle.deletionBlock === null ? "Supprimable" : "Non supprimable"}
+                      </span>
+                    </>
+                  )}
                 </div>
 
                 {étiquettes.length > 0 && (
@@ -244,7 +291,27 @@ export function RecipeCatalog({
                     )}
                   </div>
                 )}
-              </Link>
+
+                {onLifecycleAction && (
+                  <LifecycleActionBar
+                    busy={busyRecipeId === r.recipe.id}
+                    actions={recipeLifecycleActions(r.status)
+                      .filter((action) => action !== "duplicate")
+                      .map((action): LifecycleActionSpec => ({
+                        key: action,
+                        label: RECIPE_ACTION_LABELS_FR[action],
+                        onRun: () => onLifecycleAction(r, action),
+                        // Publier une recette incomplète est refusé par la
+                        // base : on le dit ici plutôt que de laisser échouer.
+                        disabled: action === "publish" && blocage !== null,
+                        title:
+                          action === "publish" && blocage !== null
+                            ? "Complète la recette avant de la publier."
+                            : undefined,
+                      }))}
+                  />
+                )}
+              </div>
             );
           })}
         </div>

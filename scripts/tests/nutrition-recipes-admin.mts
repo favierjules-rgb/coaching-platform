@@ -34,6 +34,7 @@ import {
   createEmptyIngredient,
   createRecipeFormFromRecord,
   dependentsOf,
+  duplicateRecipeForm,
   detectLinkCycle,
   duplicateIngredient,
   hasTag,
@@ -46,6 +47,19 @@ import {
   validateRecipeForm,
   type RecipeFormState,
 } from "../../lib/nutrition/recipe-form";
+import { DeleteConfirmationModal } from "../../components/admin/LifecycleActions";
+import {
+  describeRecipeDeletionBlock,
+  duplicateName,
+  matchesExactName,
+  recipeLifecycleActions,
+  recipeStatusAfter,
+  RECIPE_ACTION_LABELS_FR,
+} from "../../lib/nutrition/lifecycle";
+import {
+  parseDeletionResult,
+  parseNutritionLifecycleOverview,
+} from "../../lib/supabase/nutrition-lifecycle";
 import {
   RECIPE_ROLE_LABELS_FR,
   RECIPE_STATUS_LABELS_FR,
@@ -115,6 +129,11 @@ const BUILDER = lire("../../components/admin/RecipeBuilder.tsx");
 const CATALOGUE = lire("../../components/admin/RecipeCatalog.tsx");
 const PANNEAU_TAGS = lire("../../components/admin/RecipeTagsPanel.tsx");
 const DIALOGUE_IMPORT = lire("../../components/admin/RecipeFixtureImportDialog.tsx");
+const CYCLE_DE_VIE = lire("../../components/admin/LifecycleActions.tsx");
+const CYCLE_DE_VIE_DOMAINE = lire("../../lib/nutrition/lifecycle.ts");
+const CYCLE_DE_VIE_SERVICE = lire("../../lib/supabase/nutrition-lifecycle.ts");
+const MIGRATION_CYCLE_DE_VIE = lire("../../supabase/migrations/20260815090000_nutrition_lifecycle.sql");
+const PAGE_PLAN_DETAIL = lire("../../app/admin/nutrition/[planId]/page.tsx");
 const PAGE_LISTE = lire("../../app/admin/nutrition/recettes/page.tsx");
 const PAGE_NOUVELLE = lire("../../app/admin/nutrition/recettes/nouvelle/page.tsx");
 const PAGE_DETAIL = lire("../../app/admin/nutrition/recettes/[recipeId]/page.tsx");
@@ -610,13 +629,43 @@ await test("32. une erreur de sauvegarde CONSERVE le formulaire", () => {
   }
 });
 
-await test("33. l'archivage est un STATUT : aucun chemin de suppression définitive", () => {
-  assert.ok(COUCHE_ÉCRITURE.includes('status: "archived"'));
-  for (const [nom, source] of Object.entries({ BUILDER, PAGE_DETAIL, PAGE_LISTE, COUCHE_ÉCRITURE })) {
-    assert.ok(!/\.delete\(\)/.test(sansCommentairesTs(source)), `${nom} : aucune suppression`);
-    assert.ok(!/supprimer définitivement|hard delete/i.test(source), `${nom} : aucun libellé de suppression`);
+await test("33. l'archivage reste un STATUT, et la suppression ne passe QUE par la RPC", () => {
+  // ARCHIVER n'a pas changé de nature : c'est toujours une écriture de statut,
+  // et « Restaurer » la défait. La PR D ajoute une suppression DÉFINITIVE, qui
+  // est une autre action, avec un autre chemin.
+  assert.ok(CYCLE_DE_VIE_DOMAINE.includes('archive: "Archiver"'));
+  assert.ok(CYCLE_DE_VIE_DOMAINE.includes('restore: "Restaurer"'));
+  assert.ok(COUCHE_ÉCRITURE.includes("setNutritionRecipeStatus"), "le statut a un chemin dédié");
+  // La charge utile d'un changement de statut ne porte NI ingrédients NI
+  // étiquettes : publier ou archiver ne peut donc rien abîmer.
+  const corps = sansCommentairesTs(COUCHE_ÉCRITURE);
+  const bloc = corps.slice(corps.indexOf("export async function setNutritionRecipeStatus"));
+  const appel = bloc.slice(0, bloc.indexOf("}\n"));
+  assert.ok(!appel.includes("ingredients"), "aucun ingrédient dans une transition de statut");
+  assert.ok(!appel.includes("tags"), "aucune étiquette dans une transition de statut");
+
+  // AUCUNE suppression directe depuis le navigateur, nulle part.
+  for (const [nom, source] of Object.entries({
+    BUILDER,
+    CATALOGUE,
+    PAGE_DETAIL,
+    PAGE_LISTE,
+    COUCHE_ÉCRITURE,
+    CYCLE_DE_VIE,
+    CYCLE_DE_VIE_SERVICE,
+  })) {
+    assert.ok(!/\.delete\(\)/.test(sansCommentairesTs(source)), `${nom} : aucune suppression directe`);
   }
-  assert.ok(BUILDER.includes("Archiver cette recette ?"), "confirmation avant archivage");
+  // La suppression passe par la RPC, qui ne reçoit qu'un identifiant : aucun
+  // drapeau d'autorisation ne transite depuis le navigateur.
+  assert.ok(CYCLE_DE_VIE_SERVICE.includes('"delete_nutrition_recipe"'));
+  const service = sansCommentairesTs(CYCLE_DE_VIE_SERVICE);
+  assert.ok(!/canDelete|allowDelete|force:\s*true|confirmed:/.test(service), "aucun verdict côté client");
+  const argsRpc = service.slice(service.lastIndexOf('"delete_nutrition_recipe"'));
+  assert.ok(
+    argsRpc.slice(0, argsRpc.indexOf("}")).includes("p_recipe_id"),
+    "la RPC ne reçoit que l'identifiant",
+  );
 });
 
 await test("34. le retour canonique de la RPC est lu sans supposition", () => {
@@ -795,7 +844,10 @@ await test("42. AUCUN écran élève n'est modifié, aucune policy de lecture é
 });
 
 await test("43. accessibilité et responsive : cibles tactiles, clavier, pas de débordement", () => {
-  const sources = { BUILDER, CATALOGUE, PANNEAU_TAGS, DIALOGUE_IMPORT, APERÇU };
+  // CYCLE_DE_VIE est ajouté à la liste : le catalogue et la fiche lui
+  // délèguent désormais tous leurs boutons d'action, et un composant partagé
+  // qui manquerait la cible de 44 px la manquerait sur les deux écrans.
+  const sources = { BUILDER, CATALOGUE, PANNEAU_TAGS, DIALOGUE_IMPORT, APERÇU, CYCLE_DE_VIE };
   for (const [nom, source] of Object.entries(sources)) {
     const boutons = (source.match(/<button/g) ?? []).length;
     if (boutons > 0) {
@@ -893,12 +945,12 @@ await test("48. la checklist PostgreSQL couvre le périmètre exigé", () => {
 await test("49. la migration est déclarée au manifeste et comptée", () => {
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 21);
+  assert.equal(attendues.length, 23);
   assert.ok(attendues.includes("20260808090000_save_nutrition_recipe.sql"));
   assert.ok(attendues.includes("20260809090000_save_nutrition_recipe_partial_payload.sql"));
   const secu = lire("../../scripts/tests/security-hardening.mts");
-  assert.ok(secu.includes(".length, 48,"), "le compteur de migrations suit les migrations réelles");
-  assert.ok(secu.includes("assert.equal(attendues.length, 21);"));
+  assert.ok(secu.includes(".length, 50,"), "le compteur de migrations suit les migrations réelles");
+  assert.ok(secu.includes("assert.equal(attendues.length, 23);"));
 });
 
 /* ═══════════ 9. PR B.1 — correctifs de conformité ═══════════ */
@@ -1211,9 +1263,11 @@ await test("58. un formulaire VIERGE n'agresse pas : aucune erreur avant la prem
   // Et surtout : on ne prétend PAS que la recette vide est exploitable.
   assert.ok(!htmlVierge.includes("elle peut être activée"), "aucune promesse fausse");
   assert.ok(htmlVierge.includes("au fil de la saisie"), "on indique quoi faire");
-  // Le bouton d'activation reste refusé, lui, dès le premier rendu.
-  assert.ok(/Activer la recette/.test(htmlVierge));
-  assert.ok(htmlVierge.includes("disabled"), "l'activation est bloquée");
+  // Le bouton de publication reste refusé, lui, dès le premier rendu.
+  // « Enregistrer et publier » depuis la PR D : ce bouton enregistre la saisie
+  // ET publie, là où la barre de cycle de vie ne fait que changer le statut.
+  assert.ok(/Enregistrer et publier/.test(htmlVierge));
+  assert.ok(htmlVierge.includes("disabled"), "la publication est bloquée");
 
   // Une recette EXISTANTE incomplète, elle, affiche ses points dès l'ouverture.
   const existante: RecipeFormState = { ...vierge, recipeId: "r1" };
@@ -1258,6 +1312,225 @@ await test("60. le dialogue d'import traite l'échec et ignore un rapport périm
   assert.ok(code.includes('role="alert"'), "l'échec est annoncé");
   // La promesse d'origine reste inchangée : l'import part toujours d'un clic.
   assert.ok(code.includes("onClick={lancer}"));
+});
+
+/* ═══════════ 12. Cycle de vie des recettes (PR D) ═══════════ */
+
+await test("61. les actions proposées suivent le statut, et rien d'autre", () => {
+  assert.deepEqual(recipeLifecycleActions("draft"), ["publish", "archive", "duplicate"]);
+  assert.deepEqual(recipeLifecycleActions("active"), ["unpublish", "archive", "duplicate"]);
+  // Une archive ne se republie pas d'un clic : « Restaurer » la ramène en
+  // BROUILLON, pour qu'elle soit relue avant de revenir aux élèves.
+  assert.deepEqual(recipeLifecycleActions("archived"), ["restore", "duplicate"]);
+  assert.equal(recipeStatusAfter("restore"), "draft");
+  assert.equal(recipeStatusAfter("publish"), "active");
+  assert.equal(recipeStatusAfter("unpublish"), "draft");
+  assert.equal(recipeStatusAfter("archive"), "archived");
+  assert.equal(recipeStatusAfter("duplicate"), null, "dupliquer ne change aucun statut");
+  // Le vocabulaire est celui de la publication, pas de l'activation.
+  assert.equal(RECIPE_ACTION_LABELS_FR.publish, "Publier");
+  assert.equal(RECIPE_ACTION_LABELS_FR.unpublish, "Dépublier");
+  assert.equal(RECIPE_STATUS_LABELS_FR.active, "Publiée");
+});
+
+await test("62. dupliquer produit une recette INDÉPENDANTE, jamais un alias", () => {
+  const base: RecipeFormState = {
+    ...createBlankRecipeForm("coach-1"),
+    recipeId: "r-source",
+    sourceKey: "fixture:poulet",
+    name: "Poulet riz",
+    status: "active",
+    ingredients: [
+      { ...createEmptyIngredient("ing-a"), name: "Poulet", role: "protein" },
+      {
+        ...createEmptyIngredient("ing-b"),
+        name: "Sauce",
+        role: "fat",
+        linkedToIngredientId: "ing-a",
+        linkRatioBp: "2500",
+      },
+    ],
+    tags: [{ kind: "diet", value: "halal" }],
+  };
+  let n = 0;
+  const copie = duplicateRecipeForm(base, duplicateName(base.name), () => `neuf-${++n}`);
+
+  assert.equal(copie.recipeId, null, "sans identifiant, la RPC CRÉE au lieu de mettre à jour");
+  assert.equal(copie.sourceKey, null, "la clé de fixture ne se duplique pas (index unique)");
+  assert.equal(copie.status, "draft", "une copie ne naît jamais publiée");
+  assert.equal(copie.name, "Poulet riz (copie)");
+  // Aucun identifiant d'ingrédient partagé : la RPC refuse un enfant
+  // appartenant à une autre recette.
+  const idsSource = base.ingredients.map((i) => i.id);
+  for (const ing of copie.ingredients) {
+    assert.ok(!idsSource.includes(ing.id), `${ing.id} appartient encore à l'original`);
+  }
+  // La liaison suit la copie, elle ne pointe plus vers l'original.
+  assert.equal(copie.ingredients[1].linkedToIngredientId, copie.ingredients[0].id);
+  assert.equal(copie.ingredients[1].linkRatioBp, "2500");
+  assert.deepEqual(copie.tags, base.tags);
+  // L'original n'a pas bougé d'un octet.
+  assert.equal(base.recipeId, "r-source");
+  assert.equal(base.ingredients[0].id, "ing-a");
+});
+
+await test("63. la confirmation exige le nom EXACT, et le motif de blocage est nommé", () => {
+  assert.ok(matchesExactName("Poulet riz", "Poulet riz"));
+  assert.ok(matchesExactName("  Poulet riz  ", "Poulet riz"), "les espaces de bord sont tolérés");
+  assert.ok(matchesExactName("Crème brûlée".normalize("NFD"), "Crème brûlée"), "accents normalisés");
+  assert.ok(!matchesExactName("poulet riz", "Poulet riz"), "la casse compte");
+  assert.ok(!matchesExactName("Poulet", "Poulet riz"), "un préfixe ne suffit pas");
+  assert.ok(!matchesExactName("", ""), "une ressource sans nom ne s'auto-confirme pas");
+
+  // Le motif NOMME la dépendance et son nombre.
+  assert.ok(describeRecipeDeletionBlock("assigned", { studentsWithAccess: 3 }).includes("3 élèves"));
+  assert.ok(describeRecipeDeletionBlock("assigned", { studentsWithAccess: 1 }).includes("Un élève"));
+  assert.ok(describeRecipeDeletionBlock("forbidden", { studentsWithAccess: 0 }).includes("autre coach"));
+  assert.ok(describeRecipeDeletionBlock("not_found", { studentsWithAccess: 0 }).includes("introuvable"));
+
+  // Bloquée : aucun champ de confirmation, aucun bouton de suppression.
+  const bloquée = renderToString(
+    createElement(DeleteConfirmationModal, {
+      resourceName: "Poulet riz",
+      resourceKind: "cette recette",
+      dependencies: [{ label: "Élèves pouvant y accéder", count: 2 }],
+      blockedReason: "Deux eleves peuvent encore ouvrir cette recette.",
+      deleting: false,
+      error: null,
+      onCancel: () => {},
+      onConfirm: () => {},
+    }),
+  );
+  assert.ok(bloquée.includes("Deux eleves peuvent encore ouvrir cette recette."), "le motif est affiché");
+  assert.ok(bloquée.includes('role="alert"'), "et annoncé aux lecteurs d'écran");
+  assert.ok(!bloquée.includes("Recopie le nom exact"), "rien à confirmer quand c'est refusé");
+  assert.ok(!/>\s*Supprimer définitivement\s*</.test(bloquée.replace(/<!-- -->/g, "")),
+    "aucun bouton de suppression quand c'est refusé");
+
+  // Permise : le bouton existe mais part DÉSACTIVÉ, avant toute saisie.
+  const permise = renderToString(
+    createElement(DeleteConfirmationModal, {
+      resourceName: "Poulet riz",
+      resourceKind: "cette recette",
+      dependencies: [{ label: "Ingrédients", count: 4 }],
+      blockedReason: null,
+      deleting: false,
+      error: null,
+      onCancel: () => {},
+      onConfirm: () => {},
+    }),
+  );
+  assert.ok(permise.includes("Recopie le nom exact"));
+  assert.ok(permise.includes("irréversible"), "l'irréversibilité est dite");
+  assert.ok(permise.includes("disabled"), "désactivé tant que le nom n'est pas recopié");
+  assert.ok(permise.includes("Poulet riz"), "le nom attendu est rappelé");
+  assert.ok(permise.includes("4"), "les dépendances comptées sont affichées");
+});
+
+await test("64. « Supprimer définitivement » n'est jamais une action principale", () => {
+  // Elle vit dans une zone dangereuse, pas dans la barre d'actions.
+  const cycle = CYCLE_DE_VIE;
+  assert.ok(cycle.includes("DangerZone"), "une zone dangereuse existe");
+  assert.ok(cycle.includes("Zone dangereuse"));
+  assert.ok(cycle.includes("border-destructive"), "elle est visuellement distincte");
+  // Le déclencheur n'est rendu QUE par la zone dangereuse.
+  const barre = cycle.slice(cycle.indexOf("export function LifecycleActionBar"), cycle.indexOf("export function DangerZone"));
+  assert.ok(!barre.includes("DELETE_ACTION_LABEL_FR"), "la barre d'actions ne supprime rien");
+  // Sur les deux fiches, la suppression est dans la zone dangereuse.
+  for (const [nom, page] of Object.entries({ PAGE_DETAIL, PAGE_PLAN_DETAIL })) {
+    assert.ok(page.includes("<DangerZone"), `${nom} : la suppression est encadrée`);
+    assert.ok(page.includes("DeleteTriggerButton"), `${nom} : par le déclencheur dédié`);
+    assert.ok(page.includes("DeleteConfirmationModal"), `${nom} : derrière une confirmation`);
+  }
+});
+
+await test("65. la migration du cycle de vie respecte les conventions du dépôt", () => {
+  const sql = MIGRATION_CYCLE_DE_VIE;
+  for (const fn of [
+    "delete_nutrition_plan(uuid)",
+    "delete_nutrition_recipe(uuid)",
+    "nutrition_plan_deletion_block(uuid)",
+    "nutrition_recipe_deletion_block(uuid)",
+    "nutrition_lifecycle_overview()",
+  ]) {
+    assert.ok(sql.includes(`revoke all on function public.${fn} from public;`), `revoke public : ${fn}`);
+    assert.ok(sql.includes(`revoke execute on function public.${fn} from anon;`), `revoke anon : ${fn}`);
+    assert.ok(sql.includes(`grant execute on function public.${fn} to authenticated;`), `grant : ${fn}`);
+    assert.ok(sql.includes(`alter function public.${fn} owner to postgres;`), `owner : ${fn}`);
+  }
+  // Sept fonctions sont (re)créées : le trigger de datation, la RPC
+  // d'assignation recréée, les deux calculs de blocage, les deux suppressions
+  // et l'aperçu. On compte les DÉCLARATIONS, en début de ligne, et non les
+  // occurrences dans les commentaires.
+  const déclarations = (m: RegExp) => (sql.match(m) ?? []).length;
+  assert.equal(déclarations(/^security invoker$/gm), 7, "chaque fonction est security invoker");
+  assert.ok(!/^security definer$/m.test(sql), "aucune élévation de privilège");
+  assert.equal(déclarations(/^set search_path = ''$/gm), 7, "search_path verrouillé partout");
+
+  // AUCUNE donnée détruite PAR LA MIGRATION ELLE-MÊME. Les corps de fonction
+  // contiennent des `delete`, évidemment — c'est leur objet. On les retire
+  // pour ne juger que ce que la migration exécute à son application.
+  const horsCorps = sql
+    .replace(/\$fn\$[\s\S]*?\$fn\$/g, "")
+    .replace(/\$\$[\s\S]*?\$\$/g, "")
+    .split("\n")
+    .filter((l) => !l.trimStart().startsWith("--"))
+    .join("\n");
+  assert.ok(!/delete from/i.test(horsCorps), "la migration ne supprime aucune ligne à son application");
+  assert.ok(!/\bupdate\b[\s\S]{0,40}\bset\b(?![\s\S]{0,200}archived_at)/i.test(horsCorps),
+    "la seule écriture de données est la reprise des dates d'archivage");
+  assert.ok(!/drop table|drop column|truncate/i.test(sql), "aucune structure détruite");
+  // Le journal de l'élève n'est JAMAIS supprimé pour débloquer une suppression.
+  const corpsSuppression = sql.slice(sql.indexOf("create or replace function public.delete_nutrition_plan"));
+  assert.ok(!/delete from public\.nutrition_daily_logs/.test(corpsSuppression),
+    "le suivi quotidien n'est jamais effacé");
+  assert.ok(corpsSuppression.includes("used_in_history"), "sa présence REFUSE la suppression");
+  // Les tables enfants sont nommées une par une, jamais laissées à la cascade.
+  for (const table of ["public.meals", "public.nutrition_days",
+                       "public.nutrition_meal_slot_targets", "public.nutrition_plan_profiles"]) {
+    assert.ok(corpsSuppression.includes(`delete from ${table}`), `suppression explicite : ${table}`);
+  }
+  // Et la migration refuse de s'appliquer si une clé étrangère inconnue apparaît.
+  assert.ok(sql.includes("ne connaît pas ces tables référençant nutrition_plans"));
+  assert.ok(sql.includes("ne connaît pas ces tables référençant nutrition_recipes"));
+});
+
+await test("66. l'aperçu du cycle de vie est lu sans supposition, et le doute refuse", () => {
+  const aperçu = parseNutritionLifecycleOverview({
+    plans: [
+      { id: "p1", status: "actif", archived_at: null, assigned_students: 1, daily_logs: 4, deletion_block: "assigned" },
+      { id: null, status: "actif" },
+      "pas un objet",
+    ],
+    recipes: [
+      { id: "r1", status: "active", archived_at: "2026-08-01T00:00:00Z", students_with_access: 2, deletion_block: null },
+      { id: "r2", status: "draft", deletion_block: "code_inventé" },
+    ],
+  });
+  assert.equal(aperçu.plans.size, 1, "une entrée sans identifiant est ignorée, pas fatale");
+  assert.equal(aperçu.plans.get("p1")?.deletionBlock, "assigned");
+  assert.equal(aperçu.plans.get("p1")?.dependencies.dailyLogs, 4);
+  assert.equal(aperçu.recipes.get("r1")?.deletionBlock, null);
+  assert.equal(aperçu.recipes.get("r1")?.archivedAt, "2026-08-01T00:00:00Z");
+  assert.equal(aperçu.recipes.get("r2")?.deletionBlock, null, "un code inconnu n'est pas inventé");
+  assert.equal(parseNutritionLifecycleOverview(null).plans.size, 0);
+
+  // Le DÉFAUT est le refus : une réponse illisible ne vaut jamais succès.
+  assert.equal(parseDeletionResult(null, "p1").ok, false);
+  assert.equal(parseDeletionResult({}, "p1").ok, false);
+  assert.equal(parseDeletionResult({ ok: false, reason: "inconnu" }, "p1").ok, false);
+  const refus = parseDeletionResult(
+    { ok: false, reason: "used_in_history", dependencies: { daily_logs: 7, assigned_students: 0 } },
+    "p1",
+  );
+  assert.equal(refus.ok === false && refus.reason, "used_in_history");
+  assert.equal(refus.ok === false && refus.dependencies.dailyLogs, 7);
+  const succès = parseDeletionResult(
+    { ok: true, plan_id: "p1", name: "Semaine sèche", deleted: { meals: 3, days: 7 } },
+    "p1",
+  );
+  assert.equal(succès.ok && succès.deleted.meals, 3);
+  assert.equal(succès.ok && succès.name, "Semaine sèche");
 });
 
 

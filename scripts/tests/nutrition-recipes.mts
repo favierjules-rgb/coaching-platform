@@ -628,11 +628,11 @@ await test("38. les 11 fixtures ne sont JAMAIS insérées en base", () => {
 await test("39. la migration est déclarée au manifeste et comptée", () => {
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 21);
+  assert.equal(attendues.length, 23);
   assert.ok(attendues.includes("20260807090000_nutrition_recipes.sql"));
   const secu = lire("../../scripts/tests/security-hardening.mts");
-  assert.ok(secu.includes(".length, 48,"), "le compteur de migrations suit les migrations réelles");
-  assert.ok(secu.includes("assert.equal(attendues.length, 21);"));
+  assert.ok(secu.includes(".length, 50,"), "le compteur de migrations suit les migrations réelles");
+  assert.ok(secu.includes("assert.equal(attendues.length, 23);"));
 });
 
 await test("40. la checklist PostgreSQL couvre le périmètre exigé", () => {

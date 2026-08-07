@@ -159,6 +159,61 @@ export function createRecipeFormFromRecord(
   };
 }
 
+/**
+ * Une COPIE indépendante d'une recette — pour le bouton « Dupliquer ».
+ *
+ * TROIS CHOSES DOIVENT CHANGER, et elles sont toutes obligatoires :
+ *
+ *   1. `recipeId` repasse à `null`, sans quoi la RPC METTRAIT À JOUR
+ *      l'original au lieu d'en créer une seconde ;
+ *   2. chaque ingrédient reçoit un identifiant NEUF — un identifiant
+ *      appartenant déjà à une autre recette est refusé par
+ *      `save_nutrition_recipe` (`INGREDIENT_FROM_ANOTHER_RECIPE`) ;
+ *   3. `sourceKey` repasse à `null` : cette clé est l'identité d'une fixture
+ *      importée, et son index unique partiel refuserait un doublon.
+ *
+ * Les LIAISONS entre ingrédients sont réécrites vers les nouveaux
+ * identifiants : une copie dont les liaisons pointeraient vers l'original
+ * mélangerait les deux recettes au premier enregistrement.
+ *
+ * La copie naît en BROUILLON : dupliquer ne publie rien.
+ *
+ * `generateId` est injectable pour que les tests soient déterministes.
+ */
+export function duplicateRecipeForm(
+  state: RecipeFormState,
+  nom: string,
+  generateId: () => IngredientId = newIngredientId,
+): RecipeFormState {
+  const nouvelId = new Map<IngredientId, IngredientId>();
+  for (const ingrédient of state.ingredients) {
+    nouvelId.set(ingrédient.id, generateId());
+  }
+  return {
+    ...state,
+    recipeId: null,
+    sourceKey: null,
+    name: nom,
+    status: "draft",
+    ingredients: state.ingredients.map((ingrédient) => ({
+      ...ingrédient,
+      id: nouvelId.get(ingrédient.id) ?? generateId(),
+      // Une liaison vers un ingrédient absent de la recette est déjà
+      // impossible (clé étrangère composite) ; le `?? null` couvre le cas
+      // d'un état de formulaire incohérent plutôt que de le propager.
+      linkedToIngredientId:
+        ingrédient.linkedToIngredientId === null
+          ? null
+          : (nouvelId.get(ingrédient.linkedToIngredientId) ?? null),
+      linkRatioBp:
+        ingrédient.linkedToIngredientId !== null && nouvelId.has(ingrédient.linkedToIngredientId)
+          ? ingrédient.linkRatioBp
+          : "",
+    })),
+    tags: [...state.tags],
+  };
+}
+
 /* ─────────────────────────── Ingrédients ─────────────────────────── */
 
 export function addIngredient(state: RecipeFormState, id?: IngredientId): RecipeFormState {

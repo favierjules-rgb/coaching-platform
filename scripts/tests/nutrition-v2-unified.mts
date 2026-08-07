@@ -132,6 +132,10 @@ const SEMAINE_LIB = lire("../../lib/nutrition/plan-v2-week.ts");
 const SEMAINE_FORM = lire("../../lib/nutrition/plan-v2-week-form.ts");
 const LECTURE_SEMAINE = lire("../../lib/supabase/nutrition-week.ts");
 const HOOK_ELEVE = lire("../../hooks/useStudentNutritionPlanV2.ts");
+const M_CYCLE_DE_VIE = lire("../../supabase/migrations/20260815090000_nutrition_lifecycle.sql");
+const HOOK_CYCLE_DE_VIE = lire("../../hooks/useNutritionLifecycle.ts");
+const SERVICE_CYCLE_DE_VIE = lire("../../lib/supabase/nutrition-lifecycle.ts");
+const LECTURE_PLANS = lire("../../lib/supabase/nutrition.ts");
 
 /* ────────────────────────── Aides ────────────────────────── */
 
@@ -1053,6 +1057,16 @@ await test("50. la checklist PostgreSQL couvre le périmètre exigé", () => {
     "protect_students_ownership",
     "nutrition_daily_logs",
     "UNKNOWN_PROFILE_FOR_DAY",
+    // Section I — cycle de vie (PR D)
+    "delete_nutrition_plan(",
+    "delete_nutrition_recipe(",
+    "nutrition_lifecycle_overview()",
+    "used_in_history",
+    "I22.",
+    // Section K — le propriétaire d'un plan (correctif du risque nº1)
+    "nutrition_plans_fill_coach_id",
+    "voit ENFIN la recette de son coach",
+    "la réassignation répare le plan",
   ]) {
     assert.ok(CHECKLIST.includes(attendu), `la checklist doit couvrir : ${attendu}`);
   }
@@ -1063,7 +1077,7 @@ await test("50. la checklist PostgreSQL couvre le périmètre exigé", () => {
 await test("51. les quatre migrations sont déclarées au manifeste et comptées", () => {
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 21);
+  assert.equal(attendues.length, 23);
   for (const nom of [
     "20260810090000_harden_nutrition_privileges.sql",
     "20260811090000_nutrition_v2_unification.sql",
@@ -1073,8 +1087,8 @@ await test("51. les quatre migrations sont déclarées au manifeste et comptées
     assert.ok(attendues.includes(nom), nom);
   }
   const secu = lire("../../scripts/tests/security-hardening.mts");
-  assert.ok(secu.includes(".length, 48,"), "le compteur de migrations suit les migrations réelles");
-  assert.ok(secu.includes("assert.equal(attendues.length, 21);"));
+  assert.ok(secu.includes(".length, 50,"), "le compteur de migrations suit les migrations réelles");
+  assert.ok(secu.includes("assert.equal(attendues.length, 23);"));
 });
 
 /* ─── 52-53. Outils 1 et 3 après la PR C.1 ─────────────────────────────── */
@@ -1426,7 +1440,7 @@ await test("61. aucun nouveau chemin d'écriture, aucune migration ajoutée", ()
   // strictement additive : elle ne remplace qu'une fonction.
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 21);
+  assert.equal(attendues.length, 23);
   assert.ok(attendues.includes("20260814090000_nutrition_plan_v2_blocking_issue_week.sql"));
 });
 
@@ -1792,6 +1806,93 @@ await test("69. chaque repas affiche la part de SON créneau, pour SON jour", ()
   // Un créneau DÉSACTIVÉ n'a pas d'objectif — il n'en a pas « zéro ».
   assert.equal(slotMacrosForDay(semaine, lundi, "dessert"), null);
 });
+/* ═══════════ Cycle de vie — ce que la BASE impose (PR D) ═══════════ */
+
+await test("71. un BROUILLON est invisible pour l'élève, une ARCHIVE reste lisible", () => {
+  const sql = M_CYCLE_DE_VIE;
+  // Les cinq policies de lecture élève portent toutes la même condition.
+  for (const policy of [
+    "nutrition_plans_select_self_or_assigned",
+    "nutrition_days_select_self_or_assigned",
+    "meals_select_self_or_assigned",
+    "nutrition_plan_profiles_select_assigned",
+    "nutrition_meal_slot_targets_select_assigned",
+  ]) {
+    const début = sql.indexOf(`create policy "${policy}"`);
+    assert.ok(début > 0, `${policy} doit être recréée`);
+    const corps = sql.slice(début, début + 700);
+    assert.ok(corps.includes("status <> 'prochain'"), `${policy} : le brouillon est exclu`);
+    assert.ok(!corps.includes("status = 'actif'"), `${policy} : une ARCHIVE reste lisible`);
+  }
+  // L'écriture élève sur ses journées suit la même règle.
+  const majJour = sql.slice(sql.indexOf('create policy "nutrition_days_update_self"'));
+  assert.equal((majJour.slice(0, 900).match(/status <> 'prochain'/g) ?? []).length, 2,
+    "USING et WITH CHECK portent tous deux la condition");
+  // Le catalogue de recettes passe par le plan : un brouillon ne l'ouvre plus.
+  const recettesÉlève = sql.slice(sql.indexOf('create policy "nutrition_recipes_select_student"'));
+  assert.ok(recettesÉlève.slice(0, 600).includes("p.status <> 'prochain'"));
+  assert.ok(recettesÉlève.slice(0, 600).includes("status = 'active'"),
+    "une recette non publiée reste invisible, règle inchangée");
+  // Et la lecture applicative répète la règle, pour un appel privilégié.
+  assert.ok(LECTURE_PLANS.includes('.neq("status", "prochain")'));
+});
+
+await test("72. un plan non ACTIF n'est pas assignable, et la base le refuse elle-même", () => {
+  const sql = M_CYCLE_DE_VIE;
+  const rpc = sql.slice(sql.indexOf("create or replace function public.assign_nutrition_plan"));
+  assert.ok(rpc.includes("PLAN_STATUS_DRAFT"), "un brouillon est nommément refusé");
+  assert.ok(rpc.includes("PLAN_STATUS_ARCHIVED"), "une archive aussi");
+  // Le contrôle est AVANT toute écriture : il précède le retrait des autres
+  // plans de l'élève, donc un refus ne laisse jamais l'élève sans plan.
+  assert.ok(rpc.indexOf("PLAN_STATUS_DRAFT") < rpc.indexOf("set student_id = null"),
+    "le refus précède toute écriture");
+  // Idempotence préservée : réassigner le plan que l'élève a DÉJÀ n'est pas
+  // refusé, quel que soit son statut — sinon un plan archivé alors qu'il était
+  // assigné deviendrait irrécupérable.
+  assert.ok(rpc.includes("v_plan.student_id is distinct from p_student_id"));
+  // Le message d'écran existe, et distingue les deux cas.
+  assert.ok(PAGE_ADMIN_PLAN.includes("il ne peut pas être assigné tant qu'il n'est pas activé"));
+  assert.ok(PAGE_ADMIN_PLAN.includes("plus proposé à de nouvelles assignations"));
+});
+
+await test("73. l'outil 1 n'est JAMAIS sacrifié pour rendre une suppression possible", () => {
+  const sql = M_CYCLE_DE_VIE;
+  // La clé étrangère du journal est en CASCADE : sans garde, supprimer le plan
+  // effacerait le suivi. La garde refuse au lieu de supprimer.
+  const blocage = sql.slice(
+    sql.indexOf("create or replace function public.nutrition_plan_deletion_block"),
+    sql.indexOf("create or replace function public.nutrition_recipe_deletion_block"),
+  );
+  assert.ok(blocage.includes("from public.nutrition_daily_logs"), "le journal est consulté");
+  assert.ok(blocage.includes("return 'used_in_history'"), "et sa présence REFUSE");
+  assert.ok(!/delete from/i.test(blocage), "la garde ne supprime rien, elle est stable");
+  // La suppression elle-même revérifie APRÈS verrouillage.
+  const suppression = sql.slice(sql.indexOf("create or replace function public.delete_nutrition_plan"));
+  assert.ok(suppression.includes("for update"), "la ligne est verrouillée avant les contrôles");
+  assert.ok(suppression.includes("PLAN_HISTORY_APPEARED"),
+    "une journée apparue entre-temps annule toute la transaction");
+  assert.ok(!/delete from public\.nutrition_daily_logs/.test(suppression));
+  // Et aucune affectation n'est retirée d'office pour débloquer.
+  assert.ok(!/set student_id = null/.test(suppression), "aucune désaffectation automatique");
+});
+
+await test("74. les compteurs de l'interface tiennent en UN aller-retour", () => {
+  // Un appel, pour toutes les ressources — pas un par ligne.
+  assert.ok(SERVICE_CYCLE_DE_VIE.includes('"nutrition_lifecycle_overview"'));
+  const sql = M_CYCLE_DE_VIE;
+  const aperçu = sql.slice(sql.indexOf("create or replace function public.nutrition_lifecycle_overview"));
+  assert.ok(aperçu.includes("left join lateral"), "les compteurs sont agrégés en SQL");
+  assert.ok(aperçu.includes("jsonb_agg"), "un seul document est renvoyé");
+  assert.ok(aperçu.includes("stable"), "l'aperçu ne peut rien écrire");
+  assert.ok(aperçu.includes("is_coach_or_admin()"), "réservé au staff");
+  // Le hook n'appelle la lecture qu'au montage et sur rechargement explicite.
+  const hook = HOOK_CYCLE_DE_VIE;
+  assert.equal((hook.match(/readNutritionLifecycleOverview\(/g) ?? []).length, 2,
+    "une lecture au montage, une au rechargement — jamais par ligne");
+  assert.ok(!/\bmap\(|forEach\(/.test(hook.slice(hook.indexOf("useEffect"))),
+    "aucune boucle de requêtes");
+});
+
 
 console.log(`\n${réussis} réussis, ${échecs} échecs`);
 if (échecs > 0) process.exit(1);

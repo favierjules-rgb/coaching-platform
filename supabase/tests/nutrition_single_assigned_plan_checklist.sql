@@ -1,6 +1,7 @@
 -- ============================================================================
 -- Checklist PostgreSQL — fix/nutrition-single-assigned-plan
--- Migration couverte : 20260806090000_assign_nutrition_plan_unique.sql
+-- Migrations couvertes : 20260806090000_assign_nutrition_plan_unique.sql
+--                        20260815090000_nutrition_lifecycle.sql (section J)
 --
 -- CE QU'ELLE VÉRIFIE
 --   A. les trois fonctions existent, avec la bonne signature, security
@@ -15,6 +16,10 @@
 --   G. atomicité : une erreur en cours de transaction ne laisse aucun état
 --      partiel ;
 --   H. programmes et documents intacts ;
+--   J. le STATUT commande l'assignabilité : un brouillon et une archive sont
+--      refusés PAR LA RPC — pas par l'interface — sans qu'aucune affectation
+--      ne bouge, tandis qu'un plan archivé DÉJÀ assigné reste ré-enregistrable
+--      pour son propre élève ;
 --   I. après le ROLLBACK, aucune donnée de test ne subsiste.
 --
 -- EXÉCUTION (base LOCALE uniquement) :
@@ -178,8 +183,15 @@ values ('77770000-0000-4000-8000-00000000000b', 'breakfast',      true, 2000, 20
        ('77770000-0000-4000-8000-00000000000b', 'dessert',        true,  500,  500,  500, 6);
 
 -- Plan C : v2 INCOMPLET (protéines à 9 000 seulement).
+--
+-- STATUT « actif » depuis la PR D. Ce plan était en 'prochain', et la section E
+-- affirmait alors tester le refus d'une RÉPARTITION incomplète — mais depuis
+-- que `assign_nutrition_plan` refuse aussi les brouillons, c'est le contrôle de
+-- statut qui se déclenchait le premier : la section E ne testait plus ce
+-- qu'elle prétendait. Le passer en 'actif' rétablit l'isolement de la règle
+-- visée. Le refus de statut a désormais sa propre section (J).
 insert into public.nutrition_plans (id, name, goal_type, status, daily_target, nutrition_model_version)
-values ('66660000-0000-4000-8000-00000000000c', 'Plan C (v2 incomplet)', 'maintien', 'prochain', '{}'::jsonb, 2);
+values ('66660000-0000-4000-8000-00000000000c', 'Plan C (v2 incomplet)', 'maintien', 'actif', '{}'::jsonb, 2);
 insert into public.nutrition_plan_profiles (id, plan_id, profile_key, daily_calories, protein_bp, carb_bp, fat_bp)
 values ('77770000-0000-4000-8000-00000000000c', '66660000-0000-4000-8000-00000000000c', 'default', 2000, 3000, 4500, 2500);
 insert into public.nutrition_meal_slot_targets (profile_id, slot, enabled, protein_bp, carb_bp, fat_bp, display_order)
@@ -415,6 +427,96 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------
+-- Section J — le STATUT commande l'assignabilité (PR D)
+-- ---------------------------------------------------------------------
+-- « Archivé : … n'est plus assignable à de nouveaux élèves » et « Brouillon :
+-- … non visible par les élèves ». Masquer le plan dans le sélecteur ne suffit
+-- pas : `assign_nutrition_plan` est accordée à `authenticated` et s'appelle en
+-- une ligne. Ces contrôles passent DIRECTEMENT par la RPC, sans interface.
+--
+-- Plan D est créé ici, complet et valide, pour que le SEUL motif de refus
+-- possible soit le statut : s'il était incomplet, on ne saurait pas laquelle
+-- des deux règles a refusé.
+insert into public.nutrition_plans (id, name, goal_type, status, daily_target, nutrition_model_version)
+values ('66660000-0000-4000-8000-00000000000d', 'Plan D (statuts)', 'maintien', 'prochain', '{}'::jsonb, 2);
+insert into public.nutrition_plan_profiles (id, plan_id, profile_key, daily_calories, protein_bp, carb_bp, fat_bp)
+values ('77770000-0000-4000-8000-00000000000d', '66660000-0000-4000-8000-00000000000d',
+        'default', 2400, 3000, 4500, 2500);
+insert into public.nutrition_meal_slot_targets (profile_id, slot, enabled, protein_bp, carb_bp, fat_bp, display_order)
+values ('77770000-0000-4000-8000-00000000000d', 'breakfast',      true, 2000, 2000, 2000, 1),
+       ('77770000-0000-4000-8000-00000000000d', 'morning_snack',  true, 1000, 1000, 1000, 2),
+       ('77770000-0000-4000-8000-00000000000d', 'lunch',          true, 3000, 3000, 3000, 3),
+       ('77770000-0000-4000-8000-00000000000d', 'afternoon_snack',true, 1000, 1000, 1000, 4),
+       ('77770000-0000-4000-8000-00000000000d', 'dinner',         true, 2500, 2500, 2500, 5),
+       ('77770000-0000-4000-8000-00000000000d', 'dessert',        true,  500,  500,  500, 6);
+insert into public.nutrition_days (plan_id, day, profile_key, status, target)
+select '66660000-0000-4000-8000-00000000000d', j, 'default', 'non-commence', '{}'::jsonb
+  from unnest(array['monday','tuesday','wednesday','thursday','friday','saturday','sunday']) as j;
+
+do $$
+declare
+  v_msg text;
+  v_refuse boolean;
+  v_avant jsonb;
+  v_apres jsonb;
+  v_res jsonb;
+begin
+  select jsonb_agg(jsonb_build_object('id', id, 'student_id', student_id) order by id)
+    into v_avant from public.nutrition_plans;
+
+  -- ── Brouillon ───────────────────────────────────────────────────────
+  v_refuse := false;
+  begin
+    perform public.assign_nutrition_plan('66660000-0000-4000-8000-00000000000d',
+                                         '55550000-0000-4000-8000-000000000002');
+  exception when others then v_refuse := true; v_msg := sqlerrm; end;
+  perform pg_temp.noter('J', 'J1. un plan BROUILLON est refusé à l''assignation', v_refuse);
+  perform pg_temp.noter('J', 'J2. le refus nomme le statut, pas la répartition',
+    coalesce(v_msg, '') like '%PLAN_STATUS_DRAFT%');
+
+  -- ── Archivé ─────────────────────────────────────────────────────────
+  update public.nutrition_plans set status = 'ancien'
+   where id = '66660000-0000-4000-8000-00000000000d';
+  v_refuse := false;
+  begin
+    perform public.assign_nutrition_plan('66660000-0000-4000-8000-00000000000d',
+                                         '55550000-0000-4000-8000-000000000002');
+  exception when others then v_refuse := true; v_msg := sqlerrm; end;
+  perform pg_temp.noter('J', 'J3. un plan ARCHIVÉ est refusé à un NOUVEL élève', v_refuse);
+  perform pg_temp.noter('J', 'J4. le refus nomme l''archivage',
+    coalesce(v_msg, '') like '%PLAN_STATUS_ARCHIVED%');
+
+  select jsonb_agg(jsonb_build_object('id', id, 'student_id', student_id) order by id)
+    into v_apres from public.nutrition_plans;
+  perform pg_temp.noter('J', 'J5. AUCUNE affectation modifiée par ces deux refus', v_avant = v_apres);
+
+  -- ── Actif ───────────────────────────────────────────────────────────
+  update public.nutrition_plans set status = 'actif'
+   where id = '66660000-0000-4000-8000-00000000000d';
+  select public.assign_nutrition_plan('66660000-0000-4000-8000-00000000000d',
+                                      '55550000-0000-4000-8000-000000000002') into v_res;
+  perform pg_temp.noter('J', 'J6. redevenu ACTIF, le même plan est assignable',
+    (v_res->'plan'->>'student_id') = '55550000-0000-4000-8000-000000000002');
+
+  -- ── Archivé ALORS QU'IL EST ASSIGNÉ ─────────────────────────────────
+  -- « conservé pour les élèves déjà assignés » : archiver ne doit pas rendre
+  -- le plan irrécupérable pour SON élève. Réassigner le même plan au même
+  -- élève reste donc idempotent, quel que soit le statut.
+  update public.nutrition_plans set status = 'ancien'
+   where id = '66660000-0000-4000-8000-00000000000d';
+  v_refuse := false;
+  begin
+    select public.assign_nutrition_plan('66660000-0000-4000-8000-00000000000d',
+                                        '55550000-0000-4000-8000-000000000002') into v_res;
+  exception when others then v_refuse := true; end;
+  perform pg_temp.noter('J', 'J7. archivé mais DÉJÀ assigné : la réassignation au même élève reste idempotente',
+    not v_refuse and (v_res->'plan'->>'student_id') = '55550000-0000-4000-8000-000000000002');
+  perform pg_temp.noter('J', 'J8. l''élève conserve bien son plan archivé',
+    (select student_id from public.nutrition_plans
+      where id = '66660000-0000-4000-8000-00000000000d') = '55550000-0000-4000-8000-000000000002');
+end $$;
+
+-- ---------------------------------------------------------------------
 -- Section I — bilan
 -- ---------------------------------------------------------------------
 reset role;
@@ -445,7 +547,8 @@ do $$
 declare nb int;
 begin
   select count(*) into nb from public.nutrition_plans
-   where name in ('Plan A (converti)', 'Plan B (v2 complet)', 'Plan C (v2 incomplet)');
+   where name in ('Plan A (converti)', 'Plan B (v2 complet)', 'Plan C (v2 incomplet)',
+                  'Plan D (statuts)');
   if nb <> 0 then
     raise exception 'ÉCHEC   — I1. des plans de test ont survécu au ROLLBACK (% lignes)', nb;
   end if;

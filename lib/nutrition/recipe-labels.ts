@@ -37,9 +37,17 @@ export const RECIPE_ROLE_HINTS_FR: Readonly<Record<RecipeIngredientRole, string>
   free: "Exclu du calcul : légumes verts, épices, édulcorant.",
 };
 
+/**
+ * « Publiée » plutôt que « Active » depuis la PR D : c'est le mot que
+ * l'interface emploie partout ailleurs pour désigner un contenu visible par
+ * les élèves (`AdminDocumentStatus` dit déjà « publié »), et le couple
+ * Publier / Dépublier n'a de sens qu'avec lui. La VALEUR en base reste
+ * `'active'` — la renommer casserait les trois policies élèves qui la
+ * comparent littéralement, pour un gain purement cosmétique.
+ */
 export const RECIPE_STATUS_LABELS_FR: Readonly<Record<RecipeStatus, string>> = {
   draft: "Brouillon",
-  active: "Active",
+  active: "Publiée",
   archived: "Archivée",
 };
 

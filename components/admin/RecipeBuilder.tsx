@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Archive, Save } from "lucide-react";
+import { Save } from "lucide-react";
 
 import { Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
 import { Modal, OutlineButton, PrimaryButton } from "@/components/admin/Modal";
@@ -53,7 +53,6 @@ export function RecipeBuilder({
   state,
   onChange,
   onSave,
-  onArchive,
   saving,
   saveError,
   blockingIssue,
@@ -61,13 +60,11 @@ export function RecipeBuilder({
   state: RecipeFormState;
   onChange: (next: RecipeFormState) => void;
   onSave: (status: RecipeStatus) => void | Promise<void>;
-  onArchive?: () => void | Promise<void>;
   saving: boolean;
   saveError: string | null;
   blockingIssue: string | null;
 }) {
   const [retraitDemandé, setRetraitDemandé] = useState<string | null>(null);
-  const [archivageDemandé, setArchivageDemandé] = useState(false);
 
   // Une recette VIERGE affichait sept messages d'erreur avant la première
   // frappe : accueil hostile, et sept `role="alert"` annoncés en rafale par un
@@ -205,30 +202,24 @@ export function RecipeBuilder({
           <Save size={14} />
           {saving ? "Enregistrement…" : "Enregistrer le brouillon"}
         </button>
+        {/* « Enregistrer et publier » plutôt que « Activer la recette » : ce
+            bouton fait DEUX choses — il enregistre la saisie en cours, puis
+            publie. Les transitions de statut SEULES (publier, dépublier,
+            archiver, restaurer) vivent dans la barre de cycle de vie, en haut
+            de la page, et n'écrivent aucun champ du formulaire. */}
         <button
           type="button"
           disabled={saving || bloquant}
           onClick={() => enregistrer("active")}
-          title={bloquant ? "Complète la recette avant de l'activer." : undefined}
+          title={bloquant ? "Complète la recette avant de la publier." : undefined}
           className="pressable flex min-h-[44px] items-center gap-2 rounded-control border border-border px-4 py-2 text-xs font-bold uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         >
-          Activer la recette
+          Enregistrer et publier
         </button>
-        {onArchive && state.recipeId && state.status !== "archived" && (
-          <button
-            type="button"
-            disabled={saving}
-            onClick={() => setArchivageDemandé(true)}
-            className="pressable flex min-h-[44px] items-center gap-2 rounded-control border border-border px-4 py-2 text-xs font-bold uppercase tracking-widest text-muted-foreground transition-colors hover:border-destructive hover:text-destructive disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40"
-          >
-            <Archive size={14} />
-            Archiver
-          </button>
-        )}
       </div>
       {bloquant && (
         <p className="text-xs text-muted-foreground">
-          L&apos;activation reste possible une fois les points ci-dessus complétés. Le brouillon,
+          La publication reste possible une fois les points ci-dessus complétés. Le brouillon,
           lui, s&apos;enregistre à tout moment.
         </p>
       )}
@@ -255,25 +246,6 @@ export function RecipeBuilder({
         </Modal>
       )}
 
-      {archivageDemandé && onArchive && (
-        <Modal title="Archiver cette recette ?" onClose={() => setArchivageDemandé(false)}>
-          <p className="text-sm text-muted-foreground">
-            La recette est conservée en base et reste consultable. Elle ne sera plus proposée.
-            Aucune suppression définitive n&apos;est possible depuis cette page.
-          </p>
-          <div className="mt-6 flex flex-wrap gap-3">
-            <PrimaryButton
-              onClick={() => {
-                setArchivageDemandé(false);
-                void onArchive();
-              }}
-            >
-              Archiver
-            </PrimaryButton>
-            <OutlineButton onClick={() => setArchivageDemandé(false)}>Annuler</OutlineButton>
-          </div>
-        </Modal>
-      )}
     </div>
   );
 }

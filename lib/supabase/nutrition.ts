@@ -140,6 +140,10 @@ function mapNutritionPlanRow(row: NutritionPlanRow, days: AdminNutritionDay[], a
       row.weekly_target_calories ??
       (row.nutrition_model_version === 2 ? (dailyTarget.calories ?? 0) * 7 : 0),
     status: STATUS_DB_TO_APP[row.status] ?? "brouillon",
+    // Date d'archivage (migration 20260815090000). Le trigger de base la pose
+    // et l'efface : elle est donc toujours cohérente avec le statut, quel que
+    // soit le chemin d'écriture emprunté.
+    archivedAt: row.archived_at ?? null,
     coachNotes: row.coach_notes,
     hydrationTip: row.hydration_tip,
     supplements: row.supplements ?? [],
@@ -199,6 +203,13 @@ export async function getNutritionPlans(supabase: TypedSupabaseClient): Promise<
  * plus récemment modifié en premier — pour la vue élève /nutrition
  * (équivalent réel de la liste mock `nutritionPlans`). Tableau vide si aucun
  * plan n'est assigné.
+ *
+ * LES BROUILLONS SONT EXCLUS. Ce n'est pas ici que se joue la protection —
+ * la policy `nutrition_plans_select_self_or_assigned` (migration
+ * 20260815090000) ne rend déjà plus un plan `prochain` à son élève, et c'est
+ * elle qui fait foi. Le filtre est répété ici pour deux raisons : il rend la
+ * règle lisible à l'endroit où on lit les plans d'un élève, et il vaut aussi
+ * pour un appel exécuté avec un rôle privilégié, que la RLS n'arrêterait pas.
  */
 export async function getAssignedNutritionPlansForStudent(
   supabase: TypedSupabaseClient,
@@ -208,6 +219,7 @@ export async function getAssignedNutritionPlansForStudent(
     .from("nutrition_plans")
     .select("*")
     .eq("student_id", studentId)
+    .neq("status", "prochain")
     .order("updated_at", { ascending: false });
   devWarn("getAssignedNutritionPlansForStudent (nutrition_plans)", plansError);
   if (!planRows || planRows.length === 0) {
