@@ -550,7 +550,11 @@ export function toRecipeSavePayload(
   return {
     recipe: {
       id: state.recipeId,
-      coach_id: state.coachId,
+      // `coach_id` N'EST PLUS ÉMIS. Depuis la migration 20260818090000,
+      // `save_nutrition_recipe` ne le lit plus : le propriétaire vient de
+      // `current_coach_id()` à la création, et de la ligne existante à la
+      // modification. L'envoyer entretiendrait l'illusion que le navigateur
+      // a son mot à dire.
       name: state.name.trim(),
       description: state.description.trim() === "" ? null : state.description.trim(),
       slot_key: state.slotKey,

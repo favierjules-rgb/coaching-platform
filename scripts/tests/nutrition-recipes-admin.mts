@@ -23,7 +23,14 @@ import { computeCaloriesFromGrams } from "../../lib/nutrition/macro-targets";
 import { solveRecipe } from "../../lib/nutrition/recipe-solver";
 import { describeRecipeFit } from "../../lib/nutrition/recipe-matching";
 import {
+  analyzeRecipeImport,
+  buildImportTemplate,
+  normalizeRecipeName,
+  toImportRpcPayload,
+} from "../../lib/nutrition/recipe-import";
+import {
   RECIPE_INGREDIENT_ROLES,
+  RECIPE_SLOT_KEYS,
   RECIPE_TAG_KINDS,
   RECIPE_TAG_VOCABULARY,
   type RecipeWithTags,
@@ -82,7 +89,12 @@ import {
   importNutritionRecipeFixtures,
   parseRecipeWriteResult,
 } from "../../lib/supabase/nutrition-recipes-write";
-import { RecipeCatalog, filterCatalog, formatUpdatedAt } from "../../components/admin/RecipeCatalog";
+import {
+  CATALOG_FILTERS_VIDES,
+  RecipeCatalog,
+  filterCatalog,
+  formatUpdatedAt,
+} from "../../components/admin/RecipeCatalog";
 import { RecipeTagsPanel } from "../../components/admin/RecipeTagsPanel";
 import { RecipeAdaptivePreview } from "../../components/admin/RecipeAdaptivePreview";
 import { RecipeBuilder } from "../../components/admin/RecipeBuilder";
@@ -134,6 +146,10 @@ const CYCLE_DE_VIE_DOMAINE = lire("../../lib/nutrition/lifecycle.ts");
 const CYCLE_DE_VIE_SERVICE = lire("../../lib/supabase/nutrition-lifecycle.ts");
 const MIGRATION_CYCLE_DE_VIE = lire("../../supabase/migrations/20260815090000_nutrition_lifecycle.sql");
 const MIGRATION_SUPPRESSION = lire("../../supabase/migrations/20260817090000_nutrition_plan_deletion_history.sql");
+const CHECKLIST_ADMIN = lire("../../supabase/tests/nutrition_recipes_admin_checklist.sql");
+const MIGRATION_CATALOGUE = lire("../../supabase/migrations/20260818090000_nutrition_recipe_catalog.sql");
+const MODELE_IMPORT = lire("../../docs/modele-import-recettes.json");
+const DIALOGUE_IMPORT_FICHIER = lire("../../components/admin/RecipeImportDialog.tsx");
 const PAGE_PLAN_DETAIL = lire("../../app/admin/nutrition/[planId]/page.tsx");
 const PAGE_LISTE = lire("../../app/admin/nutrition/recettes/page.tsx");
 const PAGE_NOUVELLE = lire("../../app/admin/nutrition/recettes/nouvelle/page.tsx");
@@ -946,12 +962,12 @@ await test("48. la checklist PostgreSQL couvre le périmètre exigé", () => {
 await test("49. la migration est déclarée au manifeste et comptée", () => {
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 24);
+  assert.equal(attendues.length, 25);
   assert.ok(attendues.includes("20260808090000_save_nutrition_recipe.sql"));
   assert.ok(attendues.includes("20260809090000_save_nutrition_recipe_partial_payload.sql"));
   const secu = lire("../../scripts/tests/security-hardening.mts");
-  assert.ok(secu.includes(".length, 51,"), "le compteur de migrations suit les migrations réelles");
-  assert.ok(secu.includes("assert.equal(attendues.length, 24);"));
+  assert.ok(secu.includes(".length, 52,"), "le compteur de migrations suit les migrations réelles");
+  assert.ok(secu.includes("assert.equal(attendues.length, 25);"));
 });
 
 /* ═══════════ 9. PR B.1 — correctifs de conformité ═══════════ */
@@ -1557,6 +1573,328 @@ await test("66. l'aperçu du cycle de vie est lu sans supposition, et le doute r
   );
   assert.equal(succès.ok && succès.deleted.meals, 3);
   assert.equal(succès.ok && succès.name, "Semaine sèche");
+});
+
+/* ═══════════ 13. Catalogue, duplication et import (PR E) ═══════════ */
+
+const CATALOGUE_E: RecipeWithTags[] = [
+  { ...recordFactice("e1", "Omelette", "breakfast", "draft", [{ kind: "diet", value: "vegetarian" }]),
+    updatedAt: "2026-01-10T10:00:00Z" },
+  { ...recordFactice("e2", "Bol poulet", "lunch", "active", [{ kind: "allergen", value: "gluten" }]),
+    updatedAt: "2026-03-01T10:00:00Z" },
+  { ...recordFactice("e3", "Ancienne tarte", null, "archived", []),
+    updatedAt: "2025-06-01T10:00:00Z" },
+];
+
+await test("67. le catalogue filtre par nom, statut, créneau — et se combine", () => {
+  const base = CATALOG_FILTERS_VIDES;
+  const noms = (r: readonly RecipeWithTags[]) => r.map((x) => x.recipe.name);
+
+  // 1. recherche par nom, insensible à la casse et aux accents
+  assert.deepEqual(noms(filterCatalog(CATALOGUE_E, { ...base, query: "POULET" })), ["Bol poulet"]);
+  assert.deepEqual(noms(filterCatalog(CATALOGUE_E, { ...base, query: "  omelette " })), ["Omelette"]);
+  // 2/3/4. un filtre par statut
+  assert.deepEqual(noms(filterCatalog(CATALOGUE_E, { ...base, status: "draft" })), ["Omelette"]);
+  assert.deepEqual(noms(filterCatalog(CATALOGUE_E, { ...base, status: "active" })), ["Bol poulet"]);
+  assert.deepEqual(noms(filterCatalog(CATALOGUE_E, { ...base, status: "archived" })), ["Ancienne tarte"]);
+  // 5. par créneau, et le cas « générique » (slot_key nul)
+  assert.deepEqual(noms(filterCatalog(CATALOGUE_E, { ...base, slot: "lunch" })), ["Bol poulet"]);
+  assert.deepEqual(noms(filterCatalog(CATALOGUE_E, { ...base, slot: "generic" })), ["Ancienne tarte"]);
+  // 6. combinaison : un filtre qui ne peut rien rendre ne rend rien
+  assert.deepEqual(noms(filterCatalog(CATALOGUE_E, { ...base, status: "active", slot: "breakfast" })), []);
+  assert.deepEqual(
+    noms(filterCatalog(CATALOGUE_E, { ...base, status: "draft", slot: "breakfast", tagKind: "diet" })),
+    ["Omelette"],
+  );
+  // 7. l'état « aucun filtre » rend TOUT — c'est ce que « Réinitialiser » restaure
+  assert.equal(filterCatalog(CATALOGUE_E, base).length, 3);
+  assert.equal(CATALOG_FILTERS_VIDES.query, "");
+  assert.equal(CATALOG_FILTERS_VIDES.status, "tous");
+  assert.equal(CATALOG_FILTERS_VIDES.slot, "tous");
+  assert.equal(CATALOG_FILTERS_VIDES.tagKind, "tous");
+  // Le bouton lit la MÊME constante : il ne peut pas oublier un filtre.
+  assert.ok(CATALOGUE.includes("CATALOG_FILTERS_VIDES.query"));
+  assert.ok(CATALOGUE.includes("réinitialiser"));
+});
+
+await test("68. les trois ordres de tri, et un ordre STABLE", () => {
+  const base = CATALOG_FILTERS_VIDES;
+  const noms = (s: "alpha" | "recent" | "ancien") =>
+    filterCatalog(CATALOGUE_E, { ...base, sort: s }).map((x) => x.recipe.name);
+
+  assert.deepEqual(noms("alpha"), ["Ancienne tarte", "Bol poulet", "Omelette"]);
+  assert.deepEqual(noms("recent"), ["Bol poulet", "Omelette", "Ancienne tarte"]);
+  assert.deepEqual(noms("ancien"), ["Ancienne tarte", "Omelette", "Bol poulet"]);
+  // « alpha » reste le défaut : les appels sans `sort` sont inchangés.
+  assert.deepEqual(
+    filterCatalog(CATALOGUE_E, { query: "", status: "tous", slot: "tous", tagKind: "tous" }).map((x) => x.recipe.name),
+    noms("alpha"),
+  );
+  // Deux dates identiques ne doivent pas faire sauter les lignes d'un rendu à
+  // l'autre : le départage par identifiant rend l'ordre déterministe.
+  const exAequo: RecipeWithTags[] = [
+    { ...recordFactice("zz", "Zeta", null, "draft", []), updatedAt: "2026-01-01T00:00:00Z" },
+    { ...recordFactice("aa", "Alpha", null, "draft", []), updatedAt: "2026-01-01T00:00:00Z" },
+  ];
+  const ordre1 = filterCatalog(exAequo, { ...base, sort: "recent" }).map((x) => x.recipe.id);
+  const ordre2 = filterCatalog([...exAequo].reverse(), { ...base, sort: "recent" }).map((x) => x.recipe.id);
+  assert.deepEqual(ordre1, ordre2, "l'ordre ne dépend pas de l'ordre d'entrée");
+  assert.deepEqual(ordre1, ["aa", "zz"]);
+});
+
+await test("69. l'analyse d'import lit, diagnostique, et n'écrit RIEN", () => {
+  // Le module d'analyse ne connaît AUCUN chemin d'écriture : ni Supabase, ni
+  // RPC, ni fetch. C'est ce qui rend l'étape 1 sûre par construction.
+  const source = sansCommentairesTs(lire("../../lib/nutrition/recipe-import.ts"));
+  for (const interdit of ["supabase", "rpc(", "fetch(", ".insert(", ".update(", ".delete("]) {
+    assert.ok(!source.includes(interdit), `l'analyse ne doit pas connaître ${interdit}`);
+  }
+
+  // 14. un fichier VALIDE est analysé sans erreur, et produit une charge utile
+  const valide = analyzeRecipeImport(MODELE_IMPORT);
+  assert.equal(valide.fileError, null, "le modèle livré doit être lisible");
+  assert.equal(valide.total, 2);
+  assert.equal(valide.valid, 2, JSON.stringify(valide.recipes.flatMap((r) => r.issues)));
+  assert.equal(valide.invalid, 0);
+
+  // 15. un fichier INVALIDE dit précisément ce qui cloche, recette par recette
+  const illisible = analyzeRecipeImport("{ ceci n'est pas du json");
+  assert.ok(illisible.fileError?.includes("JSON"), illisible.fileError ?? "");
+  assert.equal(illisible.total, 0);
+
+  const fautif = analyzeRecipeImport(
+    JSON.stringify([
+      { name: "", ingredients: [] },
+      { name: "Rôle faux", slot: "brunch", ingredients: [{ name: "X", role: "protéine", referenceGrams: 10 }] },
+      {
+        name: "Liaison folle",
+        ingredients: [
+          { name: "A", role: "protein", proteinPer100g: 20, carbPer100g: 0, fatPer100g: 1, referenceGrams: 100 },
+          { name: "B", role: "fat", proteinPer100g: 0, carbPer100g: 0, fatPer100g: 90, referenceGrams: 10, linkedToPosition: 9, linkRatioBp: 1000 },
+        ],
+      },
+      { name: "Étiquette inventée", tags: { diet: ["carnivore"] }, ingredients: [
+        { name: "A", role: "protein", proteinPer100g: 20, carbPer100g: 0, fatPer100g: 1, referenceGrams: 100 }] },
+    ]),
+  );
+  assert.equal(fautif.total, 4);
+  assert.equal(fautif.valid, 0, "aucune de ces quatre n'est importable");
+  const message = (i: number) => fautif.recipes[i].issues.map((p) => `${p.where} ${p.message}`).join(" | ");
+  assert.ok(/nom est obligatoire/i.test(message(0)), message(0));
+  assert.ok(/au moins un ingrédient/i.test(message(0)), message(0));
+  assert.ok(/Rôle inconnu/i.test(message(1)), message(1));
+  assert.ok(/Créneau inconnu/i.test(message(1)), message(1));
+  assert.ok(/linkedToPosition/i.test(message(2)), message(2));
+  assert.ok(/carnivore/i.test(message(3)), message(3));
+  // Une recette invalide ne produit AUCUNE charge utile : elle ne peut pas
+  // partir par accident.
+  assert.ok(fautif.recipes.every((r) => r.payload === null));
+});
+
+await test("70. doublons : signalés, décochés, JAMAIS écrasés", () => {
+  const fichier = JSON.stringify([
+    { name: "Bol poulet", ingredients: [{ name: "P", role: "protein", proteinPer100g: 20, carbPer100g: 0, fatPer100g: 1, referenceGrams: 100 }] },
+    { name: "  BOL   POULET  ", ingredients: [{ name: "P", role: "protein", proteinPer100g: 20, carbPer100g: 0, fatPer100g: 1, referenceGrams: 100 }] },
+    { name: "Nouveauté", ingredients: [{ name: "P", role: "protein", proteinPer100g: 20, carbPer100g: 0, fatPer100g: 1, referenceGrams: 100 }] },
+  ]);
+
+  // 18. doublon détecté — contre le catalogue existant ET à l'intérieur du fichier
+  const analyse = analyzeRecipeImport(fichier, ["Bol Poulet"]);
+  assert.equal(analyse.duplicates, 2, "le nom existant et sa répétition interne");
+  assert.equal(analyse.recipes[0].duplicate, true);
+  assert.equal(analyse.recipes[1].duplicate, true);
+  assert.equal(analyse.recipes[2].duplicate, false);
+  // La normalisation ignore casse, accents, ponctuation et espaces multiples.
+  assert.equal(normalizeRecipeName("  Crème  Brûlée-Maison "), "creme brulee maison");
+
+  // 19. un doublon reste IMPORTABLE si le coach le décide — et n'écrase rien :
+  // la charge utile ne porte aucun identifiant, donc la RPC ne peut que CRÉER.
+  const toutes = toImportRpcPayload(analyse, new Set([1, 2, 3]));
+  assert.equal(toutes.recipes.length, 3);
+  for (const r of toutes.recipes as Record<string, unknown>[]) {
+    assert.ok(!("id" in r), "aucun identifiant : impossible d'écraser une recette existante");
+    assert.ok(!("recipe_id" in r));
+  }
+  // Décoché = absent de la charge utile.
+  assert.equal(toImportRpcPayload(analyse, new Set([3])).recipes.length, 1);
+  assert.equal(toImportRpcPayload(analyse, new Set()).recipes.length, 0);
+});
+
+await test("71. la charge utile d'import ne porte NI propriétaire NI statut", () => {
+  const analyse = analyzeRecipeImport(MODELE_IMPORT);
+  const payload = toImportRpcPayload(analyse, new Set([1, 2]));
+  const texte = JSON.stringify(payload);
+
+  // 20. coach_id impossible à injecter : le mot n'existe nulle part dans ce
+  // que le navigateur envoie, et la RPC ne le lit pas davantage.
+  assert.ok(!texte.includes("coach_id"), "aucun propriétaire dans la charge utile");
+  assert.ok(!texte.includes("status"), "aucun statut : la base impose « draft »");
+  // Même si le FICHIER en contenait, ils seraient ignorés à la lecture.
+  const forgé = analyzeRecipeImport(
+    JSON.stringify([{
+      name: "Forgée", coach_id: "00000000-0000-4000-8000-000000000000", status: "active",
+      ingredients: [{ name: "P", role: "protein", proteinPer100g: 20, carbPer100g: 0, fatPer100g: 1, referenceGrams: 100 }],
+    }]),
+  );
+  const forgéPayload = JSON.stringify(toImportRpcPayload(forgé, new Set([1])));
+  assert.ok(!forgéPayload.includes("coach_id"));
+  assert.ok(!forgéPayload.includes("00000000-0000-4000-8000-000000000000"));
+  assert.ok(!forgéPayload.includes("active"));
+
+  // Les liaisons voyagent PAR POSITION : un fichier n'a aucun vocabulaire pour
+  // désigner une ligne hors de sa propre recette.
+  const première = (payload.recipes[0] ?? {}) as { ingredients: Record<string, unknown>[] };
+  const liée = première.ingredients.find((i) => i.linked_to_position !== null);
+  assert.equal(liée?.linked_to_position, 1);
+  assert.equal(liée?.link_ratio_bp, 2500);
+});
+
+await test("72. le modèle livré est ENGENDRÉ par le code, il ne peut pas mentir", () => {
+  // Le fichier du dépôt est la sortie exacte de `buildImportTemplate()` : si
+  // la liste des rôles, des créneaux ou des étiquettes change, ce test tombe
+  // avant que la documentation ne devienne fausse.
+  assert.equal(MODELE_IMPORT, buildImportTemplate(), "docs/modele-import-recettes.json est périmé");
+  // Et il ne documente que des valeurs RÉELLEMENT admises.
+  const modèle = JSON.parse(MODELE_IMPORT) as { recipes: { slot?: string; ingredients: { role: string }[] }[] };
+  for (const recette of modèle.recipes) {
+    assert.ok(recette.slot === undefined || (RECIPE_SLOT_KEYS as readonly string[]).includes(recette.slot));
+    for (const ing of recette.ingredients) {
+      assert.ok(RECIPE_INGREDIENT_ROLES.includes(ing.role as never), ing.role);
+    }
+  }
+  // Le dialogue le propose au téléchargement, sans dépendance ajoutée.
+  assert.ok(DIALOGUE_IMPORT_FICHIER.includes("buildImportTemplate()"));
+  assert.ok(DIALOGUE_IMPORT_FICHIER.includes("new Blob("), "Blob natif, aucune dépendance");
+  assert.ok(!/papaparse|csv-parse|xlsx/.test(DIALOGUE_IMPORT_FICHIER));
+});
+
+await test("73. l'import se fait en DEUX temps, et l'échec ne laisse rien", () => {
+  const dialogue = sansCommentairesTs(DIALOGUE_IMPORT_FICHIER);
+  // Lire le fichier ne déclenche PAS l'import : deux gestes distincts.
+  assert.ok(dialogue.includes("analyzeRecipeImport("), "temps 1 : analyse");
+  assert.ok(dialogue.includes("onImport(toImportRpcPayload("), "temps 2 : envoi");
+  const lecture = dialogue.slice(dialogue.indexOf("async function lireFichier"), dialogue.indexOf("function basculer"));
+  assert.ok(!lecture.includes("onImport("), "lire un fichier n'écrit jamais");
+  // 22. le message d'échec dit que RIEN n'a été créé — un import partiel
+  // silencieux serait pire que l'échec lui-même.
+  const service = sansCommentairesTs(lire("../../lib/supabase/nutrition-recipes-write.ts"));
+  assert.ok(service.includes("AUCUNE recette n'a été créée"));
+  assert.ok(service.includes('"import_nutrition_recipes"'));
+  // Le service n'envoie jamais de coach_id.
+  const bloc = service.slice(service.indexOf("export async function importNutritionRecipes"));
+  assert.ok(!bloc.slice(0, bloc.indexOf("\n}")).includes("coach"), "aucun propriétaire transmis");
+});
+
+await test("74. les deux RPC du catalogue respectent les conventions du dépôt", () => {
+  const sql = MIGRATION_CATALOGUE;
+  for (const fn of ["duplicate_nutrition_recipe(uuid)", "import_nutrition_recipes(jsonb)"]) {
+    assert.ok(sql.includes(`revoke all on function public.${fn} from public;`), `revoke public : ${fn}`);
+    assert.ok(sql.includes(`revoke execute on function public.${fn} from anon;`), `revoke anon : ${fn}`);
+    assert.ok(sql.includes(`grant execute on function public.${fn} to authenticated;`), `grant : ${fn}`);
+    assert.ok(sql.includes(`alter function public.${fn} owner to postgres;`), `owner : ${fn}`);
+  }
+  // TROIS fonctions depuis le durcissement du chemin manuel : duplication,
+  // import, et `save_nutrition_recipe` réémise.
+  assert.equal((sql.match(/^security invoker$/gm) ?? []).length, 3);
+  assert.ok(!/^security definer$/m.test(sql), "aucune élévation de privilège");
+  assert.equal((sql.match(/^set search_path = ''$/gm) ?? []).length, 3);
+
+  // AUCUN changement de schéma : le catalogue se contente du modèle existant.
+  assert.ok(!/create table|alter table|add column|create policy|drop policy/i.test(sql));
+
+  // Le propriétaire n'est JAMAIS reçu de l'appelant.
+  const dup = sql.slice(sql.indexOf("create or replace function public.duplicate_nutrition_recipe"));
+  assert.ok(dup.includes("v_source.coach_id"), "la copie hérite du propriétaire de la SOURCE");
+  assert.ok(dup.includes("'draft'"), "une copie ne naît jamais publiée");
+  // BORNÉ au corps de l'import, commentaires retirés : la section C qui suit
+  // cite l'ancienne ligne de `save_nutrition_recipe` pour l'expliquer.
+  const départImp = sql.indexOf("create or replace function public.import_nutrition_recipes");
+  const imp = sql
+    .slice(départImp, sql.indexOf("$fn$;", départImp))
+    .split("\n")
+    .filter((l) => !l.trimStart().startsWith("--"))
+    .join("\n");
+  assert.ok(imp.includes("public.current_coach_id()"), "le serveur détermine le propriétaire");
+  assert.ok(!imp.includes("->>'coach_id'"), "un coach_id du fichier n'est jamais lu");
+  assert.ok(!imp.includes("->>'status'"), "un statut du fichier n'est jamais lu");
+  assert.ok(imp.includes("linked_to_position"), "les liaisons voyagent par position");
+});
+
+await test("75. le solveur et le parcours élève ne sont PAS touchés par la PR E", () => {
+  // 29. le solveur est intact — aucun fichier de la PR E ne l'importe pour le
+  // modifier, et il n'apparaît dans aucun des nouveaux modules.
+  for (const source of [lire("../../lib/nutrition/recipe-import.ts"), DIALOGUE_IMPORT_FICHIER, CATALOGUE]) {
+    assert.ok(!source.includes("solveRecipe"), "aucun appel au solveur depuis le catalogue ou l'import");
+  }
+  // 24/30. la lecture élève est inchangée : elle ne demande que « active », et
+  // aucun fichier de la PR E ne touche au hook élève.
+  const hookÉlève = lire("../../hooks/useStudentNutritionPlanV2.ts");
+  assert.ok(hookÉlève.includes('statuses: ["active"]'), "l'élève ne voit que les recettes publiées");
+  // 21. une recette importée passe la MÊME validation qu'une recette saisie :
+  // le module d'import délègue à `validateRecipeForm`, il n'en écrit pas une
+  // seconde.
+  const importSrc = lire("../../lib/nutrition/recipe-import.ts");
+  assert.ok(importSrc.includes("validateRecipeForm(état)"));
+  assert.equal((importSrc.match(/function valider|function validate/g) ?? []).length, 0,
+    "aucune validation parallèle");
+});
+
+await test("76. le propriétaire n'est plus jamais choisi par le navigateur", () => {
+  // ── Côté CLIENT : plus aucune charge utile ne porte de propriétaire ────
+  const état: RecipeFormState = {
+    ...createBlankRecipeForm("coach-usurpé"),
+    name: "Test",
+    ingredients: [{ ...createEmptyIngredient("i1"), name: "P", role: "protein" }],
+  };
+  const payload = toRecipeSavePayload(état) as { recipe: Record<string, unknown> };
+  assert.ok(!("coach_id" in payload.recipe), "le formulaire n'émet plus de coach_id");
+  assert.ok(!JSON.stringify(payload).includes("coach-usurpé"), "et l'état ne fuit pas non plus");
+
+  // Le changement de statut n'a même plus de paramètre coach.
+  const service = sansCommentairesTs(COUCHE_ÉCRITURE);
+  const statut = service.slice(service.indexOf("export async function setNutritionRecipeStatus"));
+  assert.ok(!statut.slice(0, statut.indexOf("}")).includes("coach"), "aucun coach dans le changement de statut");
+
+  // ── Côté SERVEUR : la règle, dans la migration ────────────────────────
+  const sql = MIGRATION_CATALOGUE;
+  const fn = sql.slice(sql.indexOf("create or replace function public.save_nutrition_recipe"));
+  // Les COMMENTAIRES citent l'ancienne ligne pour expliquer ce qui a changé :
+  // on ne juge que le code exécuté.
+  const corps = fn
+    .slice(0, fn.indexOf("$fn$;"))
+    .split("\n")
+    .filter((l) => !l.trimStart().startsWith("--"))
+    .join("\n");
+  assert.ok(!corps.includes("v_recipe->>'coach_id'"), "le payload n'est plus lu");
+  assert.ok(corps.includes("v_coach_id := public.current_coach_id();"), "création : le serveur décide");
+  assert.ok(corps.includes("NO_COACH_PROFILE"), "un compte sans fiche coach ne crée pas");
+  assert.ok(
+    /select np\.status, np\.coach_id\s+into v_status_courant, v_coach_id/.test(corps),
+    "modification : le propriétaire est lu sur la ligne, sous verrou",
+  );
+  // Et il n'est JAMAIS réécrit : la colonne n'apparaît dans aucun `update`.
+  const misAJour = corps.slice(corps.indexOf("update public.nutrition_recipes r set"));
+  assert.ok(!misAJour.slice(0, misAJour.indexOf("where r.id = v_recipe_id")).includes("coach_id"),
+    "aucun update ne touche coach_id");
+
+  // ── LES TROIS CHEMINS appliquent la même règle ────────────────────────
+  const dup = sql.slice(sql.indexOf("create or replace function public.duplicate_nutrition_recipe"));
+  const imp = sql.slice(sql.indexOf("create or replace function public.import_nutrition_recipes"));
+  assert.ok(dup.includes("v_source.coach_id"), "duplication : propriétaire de la source");
+  assert.ok(imp.includes("public.current_coach_id()"), "import : propriétaire du serveur");
+  for (const [nom, chemin] of Object.entries({ manuel: corps, duplication: dup, import: imp })) {
+    assert.ok(!/coalesce\(.*->>'coach_id'/.test(chemin), `${nom} : aucun repli sur le payload`);
+  }
+  // La checklist SQL éprouve les six situations sur une vraie base.
+  for (const contrôle of [
+    "L1. créer en nommant un AUTRE coach",
+    "L4. modifier sa recette ne change PAS son propriétaire",
+    "L5. modifier la recette d''un AUTRE coach est refusé",
+    "L8. mais il ne s''en approprie PAS la propriété",
+    "L9. manuel, duplication et import donnent le MÊME propriétaire",
+  ]) {
+    assert.ok(CHECKLIST_ADMIN.includes(contrôle), `la checklist doit couvrir : ${contrôle}`);
+  }
 });
 
 

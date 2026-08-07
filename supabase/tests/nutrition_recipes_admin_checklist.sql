@@ -600,12 +600,24 @@ begin
   set local role authenticated;
   perform set_config('request.jwt.claims',
     '{"sub":"aaaa9999-9999-4999-8999-999999999993","role":"authenticated"}', true);
-  v_res := public.save_nutrition_recipe(jsonb_build_object(
-    'recipe', jsonb_build_object('coach_id','dddd9999-9999-4999-8999-999999999991',
-      'name','Écrite par un administrateur','status','draft'),
-    'ingredients', '[]'::jsonb, 'tags', '[]'::jsonb));
-  perform pg_temp.noter('H', 'H0. l''ADMINISTRATEUR peut enregistrer une recette',
-    (v_res->'recipe'->>'id') is not null);
+  -- DEPUIS 20260818090000 : un administrateur SANS fiche coach ne CRÉE plus.
+  -- `nutrition_recipes.coach_id` est NOT NULL et la lecture élève exige
+  -- `p.coach_id = r.coach_id` : une recette sans propriétaire réel serait
+  -- invisible de tous. Mieux vaut un refus clair qu'une ligne morte.
+  declare v_erreur text;
+  begin
+    begin
+      v_res := public.save_nutrition_recipe(jsonb_build_object(
+        'recipe', jsonb_build_object('coach_id','dddd9999-9999-4999-8999-999999999991',
+          'name','Écrite par un administrateur','status','draft'),
+        'ingredients', '[]'::jsonb, 'tags', '[]'::jsonb));
+    exception when others then v_erreur := sqlerrm; end;
+    perform pg_temp.noter('H', 'H0. un ADMINISTRATEUR sans fiche coach ne peut pas CRÉER',
+      coalesce(v_erreur, '') like '%NO_COACH_PROFILE%');
+    perform pg_temp.noter('H', 'H0 bis. et rien n''a été créé au nom du coach visé',
+      not exists (select 1 from public.nutrition_recipes
+                   where name = 'Écrite par un administrateur'));
+  end;
   reset role;
 end $$;
 
@@ -646,6 +658,328 @@ begin
        and coalesce(pg_get_expr(polqual, polrelid), '') like '%current_student_id%'));
 end $$;
 
+
+-- =====================================================================
+-- Section K — CATALOGUE : duplication et import (migration 20260818090000)
+-- =====================================================================
+-- Les deux RPC de la PR E partagent une même exigence : le navigateur ne
+-- choisit JAMAIS le propriétaire. On l'éprouve en tentant précisément cela.
+insert into public.coaches (id, name, email)
+values ('dddd9999-9999-4999-8999-999999999992', 'Autre coach', 'ra.autre@test.local');
+
+insert into public.nutrition_recipes (id, coach_id, name, description, slot_key, status)
+values ('99999999-9999-4999-8999-999999999901', 'dddd9999-9999-4999-8999-999999999991',
+        'Catalogue — source', 'à recopier', 'lunch', 'active'),
+       ('99999999-9999-4999-8999-999999999902', 'dddd9999-9999-4999-8999-999999999992',
+        'Catalogue — autre coach', null, 'lunch', 'active');
+insert into public.nutrition_recipe_ingredients
+  (id, recipe_id, position, name, role, protein_per_100g, carb_per_100g, fat_per_100g, reference_grams)
+values ('99999999-9999-4999-8999-999999999911', '99999999-9999-4999-8999-999999999901', 1, 'Poulet', 'protein', 25, 0, 1, 140),
+       ('99999999-9999-4999-8999-999999999912', '99999999-9999-4999-8999-999999999901', 2, 'Sauce', 'fat', 3, 3, 40, 20);
+update public.nutrition_recipe_ingredients
+   set linked_to_ingredient_id = '99999999-9999-4999-8999-999999999911', link_ratio_bp = 2500
+ where id = '99999999-9999-4999-8999-999999999912';
+insert into public.nutrition_recipe_tags (recipe_id, kind, value)
+values ('99999999-9999-4999-8999-999999999901', 'diet', 'halal');
+
+do $$
+declare v jsonb; v_copie uuid; v_avant int; v_apres int; v_erreur text;
+begin
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"aaaa9999-9999-4999-8999-999999999991","role":"authenticated"}', true);
+
+  -- ── DUPLICATION ─────────────────────────────────────────────────────
+  v := public.duplicate_nutrition_recipe('99999999-9999-4999-8999-999999999901');
+  v_copie := (v->>'recipe_id')::uuid;
+  perform pg_temp.noter('K', 'K1. la duplication copie ingrédients, liaisons et étiquettes',
+    (v->>'ok')::boolean is true
+    and (v->'copied'->>'ingredients')::int = 2
+    and (v->'copied'->>'links')::int = 1
+    and (v->'copied'->>'tags')::int = 1);
+  perform pg_temp.noter('K', 'K2. la copie naît en BROUILLON, jamais publiée',
+    (select status from public.nutrition_recipes where id = v_copie) = 'draft');
+  perform pg_temp.noter('K', 'K3. identifiants DISTINCTS, à tous les niveaux',
+    v_copie <> '99999999-9999-4999-8999-999999999901'
+    and not exists (select 1 from public.nutrition_recipe_ingredients
+                     where recipe_id = v_copie
+                       and id in ('99999999-9999-4999-8999-999999999911',
+                                  '99999999-9999-4999-8999-999999999912')));
+  perform pg_temp.noter('K', 'K4. la liaison pointe DANS la copie, pas vers l''original',
+    (select bool_and(p.recipe_id = v_copie)
+       from public.nutrition_recipe_ingredients i
+       join public.nutrition_recipe_ingredients p on p.id = i.linked_to_ingredient_id
+      where i.recipe_id = v_copie));
+  perform pg_temp.noter('K', 'K5. l''ORIGINAL est intact : nom, statut, enfants',
+    (select name from public.nutrition_recipes where id = '99999999-9999-4999-8999-999999999901') = 'Catalogue — source'
+    and (select status from public.nutrition_recipes where id = '99999999-9999-4999-8999-999999999901') = 'active'
+    and (select count(*) from public.nutrition_recipe_ingredients where recipe_id = '99999999-9999-4999-8999-999999999901') = 2);
+  perform pg_temp.noter('K', 'K6. la copie hérite du propriétaire de la SOURCE',
+    (select coach_id from public.nutrition_recipes where id = v_copie) = 'dddd9999-9999-4999-8999-999999999991');
+  perform pg_temp.noter('K', 'K7. source_key nulle : une copie n''usurpe pas l''identité d''une fixture',
+    (select source_key from public.nutrition_recipes where id = v_copie) is null);
+
+  -- La recette d'un AUTRE coach est INTROUVABLE — pas « interdite » : la RLS
+  -- ne révèle même pas son existence.
+  v := public.duplicate_nutrition_recipe('99999999-9999-4999-8999-999999999902');
+  perform pg_temp.noter('K', 'K8. dupliquer la recette d''un AUTRE coach est refusé',
+    (v->>'ok')::boolean is false and v->>'reason' = 'not_found');
+
+  -- ── IMPORT ──────────────────────────────────────────────────────────
+  -- Le fichier tente d'injecter un propriétaire ET une publication.
+  v := public.import_nutrition_recipes(jsonb_build_object('recipes', jsonb_build_array(
+    jsonb_build_object(
+      'name', 'Importée A',
+      'coach_id', 'dddd9999-9999-4999-8999-999999999992',
+      'status', 'active',
+      'slot_key', 'dinner',
+      'tags', jsonb_build_array(jsonb_build_object('kind', 'diet', 'value', 'vegan')),
+      'ingredients', jsonb_build_array(
+        jsonb_build_object('position', 1, 'name', 'Tofu', 'role', 'protein',
+                           'protein_per_100g', 12, 'carb_per_100g', 2, 'fat_per_100g', 7, 'reference_grams', 150),
+        jsonb_build_object('position', 2, 'name', 'Huile', 'role', 'fat',
+                           'protein_per_100g', 0, 'carb_per_100g', 0, 'fat_per_100g', 100, 'reference_grams', 10,
+                           'linked_to_position', 1, 'link_ratio_bp', 1000))))));
+  perform pg_temp.noter('K', 'K9. l''import crée les recettes demandées',
+    (v->>'ok')::boolean is true and (v->>'count')::int = 1 and (v->>'ingredients')::int = 2);
+  perform pg_temp.noter('K', 'K10. une recette importée arrive en BROUILLON, malgré le fichier',
+    (select status from public.nutrition_recipes where name = 'Importée A') = 'draft');
+  perform pg_temp.noter('K', 'K11. le coach_id du FICHIER est ignoré : le serveur décide',
+    (select coach_id from public.nutrition_recipes where name = 'Importée A')
+      = 'dddd9999-9999-4999-8999-999999999991'
+    and not exists (select 1 from public.nutrition_recipes
+                     where coach_id = 'dddd9999-9999-4999-8999-999999999992'
+                       and name = 'Importée A'));
+  perform pg_temp.noter('K', 'K12. les liaisons importées restent DANS la recette',
+    (select bool_and(p.recipe_id = i.recipe_id)
+       from public.nutrition_recipe_ingredients i
+       join public.nutrition_recipe_ingredients p on p.id = i.linked_to_ingredient_id
+       join public.nutrition_recipes r on r.id = i.recipe_id
+      where r.name = 'Importée A'));
+
+  -- ── TRANSACTIONNALITÉ ───────────────────────────────────────────────
+  -- Un lot dont UNE recette est fautive ne doit rien laisser derrière lui.
+  select count(*) into v_avant from public.nutrition_recipes;
+  begin
+    perform public.import_nutrition_recipes(jsonb_build_object('recipes', jsonb_build_array(
+      jsonb_build_object('name', 'Valide du lot', 'ingredients', jsonb_build_array(
+        jsonb_build_object('position', 1, 'name', 'Riz', 'role', 'carbohydrate',
+                           'protein_per_100g', 7, 'carb_per_100g', 77, 'fat_per_100g', 1, 'reference_grams', 100))),
+      jsonb_build_object('name', 'Fautive du lot', 'ingredients', jsonb_build_array(
+        jsonb_build_object('position', 1, 'name', 'X', 'role', 'inconnu', 'reference_grams', 10))))));
+  exception when others then v_erreur := sqlerrm; end;
+  select count(*) into v_apres from public.nutrition_recipes;
+  perform pg_temp.noter('K', 'K13. un lot fautif est REFUSÉ, et nomme la cause',
+    v_erreur like '%INVALID_ROLE%');
+  perform pg_temp.noter('K', 'K14. et n''écrit RIEN : pas même la recette valide du lot',
+    v_avant = v_apres
+    and not exists (select 1 from public.nutrition_recipes where name = 'Valide du lot'));
+
+  reset role;
+end $$;
+
+do $$
+declare v jsonb; v_refuse boolean := false;
+begin
+  -- ── UN ÉLÈVE N'IMPORTE NI NE DUPLIQUE ───────────────────────────────
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"aaaa9999-9999-4999-8999-999999999992","role":"authenticated"}', true);
+  v := public.duplicate_nutrition_recipe('99999999-9999-4999-8999-999999999901');
+  perform pg_temp.noter('K', 'K15. un ÉLÈVE ne peut pas dupliquer',
+    (v->>'ok')::boolean is false and v->>'reason' = 'forbidden');
+  v := public.import_nutrition_recipes(jsonb_build_object('recipes', jsonb_build_array(
+    jsonb_build_object('name', 'Par un élève', 'ingredients', jsonb_build_array(
+      jsonb_build_object('position', 1, 'name', 'X', 'role', 'protein',
+                         'protein_per_100g', 1, 'carb_per_100g', 1, 'fat_per_100g', 1, 'reference_grams', 10))))));
+  perform pg_temp.noter('K', 'K16. un ÉLÈVE ne peut pas importer',
+    (v->>'ok')::boolean is false and v->>'reason' = 'forbidden');
+  perform pg_temp.noter('K', 'K17. et rien n''a été créé en son nom',
+    not exists (select 1 from public.nutrition_recipes where name = 'Par un élève'));
+  reset role;
+
+  -- ── anon ─────────────────────────────────────────────────────────────
+  perform pg_temp.noter('K', 'K18. anon ne peut exécuter aucune des deux RPC',
+    not has_function_privilege('anon', 'public.duplicate_nutrition_recipe(uuid)', 'execute')
+    and not has_function_privilege('anon', 'public.import_nutrition_recipes(jsonb)', 'execute'));
+  perform pg_temp.noter('K', 'K19. authenticated le peut, et les deux sont security invoker', (
+    select count(*) = 2 from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+      join pg_roles r on r.oid = p.proowner
+     where n.nspname = 'public'
+       and p.proname in ('duplicate_nutrition_recipe', 'import_nutrition_recipes')
+       and p.prosecdef = false
+       and r.rolname = 'postgres'
+       and 'search_path=""' = any(p.proconfig))
+    and has_function_privilege('authenticated', 'public.duplicate_nutrition_recipe(uuid)', 'execute')
+    and has_function_privilege('authenticated', 'public.import_nutrition_recipes(jsonb)', 'execute'));
+
+  -- ── L'ÉLÈVE NE VOIT NI COPIE NI IMPORT ──────────────────────────────
+  -- Les deux naissent en brouillon : la policy élève n'ouvre que « active ».
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"aaaa9999-9999-4999-8999-999999999992","role":"authenticated"}', true);
+  perform pg_temp.noter('K', 'K20. aucune recette dupliquée ou importée n''est visible de l''élève',
+    not exists (select 1 from public.nutrition_recipes
+                 where name in ('Catalogue — source — copie', 'Importée A')));
+  reset role;
+end $$;
+
+reset role;
+
+
+-- =====================================================================
+-- Section L — LE PROPRIÉTAIRE N'EST PLUS CHOISI PAR LE CLIENT (20260818090000)
+-- =====================================================================
+-- `save_nutrition_recipe` lisait `coach_id` DANS la charge utile. Un coach
+-- ordinaire était déjà contraint par le `with check` de
+-- `nutrition_recipes_manage_own_coach` — mais un ADMINISTRATEUR ne l'était
+-- pas, et le repli « premier coach du cabinet » de `useCurrentCoachId`
+-- pouvait attribuer une recette au mauvais propriétaire sans la moindre
+-- malveillance. Ces contrôles éprouvent la règle DEPUIS LA RPC, pas depuis
+-- l'écran.
+insert into public.coaches (id, user_id, name, email)
+values ('dddd9999-9999-4999-8999-999999999993', null, 'Coach cible', 'ra.cible@test.local');
+
+do $$
+declare v_res jsonb; v_id uuid; v_erreur text;
+begin
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"aaaa9999-9999-4999-8999-999999999991","role":"authenticated"}', true);
+
+  -- L1. CRÉATION en nommant un AUTRE coach → le serveur impose l'appelant.
+  v_res := public.save_nutrition_recipe(jsonb_build_object(
+    'recipe', jsonb_build_object(
+      'coach_id', 'dddd9999-9999-4999-8999-999999999993',
+      'name', 'Propriété — tentative pour un autre', 'status', 'draft'),
+    'ingredients', '[]'::jsonb, 'tags', '[]'::jsonb));
+  v_id := (v_res->'recipe'->>'id')::uuid;
+  perform pg_temp.noter('L', 'L1. créer en nommant un AUTRE coach : le propriétaire reste l''appelant',
+    (select coach_id from public.nutrition_recipes where id = v_id)
+      = 'dddd9999-9999-4999-8999-999999999991');
+  perform pg_temp.noter('L', 'L2. et RIEN n''a été créé pour le coach visé',
+    not exists (select 1 from public.nutrition_recipes
+                 where coach_id = 'dddd9999-9999-4999-8999-999999999993'));
+
+  -- L3. CRÉATION avec un coach_id inventé → même verdict.
+  v_res := public.save_nutrition_recipe(jsonb_build_object(
+    'recipe', jsonb_build_object(
+      'coach_id', '00000000-0000-4000-8000-0000000000ff',
+      'name', 'Propriété — coach inventé', 'status', 'draft'),
+    'ingredients', '[]'::jsonb, 'tags', '[]'::jsonb));
+  perform pg_temp.noter('L', 'L3. un coach_id inventé n''empêche rien et ne décide de rien',
+    (select coach_id from public.nutrition_recipes
+      where id = (v_res->'recipe'->>'id')::uuid) = 'dddd9999-9999-4999-8999-999999999991');
+
+  -- L4. MODIFICATION de SA recette en tentant de changer le propriétaire.
+  v_res := public.save_nutrition_recipe(jsonb_build_object(
+    'recipe', jsonb_build_object(
+      'id', v_id,
+      'coach_id', 'dddd9999-9999-4999-8999-999999999993',
+      'name', 'Propriété — renommée')));
+  perform pg_temp.noter('L', 'L4. modifier sa recette ne change PAS son propriétaire',
+    (select coach_id from public.nutrition_recipes where id = v_id)
+      = 'dddd9999-9999-4999-8999-999999999991'
+    and (select name from public.nutrition_recipes where id = v_id) = 'Propriété — renommée');
+
+  reset role;
+end $$;
+
+-- Une recette appartenant à un AUTRE coach, créée hors rôle.
+insert into public.nutrition_recipes (id, coach_id, name, status)
+values ('88889999-9999-4999-8999-999999999901', 'dddd9999-9999-4999-8999-999999999993',
+        'Propriété — recette d''autrui', 'draft');
+
+do $$
+declare v_res jsonb; v_erreur text;
+begin
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"aaaa9999-9999-4999-8999-999999999991","role":"authenticated"}', true);
+
+  -- L5. MODIFIER la recette d'un autre coach : refusée. `RECIPE_NOT_FOUND`
+  --     et non « interdit » — la RLS ne révèle même pas son existence.
+  begin
+    v_res := public.save_nutrition_recipe(jsonb_build_object(
+      'recipe', jsonb_build_object(
+        'id', '88889999-9999-4999-8999-999999999901',
+        'coach_id', 'dddd9999-9999-4999-8999-999999999991',
+        'name', 'Volée')));
+  exception when others then v_erreur := sqlerrm; end;
+  perform pg_temp.noter('L', 'L5. modifier la recette d''un AUTRE coach est refusé',
+    coalesce(v_erreur, '') like '%RECIPE_NOT_FOUND%');
+  reset role;
+
+  -- Recomptage HORS RÔLE : sous la RLS de l'appelant, la ligne est invisible
+  -- de toute façon. Seule une lecture privilégiée prouve qu'elle est intacte.
+  perform pg_temp.noter('L', 'L6. la recette d''autrui garde son nom ET son propriétaire',
+    (select name from public.nutrition_recipes where id = '88889999-9999-4999-8999-999999999901')
+      = 'Propriété — recette d''autrui'
+    and (select coach_id from public.nutrition_recipes where id = '88889999-9999-4999-8999-999999999901')
+      = 'dddd9999-9999-4999-8999-999999999993');
+end $$;
+
+do $$
+declare v_res jsonb;
+begin
+  -- L7. L'ADMINISTRATEUR corrige une recette SANS se l'approprier. C'est le
+  --     point que la spécification demandait de ne pas supposer : modifier
+  --     n'est pas devenir propriétaire.
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"aaaa9999-9999-4999-8999-999999999993","role":"authenticated"}', true);
+  v_res := public.save_nutrition_recipe(jsonb_build_object(
+    'recipe', jsonb_build_object(
+      'id', '88889999-9999-4999-8999-999999999901',
+      'name', 'Propriété — corrigée par un admin')));
+  perform pg_temp.noter('L', 'L7. un ADMIN peut corriger n''importe quelle recette',
+    (v_res->'recipe'->>'id') = '88889999-9999-4999-8999-999999999901');
+  reset role;
+  perform pg_temp.noter('L', 'L8. mais il ne s''en approprie PAS la propriété',
+    (select coach_id from public.nutrition_recipes where id = '88889999-9999-4999-8999-999999999901')
+      = 'dddd9999-9999-4999-8999-999999999993'
+    and (select name from public.nutrition_recipes where id = '88889999-9999-4999-8999-999999999901')
+      = 'Propriété — corrigée par un admin');
+end $$;
+
+do $$
+declare v_res jsonb; v_dup jsonb; v_imp jsonb;
+begin
+  -- L9. LES TROIS CHEMINS D'ÉCRITURE appliquent la MÊME règle. C'est le
+  --     contrôle qui compte : une seule porte laissée ouverte suffirait.
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"aaaa9999-9999-4999-8999-999999999991","role":"authenticated"}', true);
+
+  v_res := public.save_nutrition_recipe(jsonb_build_object(
+    'recipe', jsonb_build_object('coach_id', 'dddd9999-9999-4999-8999-999999999993',
+                                 'name', 'Trois chemins — manuel', 'status', 'draft'),
+    'ingredients', '[]'::jsonb, 'tags', '[]'::jsonb));
+  v_dup := public.duplicate_nutrition_recipe((v_res->'recipe'->>'id')::uuid);
+  v_imp := public.import_nutrition_recipes(jsonb_build_object('recipes', jsonb_build_array(
+    jsonb_build_object('name', 'Trois chemins — import',
+      'coach_id', 'dddd9999-9999-4999-8999-999999999993',
+      'ingredients', jsonb_build_array(jsonb_build_object(
+        'position', 1, 'name', 'X', 'role', 'protein',
+        'protein_per_100g', 20, 'carb_per_100g', 0, 'fat_per_100g', 1, 'reference_grams', 100))))));
+
+  perform pg_temp.noter('L', 'L9. manuel, duplication et import donnent le MÊME propriétaire', (
+    select count(distinct coach_id) = 1 and min(coach_id::text) = 'dddd9999-9999-4999-8999-999999999991'
+      from public.nutrition_recipes
+     where id in ((v_res->'recipe'->>'id')::uuid,
+                  (v_dup->>'recipe_id')::uuid,
+                  (v_imp->'created'->0->>'recipe_id')::uuid)));
+  perform pg_temp.noter('L', 'L10. et les trois naissent en BROUILLON', (
+    select bool_and(status = 'draft') from public.nutrition_recipes
+     where id in ((v_res->'recipe'->>'id')::uuid,
+                  (v_dup->>'recipe_id')::uuid,
+                  (v_imp->'created'->0->>'recipe_id')::uuid)));
+  reset role;
+end $$;
+
+reset role;
+
 -- ---------------------------------------------------------------------
 -- Bilan
 -- ---------------------------------------------------------------------
@@ -682,8 +1016,19 @@ begin
   -- et non la table entière : depuis l'import des fixtures, une base locale
   -- contient légitimement des recettes, et l'ancienne assertion « la table est
   -- vide » aurait échoué sans qu'aucune donnée de test n'ait survécu.
+  select count(*) into nb from public.nutrition_recipes
+   where name in ('Catalogue — source', 'Catalogue — source — copie', 'Importée A',
+                  'Catalogue — autre coach', 'Propriété — recette d''autrui',
+                  'Propriété — corrigée par un admin', 'Trois chemins — manuel',
+                  'Trois chemins — import')
+      or name like 'Propriété — %';
+  if nb <> 0 then
+    raise exception 'ÉCHEC   — J1 bis. des recettes de la section K ont survécu au ROLLBACK (% lignes)', nb;
+  end if;
+
   select count(*) into nb from public.nutrition_recipe_ingredients
-   where id::text like '11119999-%' or id::text like '22229999-%' or id::text like '33339999-%';
+   where id::text like '11119999-%' or id::text like '22229999-%' or id::text like '33339999-%'
+      or id::text like '99999999-%';
   if nb <> 0 then
     raise exception 'ÉCHEC   — J2. des ingrédients de test ont survécu au ROLLBACK (% lignes)', nb;
   end if;
