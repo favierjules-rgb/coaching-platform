@@ -6,12 +6,15 @@ import { ArrowLeft, Plus } from "lucide-react";
 
 import { RecipeCatalog } from "@/components/admin/RecipeCatalog";
 import { RecipeFixtureImportDialog } from "@/components/admin/RecipeFixtureImportDialog";
+import { RecipeImportDialog } from "@/components/admin/RecipeImportDialog";
 import { useCurrentCoachId } from "@/hooks/useCurrentCoachId";
 import { useNutritionLifecycle } from "@/hooks/useNutritionLifecycle";
 import { useNutritionRecipes } from "@/hooks/useNutritionRecipes";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
+  duplicateNutritionRecipe,
   importNutritionRecipeFixtures,
+  importNutritionRecipes,
   setNutritionRecipeStatus,
 } from "@/lib/supabase/nutrition-recipes-write";
 import { validateRecipeForm, createRecipeFormFromRecord } from "@/lib/nutrition/recipe-form";
@@ -58,6 +61,29 @@ export default function AdminNutritionRecipesPage() {
    * bouton anodin.
    */
   async function lancerAction(recette: RecipeWithTags, action: RecipeLifecycleAction) {
+    // DUPLIQUER n'est pas un changement de statut : la base copie la recette
+    // entière, et le navigateur n'envoie que l'identifiant de la source — ni
+    // propriétaire, ni contenu, ni statut.
+    if (action === "duplicate") {
+      setActionErreur(null);
+      setActionEnCours(recette.recipe.id);
+      const supabase = createSupabaseBrowserClient();
+      if (!supabase) {
+        setActionEnCours(null);
+        setActionErreur("Connexion indisponible. Rien n'a été créé.");
+        return;
+      }
+      const copie = await duplicateNutritionRecipe(supabase, recette.recipe.id);
+      setActionEnCours(null);
+      if (!copie.ok) {
+        setActionErreur(copie.message);
+        return;
+      }
+      await refetch();
+      await cycleDeVie.refetch();
+      return;
+    }
+
     const cible = recipeStatusAfter(action);
     if (!cible || !coachId) return;
     setActionErreur(null);
@@ -68,7 +94,7 @@ export default function AdminNutritionRecipesPage() {
       setActionErreur("Connexion indisponible. Rien n'a été modifié.");
       return;
     }
-    const résultat = await setNutritionRecipeStatus(supabase, recette.recipe.id, coachId, cible);
+    const résultat = await setNutritionRecipeStatus(supabase, recette.recipe.id, cible);
     setActionEnCours(null);
     if (!résultat.ok) {
       setActionErreur(résultat.message);
@@ -89,6 +115,24 @@ export default function AdminNutritionRecipesPage() {
     }
     return map;
   }, [recipes, coachId]);
+
+  /**
+   * L'import d'un FICHIER. Aucun `coach_id` ne part d'ici : la RPC le
+   * détermine elle-même. Un échec n'écrit rien — la fonction plpgsql est une
+   * transaction, et le message le dit sans détour.
+   */
+  async function importerFichier(payload: { recipes: unknown[] }) {
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) {
+      return { ok: false as const, message: "Connexion indisponible. AUCUNE recette n'a été créée." };
+    }
+    const résultat = await importNutritionRecipes(supabase, payload);
+    if (résultat.ok) {
+      await refetch();
+      await cycleDeVie.refetch();
+    }
+    return résultat;
+  }
 
   async function importer(updateExisting: boolean): Promise<FixtureImportReport> {
     const supabase = createSupabaseBrowserClient();
@@ -122,6 +166,11 @@ export default function AdminNutritionRecipesPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          <RecipeImportDialog
+            onImport={importerFichier}
+            disabled={!coachId}
+            existingNames={recipes.map((r) => r.recipe.name)}
+          />
           <RecipeFixtureImportDialog onImport={importer} disabled={!coachId} />
           <Link
             href="/admin/nutrition/recettes/nouvelle"

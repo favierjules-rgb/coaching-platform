@@ -189,12 +189,153 @@ export async function saveNutritionRecipe(
 export async function setNutritionRecipeStatus(
   supabase: TypedSupabaseClient,
   recipeId: string,
-  coachId: string,
   status: RecipeStatus,
 ): Promise<RecipeWriteResult> {
-  return saveNutritionRecipe(supabase, {
-    recipe: { id: recipeId, coach_id: coachId, status },
+  // Ni propriétaire, ni contenu : `{id, status}` et rien d'autre. La base
+  // conserve le coach de la ligne existante — il n'y a plus de paramètre à
+  // fournir, donc plus rien à se tromper.
+  return saveNutritionRecipe(supabase, { recipe: { id: recipeId, status } });
+}
+
+/* ──────────────────── Duplication et import — côté SERVEUR ──────────────────── */
+
+type NomRpcCatalogue = "duplicate_nutrition_recipe" | "import_nutrition_recipes";
+
+function boundCatalogRpc(supabase: TypedSupabaseClient) {
+  return (
+    supabase.rpc as unknown as (
+      fn: NomRpcCatalogue,
+      args: Record<string, unknown>,
+    ) => Promise<{ data: unknown; error: { message: string } | null }>
+  ).bind(supabase);
+}
+
+export interface DuplicateRecipeSuccess {
+  readonly ok: true;
+  readonly recipeId: string;
+  readonly name: string;
+  readonly copied: { readonly ingredients: number; readonly links: number; readonly tags: number };
+}
+export interface DuplicateRecipeFailure {
+  readonly ok: false;
+  readonly reason: "forbidden" | "not_found" | "unknown";
+  readonly message: string;
+}
+export type DuplicateRecipeResult = DuplicateRecipeSuccess | DuplicateRecipeFailure;
+
+const REFUS_DUPLICATION: DuplicateRecipeFailure = {
+  ok: false,
+  reason: "unknown",
+  message: "La duplication a échoué. Rien n'a été créé — réessaie.",
+};
+
+/** Traduit le retour de `duplicate_nutrition_recipe`. Fonction PURE. */
+export function parseDuplicateRecipeResult(data: unknown): DuplicateRecipeResult {
+  const ligne = (data ?? {}) as Record<string, unknown>;
+  if (ligne.ok === true && typeof ligne.recipe_id === "string") {
+    const copié = (ligne.copied ?? {}) as Record<string, unknown>;
+    const n = (v: unknown) => (typeof v === "number" && v >= 0 ? Math.trunc(v) : 0);
+    return {
+      ok: true,
+      recipeId: ligne.recipe_id,
+      name: typeof ligne.name === "string" ? ligne.name : "",
+      copied: { ingredients: n(copié.ingredients), links: n(copié.links), tags: n(copié.tags) },
+    };
+  }
+  if (ligne.reason === "forbidden") {
+    return { ok: false, reason: "forbidden", message: "Cette recette ne t'appartient pas." };
+  }
+  if (ligne.reason === "not_found") {
+    return {
+      ok: false,
+      reason: "not_found",
+      message: "Cette recette est introuvable : elle a peut-être été supprimée. Recharge la page.",
+    };
+  }
+  return REFUS_DUPLICATION;
+}
+
+/**
+ * Duplique une recette. Le navigateur n'envoie QUE l'identifiant de la
+ * source : ni le propriétaire, ni le statut, ni le contenu — la base lit tout
+ * sur la source et impose « brouillon ». C'est ce qui rend impossible de créer
+ * une recette dans le catalogue d'un autre coach.
+ */
+export async function duplicateNutritionRecipe(
+  supabase: TypedSupabaseClient,
+  recipeId: string,
+): Promise<DuplicateRecipeResult> {
+  const { data, error } = await boundCatalogRpc(supabase)("duplicate_nutrition_recipe", {
+    p_recipe_id: recipeId,
   });
+  if (error) return REFUS_DUPLICATION;
+  return parseDuplicateRecipeResult(data);
+}
+
+export interface ImportRecipesSuccess {
+  readonly ok: true;
+  readonly count: number;
+  readonly ingredients: number;
+  readonly created: readonly { readonly recipeId: string; readonly name: string }[];
+}
+export interface ImportRecipesFailure {
+  readonly ok: false;
+  readonly message: string;
+}
+export type ImportRecipesResult = ImportRecipesSuccess | ImportRecipesFailure;
+
+/** Traduit le retour de `import_nutrition_recipes`. Fonction PURE. */
+export function parseImportRecipesResult(data: unknown): ImportRecipesResult {
+  const ligne = (data ?? {}) as Record<string, unknown>;
+  if (ligne.ok !== true) {
+    return {
+      ok: false,
+      message:
+        ligne.reason === "forbidden"
+          ? "Tu n'as pas les droits nécessaires pour importer des recettes."
+          : "L'import a échoué. AUCUNE recette n'a été créée.",
+    };
+  }
+  const créées = Array.isArray(ligne.created) ? ligne.created : [];
+  return {
+    ok: true,
+    count: typeof ligne.count === "number" ? ligne.count : créées.length,
+    ingredients: typeof ligne.ingredients === "number" ? ligne.ingredients : 0,
+    created: créées
+      .map((c) => (c ?? {}) as Record<string, unknown>)
+      .filter((c) => typeof c.recipe_id === "string")
+      .map((c) => ({ recipeId: c.recipe_id as string, name: String(c.name ?? "") })),
+  };
+}
+
+/**
+ * Importe un LOT de recettes en UNE transaction.
+ *
+ * AUCUN `coach_id` n'est transmis : la RPC le détermine elle-même
+ * (`current_coach_id()`), et ignore purement un `coach_id` qui traînerait dans
+ * la charge utile. Le statut « brouillon » est imposé côté base, pas ici.
+ *
+ * Un échec n'écrit RIEN : la fonction plpgsql est une transaction, et la
+ * moindre exception annule le lot entier. Le message le dit explicitement,
+ * pour qu'un coach ne parte pas chercher ce qui serait passé.
+ */
+export async function importNutritionRecipes(
+  supabase: TypedSupabaseClient,
+  payload: { recipes: unknown[] },
+): Promise<ImportRecipesResult> {
+  if (payload.recipes.length === 0) {
+    return { ok: true, count: 0, ingredients: 0, created: [] };
+  }
+  const { data, error } = await boundCatalogRpc(supabase)("import_nutrition_recipes", {
+    p_payload: payload,
+  });
+  if (error) {
+    return {
+      ok: false,
+      message: `L'import a échoué, AUCUNE recette n'a été créée : ${error.message}`,
+    };
+  }
+  return parseImportRecipesResult(data);
 }
 
 /* ─────────────────────────── Import des fixtures ─────────────────────────── */

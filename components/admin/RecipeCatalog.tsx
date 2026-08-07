@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ChefHat } from "lucide-react";
+import { AlertTriangle, ChefHat, RotateCcw } from "lucide-react";
 
 import { LifecycleActionBar, type LifecycleActionSpec } from "@/components/admin/LifecycleActions";
 import { FilterButtons, SearchInput } from "@/components/admin/SearchAndFilters";
@@ -47,13 +47,29 @@ import {
 export type StatusFilter = "tous" | RecipeStatus;
 export type SlotFilter = "tous" | "generic" | RecipeSlotKey;
 export type TagFilter = "tous" | RecipeTagKind;
+/**
+ * L'ordre d'affichage. « alpha » reste le DÉFAUT : c'est l'ordre dans lequel
+ * on cherche une recette dont on connaît le nom, et c'était le seul ordre
+ * jusqu'ici — le rendre optionnel garde tous les appels existants exacts.
+ */
+export type CatalogSort = "alpha" | "recent" | "ancien";
 
 export interface CatalogFilters {
   readonly query: string;
   readonly status: StatusFilter;
   readonly slot: SlotFilter;
   readonly tagKind: TagFilter;
+  readonly sort?: CatalogSort;
 }
+
+/** L'état « aucun filtre » — une seule définition, pour que « Réinitialiser » ne puisse pas en oublier un. */
+export const CATALOG_FILTERS_VIDES: CatalogFilters = {
+  query: "",
+  status: "tous",
+  slot: "tous",
+  tagKind: "tous",
+  sort: "alpha",
+};
 
 /** Nombre d'ingrédients et étiquettes affichés pour une ligne du catalogue. */
 export interface CatalogRow {
@@ -88,8 +104,19 @@ export function filterCatalog(
       return true;
     })
     .sort((a, b) => {
+      // Départage TOUJOURS par identifiant : deux recettes de même nom, ou
+      // modifiées à la même seconde, doivent s'afficher dans le même ordre
+      // d'un rendu à l'autre. Un tri instable ferait sauter les lignes sous le
+      // curseur.
+      const parId = a.recipe.id.localeCompare(b.recipe.id);
+      if (filters.sort === "recent" || filters.sort === "ancien") {
+        const da = Date.parse(a.updatedAt ?? "") || 0;
+        const db = Date.parse(b.updatedAt ?? "") || 0;
+        const écart = filters.sort === "recent" ? db - da : da - db;
+        return écart !== 0 ? écart : parId;
+      }
       const parNom = a.recipe.name.localeCompare(b.recipe.name, "fr");
-      return parNom !== 0 ? parNom : a.recipe.id.localeCompare(b.recipe.id);
+      return parNom !== 0 ? parNom : parId;
     });
 }
 
@@ -115,6 +142,11 @@ const SLOT_FILTERS: { value: SlotFilter; label: string }[] = [
   { value: "tous", label: "Tous créneaux" },
   { value: "generic", label: "Génériques" },
   ...RECIPE_SLOT_KEYS.map((s) => ({ value: s as SlotFilter, label: RECIPE_SLOT_LABELS_FR[s] })),
+];
+const SORT_FILTERS: { value: CatalogSort; label: string }[] = [
+  { value: "alpha", label: "A → Z" },
+  { value: "recent", label: "Plus récentes" },
+  { value: "ancien", label: "Plus anciennes" },
 ];
 const TAG_FILTERS: { value: TagFilter; label: string }[] = [
   { value: "tous", label: "Toutes étiquettes" },
@@ -151,15 +183,33 @@ export function RecipeCatalog({
   onLifecycleAction?: (recipe: RecipeWithTags, action: RecipeLifecycleAction) => void;
   busyRecipeId?: string | null;
 }) {
-  const [query, setQuery] = useState("");
-  const [status, setStatus] = useState<StatusFilter>("tous");
-  const [slot, setSlot] = useState<SlotFilter>("tous");
-  const [tagKind, setTagKind] = useState<TagFilter>("tous");
+  const [query, setQuery] = useState(CATALOG_FILTERS_VIDES.query);
+  const [status, setStatus] = useState<StatusFilter>(CATALOG_FILTERS_VIDES.status);
+  const [slot, setSlot] = useState<SlotFilter>(CATALOG_FILTERS_VIDES.slot);
+  const [tagKind, setTagKind] = useState<TagFilter>(CATALOG_FILTERS_VIDES.tagKind);
+  const [sort, setSort] = useState<CatalogSort>("alpha");
 
   const filtrées = useMemo(
-    () => filterCatalog(recipes, { query, status, slot, tagKind }),
-    [recipes, query, status, slot, tagKind],
+    () => filterCatalog(recipes, { query, status, slot, tagKind, sort }),
+    [recipes, query, status, slot, tagKind, sort],
   );
+
+  // Un seul filtre actif suffit à proposer la remise à zéro : la proposer en
+  // permanence en ferait un bouton qu'on cesse de voir.
+  const filtreActif =
+    query !== CATALOG_FILTERS_VIDES.query ||
+    status !== CATALOG_FILTERS_VIDES.status ||
+    slot !== CATALOG_FILTERS_VIDES.slot ||
+    tagKind !== CATALOG_FILTERS_VIDES.tagKind ||
+    sort !== "alpha";
+
+  function réinitialiser() {
+    setQuery(CATALOG_FILTERS_VIDES.query);
+    setStatus(CATALOG_FILTERS_VIDES.status);
+    setSlot(CATALOG_FILTERS_VIDES.slot);
+    setTagKind(CATALOG_FILTERS_VIDES.tagKind);
+    setSort("alpha");
+  }
 
   if (loading) {
     return <p className="text-sm text-muted-foreground">Chargement du catalogue…</p>;
@@ -180,6 +230,22 @@ export function RecipeCatalog({
         <FilterButtons options={STATUS_FILTERS} active={status} onChange={setStatus} />
         <FilterButtons options={SLOT_FILTERS} active={slot} onChange={setSlot} />
         <FilterButtons options={TAG_FILTERS} active={tagKind} onChange={setTagKind} />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <FilterButtons options={SORT_FILTERS} active={sort} onChange={setSort} />
+          {filtreActif && (
+            <button
+              type="button"
+              onClick={réinitialiser}
+              className="pressable flex min-h-[44px] items-center gap-2 rounded-control border border-border px-4 py-2 text-xs font-bold uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            >
+              <RotateCcw size={13} />
+              Réinitialiser
+            </button>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground" role="status">
+          {filtrées.length} recette{filtrées.length > 1 ? "s" : ""} sur {recipes.length}
+        </p>
       </div>
 
       {invalid.length > 0 && (
@@ -296,7 +362,6 @@ export function RecipeCatalog({
                   <LifecycleActionBar
                     busy={busyRecipeId === r.recipe.id}
                     actions={recipeLifecycleActions(r.status)
-                      .filter((action) => action !== "duplicate")
                       .map((action): LifecycleActionSpec => ({
                         key: action,
                         label: RECIPE_ACTION_LABELS_FR[action],

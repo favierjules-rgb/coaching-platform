@@ -1,0 +1,107 @@
+{
+  "_lisez_moi": [
+    "Chaque recette a un nom et au moins un ingrédient. Tout le reste est facultatif.",
+    "slot : un créneau parmi breakfast, morning_snack, lunch, afternoon_snack, dinner, dessert — ou rien du tout, et la recette vaut pour toutes les occasions.",
+    "role : protein, carbohydrate, fat, fixed, free. « protein », « carbohydrate » et « fat » voient leur quantité varier pour atteindre la cible ; « fixed » ne bouge pas ; « free » est exclu du calcul.",
+    "Les macros s'écrivent POUR 100 g de produit cru. referenceGrams est la quantité de départ.",
+    "linkedToPosition : le RANG d'un autre ingrédient de la même recette (le premier vaut 1). linkRatioBp est la part, en dix-millièmes — 2500 = 25 %.",
+    "Les recettes importées arrivent toujours en BROUILLON : rien n'est publié automatiquement."
+  ],
+  "recipes": [
+    {
+      "name": "Bol poulet riz curry",
+      "description": "Exemple : quantités variables et sauce liée au poulet.",
+      "slot": "lunch",
+      "tags": {
+        "diet": [
+          "halal"
+        ],
+        "allergen": [
+          "milk"
+        ]
+      },
+      "ingredients": [
+        {
+          "name": "Blanc de poulet",
+          "role": "protein",
+          "proteinPer100g": 25,
+          "carbPer100g": 0,
+          "fatPer100g": 1,
+          "referenceGrams": 140,
+          "minGrams": 100,
+          "maxGrams": 220
+        },
+        {
+          "name": "Riz basmati cru",
+          "role": "carbohydrate",
+          "proteinPer100g": 7,
+          "carbPer100g": 77,
+          "fatPer100g": 1,
+          "referenceGrams": 80
+        },
+        {
+          "name": "Crème de coco",
+          "role": "fat",
+          "proteinPer100g": 2,
+          "carbPer100g": 3,
+          "fatPer100g": 20,
+          "referenceGrams": 30,
+          "linkedToPosition": 1,
+          "linkRatioBp": 2500
+        },
+        {
+          "name": "Épinards",
+          "role": "free",
+          "proteinPer100g": 3,
+          "carbPer100g": 1,
+          "fatPer100g": 0,
+          "referenceGrams": 100
+        }
+      ]
+    },
+    {
+      "name": "Omelette deux œufs et pain",
+      "description": "Exemple : un ingrédient compté à l'unité, et un ingrédient fixe.",
+      "slot": "breakfast",
+      "tags": {
+        "diet": [
+          "vegetarian"
+        ],
+        "allergen": [
+          "egg",
+          "gluten"
+        ]
+      },
+      "ingredients": [
+        {
+          "name": "Œuf entier",
+          "role": "protein",
+          "proteinPer100g": 13,
+          "carbPer100g": 1,
+          "fatPer100g": 11,
+          "referenceGrams": 100,
+          "eggGrams": 50,
+          "unitName": "œuf",
+          "maxUnits": 4
+        },
+        {
+          "name": "Pain complet",
+          "role": "carbohydrate",
+          "proteinPer100g": 9,
+          "carbPer100g": 45,
+          "fatPer100g": 3,
+          "referenceGrams": 60
+        },
+        {
+          "name": "Beurre",
+          "role": "fixed",
+          "proteinPer100g": 1,
+          "carbPer100g": 1,
+          "fatPer100g": 82,
+          "referenceGrams": 10,
+          "fixedLabel": "1 noisette"
+        }
+      ]
+    }
+  ]
+}

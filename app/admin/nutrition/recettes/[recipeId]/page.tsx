@@ -19,19 +19,18 @@ import { useNutritionRecipe } from "@/hooks/useNutritionRecipes";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { deleteNutritionRecipe } from "@/lib/supabase/nutrition-lifecycle";
 import {
+  duplicateNutritionRecipe,
   saveNutritionRecipe,
   setNutritionRecipeStatus,
 } from "@/lib/supabase/nutrition-recipes-write";
 import {
   createRecipeFormFromRecord,
-  duplicateRecipeForm,
   toRecipeSavePayload,
   type RecipeFormState,
 } from "@/lib/nutrition/recipe-form";
 import {
   describeRecipeDeletionBlock,
   describeRecipeDeletionSideEffects,
-  duplicateName,
   recipeLifecycleActions,
   recipeStatusAfter,
   RECIPE_ACTION_LABELS_FR,
@@ -127,7 +126,7 @@ export default function AdminNutritionRecipeDetailPage() {
       setActionErreur("Connexion indisponible. Rien n'a été modifié.");
       return;
     }
-    const résultat = await setNutritionRecipeStatus(supabase, recipe.recipe.id, coachId, cible);
+    const résultat = await setNutritionRecipeStatus(supabase, recipe.recipe.id, cible);
     setActionEnCours(false);
     if (!résultat.ok) {
       setActionErreur(résultat.message);
@@ -142,12 +141,13 @@ export default function AdminNutritionRecipeDetailPage() {
   }
 
   /**
-   * Duplique la recette en un BROUILLON indépendant : identifiants
-   * d'ingrédients neufs, liaisons réécrites, `source_key` effacée. Passe par
-   * la même RPC que n'importe quel enregistrement.
+   * Duplique la recette. Le navigateur n'envoie QUE l'identifiant de la
+   * source : la base recopie les colonnes, traduit les liaisons par position,
+   * hérite du propriétaire de la source et impose le brouillon. La même RPC
+   * que le catalogue — une seule implémentation de la duplication.
    */
   async function dupliquer() {
-    if (!formulaire) return;
+    if (!recipe) return;
     setActionErreur(null);
     setActionEnCours(true);
     const supabase = createSupabaseBrowserClient();
@@ -156,14 +156,13 @@ export default function AdminNutritionRecipeDetailPage() {
       setActionErreur("Connexion indisponible. Rien n'a été créé.");
       return;
     }
-    const copie = duplicateRecipeForm(formulaire, duplicateName(formulaire.name));
-    const résultat = await saveNutritionRecipe(supabase, toRecipeSavePayload(copie, "draft"));
+    const copie = await duplicateNutritionRecipe(supabase, recipe.recipe.id);
     setActionEnCours(false);
-    if (!résultat.ok) {
-      setActionErreur(résultat.message);
+    if (!copie.ok) {
+      setActionErreur(copie.message);
       return;
     }
-    router.push(`/admin/nutrition/recettes/${résultat.recipeId}`);
+    router.push(`/admin/nutrition/recettes/${copie.recipeId}`);
   }
 
   function lancerAction(action: RecipeLifecycleAction) {
