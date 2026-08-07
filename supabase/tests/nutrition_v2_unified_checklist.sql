@@ -5,6 +5,8 @@
 --   20260811090000_nutrition_v2_unification.sql
 --   20260812090000_save_nutrition_plan_v2_full.sql
 --   20260813090000_student_recipe_read_access.sql
+--   20260815090000_nutrition_lifecycle.sql
+--   20260816090000_nutrition_plan_coach_ownership.sql
 --
 -- Sections :
 --   A. structure du modèle unifié (colonnes, contraintes, clés, index) ;
@@ -15,6 +17,18 @@
 --   E. sécurité des recettes : élève, coach, autre coach, admin, anonyme,
 --      attaques directes sur les tables enfants ;
 --   F. non-régression de l'outil 1 (nutrition_daily_logs) ;
+--   H. la garde d'assignation contrôle les SEPT jours ;
+--   I. CYCLE DE VIE (PR D) : les 22 cas exigés — publication, archivage,
+--      suppression définitive, appels DIRECTS des RPC par un élève, tentative
+--      de suppression inter-coach, RÈGLE MÉTIER (seul un élève actuellement
+--      affecté bloque : les journées de suivi partent avec le plan), absence
+--      d'orphelin sur les cinq tables filles, préservation de l'élève, de son
+--      compte et des données des autres plans, et RLS toujours active ;
+--   K. le PROPRIÉTAIRE d'un plan : sans lui, l'élève ne voyait AUCUNE recette.
+--      La séquence réelle est rejouée de bout en bout ;
+--   L. la BASCULE 20260815 → 20260817 : le même plan (0 élève + historique)
+--      était bloqué, il est désormais supprimable — les DEUX états sont
+--      éprouvés sur la base, pas seulement lus dans les fichiers ;
 --   G. aucune donnée de test persistante après le ROLLBACK.
 --
 -- Lancement :
@@ -27,6 +41,18 @@
 begin;
 
 create temporary table _faits (section text, libelle text, ok boolean) on commit drop;
+
+-- La section I note ses résultats SOUS les rôles applicatifs, au moment même
+-- où elle éprouve la RLS — sortir du rôle pour écrire un fait ferait perdre le
+-- contexte qu'on teste. Ces deux rôles doivent donc pouvoir écrire dans la
+-- table de faits. Même convention que nutrition_recipes_checklist.sql.
+do $$
+declare s text;
+begin
+  s := (select nspname from pg_namespace where oid = pg_my_temp_schema());
+  execute format('grant usage on schema %I to authenticated, anon', s);
+  execute format('grant insert, select on %I._faits to authenticated, anon', s);
+end $$;
 
 create or replace function pg_temp.noter(p_section text, p_libelle text, p_ok boolean)
 returns void language plpgsql as $$
@@ -854,6 +880,811 @@ begin
     coalesce(v_stable, false) and coalesce(v_lecture, false));
 end $$;
 
+-- =====================================================================
+-- Section I — CYCLE DE VIE (migration 20260815090000, PR D)
+-- =====================================================================
+-- Les 22 cas exigés : huit pour les plans, huit pour les recettes, six pour
+-- les statuts et la sécurité. TOUS passent par la base — RPC appelées
+-- directement, RLS éprouvée sous les vrais rôles — jamais par l'interface :
+-- une protection qui ne tiendrait que dans le navigateur ne serait pas une
+-- protection.
+--
+-- Table rase des affectations laissées par les sections précédentes : l'index
+-- unique partiel n'autorise qu'un plan par élève, et cette section a besoin de
+-- choisir elle-même qui est affecté à quoi.
+reset role;
+update public.nutrition_plans set student_id = null
+ where student_id in ('51110000-0000-4000-8000-00000000000a',
+                      '51110000-0000-4000-8000-00000000000b');
+
+-- Quatre plans du coach A, tous v2 et volontairement SANS profil ni jour :
+-- aucun contrôle de cette section ne passe par `assign_nutrition_plan`, donc
+-- la garde des sept jours n'entre jamais en jeu — sauf en I2/I3 où l'affectation
+-- est posée directement, comme le ferait une base existante.
+insert into public.nutrition_plans (id, coach_id, name, goal_type, status, daily_target, nutrition_model_version)
+values ('d1110000-0000-4000-8000-00000000000a', 'c1110000-0000-4000-8000-00000000000a',
+        'Cycle — plan libre', 'maintien', 'actif', '{}'::jsonb, 2),
+       ('d1110000-0000-4000-8000-00000000000b', 'c1110000-0000-4000-8000-00000000000a',
+        'Cycle — plan assigné', 'maintien', 'actif', '{}'::jsonb, 2),
+       ('d1110000-0000-4000-8000-00000000000c', 'c1110000-0000-4000-8000-00000000000a',
+        'Cycle — plan historique', 'maintien', 'actif', '{}'::jsonb, 2),
+       ('d1110000-0000-4000-8000-00000000000d', 'c1110000-0000-4000-8000-00000000000a',
+        'Cycle — plan visibilité', 'maintien', 'actif', '{}'::jsonb, 2);
+
+-- Le plan « libre » reçoit une structure complète : sa suppression doit
+-- l'emporter ENTIÈREMENT, et c'est ce qu'on vérifie en I7.
+insert into public.nutrition_plan_profiles (id, plan_id, profile_key, daily_calories, protein_bp, carb_bp, fat_bp)
+values ('d2220000-0000-4000-8000-00000000000a', 'd1110000-0000-4000-8000-00000000000a',
+        'day_monday', 2400, 3000, 4500, 2500);
+insert into public.nutrition_meal_slot_targets (profile_id, slot, enabled, protein_bp, carb_bp, fat_bp, display_order)
+values ('d2220000-0000-4000-8000-00000000000a', 'breakfast', true, 10000, 10000, 10000, 1);
+insert into public.nutrition_days (id, plan_id, day, profile_key, status, target)
+values ('d3330000-0000-4000-8000-00000000000a', 'd1110000-0000-4000-8000-00000000000a',
+        'monday', 'day_monday', 'non-commence', '{}'::jsonb);
+insert into public.meals (id, nutrition_day_id, slot, name, items, macros, coach_notes)
+values ('d4440000-0000-4000-8000-00000000000a', 'd3330000-0000-4000-8000-00000000000a',
+        'breakfast', 'Repas témoin', '["flocons"]'::jsonb, '{}'::jsonb, 'à ne pas perdre');
+
+-- Le plan « historique » porte une journée de suivi : la clé étrangère est en
+-- CASCADE, donc sans garde le journal partirait avec le plan.
+insert into public.nutrition_daily_logs (student_id, nutrition_plan_id, log_date, calories)
+values ('51110000-0000-4000-8000-00000000000a', 'd1110000-0000-4000-8000-00000000000c',
+        current_date - 3, 2100);
+
+-- Un journal TÉMOIN, rattaché à un AUTRE plan. Il ne doit pas bouger d'un
+-- pouce quand on supprime le plan « historique » : c'est ce qui distingue
+-- « supprimer ce qui dépend du plan visé » de « supprimer le suivi de
+-- l'élève ».
+insert into public.nutrition_daily_logs (student_id, nutrition_plan_id, log_date, calories)
+values ('51110000-0000-4000-8000-00000000000a', 'd1110000-0000-4000-8000-00000000000d',
+        current_date - 4, 2050);
+
+-- Le plan « visibilité » est assigné à l'élève A, avec une journée et un repas
+-- que l'élève doit voir — ou ne pas voir, selon le statut.
+insert into public.nutrition_plan_profiles (id, plan_id, profile_key, daily_calories, protein_bp, carb_bp, fat_bp)
+values ('d2220000-0000-4000-8000-00000000000d', 'd1110000-0000-4000-8000-00000000000d',
+        'day_monday', 2200, 3000, 4500, 2500);
+insert into public.nutrition_days (id, plan_id, day, profile_key, status, target)
+values ('d3330000-0000-4000-8000-00000000000d', 'd1110000-0000-4000-8000-00000000000d',
+        'monday', 'day_monday', 'non-commence', '{}'::jsonb);
+insert into public.meals (id, nutrition_day_id, slot, name, items, macros, coach_notes)
+values ('d4440000-0000-4000-8000-00000000000d', 'd3330000-0000-4000-8000-00000000000d',
+        'breakfast', 'Repas visible', '["pain"]'::jsonb, '{}'::jsonb, '');
+update public.nutrition_plans set student_id = '51110000-0000-4000-8000-00000000000a'
+ where id = 'd1110000-0000-4000-8000-00000000000d';
+
+-- Deux recettes : une du coach A (celui de l'élève A), une du coach B.
+insert into public.nutrition_recipes (id, coach_id, name, slot_key, status)
+values ('d5550000-0000-4000-8000-00000000000a', 'c1110000-0000-4000-8000-00000000000a',
+        'Cycle — recette A', 'lunch', 'active'),
+       ('d5550000-0000-4000-8000-00000000000b', 'c1110000-0000-4000-8000-00000000000b',
+        'Cycle — recette B', 'lunch', 'active');
+insert into public.nutrition_recipe_ingredients
+  (id, recipe_id, position, name, role, protein_per_100g, carb_per_100g, fat_per_100g, reference_grams)
+values ('d6660000-0000-4000-8000-00000000000a', 'd5550000-0000-4000-8000-00000000000a',
+        1, 'Poulet', 'protein', 25, 0, 1, 140);
+insert into public.nutrition_recipe_tags (recipe_id, kind, value)
+values ('d5550000-0000-4000-8000-00000000000a', 'diet', 'halal');
+
+-- ── I1 à I8 : LES PLANS ───────────────────────────────────────────────
+do $$
+declare
+  v_date timestamptz;
+  v_res jsonb;
+  v_avant int;
+begin
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"a1110000-0000-4000-8000-000000000001","role":"authenticated"}', true);
+
+  -- I1. La date d'archivage se pose seule, et disparaît à la restauration.
+  update public.nutrition_plans set status = 'ancien'
+   where id = 'd1110000-0000-4000-8000-00000000000a';
+  select archived_at into v_date from public.nutrition_plans
+   where id = 'd1110000-0000-4000-8000-00000000000a';
+  perform pg_temp.noter('I', 'I1. archiver DATE le plan, restaurer efface la date', v_date is not null);
+  update public.nutrition_plans set status = 'prochain'
+   where id = 'd1110000-0000-4000-8000-00000000000a';
+  select archived_at into v_date from public.nutrition_plans
+   where id = 'd1110000-0000-4000-8000-00000000000a';
+  perform pg_temp.noter('I', 'I1 bis. la date est effacée par la restauration', v_date is null);
+  update public.nutrition_plans set status = 'actif'
+   where id = 'd1110000-0000-4000-8000-00000000000a';
+
+  -- I5. Un plan ASSIGNÉ n'est pas supprimable — et rien ne bouge.
+  select count(*) into v_avant from public.nutrition_plans;
+  select public.delete_nutrition_plan('d1110000-0000-4000-8000-00000000000d') into v_res;
+  perform pg_temp.noter('I', 'I5. APPEL DIRECT de la RPC sur un plan ASSIGNÉ : refusé',
+    (v_res->>'ok')::boolean is false and v_res->>'reason' = 'assigned');
+  perform pg_temp.noter('I', 'I5 bis. le refus ne supprime AUCUN plan',
+    (select count(*) from public.nutrition_plans) = v_avant);
+  perform pg_temp.noter('I', 'I5 ter. le refus n''a retiré AUCUNE affectation',
+    (select student_id from public.nutrition_plans where id = 'd1110000-0000-4000-8000-00000000000d')
+      = '51110000-0000-4000-8000-00000000000a');
+
+  -- I6. RÈGLE MÉTIER : les journées de suivi NE BLOQUENT PAS.
+  --     Un plan sans élève mais avec un historique est supprimable, et son
+  --     journal part avec lui — c'est exactement le cas que l'interface
+  --     refusait à tort. On mesure le nombre de journées AVANT, pour vérifier
+  --     ensuite que la RPC annonce le compte exact.
+  perform pg_temp.noter('I', 'I6. 0 élève + des journées de suivi : la suppression est AUTORISÉE',
+    public.nutrition_plan_deletion_block('d1110000-0000-4000-8000-00000000000c') is null
+    and (select count(*) from public.nutrition_daily_logs
+          where nutrition_plan_id = 'd1110000-0000-4000-8000-00000000000c') = 1);
+
+  select public.delete_nutrition_plan('d1110000-0000-4000-8000-00000000000c') into v_res;
+  perform pg_temp.noter('I', 'I6 bis. le plan est réellement supprimé',
+    (v_res->>'ok')::boolean is true);
+  perform pg_temp.noter('I', 'I6 ter. la RPC annonce le nombre de journées supprimées',
+    (v_res->'deleted'->>'daily_logs')::int = 1);
+  perform pg_temp.noter('I', 'I6 quater. les journées liées sont parties avec le plan',
+    not exists (select 1 from public.nutrition_daily_logs
+                 where nutrition_plan_id = 'd1110000-0000-4000-8000-00000000000c'));
+
+  -- CE QUI NE DOIT JAMAIS PARTIR : l'élève, son compte, et le suivi rattaché
+  -- à un AUTRE plan.
+  -- L'ÉLÈVE, lui, n'a pas bougé. (Son compte auth est recompté en I22, hors
+  -- rôle applicatif : `authenticated` n'a aucun droit de lecture sur
+  -- auth.users, et c'est très bien ainsi.)
+  perform pg_temp.noter('I', 'I6 quinquies. l''élève n''a pas été supprimé',
+    exists (select 1 from public.students where id = '51110000-0000-4000-8000-00000000000a'));
+  perform pg_temp.noter('I', 'I6 sexies. le suivi d''un AUTRE plan n''a pas été touché',
+    (select count(*) from public.nutrition_daily_logs
+      where nutrition_plan_id = 'd1110000-0000-4000-8000-00000000000d') = 1);
+
+  -- I7. Un plan LIBRE et SANS historique part entièrement, sans orphelin.
+  select public.delete_nutrition_plan('d1110000-0000-4000-8000-00000000000a') into v_res;
+  perform pg_temp.noter('I', 'I7. 0 élève + 0 suivi : le plan est réellement supprimé',
+    (v_res->>'ok')::boolean is true);
+  perform pg_temp.noter('I', 'I7 bis. la RPC compte ce qu''elle a supprimé, table par table',
+    (v_res->'deleted'->>'meals')::int = 1
+    and (v_res->'deleted'->>'days')::int = 1
+    and (v_res->'deleted'->>'profiles')::int = 1
+    and (v_res->'deleted'->>'meal_slot_targets')::int = 1
+    and (v_res->'deleted'->>'daily_logs')::int = 0);
+  perform pg_temp.noter('I', 'I7 ter. AUCUN orphelin ne subsiste, sur AUCUNE des cinq tables',
+    not exists (select 1 from public.nutrition_plans where id = 'd1110000-0000-4000-8000-00000000000a')
+    and not exists (select 1 from public.nutrition_days where plan_id = 'd1110000-0000-4000-8000-00000000000a')
+    and not exists (select 1 from public.meals where id = 'd4440000-0000-4000-8000-00000000000a')
+    and not exists (select 1 from public.nutrition_plan_profiles where plan_id = 'd1110000-0000-4000-8000-00000000000a')
+    and not exists (select 1 from public.nutrition_meal_slot_targets
+                     where profile_id = 'd2220000-0000-4000-8000-00000000000a')
+    and not exists (select 1 from public.nutrition_daily_logs
+                     where nutrition_plan_id = 'd1110000-0000-4000-8000-00000000000a'));
+
+  -- I8. Un identifiant inconnu ne lève pas : il répond.
+  select public.delete_nutrition_plan('00000000-0000-4000-8000-0000000000ff') into v_res;
+  perform pg_temp.noter('I', 'I8. un identifiant inconnu répond not_found sans exception',
+    (v_res->>'ok')::boolean is false and v_res->>'reason' = 'not_found');
+
+  reset role;
+end $$;
+
+-- I2 / I3 / I4 : ce que l'ÉLÈVE voit, selon le statut du plan.
+do $$
+declare v_plans int; v_jours int; v_repas int;
+begin
+  -- Le plan « visibilité » repasse en BROUILLON.
+  update public.nutrition_plans set status = 'prochain'
+   where id = 'd1110000-0000-4000-8000-00000000000d';
+
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"a1110000-0000-4000-8000-000000000003","role":"authenticated"}', true);
+  select count(*) into v_plans from public.nutrition_plans
+   where id = 'd1110000-0000-4000-8000-00000000000d';
+  select count(*) into v_jours from public.nutrition_days
+   where plan_id = 'd1110000-0000-4000-8000-00000000000d';
+  select count(*) into v_repas from public.meals
+   where id = 'd4440000-0000-4000-8000-00000000000d';
+  perform pg_temp.noter('I', 'I2. un plan BROUILLON est invisible pour son élève', v_plans = 0);
+  perform pg_temp.noter('I', 'I2 bis. ses jours et ses repas le sont aussi', v_jours = 0 and v_repas = 0);
+  reset role;
+
+  -- Le même plan, ARCHIVÉ.
+  update public.nutrition_plans set status = 'ancien'
+   where id = 'd1110000-0000-4000-8000-00000000000d';
+
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"a1110000-0000-4000-8000-000000000003","role":"authenticated"}', true);
+  select count(*) into v_plans from public.nutrition_plans
+   where id = 'd1110000-0000-4000-8000-00000000000d';
+  select count(*) into v_jours from public.nutrition_days
+   where plan_id = 'd1110000-0000-4000-8000-00000000000d';
+  select count(*) into v_repas from public.meals
+   where id = 'd4440000-0000-4000-8000-00000000000d';
+  perform pg_temp.noter('I', 'I3. un plan ARCHIVÉ reste visible pour l''élève déjà affecté', v_plans = 1);
+  perform pg_temp.noter('I', 'I3 bis. avec ses jours et ses repas', v_jours = 1 and v_repas = 1);
+  reset role;
+
+  -- I4. Archiver n'a RIEN perdu, vu du côté du coach.
+  perform pg_temp.noter('I', 'I4. archiver conserve profils, jours et repas',
+    (select count(*) from public.nutrition_plan_profiles
+      where plan_id = 'd1110000-0000-4000-8000-00000000000d') = 1
+    and (select count(*) from public.nutrition_days
+          where plan_id = 'd1110000-0000-4000-8000-00000000000d') = 1
+    and (select count(*) from public.meals
+          where nutrition_day_id = 'd3330000-0000-4000-8000-00000000000d') = 1);
+end $$;
+
+-- ── I9 à I16 : LES RECETTES ───────────────────────────────────────────
+do $$
+declare v_res jsonb; v_date timestamptz;
+begin
+  -- L'élève A est affecté à un plan ACTIF du coach A : sa recette est donc
+  -- réellement atteignable, condition de I10.
+  update public.nutrition_plans set status = 'actif'
+   where id = 'd1110000-0000-4000-8000-00000000000d';
+
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"a1110000-0000-4000-8000-000000000001","role":"authenticated"}', true);
+
+  -- I9. La date d'archivage d'une recette.
+  update public.nutrition_recipes set status = 'archived'
+   where id = 'd5550000-0000-4000-8000-00000000000a';
+  select archived_at into v_date from public.nutrition_recipes
+   where id = 'd5550000-0000-4000-8000-00000000000a';
+  perform pg_temp.noter('I', 'I9. archiver DATE la recette', v_date is not null);
+  update public.nutrition_recipes set status = 'active'
+   where id = 'd5550000-0000-4000-8000-00000000000a';
+  select archived_at into v_date from public.nutrition_recipes
+   where id = 'd5550000-0000-4000-8000-00000000000a';
+  perform pg_temp.noter('I', 'I9 bis. republier efface la date', v_date is null);
+
+  -- I10. Publiée et atteignable : non supprimable.
+  select public.delete_nutrition_recipe('d5550000-0000-4000-8000-00000000000a') into v_res;
+  perform pg_temp.noter('I', 'I10. une recette PUBLIÉE qu''un élève peut ouvrir est refusée',
+    (v_res->>'ok')::boolean is false and v_res->>'reason' = 'assigned');
+  perform pg_temp.noter('I', 'I10 bis. le refus compte les élèves concernés',
+    (v_res->'dependencies'->>'students_with_access')::int = 1);
+  perform pg_temp.noter('I', 'I10 ter. la recette et ses enfants sont intacts',
+    exists (select 1 from public.nutrition_recipes where id = 'd5550000-0000-4000-8000-00000000000a')
+    and (select count(*) from public.nutrition_recipe_ingredients
+          where recipe_id = 'd5550000-0000-4000-8000-00000000000a') = 1);
+
+  -- I11. Dépubliée, elle le devient — sans qu'aucune donnée n'ait été touchée.
+  update public.nutrition_recipes set status = 'draft'
+   where id = 'd5550000-0000-4000-8000-00000000000a';
+  perform pg_temp.noter('I', 'I11. dépubliée, la même recette devient supprimable',
+    public.nutrition_recipe_deletion_block('d5550000-0000-4000-8000-00000000000a') is null);
+  perform pg_temp.noter('I', 'I11 bis. dépublier n''a supprimé ni ingrédient ni étiquette',
+    (select count(*) from public.nutrition_recipe_ingredients
+      where recipe_id = 'd5550000-0000-4000-8000-00000000000a') = 1
+    and (select count(*) from public.nutrition_recipe_tags
+          where recipe_id = 'd5550000-0000-4000-8000-00000000000a') = 1);
+
+  -- I13. La recette d'un AUTRE coach est intouchable.
+  --
+  -- LA RÉPONSE EST `not_found`, ET C'EST PLUS FORT QUE `forbidden` : la policy
+  -- `nutrition_recipes_manage_own_coach` ne rend même pas la ligne au coach A,
+  -- qui n'apprend donc pas qu'elle existe. `forbidden` reste la réponse quand
+  -- la ligne EST visible mais n'appartient pas à l'appelant — le cas des
+  -- plans, où `nutrition_plans_manage_staff` est commune à tout le staff (voir
+  -- I13 quater).
+  select public.delete_nutrition_recipe('d5550000-0000-4000-8000-00000000000b') into v_res;
+  perform pg_temp.noter('I', 'I13. la recette d''un AUTRE coach est refusée, sans fuite d''existence',
+    (v_res->>'ok')::boolean is false and v_res->>'reason' = 'not_found');
+
+  -- I15. Identifiant inconnu.
+  select public.delete_nutrition_recipe('00000000-0000-4000-8000-0000000000fe') into v_res;
+  perform pg_temp.noter('I', 'I15. un identifiant de recette inconnu répond not_found',
+    (v_res->>'ok')::boolean is false and v_res->>'reason' = 'not_found');
+
+  -- I12. La suppression réelle emporte ingrédients et étiquettes, et rien d'autre.
+  select public.delete_nutrition_recipe('d5550000-0000-4000-8000-00000000000a') into v_res;
+  perform pg_temp.noter('I', 'I12. la recette dépubliée est réellement supprimée',
+    (v_res->>'ok')::boolean is true
+    and (v_res->'deleted'->>'ingredients')::int = 1
+    and (v_res->'deleted'->>'tags')::int = 1);
+  perform pg_temp.noter('I', 'I12 bis. AUCUN orphelin ne subsiste',
+    not exists (select 1 from public.nutrition_recipe_ingredients
+                 where recipe_id = 'd5550000-0000-4000-8000-00000000000a')
+    and not exists (select 1 from public.nutrition_recipe_tags
+                     where recipe_id = 'd5550000-0000-4000-8000-00000000000a'));
+
+  reset role;
+
+  -- Recomptage HORS RÔLE : sous la RLS du coach A, « la recette de l'autre
+  -- coach existe-t-elle ? » est toujours faux, qu'elle ait été supprimée ou
+  -- non. Seule une lecture privilégiée peut le prouver.
+  perform pg_temp.noter('I', 'I13 bis. la recette de l''autre coach est TOUJOURS là',
+    exists (select 1 from public.nutrition_recipes where id = 'd5550000-0000-4000-8000-00000000000b')
+    and (select count(*) from public.nutrition_recipes
+          where id = 'd5550000-0000-4000-8000-00000000000a') = 0);
+
+  -- I13 quater. Le vrai cas `forbidden` : un plan appartenant au coach B est
+  -- VISIBLE par le coach A (policy staff commune), et pourtant refusé.
+  insert into public.nutrition_plans (id, coach_id, name, goal_type, status, daily_target, nutrition_model_version)
+  values ('d1110000-0000-4000-8000-00000000000e', 'c1110000-0000-4000-8000-00000000000b',
+          'Cycle — plan du coach B', 'maintien', 'actif', '{}'::jsonb, 2);
+
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"a1110000-0000-4000-8000-000000000001","role":"authenticated"}', true);
+  perform pg_temp.noter('I', 'I13 quater. le plan de l''autre coach est bien VISIBLE du coach A',
+    exists (select 1 from public.nutrition_plans where id = 'd1110000-0000-4000-8000-00000000000e'));
+  select public.delete_nutrition_plan('d1110000-0000-4000-8000-00000000000e') into v_res;
+  perform pg_temp.noter('I', 'I13 quinquies. et pourtant sa suppression est INTERDITE',
+    (v_res->>'ok')::boolean is false and v_res->>'reason' = 'forbidden');
+  reset role;
+  perform pg_temp.noter('I', 'I13 sexies. le plan de l''autre coach survit',
+    exists (select 1 from public.nutrition_plans where id = 'd1110000-0000-4000-8000-00000000000e'));
+end $$;
+
+-- I14 / I16 : ce qu'un ÉLÈVE obtient en appelant la RPC lui-même.
+do $$
+declare v_res jsonb; v_visibles int;
+begin
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"a1110000-0000-4000-8000-000000000003","role":"authenticated"}', true);
+
+  -- I14. L'attaque la plus simple : appeler la RPC depuis la console.
+  select public.delete_nutrition_recipe('d5550000-0000-4000-8000-00000000000b') into v_res;
+  perform pg_temp.noter('I', 'I14. un ÉLÈVE appelant la RPC directement obtient forbidden',
+    (v_res->>'ok')::boolean is false and v_res->>'reason' = 'forbidden');
+  select public.delete_nutrition_plan('d1110000-0000-4000-8000-00000000000b') into v_res;
+  perform pg_temp.noter('I', 'I14 bis. idem pour un plan',
+    (v_res->>'ok')::boolean is false and v_res->>'reason' = 'forbidden');
+
+  -- I16. La RLS des recettes n'a pas bougé : brouillon et archive restent
+  --      invisibles, et le catalogue d'un autre coach aussi.
+  select count(*) into v_visibles from public.nutrition_recipes
+   where id = 'd5550000-0000-4000-8000-00000000000b';
+  perform pg_temp.noter('I', 'I16. la recette d''un AUTRE coach reste invisible à l''élève', v_visibles = 0);
+
+  reset role;
+
+  -- Recomptage HORS RÔLE : l'élève n'a rien supprimé.
+  perform pg_temp.noter('I', 'I14 ter. l''appel direct de l''élève n''a rien supprimé',
+    exists (select 1 from public.nutrition_plans where id = 'd1110000-0000-4000-8000-00000000000b')
+    and exists (select 1 from public.nutrition_recipes where id = 'd5550000-0000-4000-8000-00000000000b'));
+end $$;
+
+do $$
+declare v_visibles int;
+begin
+  -- Une recette du coach A, en brouillon puis archivée, ne doit jamais
+  -- apparaître à l'élève A — même si son plan est actif.
+  insert into public.nutrition_recipes (id, coach_id, name, slot_key, status)
+  values ('d5550000-0000-4000-8000-00000000000c', 'c1110000-0000-4000-8000-00000000000a',
+          'Cycle — recette non publiée', 'lunch', 'draft');
+
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"a1110000-0000-4000-8000-000000000003","role":"authenticated"}', true);
+  select count(*) into v_visibles from public.nutrition_recipes
+   where id = 'd5550000-0000-4000-8000-00000000000c';
+  perform pg_temp.noter('I', 'I16 bis. un BROUILLON de recette reste invisible à l''élève', v_visibles = 0);
+  reset role;
+
+  update public.nutrition_recipes set status = 'archived'
+   where id = 'd5550000-0000-4000-8000-00000000000c';
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"a1110000-0000-4000-8000-000000000003","role":"authenticated"}', true);
+  select count(*) into v_visibles from public.nutrition_recipes
+   where id = 'd5550000-0000-4000-8000-00000000000c';
+  perform pg_temp.noter('I', 'I16 ter. une ARCHIVE de recette reste invisible à l''élève', v_visibles = 0);
+  reset role;
+end $$;
+
+-- ── I17 à I22 : STATUTS ET SÉCURITÉ ───────────────────────────────────
+do $$
+declare v_visibles int;
+begin
+  -- I17. Le catalogue passe par le plan : un plan BROUILLON n'ouvre rien.
+  update public.nutrition_recipes set status = 'active'
+   where id = 'd5550000-0000-4000-8000-00000000000c';
+  update public.nutrition_plans set status = 'prochain'
+   where id = 'd1110000-0000-4000-8000-00000000000d';
+
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"a1110000-0000-4000-8000-000000000003","role":"authenticated"}', true);
+  select count(*) into v_visibles from public.nutrition_recipes
+   where id = 'd5550000-0000-4000-8000-00000000000c';
+  perform pg_temp.noter('I', 'I17. un plan BROUILLON n''ouvre plus le catalogue du coach', v_visibles = 0);
+  reset role;
+
+  update public.nutrition_plans set status = 'actif'
+   where id = 'd1110000-0000-4000-8000-00000000000d';
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"a1110000-0000-4000-8000-000000000003","role":"authenticated"}', true);
+  select count(*) into v_visibles from public.nutrition_recipes
+   where id = 'd5550000-0000-4000-8000-00000000000c';
+  perform pg_temp.noter('I', 'I17 bis. redevenu ACTIF, le plan rouvre le catalogue', v_visibles = 1);
+  reset role;
+end $$;
+
+do $$
+declare v_nb int;
+begin
+  -- I18. Conventions de sécurité des cinq nouvelles fonctions.
+  select count(*) into v_nb
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    join pg_roles r on r.oid = p.proowner
+   where n.nspname = 'public'
+     and p.proname in ('delete_nutrition_plan', 'delete_nutrition_recipe',
+                       'nutrition_plan_deletion_block', 'nutrition_recipe_deletion_block',
+                       'nutrition_lifecycle_overview')
+     and p.prosecdef = false
+     and r.rolname = 'postgres'
+     and 'search_path=""' = any(p.proconfig);
+  perform pg_temp.noter('I', 'I18. les cinq fonctions : security invoker, owner postgres, search_path vide',
+    v_nb = 5);
+
+  -- I19. Privilèges : PUBLIC et anon dehors, authenticated dedans.
+  perform pg_temp.noter('I', 'I19. anon et PUBLIC ne peuvent exécuter aucune des cinq', not exists (
+    select 1 from unnest(array[
+      'public.delete_nutrition_plan(uuid)',
+      'public.delete_nutrition_recipe(uuid)',
+      'public.nutrition_plan_deletion_block(uuid)',
+      'public.nutrition_recipe_deletion_block(uuid)',
+      'public.nutrition_lifecycle_overview()']) as f
+     where has_function_privilege('anon', f, 'execute')
+        or has_function_privilege('public', f, 'execute')));
+  perform pg_temp.noter('I', 'I19 bis. authenticated peut les exécuter', (
+    select bool_and(has_function_privilege('authenticated', f, 'execute'))
+      from unnest(array[
+        'public.delete_nutrition_plan(uuid)',
+        'public.delete_nutrition_recipe(uuid)',
+        'public.nutrition_plan_deletion_block(uuid)',
+        'public.nutrition_recipe_deletion_block(uuid)',
+        'public.nutrition_lifecycle_overview()']) as f));
+  -- Le trigger, lui, n'est exécutable par personne d'autre que la base.
+  perform pg_temp.noter('I', 'I19 ter. le trigger de datation n''est exposé à aucun rôle applicatif',
+    not has_function_privilege('authenticated', 'public.nutrition_touch_archived_at()', 'execute')
+    and not has_function_privilege('anon', 'public.nutrition_touch_archived_at()', 'execute'));
+end $$;
+
+do $$
+declare v_refuse boolean := false; v_apercu jsonb; v_bloc text; v_res jsonb;
+begin
+  -- I20. L'aperçu est réservé au staff.
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"a1110000-0000-4000-8000-000000000003","role":"authenticated"}', true);
+  begin
+    perform public.nutrition_lifecycle_overview();
+  exception when others then v_refuse := true; end;
+  perform pg_temp.noter('I', 'I20. un ÉLÈVE ne peut pas lire l''aperçu du cycle de vie', v_refuse);
+  reset role;
+
+  -- I21. L'aperçu et la suppression disent la MÊME chose : une seule règle.
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"a1110000-0000-4000-8000-000000000001","role":"authenticated"}', true);
+  select public.nutrition_lifecycle_overview() into v_apercu;
+  select x->>'deletion_block' into v_bloc
+    from jsonb_array_elements(v_apercu->'plans') x
+   where x->>'id' = 'd1110000-0000-4000-8000-00000000000d';
+  select public.delete_nutrition_plan('d1110000-0000-4000-8000-00000000000d') into v_res;
+  perform pg_temp.noter('I', 'I21. l''aperçu et la suppression rendent le MÊME motif',
+    v_bloc is not null and v_bloc = v_res->>'reason');
+  perform pg_temp.noter('I', 'I21 bis. l''aperçu compte l''affectation du plan assigné', (
+    select (x->>'assigned_students')::int
+      from jsonb_array_elements(v_apercu->'plans') x
+     where x->>'id' = 'd1110000-0000-4000-8000-00000000000d') = 1);
+  reset role;
+end $$;
+
+do $$
+declare v_nb int;
+begin
+  -- I22. AUCUNE donnée hors du périmètre de cette section n'a disparu. Les
+  --      plans témoins des sections précédentes, le journal de l'élève et les
+  --      recettes des autres sections sont recomptés explicitement.
+  -- Le journal rattaché au plan supprimé est parti AVEC lui (règle métier),
+  -- celui rattaché au plan conservé est intact. C'est la distinction qui
+  -- compte : on ne supprime que ce qui dépend du plan visé.
+  -- On n'affirme PAS un total absolu — d'autres sections écrivent aussi dans
+  -- cette table. On affirme la seule chose qui compte : ce qui dépendait du
+  -- plan supprimé a disparu, ce qui dépendait d'un autre plan est intact.
+  perform pg_temp.noter('I', 'I22. seul le journal du plan supprimé a disparu',
+    not exists (select 1 from public.nutrition_daily_logs
+                 where nutrition_plan_id = 'd1110000-0000-4000-8000-00000000000c')
+    and exists (select 1 from public.nutrition_daily_logs
+                 where nutrition_plan_id = 'd1110000-0000-4000-8000-00000000000d'));
+
+  select count(*) into v_nb from public.nutrition_plans
+   where id in ('d1110000-0000-4000-8000-00000000000b',
+                'd1110000-0000-4000-8000-00000000000d');
+  perform pg_temp.noter('I', 'I22 bis. seuls les plans visés ont disparu', v_nb = 2);
+  perform pg_temp.noter('I', 'I22 quater. aucun élève ni compte n''a été supprimé',
+    (select count(*) from public.students
+      where id in ('51110000-0000-4000-8000-00000000000a','51110000-0000-4000-8000-00000000000b')) = 2
+    and (select count(*) from auth.users where email like 'pc.%@test.local') = 5);
+
+  select count(*) into v_nb from public.nutrition_recipes
+   where id::text like 'a2220000-%';
+  perform pg_temp.noter('I', 'I22 ter. les recettes des sections précédentes sont intactes', v_nb >= 1);
+end $$;
+
+reset role;
+
+-- =====================================================================
+-- Section K — LE PROPRIÉTAIRE D'UN PLAN (migration 20260816090000)
+-- =====================================================================
+-- LE DÉFAUT CORRIGÉ. `nutrition_plans.coach_id` n'était renseignée par aucun
+-- chemin d'écriture, alors que la lecture élève des recettes l'exige
+-- (`p.coach_id is not null and p.coach_id = nutrition_recipes.coach_id`).
+-- Résultat mesuré avant correction, sur cette même base : un élève voyait son
+-- plan et ZÉRO recette. Toute la bibliothèque était inaccessible.
+--
+-- Ces contrôles rejouent la séquence RÉELLE de l'application — création par la
+-- RPC, assignation par la RPC, publication d'une recette — et vérifient que
+-- l'élève finit par voir la recette. C'est la seule preuve qui vaille : les
+-- écrans, le solveur et les tests unitaires fonctionnaient déjà tous.
+do $$
+declare
+  v_res jsonb;
+  v_plan uuid;
+  v_profils jsonb;
+  v_jours jsonb;
+  v_recettes int;
+begin
+  select jsonb_agg(jsonb_build_object(
+      'profile_key', 'day_' || j,
+      'daily_calories', 2400, 'protein_bp', 3000, 'carb_bp', 4500, 'fat_bp', 2500,
+      'slots', jsonb_build_array(
+        jsonb_build_object('slot','breakfast','enabled',true,'protein_bp',10000,'carb_bp',10000,'fat_bp',10000,'display_order',1),
+        jsonb_build_object('slot','morning_snack','enabled',false,'protein_bp',0,'carb_bp',0,'fat_bp',0,'display_order',2),
+        jsonb_build_object('slot','lunch','enabled',false,'protein_bp',0,'carb_bp',0,'fat_bp',0,'display_order',3),
+        jsonb_build_object('slot','afternoon_snack','enabled',false,'protein_bp',0,'carb_bp',0,'fat_bp',0,'display_order',4),
+        jsonb_build_object('slot','dinner','enabled',false,'protein_bp',0,'carb_bp',0,'fat_bp',0,'display_order',5),
+        jsonb_build_object('slot','dessert','enabled',false,'protein_bp',0,'carb_bp',0,'fat_bp',0,'display_order',6))))
+    into v_profils
+    from unnest(array['monday','tuesday','wednesday','thursday','friday','saturday','sunday']) j;
+  select jsonb_agg(jsonb_build_object('day', j, 'profile_key', 'day_' || j))
+    into v_jours
+    from unnest(array['monday','tuesday','wednesday','thursday','friday','saturday','sunday']) j;
+
+  -- Le coach A crée un plan EXACTEMENT comme l'application le fait.
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"a1110000-0000-4000-8000-000000000001","role":"authenticated"}', true);
+
+  v_res := public.save_nutrition_plan_v2(jsonb_build_object(
+    'plan_id', null,
+    'plan', jsonb_build_object('name', 'Cycle — plan possédé', 'goal_type', 'maintien', 'status', 'actif'),
+    'main_profile_key', 'day_monday',
+    'profiles', v_profils,
+    'days', v_jours));
+  v_plan := (v_res->'plan'->>'id')::uuid;
+
+  perform pg_temp.noter('K', 'K1. un plan créé par la RPC porte un propriétaire',
+    (select coach_id from public.nutrition_plans where id = v_plan)
+      = 'c1110000-0000-4000-8000-00000000000a');
+
+  -- Il l'assigne à SON élève, toujours par la RPC.
+  perform public.assign_nutrition_plan(v_plan, '51110000-0000-4000-8000-00000000000a');
+  reset role;
+
+  -- Et publie une recette.
+  insert into public.nutrition_recipes (id, coach_id, name, slot_key, status)
+  values ('d5550000-0000-4000-8000-00000000000e', 'c1110000-0000-4000-8000-00000000000a',
+          'Cycle — recette visible', 'breakfast', 'active');
+
+  -- CE QUE L'ÉLÈVE VOIT — le seul contrôle qui prouve la correction.
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"a1110000-0000-4000-8000-000000000003","role":"authenticated"}', true);
+  select count(*) into v_recettes from public.nutrition_recipes
+   where id = 'd5550000-0000-4000-8000-00000000000e';
+  perform pg_temp.noter('K', 'K2. l''élève voit ENFIN la recette de son coach', v_recettes = 1);
+  reset role;
+end $$;
+
+do $$
+declare v_res jsonb;
+begin
+  -- K3. Un plan ANCIEN, sans propriétaire, se répare à sa réassignation — et
+  --     seulement à ce moment-là.
+  insert into public.nutrition_plans (id, name, goal_type, status, daily_target, nutrition_model_version)
+  values ('d1110000-0000-4000-8000-00000000000f', 'Cycle — plan orphelin', 'maintien', 'actif', '{}'::jsonb, 2);
+  update public.nutrition_plans set coach_id = null
+   where id = 'd1110000-0000-4000-8000-00000000000f';
+  perform pg_temp.noter('K', 'K3. un plan peut être remis sans propriétaire (état des plans existants)',
+    (select coach_id from public.nutrition_plans where id = 'd1110000-0000-4000-8000-00000000000f') is null);
+
+  -- Une modification ORDINAIRE ne réveille rien : le trigger d'assignation est
+  -- borné à un changement réel de `student_id`.
+  update public.nutrition_plans set name = 'Cycle — plan orphelin renommé'
+   where id = 'd1110000-0000-4000-8000-00000000000f';
+  perform pg_temp.noter('K', 'K4. renommer un plan ne lui invente pas de propriétaire',
+    (select coach_id from public.nutrition_plans where id = 'd1110000-0000-4000-8000-00000000000f') is null);
+
+  -- La structure minimale pour que l'assignation soit acceptée.
+  insert into public.nutrition_plan_profiles (id, plan_id, profile_key, daily_calories, protein_bp, carb_bp, fat_bp)
+  values ('d2220000-0000-4000-8000-00000000000f', 'd1110000-0000-4000-8000-00000000000f',
+          'day_monday', 2400, 3000, 4500, 2500);
+  insert into public.nutrition_meal_slot_targets (profile_id, slot, enabled, protein_bp, carb_bp, fat_bp, display_order)
+  values ('d2220000-0000-4000-8000-00000000000f', 'breakfast',       true,  10000, 10000, 10000, 1),
+         ('d2220000-0000-4000-8000-00000000000f', 'morning_snack',   false, 0, 0, 0, 2),
+         ('d2220000-0000-4000-8000-00000000000f', 'lunch',           false, 0, 0, 0, 3),
+         ('d2220000-0000-4000-8000-00000000000f', 'afternoon_snack', false, 0, 0, 0, 4),
+         ('d2220000-0000-4000-8000-00000000000f', 'dinner',          false, 0, 0, 0, 5),
+         ('d2220000-0000-4000-8000-00000000000f', 'dessert',         false, 0, 0, 0, 6);
+  insert into public.nutrition_days (plan_id, day, profile_key, status, target)
+  select 'd1110000-0000-4000-8000-00000000000f', j, 'day_monday', 'non-commence', '{}'::jsonb
+    from unnest(array['monday','tuesday','wednesday','thursday','friday','saturday','sunday']) j;
+
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"a1110000-0000-4000-8000-000000000001","role":"authenticated"}', true);
+  perform public.assign_nutrition_plan('d1110000-0000-4000-8000-00000000000f',
+                                       '51110000-0000-4000-8000-00000000000b');
+  reset role;
+
+  -- Le propriétaire vient de l'ÉLÈVE, pas du coach qui a cliqué : l'élève B
+  -- appartient au coach B, alors que c'est le coach A qui a assigné.
+  perform pg_temp.noter('K', 'K5. la réassignation répare le plan, avec le coach de l''ÉLÈVE',
+    (select coach_id from public.nutrition_plans where id = 'd1110000-0000-4000-8000-00000000000f')
+      = 'c1110000-0000-4000-8000-00000000000b');
+end $$;
+
+do $$
+declare v_avant uuid;
+begin
+  -- K6. Un propriétaire existant n'est JAMAIS écrasé — la PR D fait reposer
+  --     sur cette colonne le refus de supprimer le plan d'un autre coach.
+  select coach_id into v_avant from public.nutrition_plans
+   where id = 'd1110000-0000-4000-8000-00000000000e';
+  -- L'index unique partiel n'admet qu'un plan par élève : on libère l'élève
+  -- avant de lui en poser un autre à la main (ici on éprouve le TRIGGER, pas
+  -- la RPC d'assignation, qui ferait ce retrait elle-même).
+  update public.nutrition_plans set student_id = null
+   where student_id = '51110000-0000-4000-8000-00000000000a';
+  update public.nutrition_plans set student_id = '51110000-0000-4000-8000-00000000000a'
+   where id = 'd1110000-0000-4000-8000-00000000000e';
+  perform pg_temp.noter('K', 'K6. assigner un plan ne change pas son propriétaire',
+    (select coach_id from public.nutrition_plans where id = 'd1110000-0000-4000-8000-00000000000e') = v_avant);
+  update public.nutrition_plans set student_id = null
+   where id = 'd1110000-0000-4000-8000-00000000000e';
+
+  -- K7. Conventions du trigger, et son inaccessibilité aux rôles applicatifs.
+  perform pg_temp.noter('K', 'K7. le trigger est security invoker, search_path vide, owner postgres', exists (
+    select 1 from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+      join pg_roles r on r.oid = p.proowner
+     where n.nspname = 'public'
+       and p.proname = 'nutrition_plans_fill_coach_id'
+       and p.prosecdef = false
+       and r.rolname = 'postgres'
+       and 'search_path=""' = any(p.proconfig)));
+  perform pg_temp.noter('K', 'K7 bis. aucun rôle applicatif ne peut l''exécuter',
+    not has_function_privilege('authenticated', 'public.nutrition_plans_fill_coach_id()', 'execute')
+    and not has_function_privilege('anon', 'public.nutrition_plans_fill_coach_id()', 'execute'));
+  perform pg_temp.noter('K', 'K8. les deux déclencheurs sont posés', (
+    select count(*) = 2 from pg_trigger
+     where tgrelid = 'public.nutrition_plans'::regclass
+       and not tgisinternal
+       and tgname in ('nutrition_plans_fill_coach_id', 'nutrition_plans_fill_coach_id_on_assign')));
+end $$;
+
+reset role;
+
+
+-- =====================================================================
+-- Section L — LA BASCULE 20260815 → 20260817, prouvée dans les DEUX sens
+-- =====================================================================
+-- 20260815090000 est APPLIQUÉE en Production : elle est immuable. La règle a
+-- donc changé par une migration corrective, 20260817090000, et non par une
+-- retouche. Cette section prouve les deux états sur la MÊME donnée :
+--
+--   ÉTAT APRÈS 20260815 : 0 élève + historique  →  suppression BLOQUÉE
+--   ÉTAT APRÈS 20260817 : 0 élève + historique  →  suppression AUTORISÉE
+--
+-- La bascule est éprouvée en réinstallant temporairement la définition
+-- d'origine : `create or replace function` est transactionnel en PostgreSQL,
+-- donc le ROLLBACK final rend à la base la définition de la migration. Un
+-- contrôle POST-ROLLBACK le vérifie explicitement.
+insert into public.nutrition_plans (id, coach_id, name, goal_type, status, daily_target, nutrition_model_version)
+values ('d1110000-0000-4000-8000-0000000000aa', 'c1110000-0000-4000-8000-00000000000a',
+        'Bascule — plan historique', 'maintien', 'ancien', '{}'::jsonb, 2);
+insert into public.nutrition_daily_logs (student_id, nutrition_plan_id, log_date, calories) values
+  ('51110000-0000-4000-8000-00000000000a', 'd1110000-0000-4000-8000-0000000000aa', current_date - 8, 2000),
+  ('51110000-0000-4000-8000-00000000000a', 'd1110000-0000-4000-8000-0000000000aa', current_date - 9, 2150);
+
+do $$
+declare v_res jsonb;
+begin
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"a1110000-0000-4000-8000-000000000001","role":"authenticated"}', true);
+
+  -- ── ÉTAT COURANT = APRÈS 20260817 ───────────────────────────────────
+  perform pg_temp.noter('L', 'L1. APRÈS 20260817 : 0 élève + 2 journées → suppression AUTORISÉE',
+    public.nutrition_plan_deletion_block('d1110000-0000-4000-8000-0000000000aa') is null);
+
+  select public.delete_nutrition_plan('d1110000-0000-4000-8000-0000000000aa') into v_res;
+  perform pg_temp.noter('L', 'L2. la suppression aboutit et emporte les DEUX journées',
+    (v_res->>'ok')::boolean is true and (v_res->'deleted'->>'daily_logs')::int = 2);
+  perform pg_temp.noter('L', 'L3. aucune journée orpheline ne subsiste',
+    not exists (select 1 from public.nutrition_daily_logs
+                 where nutrition_plan_id = 'd1110000-0000-4000-8000-0000000000aa'));
+  reset role;
+end $$;
+
+-- ── RETOUR À L'ÉTAT 20260815, le temps d'un contrôle ──────────────────
+-- COPIE FIDÈLE de la branche que 20260815090000 posait, et RIEN d'autre : le
+-- reste du corps est identique dans les deux versions. Cette redéfinition ne
+-- survit pas au ROLLBACK.
+create or replace function public.nutrition_plan_deletion_block(p_plan_id uuid)
+returns text
+language plpgsql
+stable
+security invoker
+set search_path = ''
+as $fn$
+declare
+  v_plan record;
+begin
+  if p_plan_id is null then
+    return 'not_found';
+  end if;
+  select np.id, np.coach_id, np.student_id
+    into v_plan
+    from public.nutrition_plans np
+   where np.id = p_plan_id;
+  if not found then
+    return 'not_found';
+  end if;
+  if not public.is_coach_or_admin() then
+    return 'forbidden';
+  end if;
+  if v_plan.coach_id is not null
+     and not public.is_admin()
+     and v_plan.coach_id is distinct from public.current_coach_id() then
+    return 'forbidden';
+  end if;
+  if v_plan.student_id is not null then
+    return 'assigned';
+  end if;
+  -- LA BRANCHE DE 20260815, celle que 20260817 retire.
+  if exists (
+    select 1 from public.nutrition_daily_logs l
+     where l.nutrition_plan_id = p_plan_id
+  ) then
+    return 'used_in_history';
+  end if;
+  return null;
+end;
+$fn$;
+
+insert into public.nutrition_plans (id, coach_id, name, goal_type, status, daily_target, nutrition_model_version)
+values ('d1110000-0000-4000-8000-0000000000bb', 'c1110000-0000-4000-8000-00000000000a',
+        'Bascule — témoin 20260815', 'maintien', 'ancien', '{}'::jsonb, 2);
+insert into public.nutrition_daily_logs (student_id, nutrition_plan_id, log_date, calories)
+values ('51110000-0000-4000-8000-00000000000a', 'd1110000-0000-4000-8000-0000000000bb', current_date - 10, 1980);
+
+do $$
+declare v_res jsonb;
+begin
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"a1110000-0000-4000-8000-000000000001","role":"authenticated"}', true);
+
+  perform pg_temp.noter('L', 'L4. APRÈS 20260815 : 0 élève + historique → suppression BLOQUÉE',
+    public.nutrition_plan_deletion_block('d1110000-0000-4000-8000-0000000000bb') = 'used_in_history');
+
+  -- Et la RPC de suppression refusait alors, elle aussi : c'est bien la règle
+  -- qui a changé, pas seulement le message affiché.
+  select public.delete_nutrition_plan('d1110000-0000-4000-8000-0000000000bb') into v_res;
+  perform pg_temp.noter('L', 'L5. et la RPC refusait, pas seulement l''écran',
+    (v_res->>'ok')::boolean is false and v_res->>'reason' = 'used_in_history');
+  perform pg_temp.noter('L', 'L6. le plan témoin survit à ce refus',
+    exists (select 1 from public.nutrition_plans where id = 'd1110000-0000-4000-8000-0000000000bb'));
+  reset role;
+end $$;
+
+reset role;
+
 -- ---------------------------------------------------------------------
 -- Bilan
 -- ---------------------------------------------------------------------
@@ -881,15 +1712,28 @@ declare nb int;
 begin
   select count(*) into nb from public.nutrition_plans
    where name in ('Plan hérité v1', 'Plan unifié', 'Plan unifié renommé',
-                  'NE DOIT PAS SURVIVRE', 'Plan semaine complet');
+                  'NE DOIT PAS SURVIVRE', 'Plan semaine complet',
+                  'Cycle — plan libre', 'Cycle — plan assigné',
+                  'Cycle — plan historique', 'Cycle — plan visibilité',
+                  'Cycle — plan du coach B', 'Cycle — plan possédé',
+                  'Cycle — plan orphelin', 'Cycle — plan orphelin renommé',
+                  'Bascule — plan historique', 'Bascule — témoin 20260815');
   if nb <> 0 then
     raise exception 'ÉCHEC   — G1. des plans de test ont survécu au ROLLBACK (% lignes)', nb;
   end if;
 
   select count(*) into nb from public.nutrition_recipes
-   where id::text like 'a2220000-%';
+   where id::text like 'a2220000-%' or id::text like 'd5550000-%';
   if nb <> 0 then
     raise exception 'ÉCHEC   — G2. des recettes de test ont survécu au ROLLBACK';
+  end if;
+
+  -- La section I supprime réellement des lignes. Le ROLLBACK doit aussi
+  -- REMETTRE ce qu'elle a supprimé : une checklist ne laisse pas de trou.
+  select count(*) into nb from public.nutrition_daily_logs
+   where nutrition_plan_id::text like 'd1110000-%';
+  if nb <> 0 then
+    raise exception 'ÉCHEC   — G2 bis. un journal de test a survécu au ROLLBACK';
   end if;
 
   select count(*) into nb from auth.users where email like 'pc.%@test.local';
@@ -907,7 +1751,13 @@ begin
      or to_regprocedure('public.current_coach_id()') is null
      or to_regprocedure('public.nutrition_v2_backfill_plan(uuid)') is null
      or to_regprocedure('public.nutrition_v2_normalize_vocabulary()') is null
-     or to_regprocedure('public.nutrition_plan_v2_blocking_issue(uuid)') is null then
+     or to_regprocedure('public.nutrition_plan_v2_blocking_issue(uuid)') is null
+     or to_regprocedure('public.delete_nutrition_plan(uuid)') is null
+     or to_regprocedure('public.delete_nutrition_recipe(uuid)') is null
+     or to_regprocedure('public.nutrition_plan_deletion_block(uuid)') is null
+     or to_regprocedure('public.nutrition_recipe_deletion_block(uuid)') is null
+     or to_regprocedure('public.nutrition_lifecycle_overview()') is null
+     or to_regprocedure('public.nutrition_plans_fill_coach_id()') is null then
     raise exception 'ÉCHEC   — G4. une fonction de migration a disparu';
   end if;
   if not exists (
@@ -917,4 +1767,18 @@ begin
     raise exception 'ÉCHEC   — G5. la clé étrangère composite a disparu';
   end if;
   raise notice 'OK      — G4/G5. les objets des migrations sont toujours en place';
+end $$;
+
+-- La section L a redéfini `nutrition_plan_deletion_block` le temps d'un
+-- contrôle. Le ROLLBACK doit avoir rendu à la base la définition de la
+-- migration 20260817090000 — sans quoi la checklist laisserait derrière elle
+-- une règle périmée.
+do $$
+begin
+  if (select prosrc from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'public' and p.proname = 'nutrition_plan_deletion_block')
+     like '%from public.nutrition_daily_logs%' then
+    raise exception 'ÉCHEC   — G6. la définition 20260815 a survécu au ROLLBACK';
+  end if;
+  raise notice 'OK      — G6. la définition de 20260817090000 est bien celle en place';
 end $$;

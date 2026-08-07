@@ -1,11 +1,19 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Archive, Pencil, SlidersHorizontal } from "lucide-react";
+import { Archive, ArrowLeft, Copy, Pencil, RotateCcw, SlidersHorizontal } from "lucide-react";
 
 import { AssignStudentsModal } from "@/components/admin/AssignStudentsModal";
+import {
+  ConfirmActionModal,
+  DangerZone,
+  DeleteConfirmationModal,
+  DeleteTriggerButton,
+  LifecycleActionBar,
+  type LifecycleActionSpec,
+} from "@/components/admin/LifecycleActions";
 import { NutritionPlanV2Builder } from "@/components/admin/NutritionPlanV2Builder";
 import { NutritionPlanV2ConversionDialog } from "@/components/admin/NutritionPlanV2ConversionDialog";
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
@@ -13,10 +21,22 @@ import { StatCard } from "@/components/shared/StatCard";
 import { useAdminData } from "@/hooks/useAdminData";
 import { useContentAssignment } from "@/hooks/useContentAssignment";
 import { useGuardedNutritionAssignment } from "@/hooks/useGuardedNutritionAssignment";
+import { useNutritionLifecycle } from "@/hooks/useNutritionLifecycle";
 import { useNutritionPlanV2 } from "@/hooks/useNutritionPlanV2";
 import { useSupabaseNutritionPlans } from "@/hooks/useSupabaseNutritionPlans";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { contentStatusLabels, fullName } from "@/lib/admin";
+import {
+  describeHidingFromStudent,
+  describePlanDeletionBlock,
+  describePlanDeletionSideEffects,
+  duplicateName,
+  hidesPlanFromAssignedStudent,
+  planLifecycleActions,
+  planStatusAfter,
+  PLAN_ACTION_LABELS_FR,
+  type PlanLifecycleAction,
+} from "@/lib/nutrition/lifecycle";
 import { prefillFromLegacyDailyTarget } from "@/lib/nutrition/plan-v2-conversion";
 import {
   createFormStateFromCanonical,
@@ -29,6 +49,7 @@ import {
   createWeekFormFromPlan,
   initializeAllDays,
   mainDayTargets,
+  toDuplicateWeekPayload,
   toWeekSavePayload,
   type WeekFormState,
 } from "@/lib/nutrition/plan-v2-week-form";
@@ -40,6 +61,7 @@ import {
   STATUS_APP_TO_DB,
   updateNutritionPlanStatus as updateNutritionPlanStatusSupabase,
 } from "@/lib/supabase/nutrition";
+import { deleteNutritionPlan } from "@/lib/supabase/nutrition-lifecycle";
 import { saveNutritionPlanV2 } from "@/lib/supabase/nutrition-v2";
 import type { AdminContentStatus } from "@/types";
 
@@ -66,6 +88,19 @@ export default function NutritionPlanDetailPage() {
   const [formState, setFormState] = useState<PlanV2FormState | null>(null);
   const [savingV2, setSavingV2] = useState(false);
   const [v2Error, setV2Error] = useState<string | null>(null);
+
+  // ── Cycle de vie (PR D) ───────────────────────────────────────────────
+  const router = useRouter();
+  const cycleDeVie = useNutritionLifecycle();
+  const [actionEnCours, setActionEnCours] = useState(false);
+  const [suppressionOuverte, setSuppressionOuverte] = useState(false);
+  const [suppressionErreur, setSuppressionErreur] = useState<string | null>(null);
+  const [messageCycle, setMessageCycle] = useState<string | null>(null);
+  // Une action en attente de confirmation parce qu'elle masquerait le plan à
+  // son élève. `null` = rien en attente.
+  const [masquageEnAttente, setMasquageEnAttente] = useState<
+    { readonly appliquer: () => void | Promise<void> } | null
+  >(null);
 
   const isSupabasePlansActive = isSupabaseConfigured();
   const supabaseNutritionPlans = useSupabaseNutritionPlans();
@@ -129,21 +164,140 @@ export default function NutritionPlanDetailPage() {
 
   /** Chemin v1 INCHANGÉ : un plan v2 n'entre jamais ici (bouton non rendu). */
 
-  async function handleArchive() {
+  const infoCycle = cycleDeVie.planInfo(plan.id);
+  // ABSENT ≠ SUPPRIMABLE. Tant que l'aperçu n'est pas chargé, on considère que
+  // la suppression est impossible — et de toute façon la base retrancherait.
+  const motifBlocage =
+    infoCycle === null
+      ? "Les dépendances de ce plan n'ont pas encore été vérifiées. Recharge la page."
+      : infoCycle.deletionBlock === null
+        ? null
+        : describePlanDeletionBlock(infoCycle.deletionBlock, infoCycle.dependencies);
+
+  /**
+   * Une seule fonction pour activer, archiver et restaurer.
+   *
+   * Toutes les trois ne changent QUE le statut : `updateNutritionPlanStatus`
+   * n'écrit ni `daily_target`, ni les jours, ni les repas. Archiver ne perd
+   * donc rien, et restaurer ne reconstruit rien — c'est ce qui rend
+   * l'archivage sans risque et réversible.
+   */
+  async function changerStatut(cible: AdminContentStatus) {
     setSaveError(false);
+    setMessageCycle(null);
+    setActionEnCours(true);
     if (isSupabasePlansActive) {
       const supabase = createSupabaseBrowserClient();
       if (supabase) {
-        const ok = await updateNutritionPlanStatusSupabase(supabase, plan!.id, "archivé");
+        const ok = await updateNutritionPlanStatusSupabase(supabase, plan!.id, cible);
+        setActionEnCours(false);
         if (!ok) {
           setSaveError(true);
           return;
         }
         await supabaseNutritionPlans.refetch();
+        await cycleDeVie.refetch();
         return;
       }
     }
-    updateNutritionPlan(plan!.id, { status: "archivé" });
+    updateNutritionPlan(plan!.id, { status: cible });
+    setActionEnCours(false);
+  }
+
+  /**
+   * Duplique le plan, semaine comprise, en un BROUILLON indépendant.
+   *
+   * Réutilise le chemin d'écriture UNIQUE — `save_nutrition_plan_v2` — avec
+   * `planId: null`. Aucune écriture directe, aucune copie de ligne à ligne :
+   * la copie est construite comme n'importe quel enregistrement, donc elle
+   * subit les mêmes validations et hérite des mêmes invariants.
+   *
+   * Elle naît en brouillon et sans élève : dupliquer n'assigne jamais.
+   */
+  async function dupliquer() {
+    setSaveError(false);
+    setMessageCycle(null);
+    setActionEnCours(true);
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) {
+      setActionEnCours(false);
+      setSaveError(true);
+      return;
+    }
+    const semaine = await readNutritionPlanV2Week(supabase, plan!.id);
+    const formulaire = semaine ? createWeekFormFromPlan(semaine) : createBlankWeek();
+    const principal = mainDayTargets(formulaire);
+    const résultat = await saveNutritionPlanV2(supabase, {
+      planId: null,
+      name: duplicateName(plan!.name),
+      goalType: plan!.goalType,
+      status: STATUS_APP_TO_DB.brouillon,
+      description: plan!.description ?? "",
+      coachNotes: plan!.coachNotes,
+      hydrationTip: plan!.hydrationTip,
+      profileKey: MAIN_DAY_PROFILE_KEY,
+      dailyCalories: principal.dailyCalories,
+      proteinBp: principal.proteinBp,
+      carbBp: principal.carbBp,
+      fatBp: principal.fatBp,
+      slots: principal.slots,
+      week: toDuplicateWeekPayload(formulaire),
+    });
+    setActionEnCours(false);
+    if (!résultat.ok) {
+      setV2Error(résultat.message);
+      return;
+    }
+    await supabaseNutritionPlans.refetch();
+    router.push(`/admin/nutrition/${résultat.plan.id}`);
+  }
+
+  function lancerAction(action: PlanLifecycleAction) {
+    if (action === "duplicate") {
+      void dupliquer();
+      return;
+    }
+    const cible = planStatusAfter(action);
+    if (!cible) return;
+    // « Restaurer » ramène en brouillon. Sur un plan encore affecté, cela le
+    // fait disparaître de l'espace de l'élève : on le dit avant, en le nommant.
+    if (hidesPlanFromAssignedStudent(cible, plan!.assignedStudentIds.length)) {
+      setMasquageEnAttente({ appliquer: () => changerStatut(cible) });
+      return;
+    }
+    void changerStatut(cible);
+  }
+
+  /**
+   * La suppression définitive. Le navigateur n'envoie QUE l'identifiant :
+   * aucun drapeau d'autorisation ne transite, et la base recalcule la
+   * condition dans la transaction. Un refus est donc toujours possible ici,
+   * même si l'écran affichait le bouton — et c'est très bien ainsi.
+   */
+  async function supprimerDéfinitivement() {
+    setSuppressionErreur(null);
+    setActionEnCours(true);
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) {
+      setActionEnCours(false);
+      setSuppressionErreur("Connexion indisponible. Rien n'a été supprimé.");
+      return;
+    }
+    const résultat = await deleteNutritionPlan(supabase, plan!.id);
+    setActionEnCours(false);
+    if (!résultat.ok) {
+      setSuppressionErreur(
+        describePlanDeletionBlock(résultat.reason, {
+          assignedStudents: résultat.dependencies.assignedStudents,
+          dailyLogs: résultat.dependencies.dailyLogs,
+        }),
+      );
+      await cycleDeVie.refetch();
+      await supabaseNutritionPlans.refetch();
+      return;
+    }
+    setSuppressionOuverte(false);
+    router.push("/admin/nutrition");
   }
 
   /**
@@ -215,7 +369,28 @@ export default function NutritionPlanDetailPage() {
    * dans `nutrition_plan_profiles` ni `nutrition_meal_slot_targets`, et
    * `updateNutritionPlan` n'est jamais appelée ici.
    */
-  async function handleSaveV2() {
+  /**
+   * Le constructeur porte lui aussi un sélecteur « Statut ». Enregistrer un
+   * plan affecté en BROUILLON depuis cette page a exactement le même effet que
+   * l'action « Restaurer » : il disparaît chez l'élève. La même confirmation
+   * doit donc s'appliquer aux deux chemins — sans quoi la garantie serait
+   * partielle, et une garantie partielle ne se retient pas.
+   */
+  function handleSaveV2() {
+    if (!formState) return;
+    if (
+      hidesPlanFromAssignedStudent(
+        formState.status as AdminContentStatus,
+        plan!.assignedStudentIds.length,
+      )
+    ) {
+      setMasquageEnAttente({ appliquer: enregistrerV2 });
+      return;
+    }
+    void enregistrerV2();
+  }
+
+  async function enregistrerV2() {
     if (!formState) return;
     setSavingV2(true);
     setV2Error(null);
@@ -297,6 +472,24 @@ export default function NutritionPlanDetailPage() {
           week={weekState}
           onWeekChange={setWeekState}
         />
+
+        {/* La MÊME confirmation que sur la fiche. Elle doit être rendue ici
+            aussi : cette branche sort avant le reste de la page, et une modale
+            déclenchée sans être montée ne s'ouvrirait jamais. */}
+        {masquageEnAttente && (
+          <ConfirmActionModal
+            title="Ce plan disparaîtra de l'espace de l'élève"
+            message={describeHidingFromStudent(assignedStudents.map(fullName))}
+            confirmLabel="Enregistrer en brouillon"
+            busy={savingV2}
+            onCancel={() => setMasquageEnAttente(null)}
+            onConfirm={async () => {
+              const action = masquageEnAttente.appliquer;
+              setMasquageEnAttente(null);
+              await action();
+            }}
+          />
+        )}
       </div>
     );
   }
@@ -389,16 +582,39 @@ export default function NutritionPlanDetailPage() {
                 onSetAssignment={guarded.setAssignment}
                 triggerLabel="Assigner à des élèves"
               />
-              <button
-                type="button"
-                onClick={handleArchive}
-                className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-destructive/50 px-4 py-2 text-xs uppercase tracking-widest text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40"
-              >
-                <Archive size={13} />
-                Archiver
-              </button>
+              {/* LES ACTIONS DE CYCLE DE VIE, adaptées au statut courant.
+                  « Supprimer définitivement » n'est PAS ici : elle vit dans la
+                  zone dangereuse, en bas de page. */}
+              <LifecycleActionBar
+                busy={actionEnCours}
+                actions={planLifecycleActions(plan.status).map(
+                  (action): LifecycleActionSpec => ({
+                    key: action,
+                    label: PLAN_ACTION_LABELS_FR[action],
+                    icon: ICÔNES_ACTION_PLAN[action],
+                    onRun: () => lancerAction(action),
+                  }),
+                )}
+              />
             </div>
           </div>
+
+          {/* Un plan non actif ne peut pas être assigné : la base le refuse
+              (`assign_nutrition_plan`, migration 20260815090000). On le dit
+              AVANT le clic plutôt que de laisser découvrir l'erreur. */}
+          {plan.status !== "actif" && (
+            <p className="mb-6 rounded-panel border border-border bg-surface-soft/50 px-4 py-3 text-sm text-muted-foreground">
+              {plan.status === "brouillon"
+                ? "Ce plan est un brouillon : aucun élève ne le voit, et il ne peut pas être assigné tant qu'il n'est pas activé."
+                : `Ce plan est archivé${plan.archivedAt ? ` depuis le ${formaterDate(plan.archivedAt)}` : ""} : il n'est plus proposé à de nouvelles assignations. L'élève qui l'avait garde son suivi.`}
+            </p>
+          )}
+
+          {messageCycle && (
+            <p className="mb-6 rounded-panel border border-border bg-surface-soft/50 px-4 py-3 text-sm text-foreground" role="status">
+              {messageCycle}
+            </p>
+          )}
 
           <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
             <StatCard label="Kcal / jour" value={String(plan.caloriesPerDay)} size="lg" />
@@ -419,7 +635,7 @@ export default function NutritionPlanDetailPage() {
           </div>
 
 
-          <div className="rounded-card border border-border bg-card p-6 shadow-soft">
+          <div className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
             <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
               Élèves assignés
             </h2>
@@ -439,8 +655,71 @@ export default function NutritionPlanDetailPage() {
               </div>
             )}
           </div>
+
+          {/* ─────────────────────── ZONE DANGEREUSE ───────────────────────
+              Elle est en BAS, séparée, et ne contient qu'une action. Le coach
+              qui vise « Archiver » ne peut pas la manquer et cliquer ici. */}
+          <DangerZone description="La suppression définitive efface le plan, sa semaine, ses repas, ses profils et les journées de suivi qui s'y rattachent. Elle est refusée tant qu'un élève y est affecté — retire-le d'abord, ou archive le plan, ce qui conserve tout.">
+            <DeleteTriggerButton
+              onOpen={() => {
+                setSuppressionErreur(null);
+                setSuppressionOuverte(true);
+              }}
+              disabled={actionEnCours}
+            />
+          </DangerZone>
+
+          {masquageEnAttente && (
+            <ConfirmActionModal
+              title="Ce plan disparaîtra de l'espace de l'élève"
+              message={describeHidingFromStudent(assignedStudents.map(fullName))}
+              confirmLabel="Repasser en brouillon"
+              busy={actionEnCours || savingV2}
+              onCancel={() => setMasquageEnAttente(null)}
+              onConfirm={async () => {
+                const action = masquageEnAttente.appliquer;
+                setMasquageEnAttente(null);
+                await action();
+              }}
+            />
+          )}
+
+          {suppressionOuverte && (
+            <DeleteConfirmationModal
+              resourceName={plan.name}
+              resourceKind="ce plan alimentaire"
+              dependencies={[
+                { label: "Élèves affectés", count: infoCycle?.dependencies.assignedStudents ?? 0 },
+                { label: "Journées de suivi enregistrées", count: infoCycle?.dependencies.dailyLogs ?? 0 },
+              ]}
+              blockedReason={motifBlocage}
+              sideEffect={
+                infoCycle ? describePlanDeletionSideEffects(infoCycle.dependencies) : null
+              }
+              deleting={actionEnCours}
+              error={suppressionErreur}
+              onCancel={() => setSuppressionOuverte(false)}
+              onConfirm={supprimerDéfinitivement}
+            />
+          )}
         </>
       )}
     </div>
   );
+}
+
+/** Les icônes des actions de plan — définies hors du composant, jamais recréées. */
+const ICÔNES_ACTION_PLAN: Record<PlanLifecycleAction, ReactNode> = {
+  activate: <SlidersHorizontal size={13} />,
+  archive: <Archive size={13} />,
+  restore: <RotateCcw size={13} />,
+  duplicate: <Copy size={13} />,
+};
+
+/** Date d'archivage lisible. `Intl` suffit : aucune dépendance ajoutée. */
+function formaterDate(iso: string): string {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime())
+    ? iso
+    : date.toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
 }

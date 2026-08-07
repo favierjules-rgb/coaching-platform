@@ -105,7 +105,15 @@ create or replace function pg_temp.payload_v2(
 ) returns jsonb language sql immutable as $$
   select jsonb_build_object(
     'plan_id', p_plan_id,
-    'plan', jsonb_build_object('name', p_nom, 'goal_type', 'maintien', 'status', 'prochain'),
+    -- STATUT « actif » depuis la PR D (migration 20260815090000). Il était
+    -- 'prochain', c'est-à-dire BROUILLON, et la section E affirmait pourtant
+    -- que l'élève lisait le profil et les six créneaux de ce plan. Depuis
+    -- qu'un brouillon n'est plus visible par son élève, cette section testait
+    -- une situation qui ne doit plus exister. Le plan est donc actif : la
+    -- section E retrouve exactement ce qu'elle voulait prouver — un élève lit
+    -- SON plan et rien d'autre. L'invisibilité d'un brouillon est vérifiée,
+    -- elle, en section I de nutrition_v2_unified_checklist.sql.
+    'plan', jsonb_build_object('name', p_nom, 'goal_type', 'maintien', 'status', 'actif'),
     'profile', jsonb_build_object(
       'profile_key', 'default',
       'daily_calories', 1700,

@@ -7,10 +7,16 @@ import { ArrowLeft, Plus } from "lucide-react";
 import { RecipeCatalog } from "@/components/admin/RecipeCatalog";
 import { RecipeFixtureImportDialog } from "@/components/admin/RecipeFixtureImportDialog";
 import { useCurrentCoachId } from "@/hooks/useCurrentCoachId";
+import { useNutritionLifecycle } from "@/hooks/useNutritionLifecycle";
 import { useNutritionRecipes } from "@/hooks/useNutritionRecipes";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
-import { importNutritionRecipeFixtures } from "@/lib/supabase/nutrition-recipes-write";
+import {
+  importNutritionRecipeFixtures,
+  setNutritionRecipeStatus,
+} from "@/lib/supabase/nutrition-recipes-write";
 import { validateRecipeForm, createRecipeFormFromRecord } from "@/lib/nutrition/recipe-form";
+import { recipeStatusAfter, type RecipeLifecycleAction } from "@/lib/nutrition/lifecycle";
+import type { RecipeWithTags } from "@/lib/nutrition/recipe-rows";
 import type { FixtureImportReport } from "@/lib/nutrition/recipe-fixtures-import";
 
 /**
@@ -30,6 +36,47 @@ export default function AdminNutritionRecipesPage() {
   const { recipes, invalid, loading, error, refetch } = useNutritionRecipes();
   const { coachId } = useCurrentCoachId();
   const [importError, setImportError] = useState<string | null>(null);
+
+  // ── Cycle de vie (PR D) ───────────────────────────────────────────────
+  // UN appel pour tout le catalogue : statuts, dates d'archivage, nombre
+  // d'élèves ayant accès et motif de blocage de suppression. Jamais une
+  // requête par recette.
+  const cycleDeVie = useNutritionLifecycle();
+  const [actionEnCours, setActionEnCours] = useState<string | null>(null);
+  const [actionErreur, setActionErreur] = useState<string | null>(null);
+
+  /**
+   * Publier, dépublier, archiver, restaurer depuis le catalogue.
+   *
+   * La charge utile ne contient QUE `{id, coach_id, status}` : le contrat de
+   * `save_nutrition_recipe` garantit alors qu'aucun ingrédient, aucune
+   * étiquette et aucune description n'est touché. Changer un statut depuis une
+   * liste ne peut donc rien abîmer.
+   *
+   * La duplication et la suppression restent sur la fiche : la première a
+   * besoin de tous les ingrédients, la seconde ne doit jamais voisiner un
+   * bouton anodin.
+   */
+  async function lancerAction(recette: RecipeWithTags, action: RecipeLifecycleAction) {
+    const cible = recipeStatusAfter(action);
+    if (!cible || !coachId) return;
+    setActionErreur(null);
+    setActionEnCours(recette.recipe.id);
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) {
+      setActionEnCours(null);
+      setActionErreur("Connexion indisponible. Rien n'a été modifié.");
+      return;
+    }
+    const résultat = await setNutritionRecipeStatus(supabase, recette.recipe.id, coachId, cible);
+    setActionEnCours(null);
+    if (!résultat.ok) {
+      setActionErreur(résultat.message);
+      return;
+    }
+    await refetch();
+    await cycleDeVie.refetch();
+  }
 
   // `coachId` n'intervient pas dans la validation, mais lui passer
   // l'identifiant de la RECETTE fabriquait un état de formulaire faux : le
@@ -92,12 +139,21 @@ export default function AdminNutritionRecipesPage() {
         </p>
       )}
 
+      {actionErreur && (
+        <p className="mb-6 rounded-panel border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive" role="alert">
+          {actionErreur}
+        </p>
+      )}
+
       <RecipeCatalog
         recipes={recipes}
         invalid={invalid}
         loading={loading}
         error={error}
         blockingByRecipe={blockingByRecipe}
+        lifecycleFor={cycleDeVie.recipeInfo}
+        onLifecycleAction={lancerAction}
+        busyRecipeId={actionEnCours}
       />
     </div>
   );

@@ -1219,6 +1219,15 @@ export interface AdminNutritionPlan {
   fat: number;
   weeklyTargetCalories: number;
   status: AdminContentStatus;
+  /**
+   * Date d'entrée en archive (`nutrition_plans.archived_at`, migration
+   * 20260815090000), au format ISO. `null` pour un brouillon ou un plan
+   * actif.
+   *
+   * OPTIONNELLE À DESSEIN : le type est partagé avec les données mock
+   * (data/admin.ts), qui n'ont pas de cycle de vie en base.
+   */
+  archivedAt?: string | null;
   coachNotes: string;
   hydrationTip: string;
   supplements: string[];

@@ -1431,6 +1431,12 @@ export interface Database {
           daily_target: { calories?: number; protein?: number; carbs?: number; fat?: number } | null;
           weekly_target_calories: number | null;
           status: "actif" | "ancien" | "prochain";
+          /**
+           * Date d'entrée en archive (migration 20260815090000). `null` pour
+           * un brouillon ou un plan actif. Maintenue par le trigger
+           * `nutrition_plans_archived_at` : ne jamais l'écrire à la main.
+           */
+          archived_at: string | null;
           shopping_list: string[] | null;
           created_at: string;
           updated_at: string;
@@ -1449,6 +1455,7 @@ export interface Database {
           daily_target?: { calories?: number; protein?: number; carbs?: number; fat?: number } | null;
           weekly_target_calories?: number | null;
           status?: "actif" | "ancien" | "prochain";
+          archived_at?: string | null;
           shopping_list?: string[] | null;
           created_at?: string;
           updated_at?: string;
@@ -1467,6 +1474,7 @@ export interface Database {
           daily_target?: { calories?: number; protein?: number; carbs?: number; fat?: number } | null;
           weekly_target_calories?: number | null;
           status?: "actif" | "ancien" | "prochain";
+          archived_at?: string | null;
           shopping_list?: string[] | null;
           created_at?: string;
           updated_at?: string;

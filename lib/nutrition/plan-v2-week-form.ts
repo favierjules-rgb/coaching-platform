@@ -638,6 +638,37 @@ export function toWeekSavePayload(state: WeekFormState): {
 }
 
 /**
+ * La même semaine, mais pour une COPIE — chaque repas perd son identifiant.
+ *
+ * `toWeekSavePayload` renvoie l'UUID d'un repas déjà enregistré pour que la
+ * RPC le mette à jour au lieu d'en créer un second. Sur une duplication, c'est
+ * exactement ce qu'il ne faut pas : ces UUID appartiennent aux jours du plan
+ * d'ORIGINE, et les réutiliser déplacerait ses repas vers la copie. `null`
+ * demande à la base d'en générer de nouveaux.
+ *
+ * Les jours et les profils, eux, n'ont pas d'identifiant dans la charge utile
+ * — ils sont désignés par `day` et `profile_key`, tous deux relatifs au plan
+ * écrit. Il n'y a donc rien à neutraliser de ce côté.
+ */
+export function toDuplicateWeekPayload(state: WeekFormState): {
+  profiles: unknown[];
+  days: unknown[];
+  main_profile_key: string;
+} {
+  const payload = toWeekSavePayload(state);
+  return {
+    ...payload,
+    days: payload.days.map((jour) => {
+      const j = jour as { meals?: readonly Record<string, unknown>[] };
+      return {
+        ...(jour as Record<string, unknown>),
+        meals: (j.meals ?? []).map((repas) => ({ ...repas, id: null })),
+      };
+    }),
+  };
+}
+
+/**
  * Les objectifs du jour PRINCIPAL (lundi), pour le profil de compatibilité
  * envoyé au premier niveau de la charge utile. Ce n'est pas une source de
  * vérité : la RPC privilégie `profiles` dès qu'il est présent.

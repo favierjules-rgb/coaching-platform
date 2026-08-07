@@ -168,18 +168,32 @@ export async function saveNutritionRecipe(
 }
 
 /**
- * Archive une recette. C'est un STATUT, jamais une suppression : la PR B ne
- * livre aucun chemin de suppression définitive, et les données restent en
- * base. Passe par la même RPC — donc mêmes garanties.
+ * Change le SEUL statut d'une recette : publier, dépublier, archiver,
+ * restaurer.
+ *
+ * CHARGE UTILE MINIMALE, à dessein. Le contrat de `save_nutrition_recipe`
+ * (migration 20260809090000) est explicite : une clé absente n'est pas
+ * touchée. En n'envoyant ni `ingredients` ni `tags`, on obtient la garantie
+ * qu'un changement de statut ne peut PAS abîmer la recette — pas un
+ * ingrédient déplacé, pas une étiquette perdue, même si l'écran affichait une
+ * version périmée.
+ *
+ * ARCHIVER N'EST PAS SUPPRIMER : la recette reste en base, intégralement, et
+ * `restaurer` la ramène en brouillon. La suppression définitive a son propre
+ * chemin — `deleteNutritionRecipe`, dans lib/supabase/nutrition-lifecycle.ts.
+ *
+ * L'ACTIVATION reste soumise à la validation de la base : demander `active`
+ * sur une recette incomplète est refusé côté serveur (`not_activable`), pas
+ * ici.
  */
-export async function archiveNutritionRecipe(
+export async function setNutritionRecipeStatus(
   supabase: TypedSupabaseClient,
-  payload: Record<string, unknown>,
+  recipeId: string,
+  coachId: string,
+  status: RecipeStatus,
 ): Promise<RecipeWriteResult> {
-  const recette = (payload.recipe ?? {}) as Record<string, unknown>;
   return saveNutritionRecipe(supabase, {
-    ...payload,
-    recipe: { ...recette, status: "archived" },
+    recipe: { id: recipeId, coach_id: coachId, status },
   });
 }
 
