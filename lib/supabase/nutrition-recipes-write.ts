@@ -1,14 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import {
-  RECIPE_FIXTURES,
-  buildFixturePayload,
-  buildIngredientIdMap,
-  fixtureSourceKey,
-  summarizeFixtureImport,
-  type FixtureImportEntry,
-  type FixtureImportReport,
-} from "@/lib/nutrition/recipe-fixtures-import";
 import { describeBlockingIssue } from "@/lib/nutrition/recipe-labels";
 import type { RecipeStatus } from "@/lib/nutrition/recipe-rows";
 import type { Database } from "@/types/supabase";
@@ -22,10 +13,15 @@ import type { Database } from "@/types/supabase";
  * recettes à moitié écrites au premier réseau instable. Tout passe donc par
  * `save_nutrition_recipe` (migration 20260808090000).
  *
- * AUCUN ENCHAÎNEMENT CLIENT pour la sauvegarde principale : un appel, une
- * transaction. L'import de fixtures fait N appels — mais chacun est une
- * transaction complète et indépendante, et un échec sur l'une n'abîme pas les
- * autres. C'est un lot, pas une transaction unique, et le rapport le dit.
+ * AUCUN ENCHAÎNEMENT CLIENT : un appel, une transaction — pour la sauvegarde
+ * comme pour la duplication et pour l'import d'un fichier, qui traite tout le
+ * lot dans une seule transaction plpgsql.
+ *
+ * L'IMPORT DES RECETTES DE DÉMONSTRATION A ÉTÉ RETIRÉ (PR E.1). Il faisait N
+ * appels depuis le navigateur, et il n'avait plus de raison d'être depuis que
+ * l'import d'un fichier JSON existe. Son code n'était plus atteignable que
+ * par un bouton devenu sans objet ; le supprimer retire aussi le seul chemin
+ * par lequel un catalogue pouvait se remplir tout seul.
  *
  * AUCUNE QUANTITÉ CALCULÉE. Ce module ne connaît ni `RecipeSolution` ni
  * `SolvedIngredient` : une portion adaptée n'a aucun chemin vers la base.
@@ -215,6 +211,14 @@ export interface DuplicateRecipeSuccess {
   readonly recipeId: string;
   readonly name: string;
   readonly copied: { readonly ingredients: number; readonly links: number; readonly tags: number };
+  /**
+   * La photo de la SOURCE — la copie, elle, naît sans photo. L'appelant en
+   * fait un fichier INDÉPENDANT dans le dossier de la copie
+   * (`copyRecipeImageForDuplicate`). Aucun objet n'est jamais partagé entre
+   * deux recettes : retirer la photo de la copie ne peut pas abîmer
+   * l'original.
+   */
+  readonly sourceImagePath: string | null;
 }
 export interface DuplicateRecipeFailure {
   readonly ok: false;
@@ -240,6 +244,8 @@ export function parseDuplicateRecipeResult(data: unknown): DuplicateRecipeResult
       recipeId: ligne.recipe_id,
       name: typeof ligne.name === "string" ? ligne.name : "",
       copied: { ingredients: n(copié.ingredients), links: n(copié.links), tags: n(copié.tags) },
+      sourceImagePath:
+        typeof ligne.source_image_path === "string" ? ligne.source_image_path : null,
     };
   }
   if (ligne.reason === "forbidden") {
@@ -336,100 +342,4 @@ export async function importNutritionRecipes(
     };
   }
   return parseImportRecipesResult(data);
-}
-
-/* ─────────────────────────── Import des fixtures ─────────────────────────── */
-
-export interface FixtureImportOptions {
-  /** `true` = met à jour une fixture déjà importée. Par défaut : on l'ignore. */
-  readonly updateExisting?: boolean;
-  /** Injectable pour les tests — sinon `crypto.randomUUID`. */
-  readonly generateId?: () => string;
-}
-
-/**
- * Import EXPLICITE des 11 recettes de démonstration.
- *
- * JAMAIS AUTOMATIQUE. Cette fonction n'est appelée que depuis un bouton, après
- * confirmation. Aucun chargement de page ne la déclenche, et la migration ne
- * l'exécute pas.
- *
- * REJOUABLE SANS DOUBLON. L'identité vient de `source_key`
- * (`fixture:<cle_technique>`), jamais du nom affiché : une recette saisie à la
- * main portant le même nom qu'une fixture n'est donc jamais touchée.
- *
- * Chaque fixture est une transaction indépendante : un échec sur l'une
- * n'annule pas les autres, et le rapport distingue importées, mises à jour,
- * ignorées et en échec.
- */
-export async function importNutritionRecipeFixtures(
-  supabase: TypedSupabaseClient,
-  coachId: string,
-  options: FixtureImportOptions = {},
-): Promise<FixtureImportReport> {
-  const generate = options.generateId ?? (() => globalThis.crypto.randomUUID());
-  const updateExisting = options.updateExisting ?? false;
-
-  // UNE requête pour connaître ce qui est déjà importé — pas une par fixture.
-  const clés = RECIPE_FIXTURES.map(fixtureSourceKey);
-  const { data: existantes, error: erreurLecture } = await supabase
-    .from("nutrition_recipes")
-    .select("id, source_key")
-    .eq("coach_id", coachId)
-    .in("source_key", clés);
-
-  // Sans cette lecture, on ne SAIT PAS ce qui est déjà importé. Continuer
-  // traiterait chaque fixture déjà présente comme une création : l'index
-  // unique partiel les rejetterait une par une, et le rapport annoncerait
-  // « 11 en échec » là où la réalité est « je n'ai pas pu vérifier ». On
-  // s'arrête donc, avec la vraie cause.
-  if (erreurLecture) {
-    return summarizeFixtureImport(
-      RECIPE_FIXTURES.map((fixture) => ({
-        sourceKey: fixtureSourceKey(fixture),
-        name: fixture.name,
-        outcome: "failed" as const,
-        message:
-          "Impossible de vérifier les recettes déjà importées : rien n'a été écrit. Réessaie.",
-      })),
-    );
-  }
-
-  const parClé = new Map<string, string>();
-  for (const ligne of (existantes ?? []) as { id: string; source_key: string | null }[]) {
-    if (ligne.source_key) parClé.set(ligne.source_key, ligne.id);
-  }
-
-  const entries: FixtureImportEntry[] = [];
-
-  for (const fixture of RECIPE_FIXTURES) {
-    const sourceKey = fixtureSourceKey(fixture);
-    const existante = parClé.get(sourceKey) ?? null;
-
-    if (existante && !updateExisting) {
-      entries.push({
-        sourceKey, name: fixture.name, outcome: "skipped",
-        message: "Déjà importée — laissée telle quelle.",
-      });
-      continue;
-    }
-
-    const ids = buildIngredientIdMap(fixture, generate);
-    const résultat = await saveNutritionRecipe(
-      supabase,
-      buildFixturePayload(fixture, coachId, existante, ids),
-    );
-
-    if (résultat.ok) {
-      entries.push({
-        sourceKey, name: fixture.name,
-        outcome: existante ? "updated" : "imported",
-        message: null,
-      });
-    } else {
-      entries.push({ sourceKey, name: fixture.name, outcome: "failed", message: résultat.message });
-    }
-  }
-
-  return summarizeFixtureImport(entries);
 }

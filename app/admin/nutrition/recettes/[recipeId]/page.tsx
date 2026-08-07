@@ -13,6 +13,7 @@ import {
   type LifecycleActionSpec,
 } from "@/components/admin/LifecycleActions";
 import { RecipeBuilder } from "@/components/admin/RecipeBuilder";
+import { RecipeImageField } from "@/components/admin/RecipeImageField";
 import { useCurrentCoachId } from "@/hooks/useCurrentCoachId";
 import { useNutritionLifecycle } from "@/hooks/useNutritionLifecycle";
 import { useNutritionRecipe } from "@/hooks/useNutritionRecipes";
@@ -23,6 +24,10 @@ import {
   saveNutritionRecipe,
   setNutritionRecipeStatus,
 } from "@/lib/supabase/nutrition-recipes-write";
+import {
+  cleanupRecipeImageAfterDeletion,
+  copyRecipeImageForDuplicate,
+} from "@/lib/supabase/storage-recipe-images";
 import {
   createRecipeFormFromRecord,
   toRecipeSavePayload,
@@ -157,11 +162,27 @@ export default function AdminNutritionRecipeDetailPage() {
       return;
     }
     const copie = await duplicateNutritionRecipe(supabase, recipe.recipe.id);
-    setActionEnCours(false);
     if (!copie.ok) {
+      setActionEnCours(false);
       setActionErreur(copie.message);
       return;
     }
+
+    // LA PHOTO EST RECOPIÉE, PAS PARTAGÉE. La copie a son propre fichier,
+    // dans son propre dossier : retirer sa photo plus tard ne peut pas
+    // abîmer l'original. Un échec ne remet pas la duplication en cause — le
+    // contenu, lui, a bien été copié.
+    if (copie.sourceImagePath !== null && coachId !== null) {
+      const image = await copyRecipeImageForDuplicate(supabase, {
+        coachId,
+        sourcePath: copie.sourceImagePath,
+        newRecipeId: copie.recipeId,
+        fileId: crypto.randomUUID(),
+      });
+      if (!image.ok) setActionErreur(image.message);
+    }
+
+    setActionEnCours(false);
     router.push(`/admin/nutrition/recettes/${copie.recipeId}`);
   }
 
@@ -196,6 +217,11 @@ export default function AdminNutritionRecipeDetailPage() {
       await cycleDeVie.refetch();
       return;
     }
+    // La base a tranché : la recette n'existe plus. On retire ENSUITE son
+    // fichier — jamais l'inverse. Un échec laisse un objet orphelin, inerte,
+    // là où l'ordre contraire laisserait une image cassée bien visible.
+    await cleanupRecipeImageAfterDeletion(supabase, résultat.imagePath);
+
     setSuppressionOuverte(false);
     router.push("/admin/nutrition/recettes");
   }
@@ -305,6 +331,19 @@ export default function AdminNutritionRecipeDetailPage() {
         saving={saving}
         saveError={saveError}
         blockingIssue={blockingIssue}
+        imageSlot={
+          <RecipeImageField
+            recipeId={recipe.recipe.id}
+            coachId={coachId}
+            imagePath={recipe.imagePath}
+            recipeName={recipe.recipe.name}
+            // La recette relue est la seule source : pas d'état local à
+            // resynchroniser, donc pas de divergence possible entre ce que
+            // l'écran montre et ce que la base contient.
+            onCommitted={() => void refetch()}
+            disabled={actionEnCours || saving}
+          />
+        }
       />
 
       <div className="mt-8">

@@ -112,12 +112,17 @@ export default function NutritionPlanDetailPage() {
         {/* ──────────────── SECTION 1 — SUIVI DE LA SEMAINE ────────────────
             Réutilisé tel quel : même composant, mêmes calculs, même rendu que
             l'écran /nutrition. Aucune notion de repas ni de créneau ici — cet
-            outil reste strictement journalier. */}
+            outil reste strictement journalier.
+
+            LE TITRE APPARTIENT AU COMPOSANT. `WeeklyNutritionTracker` rend
+            déjà son propre `<h2>Suivi de la semaine</h2>` : celui qui vivait
+            ici le doublait à l'écran. C'est ce titre-ci qui a été retiré, et
+            pas l'autre — le composant est monté sur DEUX écrans (/nutrition
+            et cette page), et lui ôter son titre l'aurait laissé anonyme sur
+            le premier. Le doublon est donc supprimé à sa source, jamais
+            masqué en CSS. */}
         {supabaseNutrition.studentId && (
           <section className="mb-10">
-            <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
-              Suivi de la semaine
-            </h2>
             <WeeklyNutritionTracker
               studentId={supabaseNutrition.studentId}
               planId={plan.id}

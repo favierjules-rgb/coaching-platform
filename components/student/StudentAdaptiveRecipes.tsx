@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { ArrowLeft, ChefHat } from "lucide-react";
 
+import { RecipeImage } from "@/components/shared/RecipeImage";
 import { NBSP, formatIntegerFr } from "@/lib/nutrition/basis-points";
 import { MEAL_SLOT_LABELS_FR, type MealSlotKey } from "@/lib/nutrition/meal-distribution";
 import {
@@ -209,6 +210,17 @@ export function StudentAdaptiveRecipes({
                     onClick={() => setRecetteChoisie(r.recipe.id)}
                     className="pressable flex min-h-11 w-full flex-col items-start gap-1 rounded-panel border border-border bg-card p-4 text-left shadow-soft transition-colors hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                   >
+                    {/* La photo N'INTERVIENT NULLE PART dans le choix : le
+                        filtrage, le solveur et le classement ne la lisent
+                        pas. Elle illustre, c'est tout. `sizes` décrit la
+                        vraie largeur — une colonne pleine sur mobile, une
+                        demi-colonne au-delà. */}
+                    <RecipeImage
+                      imagePath={r.imagePath}
+                      alt={r.recipe.name}
+                      sizes="(max-width: 640px) 92vw, 320px"
+                      className="mb-2 w-full"
+                    />
                     <span className="flex items-center gap-2 text-sm font-bold text-foreground">
                       <ChefHat size={14} className="flex-shrink-0 text-muted-foreground" />
                       {r.recipe.name}
@@ -261,6 +273,18 @@ export function StudentAdaptiveRecipes({
               Retour aux recettes
             </button>
           </div>
+
+          {recette.imagePath !== null && (
+            <RecipeImage
+              imagePath={recette.imagePath}
+              alt={recette.recipe.name}
+              sizes="(max-width: 768px) 92vw, 700px"
+              // Seule image de la page à ce moment, et attendue tout de
+              // suite : c'est le seul endroit où `priority` se justifie.
+              priority
+              className="w-full"
+            />
+          )}
 
           <p
             className={`rounded-panel border px-4 py-3 text-sm ${

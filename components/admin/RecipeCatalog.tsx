@@ -7,6 +7,7 @@ import { AlertTriangle, ChefHat, RotateCcw } from "lucide-react";
 import { LifecycleActionBar, type LifecycleActionSpec } from "@/components/admin/LifecycleActions";
 import { FilterButtons, SearchInput } from "@/components/admin/SearchAndFilters";
 import { StatusBadge } from "@/components/admin/StatusBadge";
+import { RecipeImage } from "@/components/shared/RecipeImage";
 import {
   recipeLifecycleActions,
   RECIPE_ACTION_LABELS_FR,
@@ -293,7 +294,19 @@ export function RecipeCatalog({
                 className="flex flex-col gap-3 rounded-card border border-border bg-card p-4 shadow-soft transition-colors hover:border-border-strong sm:p-6"
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
+                  {/* La vignette précède le titre sans alourdir la carte :
+                      72 px de large, rapport fixe, et le MÊME repli pour les
+                      recettes sans photo — la grille ne se déforme pas selon
+                      que le coach a illustré ou non. `sizes` reste petit :
+                      inutile de télécharger 1400 px pour une vignette. */}
+                  <RecipeImage
+                    imagePath={r.imagePath}
+                    alt={r.recipe.name}
+                    sizes="72px"
+                    className="w-[72px] flex-shrink-0"
+                    rounded="rounded-control"
+                  />
+                  <div className="min-w-0 flex-1">
                     <Link
                       href={`/admin/nutrition/recettes/${r.recipe.id}`}
                       className="block truncate font-heading text-base font-bold uppercase text-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"

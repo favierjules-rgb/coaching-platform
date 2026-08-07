@@ -88,7 +88,52 @@ const PRIVATE_PATHS = [
   "/onboarding",
 ];
 
+/**
+ * IMAGES DISTANTES — l'hôte exact, et rien d'autre.
+ *
+ * `next/image` refuse par défaut toute source distante : sans cette liste, un
+ * `<Image src="https://…supabase.co/…">` rend un 400. La tentation est de
+ * poser `hostname: "**.supabase.co"` et de passer à autre chose — ce serait
+ * ouvrir l'optimiseur d'images de ce site à N'IMPORTE QUEL projet Supabase du
+ * monde, qui pourrait alors s'en servir comme CDN gratuit.
+ *
+ * L'hôte est donc DÉRIVÉ de `NEXT_PUBLIC_SUPABASE_URL` : un seul projet, le
+ * nôtre. Et le chemin est borné au bucket public des photos de recettes —
+ * l'optimiseur ne relaiera rien d'autre, pas même un autre bucket public du
+ * même projet. `search: ""` interdit en plus toute chaîne de requête, qui
+ * multiplierait les variantes de cache pour la même image.
+ *
+ * Si la variable manque (build sans environnement), la liste est vide : aucun
+ * relais n'est ouvert. C'est cohérent — sans URL Supabase, l'application n'a
+ * de toute façon aucune image à afficher.
+ *
+ * `lib/nutrition/recipe-image.ts` construit le MÊME motif, et un test vérifie
+ * que les deux ne divergent pas.
+ */
+function recipeImageRemotePatterns() {
+  const brut = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!brut) return [];
+  let hostname: string;
+  try {
+    hostname = new URL(brut).hostname;
+  } catch {
+    return [];
+  }
+  if (hostname === "") return [];
+  return [
+    {
+      protocol: "https" as const,
+      hostname,
+      pathname: "/storage/v1/object/public/recipe-images/**",
+      search: "",
+    },
+  ];
+}
+
 const nextConfig: NextConfig = {
+  images: {
+    remotePatterns: recipeImageRemotePatterns(),
+  },
   async headers() {
     return [
       { source: "/:path*", headers: securityHeaders },

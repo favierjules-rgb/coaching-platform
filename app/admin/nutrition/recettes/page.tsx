@@ -5,7 +5,6 @@ import Link from "next/link";
 import { ArrowLeft, Plus } from "lucide-react";
 
 import { RecipeCatalog } from "@/components/admin/RecipeCatalog";
-import { RecipeFixtureImportDialog } from "@/components/admin/RecipeFixtureImportDialog";
 import { RecipeImportDialog } from "@/components/admin/RecipeImportDialog";
 import { useCurrentCoachId } from "@/hooks/useCurrentCoachId";
 import { useNutritionLifecycle } from "@/hooks/useNutritionLifecycle";
@@ -13,14 +12,12 @@ import { useNutritionRecipes } from "@/hooks/useNutritionRecipes";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
   duplicateNutritionRecipe,
-  importNutritionRecipeFixtures,
   importNutritionRecipes,
   setNutritionRecipeStatus,
 } from "@/lib/supabase/nutrition-recipes-write";
 import { validateRecipeForm, createRecipeFormFromRecord } from "@/lib/nutrition/recipe-form";
 import { recipeStatusAfter, type RecipeLifecycleAction } from "@/lib/nutrition/lifecycle";
 import type { RecipeWithTags } from "@/lib/nutrition/recipe-rows";
-import type { FixtureImportReport } from "@/lib/nutrition/recipe-fixtures-import";
 
 /**
  * Catalogue des recettes — administration.
@@ -38,7 +35,6 @@ import type { FixtureImportReport } from "@/lib/nutrition/recipe-fixtures-import
 export default function AdminNutritionRecipesPage() {
   const { recipes, invalid, loading, error, refetch } = useNutritionRecipes();
   const { coachId } = useCurrentCoachId();
-  const [importError, setImportError] = useState<string | null>(null);
 
   // ── Cycle de vie (PR D) ───────────────────────────────────────────────
   // UN appel pour tout le catalogue : statuts, dates d'archivage, nombre
@@ -134,18 +130,6 @@ export default function AdminNutritionRecipesPage() {
     return résultat;
   }
 
-  async function importer(updateExisting: boolean): Promise<FixtureImportReport> {
-    const supabase = createSupabaseBrowserClient();
-    if (!supabase || !coachId) {
-      setImportError("Impossible d'identifier le coach : recharge la page puis réessaie.");
-      return { imported: 0, updated: 0, skipped: 0, failed: 0, entries: [] };
-    }
-    setImportError(null);
-    const rapport = await importNutritionRecipeFixtures(supabase, coachId, { updateExisting });
-    await refetch();
-    return rapport;
-  }
-
   return (
     <div>
       <Link
@@ -171,7 +155,6 @@ export default function AdminNutritionRecipesPage() {
             disabled={!coachId}
             existingNames={recipes.map((r) => r.recipe.name)}
           />
-          <RecipeFixtureImportDialog onImport={importer} disabled={!coachId} />
           <Link
             href="/admin/nutrition/recettes/nouvelle"
             className="pressable flex min-h-[44px] items-center gap-2 rounded-control border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
@@ -181,12 +164,6 @@ export default function AdminNutritionRecipesPage() {
           </Link>
         </div>
       </div>
-
-      {importError && (
-        <p className="mb-6 rounded-panel border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive" role="alert">
-          {importError}
-        </p>
-      )}
 
       {actionErreur && (
         <p className="mb-6 rounded-panel border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive" role="alert">
