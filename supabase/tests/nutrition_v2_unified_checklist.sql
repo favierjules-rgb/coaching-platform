@@ -20,10 +20,15 @@
 --   H. la garde d'assignation contrôle les SEPT jours ;
 --   I. CYCLE DE VIE (PR D) : les 22 cas exigés — publication, archivage,
 --      suppression définitive, appels DIRECTS des RPC par un élève, tentative
---      de suppression inter-coach, préservation des jours, repas et journaux,
---      absence d'orphelin, et RLS toujours active ;
+--      de suppression inter-coach, RÈGLE MÉTIER (seul un élève actuellement
+--      affecté bloque : les journées de suivi partent avec le plan), absence
+--      d'orphelin sur les cinq tables filles, préservation de l'élève, de son
+--      compte et des données des autres plans, et RLS toujours active ;
 --   K. le PROPRIÉTAIRE d'un plan : sans lui, l'élève ne voyait AUCUNE recette.
 --      La séquence réelle est rejouée de bout en bout ;
+--   L. la BASCULE 20260815 → 20260817 : le même plan (0 élève + historique)
+--      était bloqué, il est désormais supprimable — les DEUX états sont
+--      éprouvés sur la base, pas seulement lus dans les fichiers ;
 --   G. aucune donnée de test persistante après le ROLLBACK.
 --
 -- Lancement :
@@ -926,6 +931,14 @@ insert into public.nutrition_daily_logs (student_id, nutrition_plan_id, log_date
 values ('51110000-0000-4000-8000-00000000000a', 'd1110000-0000-4000-8000-00000000000c',
         current_date - 3, 2100);
 
+-- Un journal TÉMOIN, rattaché à un AUTRE plan. Il ne doit pas bouger d'un
+-- pouce quand on supprime le plan « historique » : c'est ce qui distingue
+-- « supprimer ce qui dépend du plan visé » de « supprimer le suivi de
+-- l'élève ».
+insert into public.nutrition_daily_logs (student_id, nutrition_plan_id, log_date, calories)
+values ('51110000-0000-4000-8000-00000000000a', 'd1110000-0000-4000-8000-00000000000d',
+        current_date - 4, 2050);
+
 -- Le plan « visibilité » est assigné à l'élève A, avec une journée et un repas
 -- que l'élève doit voir — ou ne pas voir, selon le statut.
 insert into public.nutrition_plan_profiles (id, plan_id, profile_key, daily_calories, protein_bp, carb_bp, fat_bp)
@@ -981,7 +994,7 @@ begin
   -- I5. Un plan ASSIGNÉ n'est pas supprimable — et rien ne bouge.
   select count(*) into v_avant from public.nutrition_plans;
   select public.delete_nutrition_plan('d1110000-0000-4000-8000-00000000000d') into v_res;
-  perform pg_temp.noter('I', 'I5. un plan ASSIGNÉ est refusé à la suppression',
+  perform pg_temp.noter('I', 'I5. APPEL DIRECT de la RPC sur un plan ASSIGNÉ : refusé',
     (v_res->>'ok')::boolean is false and v_res->>'reason' = 'assigned');
   perform pg_temp.noter('I', 'I5 bis. le refus ne supprime AUCUN plan',
     (select count(*) from public.nutrition_plans) = v_avant);
@@ -989,33 +1002,55 @@ begin
     (select student_id from public.nutrition_plans where id = 'd1110000-0000-4000-8000-00000000000d')
       = '51110000-0000-4000-8000-00000000000a');
 
-  -- I6. Un plan référencé par un JOURNAL n'est pas supprimable, et le journal
-  --     survit intact — on ne supprime jamais un historique pour débloquer.
-  select public.delete_nutrition_plan('d1110000-0000-4000-8000-00000000000c') into v_res;
-  perform pg_temp.noter('I', 'I6. un plan référencé par le suivi quotidien est refusé',
-    (v_res->>'ok')::boolean is false and v_res->>'reason' = 'used_in_history');
-  perform pg_temp.noter('I', 'I6 bis. la journée de suivi est TOUJOURS là',
-    (select count(*) from public.nutrition_daily_logs
-      where nutrition_plan_id = 'd1110000-0000-4000-8000-00000000000c') = 1);
-  perform pg_temp.noter('I', 'I6 ter. le refus nomme la dépendance comptée',
-    (v_res->'dependencies'->>'daily_logs')::int = 1);
+  -- I6. RÈGLE MÉTIER : les journées de suivi NE BLOQUENT PAS.
+  --     Un plan sans élève mais avec un historique est supprimable, et son
+  --     journal part avec lui — c'est exactement le cas que l'interface
+  --     refusait à tort. On mesure le nombre de journées AVANT, pour vérifier
+  --     ensuite que la RPC annonce le compte exact.
+  perform pg_temp.noter('I', 'I6. 0 élève + des journées de suivi : la suppression est AUTORISÉE',
+    public.nutrition_plan_deletion_block('d1110000-0000-4000-8000-00000000000c') is null
+    and (select count(*) from public.nutrition_daily_logs
+          where nutrition_plan_id = 'd1110000-0000-4000-8000-00000000000c') = 1);
 
-  -- I7. Un plan LIBRE part entièrement, sans laisser d'orphelin.
-  select public.delete_nutrition_plan('d1110000-0000-4000-8000-00000000000a') into v_res;
-  perform pg_temp.noter('I', 'I7. un plan libre est réellement supprimé',
+  select public.delete_nutrition_plan('d1110000-0000-4000-8000-00000000000c') into v_res;
+  perform pg_temp.noter('I', 'I6 bis. le plan est réellement supprimé',
     (v_res->>'ok')::boolean is true);
-  perform pg_temp.noter('I', 'I7 bis. la RPC compte ce qu''elle a supprimé',
+  perform pg_temp.noter('I', 'I6 ter. la RPC annonce le nombre de journées supprimées',
+    (v_res->'deleted'->>'daily_logs')::int = 1);
+  perform pg_temp.noter('I', 'I6 quater. les journées liées sont parties avec le plan',
+    not exists (select 1 from public.nutrition_daily_logs
+                 where nutrition_plan_id = 'd1110000-0000-4000-8000-00000000000c'));
+
+  -- CE QUI NE DOIT JAMAIS PARTIR : l'élève, son compte, et le suivi rattaché
+  -- à un AUTRE plan.
+  -- L'ÉLÈVE, lui, n'a pas bougé. (Son compte auth est recompté en I22, hors
+  -- rôle applicatif : `authenticated` n'a aucun droit de lecture sur
+  -- auth.users, et c'est très bien ainsi.)
+  perform pg_temp.noter('I', 'I6 quinquies. l''élève n''a pas été supprimé',
+    exists (select 1 from public.students where id = '51110000-0000-4000-8000-00000000000a'));
+  perform pg_temp.noter('I', 'I6 sexies. le suivi d''un AUTRE plan n''a pas été touché',
+    (select count(*) from public.nutrition_daily_logs
+      where nutrition_plan_id = 'd1110000-0000-4000-8000-00000000000d') = 1);
+
+  -- I7. Un plan LIBRE et SANS historique part entièrement, sans orphelin.
+  select public.delete_nutrition_plan('d1110000-0000-4000-8000-00000000000a') into v_res;
+  perform pg_temp.noter('I', 'I7. 0 élève + 0 suivi : le plan est réellement supprimé',
+    (v_res->>'ok')::boolean is true);
+  perform pg_temp.noter('I', 'I7 bis. la RPC compte ce qu''elle a supprimé, table par table',
     (v_res->'deleted'->>'meals')::int = 1
     and (v_res->'deleted'->>'days')::int = 1
     and (v_res->'deleted'->>'profiles')::int = 1
-    and (v_res->'deleted'->>'meal_slot_targets')::int = 1);
-  perform pg_temp.noter('I', 'I7 ter. AUCUN orphelin ne subsiste',
+    and (v_res->'deleted'->>'meal_slot_targets')::int = 1
+    and (v_res->'deleted'->>'daily_logs')::int = 0);
+  perform pg_temp.noter('I', 'I7 ter. AUCUN orphelin ne subsiste, sur AUCUNE des cinq tables',
     not exists (select 1 from public.nutrition_plans where id = 'd1110000-0000-4000-8000-00000000000a')
     and not exists (select 1 from public.nutrition_days where plan_id = 'd1110000-0000-4000-8000-00000000000a')
     and not exists (select 1 from public.meals where id = 'd4440000-0000-4000-8000-00000000000a')
     and not exists (select 1 from public.nutrition_plan_profiles where plan_id = 'd1110000-0000-4000-8000-00000000000a')
     and not exists (select 1 from public.nutrition_meal_slot_targets
-                     where profile_id = 'd2220000-0000-4000-8000-00000000000a'));
+                     where profile_id = 'd2220000-0000-4000-8000-00000000000a')
+    and not exists (select 1 from public.nutrition_daily_logs
+                     where nutrition_plan_id = 'd1110000-0000-4000-8000-00000000000a'));
 
   -- I8. Un identifiant inconnu ne lève pas : il répond.
   select public.delete_nutrition_plan('00000000-0000-4000-8000-0000000000ff') into v_res;
@@ -1190,7 +1225,7 @@ begin
   select public.delete_nutrition_recipe('d5550000-0000-4000-8000-00000000000b') into v_res;
   perform pg_temp.noter('I', 'I14. un ÉLÈVE appelant la RPC directement obtient forbidden',
     (v_res->>'ok')::boolean is false and v_res->>'reason' = 'forbidden');
-  select public.delete_nutrition_plan('d1110000-0000-4000-8000-00000000000c') into v_res;
+  select public.delete_nutrition_plan('d1110000-0000-4000-8000-00000000000b') into v_res;
   perform pg_temp.noter('I', 'I14 bis. idem pour un plan',
     (v_res->>'ok')::boolean is false and v_res->>'reason' = 'forbidden');
 
@@ -1204,7 +1239,7 @@ begin
 
   -- Recomptage HORS RÔLE : l'élève n'a rien supprimé.
   perform pg_temp.noter('I', 'I14 ter. l''appel direct de l''élève n''a rien supprimé',
-    exists (select 1 from public.nutrition_plans where id = 'd1110000-0000-4000-8000-00000000000c')
+    exists (select 1 from public.nutrition_plans where id = 'd1110000-0000-4000-8000-00000000000b')
     and exists (select 1 from public.nutrition_recipes where id = 'd5550000-0000-4000-8000-00000000000b'));
 end $$;
 
@@ -1327,8 +1362,8 @@ begin
   select public.nutrition_lifecycle_overview() into v_apercu;
   select x->>'deletion_block' into v_bloc
     from jsonb_array_elements(v_apercu->'plans') x
-   where x->>'id' = 'd1110000-0000-4000-8000-00000000000c';
-  select public.delete_nutrition_plan('d1110000-0000-4000-8000-00000000000c') into v_res;
+   where x->>'id' = 'd1110000-0000-4000-8000-00000000000d';
+  select public.delete_nutrition_plan('d1110000-0000-4000-8000-00000000000d') into v_res;
   perform pg_temp.noter('I', 'I21. l''aperçu et la suppression rendent le MÊME motif',
     v_bloc is not null and v_bloc = v_res->>'reason');
   perform pg_temp.noter('I', 'I21 bis. l''aperçu compte l''affectation du plan assigné', (
@@ -1344,15 +1379,26 @@ begin
   -- I22. AUCUNE donnée hors du périmètre de cette section n'a disparu. Les
   --      plans témoins des sections précédentes, le journal de l'élève et les
   --      recettes des autres sections sont recomptés explicitement.
-  select count(*) into v_nb from public.nutrition_daily_logs
-   where student_id = '51110000-0000-4000-8000-00000000000a';
-  perform pg_temp.noter('I', 'I22. le journal de l''élève n''a pas été touché', v_nb >= 1);
+  -- Le journal rattaché au plan supprimé est parti AVEC lui (règle métier),
+  -- celui rattaché au plan conservé est intact. C'est la distinction qui
+  -- compte : on ne supprime que ce qui dépend du plan visé.
+  -- On n'affirme PAS un total absolu — d'autres sections écrivent aussi dans
+  -- cette table. On affirme la seule chose qui compte : ce qui dépendait du
+  -- plan supprimé a disparu, ce qui dépendait d'un autre plan est intact.
+  perform pg_temp.noter('I', 'I22. seul le journal du plan supprimé a disparu',
+    not exists (select 1 from public.nutrition_daily_logs
+                 where nutrition_plan_id = 'd1110000-0000-4000-8000-00000000000c')
+    and exists (select 1 from public.nutrition_daily_logs
+                 where nutrition_plan_id = 'd1110000-0000-4000-8000-00000000000d'));
 
   select count(*) into v_nb from public.nutrition_plans
    where id in ('d1110000-0000-4000-8000-00000000000b',
-                'd1110000-0000-4000-8000-00000000000c',
                 'd1110000-0000-4000-8000-00000000000d');
-  perform pg_temp.noter('I', 'I22 bis. seuls les plans réellement supprimables ont disparu', v_nb = 3);
+  perform pg_temp.noter('I', 'I22 bis. seuls les plans visés ont disparu', v_nb = 2);
+  perform pg_temp.noter('I', 'I22 quater. aucun élève ni compte n''a été supprimé',
+    (select count(*) from public.students
+      where id in ('51110000-0000-4000-8000-00000000000a','51110000-0000-4000-8000-00000000000b')) = 2
+    and (select count(*) from auth.users where email like 'pc.%@test.local') = 5);
 
   select count(*) into v_nb from public.nutrition_recipes
    where id::text like 'a2220000-%';
@@ -1523,6 +1569,122 @@ end $$;
 
 reset role;
 
+
+-- =====================================================================
+-- Section L — LA BASCULE 20260815 → 20260817, prouvée dans les DEUX sens
+-- =====================================================================
+-- 20260815090000 est APPLIQUÉE en Production : elle est immuable. La règle a
+-- donc changé par une migration corrective, 20260817090000, et non par une
+-- retouche. Cette section prouve les deux états sur la MÊME donnée :
+--
+--   ÉTAT APRÈS 20260815 : 0 élève + historique  →  suppression BLOQUÉE
+--   ÉTAT APRÈS 20260817 : 0 élève + historique  →  suppression AUTORISÉE
+--
+-- La bascule est éprouvée en réinstallant temporairement la définition
+-- d'origine : `create or replace function` est transactionnel en PostgreSQL,
+-- donc le ROLLBACK final rend à la base la définition de la migration. Un
+-- contrôle POST-ROLLBACK le vérifie explicitement.
+insert into public.nutrition_plans (id, coach_id, name, goal_type, status, daily_target, nutrition_model_version)
+values ('d1110000-0000-4000-8000-0000000000aa', 'c1110000-0000-4000-8000-00000000000a',
+        'Bascule — plan historique', 'maintien', 'ancien', '{}'::jsonb, 2);
+insert into public.nutrition_daily_logs (student_id, nutrition_plan_id, log_date, calories) values
+  ('51110000-0000-4000-8000-00000000000a', 'd1110000-0000-4000-8000-0000000000aa', current_date - 8, 2000),
+  ('51110000-0000-4000-8000-00000000000a', 'd1110000-0000-4000-8000-0000000000aa', current_date - 9, 2150);
+
+do $$
+declare v_res jsonb;
+begin
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"a1110000-0000-4000-8000-000000000001","role":"authenticated"}', true);
+
+  -- ── ÉTAT COURANT = APRÈS 20260817 ───────────────────────────────────
+  perform pg_temp.noter('L', 'L1. APRÈS 20260817 : 0 élève + 2 journées → suppression AUTORISÉE',
+    public.nutrition_plan_deletion_block('d1110000-0000-4000-8000-0000000000aa') is null);
+
+  select public.delete_nutrition_plan('d1110000-0000-4000-8000-0000000000aa') into v_res;
+  perform pg_temp.noter('L', 'L2. la suppression aboutit et emporte les DEUX journées',
+    (v_res->>'ok')::boolean is true and (v_res->'deleted'->>'daily_logs')::int = 2);
+  perform pg_temp.noter('L', 'L3. aucune journée orpheline ne subsiste',
+    not exists (select 1 from public.nutrition_daily_logs
+                 where nutrition_plan_id = 'd1110000-0000-4000-8000-0000000000aa'));
+  reset role;
+end $$;
+
+-- ── RETOUR À L'ÉTAT 20260815, le temps d'un contrôle ──────────────────
+-- COPIE FIDÈLE de la branche que 20260815090000 posait, et RIEN d'autre : le
+-- reste du corps est identique dans les deux versions. Cette redéfinition ne
+-- survit pas au ROLLBACK.
+create or replace function public.nutrition_plan_deletion_block(p_plan_id uuid)
+returns text
+language plpgsql
+stable
+security invoker
+set search_path = ''
+as $fn$
+declare
+  v_plan record;
+begin
+  if p_plan_id is null then
+    return 'not_found';
+  end if;
+  select np.id, np.coach_id, np.student_id
+    into v_plan
+    from public.nutrition_plans np
+   where np.id = p_plan_id;
+  if not found then
+    return 'not_found';
+  end if;
+  if not public.is_coach_or_admin() then
+    return 'forbidden';
+  end if;
+  if v_plan.coach_id is not null
+     and not public.is_admin()
+     and v_plan.coach_id is distinct from public.current_coach_id() then
+    return 'forbidden';
+  end if;
+  if v_plan.student_id is not null then
+    return 'assigned';
+  end if;
+  -- LA BRANCHE DE 20260815, celle que 20260817 retire.
+  if exists (
+    select 1 from public.nutrition_daily_logs l
+     where l.nutrition_plan_id = p_plan_id
+  ) then
+    return 'used_in_history';
+  end if;
+  return null;
+end;
+$fn$;
+
+insert into public.nutrition_plans (id, coach_id, name, goal_type, status, daily_target, nutrition_model_version)
+values ('d1110000-0000-4000-8000-0000000000bb', 'c1110000-0000-4000-8000-00000000000a',
+        'Bascule — témoin 20260815', 'maintien', 'ancien', '{}'::jsonb, 2);
+insert into public.nutrition_daily_logs (student_id, nutrition_plan_id, log_date, calories)
+values ('51110000-0000-4000-8000-00000000000a', 'd1110000-0000-4000-8000-0000000000bb', current_date - 10, 1980);
+
+do $$
+declare v_res jsonb;
+begin
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"a1110000-0000-4000-8000-000000000001","role":"authenticated"}', true);
+
+  perform pg_temp.noter('L', 'L4. APRÈS 20260815 : 0 élève + historique → suppression BLOQUÉE',
+    public.nutrition_plan_deletion_block('d1110000-0000-4000-8000-0000000000bb') = 'used_in_history');
+
+  -- Et la RPC de suppression refusait alors, elle aussi : c'est bien la règle
+  -- qui a changé, pas seulement le message affiché.
+  select public.delete_nutrition_plan('d1110000-0000-4000-8000-0000000000bb') into v_res;
+  perform pg_temp.noter('L', 'L5. et la RPC refusait, pas seulement l''écran',
+    (v_res->>'ok')::boolean is false and v_res->>'reason' = 'used_in_history');
+  perform pg_temp.noter('L', 'L6. le plan témoin survit à ce refus',
+    exists (select 1 from public.nutrition_plans where id = 'd1110000-0000-4000-8000-0000000000bb'));
+  reset role;
+end $$;
+
+reset role;
+
 -- ---------------------------------------------------------------------
 -- Bilan
 -- ---------------------------------------------------------------------
@@ -1554,7 +1716,8 @@ begin
                   'Cycle — plan libre', 'Cycle — plan assigné',
                   'Cycle — plan historique', 'Cycle — plan visibilité',
                   'Cycle — plan du coach B', 'Cycle — plan possédé',
-                  'Cycle — plan orphelin', 'Cycle — plan orphelin renommé');
+                  'Cycle — plan orphelin', 'Cycle — plan orphelin renommé',
+                  'Bascule — plan historique', 'Bascule — témoin 20260815');
   if nb <> 0 then
     raise exception 'ÉCHEC   — G1. des plans de test ont survécu au ROLLBACK (% lignes)', nb;
   end if;
@@ -1604,4 +1767,18 @@ begin
     raise exception 'ÉCHEC   — G5. la clé étrangère composite a disparu';
   end if;
   raise notice 'OK      — G4/G5. les objets des migrations sont toujours en place';
+end $$;
+
+-- La section L a redéfini `nutrition_plan_deletion_block` le temps d'un
+-- contrôle. Le ROLLBACK doit avoir rendu à la base la définition de la
+-- migration 20260817090000 — sans quoi la checklist laisserait derrière elle
+-- une règle périmée.
+do $$
+begin
+  if (select prosrc from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'public' and p.proname = 'nutrition_plan_deletion_block')
+     like '%from public.nutrition_daily_logs%' then
+    raise exception 'ÉCHEC   — G6. la définition 20260815 a survécu au ROLLBACK';
+  end if;
+  raise notice 'OK      — G6. la définition de 20260817090000 est bien celle en place';
 end $$;

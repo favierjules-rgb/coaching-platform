@@ -133,6 +133,10 @@ const SEMAINE_FORM = lire("../../lib/nutrition/plan-v2-week-form.ts");
 const LECTURE_SEMAINE = lire("../../lib/supabase/nutrition-week.ts");
 const HOOK_ELEVE = lire("../../hooks/useStudentNutritionPlanV2.ts");
 const M_CYCLE_DE_VIE = lire("../../supabase/migrations/20260815090000_nutrition_lifecycle.sql");
+// 20260815 et 20260816 sont APPLIQUÉES en Production, donc immuables : toute
+// évolution de règle vit dans une migration NOUVELLE, et c'est elle qu'il faut
+// lire pour connaître le comportement en vigueur.
+const M_SUPPRESSION = lire("../../supabase/migrations/20260817090000_nutrition_plan_deletion_history.sql");
 const HOOK_CYCLE_DE_VIE = lire("../../hooks/useNutritionLifecycle.ts");
 const SERVICE_CYCLE_DE_VIE = lire("../../lib/supabase/nutrition-lifecycle.ts");
 const LECTURE_PLANS = lire("../../lib/supabase/nutrition.ts");
@@ -1061,12 +1065,16 @@ await test("50. la checklist PostgreSQL couvre le périmètre exigé", () => {
     "delete_nutrition_plan(",
     "delete_nutrition_recipe(",
     "nutrition_lifecycle_overview()",
-    "used_in_history",
+    "0 élève + des journées de suivi : la suppression est AUTORISÉE",
+    "les journées liées sont parties avec le plan",
     "I22.",
     // Section K — le propriétaire d'un plan (correctif du risque nº1)
     "nutrition_plans_fill_coach_id",
     "voit ENFIN la recette de son coach",
     "la réassignation répare le plan",
+    // Section L — la bascule 20260815 → 20260817
+    "APRÈS 20260817 : 0 élève + 2 journées → suppression AUTORISÉE",
+    "APRÈS 20260815 : 0 élève + historique → suppression BLOQUÉE",
   ]) {
     assert.ok(CHECKLIST.includes(attendu), `la checklist doit couvrir : ${attendu}`);
   }
@@ -1077,7 +1085,7 @@ await test("50. la checklist PostgreSQL couvre le périmètre exigé", () => {
 await test("51. les quatre migrations sont déclarées au manifeste et comptées", () => {
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 23);
+  assert.equal(attendues.length, 24);
   for (const nom of [
     "20260810090000_harden_nutrition_privileges.sql",
     "20260811090000_nutrition_v2_unification.sql",
@@ -1087,8 +1095,8 @@ await test("51. les quatre migrations sont déclarées au manifeste et comptées
     assert.ok(attendues.includes(nom), nom);
   }
   const secu = lire("../../scripts/tests/security-hardening.mts");
-  assert.ok(secu.includes(".length, 50,"), "le compteur de migrations suit les migrations réelles");
-  assert.ok(secu.includes("assert.equal(attendues.length, 23);"));
+  assert.ok(secu.includes(".length, 51,"), "le compteur de migrations suit les migrations réelles");
+  assert.ok(secu.includes("assert.equal(attendues.length, 24);"));
 });
 
 /* ─── 52-53. Outils 1 et 3 après la PR C.1 ─────────────────────────────── */
@@ -1440,7 +1448,7 @@ await test("61. aucun nouveau chemin d'écriture, aucune migration ajoutée", ()
   // strictement additive : elle ne remplace qu'une fonction.
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 23);
+  assert.equal(attendues.length, 24);
   assert.ok(attendues.includes("20260814090000_nutrition_plan_v2_blocking_issue_week.sql"));
 });
 
@@ -1855,24 +1863,49 @@ await test("72. un plan non ACTIF n'est pas assignable, et la base le refuse ell
   assert.ok(PAGE_ADMIN_PLAN.includes("plus proposé à de nouvelles assignations"));
 });
 
-await test("73. l'outil 1 n'est JAMAIS sacrifié pour rendre une suppression possible", () => {
-  const sql = M_CYCLE_DE_VIE;
-  // La clé étrangère du journal est en CASCADE : sans garde, supprimer le plan
-  // effacerait le suivi. La garde refuse au lieu de supprimer.
-  const blocage = sql.slice(
-    sql.indexOf("create or replace function public.nutrition_plan_deletion_block"),
-    sql.indexOf("create or replace function public.nutrition_recipe_deletion_block"),
-  );
-  assert.ok(blocage.includes("from public.nutrition_daily_logs"), "le journal est consulté");
-  assert.ok(blocage.includes("return 'used_in_history'"), "et sa présence REFUSE");
-  assert.ok(!/delete from/i.test(blocage), "la garde ne supprime rien, elle est stable");
-  // La suppression elle-même revérifie APRÈS verrouillage.
-  const suppression = sql.slice(sql.indexOf("create or replace function public.delete_nutrition_plan"));
+await test("73. la SEULE condition bloquante est un élève actuellement affecté", () => {
+  // La règle EN VIGUEUR vient de 20260817090000. 20260815090000 est immuable :
+  // on vérifie d'ailleurs qu'elle porte toujours l'ancienne règle, preuve que
+  // le correctif est bien passé par une migration et non par une retouche.
+  assert.ok(/from public\.nutrition_daily_logs/.test(
+    M_CYCLE_DE_VIE.slice(
+      M_CYCLE_DE_VIE.indexOf("create or replace function public.nutrition_plan_deletion_block"),
+      M_CYCLE_DE_VIE.indexOf("create or replace function public.nutrition_recipe_deletion_block"),
+    )),
+    "20260815 doit rester tel qu'il a été appliqué en Production");
+  const sql = M_SUPPRESSION;
+  const départBloc = sql.indexOf("create or replace function public.nutrition_plan_deletion_block");
+  const blocage = sql.slice(départBloc, sql.indexOf("$fn$;", départBloc));
+  // RÈGLE MÉTIER : l'affectation bloque, l'historique non.
+  assert.ok(/if v_plan\.student_id is not null then\s+return 'assigned';/.test(blocage),
+    "un élève affecté refuse la suppression");
+  assert.ok(!/from public\.nutrition_daily_logs/.test(blocage),
+    "les journées de suivi ne sont plus une condition de blocage");
+  assert.ok(!/delete from/i.test(blocage), "la garde ne supprime rien, elle est `stable`");
+  // `used_in_history` subsiste, mais comme garde-fou d'ÉVOLUTION : il ne se
+  // déclenche que si une table inconnue référence le plan.
+  assert.ok(blocage.includes("pg_catalog.pg_constraint"), "le garde-fou lit le schéma");
+  assert.ok(blocage.includes("return 'used_in_history'"));
+
+  // La suppression, elle, emporte le journal — explicitement, et en le
+  // comptant, jamais en laissant faire la CASCADE.
+  // BORNÉ au corps de la fonction : au-delà, le fichier parle d'autre chose.
+  const départ = sql.indexOf("create or replace function public.delete_nutrition_plan");
+  const suppression = sql.slice(départ, sql.indexOf("$fn$;", départ));
   assert.ok(suppression.includes("for update"), "la ligne est verrouillée avant les contrôles");
-  assert.ok(suppression.includes("PLAN_HISTORY_APPEARED"),
-    "une journée apparue entre-temps annule toute la transaction");
-  assert.ok(!/delete from public\.nutrition_daily_logs/.test(suppression));
-  // Et aucune affectation n'est retirée d'office pour débloquer.
+  assert.ok(/delete from public\.nutrition_daily_logs[\s\S]{0,120}nutrition_plan_id = p_plan_id/.test(suppression),
+    "le journal du plan est supprimé, borné à CE plan");
+  assert.ok(suppression.includes("'daily_logs', v_logs"), "et le nombre supprimé est remonté");
+  // Les cinq tables filles sont nommées une par une.
+  for (const table of ["public.meals", "public.nutrition_days", "public.nutrition_meal_slot_targets",
+                       "public.nutrition_plan_profiles", "public.nutrition_daily_logs"]) {
+    assert.ok(suppression.includes(`delete from ${table}`), `suppression explicite : ${table}`);
+  }
+  // Une affectation apparue entre-temps annule TOUTE la transaction.
+  assert.ok(suppression.includes("PLAN_ASSIGNED_APPEARED"));
+  // CE QUI N'EST JAMAIS TOUCHÉ.
+  assert.ok(!/delete from public\.students/.test(suppression), "jamais un élève");
+  assert.ok(!/auth\.users/.test(suppression), "jamais un compte");
   assert.ok(!/set student_id = null/.test(suppression), "aucune désaffectation automatique");
 });
 

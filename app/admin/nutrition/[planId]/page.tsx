@@ -29,6 +29,7 @@ import { contentStatusLabels, fullName } from "@/lib/admin";
 import {
   describeHidingFromStudent,
   describePlanDeletionBlock,
+  describePlanDeletionSideEffects,
   duplicateName,
   hidesPlanFromAssignedStudent,
   planLifecycleActions,
@@ -658,7 +659,7 @@ export default function NutritionPlanDetailPage() {
           {/* ─────────────────────── ZONE DANGEREUSE ───────────────────────
               Elle est en BAS, séparée, et ne contient qu'une action. Le coach
               qui vise « Archiver » ne peut pas la manquer et cliquer ici. */}
-          <DangerZone description="La suppression définitive efface le plan, sa semaine, ses repas et ses profils. Elle est refusée tant qu'un élève y est affecté ou qu'une journée de suivi s'y rattache — l'archivage reste la bonne action dans ces cas-là.">
+          <DangerZone description="La suppression définitive efface le plan, sa semaine, ses repas, ses profils et les journées de suivi qui s'y rattachent. Elle est refusée tant qu'un élève y est affecté — retire-le d'abord, ou archive le plan, ce qui conserve tout.">
             <DeleteTriggerButton
               onOpen={() => {
                 setSuppressionErreur(null);
@@ -692,6 +693,9 @@ export default function NutritionPlanDetailPage() {
                 { label: "Journées de suivi enregistrées", count: infoCycle?.dependencies.dailyLogs ?? 0 },
               ]}
               blockedReason={motifBlocage}
+              sideEffect={
+                infoCycle ? describePlanDeletionSideEffects(infoCycle.dependencies) : null
+              }
               deleting={actionEnCours}
               error={suppressionErreur}
               onCancel={() => setSuppressionOuverte(false)}

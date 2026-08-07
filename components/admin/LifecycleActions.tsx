@@ -214,6 +214,7 @@ export function DeleteConfirmationModal({
   resourceKind,
   dependencies,
   blockedReason,
+  sideEffect = null,
   deleting,
   error,
   onCancel,
@@ -225,6 +226,15 @@ export function DeleteConfirmationModal({
   readonly dependencies: readonly DependencyCount[];
   /** `null` = la suppression est permise. Sinon, le motif PRÉCIS, en français. */
   readonly blockedReason: string | null;
+  /**
+   * Ce que la suppression emportera EN PLUS de la ressource elle-même —
+   * « 2 journées de suivi seront également supprimées ».
+   *
+   * Affiché uniquement quand la suppression est PERMISE : sur une suppression
+   * refusée, l'utilisateur a besoin du motif, pas d'un inventaire de ce qui
+   * ne partira pas.
+   */
+  readonly sideEffect?: string | null;
   readonly deleting: boolean;
   readonly error: string | null;
   readonly onCancel: () => void;
@@ -269,7 +279,18 @@ export function DeleteConfirmationModal({
             {blockedReason}
           </p>
         ) : (
-          <div>
+          <div className="flex flex-col gap-4">
+            {/* CE QUI PART AUSSI. Dit avant le clic, à la même taille que le
+                reste : une perte annoncée en petit est une perte cachée. */}
+            {sideEffect && (
+              <p
+                className="rounded-panel border border-warning/40 bg-warning/10 px-4 py-3 text-sm leading-relaxed text-warning"
+                role="status"
+              >
+                {sideEffect}
+              </p>
+            )}
+            <div>
             <label htmlFor={champId} className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
               Recopie le nom exact pour confirmer
             </label>
@@ -286,6 +307,7 @@ export function DeleteConfirmationModal({
             <p id={aideId} className="mt-2 text-xs text-muted-foreground">
               Attendu : <span className="font-bold text-foreground">{resourceName}</span>
             </p>
+            </div>
           </div>
         )}
 

@@ -55,10 +55,11 @@ import {
   type WeekFormState,
 } from "../../lib/nutrition/plan-v2-week-form";
 import { toDuplicateWeekPayload, toWeekSavePayload } from "../../lib/nutrition/plan-v2-week-form";
-import { ConfirmActionModal } from "../../components/admin/LifecycleActions";
+import { ConfirmActionModal, DeleteConfirmationModal } from "../../components/admin/LifecycleActions";
 import {
   describeHidingFromStudent,
   describePlanDeletionBlock,
+  describePlanDeletionSideEffects,
   duplicateName,
   hidesPlanFromAssignedStudent,
   planLifecycleActions,
@@ -1021,11 +1022,11 @@ await test("63. toutes les garanties de sécurité sont reconduites", () => {
 await test("64. la migration est déclarée au manifeste et comptée", () => {
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 23);
+  assert.equal(attendues.length, 24);
   assert.ok(attendues.includes("20260805090000_nutrition_plan_v2_weekly_target.sql"));
   const secu = lire("../../scripts/tests/security-hardening.mts");
-  assert.ok(secu.includes(".length, 50,"), "le compteur de migrations suit les migrations réelles");
-  assert.ok(secu.includes("assert.equal(attendues.length, 23);"));
+  assert.ok(secu.includes(".length, 51,"), "le compteur de migrations suit les migrations réelles");
+  assert.ok(secu.includes("assert.equal(attendues.length, 24);"));
 });
 
 /* ══════════ Refonte « semaine d'abord » — rendu réel ══════════ */
@@ -1105,10 +1106,68 @@ await test("68. les actions du plan suivent son statut, et la suppression n'en f
   // La liste des plans ne propose PAS la suppression — seulement le statut.
   assert.ok(!PAGE_LISTE.includes("DeleteTriggerButton"));
   assert.ok(PAGE_LISTE.includes('filter((action) => action !== "duplicate")'));
-  // Le motif de blocage nomme la dépendance, au singulier comme au pluriel.
-  assert.ok(describePlanDeletionBlock("assigned", { assignedStudents: 1, dailyLogs: 0 }).includes("Un élève"));
-  assert.ok(describePlanDeletionBlock("used_in_history", { assignedStudents: 0, dailyLogs: 12 }).includes("12 journées"));
-  assert.ok(describePlanDeletionBlock("used_in_history", { assignedStudents: 0, dailyLogs: 12 }).includes("archive"));
+  // RÈGLE MÉTIER : la SEULE condition bloquante est un élève actuellement
+  // affecté. Le motif le nomme, au singulier comme au pluriel, et propose la
+  // sortie (retirer l'élève, ou archiver).
+  const seul = describePlanDeletionBlock("assigned", { assignedStudents: 1, dailyLogs: 12 });
+  assert.ok(seul.includes("Un élève"));
+  assert.ok(seul.includes("archive"), "l'alternative non destructrice est nommée");
+  assert.ok(!seul.includes("journée"), "l'historique n'est PAS invoqué comme motif de refus");
+  assert.ok(describePlanDeletionBlock("assigned", { assignedStudents: 3, dailyLogs: 0 }).includes("3 élèves"));
+
+  // Un historique, désormais, ne bloque plus : il s'ANNONCE.
+  assert.equal(describePlanDeletionSideEffects({ assignedStudents: 0, dailyLogs: 0 }), null,
+    "rien à signaler quand il n'y a rien à perdre");
+  assert.equal(describePlanDeletionSideEffects({ assignedStudents: 0, dailyLogs: 1 }),
+    "1 journée de suivi sera également supprimée.");
+  assert.equal(describePlanDeletionSideEffects({ assignedStudents: 0, dailyLogs: 2 }),
+    "2 journées de suivi seront également supprimées.");
+});
+
+await test("68 bis. la modale annonce ce qui partira EN PLUS, et seulement si c'est permis", () => {
+  // PERMISE + historique : l'avertissement est visible, et le champ de
+  // confirmation aussi.
+  const permise = renderToString(
+    createElement(DeleteConfirmationModal, {
+      resourceName: "TEST PLAN V2",
+      resourceKind: "ce plan alimentaire",
+      dependencies: [
+        { label: "Élèves affectés", count: 0 },
+        { label: "Journées de suivi enregistrées", count: 2 },
+      ],
+      blockedReason: null,
+      sideEffect: describePlanDeletionSideEffects({ assignedStudents: 0, dailyLogs: 2 }),
+      deleting: false,
+      error: null,
+      onCancel: () => {},
+      onConfirm: () => {},
+    }),
+  );
+  const texte = permise.replace(/<!-- -->/g, "");
+  assert.ok(texte.includes("2 journées de suivi seront également supprimées."),
+    "la perte est annoncée AVANT le clic");
+  assert.ok(texte.includes("Recopie le nom exact"), "et la confirmation reste exigée");
+  assert.ok(texte.includes("irréversible"), "l'irréversibilité est maintenue");
+  assert.ok(permise.includes("disabled"), "le bouton part désactivé");
+
+  // REFUSÉE : on montre le motif, pas un inventaire de ce qui ne partira pas.
+  const refusée = renderToString(
+    createElement(DeleteConfirmationModal, {
+      resourceName: "TEST PLAN V2",
+      resourceKind: "ce plan alimentaire",
+      dependencies: [{ label: "Élèves affectés", count: 1 }],
+      blockedReason: "Un eleve est encore affecte a ce plan.",
+      sideEffect: "2 journees de suivi seront egalement supprimees.",
+      deleting: false,
+      error: null,
+      onCancel: () => {},
+      onConfirm: () => {},
+    }),
+  );
+  assert.ok(refusée.includes("Un eleve est encore affecte a ce plan."));
+  assert.ok(!refusée.includes("2 journees de suivi seront egalement supprimees."),
+    "aucun avertissement de perte sur une suppression refusée");
+  assert.ok(!refusée.includes("Recopie le nom exact"));
 });
 
 await test("69. dupliquer un plan crée un BROUILLON indépendant, par la MÊME RPC", () => {

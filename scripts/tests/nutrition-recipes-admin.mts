@@ -133,6 +133,7 @@ const CYCLE_DE_VIE = lire("../../components/admin/LifecycleActions.tsx");
 const CYCLE_DE_VIE_DOMAINE = lire("../../lib/nutrition/lifecycle.ts");
 const CYCLE_DE_VIE_SERVICE = lire("../../lib/supabase/nutrition-lifecycle.ts");
 const MIGRATION_CYCLE_DE_VIE = lire("../../supabase/migrations/20260815090000_nutrition_lifecycle.sql");
+const MIGRATION_SUPPRESSION = lire("../../supabase/migrations/20260817090000_nutrition_plan_deletion_history.sql");
 const PAGE_PLAN_DETAIL = lire("../../app/admin/nutrition/[planId]/page.tsx");
 const PAGE_LISTE = lire("../../app/admin/nutrition/recettes/page.tsx");
 const PAGE_NOUVELLE = lire("../../app/admin/nutrition/recettes/nouvelle/page.tsx");
@@ -945,12 +946,12 @@ await test("48. la checklist PostgreSQL couvre le périmètre exigé", () => {
 await test("49. la migration est déclarée au manifeste et comptée", () => {
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 23);
+  assert.equal(attendues.length, 24);
   assert.ok(attendues.includes("20260808090000_save_nutrition_recipe.sql"));
   assert.ok(attendues.includes("20260809090000_save_nutrition_recipe_partial_payload.sql"));
   const secu = lire("../../scripts/tests/security-hardening.mts");
-  assert.ok(secu.includes(".length, 50,"), "le compteur de migrations suit les migrations réelles");
-  assert.ok(secu.includes("assert.equal(attendues.length, 23);"));
+  assert.ok(secu.includes(".length, 51,"), "le compteur de migrations suit les migrations réelles");
+  assert.ok(secu.includes("assert.equal(attendues.length, 24);"));
 });
 
 /* ═══════════ 9. PR B.1 — correctifs de conformité ═══════════ */
@@ -1480,19 +1481,44 @@ await test("65. la migration du cycle de vie respecte les conventions du dépôt
   assert.ok(!/\bupdate\b[\s\S]{0,40}\bset\b(?![\s\S]{0,200}archived_at)/i.test(horsCorps),
     "la seule écriture de données est la reprise des dates d'archivage");
   assert.ok(!/drop table|drop column|truncate/i.test(sql), "aucune structure détruite");
-  // Le journal de l'élève n'est JAMAIS supprimé pour débloquer une suppression.
-  const corpsSuppression = sql.slice(sql.indexOf("create or replace function public.delete_nutrition_plan"));
-  assert.ok(!/delete from public\.nutrition_daily_logs/.test(corpsSuppression),
-    "le suivi quotidien n'est jamais effacé");
-  assert.ok(corpsSuppression.includes("used_in_history"), "sa présence REFUSE la suppression");
-  // Les tables enfants sont nommées une par une, jamais laissées à la cascade.
+  // Les CINQ tables filles sont nommées une par une, jamais laissées à la
+  // cascade — y compris le journal quotidien, qui part avec le plan depuis
+  // que la règle métier a été fixée (seul un élève affecté bloque).
+  //
+  // C'est 20260817090000 qui porte cette version : 20260815090000 est
+  // APPLIQUÉE en Production, donc immuable, et n'est plus modifiée.
+  const suppr = MIGRATION_SUPPRESSION;
+  const départ = suppr.indexOf("create or replace function public.delete_nutrition_plan");
+  const corpsSuppression = suppr.slice(départ, suppr.indexOf("$fn$;", départ));
   for (const table of ["public.meals", "public.nutrition_days",
-                       "public.nutrition_meal_slot_targets", "public.nutrition_plan_profiles"]) {
+                       "public.nutrition_meal_slot_targets", "public.nutrition_plan_profiles",
+                       "public.nutrition_daily_logs"]) {
     assert.ok(corpsSuppression.includes(`delete from ${table}`), `suppression explicite : ${table}`);
   }
+  // Chaque suppression est BORNÉE au plan visé : rien d'un autre plan, et
+  // jamais un élève ni un compte.
+  assert.ok(!/delete from public\.students/.test(corpsSuppression), "jamais un élève");
+  assert.ok(!/auth\.users/.test(corpsSuppression), "jamais un compte");
+  assert.ok(/delete from public\.nutrition_daily_logs[\s\S]{0,120}nutrition_plan_id = p_plan_id/.test(corpsSuppression),
+    "le journal supprimé est borné à CE plan");
   // Et la migration refuse de s'appliquer si une clé étrangère inconnue apparaît.
   assert.ok(sql.includes("ne connaît pas ces tables référençant nutrition_plans"));
   assert.ok(sql.includes("ne connaît pas ces tables référençant nutrition_recipes"));
+
+  // LA MIGRATION CORRECTIVE : elle ne recopie pas 20260815, elle ne remplace
+  // que les DEUX fonctions dont le comportement change, et ne détruit rien.
+  assert.equal((suppr.match(/create or replace function/g) ?? []).length, 2,
+    "seules les deux fonctions concernées sont réémises");
+  assert.ok(suppr.includes("public.nutrition_plan_deletion_block(p_plan_id uuid)"));
+  assert.ok(suppr.includes("public.delete_nutrition_plan(p_plan_id uuid)"));
+  assert.ok(!/create policy|drop policy|alter table|create trigger/i.test(suppr),
+    "aucun schéma, aucune policy, aucun trigger touché");
+  const horsCorpsSuppr = suppr
+    .replace(/\$fn\$[\s\S]*?\$fn\$/g, "")
+    .replace(/\$\$[\s\S]*?\$\$/g, "")
+    .split("\n").filter((l) => !l.trimStart().startsWith("--")).join("\n");
+  assert.ok(!/delete from|update /i.test(horsCorpsSuppr), "la corrective ne touche aucune donnée");
+  assert.ok(suppr.includes("IMMUABLES"), "la raison d'être de la corrective est écrite");
 });
 
 await test("66. l'aperçu du cycle de vie est lu sans supposition, et le doute refuse", () => {

@@ -30,6 +30,7 @@ import {
 } from "@/lib/nutrition/recipe-form";
 import {
   describeRecipeDeletionBlock,
+  describeRecipeDeletionSideEffects,
   duplicateName,
   recipeLifecycleActions,
   recipeStatusAfter,
@@ -332,6 +333,10 @@ export default function AdminNutritionRecipeDetailPage() {
             },
           ]}
           blockedReason={motifBlocage}
+          sideEffect={describeRecipeDeletionSideEffects(
+            recipe.recipe.ingredients.length,
+            recipe.tags.length,
+          )}
           deleting={actionEnCours}
           error={suppressionErreur}
           onCancel={() => setSuppressionOuverte(false)}

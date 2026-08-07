@@ -65,18 +65,40 @@ export function describePlanDeletionBlock(
 ): string {
   switch (code) {
     case "assigned":
+      // LA SEULE condition métier bloquante. Les journées de suivi déjà
+      // enregistrées, elles, ne bloquent plus rien : elles sont supprimées
+      // avec le plan, et la modale l'annonce avant le clic.
       return deps.assignedStudents > 1
-        ? `${deps.assignedStudents} élèves sont encore affectés à ce plan. Retire-les avant de pouvoir le supprimer — ou archive-le, ce qui leur laisse leur suivi.`
-        : "Un élève est encore affecté à ce plan. Retire-lui avant de pouvoir le supprimer — ou archive-le, ce qui lui laisse son suivi.";
+        ? `${deps.assignedStudents} élèves sont encore affectés à ce plan. Retire-les d'abord — ou archive-le, ce qui leur laisse leur suivi.`
+        : "Un élève est encore affecté à ce plan. Retire-le d'abord — ou archive le plan, ce qui lui laisse son suivi.";
     case "used_in_history":
-      return deps.dailyLogs > 1
-        ? `${deps.dailyLogs} journées de suivi ont été enregistrées sur ce plan. Elles ne seront jamais effacées pour rendre une suppression possible : archive le plan à la place.`
-        : "Une journée de suivi a été enregistrée sur ce plan. Elle ne sera jamais effacée pour rendre une suppression possible : archive le plan à la place.";
+      // Jamais un refus métier : ce code ne survient que si une table encore
+      // inconnue de `delete_nutrition_plan` référence le plan. On préfère
+      // refuser plutôt que de laisser une suppression improviser.
+      return "Une donnée non prévue référence ce plan : la suppression est bloquée par sécurité, le temps que le nettoyage soit mis à jour.";
     case "forbidden":
       return "Ce plan appartient à un autre coach : tu ne peux pas le supprimer.";
     case "not_found":
       return "Ce plan est introuvable : il a peut-être déjà été supprimé. Recharge la page.";
   }
+}
+
+/**
+ * Ce que la suppression emportera AUSSI — annoncé avant le clic, jamais
+ * découvert après.
+ *
+ * Les journées de suivi n'empêchent plus la suppression : elles n'existent
+ * que par le plan (`nutrition_plan_id` est NOT NULL) et disparaissent avec
+ * lui. C'est une perte réelle, donc elle se dit — pas en petit, et pas après.
+ *
+ * `null` quand il n'y a rien à signaler : une modale qui avertit toujours
+ * n'avertit plus.
+ */
+export function describePlanDeletionSideEffects(deps: PlanDeletionDependencies): string | null {
+  if (deps.dailyLogs <= 0) return null;
+  return deps.dailyLogs > 1
+    ? `${deps.dailyLogs} journées de suivi seront également supprimées.`
+    : "1 journée de suivi sera également supprimée.";
 }
 
 /** Le motif PRÉCIS, en français, pour une recette. */
@@ -90,12 +112,34 @@ export function describeRecipeDeletionBlock(
         ? `${deps.studentsWithAccess} élèves peuvent encore ouvrir cette recette depuis leur plan alimentaire. Dépublie-la ou archive-la d'abord.`
         : "Un élève peut encore ouvrir cette recette depuis son plan alimentaire. Dépublie-la ou archive-la d'abord.";
     case "used_in_history":
-      return "Cette recette est référencée par un historique conservé : elle ne peut pas être supprimée.";
+      // Même nature que pour les plans : garde-fou d'évolution du schéma,
+      // jamais un refus métier.
+      return "Une donnée non prévue référence cette recette : la suppression est bloquée par sécurité, le temps que le nettoyage soit mis à jour.";
     case "forbidden":
       return "Cette recette appartient à un autre coach : tu ne peux pas la supprimer.";
     case "not_found":
       return "Cette recette est introuvable : elle a peut-être déjà été supprimée. Recharge la page.";
   }
+}
+
+/**
+ * Ce que la suppression d'une recette emportera aussi. Même philosophie que
+ * pour un plan : ingrédients et étiquettes n'existent que par elle, ils
+ * partent avec elle, et on le dit avant.
+ */
+export function describeRecipeDeletionSideEffects(
+  ingrédients: number,
+  étiquettes: number,
+): string | null {
+  const morceaux: string[] = [];
+  if (ingrédients > 0) {
+    morceaux.push(`${ingrédients} ingrédient${ingrédients > 1 ? "s" : ""}`);
+  }
+  if (étiquettes > 0) {
+    morceaux.push(`${étiquettes} étiquette${étiquettes > 1 ? "s" : ""}`);
+  }
+  if (morceaux.length === 0) return null;
+  return `${morceaux.join(" et ")} seront également supprimé${ingrédients > 1 || morceaux.length > 1 ? "s" : ""}.`;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
