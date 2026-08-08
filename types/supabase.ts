@@ -736,6 +736,12 @@ export interface Database {
           exercise_order: number | null;
           rpe: number | null;
           comment: string;
+          // Remplacement déclaré par l'élève (migration 20260820090000).
+          // `substitute_exercise_name` est DÉRIVÉ de l'identifiant par le
+          // trigger enforce_exercise_feedback_substitution : il n'est jamais
+          // à écrire depuis l'application, seulement à lire.
+          substitute_exercise_library_id: string | null;
+          substitute_exercise_name: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -748,6 +754,7 @@ export interface Database {
           exercise_order?: number | null;
           rpe?: number | null;
           comment?: string;
+          substitute_exercise_library_id?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -760,6 +767,7 @@ export interface Database {
           exercise_order?: number | null;
           rpe?: number | null;
           comment?: string;
+          substitute_exercise_library_id?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -1324,6 +1332,9 @@ export interface Database {
           level: string;
           muscle_group: string;
           secondary_muscles: string[];
+          // Pattern de mouvement (migration 20260820090000) — nullable,
+          // vocabulaire figé par exercise_library_movement_pattern_check.
+          movement_pattern: string | null;
           video_url: string;
           alternative_video_url: string;
           technical_cues: string;
@@ -1347,6 +1358,7 @@ export interface Database {
           level?: string;
           muscle_group?: string;
           secondary_muscles?: string[];
+          movement_pattern?: string | null;
           video_url?: string;
           alternative_video_url?: string;
           technical_cues?: string;
@@ -1370,6 +1382,7 @@ export interface Database {
           level?: string;
           muscle_group?: string;
           secondary_muscles?: string[];
+          movement_pattern?: string | null;
           video_url?: string;
           alternative_video_url?: string;
           technical_cues?: string;

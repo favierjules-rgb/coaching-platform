@@ -103,6 +103,98 @@ export async function POST(request: Request) {
     }
   }
 
+  // 4-bis. REMPLACEMENTS D'EXERCICE — vérifiés ici ET en base.
+  //
+  //   Le trigger `enforce_exercise_feedback_substitution` est le dernier
+  //   rempart : il refuserait de toute façon un remplacement illégitime, et
+  //   il protège aussi les appels PostgREST directs qui ne passent jamais
+  //   par cette route. Mais un refus au niveau du trigger arriverait en
+  //   plein milieu de l'écriture, exercice par exercice. On répète donc la
+  //   règle ICI, avant la moindre écriture, pour rendre un 400 explicite
+  //   plutôt qu'un enregistrement partiel.
+  //
+  //   La règle, identique des deux côtés : l'exercice prescrit doit être
+  //   identifié, appartenir à CETTE séance, venir de la banque ; le
+  //   remplaçant doit être un AUTRE exercice, actif, de MÊME pattern.
+  const remplacements = payload.exercises.filter((e) => e.substituteExerciseLibraryId);
+  if (remplacements.length > 0) {
+    if (!payload.sessionId) {
+      return NextResponse.json(
+        { error: "Un remplacement ne peut être déclaré que sur une séance réelle." },
+        { status: 400 },
+      );
+    }
+    const idsPrescrits = remplacements.map((e) => e.exerciseId);
+    if (idsPrescrits.some((id) => !id)) {
+      return NextResponse.json(
+        { error: "Remplacement sans exercice prescrit identifié." },
+        { status: 400 },
+      );
+    }
+
+    // Les lignes prescrites, lues sous RLS et RESTREINTES à la séance visée :
+    // un identifiant emprunté à une autre séance ne remonte tout simplement pas.
+    const { data: lignesPrescrites } = await supabase
+      .from("workout_exercises")
+      .select("id, exercise_library_id")
+      .eq("session_id", payload.sessionId)
+      .in("id", idsPrescrits as string[]);
+    const parExerciceId = new Map((lignesPrescrites ?? []).map((r) => [r.id, r.exercise_library_id]));
+
+    const idsBanque = new Set<string>();
+    for (const e of remplacements) {
+      const source = parExerciceId.get(e.exerciseId as string);
+      if (source === undefined) {
+        return NextResponse.json(
+          { error: "Cet exercice n'appartient pas à la séance." },
+          { status: 400 },
+        );
+      }
+      if (!source) {
+        return NextResponse.json(
+          { error: "Cet exercice n'a pas de fiche de banque : aucun remplacement possible." },
+          { status: 400 },
+        );
+      }
+      idsBanque.add(source);
+      idsBanque.add(e.substituteExerciseLibraryId as string);
+    }
+
+    // Statuts et patterns, en UNE lecture pour toute la séance.
+    const { data: fiches } = await supabase
+      .from("exercise_library")
+      .select("id, movement_pattern, status")
+      .in("id", [...idsBanque]);
+    const parFiche = new Map((fiches ?? []).map((r) => [r.id, r]));
+
+    for (const e of remplacements) {
+      const sourceId = parExerciceId.get(e.exerciseId as string) as string;
+      const substitutId = e.substituteExerciseLibraryId as string;
+      if (sourceId === substitutId) {
+        return NextResponse.json(
+          { error: "Le remplaçant est l'exercice prescrit lui-même." },
+          { status: 400 },
+        );
+      }
+      const source = parFiche.get(sourceId);
+      const substitut = parFiche.get(substitutId);
+      // `substitut` absent = fiche inexistante OU archivée (la RLS élève ne
+      // montre que les fiches actives) : les deux se refusent pareil.
+      if (!source || !substitut || substitut.status !== "active") {
+        return NextResponse.json(
+          { error: "Exercice de remplacement indisponible." },
+          { status: 400 },
+        );
+      }
+      if (!source.movement_pattern || source.movement_pattern !== substitut.movement_pattern) {
+        return NextResponse.json(
+          { error: "Ce remplaçant ne partage pas le pattern de mouvement de l'exercice prescrit." },
+          { status: 400 },
+        );
+      }
+    }
+  }
+
   // 5. Écriture : student_id imposé par le serveur, snapshot construit par la
   //    couche à partir des lignes réelles, immutabilité garantie en aval.
   const saved = await saveWorkoutFeedback(supabase, { ...payload, studentId: studentRow.id });

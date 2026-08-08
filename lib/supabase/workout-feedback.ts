@@ -11,15 +11,7 @@ import type {
   WorkoutFeedbackPayload,
 } from "@/types";
 import type { Database } from "@/types/supabase";
-import {
-  buildPrescribedSnapshot,
-  sanitizeDurationMinutes,
-  sanitizePerformedAt,
-  type PrescribedSnapshot,
-  type SnapshotBlockRow,
-  type SnapshotExerciseRow,
-  type SnapshotSessionRow,
-} from "@/lib/workout-history";
+import { sanitizeDurationMinutes, sanitizePerformedAt } from "@/lib/workout-history";
 
 /**
  * Couche d'accès aux retours d'entraînement Supabase (tables
@@ -42,45 +34,6 @@ type TypedSupabaseClient = SupabaseClient<Database>;
 type WorkoutFeedbackRow = Database["public"]["Tables"]["workout_feedback"]["Row"];
 type ExerciseFeedbackRow = Database["public"]["Tables"]["exercise_feedback"]["Row"];
 type ExerciseSetFeedbackRow = Database["public"]["Tables"]["exercise_set_feedback"]["Row"];
-
-/**
- * Lignes réelles de la séance pour la photographie du prescrit (phase 1,
- * feat/student-workout-history). Le snapshot n'est JAMAIS accepté tel quel
- * depuis le navigateur : il est reconstruit ici à partir de ce que la base
- * (sous RLS) contient réellement au moment de la soumission. Trois lectures
- * ciblées — pas de dépendance au chargeur complet des programmes.
- * Injectable dans saveWorkoutFeedback pour les tests hors ligne.
- */
-export async function loadSessionRowsForSnapshot(
-  supabase: TypedSupabaseClient,
-  sessionId: string,
-): Promise<{ session: SnapshotSessionRow; blocks: SnapshotBlockRow[]; exercises: SnapshotExerciseRow[] } | null> {
-  const { data: sessionRow, error: sessionError } = await supabase
-    .from("workout_sessions")
-    .select("id, name, day")
-    .eq("id", sessionId)
-    .maybeSingle();
-  devWarn("loadSessionRowsForSnapshot (session)", sessionError);
-  if (!sessionRow) return null;
-
-  const [blocksResult, exercisesResult] = await Promise.all([
-    supabase.from("training_blocks").select("id, title, block_type, position").eq("session_id", sessionId),
-    supabase
-      .from("workout_exercises")
-      .select("block_id, exercise_library_id, name, order_index, sets, reps, recommended_load, recommended_rpe, rest_seconds, tempo, notes")
-      .eq("session_id", sessionId),
-  ]);
-  devWarn("loadSessionRowsForSnapshot (blocs)", blocksResult.error);
-  devWarn("loadSessionRowsForSnapshot (exercices)", exercisesResult.error);
-
-  return {
-    session: sessionRow,
-    blocks: blocksResult.data ?? [],
-    exercises: exercisesResult.data ?? [],
-  };
-}
-
-export type SnapshotRowsLoader = typeof loadSessionRowsForSnapshot;
 
 function devWarn(context: string, error: { message: string } | null): void {
   if (error && process.env.NODE_ENV === "development") {
@@ -124,6 +77,8 @@ function mapExerciseFeedbackRow(row: ExerciseFeedbackRow): SupabaseExerciseFeedb
     exerciseOrder: row.exercise_order,
     rpe: row.rpe,
     comment: row.comment,
+    substituteExerciseLibraryId: row.substitute_exercise_library_id,
+    substituteExerciseName: row.substitute_exercise_name,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -155,6 +110,13 @@ function toAdminStudentFeedback(
   feedback: SupabaseWorkoutFeedback,
   exercises: SupabaseExerciseFeedback[],
   setsByExerciseFeedbackId: Map<string, SupabaseExerciseSetFeedback[]>,
+  /**
+   * Démonstrations ACTUELLES des remplaçants, par id de fiche de banque.
+   * Vide par défaut : seule la lecture destinée à l'écran de l'élève
+   * (getWorkoutFeedbackBySession) paie la requête supplémentaire — les
+   * listes du coach n'affichent aucune vidéo.
+   */
+  substituteVideos: Map<string, string> = new Map(),
 ): AdminStudentFeedback {
   const exerciseEntries: AdminExerciseFeedbackEntry[] = exercises
     .slice()
@@ -177,6 +139,13 @@ function toAdminStudentFeedback(
         rpe: set.rpe,
         exerciseRpe: exercise.rpe,
         comment: exercise.comment,
+        // Remplacement (F3) : `exerciseName` reste le PRESCRIT, ce champ
+        // porte le RÉALISÉ. `null` sur tout l'historique — aucun backfill.
+        substituteExerciseName: exercise.substituteExerciseName,
+        substituteExerciseLibraryId: exercise.substituteExerciseLibraryId,
+        substituteVideoUrl: exercise.substituteExerciseLibraryId
+          ? (substituteVideos.get(exercise.substituteExerciseLibraryId) ?? null)
+          : null,
       }));
     });
 
@@ -202,6 +171,35 @@ function toAdminStudentFeedback(
     createdAt: feedback.createdAt,
     updatedAt: feedback.updatedAt,
   };
+}
+
+/**
+ * Démonstrations ACTUELLES des remplaçants déclarés dans ces lignes.
+ *
+ * POURQUOI ICI ET PAS DANS LE RETOUR. L'URL d'une vidéo n'a rien à faire
+ * dans un retour de séance : elle changerait sans prévenir, alors qu'un
+ * retour est une photographie. On résout donc à la LECTURE, en UNE requête
+ * groupée, et seulement s'il y a au moins un remplacement — une séance sans
+ * remplacement ne paie rien. Une fiche supprimée depuis ne rend simplement
+ * aucune vidéo : le NOM réalisé, lui, reste dans le retour.
+ */
+async function loadSubstituteVideos(
+  supabase: TypedSupabaseClient,
+  exercises: SupabaseExerciseFeedback[],
+): Promise<Map<string, string>> {
+  const ids = [...new Set(exercises.map((e) => e.substituteExerciseLibraryId).filter((id): id is string => !!id))];
+  if (ids.length === 0) return new Map();
+  const { data, error } = await supabase
+    .from("exercise_library")
+    .select("id, video_url, alternative_video_url")
+    .in("id", ids);
+  devWarn("loadSubstituteVideos", error);
+  const videos = new Map<string, string>();
+  for (const ligne of data ?? []) {
+    const url = (ligne.video_url || ligne.alternative_video_url || "").trim();
+    if (url) videos.set(ligne.id, url);
+  }
+  return videos;
 }
 
 /** Récupère et regroupe les exercices/séries de un ou plusieurs retours en un minimum de requêtes. */
@@ -274,7 +272,11 @@ export async function getWorkoutFeedbackBySession(
 
   const feedback = mapWorkoutFeedbackRow(data);
   const { exercisesByFeedbackId, setsByExerciseFeedbackId } = await loadExercisesAndSets(supabase, [feedback.id]);
-  return toAdminStudentFeedback(feedback, exercisesByFeedbackId.get(feedback.id) ?? [], setsByExerciseFeedbackId);
+  const exercises = exercisesByFeedbackId.get(feedback.id) ?? [];
+  // SEULE lecture qui résout les démonstrations : c'est celle qui alimente
+  // l'écran où l'élève rouvre son retour pour le modifier.
+  const videos = await loadSubstituteVideos(supabase, exercises);
+  return toAdminStudentFeedback(feedback, exercises, setsByExerciseFeedbackId, videos);
 }
 
 /** Liste de tous les retours Supabase pour /admin/retours, plus récents en premier. */
@@ -353,15 +355,52 @@ export async function getAdminWorkoutFeedbackDetail(
  * `payload.exercises` doit déjà être filtré en amont (un exercice sans
  * aucune série renseignée ne doit pas être transmis), comme le fait
  * SessionFeedbackSection côté mock.
+ *
+ * ── CE QUE CETTE COUCHE N'ÉCRIT PLUS (migration 20260821090000) ──────────
+ * `prescribed_snapshot` : la photographie du PRESCRIT est RECONSTRUITE par
+ * la base, à chaque écriture, depuis les lignes de prescription réelles. Un
+ * snapshot envoyé d'ici — ou par n'importe quel appel PostgREST direct —
+ * n'est même pas lu. Le construire côté client n'aurait donc aucun effet,
+ * et laisserait croire à une autorité qui n'existe plus.
+ * `status`, `coach_reply`, `session_status`, `submitted_at`, `updated_at`
+ * sont dans le même cas : imposés ou dérivés par la base.
+ *
+ * ── COURSE ENTRE DEUX SOUMISSIONS (migration 20260823090000) ─────────────
+ * L'unicité « un élève + une séance = un seul retour » est tenue par un
+ * index UNIQUE PARTIEL, donc par PostgreSQL lui-même. La lecture puis
+ * écriture ci-dessous ne peut PAS l'assurer : deux requêtes simultanées
+ * lisent toutes les deux « aucun retour ». Quand l'index tranche, le
+ * perdant reçoit un SQLSTATE 23505 — on relit alors le retour GAGNANT et on
+ * poursuit en mise à jour, ce qui est exactement le chemin d'une
+ * resoumission ordinaire. Aucun second retour n'est créé, et aucune autre
+ * erreur Supabase n'est masquée : seul le code 23505 déclenche ce
+ * rattrapage.
  */
+
+/**
+ * Collision d'unicité PostgreSQL, et RIEN d'autre. On ne teste ni le
+ * message ni le nom de l'index : une panne réseau, un refus RLS ou une
+ * violation de CHECK doivent rester des échecs francs, jamais être
+ * réinterprétés en « le retour existait déjà ».
+ */
+function estCollisionUnicite(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "23505";
+}
+
+/** Ce dont la mise à jour a besoin d'un retour déjà en base. */
+type RetourExistant = {
+  id: string;
+  status: string;
+  coach_reply: string;
+  performed_at: string | null;
+};
 export async function saveWorkoutFeedback(
   supabase: TypedSupabaseClient,
   payload: WorkoutFeedbackPayload,
-  loadSnapshotRows: SnapshotRowsLoader = loadSessionRowsForSnapshot,
 ): Promise<AdminStudentFeedback | null> {
   const { data: existing, error: lookupError } = await supabase
     .from("workout_feedback")
-    .select("id, status, coach_reply, prescribed_snapshot, performed_at")
+    .select("id, status, coach_reply, performed_at")
     .eq("student_id", payload.studentId)
     .eq("session_key", payload.sessionKey)
     .maybeSingle();
@@ -369,61 +408,36 @@ export async function saveWorkoutFeedback(
 
   const now = new Date().toISOString();
 
-  // ── Historique (phase 1) ─────────────────────────────────────────────────
-  // La photographie du prescrit n'est prise qu'à la PREMIÈRE soumission d'une
-  // séance terminée, et jamais réécrite ensuite (garde applicative ici, et
-  // trigger workout_feedback_snapshot_immutable côté base) : une nouvelle
-  // soumission met à jour le réalisé, jamais la photographie d'origine.
-  const dejaFige = Boolean(existing?.prescribed_snapshot);
-  let snapshot: PrescribedSnapshot | null = null;
-  if (payload.completed && !dejaFige && payload.sessionId) {
-    const lignes = await loadSnapshotRows(supabase, payload.sessionId);
-    if (lignes) {
-      snapshot = buildPrescribedSnapshot(lignes.session, lignes.blocks, lignes.exercises, now);
-    }
-  }
-  // La date de réalisation est conservée telle que posée à l'origine ; à
-  // défaut, la date (validée) de cette soumission.
-  const performedAt = payload.completed
-    ? (existing?.performed_at ?? sanitizePerformedAt(payload.performedAt))
-    : null;
-  const durationMinutes = sanitizeDurationMinutes(payload.durationMinutes);
-  const sessionStatus = payload.completed ? "done" : null;
-  const champsHistorique = {
-    performed_at: performedAt,
-    duration_minutes: durationMinutes,
-    session_status: sessionStatus,
-    ...(snapshot ? { prescribed_snapshot: snapshot as unknown as Record<string, unknown> } : {}),
-  };
+  // La date de réalisation est conservée telle que posée à l'ORIGINE ; à
+  // défaut, la date (validée) de cette soumission. Elle appartient bien à
+  // l'élève : c'est lui qui déclare QUAND il a fait sa séance. Calculée à
+  // partir de la ligne RÉELLEMENT visée — qui, en cas de course perdue,
+  // n'est pas celle qu'on avait lue au départ.
+  const champsHistorique = (ligne: RetourExistant | null) => ({
+    performed_at: payload.completed
+      ? (ligne?.performed_at ?? sanitizePerformedAt(payload.performedAt))
+      : null,
+    duration_minutes: sanitizeDurationMinutes(payload.durationMinutes),
+  });
 
   let feedbackId: string;
   let status: FeedbackStatus;
   let coachReply: string;
+  // Métadonnées de séance RELUES après écriture. Quand `session_id` est
+  // renseigné, la base les DÉRIVE de la séance (migration 20260822090000) :
+  // les renvoyer telles qu'envoyées afficherait la version du client, pas
+  // celle qui a été enregistrée. On les envoie tout de même, parce qu'elles
+  // restent la seule source sur le chemin mock (séance sans `session_id`),
+  // et on relit ce que la base a retenu.
+  let programId: string | null = payload.programId ?? null;
+  let sessionKey: string = payload.sessionKey;
+  let refLabel: string = payload.sessionRefLabel;
 
-  if (existing) {
-    feedbackId = existing.id;
-    status = existing.status as FeedbackStatus;
-    coachReply = existing.coach_reply;
-    const { error: updateError } = await supabase
-      .from("workout_feedback")
-      .update({
-        session_id: payload.sessionId ?? null,
-        program_id: payload.programId ?? null,
-        session_ref_label: payload.sessionRefLabel,
-        completed: payload.completed,
-        global_rpe: payload.globalRpe,
-        global_comment: payload.globalComment,
-        pain: payload.pain,
-        submitted_at: now,
-        updated_at: now,
-        ...champsHistorique,
-      })
-      .eq("id", feedbackId);
-    devWarn("saveWorkoutFeedback (update)", updateError);
+  // Le retour à mettre à jour : celui trouvé par la clé applicative, ou —
+  // après une course perdue — celui que l'index UNIQUE a désigné gagnant.
+  let cible: RetourExistant | null = existing ?? null;
 
-    const { error: deleteError } = await supabase.from("exercise_feedback").delete().eq("workout_feedback_id", feedbackId);
-    devWarn("saveWorkoutFeedback (delete previous exercises)", deleteError);
-  } else {
+  if (!cible) {
     const { data: inserted, error: insertError } = await supabase
       .from("workout_feedback")
       .insert({
@@ -436,19 +450,99 @@ export async function saveWorkoutFeedback(
         global_rpe: payload.globalRpe,
         global_comment: payload.globalComment,
         pain: payload.pain,
-        submitted_at: now,
-        ...champsHistorique,
+        ...champsHistorique(null),
       })
-      .select("id, status, coach_reply")
+      .select("id, status, coach_reply, program_id, session_key, session_ref_label")
       .single();
     devWarn("saveWorkoutFeedback (insert)", insertError);
-    if (!inserted) {
+
+    if (inserted) {
+      programId = inserted.program_id;
+      sessionKey = inserted.session_key ?? payload.sessionKey;
+      refLabel = inserted.session_ref_label ?? payload.sessionRefLabel;
+      feedbackId = inserted.id;
+      status = inserted.status as FeedbackStatus;
+      coachReply = inserted.coach_reply;
+      return await ecrireExercicesEtRendre(supabase, payload, {
+        feedbackId, status, coachReply, programId, sessionKey, refLabel, now,
+      });
+    }
+
+    // COURSE PERDUE. L'index a tranché : un retour existe déjà pour ce
+    // couple (élève, séance). On ne crée surtout pas un second retour — on
+    // reprend celui qui a gagné, exactement comme une resoumission.
+    if (!estCollisionUnicite(insertError) || !payload.sessionId) {
       return null;
     }
-    feedbackId = inserted.id;
-    status = inserted.status as FeedbackStatus;
-    coachReply = inserted.coach_reply;
+    const { data: gagnante, error: relectureError } = await supabase
+      .from("workout_feedback")
+      .select("id, status, coach_reply, performed_at")
+      .eq("student_id", payload.studentId)
+      .eq("session_id", payload.sessionId)
+      .maybeSingle();
+    devWarn("saveWorkoutFeedback (relecture après collision)", relectureError);
+    if (!gagnante) {
+      // L'index dit qu'une ligne existe, la relecture ne la voit pas :
+      // situation contradictoire (RLS, ligne supprimée entre-temps). On
+      // échoue franchement plutôt que d'insister.
+      return null;
+    }
+    cible = gagnante as RetourExistant;
   }
+
+  feedbackId = cible.id;
+  status = cible.status as FeedbackStatus;
+  coachReply = cible.coach_reply;
+  const { data: updated, error: updateError } = await supabase
+    .from("workout_feedback")
+    .update({
+      session_id: payload.sessionId ?? null,
+      program_id: payload.programId ?? null,
+      session_ref_label: payload.sessionRefLabel,
+      completed: payload.completed,
+      global_rpe: payload.globalRpe,
+      global_comment: payload.globalComment,
+      pain: payload.pain,
+      ...champsHistorique(cible),
+    })
+    .eq("id", feedbackId)
+    .select("id, program_id, session_key, session_ref_label")
+    .single();
+  devWarn("saveWorkoutFeedback (update)", updateError);
+  if (updated) {
+    programId = updated.program_id;
+    sessionKey = updated.session_key ?? payload.sessionKey;
+    refLabel = updated.session_ref_label ?? payload.sessionRefLabel;
+  }
+
+  const { error: deleteError } = await supabase.from("exercise_feedback").delete().eq("workout_feedback_id", feedbackId);
+  devWarn("saveWorkoutFeedback (delete previous exercises)", deleteError);
+
+  return await ecrireExercicesEtRendre(supabase, payload, {
+    feedbackId, status, coachReply, programId, sessionKey, refLabel, now,
+  });
+}
+
+/**
+ * Écrit les exercices et séries réalisés, journalise l'activité, et compose
+ * le retour rendu à l'appelant. Extrait de `saveWorkoutFeedback` pour que
+ * les DEUX chemins — création et mise à jour, cette dernière incluant le
+ * rattrapage d'une course perdue — partagent rigoureusement le même code.
+ */
+async function ecrireExercicesEtRendre(
+  supabase: TypedSupabaseClient,
+  payload: WorkoutFeedbackPayload,
+  contexte: {
+    feedbackId: string;
+    status: FeedbackStatus;
+    coachReply: string;
+    programId: string | null;
+    sessionKey: string;
+    refLabel: string;
+    now: string;
+  },
+): Promise<AdminStudentFeedback | null> {
+  const { feedbackId, status, coachReply, programId, sessionKey, refLabel, now } = contexte;
 
   const exerciseEntries: AdminExerciseFeedbackEntry[] = [];
   for (const exercise of payload.exercises) {
@@ -458,12 +552,23 @@ export async function saveWorkoutFeedback(
       .insert({
         workout_feedback_id: feedbackId,
         student_id: payload.studentId,
+        // `exercise_id` existait depuis l'origine sans jamais être écrit.
+        // Il l'est à partir du chantier F3, parce que c'est LUI qui donne au
+        // trigger de base l'exercice prescrit dont il faut comparer le
+        // pattern. `null` reste normal : séance mock, ou bloc cardio.
+        exercise_id: exercise.exerciseId ?? null,
         exercise_name: exercise.exerciseName,
         exercise_order: exercise.exerciseOrder,
         rpe: exercise.rpe,
         comment: exercise.comment,
+        // On envoie l'IDENTIFIANT, jamais le nom : le trigger
+        // enforce_exercise_feedback_substitution dérive le nom de la banque
+        // et refuse tout remplacement qui ne partage pas le pattern.
+        substitute_exercise_library_id: exercise.substituteExerciseLibraryId ?? null,
       })
-      .select("id")
+      // On RELIT le nom écrit par la base plutôt que de le supposer : c'est
+      // la base qui décide, l'écran ne fait qu'afficher sa décision.
+      .select("id, substitute_exercise_name")
       .single();
     devWarn("saveWorkoutFeedback (exercise insert)", exerciseError);
     if (!exerciseRow) continue;
@@ -492,6 +597,8 @@ export async function saveWorkoutFeedback(
         rpe: set.rpe ?? null,
         exerciseRpe: exercise.rpe,
         comment: exercise.comment,
+        substituteExerciseName: exerciseRow.substitute_exercise_name,
+        substituteExerciseLibraryId: exercise.substituteExerciseLibraryId ?? null,
       });
     }
   }
@@ -509,9 +616,9 @@ export async function saveWorkoutFeedback(
     id: feedbackId,
     studentId: payload.studentId,
     type: "entrainement",
-    sessionId: payload.sessionKey,
-    programId: payload.programId ?? null,
-    refLabel: payload.sessionRefLabel || "Séance",
+    sessionId: sessionKey,
+    programId,
+    refLabel: refLabel || "Séance",
     date: now.slice(0, 10),
     completed: payload.completed,
     rpe: payload.globalRpe,

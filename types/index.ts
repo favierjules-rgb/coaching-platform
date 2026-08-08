@@ -1341,6 +1341,28 @@ export interface AdminExerciseFeedbackEntry {
    */
   exerciseRpe?: number | null;
   comment: string;
+  /**
+   * Nom RÉELLEMENT réalisé quand l'élève a déclaré l'exercice indisponible
+   * (`exercise_feedback.substitute_exercise_name`, photographié à
+   * l'enregistrement). `exerciseName` reste le nom PRESCRIT : le coach voit
+   * les deux, jamais l'un à la place de l'autre. Absent/`null` = aucun
+   * remplacement, cas de tout l'historique.
+   */
+  substituteExerciseName?: string | null;
+  /**
+   * Identité de la fiche de banque réalisée — sert à RESTAURER le choix
+   * quand l'élève rouvre son retour pour le modifier. Passe à `null` si la
+   * fiche a été supprimée depuis (le nom, lui, subsiste).
+   */
+  substituteExerciseLibraryId?: string | null;
+  /**
+   * Démonstration ACTUELLE du remplaçant, résolue À LA LECTURE depuis
+   * `exercise_library` — jamais stockée dans le retour. Si le coach change
+   * la vidéo de la fiche, l'élève voit la nouvelle ; si la fiche est
+   * supprimée, il n'y a plus de vidéo mais le NOM réalisé subsiste. Absente
+   * partout où la résolution n'est pas faite (listes du coach).
+   */
+  substituteVideoUrl?: string | null;
 }
 
 /**
@@ -1426,6 +1448,9 @@ export interface SupabaseExerciseFeedback {
   exerciseOrder: number | null;
   rpe: number | null;
   comment: string;
+  /** Trace du remplacement — voir AdminExerciseFeedbackEntry.substituteExerciseName. */
+  substituteExerciseLibraryId: string | null;
+  substituteExerciseName: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1468,6 +1493,20 @@ export interface ExerciseFeedbackPayload {
   rpe: number | null;
   comment: string;
   sets: ExerciseSetFeedbackPayload[];
+  /**
+   * `workout_exercises.id` de l'exercice PRESCRIT — uuid réel quand la
+   * séance vient d'un programme Supabase, `null` sinon (séance mock, bloc
+   * cardio). Sert à écrire enfin `exercise_feedback.exercise_id`, resté
+   * vide depuis l'origine, et à valider un remplacement côté base : c'est
+   * lui qui donne le pattern de mouvement attendu.
+   */
+  exerciseId?: string | null;
+  /**
+   * Remplacement effectué par l'élève : identité de la fiche de banque
+   * réellement réalisée. Le NOM n'est jamais transmis — il est dérivé de
+   * cet identifiant par le trigger de base, donc non falsifiable.
+   */
+  substituteExerciseLibraryId?: string | null;
 }
 
 export interface WorkoutFeedbackPayload {
@@ -2003,6 +2042,81 @@ export type ExerciseEquipment =
 export type ExerciseLevel = "débutant" | "intermédiaire" | "avancé";
 export type ExerciseLibraryStatus = "active" | "archived";
 
+/**
+ * PATTERN DE MOUVEMENT — action articulaire d'un exercice, et SEULE clé de
+ * regroupement du remplacement élève (« exercice indisponible »). Un groupe
+ * musculaire ne suffit pas : développé couché et écarté partagent
+ * « pectoraux » sans être interchangeables.
+ *
+ * Libellés, ordre, régions et exemples : lib/movement-patterns.ts.
+ * Le même vocabulaire est figé par le CHECK
+ * `exercise_library_movement_pattern_check` (migration 20260820090000) —
+ * les deux listes sont comparées par scripts/tests/training-movement-patterns.mts.
+ */
+export type MovementPattern =
+  | "poussee_horizontale"
+  | "poussee_verticale"
+  | "poussee_inclinee"
+  | "poussee_declinee"
+  | "tirage_vertical"
+  | "tirage_horizontal_coudes_ouverts"
+  | "tirage_horizontal_coudes_fermes"
+  | "tirage_diagonal"
+  | "ecarte_horizontal"
+  | "ecarte_incline"
+  | "ecarte_decline"
+  | "elevation_laterale"
+  | "elevation_frontale"
+  | "elevation_posterieure"
+  | "rotation_externe_epaule"
+  | "rotation_interne_epaule"
+  | "flexion_coude_anterieur"
+  | "flexion_coude_posterieur"
+  | "extension_coude_anterieur"
+  | "extension_coude_posterieur"
+  | "flexion_poignet"
+  | "extension_poignet"
+  | "pronosupination"
+  | "squat"
+  | "fente"
+  | "hinge"
+  | "extension_de_hanche"
+  | "flexion_de_hanche"
+  | "extension_genou"
+  | "flexion_genou"
+  | "abduction_hanche"
+  | "adduction_hanche"
+  | "rotation_hanche"
+  | "flexion_plantaire"
+  | "flexion_dorsale"
+  | "flexion_tronc"
+  | "extension_tronc"
+  | "rotation_tronc"
+  | "anti_extension"
+  | "anti_rotation"
+  | "anti_flexion_laterale"
+  | "port_de_charge"
+  | "haltero"
+  | "pliometrie"
+  | "locomotion"
+  | "mobilite";
+
+/**
+ * Remplaçant proposé à l'élève quand la machine est prise : uniquement
+ * l'identité de la fiche de banque et ce qui change à l'écran (nom, vidéo).
+ * La STRUCTURE prescrite — séries, reps, RPE/RIR, repos, tempo — n'est
+ * jamais transportée ici : elle ne bouge pas.
+ */
+export interface ExerciseSubstituteOption {
+  id: string;
+  name: string;
+  videoUrl: string;
+  alternativeVideoUrl: string;
+  muscleGroup: string;
+  equipment: string;
+  level: string;
+}
+
 export interface ExerciseTag {
   id: string;
   label: string;
@@ -2015,6 +2129,13 @@ export interface ExerciseLibraryItem {
   /** Groupe musculaire principal (voir MuscleGroup, lib/training-metrics.ts). */
   muscleGroup: MuscleGroup;
   secondaryMuscles: MuscleGroup[];
+  /**
+   * Pattern de mouvement — FACULTATIF (`null` = non renseigné, cas de toute
+   * la banque existante). Deux exercices ne peuvent se remplacer que s'ils
+   * portent le MÊME pattern non nul (règle appliquée côté base par le
+   * trigger enforce_exercise_feedback_substitution, pas seulement à l'écran).
+   */
+  movementPattern: MovementPattern | null;
   category: ExerciseCategory;
   exerciseType: ExerciseType;
   equipment: ExerciseEquipment;

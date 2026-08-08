@@ -44,6 +44,7 @@ import type {
   Exercise,
   ExerciseFeedback,
   ExerciseFeedbackPayload,
+  ExerciseSubstituteOption,
   TrainingBlock,
 } from "@/types";
 
@@ -236,6 +237,14 @@ export function SessionFeedbackSection({
   const [exerciseFeedback, setExerciseFeedback] = useState(() =>
     buildInitialFeedback(strengthExercises, studentId, sessionId),
   );
+  // REMPLACEMENTS (F3) — indexés par `exercise.id`, c'est-à-dire
+  // `workout_exercises.id`. Cet état ne touche JAMAIS `exerciseFeedback` :
+  // la structure prescrite (séries, reps, RPE cible) reste intacte, seuls le
+  // nom et la vidéo affichés changent, et l'identité du remplaçant part dans
+  // le retour.
+  const [substitutions, setSubstitutions] = useState<Record<string, ExerciseSubstituteOption | null>>({});
+  const remplacerExercice = (exerciseId: string, option: ExerciseSubstituteOption | null) =>
+    setSubstitutions((prev) => ({ ...prev, [exerciseId]: option }));
   const [completed, setCompleted] = useState(false);
   const [globalRpe, setGlobalRpe] = useState("");
   const [globalComment, setGlobalComment] = useState("");
@@ -367,6 +376,13 @@ export function SessionFeedbackSection({
           .map((exerciseFb, index) => ({
             exerciseName: exerciseFb.exerciseName,
             exerciseOrder: index,
+            // `exerciseFb.exerciseId` EST `workout_exercises.id` (clé de
+            // `buildInitialFeedback`). Transmis seulement quand c'est un
+            // uuid réel — une séance mock n'en a pas.
+            exerciseId: isUuid(exerciseFb.exerciseId) ? exerciseFb.exerciseId : null,
+            // On envoie l'IDENTIFIANT du remplaçant, jamais son nom : la
+            // base le dérive elle-même et refuse tout pattern discordant.
+            substituteExerciseLibraryId: substitutions[exerciseFb.exerciseId]?.id ?? null,
             // Option B : plus de saisie RPE au niveau exercice pour la
             // musculation — le RPE vit PAR SÉRIE (exercise_set_feedback.rpe).
             // Aucune moyenne ni valeur globale inventée. (Le cardio garde son
@@ -476,6 +492,40 @@ export function SessionFeedbackSection({
     }
     setBlockDrafts(drafts);
     setBlockErrors({});
+    // REMPLACEMENTS — restaurés depuis le retour enregistré, sinon une
+    // re-soumission les effacerait silencieusement (elle REMPLACE les lignes
+    // d'exercice). Le retour porte l'identité et le nom ; la DÉMONSTRATION
+    // est résolue à la lecture depuis la banque, jamais stockée ici — ainsi
+    // l'élève retrouve la bonne vidéo dès la réouverture, et une vidéo
+    // changée depuis par le coach est celle qu'il voit.
+    setSubstitutions(() => {
+      const restaurés: Record<string, ExerciseSubstituteOption | null> = {};
+      const parNomPrescrit = new Map<string, AdminExerciseFeedbackEntry>();
+      for (const entry of existingFeedback.exerciseEntries) {
+        if (isCardioResultEntryName(entry.exerciseName)) continue;
+        if (!entry.substituteExerciseLibraryId || !entry.substituteExerciseName) continue;
+        parNomPrescrit.set(normalizeExerciseName(entry.exerciseName), entry);
+      }
+      for (const exercise of strengthExercises) {
+        const entry = parNomPrescrit.get(normalizeExerciseName(exercise.name));
+        if (!entry) continue;
+        restaurés[exercise.id] = {
+          id: entry.substituteExerciseLibraryId as string,
+          name: entry.substituteExerciseName as string,
+          // Résolue à la LECTURE depuis la banque (voir
+          // lib/supabase/workout-feedback.ts::loadSubstituteVideos) : la
+          // bonne démonstration réapparaît immédiatement, sans que l'URL
+          // n'ait jamais été stockée dans le retour. Vide si la fiche a été
+          // supprimée depuis — le nom réalisé, lui, subsiste.
+          videoUrl: entry.substituteVideoUrl ?? "",
+          alternativeVideoUrl: "",
+          muscleGroup: "",
+          equipment: "",
+          level: "",
+        };
+      }
+      return restaurés;
+    });
     // Option B — édition : restaure les valeurs muscu réellement ENREGISTRÉES
     // (charge/reps/RPE par série + commentaire d'exercice), pour que la
     // re-soumission (qui remplace les exercices, chemin idempotent inchangé)
@@ -539,6 +589,18 @@ export function SessionFeedbackSection({
     // retours), rien ne change : la séance vivante reste la seule source,
     // historique non figé assumé.
     const prescription = resolvePrescription(existingFeedback.prescribedSnapshot, true);
+    // Un remplacement par EXERCICE, pas par série : `exerciseEntries` est une
+    // liste à plat où l'information est répétée sur chaque série.
+    const remplacementsDuRetour = [
+      ...new Map(
+        existingFeedback.exerciseEntries
+          .filter((e) => !isCardioResultEntryName(e.exerciseName) && e.substituteExerciseName)
+          .map((e) => [
+            `${e.exerciseName}→${e.substituteExerciseName}`,
+            { prescrit: e.exerciseName, realise: e.substituteExerciseName as string },
+          ]),
+      ).values(),
+    ];
     return (
       // Refonte apple-ui : récapitulatif recentré dans la colonne principale.
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 animate-fade-in">
@@ -653,6 +715,21 @@ export function SessionFeedbackSection({
           </div>
         )}
 
+        {remplacementsDuRetour.length > 0 && (
+          <div className="rounded-card border border-border bg-card p-6 shadow-soft">
+            <h3 className="mb-3 font-heading text-sm font-bold uppercase text-foreground">
+              Exercices remplacés
+            </h3>
+            <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
+              {remplacementsDuRetour.map((r) => (
+                <li key={`${r.prescrit}-${r.realise}`}>
+                  <span className="text-foreground">{r.realise}</span> à la place de {r.prescrit}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {(existingFeedback.rpe !== null || existingFeedback.comment || existingFeedback.pain) && (
           <div className="rounded-card border border-border bg-card p-6 shadow-soft">
             <h3 className="mb-3 font-heading text-sm font-bold uppercase text-foreground">Résumé global de la séance</h3>
@@ -691,6 +768,14 @@ export function SessionFeedbackSection({
             previous={findPreviousPerformance(previousIndex, exercise)}
             onSetChange={(setNumber, field, value) => handleSetChange(exercise.id, setNumber, field, value)}
             onCommentChange={(value) => handleCommentChange(exercise.id, value)}
+            substitute={substitutions[exercise.id] ?? null}
+            // Le remplacement n'est proposé QUE sur le chemin Supabase réel :
+            // il s'appuie sur la banque d'exercices et sur une trace écrite
+            // en base. Sur le chemin mock/localStorage, ni l'une ni l'autre
+            // n'existent — on ne montre pas un bouton qui ne mènerait à rien.
+            {...(supabaseFeedback.active
+              ? { onSubstituteChange: (option: ExerciseSubstituteOption | null) => remplacerExercice(exercise.id, option) }
+              : {})}
           />
         )}
         renderCardioFooter={(block) => {

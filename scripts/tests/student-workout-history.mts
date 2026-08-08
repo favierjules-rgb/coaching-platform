@@ -59,6 +59,27 @@ function creerBase() {
   let compteur = 0;
   const idSuivant = (prefixe: string) => `${prefixe}-${(compteur += 1).toString().padStart(3, "0")}`;
 
+  /**
+   * LE TRIGGER `enforce_workout_feedback_write`, REPRODUIT (migration
+   * 20260821090000). C'est la BASE qui construit `prescribed_snapshot`, à
+   * partir de la prescription réelle, et qui dérive `session_status` — plus
+   * jamais l'appelant. Sans cette simulation, les contrôles ci-dessous
+   * mesureraient un comportement que le dépôt n'a plus.
+   */
+  function triggerRetour(ligne: Ligne, avant: Ligne | null) {
+    ligne.session_status = ligne.completed ? "done" : null;
+    ligne.submitted_at = "t";
+    ligne.updated_at = "t";
+    if (avant?.prescribed_snapshot) {
+      ligne.prescribed_snapshot = avant.prescribed_snapshot;
+      return;
+    }
+    ligne.prescribed_snapshot =
+      ligne.completed && ligne.session_id
+        ? (prescriptionEnBase(ligne.session_id as string) as unknown as Ligne)
+        : null;
+  }
+
   function from(nom: string) {
     const état: { op: "select" | "insert" | "update" | "delete"; valeurs?: Ligne | Ligne[]; filtres: [string, unknown][]; limite?: number } = {
       op: "select",
@@ -79,6 +100,7 @@ function creerBase() {
         const àInsérer = Array.isArray(état.valeurs) ? état.valeurs : [état.valeurs ?? {}];
         const insérées = àInsérer.map((valeurs) => {
           const ligne = { id: idSuivant(nom), status: "a-traiter", coach_reply: "", created_at: "t", updated_at: "t", ...valeurs };
+          if (nom === "workout_feedback") triggerRetour(ligne, null);
           lignes.push(ligne);
           return { ...ligne };
         });
@@ -86,7 +108,11 @@ function creerBase() {
       }
       if (état.op === "update") {
         const touchées = lignes.filter(correspond);
-        for (const ligne of touchées) Object.assign(ligne, état.valeurs);
+        for (const ligne of touchées) {
+          const avant = { ...ligne };
+          Object.assign(ligne, état.valeurs);
+          if (nom === "workout_feedback") triggerRetour(ligne, avant);
+        }
         return touchées.map((l) => ({ ...l }));
       }
       const àSupprimer = lignes.filter(correspond);
@@ -203,12 +229,26 @@ const lignesSéance = {
     { block_id: "bloc-1", exercise_library_id: "lib-dc", name: "Développé couché", order_index: 1, sets: 3, reps: "10", recommended_load: null, rest_seconds: 90, tempo: null, notes: null },
   ],
 };
-/** Chargeur injecté : représente les lignes RÉELLEMENT en base (mutables pour le test 8). */
-const chargeurSéance = async () => ({
-  session: { ...lignesSéance.session },
-  blocks: lignesSéance.blocks.map((b) => ({ ...b })),
-  exercises: lignesSéance.exercises.map((e) => ({ ...e })),
-});
+/**
+ * La prescription telle qu'elle vit EN BASE au moment de l'écriture
+ * (mutable : le test 8 la modifie pour jouer « le coach retravaille la
+ * séance »). C'est la source unique de la photographie du prescrit — le
+ * trigger simulé de `creerBase` la lit, l'appelant ne la fournit plus.
+ *
+ * `buildPrescribedSnapshot` reste la référence de FORME : la fonction SQL
+ * `public.build_prescribed_snapshot` produit le même objet, et la checklist
+ * `training_movement_patterns_checklist.sql` le vérifie champ par champ
+ * contre de vraies lignes PostgreSQL (section D).
+ */
+function prescriptionEnBase(sessionId: string) {
+  if (sessionId !== lignesSéance.session.id) return null;
+  return buildPrescribedSnapshot(
+    { ...lignesSéance.session },
+    lignesSéance.blocks.map((b) => ({ ...b })),
+    lignesSéance.exercises.map((e) => ({ ...e })),
+    "2026-08-08T10:00:00.000Z",
+  );
+}
 
 function payloadDe(studentId: string, complet = true): WorkoutFeedbackPayload {
   return {
@@ -303,7 +343,7 @@ await (async () => {
   /* ─── 6-9 + 14 : snapshot ─── */
 
   await test("6. une séance terminée enregistre un snapshot", async () => {
-    const résultat = await saveWorkoutFeedback(client, payloadDe("eleve-A"), chargeurSéance as never);
+    const résultat = await saveWorkoutFeedback(client, payloadDe("eleve-A"));
     assert.ok(résultat, "feedback enregistré");
     const ligne = base.table("workout_feedback").find((l) => l.student_id === "eleve-A")!;
     assert.ok(ligne.prescribed_snapshot, "snapshot posé");
@@ -332,7 +372,7 @@ await (async () => {
     lignesSéance.exercises[0].reps = "5";
     lignesSéance.exercises[0].recommended_load = "120 kg";
     // …et l'élève resoumet son retour.
-    await saveWorkoutFeedback(client, payloadDe("eleve-A"), chargeurSéance as never);
+    await saveWorkoutFeedback(client, payloadDe("eleve-A"));
     const ligne = base.table("workout_feedback").find((l) => l.student_id === "eleve-A")!;
     const s = ligne.prescribed_snapshot as unknown as ReturnType<typeof buildPrescribedSnapshot>;
     assert.equal(s.blocks[0].exercises[0].reps, "8", "le snapshot garde la prescription d'origine");
@@ -351,8 +391,24 @@ await (async () => {
   await test("14. une nouvelle soumission ne remplace pas silencieusement le snapshot original", () => {
     // Déjà démontré par le test 8 côté données ; on verrouille en plus les
     // deux gardes : applicative (dejaFige) et base (trigger immuable).
+    // La garde applicative `dejaFige` a DISPARU le 08/08/2026, et c'est un
+    // progrès : la couche d'écriture ne construit plus du tout le snapshot,
+    // donc elle n'a plus rien à protéger. L'autorité est descendue en base.
     const couche = readFileSync(new URL("../../lib/supabase/workout-feedback.ts", import.meta.url), "utf8");
-    assert.ok(/dejaFige/.test(couche) && /!dejaFige/.test(couche), "garde applicative présente");
+    assert.ok(
+      !/prescribed_snapshot\s*:/.test(couche),
+      "la couche d'écriture ne doit plus JAMAIS écrire prescribed_snapshot",
+    );
+    assert.ok(
+      !/buildPrescribedSnapshot/.test(couche),
+      "elle ne doit même plus construire de snapshot : la base seule fait autorité",
+    );
+    const autoritaire = readFileSync(
+      new URL("../../supabase/migrations/20260821090000_workout_feedback_authoritative.sql", import.meta.url),
+      "utf8",
+    );
+    assert.ok(/new\.prescribed_snapshot := case/.test(autoritaire), "le snapshot est recalculé par le trigger");
+    assert.ok(/build_prescribed_snapshot\(new\.session_id\)/.test(autoritaire), "depuis la prescription réelle");
     const migration = readFileSync(
       new URL("../../supabase/migrations/20260801120000_workout_feedback_history_phase1.sql", import.meta.url),
       "utf8",
@@ -416,11 +472,11 @@ await (async () => {
     const historique = payloadDe("eleve-B");
     delete (historique as unknown as Record<string, unknown>).performedAt;
     delete (historique as unknown as Record<string, unknown>).durationMinutes;
-    const résultat = await saveWorkoutFeedback(client, historique, chargeurSéance as never);
+    const résultat = await saveWorkoutFeedback(client, historique);
     assert.ok(résultat, "payload historique accepté");
     // Une séance NON terminée ne pose ni snapshot ni statut done.
     const nonTerminée = payloadDe("eleve-C", false);
-    await saveWorkoutFeedback(client, nonTerminée, chargeurSéance as never);
+    await saveWorkoutFeedback(client, nonTerminée);
     const ligne = base.table("workout_feedback").find((l) => l.student_id === "eleve-C")!;
     assert.equal(ligne.prescribed_snapshot ?? null, null, "pas de snapshot sans séance terminée");
     assert.equal(ligne.session_status ?? null, null);
@@ -445,8 +501,8 @@ await (async () => {
 
   await test("M2. les feedbacks de deux élèves du groupe restent distincts (snapshot compris)", async () => {
     const payloadG = (studentId: string) => ({ ...payloadDe(studentId), sessionKey: "sess-g1", sessionId: "sess-a1" });
-    await saveWorkoutFeedback(client, payloadG("eleve-G1") as never, chargeurSéance as never);
-    await saveWorkoutFeedback(client, payloadG("eleve-G2") as never, chargeurSéance as never);
+    await saveWorkoutFeedback(client, payloadG("eleve-G1") as never);
+    await saveWorkoutFeedback(client, payloadG("eleve-G2") as never);
     const retours = base.table("workout_feedback").filter((l) => l.session_key === "sess-g1");
     assert.equal(retours.length, 2, "un retour par élève pour la MÊME séance partagée");
     assert.ok(retours.every((r) => r.prescribed_snapshot), "chaque élève porte SON snapshot");

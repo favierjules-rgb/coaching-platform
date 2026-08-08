@@ -132,23 +132,56 @@ select case when :'premiere' <> :'troisieme'
        then 'OK — B3 nouvelle session → nouveau cycle'
        else 'ECHEC B3 : la nouvelle session a réutilisé l''ancienne copie' end as b3;
 
--- B4. Immutabilité : une fois posé, le snapshot ne peut plus être réécrit.
+-- B4. Le snapshot est DÉRIVÉ par la base, puis immuable.
+--
+--     RÉÉCRIT le 08/08/2026 (migration 20260821090000). Auparavant ce
+--     contrôle INJECTAIT un snapshot littéral puis attendait une exception à
+--     la réécriture. Les deux hypothèses ont changé, et c'est le but du
+--     chantier : `prescribed_snapshot` n'est plus jamais accepté d'un
+--     appelant — il est RECALCULÉ depuis la prescription réelle — et le
+--     gardien restaure l'ancienne valeur au lieu de lever une exception.
+--     On mesure donc la VALEUR, jamais le fait qu'une exception survienne.
+--
+--     Le retour vise la séance de la COPIE de l'élève, la seule qu'il
+--     possède réellement : un retour sur la séance du catalogue est
+--     désormais refusé, et c'est exactement la protection attendue.
+select id as session_copie from workout_sessions where program_id = :'premiere' \gset
+
 insert into workout_feedback (id, student_id, session_id, completed, prescribed_snapshot)
  values ('00000000-0000-4000-8000-000000000005', '00000000-0000-4000-8000-000000000001',
-         '00000000-0000-4000-8000-000000000004', true, '{"version":1}'::jsonb);
+         :'session_copie', true, '{"version":1,"sessionName":"MENSONGE"}'::jsonb);
+
+select case when (select prescribed_snapshot->>'sessionName' <> 'MENSONGE'
+                    and (prescribed_snapshot->>'sessionId')::uuid = :'session_copie'::uuid
+                    and prescribed_snapshot->>'capturedAt' is not null
+                    from workout_feedback
+                   where id = '00000000-0000-4000-8000-000000000005')
+       then 'OK — B4a snapshot RECALCULÉ par la base, la valeur envoyée est ignorée'
+       else 'ECHEC B4a : un snapshot fourni par l''appelant a été retenu' end as b4a;
+
+update workout_feedback
+   set prescribed_snapshot = '{"version":1,"sessionName":"RÉÉCRIT APRÈS COUP"}'::jsonb
+ where id = '00000000-0000-4000-8000-000000000005';
+select case when (select prescribed_snapshot->>'sessionName' <> 'RÉÉCRIT APRÈS COUP'
+                    from workout_feedback
+                   where id = '00000000-0000-4000-8000-000000000005')
+       then 'OK — B4b snapshot immuable : la réécriture est sans effet'
+       else 'ECHEC B4b : le snapshot a été réécrit' end as b4b;
+
+-- B4ter. Un retour visant une séance que l'élève NE possède pas est refusé.
 do $$
 begin
-  update public.workout_feedback
-     set prescribed_snapshot = '{"version":2}'::jsonb
-   where id = '00000000-0000-4000-8000-000000000005';
-  raise exception 'ECHEC B4 : la réécriture du snapshot aurait dû être rejetée';
-exception when check_violation then
-  raise notice 'OK — B4 snapshot immuable (réécriture rejetée par le trigger)';
+  insert into public.workout_feedback (student_id, session_id, completed)
+   values ('00000000-0000-4000-8000-000000000001',
+           '00000000-0000-4000-8000-000000000004', true);
+  raise exception 'ECHEC B4ter : un retour sur une séance étrangère a été accepté';
+exception when insufficient_privilege then
+  raise notice 'OK — B4ter retour sur une séance non possédée : refusé';
 end $$;
 
 -- B5. ON DELETE SET NULL : supprimer la séance n'emporte pas le retour,
 --     la référence devient simplement NULL (l'historique survit au builder).
-delete from workout_sessions where id = '00000000-0000-4000-8000-000000000004';
+delete from workout_sessions where id = :'session_copie';
 select case when (select session_id is null and prescribed_snapshot is not null
                     from workout_feedback
                    where id = '00000000-0000-4000-8000-000000000005')
