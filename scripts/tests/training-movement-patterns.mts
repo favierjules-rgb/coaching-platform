@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 
@@ -68,21 +68,23 @@ const lire = (chemin: string) => readFileSync(new URL(chemin, import.meta.url), 
 
 const MIGRATION = lire("../../supabase/migrations/20260820090000_training_movement_patterns.sql");
 /**
- * Le vocabulaire évolue en DEUX temps, parce que les migrations sont
- * appliquées avant le merge et que la Production sert encore l'ancien
- * frontend pendant cette fenêtre :
- *   - 20260824 (TRANSITION, dans cette branche) : 46 valeurs courantes
- *     PLUS 4 clés DEPRECATED encore acceptées ;
- *   - la migration de NETTOYAGE, qui ne garde que les 46, n'est
- *     volontairement PAS dans cette branche : elle sera écrite après le
- *     merge, après la mise en Production, et après le réétiquetage manuel
- *     des fiches restées en `flexion_coude`.
- * 20260820090000, elle, a été appliquée au projet distant : immuable, elle
- * porte pour toujours les 36 valeurs d'origine.
+ * Le vocabulaire a évolué en TROIS temps, parce que les migrations sont
+ * appliquées avant le merge et que la Production servait encore l'ancien
+ * frontend pendant la fenêtre de déploiement :
+ *   - 20260820 (APPLIQUÉE, IMMUABLE) : les 36 valeurs d'origine ;
+ *   - 20260824 (TRANSITION) : 46 valeurs courantes PLUS 4 clés DEPRECATED
+ *     encore tolérées, le temps que le nouveau frontend soit servi et que
+ *     les fiches restantes soient réétiquetées à la main ;
+ *   - 20260825 (NETTOYAGE, état FINAL) : plus que les 46. C'est ELLE qui
+ *     fait désormais autorité — c'est son CHECK que la suite compare au
+ *     vocabulaire TypeScript.
+ * Les trois fichiers coexistent : une migration appliquée ne se réécrit
+ * jamais, elle se corrige par une suivante.
  */
 const MIGRATION_TRANSITION = lire("../../supabase/migrations/20260824090000_training_movement_patterns_v2.sql");
+const MIGRATION_FINALE = lire("../../supabase/migrations/20260825090000_training_movement_patterns_remove_legacy.sql");
 
-/** Les 4 clés retirées du vocabulaire, encore acceptées pendant la transition. */
+/** Les 4 clés retirées du vocabulaire, tolérées seulement pendant la transition. */
 const CLÉS_DEPRECATED = ["tirage_horizontal", "flexion_coude", "extension_coude", "charniere_de_hanche"];
 const MIGRATION_AUTORITAIRE = lire("../../supabase/migrations/20260821090000_workout_feedback_authoritative.sql");
 const MIGRATION_METADONNEES = lire("../../supabase/migrations/20260822090000_workout_feedback_session_metadata.sql");
@@ -124,13 +126,14 @@ function valeursDuCheck(sql: string): string[] {
 }
 
 /**
- * Le vocabulaire COURANT : ce que le CHECK de transition accepte, MOINS les
- * clés DEPRECATED. C'est cette liste-là qui doit correspondre exactement à
- * `movementPatternOrder` — les 4 tolérances de déploiement ne font pas
- * partie du vocabulaire et ne doivent apparaître dans aucun sélecteur.
+ * Le vocabulaire COURANT : ce que le CHECK FINAL accepte, tel quel. Plus
+ * aucun filtrage — la migration de nettoyage a retiré les 4 tolérances, donc
+ * ce que porte le fichier EST le vocabulaire. Si une clé DEPRECATED y
+ * réapparaissait, A0quater le verrait ; si elle divergeait du TypeScript,
+ * A1 le verrait.
  */
 function valeursDuCheckSql(): string[] {
-  return valeursDuCheck(MIGRATION_TRANSITION).filter((v) => !CLÉS_DEPRECATED.includes(v));
+  return valeursDuCheck(MIGRATION_FINALE);
 }
 
 /** Les 36 valeurs de la version 1, telles qu'appliquées en Production. */
@@ -163,6 +166,10 @@ await test("A0. la migration APPLIQUÉE (20260820090000) n'a pas été retouché
   }
 });
 await test("A0ter. ÉTAT TRANSITOIRE (20260824) : 46 valeurs + les 4 clés DEPRECATED", () => {
+  // Cette migration a été appliquée : son contenu est figé, y compris ses
+  // quatre tolérances. Ce n'est pas l'état courant de la base — 20260825 les
+  // a retirées depuis — mais c'est l'état qu'elle a réellement produit, et
+  // le fichier doit continuer à le dire.
   const acceptées = valeursDuCheck(MIGRATION_TRANSITION);
   assert.equal(acceptées.length, 50, "46 courantes + 4 tolérées");
   // Le vocabulaire courant est intégralement là…
@@ -180,20 +187,67 @@ await test("A0ter. ÉTAT TRANSITOIRE (20260824) : 46 valeurs + les 4 clés DEPRE
   assert.ok(MIGRATION_TRANSITION.includes("DEPRECATED — COMPATIBILITÉ DE DÉPLOIEMENT UNIQUEMENT"));
 });
 
-await test("A0quater. la transition ANNONCE son nettoyage, sans l'embarquer", () => {
-  // La migration de nettoyage n'est pas dans cette branche : elle sera
-  // écrite après le merge, la mise en Production et le réétiquetage manuel.
-  // Ce qui compte ici, c'est que la dette soit NOMMÉE dans le fichier —
-  // une tolérance de déploiement qu'on oublie devient permanente.
-  assert.ok(MIGRATION_TRANSITION.includes("UNE MIGRATION DE NETTOYAGE VIENDRA LES RETIRER"));
+await test("A0quater. ÉTAT FINAL (20260825) : exactement 46 valeurs, aucune clé retirée", () => {
+  const acceptées = valeursDuCheck(MIGRATION_FINALE);
+  assert.equal(acceptées.length, 46, "le CHECK final ne porte que le vocabulaire");
+  assert.equal(new Set(acceptées).size, 46, "doublon dans le CHECK final");
+  for (const p of movementPatternOrder) {
+    assert.ok(acceptées.includes(p), `valeur courante absente du CHECK final : ${p}`);
+  }
+  // La tolérance de déploiement est bel et bien refermée. On compare des
+  // valeurs EXTRAITES, pas du texte brut : `flexion_coude` est un préfixe de
+  // `flexion_coude_anterieur`, et le précheck cite légitimement les 4 clés
+  // plus haut dans le fichier — une recherche textuelle mentirait deux fois.
+  for (const legacy of CLÉS_DEPRECATED) {
+    assert.ok(!acceptées.includes(legacy), `clé retirée encore acceptée : ${legacy}`);
+  }
+  // La transition, elle, garde sa trace : on ne réécrit pas une migration.
   assert.ok(MIGRATION_TRANSITION.includes("20260825090000_training_movement_patterns_remove_legacy.sql"),
-    "le nom prévu de la migration de nettoyage doit être écrit");
-  assert.ok(MIGRATION_TRANSITION.includes("elle n'est\n-- volontairement PAS dans cette branche"),
-    "et son absence doit être explicitement assumée");
-  assert.ok(
-    !existsSync(new URL("../../supabase/migrations/20260825090000_training_movement_patterns_remove_legacy.sql", import.meta.url).pathname),
-    "la migration de nettoyage ne doit pas encore exister dans cette branche",
-  );
+    "la transition doit toujours nommer la migration qui la referme");
+});
+
+await test("A0quinquies. le nettoyage ne touche AUCUNE donnée : contrainte, et rien d'autre", () => {
+  // On raisonne sur le CODE seul : les commentaires expliquent justement
+  // qu'aucune conversion n'est faite, ils ne doivent pas déclencher le test.
+  const code = MIGRATION_FINALE.split("\n").map((l) => l.replace(/--.*$/, "")).join("\n");
+  for (const verbe of ["update", "delete", "insert", "truncate"]) {
+    assert.ok(!new RegExp(`\\b${verbe}\\b`, "i").test(code),
+      `la migration de nettoyage ne doit contenir aucun ${verbe.toUpperCase()}`);
+  }
+  assert.ok(!/set movement_pattern/i.test(code), "aucune valeur ne doit être réécrite");
+  assert.ok(!/movement_pattern\s*=\s*null/i.test(code), "aucune valeur ne doit être vidée");
+  // Un précheck qui REFUSE, et qui nomme ce qu'il a trouvé.
+  assert.ok(MIGRATION_FINALE.includes("MIGRATION REFUSÉE"), "précheck de refus absent");
+  assert.ok(/Exemples\s*:/.test(MIGRATION_FINALE), "le refus doit citer des fiches");
+  for (const legacy of CLÉS_DEPRECATED) {
+    assert.ok(new RegExp(`'${legacy}'`).test(MIGRATION_FINALE),
+      `le précheck doit chercher ${legacy}`);
+  }
+  // Et la promesse est vérifiée par la migration elle-même : empreinte de la
+  // colonne avant, empreinte après, échec si quoi que ce soit a bougé.
+  assert.ok(code.includes("f3.empreinte_avant") && code.includes("f3.fiches_avant"),
+    "la migration doit mesurer son propre effet sur les données");
+  assert.ok(code.includes("MIGRATION INVALIDE"), "et refuser de conclure si une valeur a changé");
+  // L'ordre : précheck → empreinte → drop → add → contrôle.
+  const iPrecheck = MIGRATION_FINALE.indexOf("MIGRATION REFUSÉE");
+  const iEmpreinte = MIGRATION_FINALE.indexOf("f3.empreinte_avant");
+  const iDrop = MIGRATION_FINALE.indexOf("drop constraint if exists exercise_library_movement_pattern_check");
+  const iAdd = MIGRATION_FINALE.indexOf("add constraint exercise_library_movement_pattern_check");
+  const iControle = MIGRATION_FINALE.indexOf("MIGRATION INCOMPLÈTE");
+  assert.ok(iPrecheck > 0 && iEmpreinte > iPrecheck && iDrop > iEmpreinte && iAdd > iDrop && iControle > iAdd,
+    "ordre précheck → empreinte → drop → add → contrôle non respecté");
+});
+
+await test("A0sexies. transition et état final ne diffèrent QUE des 4 tolérances", () => {
+  // La transition doit être un sur-ensemble STRICT du final : rien n'a été
+  // ajouté ni perdu en chemin, seules les 4 clés de compatibilité tombent.
+  const transition = valeursDuCheck(MIGRATION_TRANSITION);
+  const finale = valeursDuCheck(MIGRATION_FINALE);
+  const enTrop = transition.filter((v) => !finale.includes(v));
+  const perdues = finale.filter((v) => !transition.includes(v));
+  assert.deepEqual([...enTrop].sort(), [...CLÉS_DEPRECATED].sort(),
+    "la seule différence doit être les 4 clés DEPRECATED");
+  assert.deepEqual(perdues, [], "le nettoyage n'a le droit d'ajouter aucune valeur");
 });
 
 await test("A0bis. la migration corrective ne convertit AUCUNE donnée d'office", () => {
@@ -403,9 +457,9 @@ await test("B7. aucune migration déjà appliquée n'est touchée", () => {
   const fichiers = readdirSync(new URL("../../supabase/migrations", import.meta.url).pathname)
     .filter((f) => f.endsWith(".sql"))
     .sort();
-  assert.equal(fichiers.length, 58, "58 migrations attendues après ce chantier");
+  assert.equal(fichiers.length, 59, "59 migrations attendues après ce chantier");
   assert.deepEqual(
-    fichiers.slice(-6),
+    fichiers.slice(-7),
     [
       "20260819090000_nutrition_recipe_images.sql",
       "20260820090000_training_movement_patterns.sql",
@@ -413,18 +467,20 @@ await test("B7. aucune migration déjà appliquée n'est touchée", () => {
       "20260822090000_workout_feedback_session_metadata.sql",
       "20260823090000_workout_feedback_unique_session.sql",
       "20260824090000_training_movement_patterns_v2.sql",
+      "20260825090000_training_movement_patterns_remove_legacy.sql",
     ],
-    "les cinq migrations du chantier viennent APRÈS celle des images, sans rien intercaler",
+    "les six migrations du chantier viennent APRÈS celle des images, sans rien intercaler",
   );
 
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 31);
+  assert.equal(attendues.length, 32);
   assert.ok(attendues.includes("20260820090000_training_movement_patterns.sql"), "manifeste non mis à jour");
   assert.ok(attendues.includes("20260821090000_workout_feedback_authoritative.sql"), "manifeste non mis à jour");
   assert.ok(attendues.includes("20260822090000_workout_feedback_session_metadata.sql"), "manifeste non mis à jour");
   assert.ok(attendues.includes("20260823090000_workout_feedback_unique_session.sql"), "manifeste non mis à jour");
   assert.ok(attendues.includes("20260824090000_training_movement_patterns_v2.sql"), "manifeste non mis à jour");
+  assert.ok(attendues.includes("20260825090000_training_movement_patterns_remove_legacy.sql"), "manifeste non mis à jour");
   assert.deepEqual(
     [...attendues].sort(),
     fichiers.filter((f) => f >= "20260724214500"),
@@ -448,7 +504,10 @@ await test("B8. la faille visée est nommée et corrigée : status et coach_repl
 await test("B9. la checklist SQL couvre les trois questions posées", () => {
   for (const marqueur of [
     "B1. la colonne movement_pattern existe",
-    "B4bis. TRANSITION : les 4 clés DEPRECATED sont encore acceptées",
+    "B4bis. « charniere_de_hanche » (fusionnée dans « hinge ») est REFUSÉE",
+    "B4quater. « flexion_coude » (scindée antérieur/postérieur) est REFUSÉE",
+    "B4sexies. aucune fiche legacy n''a survécu au refus",
+    "B4septies. le CHECK en base ne mentionne plus aucune clé retirée",
     "C1. l''élève obtient 2 remplaçants",
     "C7. un UUID inexistant ne rend AUCUNE ligne",
     "C9. la banque est GLOBALE",
