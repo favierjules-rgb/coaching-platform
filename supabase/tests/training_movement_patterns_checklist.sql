@@ -253,8 +253,33 @@ begin
   perform pg_temp.noter('B', 'B4. une valeur hors vocabulaire est REFUSÉE',
     pg_temp.refuse($q$
       insert into public.exercise_library (id, name, movement_pattern)
-      values ('3300ffff-0000-4000-8000-000000000001'::uuid, 'Faux pattern', 'hinge')
+      values ('3300ffff-0000-4000-8000-000000000001'::uuid, 'Faux pattern', 'poussee_oblique')
     $q$));
+
+  -- B4bis. ÉTAT TRANSITOIRE. Les 4 clés retirées du vocabulaire sont encore
+  -- ACCEPTÉES par le CHECK — c'est délibéré, et c'est ce qui protège la
+  -- fenêtre de déploiement : PostgreSQL revalide un CHECK sur la ligne
+  -- entière à chaque UPDATE, donc une fiche portant encore `flexion_coude`
+  -- deviendrait immodifiable si la clé disparaissait maintenant.
+  -- Elles seront retirées par la migration de nettoyage, écrite après la
+  -- mise en Production et le réétiquetage manuel des fiches concernées.
+  insert into public.exercise_library (id, name, movement_pattern) values
+    ('3300ffff-0000-4000-8000-000000000003'::uuid, 'Legacy fusionnée', 'charniere_de_hanche'),
+    ('3300ffff-0000-4000-8000-000000000004'::uuid, 'Legacy scindée 1', 'tirage_horizontal'),
+    ('3300ffff-0000-4000-8000-000000000005'::uuid, 'Legacy scindée 2', 'flexion_coude'),
+    ('3300ffff-0000-4000-8000-000000000006'::uuid, 'Legacy scindée 3', 'extension_coude');
+  select count(*) into v_n from public.exercise_library where name like 'Legacy %';
+  perform pg_temp.noter('B',
+    format('B4bis. TRANSITION : les 4 clés DEPRECATED sont encore acceptées (%s)', v_n),
+    v_n = 4);
+
+  -- Mais elles ne font PAS partie du vocabulaire : aucun sélecteur ne les
+  -- propose, et la migration de transition les signale comme telles.
+  perform pg_temp.noter('B', 'B4ter. et elles sont marquées DEPRECATED dans la migration',
+    (select count(*) from public.exercise_library
+      where movement_pattern in ('tirage_horizontal', 'flexion_coude',
+                                 'extension_coude', 'charniere_de_hanche')) = 4);
+  delete from public.exercise_library where name like 'Legacy %';
 
   insert into public.exercise_library (id, name, movement_pattern)
   values ('3300ffff-0000-4000-8000-000000000002'::uuid, 'Sans pattern', null);
@@ -264,26 +289,29 @@ begin
   begin
     insert into public.exercise_library (name, movement_pattern)
     select 'vocab-' || p, p from unnest(array[
-      'poussee_horizontale','poussee_verticale','tirage_horizontal','tirage_vertical',
-      'elevation_laterale','elevation_frontale','elevation_posterieure',
-      'rotation_externe_epaule','rotation_interne_epaule',
-      'flexion_coude','extension_coude','flexion_poignet','extension_poignet','pronosupination',
-      'squat','fente','charniere_de_hanche','extension_de_hanche',
-      'extension_genou','flexion_genou','abduction_hanche','adduction_hanche','rotation_hanche',
-      'flexion_plantaire','flexion_dorsale',
-      'flexion_tronc','extension_tronc','rotation_tronc',
-      'anti_extension','anti_rotation','anti_flexion_laterale',
-      'port_de_charge','haltero','pliometrie','locomotion','mobilite'
+      'poussee_horizontale','poussee_verticale','poussee_inclinee',
+      'poussee_declinee','tirage_vertical','tirage_horizontal_coudes_ouverts',
+      'tirage_horizontal_coudes_fermes','tirage_diagonal','ecarte_horizontal',
+      'ecarte_incline','ecarte_decline','elevation_laterale','elevation_frontale',
+      'elevation_posterieure','rotation_externe_epaule','rotation_interne_epaule',
+      'flexion_coude_anterieur','flexion_coude_posterieur',
+      'extension_coude_anterieur','extension_coude_posterieur','flexion_poignet',
+      'extension_poignet','pronosupination','squat','fente','hinge',
+      'extension_de_hanche','flexion_de_hanche','extension_genou','flexion_genou',
+      'abduction_hanche','adduction_hanche','rotation_hanche','flexion_plantaire',
+      'flexion_dorsale','flexion_tronc','extension_tronc','rotation_tronc',
+      'anti_extension','anti_rotation','anti_flexion_laterale','port_de_charge',
+      'haltero','pliometrie','locomotion','mobilite'
     ]) as p;
   exception when others then v_manquants := sqlerrm;
   end;
   perform pg_temp.noter('B',
-    format('B6. les 36 valeurs du vocabulaire sont acceptées%s',
+    format('B6. les 46 valeurs du vocabulaire sont acceptées%s',
            case when v_manquants = '' then '' else ' — ' || v_manquants end),
     v_manquants = '');
 
   select count(*) into v_n from public.exercise_library where name like 'vocab-%';
-  perform pg_temp.noter('B', 'B7. 36 valeurs, pas 35 ni 37', v_n = 36);
+  perform pg_temp.noter('B', 'B7. 46 valeurs, pas 45 ni 47', v_n = 46);
 
   -- Ménage : ces lignes ne doivent pas polluer les comptages de la section C.
   delete from public.exercise_library where name like 'vocab-%' or name = 'Sans pattern';

@@ -63,7 +63,8 @@
     "20260820090000_training_movement_patterns.sql",
     "20260821090000_workout_feedback_authoritative.sql",
     "20260822090000_workout_feedback_session_metadata.sql",
-    "20260823090000_workout_feedback_unique_session.sql"
+    "20260823090000_workout_feedback_unique_session.sql",
+    "20260824090000_training_movement_patterns_v2.sql"
   ],
   "garanties_de_contenu": {
     "insert_de_donnees_metier": 0,

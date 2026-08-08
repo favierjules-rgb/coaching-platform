@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 
@@ -67,6 +67,23 @@ async function test(nom: string, fn: () => void | Promise<void>) {
 const lire = (chemin: string) => readFileSync(new URL(chemin, import.meta.url), "utf8");
 
 const MIGRATION = lire("../../supabase/migrations/20260820090000_training_movement_patterns.sql");
+/**
+ * Le vocabulaire évolue en DEUX temps, parce que les migrations sont
+ * appliquées avant le merge et que la Production sert encore l'ancien
+ * frontend pendant cette fenêtre :
+ *   - 20260824 (TRANSITION, dans cette branche) : 46 valeurs courantes
+ *     PLUS 4 clés DEPRECATED encore acceptées ;
+ *   - la migration de NETTOYAGE, qui ne garde que les 46, n'est
+ *     volontairement PAS dans cette branche : elle sera écrite après le
+ *     merge, après la mise en Production, et après le réétiquetage manuel
+ *     des fiches restées en `flexion_coude`.
+ * 20260820090000, elle, a été appliquée au projet distant : immuable, elle
+ * porte pour toujours les 36 valeurs d'origine.
+ */
+const MIGRATION_TRANSITION = lire("../../supabase/migrations/20260824090000_training_movement_patterns_v2.sql");
+
+/** Les 4 clés retirées du vocabulaire, encore acceptées pendant la transition. */
+const CLÉS_DEPRECATED = ["tirage_horizontal", "flexion_coude", "extension_coude", "charniere_de_hanche"];
 const MIGRATION_AUTORITAIRE = lire("../../supabase/migrations/20260821090000_workout_feedback_authoritative.sql");
 const MIGRATION_METADONNEES = lire("../../supabase/migrations/20260822090000_workout_feedback_session_metadata.sql");
 /** La matrice de propriété vit en tête des deux migrations de sécurité. */
@@ -96,15 +113,117 @@ function sansCommentairesTs(source: string): string {
  * On découpe sur la région exacte du `array[...]` : la migration contient
  * d'autres littéraux (« active », « a-traiter »…) qu'il ne faut pas ramasser.
  */
-function valeursDuCheckSql(): string[] {
-  const début = MIGRATION.indexOf("exercise_library_movement_pattern_check\n      check (");
-  assert.ok(début > 0, "le CHECK du vocabulaire est introuvable dans la migration");
-  const ouverture = MIGRATION.indexOf("array[", début);
-  const fermeture = MIGRATION.indexOf("])", ouverture);
+/** Valeurs acceptées par le CHECK posé par une migration donnée. */
+function valeursDuCheck(sql: string): string[] {
+  const début = sql.indexOf("add constraint exercise_library_movement_pattern_check");
+  assert.ok(début > 0, "le CHECK est introuvable dans cette migration");
+  const ouverture = sql.indexOf("array[", début);
+  const fermeture = sql.indexOf("])", ouverture);
   assert.ok(ouverture > 0 && fermeture > ouverture, "bornes du tableau SQL introuvables");
-  const région = MIGRATION.slice(ouverture, fermeture);
-  return [...région.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+  return [...sql.slice(ouverture, fermeture).matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
 }
+
+/**
+ * Le vocabulaire COURANT : ce que le CHECK de transition accepte, MOINS les
+ * clés DEPRECATED. C'est cette liste-là qui doit correspondre exactement à
+ * `movementPatternOrder` — les 4 tolérances de déploiement ne font pas
+ * partie du vocabulaire et ne doivent apparaître dans aucun sélecteur.
+ */
+function valeursDuCheckSql(): string[] {
+  return valeursDuCheck(MIGRATION_TRANSITION).filter((v) => !CLÉS_DEPRECATED.includes(v));
+}
+
+/** Les 36 valeurs de la version 1, telles qu'appliquées en Production. */
+const VOCABULAIRE_V1 = [
+  "poussee_horizontale", "poussee_verticale", "tirage_horizontal", "tirage_vertical",
+  "elevation_laterale", "elevation_frontale", "elevation_posterieure",
+  "rotation_externe_epaule", "rotation_interne_epaule",
+  "flexion_coude", "extension_coude", "flexion_poignet", "extension_poignet", "pronosupination",
+  "squat", "fente", "charniere_de_hanche", "extension_de_hanche",
+  "extension_genou", "flexion_genou", "abduction_hanche", "adduction_hanche", "rotation_hanche",
+  "flexion_plantaire", "flexion_dorsale",
+  "flexion_tronc", "extension_tronc", "rotation_tronc",
+  "anti_extension", "anti_rotation", "anti_flexion_laterale",
+  "port_de_charge", "haltero", "pliometrie", "locomotion", "mobilite",
+];
+await test("A0. la migration APPLIQUÉE (20260820090000) n'a pas été retouchée", () => {
+  // Elle a tourné sur le projet distant : son contenu doit rester le reflet
+  // exact de ce qui a été exécuté. Faire évoluer le vocabulaire en la
+  // réécrivant produirait un fichier qui ment sur l'état réel de la base.
+  const début = MIGRATION.indexOf("exercise_library_movement_pattern_check\n      check (");
+  assert.ok(début > 0, "le CHECK d'origine est introuvable");
+  const région = MIGRATION.slice(MIGRATION.indexOf("array[", début), MIGRATION.indexOf("])", début));
+  const v1 = [...région.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+  assert.deepEqual([...v1].sort(), [...VOCABULAIRE_V1].sort(),
+    "20260820090000 doit porter EXACTEMENT les 36 valeurs d'origine");
+  assert.ok(MIGRATION.includes("vocabulaire contrôlé de 36"), "son en-tête aussi");
+  // Y compris les quatre clés retirées depuis : elles ont réellement existé.
+  for (const retirée of ["tirage_horizontal", "flexion_coude", "extension_coude", "charniere_de_hanche"]) {
+    assert.ok(v1.includes(retirée), `la version 1 portait ${retirée}`);
+  }
+});
+await test("A0ter. ÉTAT TRANSITOIRE (20260824) : 46 valeurs + les 4 clés DEPRECATED", () => {
+  const acceptées = valeursDuCheck(MIGRATION_TRANSITION);
+  assert.equal(acceptées.length, 50, "46 courantes + 4 tolérées");
+  // Le vocabulaire courant est intégralement là…
+  for (const p of movementPatternOrder) {
+    assert.ok(acceptées.includes(p), `valeur courante absente du CHECK de transition : ${p}`);
+  }
+  // …et les 4 anciennes AUSSI. Leur absence serait le bug : PostgreSQL
+  // revalide un CHECK sur la ligne entière à chaque UPDATE, donc une fiche
+  // portant encore une ancienne clé deviendrait immodifiable par l'ancien
+  // frontend pendant la fenêtre de déploiement.
+  for (const legacy of CLÉS_DEPRECATED) {
+    assert.ok(acceptées.includes(legacy), `clé DEPRECATED absente du CHECK de transition : ${legacy}`);
+  }
+  // Elles sont signalées comme telles, pas glissées en douce.
+  assert.ok(MIGRATION_TRANSITION.includes("DEPRECATED — COMPATIBILITÉ DE DÉPLOIEMENT UNIQUEMENT"));
+});
+
+await test("A0quater. la transition ANNONCE son nettoyage, sans l'embarquer", () => {
+  // La migration de nettoyage n'est pas dans cette branche : elle sera
+  // écrite après le merge, la mise en Production et le réétiquetage manuel.
+  // Ce qui compte ici, c'est que la dette soit NOMMÉE dans le fichier —
+  // une tolérance de déploiement qu'on oublie devient permanente.
+  assert.ok(MIGRATION_TRANSITION.includes("UNE MIGRATION DE NETTOYAGE VIENDRA LES RETIRER"));
+  assert.ok(MIGRATION_TRANSITION.includes("20260825090000_training_movement_patterns_remove_legacy.sql"),
+    "le nom prévu de la migration de nettoyage doit être écrit");
+  assert.ok(MIGRATION_TRANSITION.includes("elle n'est\n-- volontairement PAS dans cette branche"),
+    "et son absence doit être explicitement assumée");
+  assert.ok(
+    !existsSync(new URL("../../supabase/migrations/20260825090000_training_movement_patterns_remove_legacy.sql", import.meta.url).pathname),
+    "la migration de nettoyage ne doit pas encore exister dans cette branche",
+  );
+});
+
+await test("A0bis. la migration corrective ne convertit AUCUNE donnée d'office", () => {
+  const sql = MIGRATION_TRANSITION;
+  // Un précheck qui refuse, et DEUX mappings nommément validés — pas un de plus.
+  assert.ok(sql.includes("MIGRATION REFUSÉE"), "précheck de refus absent");
+  assert.equal([...sql.matchAll(/^  update public\.exercise_library$/gm)].length, 2,
+    "exactement deux mappings, ceux qui ont été validés");
+  assert.ok(sql.includes("set movement_pattern = 'tirage_horizontal_coudes_ouverts'"));
+  assert.ok(sql.includes("set movement_pattern = 'hinge'\n   where movement_pattern = 'charniere_de_hanche';"));
+  // NI `flexion_coude` NI `extension_coude` ne sont convertis : l'ambiguïté
+  // antérieur/postérieur n'appartient qu'au coach, qui réétiquette lui-même.
+  for (const clé of ["flexion_coude", "extension_coude"]) {
+    assert.ok(!new RegExp(`where movement_pattern = '${clé}'`).test(sql),
+      `${clé} ne doit être converti par aucune règle automatique`);
+  }
+  // AUCUNE valeur n'est mise à NULL : tant que la clé DEPRECATED est
+  // acceptée, la fiche garde la trace de ce qu'elle était.
+  assert.ok(!/set movement_pattern = null/i.test(sql),
+    "cette migration ne doit vider aucun pattern");
+  // Rien n'est jamais supprimé.
+  assert.ok(!/delete\s+from/i.test(sql), "aucune suppression de ligne");
+  // Et la contrainte tombe AVANT le remappage, sinon la nouvelle valeur
+  // violerait l'ancien CHECK.
+  const iDrop = sql.indexOf("drop constraint if exists exercise_library_movement_pattern_check");
+  const iMap = sql.indexOf("set movement_pattern = 'tirage_horizontal_coudes_ouverts'");
+  const iAdd = sql.indexOf("add constraint exercise_library_movement_pattern_check");
+  assert.ok(iDrop > 0 && iMap > iDrop && iAdd > iMap, "ordre drop → remappage → add non respecté");
+});
+
 
 await test("A1. le CHECK SQL et movementPatternOrder sont le MÊME ensemble", () => {
   const sql = valeursDuCheckSql();
@@ -116,10 +235,10 @@ await test("A1. le CHECK SQL et movementPatternOrder sont le MÊME ensemble", ()
   );
 });
 
-await test("A2. 36 valeurs, aucun doublon, aucune valeur vide", () => {
-  assert.equal(movementPatternOrder.length, 36);
-  assert.equal(new Set(movementPatternOrder).size, 36, "doublon dans le vocabulaire");
-  assert.equal(valeursDuCheckSql().length, 36, "le CHECK SQL n'a pas 36 valeurs");
+await test("A2. 46 valeurs, aucun doublon, aucune valeur vide", () => {
+  assert.equal(movementPatternOrder.length, 46);
+  assert.equal(new Set(movementPatternOrder).size, 46, "doublon dans le vocabulaire");
+  assert.equal(valeursDuCheckSql().length, 46, "le CHECK SQL n'a pas 46 valeurs");
   for (const p of movementPatternOrder) {
     assert.match(p, /^[a-z][a-z_]*[a-z]$/, `clé mal formée : ${p}`);
   }
@@ -147,7 +266,20 @@ await test("A4. toutes les articulations demandées sont couvertes", () => {
   }
   // Les deux exemples cités par l'utilisateur existent bien.
   assert.ok(movementPatternOrder.includes("elevation_laterale"), "« élévation » absente");
-  assert.ok(movementPatternOrder.includes("charniere_de_hanche"), "« hinge » absente");
+  assert.ok(movementPatternOrder.includes("hinge"), "« hinge » absent");
+
+  // AUCUN DOUBLON SÉMANTIQUE. Deux entrées pour le même mouvement seraient
+  // pires que pas de pattern du tout : deux exercices identiques ne se
+  // proposeraient jamais l'un l'autre. « Charnière de hanche » a été retiré
+  // au profit de « Hinge », qui désigne exactement la même chose.
+  assert.ok(
+    !(movementPatternOrder as readonly string[]).includes("charniere_de_hanche"),
+    "« charniere_de_hanche » et « hinge » sont le même mouvement : une seule entrée",
+  );
+  // Les découpages fins doivent rester des mouvements DISTINCTS, jamais des
+  // synonymes : on vérifie que chaque libellé est unique.
+  const libellés = movementPatternOrder.map((p) => movementPatternLabels[p]);
+  assert.equal(new Set(libellés).size, libellés.length, "deux patterns portent le même libellé");
 });
 
 await test("A5. normalizeMovementPattern refuse tout ce qui n'est pas du vocabulaire", () => {
@@ -157,16 +289,23 @@ await test("A5. normalizeMovementPattern refuse tout ce qui n'est pas du vocabul
   assert.equal(normalizeMovementPattern("   "), null);
   assert.equal(normalizeMovementPattern(null), null);
   assert.equal(normalizeMovementPattern(undefined), null);
-  assert.equal(normalizeMovementPattern("hinge"), null, "un synonyme anglais n'est pas du vocabulaire");
+  assert.equal(normalizeMovementPattern("hinge"), "hinge");
+  // Une clé RETIRÉE du vocabulaire doit être refusée, pas tolérée en douce :
+  // « charniere_de_hanche » a été fusionnée dans « hinge ».
+  assert.equal(normalizeMovementPattern("charniere_de_hanche"), null, "clé retirée du vocabulaire");
+  assert.equal(normalizeMovementPattern("tirage_horizontal"), null, "clé scindée en coudes ouverts/fermés");
+  assert.equal(normalizeMovementPattern("flexion_coude"), null, "clé scindée en antérieur/postérieur");
   assert.equal(normalizeMovementPattern("SQUAT"), null, "la casse n'est pas normalisée : c'est une clé, pas du texte");
   assert.equal(normalizeMovementPattern(42 as unknown as string), null);
 });
 
 await test("A6. les libellés d'affichage sont honnêtes, y compris sans pattern", () => {
-  assert.equal(movementPatternDisplayLabel("charniere_de_hanche"), "Charnière de hanche");
+  assert.equal(movementPatternDisplayLabel("hinge"), "Hinge");
   assert.equal(movementPatternDisplayLabel(null), "Pattern non renseigné");
-  assert.equal(movementPatternSelectLabel("charniere_de_hanche"), "Hanche / genou · Charnière de hanche");
+  assert.equal(movementPatternSelectLabel("hinge"), "Hanche / genou · Hinge");
   assert.equal(movementPatternSelectLabel("poussee_horizontale"), "Haut du corps · Poussée horizontale");
+  assert.equal(movementPatternSelectLabel("tirage_horizontal_coudes_fermes"), "Haut du corps · Tirage horizontal coudes fermés");
+  assert.equal(movementPatternSelectLabel("flexion_coude_anterieur"), "Coude / poignet · Flexion de coude antérieur");
 });
 
 
@@ -264,26 +403,28 @@ await test("B7. aucune migration déjà appliquée n'est touchée", () => {
   const fichiers = readdirSync(new URL("../../supabase/migrations", import.meta.url).pathname)
     .filter((f) => f.endsWith(".sql"))
     .sort();
-  assert.equal(fichiers.length, 57, "57 migrations attendues après ce chantier");
+  assert.equal(fichiers.length, 58, "58 migrations attendues après ce chantier");
   assert.deepEqual(
-    fichiers.slice(-5),
+    fichiers.slice(-6),
     [
       "20260819090000_nutrition_recipe_images.sql",
       "20260820090000_training_movement_patterns.sql",
       "20260821090000_workout_feedback_authoritative.sql",
       "20260822090000_workout_feedback_session_metadata.sql",
       "20260823090000_workout_feedback_unique_session.sql",
+      "20260824090000_training_movement_patterns_v2.sql",
     ],
-    "les quatre migrations du chantier viennent APRÈS celle des images, sans rien intercaler",
+    "les cinq migrations du chantier viennent APRÈS celle des images, sans rien intercaler",
   );
 
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 30);
+  assert.equal(attendues.length, 31);
   assert.ok(attendues.includes("20260820090000_training_movement_patterns.sql"), "manifeste non mis à jour");
   assert.ok(attendues.includes("20260821090000_workout_feedback_authoritative.sql"), "manifeste non mis à jour");
   assert.ok(attendues.includes("20260822090000_workout_feedback_session_metadata.sql"), "manifeste non mis à jour");
   assert.ok(attendues.includes("20260823090000_workout_feedback_unique_session.sql"), "manifeste non mis à jour");
+  assert.ok(attendues.includes("20260824090000_training_movement_patterns_v2.sql"), "manifeste non mis à jour");
   assert.deepEqual(
     [...attendues].sort(),
     fichiers.filter((f) => f >= "20260724214500"),
@@ -307,6 +448,7 @@ await test("B8. la faille visée est nommée et corrigée : status et coach_repl
 await test("B9. la checklist SQL couvre les trois questions posées", () => {
   for (const marqueur of [
     "B1. la colonne movement_pattern existe",
+    "B4bis. TRANSITION : les 4 clés DEPRECATED sont encore acceptées",
     "C1. l''élève obtient 2 remplaçants",
     "C7. un UUID inexistant ne rend AUCUNE ligne",
     "C9. la banque est GLOBALE",
@@ -1183,19 +1325,20 @@ await test("G3. la recherche de la banque trouve un pattern par sa clé ET par s
   const fiche: ExerciseLibraryItem = {
     id: "x", name: "Soulevé de terre", description: "",
     muscleGroup: "ischios", secondaryMuscles: [],
-    movementPattern: "charniere_de_hanche",
+    movementPattern: "hinge",
     category: "Force", exerciseType: "Force", equipment: "Barre", level: "avancé",
     videoUrl: "", alternativeVideoUrl: "", technicalNote: "", commonMistakes: "",
     coachInstructions: "", defaultTempo: "", defaultRestSeconds: null, tags: [],
     status: "active", createdAt: "", updatedAt: "",
   };
-  assert.ok(matchesExerciseSearch(fiche, "charniere"), "recherche par clé");
-  assert.ok(matchesExerciseSearch(fiche, "Charnière"), "recherche par libellé accentué");
-  assert.ok(matchesExerciseSearch(fiche, "hanche"), "recherche partielle");
+  assert.ok(matchesExerciseSearch(fiche, "hinge"), "recherche par clé");
+  assert.ok(matchesExerciseSearch(fiche, "Hinge"), "recherche insensible à la casse");
   assert.ok(!matchesExerciseSearch(fiche, "squat"), "un autre pattern ne doit pas répondre");
+  // Un libellé accentué reste cherchable : « Élévation postérieure ».
+  assert.ok(matchesExerciseSearch({ ...fiche, movementPattern: "elevation_posterieure" }, "postérieure"));
   // Une fiche sans pattern ne casse pas la recherche.
   assert.ok(matchesExerciseSearch({ ...fiche, movementPattern: null }, "soulevé"));
-  assert.ok(!matchesExerciseSearch({ ...fiche, movementPattern: null }, "charniere"));
+  assert.ok(!matchesExerciseSearch({ ...fiche, movementPattern: null }, "hinge"));
 });
 
 await test("G4. types/supabase.ts porte les trois nouvelles colonnes", () => {

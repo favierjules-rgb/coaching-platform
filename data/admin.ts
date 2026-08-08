@@ -203,7 +203,7 @@ export const adminExerciseLibrary: ExerciseLibraryItem[] = [
     description: "",
     muscleGroup: "dos",
     secondaryMuscles: ["biceps"],
-    movementPattern: "tirage_horizontal",
+    movementPattern: "tirage_horizontal_coudes_fermes",
     category: "Hypertrophie",
     exerciseType: "Hypertrophie",
     equipment: "Barre",
