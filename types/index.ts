@@ -1366,6 +1366,31 @@ export interface AdminExerciseFeedbackEntry {
 }
 
 /**
+ * VIDÉO DE TECHNIQUE D'UN EXERCICE (F4).
+ *
+ * Portée par le RETOUR, pas par `exerciseEntries`. Ce n'est pas un détail de
+ * rangement : `exerciseEntries` est une liste à PLAT, une entrée par SÉRIE.
+ * Une vidéo y aurait été répétée autant de fois qu'il y a de séries — et
+ * SURTOUT, un exercice filmé sans aucune série saisie n'y produit AUCUNE
+ * entrée, donc sa vidéo aurait été invisible à la relecture puis perdue à la
+ * resoumission. Une vidéo appartient à un exercice ; on la range là.
+ */
+export interface FeedbackVideoEntry {
+  /** Nom PRESCRIT de l'exercice — la clé de rapprochement à la réouverture. */
+  exerciseName: string;
+  /** Nom RÉELLEMENT réalisé (remplaçant le cas échéant) — ce que le coach lit. */
+  realizedName: string;
+  /** CHEMIN dans le bucket privé, jamais une URL : une URL signée périme. */
+  videoPath: string;
+  /**
+   * URL SIGNÉE, résolue À LA LECTURE et valable une heure. `null` quand la
+   * résolution n'a pas été faite, ou quand la RLS refuse ce chemin à cet
+   * appelant — un coach non rattaché à l'élève n'obtient rien.
+   */
+  videoUrl: string | null;
+}
+
+/**
  * Retour élève consolidé côté admin (entraînement, nutrition ou profil).
  * Correspond à une future table Supabase `student_feedback` ; les détails
  * par exercice restent une sous-liste (exerciseEntries) plutôt qu'une
@@ -1391,6 +1416,12 @@ export interface AdminStudentFeedback {
   pain: string;
   comment: string;
   exerciseEntries: AdminExerciseFeedbackEntry[];
+  /**
+   * Vidéos de technique du retour, une par exercice filmé (F4). Optionnelle :
+   * absente sur tout l'historique et sur le chemin mock, qui n'a pas de
+   * bucket. Vide quand aucun exercice n'a été filmé.
+   */
+  videos?: FeedbackVideoEntry[];
   status: FeedbackStatus;
   coachReply: string;
   createdAt: string;
@@ -1451,6 +1482,10 @@ export interface SupabaseExerciseFeedback {
   /** Trace du remplacement — voir AdminExerciseFeedbackEntry.substituteExerciseName. */
   substituteExerciseLibraryId: string | null;
   substituteExerciseName: string | null;
+  /** Vidéo de technique (F4) : chemin dans feedback-videos, ou null. */
+  videoPath: string | null;
+  /** Date du dépôt, DÉRIVÉE par la base — point d'appui de la rétention. */
+  videoUploadedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1507,6 +1542,13 @@ export interface ExerciseFeedbackPayload {
    * cet identifiant par le trigger de base, donc non falsifiable.
    */
   substituteExerciseLibraryId?: string | null;
+  /**
+   * Vidéo de technique (F4) : le CHEMIN rendu par le dépôt côté navigateur.
+   * Le fichier est déjà dans le bucket quand ce champ arrive — l'envoi du
+   * retour ne fait que le rattacher à la ligne. La base refuse tout chemin
+   * qui ne désigne pas le dossier de cet élève.
+   */
+  videoPath?: string | null;
 }
 
 export interface WorkoutFeedbackPayload {

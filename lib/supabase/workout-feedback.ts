@@ -5,12 +5,15 @@ import type {
   AdminExerciseFeedbackEntry,
   AdminStudentFeedback,
   FeedbackStatus,
+  FeedbackVideoEntry,
   SupabaseExerciseFeedback,
   SupabaseExerciseSetFeedback,
   SupabaseWorkoutFeedback,
   WorkoutFeedbackPayload,
 } from "@/types";
 import type { Database } from "@/types/supabase";
+import { loadSignedFeedbackVideoUrls } from "@/lib/supabase/storage-feedback-videos";
+import { exerciseFeedbackWorthPersisting } from "@/lib/workout-feedback-entry";
 import { sanitizeDurationMinutes, sanitizePerformedAt } from "@/lib/workout-history";
 
 /**
@@ -79,6 +82,8 @@ function mapExerciseFeedbackRow(row: ExerciseFeedbackRow): SupabaseExerciseFeedb
     comment: row.comment,
     substituteExerciseLibraryId: row.substitute_exercise_library_id,
     substituteExerciseName: row.substitute_exercise_name,
+    videoPath: row.video_path,
+    videoUploadedAt: row.video_uploaded_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -117,6 +122,12 @@ function toAdminStudentFeedback(
    * listes du coach n'affichent aucune vidéo.
    */
   substituteVideos: Map<string, string> = new Map(),
+  /**
+   * URLs signées des vidéos d'élève, par chemin. Vide par défaut, pour la
+   * même raison que `substituteVideos` : seuls les écrans qui affichent
+   * réellement la vidéo paient les signatures.
+   */
+  videoUrls: Map<string, string> = new Map(),
 ): AdminStudentFeedback {
   const exerciseEntries: AdminExerciseFeedbackEntry[] = exercises
     .slice()
@@ -149,6 +160,21 @@ function toAdminStudentFeedback(
       }));
     });
 
+  // VIDÉOS (F4) — bâties depuis les EXERCICES, jamais depuis les séries.
+  // Un exercice filmé sans aucune série saisie ne produit aucune entrée dans
+  // `exerciseEntries` : construire les vidéos à partir de cette liste-là les
+  // aurait perdues, et la resoumission suivante aurait effacé la référence.
+  const videos: FeedbackVideoEntry[] = exercises
+    .slice()
+    .sort((a, b) => (a.exerciseOrder ?? 0) - (b.exerciseOrder ?? 0))
+    .filter((exercise) => exercise.videoPath)
+    .map((exercise) => ({
+      exerciseName: exercise.exerciseName,
+      realizedName: exercise.substituteExerciseName ?? exercise.exerciseName,
+      videoPath: exercise.videoPath as string,
+      videoUrl: videoUrls.get(exercise.videoPath as string) ?? null,
+    }));
+
   return {
     id: feedback.id,
     studentId: feedback.studentId,
@@ -162,6 +188,7 @@ function toAdminStudentFeedback(
     pain: feedback.pain,
     comment: feedback.globalComment,
     exerciseEntries,
+    videos,
     status: feedback.status,
     coachReply: feedback.coachReply,
     prescribedSnapshot: feedback.prescribedSnapshot ?? null,
@@ -246,6 +273,25 @@ async function loadExercisesAndSets(
   return { exercisesByFeedbackId, setsByExerciseFeedbackId };
 }
 
+/**
+ * URLs SIGNÉES des vidéos de technique (F4), par chemin.
+ *
+ * Même arbitrage que `loadSubstituteVideos` : seules les lectures de DÉTAIL
+ * paient les signatures — l'écran où l'élève rouvre son retour, et la modale
+ * où le coach le regarde. Les listes transportent le chemin et rien d'autre.
+ * Une URL signée est un jeton d'accès : on n'en fabrique pas pour des lignes
+ * que personne ne regardera.
+ */
+async function loadFeedbackVideoUrls(
+  supabase: TypedSupabaseClient,
+  exercises: SupabaseExerciseFeedback[],
+): Promise<Map<string, string>> {
+  return loadSignedFeedbackVideoUrls(
+    supabase,
+    exercises.map((exercise) => exercise.videoPath),
+  );
+}
+
 /* ─── Lecture ─── */
 
 /**
@@ -276,7 +322,8 @@ export async function getWorkoutFeedbackBySession(
   // SEULE lecture qui résout les démonstrations : c'est celle qui alimente
   // l'écran où l'élève rouvre son retour pour le modifier.
   const videos = await loadSubstituteVideos(supabase, exercises);
-  return toAdminStudentFeedback(feedback, exercises, setsByExerciseFeedbackId, videos);
+  const videosEleve = await loadFeedbackVideoUrls(supabase, exercises);
+  return toAdminStudentFeedback(feedback, exercises, setsByExerciseFeedbackId, videos, videosEleve);
 }
 
 /** Liste de tous les retours Supabase pour /admin/retours, plus récents en premier. */
@@ -295,8 +342,20 @@ export async function getAdminWorkoutFeedbackList(supabase: TypedSupabaseClient)
     supabase,
     feedbacks.map((f) => f.id),
   );
+  // C'EST CE CHEMIN QUE LE COACH EMPRUNTE. /admin/retours affiche cette
+  // liste, et c'est depuis une de ses lignes que FeedbackDetailModal s'ouvre
+  // — il n'existe aucun second chargement « de détail ». Les URLs sont donc
+  // signées ici, EN UNE SEULE requête pour toute la page (createSignedUrls),
+  // et seulement pour les vidéos que la RLS accorde à CE coach.
+  const videoUrls = await loadFeedbackVideoUrls(supabase, [...exercisesByFeedbackId.values()].flat());
   return feedbacks.map((feedback) =>
-    toAdminStudentFeedback(feedback, exercisesByFeedbackId.get(feedback.id) ?? [], setsByExerciseFeedbackId),
+    toAdminStudentFeedback(
+      feedback,
+      exercisesByFeedbackId.get(feedback.id) ?? [],
+      setsByExerciseFeedbackId,
+      new Map(),
+      videoUrls,
+    ),
   );
 }
 
@@ -323,22 +382,6 @@ export async function getWorkoutFeedbackForStudent(
   return feedbacks.map((feedback) =>
     toAdminStudentFeedback(feedback, exercisesByFeedbackId.get(feedback.id) ?? [], setsByExerciseFeedbackId),
   );
-}
-
-/** `null` si le retour n'existe pas/erreur — utilisé pour un rafraîchissement ciblé du détail. */
-export async function getAdminWorkoutFeedbackDetail(
-  supabase: TypedSupabaseClient,
-  feedbackId: string,
-): Promise<AdminStudentFeedback | null> {
-  const { data, error } = await supabase.from("workout_feedback").select("*").eq("id", feedbackId).maybeSingle();
-  devWarn("getAdminWorkoutFeedbackDetail", error);
-  if (!data) {
-    return null;
-  }
-
-  const feedback = mapWorkoutFeedbackRow(data);
-  const { exercisesByFeedbackId, setsByExerciseFeedbackId } = await loadExercisesAndSets(supabase, [feedback.id]);
-  return toAdminStudentFeedback(feedback, exercisesByFeedbackId.get(feedback.id) ?? [], setsByExerciseFeedbackId);
 }
 
 /* ─── Écriture ─── */
@@ -545,8 +588,17 @@ async function ecrireExercicesEtRendre(
   const { feedbackId, status, coachReply, programId, sessionKey, refLabel, now } = contexte;
 
   const exerciseEntries: AdminExerciseFeedbackEntry[] = [];
+  // Les vidéos sont collectées AU NIVEAU DE L'EXERCICE, comme à la lecture :
+  // un exercice filmé sans série n'a aucune entrée de série, sa vidéo ne peut
+  // donc pas voyager dans `exerciseEntries`.
+  const videos: FeedbackVideoEntry[] = [];
   for (const exercise of payload.exercises) {
-    if (exercise.sets.length === 0) continue;
+    // Une ligne est écrite dès qu'elle porte une donnée UTILE — pas
+    // seulement des séries. Avant ce correctif, un exercice filmé sans
+    // aucune série saisie disparaissait à l'envoi et laissait son fichier
+    // orphelin dans le bucket. La règle vit dans lib/workout-feedback-entry.ts,
+    // pour être lue et testée seule.
+    if (!exerciseFeedbackWorthPersisting(exercise)) continue;
     const { data: exerciseRow, error: exerciseError } = await supabase
       .from("exercise_feedback")
       .insert({
@@ -565,13 +617,32 @@ async function ecrireExercicesEtRendre(
         // enforce_exercise_feedback_substitution dérive le nom de la banque
         // et refuse tout remplacement qui ne partage pas le pattern.
         substitute_exercise_library_id: exercise.substituteExerciseLibraryId ?? null,
+        // Vidéo de technique (F4) : on envoie le CHEMIN rendu par le dépôt.
+        // `video_uploaded_at` n'est PAS envoyé — il est dérivé par le
+        // trigger, exactement comme substitute_exercise_name.
+        video_path: exercise.videoPath ?? null,
       })
       // On RELIT le nom écrit par la base plutôt que de le supposer : c'est
       // la base qui décide, l'écran ne fait qu'afficher sa décision.
-      .select("id, substitute_exercise_name")
+      // On RELIT ce que la base a retenu — nom du remplaçant ET chemin de
+      // vidéo : c'est elle qui décide, l'écran ne fait qu'afficher sa décision.
+      .select("id, substitute_exercise_name, video_path")
       .single();
     devWarn("saveWorkoutFeedback (exercise insert)", exerciseError);
     if (!exerciseRow) continue;
+
+    // On relit le chemin RETENU PAR LA BASE, jamais celui qu'on a envoyé :
+    // c'est elle qui refuse un chemin étranger, l'écran ne fait qu'afficher
+    // sa décision. L'URL signée, elle, n'est pas fabriquée ici — cet objet
+    // sert à rafraîchir l'écran de l'élève, qui la résout lui-même.
+    if (exerciseRow.video_path) {
+      videos.push({
+        exerciseName: exercise.exerciseName,
+        realizedName: exerciseRow.substitute_exercise_name ?? exercise.exerciseName,
+        videoPath: exerciseRow.video_path,
+        videoUrl: null,
+      });
+    }
 
     const { error: setsError } = await supabase.from("exercise_set_feedback").insert(
       exercise.sets.map((set) => ({
@@ -625,6 +696,7 @@ async function ecrireExercicesEtRendre(
     pain: payload.pain,
     comment: payload.globalComment,
     exerciseEntries,
+    videos,
     status,
     coachReply,
     createdAt: now,

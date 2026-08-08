@@ -245,6 +245,14 @@ export function SessionFeedbackSection({
   const [substitutions, setSubstitutions] = useState<Record<string, ExerciseSubstituteOption | null>>({});
   const remplacerExercice = (exerciseId: string, option: ExerciseSubstituteOption | null) =>
     setSubstitutions((prev) => ({ ...prev, [exerciseId]: option }));
+  // VIDÉOS DE TECHNIQUE (F4) — indexées par `exercise.id`, exactement comme
+  // les remplacements, et tout aussi étrangères à `exerciseFeedback` : une
+  // vidéo ne modifie ni une série, ni un commentaire. On garde le CHEMIN,
+  // jamais une URL : le fichier est déjà dans le bucket quand ce chemin
+  // apparaît, l'envoi du retour ne fait que le rattacher à la ligne.
+  const [videosExercice, setVideosExercice] = useState<Record<string, string | null>>({});
+  const changerVideo = (exerciseId: string, chemin: string | null) =>
+    setVideosExercice((prev) => ({ ...prev, [exerciseId]: chemin }));
   const [completed, setCompleted] = useState(false);
   const [globalRpe, setGlobalRpe] = useState("");
   const [globalComment, setGlobalComment] = useState("");
@@ -383,6 +391,10 @@ export function SessionFeedbackSection({
             // On envoie l'IDENTIFIANT du remplaçant, jamais son nom : la
             // base le dérive elle-même et refuse tout pattern discordant.
             substituteExerciseLibraryId: substitutions[exerciseFb.exerciseId]?.id ?? null,
+            // Vidéo de technique : le CHEMIN déjà déposé. La route vérifie
+            // qu'il désigne bien le dossier de cet élève, et le trigger le
+            // revérifie — le client ne fait que transporter.
+            videoPath: videosExercice[exerciseFb.exerciseId] ?? null,
             // Option B : plus de saisie RPE au niveau exercice pour la
             // musculation — le RPE vit PAR SÉRIE (exercise_set_feedback.rpe).
             // Aucune moyenne ni valeur globale inventée. (Le cardio garde son
@@ -526,6 +538,29 @@ export function SessionFeedbackSection({
       }
       return restaurés;
     });
+    // VIDÉOS — restaurées pour la même raison que les remplacements : une
+    // re-soumission REMPLACE les lignes d'exercice, donc un chemin non
+    // renvoyé serait silencieusement perdu et le fichier deviendrait
+    // orphelin. Le chemin survit à la réécriture parce que l'écran le
+    // renvoie ; c'est précisément pour cela qu'il ne contient pas
+    // l'identifiant de la ligne.
+    //
+    // La source est `feedback.videos` et NON `exerciseEntries` : cette
+    // dernière est une liste par SÉRIE, où un exercice filmé sans aucune
+    // série saisie n'apparaît pas du tout.
+    setVideosExercice(() => {
+      const restaurées: Record<string, string | null> = {};
+      const parNomPrescrit = new Map<string, string>();
+      for (const video of existingFeedback.videos ?? []) {
+        parNomPrescrit.set(normalizeExerciseName(video.exerciseName), video.videoPath);
+      }
+      for (const exercise of strengthExercises) {
+        const chemin = parNomPrescrit.get(normalizeExerciseName(exercise.name));
+        if (chemin) restaurées[exercise.id] = chemin;
+      }
+      return restaurées;
+    });
+
     // Option B — édition : restaure les valeurs muscu réellement ENREGISTRÉES
     // (charge/reps/RPE par série + commentaire d'exercice), pour que la
     // re-soumission (qui remplace les exercices, chemin idempotent inchangé)
@@ -775,6 +810,16 @@ export function SessionFeedbackSection({
             // n'existent — on ne montre pas un bouton qui ne mènerait à rien.
             {...(supabaseFeedback.active
               ? { onSubstituteChange: (option: ExerciseSubstituteOption | null) => remplacerExercice(exercise.id, option) }
+              : {})}
+            // La vidéo, comme le remplacement, n'existe que sur le chemin
+            // Supabase réel : elle exige un bucket, une identité d'élève et
+            // une ligne en base. Sur le chemin mock, aucun des trois.
+            {...(supabaseFeedback.active && supabaseFeedback.studentId
+              ? {
+                  studentId: supabaseFeedback.studentId,
+                  videoPath: videosExercice[exercise.id] ?? null,
+                  onVideoChange: (chemin: string | null) => changerVideo(exercise.id, chemin),
+                }
               : {})}
           />
         )}

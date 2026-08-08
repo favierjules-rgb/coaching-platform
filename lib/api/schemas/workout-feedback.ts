@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { FEEDBACK_VIDEO_PATH_SHAPE } from "@/lib/feedback-video";
+
 /**
  * Schéma STRICT du corps de POST /api/student/workout-feedback — extrait de
  * la route (correctif fix/workout-feedback-save-production) pour être testé
@@ -53,6 +55,18 @@ const exerciseSchema = z.object({
   // accepté du client : il est dérivé côté base. Le schéma reste `.strict()`,
   // donc envoyer `substituteExerciseName` fait toujours échouer la requête.
   substituteExerciseLibraryId: z.uuid().nullable().optional(),
+  // ── Vidéo de technique (F4, feat/student-feedback-video) ────────────────
+  // Le CHEMIN dans le bucket privé, jamais une URL : une URL signée est un
+  // jeton d'accès qui périme, et l'accepter du client reviendrait à laisser
+  // écrire n'importe quelle adresse dans le retour. La forme est validée
+  // ici ET par la contrainte SQL du même nom ; l'APPARTENANCE, elle, est
+  // tranchée par le trigger — un chemin bien formé qui désigne le dossier
+  // d'un autre élève passe ce schéma et se fait refuser par la base.
+  videoPath: z
+    .string()
+    .regex(FEEDBACK_VIDEO_PATH_SHAPE, "chemin de vidéo non conforme")
+    .nullable()
+    .optional(),
   })
   .strict();
 

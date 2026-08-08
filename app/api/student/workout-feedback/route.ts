@@ -195,6 +195,27 @@ export async function POST(request: Request) {
     }
   }
 
+  // 4-ter. VIDÉOS DE TECHNIQUE — le chemin doit désigner le dossier de CET élève.
+  //
+  //   Le schéma a déjà validé la FORME ; il ne peut rien dire de
+  //   l'APPARTENANCE, parce qu'il ne connaît pas l'élève. Le trigger
+  //   `enforce_exercise_feedback_write` est le dernier rempart et refuserait
+  //   de toute façon — mais, comme pour les remplacements, un refus au
+  //   niveau du trigger arriverait au milieu de l'écriture, exercice par
+  //   exercice. On tranche donc ici, avant la moindre ligne écrite.
+  //
+  //   `studentRow.id` vient du SERVEUR, jamais du corps de la requête :
+  //   c'est ce qui rend ce contrôle non contournable.
+  const videoEtrangere = payload.exercises.find(
+    (e) => e.videoPath && e.videoPath.split("/")[0] !== studentRow.id,
+  );
+  if (videoEtrangere) {
+    return NextResponse.json(
+      { error: "Cette vidéo n'est pas la tienne." },
+      { status: 403 },
+    );
+  }
+
   // 5. Écriture : student_id imposé par le serveur, snapshot construit par la
   //    couche à partir des lignes réelles, immutabilité garantie en aval.
   const saved = await saveWorkoutFeedback(supabase, { ...payload, studentId: studentRow.id });

@@ -18,6 +18,7 @@ import {
   normalizeMovementPattern,
 } from "../../lib/movement-patterns";
 import { parseExerciseSubstitutes } from "../../lib/supabase/exercise-substitutes";
+import { creerBase } from "./helpers/supabase-double";
 import { saveWorkoutFeedback } from "../../lib/supabase/workout-feedback";
 import type {
   Exercise,
@@ -88,8 +89,14 @@ const MIGRATION_FINALE = lire("../../supabase/migrations/20260825090000_training
 const CLÉS_DEPRECATED = ["tirage_horizontal", "flexion_coude", "extension_coude", "charniere_de_hanche"];
 const MIGRATION_AUTORITAIRE = lire("../../supabase/migrations/20260821090000_workout_feedback_authoritative.sql");
 const MIGRATION_METADONNEES = lire("../../supabase/migrations/20260822090000_workout_feedback_session_metadata.sql");
-/** La matrice de propriété vit en tête des deux migrations de sécurité. */
-const MATRICE = MIGRATION_AUTORITAIRE + "\n" + MIGRATION_METADONNEES;
+/**
+ * La matrice de propriété vit en tête des migrations qui posent des colonnes
+ * sur les trois tables de retour. Elle s'ÉTEND, elle ne se réécrit pas : une
+ * migration appliquée est immuable, donc une colonne ajoutée plus tard se
+ * classe dans la migration qui l'ajoute. Le contrôle BB1 lit l'ensemble.
+ */
+const MIGRATION_VIDEO = lire("../../supabase/migrations/20260826090000_student_feedback_video.sql");
+const MATRICE = [MIGRATION_AUTORITAIRE, MIGRATION_METADONNEES, MIGRATION_VIDEO].join("\n");
 const COUCHE_ECRITURE = lire("../../lib/supabase/workout-feedback.ts");
 const CHECKLIST = lire("../../supabase/tests/training_movement_patterns_checklist.sql");
 const CARTE = lire("../../components/student/ExerciseFeedbackCard.tsx");
@@ -457,9 +464,15 @@ await test("B7. aucune migration déjà appliquée n'est touchée", () => {
   const fichiers = readdirSync(new URL("../../supabase/migrations", import.meta.url).pathname)
     .filter((f) => f.endsWith(".sql"))
     .sort();
-  assert.equal(fichiers.length, 59, "59 migrations attendues après ce chantier");
+  assert.equal(fichiers.length, 60, "60 migrations attendues après ce chantier");
+  // On ancre sur la migration qui PRÉCÈDE le chantier plutôt que sur la fin
+  // du dossier : ce qui doit rester vrai, c'est que les six migrations F3 se
+  // suivent sans rien d'intercalé — pas qu'elles soient les dernières. Un
+  // chantier suivant (F4…) ne doit pas faire échouer un test de F3.
+  const départ = fichiers.indexOf("20260819090000_nutrition_recipe_images.sql");
+  assert.ok(départ >= 0, "la migration des images de recettes a disparu");
   assert.deepEqual(
-    fichiers.slice(-7),
+    fichiers.slice(départ, départ + 7),
     [
       "20260819090000_nutrition_recipe_images.sql",
       "20260820090000_training_movement_patterns.sql",
@@ -474,7 +487,7 @@ await test("B7. aucune migration déjà appliquée n'est touchée", () => {
 
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 32);
+  assert.equal(attendues.length, 33);
   assert.ok(attendues.includes("20260820090000_training_movement_patterns.sql"), "manifeste non mis à jour");
   assert.ok(attendues.includes("20260821090000_workout_feedback_authoritative.sql"), "manifeste non mis à jour");
   assert.ok(attendues.includes("20260822090000_workout_feedback_session_metadata.sql"), "manifeste non mis à jour");
@@ -875,137 +888,8 @@ await test("C5. la route rejoue la règle du remplacement AVANT toute écriture"
  * D. L'ÉCRITURE — l'identifiant part, le nom revient de la base
  * ════════════════════════════════════════════════════════════════════════ */
 
-type Ligne = Record<string, unknown>;
-
-/**
- * Base factice REPRODUISANT le trigger de la migration : le nom du
- * remplaçant est DÉRIVÉ de son identifiant, quoi que l'appelant envoie.
- * C'est ce comportement que la couche applicative doit respecter — et c'est
- * lui qui rend le test probant plutôt que tautologique.
- */
-function creerBase() {
-  const banque: Record<string, string> = {
-    "33000000-0000-4000-8000-0000000000a2": "Développé couché haltères",
-    "33000000-0000-4000-8000-0000000000a3": "Pompes lestées",
-  };
-  const tables = new Map<string, Ligne[]>();
-  const table = (nom: string) => {
-    if (!tables.has(nom)) tables.set(nom, []);
-    return tables.get(nom)!;
-  };
-  const défauts: Record<string, Ligne> = {
-    workout_feedback: {
-      session_id: null, program_id: null, completed: false, global_rpe: null, global_comment: "",
-      pain: "", status: "a-traiter", coach_reply: "", prescribed_snapshot: null, performed_at: null,
-      duration_minutes: null, session_status: null,
-      submitted_at: "2026-08-08T10:00:00Z", created_at: "2026-08-08T10:00:00Z", updated_at: "2026-08-08T10:00:00Z",
-    },
-    exercise_feedback: {
-      exercise_id: null, rpe: null, comment: "",
-      substitute_exercise_library_id: null, substitute_exercise_name: null,
-      created_at: "2026-08-08T10:00:00Z", updated_at: "2026-08-08T10:00:00Z",
-    },
-    exercise_set_feedback: { load_used: "", reps_done: "", rpe: null },
-  };
-  let compteur = 0;
-  const envoyé: Ligne[] = [];
-  /** Erreur d'unicité posée par l'insert simulé, relue par `single()`. */
-  let collision: { code: string; message: string } | null = null;
-  /** Erreur arbitraire à injecter au PROCHAIN insert workout_feedback. */
-  let erreurInjectée: { code: string; message: string } | null = null;
-
-  function from(nom: string) {
-    const état: { op: "select" | "insert" | "update" | "delete"; valeurs?: Ligne | Ligne[]; filtres: [string, unknown][] } =
-      { op: "select", filtres: [] };
-    const correspond = (l: Ligne) => état.filtres.every(([c, v]) => l[c] === v);
-    const exécuter = (): Ligne[] => {
-      const lignes = table(nom);
-      if (état.op === "select") return lignes.filter(correspond).map((l) => ({ ...l }));
-      if (état.op === "insert") {
-        const valeurs = Array.isArray(état.valeurs) ? état.valeurs : [état.valeurs ?? {}];
-        // L'INDEX UNIQUE PARTIEL, reproduit (migration 20260823090000) :
-        // un élève + une séance réelle = un seul retour. Sans lui, le
-        // rattrapage de collision ne serait jamais exercé.
-        if (nom === "workout_feedback") {
-          for (const v of valeurs) {
-            if (
-              v.session_id &&
-              table(nom).some((l) => l.student_id === v.student_id && l.session_id === v.session_id)
-            ) {
-              collision = { code: "23505", message: 'duplicate key value violates unique constraint "workout_feedback_one_per_student_session_uidx"' };
-              return [];
-            }
-          }
-        }
-        return valeurs.map((v) => {
-          if (nom === "exercise_feedback") envoyé.push({ ...v });
-          const ligne: Ligne = { id: `${nom}-${(compteur += 1)}`, ...(défauts[nom] ?? {}), ...v };
-          // ── LE TRIGGER, reproduit ──────────────────────────────────────
-          if (nom === "exercise_feedback") {
-            const idSub = ligne.substitute_exercise_library_id as string | null;
-            ligne.substitute_exercise_name = idSub ? (banque[idSub] ?? null) : null;
-          }
-          lignes.push(ligne);
-          return { ...ligne };
-        });
-      }
-      if (état.op === "update") {
-        const touchées = lignes.filter(correspond);
-        for (const l of touchées) Object.assign(l, état.valeurs);
-        return touchées.map((l) => ({ ...l }));
-      }
-      const gardées = lignes.filter((l) => !correspond(l));
-      tables.set(nom, gardées);
-      return [];
-    };
-    const chaîne: Record<string, unknown> = {
-      select: () => chaîne,
-      insert(v: Ligne | Ligne[]) { état.op = "insert"; état.valeurs = v; return chaîne; },
-      update(v: Ligne) { état.op = "update"; état.valeurs = v; return chaîne; },
-      delete() { état.op = "delete"; return chaîne; },
-      eq(c: string, v: unknown) { état.filtres.push([c, v]); return chaîne; },
-      in: () => chaîne,
-      order: () => chaîne,
-      limit: () => chaîne,
-      maybeSingle: () => Promise.resolve({ data: exécuter()[0] ?? null, error: null }),
-      single: () => {
-        if (nom === "workout_feedback" && état.op === "insert" && erreurInjectée) {
-          const erreur = erreurInjectée;
-          erreurInjectée = null;
-          return Promise.resolve({ data: null, error: erreur });
-        }
-        const [première] = exécuter();
-        if (collision) {
-          const erreur = collision;
-          collision = null;
-          return Promise.resolve({ data: null, error: erreur });
-        }
-        return Promise.resolve({ data: première ?? null, error: première ? null : { message: "aucune ligne" } });
-      },
-      then: (résoudre: (v: { data: Ligne[]; error: null }) => void) => résoudre({ data: exécuter(), error: null }),
-    };
-    return chaîne;
-  }
-  const client = { from } as never;
-  injecteurs.set(client, (e) => { erreurInjectée = e; });
-  return { client, table, envoyé };
-}
 
 const ÉLÈVE = "32000000-0000-4000-8000-000000000002";
-
-/**
- * Injecteur d'erreur de la base factice, adressé par son client. Une Map
- * externe plutôt qu'une méthode sur l'objet : le client est typé `never`
- * pour se faire accepter par `saveWorkoutFeedback`, il ne peut donc porter
- * aucune méthode visible côté test.
- */
-const injecteurs = new Map<unknown, (e: { code: string; message: string }) => void>();
-
-function injecterErreur(client: unknown, e: { code: string; message: string }): void {
-  const injecteur = injecteurs.get(client);
-  assert.ok(injecteur, "base factice sans injecteur d'erreur");
-  injecteur(e);
-}
 
 function payloadAvecRemplacement(): WorkoutFeedbackPayload {
   return {
@@ -1137,19 +1021,19 @@ await test("DB1. course perdue : le retour GAGNANT est réutilisé, jamais un se
 });
 
 await test("DB2. une erreur qui N'EST PAS une collision n'est jamais réinterprétée", async () => {
-  const { client, table } = creerBase();
+  const { client, table, injecterErreur } = creerBase();
   // 42501 = insufficient_privilege (refus RLS). Le rattrapage ne doit pas
   // s'enclencher : on ne veut surtout pas transformer un refus de droits en
   // « le retour existait déjà ».
-  injecterErreur(client, { code: "42501", message: "new row violates row-level security policy" });
+  injecterErreur({ code: "42501", message: "new row violates row-level security policy" });
   const sauvé = await saveWorkoutFeedback(client, payloadAvecRemplacement());
   assert.equal(sauvé, null, "un refus RLS doit rester un échec franc");
   assert.equal(table("workout_feedback").length, 0, "et rien ne doit être écrit");
 });
 
 await test("DB3. collision sans session_id : aucun rattrapage possible, échec franc", async () => {
-  const { client, table } = creerBase();
-  injecterErreur(client, { code: "23505", message: "duplicate key" });
+  const { client, table, injecterErreur } = creerBase();
+  injecterErreur({ code: "23505", message: "duplicate key" });
   const payload = payloadAvecRemplacement();
   payload.sessionId = null;
   const sauvé = await saveWorkoutFeedback(client, payload);

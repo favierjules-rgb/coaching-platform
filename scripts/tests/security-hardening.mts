@@ -260,7 +260,21 @@ await test("12. en-têtes de sécurité déclarés", async () => {
   assert.equal(parCle.get("X-Content-Type-Options"), "nosniff");
   assert.equal(parCle.get("X-Frame-Options"), "DENY");
   assert.equal(parCle.get("Referrer-Policy"), "strict-origin-when-cross-origin");
-  assert.ok(parCle.get("Permissions-Policy")?.includes("camera=()"), "Permissions-Policy restrictive");
+  // Permissions-Policy : la caméra a été OUVERTE À CE SITE SEUL par F4
+  // (feat/student-feedback-video), pour que l'élève puisse filmer sa
+  // technique. Le contrôle ne s'est pas assoupli, il s'est DÉPLACÉ — et il
+  // s'est durci sur les deux points qui comptent :
+  //   - `camera=(self)` et rien d'autre : `camera=*` ou une origine tierce
+  //     donnerait le droit à une iframe (Stripe comprise) ;
+  //   - `microphone=()` reste FERMÉ : la capture demande `audio: false`, une
+  //     vidéo de technique n'a pas besoin du son.
+  const permissions = parCle.get("Permissions-Policy") ?? "";
+  assert.ok(permissions.includes("camera=(self)"), "la caméra doit être ouverte à ce site seul");
+  assert.ok(!/camera=\*/.test(permissions), "la caméra ne doit jamais être ouverte à toutes les origines");
+  assert.ok(permissions.includes("microphone=()"), "le micro doit rester fermé");
+  for (const api of ["geolocation=()", "payment=()", "usb=()", "interest-cohort=()"]) {
+    assert.ok(permissions.includes(api), `${api} ne doit pas avoir été rouvert`);
+  }
 
   const csp = parCle.get("Content-Security-Policy-Report-Only");
   assert.ok(csp, "CSP absente");
@@ -268,6 +282,13 @@ await test("12. en-têtes de sécurité déclarés", async () => {
   assert.ok(csp.includes("object-src 'none'"), "object-src non verrouillé");
   assert.ok(csp.includes("https://*.supabase.co"), "Supabase absent de connect-src");
   assert.ok(csp.includes("https://js.stripe.com"), "Stripe absent");
+  // `media-src` : sans lui, les `<video>` retombent sur `default-src 'self'`
+  // et la vidéo de technique (aperçu `blob:` + URL signée Storage) casserait
+  // le jour où la CSP passera en mode bloquant — sans autre symptôme qu'un
+  // lecteur noir.
+  assert.ok(csp.includes("media-src"), "media-src non déclaré");
+  assert.ok(/media-src[^;]*blob:/.test(csp), "aperçu local (blob:) non autorisé");
+  assert.ok(/media-src[^;]*supabase\.co/.test(csp), "URL signée Storage non autorisée");
   // Report-Only d'abord : une CSP bloquante non mesurée casse le paiement.
   assert.ok(!parCle.has("Content-Security-Policy"), "la CSP doit rester en Report-Only à ce stade");
 });
@@ -428,7 +449,7 @@ await test("18. le baseline est HORS de supabase/migrations — impossible à po
   // 39 depuis la persistance de l'objectif hebdomadaire des plans v2
   // (migration 20260805090000, feat/nutrition-plan-v2-builder — déclarée
   // dans le manifeste comme le veut la procédure).
-  assert.equal(migrations.filter((f) => f.endsWith(".sql")).length, 59, "les 59 migrations doivent rester intactes");
+  assert.equal(migrations.filter((f) => f.endsWith(".sql")).length, 60, "les 60 migrations doivent rester intactes");
 });
 
 await test("19. manifeste : empreintes exactes et borne cohérente", () => {
@@ -451,7 +472,7 @@ await test("19. manifeste : empreintes exactes et borne cohérente", () => {
   // Les migrations annoncées existent réellement, et ce sont bien celles
   // qui suivent la borne.
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 32);
+  assert.equal(attendues.length, 33);
   const presentes = readdirSync(new URL("../../supabase/migrations", import.meta.url).pathname)
     .filter((f) => f.endsWith(".sql"))
     .filter((f) => f >= "20260724214500")
