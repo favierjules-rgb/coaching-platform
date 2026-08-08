@@ -1,4 +1,5 @@
 import { currentDate } from "@/lib/clock";
+import { movementPatternLabels } from "@/lib/movement-patterns";
 import { normalizePaymentProfile } from "@/lib/payments";
 import type {
   AdminContentStatus,
@@ -427,7 +428,17 @@ export const exerciseLevelLabels: Record<ExerciseLevel, string> = {
 
 export function matchesExerciseSearch(item: ExerciseLibraryItem, query: string): boolean {
   if (!query.trim()) return true;
-  const haystack = [item.name, item.muscleGroup, item.equipment, item.category, ...item.tags]
+  // Le pattern est cherchable par sa CLÉ et par son LIBELLÉ : le coach tape
+  // « charnière » ou « charniere_de_hanche », les deux doivent répondre.
+  const haystack = [
+    item.name,
+    item.muscleGroup,
+    item.equipment,
+    item.category,
+    item.movementPattern ?? "",
+    item.movementPattern ? movementPatternLabels[item.movementPattern] : "",
+    ...item.tags,
+  ]
     .join(" ")
     .toLowerCase();
   return haystack.includes(query.trim().toLowerCase());

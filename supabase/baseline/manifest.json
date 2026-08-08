@@ -59,7 +59,11 @@
     "20260816090000_nutrition_plan_coach_ownership.sql",
     "20260817090000_nutrition_plan_deletion_history.sql",
     "20260818090000_nutrition_recipe_catalog.sql",
-    "20260819090000_nutrition_recipe_images.sql"
+    "20260819090000_nutrition_recipe_images.sql",
+    "20260820090000_training_movement_patterns.sql",
+    "20260821090000_workout_feedback_authoritative.sql",
+    "20260822090000_workout_feedback_session_metadata.sql",
+    "20260823090000_workout_feedback_unique_session.sql"
   ],
   "garanties_de_contenu": {
     "insert_de_donnees_metier": 0,
