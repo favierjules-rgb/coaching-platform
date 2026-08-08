@@ -1,11 +1,15 @@
 import { PlayCircle } from "lucide-react";
 
 import {
+  ExerciseSubstitutionPicker,
+  type ChargeurRemplacants,
+} from "@/components/student/ExerciseSubstitutionPicker";
+import {
   formatPreviousSetLabel,
   resolveSetPlaceholders,
   type PreviousExercisePerf,
 } from "@/lib/previous-performance";
-import type { Exercise, ExerciseFeedback } from "@/types";
+import type { Exercise, ExerciseFeedback, ExerciseSubstituteOption } from "@/types";
 
 interface ExerciseFeedbackCardProps {
   exercise: Exercise;
@@ -29,6 +33,16 @@ interface ExerciseFeedbackCardProps {
     value: string,
   ) => void;
   onCommentChange: (value: string) => void;
+  /**
+   * Remplacement (F3) : SEULS le nom affiché et la vidéo changent. La
+   * prescription — séries, répétitions, RPE cible, repos, tempo — est celle
+   * de `exercise`, toujours, et n'est jamais recalculée. `null` = aucun
+   * remplacement.
+   */
+  substitute?: ExerciseSubstituteOption | null;
+  onSubstituteChange?: (option: ExerciseSubstituteOption | null) => void;
+  /** Injectable pour les tests — voir ExerciseSubstitutionPicker. */
+  chargerRemplacants?: ChargeurRemplacants;
 }
 
 /**
@@ -56,7 +70,14 @@ export function ExerciseFeedbackCard({
   previous,
   onSetChange,
   onCommentChange,
+  substitute = null,
+  onSubstituteChange,
+  chargerRemplacants,
 }: ExerciseFeedbackCardProps) {
+  // Le nom et la vidéo RÉELLEMENT réalisés. Tout le reste vient de
+  // `exercise` : c'est la prescription, elle ne bouge pas.
+  const nomAffiche = substitute?.name ?? exercise.name;
+  const videoAffichee = (substitute ? substitute.videoUrl || substitute.alternativeVideoUrl : exercise.videoUrl).trim();
   const champ =
     "w-full min-w-0 rounded-control border border-border bg-background px-3 py-2.5 text-sm text-foreground transition-colors placeholder:text-muted-foreground/60 focus:border-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30";
 
@@ -69,9 +90,14 @@ export function ExerciseFeedbackCard({
               {String(index + 1).padStart(2, "0")}
             </span>
             <h3 className="text-base font-semibold leading-snug tracking-tight text-foreground">
-              {exercise.name}
+              {nomAffiche}
             </h3>
           </div>
+          {substitute && (
+            <p className="mt-0.5 text-xs leading-snug text-muted-foreground/80">
+              À la place de {exercise.name}
+            </p>
+          )}
           <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
             {[
               `${exercise.sets} séries`,
@@ -85,9 +111,9 @@ export function ExerciseFeedbackCard({
               .join(" · ")}
           </p>
         </div>
-        {exercise.videoUrl.trim() ? (
+        {videoAffichee ? (
           <a
-            href={exercise.videoUrl}
+            href={videoAffichee}
             target="_blank"
             rel="noopener noreferrer"
             className="pressable inline-flex min-h-11 items-center gap-2 rounded-control border border-border px-4 py-2 text-xs font-medium text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
@@ -190,6 +216,20 @@ export function ExerciseFeedbackCard({
           placeholder="Commentaire exercice (optionnel)"
           className={champ}
         />
+
+        {/* Le remplacement vit sous le retour de l'exercice, jamais dans
+            l'en-tête : c'est une action de séance, pas une information de
+            prescription. Absent quand l'appelant ne gère pas le
+            remplacement (chemin mock, récapitulatif). */}
+        {onSubstituteChange && (
+          <ExerciseSubstitutionPicker
+            libraryExerciseId={exercise.libraryExerciseId ?? null}
+            substitute={substitute}
+            onChoose={onSubstituteChange}
+            onReset={() => onSubstituteChange(null)}
+            {...(chargerRemplacants ? { chargerRemplacants } : {})}
+          />
+        )}
       </div>
     </div>
   );

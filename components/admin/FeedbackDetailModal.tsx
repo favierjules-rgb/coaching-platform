@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle, Eye } from "lucide-react";
+import { CheckCircle, Eye, Repeat2 } from "lucide-react";
 
 import { TextareaField } from "@/components/admin/AdminFormFields";
 import { Modal, PrimaryButton } from "@/components/admin/Modal";
@@ -117,6 +117,22 @@ export function FeedbackDetailModal({
   const parsedCardio = parseCardioResults(feedback.exerciseEntries);
   const strengthEntries = feedback.exerciseEntries.filter((entry) => !isCardioResultEntryName(entry.exerciseName));
 
+  // REMPLACEMENTS (F3) — dédoublonnés par couple prescrit → réalisé :
+  // `exerciseEntries` est une liste à PLAT (une entrée par série), donc
+  // l'information y est répétée autant de fois qu'il y a de séries.
+  // Affichés en tête du détail : c'est la première chose que le coach doit
+  // voir, avant de lire des charges qui ne portent pas sur l'exercice prévu.
+  const remplacements = [
+    ...new Map(
+      strengthEntries
+        .filter((entry) => entry.substituteExerciseName)
+        .map((entry) => [
+          `${entry.exerciseName}→${entry.substituteExerciseName}`,
+          { prescrit: entry.exerciseName, realise: entry.substituteExerciseName as string },
+        ]),
+    ).values(),
+  ];
+
   return (
     <>
       <button
@@ -181,6 +197,22 @@ export function FeedbackDetailModal({
               </div>
             )}
 
+            {remplacements.length > 0 && (
+              <div className="rounded-panel border border-primary/40 bg-primary/5 p-3">
+                <h4 className="mb-2 flex items-center gap-1.5 text-xs uppercase tracking-wide text-primary">
+                  <Repeat2 size={13} aria-hidden="true" />
+                  Exercices remplacés par l&apos;élève
+                </h4>
+                <ul className="flex flex-col gap-0.5 text-sm text-muted-foreground">
+                  {remplacements.map((r) => (
+                    <li key={`${r.prescrit}-${r.realise}`}>
+                      <span className="text-foreground">{r.realise}</span> à la place de {r.prescrit}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {strengthEntries.length > 0 && (
               <div>
                 <h4 className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Détail par exercice</h4>
@@ -192,7 +224,14 @@ export function FeedbackDetailModal({
                   {strengthEntries.map((entry, i) => (
                     <div key={i} className="rounded-panel border border-border p-3 text-sm">
                       <div className="flex justify-between text-foreground">
-                        <span>{entry.exerciseName} — série {entry.setNumber}</span>
+                        {/* Le nom PRESCRIT reste la clé de lecture du coach ;
+                            le réalisé s'ajoute, il ne le remplace jamais. */}
+                        <span>
+                          {entry.exerciseName} — série {entry.setNumber}
+                          {entry.substituteExerciseName && (
+                            <span className="text-primary"> · réalisé : {entry.substituteExerciseName}</span>
+                          )}
+                        </span>
                         {entry.rpe !== null && <span className="text-muted-foreground">RPE {entry.rpe}</span>}
                       </div>
                       <div className="mt-1 text-xs text-muted-foreground">

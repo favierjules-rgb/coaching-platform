@@ -59,7 +59,8 @@
     "test:nutrition-recipes": "tsx scripts/tests/nutrition-recipes.mts",
     "test:nutrition-recipes-admin": "tsx scripts/tests/nutrition-recipes-admin.mts",
     "test:nutrition-recipe-images": "tsx scripts/tests/nutrition-recipe-images.mts",
-    "test:nutrition-v2-unified": "npx tsx scripts/tests/nutrition-v2-unified.mts"
+    "test:nutrition-v2-unified": "npx tsx scripts/tests/nutrition-v2-unified.mts",
+    "test:training-movement-patterns": "tsx scripts/tests/training-movement-patterns.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

@@ -1086,7 +1086,7 @@ await test("50. la checklist PostgreSQL couvre le périmètre exigé", () => {
 await test("51. les quatre migrations sont déclarées au manifeste et comptées", () => {
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 26);
+  assert.equal(attendues.length, 30);
   for (const nom of [
     "20260810090000_harden_nutrition_privileges.sql",
     "20260811090000_nutrition_v2_unification.sql",
@@ -1096,8 +1096,8 @@ await test("51. les quatre migrations sont déclarées au manifeste et comptées
     assert.ok(attendues.includes(nom), nom);
   }
   const secu = lire("../../scripts/tests/security-hardening.mts");
-  assert.ok(secu.includes(".length, 53,"), "le compteur de migrations suit les migrations réelles");
-  assert.ok(secu.includes("assert.equal(attendues.length, 26);"));
+  assert.ok(secu.includes(".length, 57,"), "le compteur de migrations suit les migrations réelles");
+  assert.ok(secu.includes("assert.equal(attendues.length, 30);"));
 });
 
 /* ─── 52-53. Outils 1 et 3 après la PR C.1 ─────────────────────────────── */
@@ -1449,7 +1449,7 @@ await test("61. aucun nouveau chemin d'écriture, aucune migration ajoutée", ()
   // strictement additive : elle ne remplace qu'une fonction.
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 26);
+  assert.equal(attendues.length, 30);
   assert.ok(attendues.includes("20260814090000_nutrition_plan_v2_blocking_issue_week.sql"));
 });
 

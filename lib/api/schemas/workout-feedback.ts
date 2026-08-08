@@ -27,7 +27,15 @@ const setSchema = z.object({
   // existant (serializeCardioBlockResult) n'émet pas cette clé. Mêmes
   // bornes que le CHECK exercise_set_feedback_rpe_check (1-10).
   rpe: z.number().int().min(1).max(10).nullable().optional(),
-});
+  })
+  // STRICT ici AUSSI (durcissement F3). La strictesse ne portait que sur
+  // l'enveloppe : une clé inconnue GLISSÉE DANS UN EXERCICE ou dans une
+  // série était silencieusement retirée, jamais refusée. Rien de ce que le
+  // dépôt émet n'en dépend — SessionFeedbackSection et
+  // lib/cardio-feedback.ts::serializeCardioBlockResult produisent
+  // exactement les clés déclarées — mais un `substituteExerciseName` glissé
+  // à la main mérite un 400 explicite, pas un silence.
+  .strict();
 
 const exerciseSchema = z.object({
   exerciseName: z.string().min(1).max(200),
@@ -37,7 +45,16 @@ const exerciseSchema = z.object({
   // Enveloppe JSON cardio incluse (commentaire libre de l'élève à l'intérieur).
   comment: z.string().max(10000),
   sets: z.array(setSchema).max(50),
-});
+  // ── Remplacement d'exercice (F3, feat/training-movement-patterns) ────────
+  // `exerciseId` = `workout_exercises.id` de l'exercice PRESCRIT. Optionnel :
+  // `null` pour une séance mock ou un bloc cardio, qui n'ont pas d'uuid réel.
+  exerciseId: z.uuid().nullable().optional(),
+  // Identité de la fiche de banque réellement réalisée. Le NOM n'est jamais
+  // accepté du client : il est dérivé côté base. Le schéma reste `.strict()`,
+  // donc envoyer `substituteExerciseName` fait toujours échouer la requête.
+  substituteExerciseLibraryId: z.uuid().nullable().optional(),
+  })
+  .strict();
 
 export const workoutFeedbackPayloadSchema = z
   .object({

@@ -11,6 +11,7 @@ import {
   exerciseLevelLabels,
   matchesExerciseSearch,
 } from "@/lib/admin";
+import { movementPatternLabels } from "@/lib/movement-patterns";
 import { muscleGroupLabels } from "@/lib/training-metrics";
 import type { ExerciseLibraryItem, MuscleGroup } from "@/types";
 
@@ -65,6 +66,15 @@ export function ExerciseLibraryManager({ items, onCreate, onUpdate, onSetStatus,
                 <span className="rounded-full border border-border px-2 py-0.5">{exerciseCategoryLabels[item.category]}</span>
                 <span className="rounded-full border border-border px-2 py-0.5">{exerciseEquipmentLabels[item.equipment]}</span>
                 <span className="rounded-full border border-border px-2 py-0.5">{exerciseLevelLabels[item.level]}</span>
+                {/* Le pattern porte une bordure marquée : c'est lui qui
+                    décide des remplacements côté élève, pas les autres
+                    étiquettes. Absent quand il n'est pas renseigné — aucune
+                    mention inutile sur une banque qui n'en a pas encore. */}
+                {item.movementPattern && (
+                  <span className="rounded-full border border-border-strong px-2 py-0.5 text-foreground">
+                    {movementPatternLabels[item.movementPattern]}
+                  </span>
+                )}
               </div>
               {item.description && <p className="text-xs text-muted-foreground">{item.description}</p>}
               {item.technicalNote && <p className="text-xs text-muted-foreground">{item.technicalNote}</p>}

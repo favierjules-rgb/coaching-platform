@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import type { ExerciseLibraryItem, MuscleGroup } from "@/types";
+import { normalizeMovementPattern } from "@/lib/movement-patterns";
+import type { ExerciseLibraryItem, MovementPattern, MuscleGroup } from "@/types";
 import type { Database } from "@/types/supabase";
 
 /**
@@ -46,6 +47,10 @@ function mapExerciseLibraryRow(row: ExerciseLibraryRow): ExerciseLibraryItem {
     description: row.description ?? "",
     muscleGroup: asMuscleGroup(row.muscle_group),
     secondaryMuscles: asMuscleGroupList(row.secondary_muscles),
+    // `normalizeMovementPattern` VÉRIFIE l'appartenance au vocabulaire au
+    // lieu de caster aveuglément comme `asMuscleGroup` : une valeur inconnue
+    // devient `null`, jamais un MovementPattern déguisé.
+    movementPattern: normalizeMovementPattern(row.movement_pattern),
     category: (row.category?.trim() || "Technique") as ExerciseLibraryItem["category"],
     exerciseType: (row.exercise_type?.trim() || row.category?.trim() || "Technique") as ExerciseLibraryItem["exerciseType"],
     equipment: (row.equipment?.trim() || "Aucun") as ExerciseLibraryItem["equipment"],
@@ -79,6 +84,7 @@ function toInsertFields(data: ExerciseLibraryWritableFields): Database["public"]
     description: data.description,
     muscle_group: data.muscleGroup,
     secondary_muscles: data.secondaryMuscles,
+    movement_pattern: data.movementPattern,
     category: data.category,
     exercise_type: data.exerciseType,
     equipment: data.equipment,
@@ -115,6 +121,7 @@ const PARTIAL_FIELD_MAP: {
   description: (v) => ({ description: v as string }),
   muscleGroup: (v) => ({ muscle_group: v as string }),
   secondaryMuscles: (v) => ({ secondary_muscles: v as string[] }),
+  movementPattern: (v) => ({ movement_pattern: v as MovementPattern }),
   category: (v) => ({ category: v as string }),
   exerciseType: (v) => ({ exercise_type: v as string }),
   equipment: (v) => ({ equipment: v as string }),

@@ -6,6 +6,12 @@ import { CheckCircle, Pencil, Plus } from "lucide-react";
 import { Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
 import { Modal, PrimaryButton } from "@/components/admin/Modal";
 import { exerciseCategoryLabels, exerciseEquipmentLabels, exerciseLevelLabels } from "@/lib/admin";
+import {
+  movementPatternExamples,
+  movementPatternOrder,
+  movementPatternSelectLabel,
+  normalizeMovementPattern,
+} from "@/lib/movement-patterns";
 import { muscleGroupLabels, muscleGroupOrder } from "@/lib/training-metrics";
 import type {
   ExerciseCategory,
@@ -14,6 +20,7 @@ import type {
   ExerciseLibraryItem,
   ExerciseLibraryStatus,
   ExerciseType,
+  MovementPattern,
   MuscleGroup,
 } from "@/types";
 
@@ -21,6 +28,16 @@ const categoryOptions = Object.entries(exerciseCategoryLabels).map(([value, labe
 const equipmentOptions = Object.entries(exerciseEquipmentLabels).map(([value, label]) => ({ value, label }));
 const levelOptions = Object.entries(exerciseLevelLabels).map(([value, label]) => ({ value, label }));
 const muscleGroupOptions = muscleGroupOrder.map((group) => ({ value: group, label: muscleGroupLabels[group] }));
+// « Non renseigné » en TÊTE et avec une valeur vide : c'est l'état de toute
+// la banque existante, et le pattern reste facultatif. Un exercice sans
+// pattern n'offrira simplement aucun remplaçant à l'élève.
+const movementPatternOptions = [
+  { value: "", label: "— Non renseigné —" },
+  ...movementPatternOrder.map((pattern) => ({
+    value: pattern,
+    label: movementPatternSelectLabel(pattern),
+  })),
+];
 const statusOptions: { value: ExerciseLibraryStatus; label: string }[] = [
   { value: "active", label: "Active" },
   { value: "archived", label: "Archivée" },
@@ -32,6 +49,9 @@ function formFromItem(item: Partial<ExerciseLibraryItem>) {
     description: item.description ?? "",
     muscleGroup: item.muscleGroup ?? "autre",
     secondaryMuscles: item.secondaryMuscles ?? [],
+    // Chaîne vide côté formulaire (un <select> ne connaît pas `null`),
+    // reconvertie en `null` à l'enregistrement.
+    movementPattern: (item.movementPattern ?? "") as MovementPattern | "",
     category: item.category ?? "Technique",
     exerciseType: item.exerciseType ?? "Technique",
     equipment: item.equipment ?? "Aucun",
@@ -83,6 +103,7 @@ export function ExerciseLibraryItemModal({ item, onSave }: ExerciseLibraryItemMo
       description: form.description.trim(),
       muscleGroup: form.muscleGroup as MuscleGroup,
       secondaryMuscles: form.secondaryMuscles,
+      movementPattern: normalizeMovementPattern(form.movementPattern),
       category: form.category as ExerciseCategory,
       exerciseType: form.exerciseType as ExerciseType,
       equipment: form.equipment as ExerciseEquipment,
@@ -156,6 +177,19 @@ export function ExerciseLibraryItemModal({ item, onSave }: ExerciseLibraryItemMo
                     </button>
                   ))}
                 </div>
+              </div>
+              <div>
+                <SelectField
+                  label="Pattern de mouvement"
+                  value={form.movementPattern}
+                  onChange={(v) => setField("movementPattern", (normalizeMovementPattern(v) ?? "") as MovementPattern | "")}
+                  options={movementPatternOptions}
+                />
+                <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                  {form.movementPattern
+                    ? `Ex. : ${movementPatternExamples[form.movementPattern as MovementPattern]}. Les exercices partageant ce pattern se proposent entre eux quand l'élève déclare la machine prise.`
+                    : "Facultatif. Sans pattern, aucun remplaçant ne sera proposé à l'élève pour cet exercice."}
+                </p>
               </div>
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
                 <SelectField label="Catégorie" value={form.category} onChange={(v) => setField("category", v as ExerciseCategory)} options={categoryOptions} />
