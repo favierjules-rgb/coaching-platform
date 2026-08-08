@@ -36,6 +36,12 @@ const contentSecurityPolicy = [
   `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${CSP_SOURCES.stripe} ${CSP_SOURCES.vercel}`,
   `style-src 'self' 'unsafe-inline'`,
   `img-src ${CSP_SOURCES.images}`,
+  // `media-src` n'était pas déclaré : les `<video>` retombaient donc sur
+  // `default-src 'self'`, qui bloque à la fois l'aperçu local (`blob:`) et
+  // l'URL signée du Storage. Sans cette ligne, la CSP passée en mode
+  // bloquant casserait la vidéo de technique (F4) sans autre symptôme qu'un
+  // lecteur noir.
+  `media-src 'self' blob: ${CSP_SOURCES.supabase}`,
   `font-src 'self' data:`,
   `connect-src 'self' ${CSP_SOURCES.supabase} ${CSP_SOURCES.stripe} ${CSP_SOURCES.vercel}`,
   `frame-src ${CSP_SOURCES.stripeFrames}`,
@@ -56,9 +62,18 @@ const securityHeaders = [
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   {
     key: "Permissions-Policy",
-    // Aucune de ces API n'est utilisée : on les refuse explicitement plutôt
-    // que de laisser la porte ouverte à un script tiers compromis.
-    value: "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()",
+    // On n'ouvre QUE ce dont on se sert.
+    //
+    // `camera=(self)` depuis F4 (feat/student-feedback-video) : l'élève peut
+    // filmer sa technique depuis la page de séance. `(self)` autorise ce
+    // site et LUI SEUL — aucune iframe tierce, Stripe compris, n'hérite du
+    // droit. Le navigateur redemande de toute façon son accord à l'élève :
+    // cet en-tête ne donne pas la caméra, il cesse de l'interdire.
+    //
+    // `microphone=()` RESTE fermé : la capture demande
+    // `getUserMedia({ audio: false })`. Une vidéo de technique n'a pas
+    // besoin du son, et ne pas l'ouvrir évite une seconde autorisation.
+    value: "camera=(self), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()",
   },
   { key: "Content-Security-Policy-Report-Only", value: contentSecurityPolicy },
 ];

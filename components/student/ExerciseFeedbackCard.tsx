@@ -5,6 +5,11 @@ import {
   type ChargeurRemplacants,
 } from "@/components/student/ExerciseSubstitutionPicker";
 import {
+  ExerciseVideoField,
+  type DeposeurVideo,
+  type ResolveurUrlVideo,
+} from "@/components/student/ExerciseVideoField";
+import {
   formatPreviousSetLabel,
   resolveSetPlaceholders,
   type PreviousExercisePerf,
@@ -43,6 +48,19 @@ interface ExerciseFeedbackCardProps {
   onSubstituteChange?: (option: ExerciseSubstituteOption | null) => void;
   /** Injectable pour les tests — voir ExerciseSubstitutionPicker. */
   chargerRemplacants?: ChargeurRemplacants;
+  /**
+   * Vidéo de technique (F4) : CHEMIN dans le bucket privé, jamais une URL.
+   * Le champ n'apparaît que si l'appelant fournit `onVideoChange` ET
+   * `studentId` — même règle que le remplacement : le récapitulatif et le
+   * chemin mock n'ont pas de quoi déposer un fichier, ils n'affichent donc
+   * pas un bouton qui ne mènerait nulle part.
+   */
+  studentId?: string | null;
+  videoPath?: string | null;
+  onVideoChange?: (chemin: string | null) => void;
+  /** Injectables pour les tests — ni réseau, ni Supabase, ni caméra. */
+  deposerVideo?: DeposeurVideo;
+  resoudreUrlVideo?: ResolveurUrlVideo;
 }
 
 /**
@@ -73,6 +91,11 @@ export function ExerciseFeedbackCard({
   substitute = null,
   onSubstituteChange,
   chargerRemplacants,
+  studentId = null,
+  videoPath = null,
+  onVideoChange,
+  deposerVideo,
+  resoudreUrlVideo,
 }: ExerciseFeedbackCardProps) {
   // Le nom et la vidéo RÉELLEMENT réalisés. Tout le reste vient de
   // `exercise` : c'est la prescription, elle ne bouge pas.
@@ -221,6 +244,19 @@ export function ExerciseFeedbackCard({
             l'en-tête : c'est une action de séance, pas une information de
             prescription. Absent quand l'appelant ne gère pas le
             remplacement (chemin mock, récapitulatif). */}
+        {/* La vidéo vit au même endroit que le remplacement, et pour la
+            même raison : c'est une action de séance posée SOUS le retour de
+            l'exercice, jamais une information de prescription. */}
+        {onVideoChange && studentId && (
+          <ExerciseVideoField
+            studentId={studentId}
+            videoPath={videoPath}
+            onChange={onVideoChange}
+            {...(deposerVideo ? { deposer: deposerVideo } : {})}
+            {...(resoudreUrlVideo ? { resoudreUrl: resoudreUrlVideo } : {})}
+          />
+        )}
+
         {onSubstituteChange && (
           <ExerciseSubstitutionPicker
             libraryExerciseId={exercise.libraryExerciseId ?? null}

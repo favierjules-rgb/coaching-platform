@@ -742,6 +742,12 @@ export interface Database {
           // à écrire depuis l'application, seulement à lire.
           substitute_exercise_library_id: string | null;
           substitute_exercise_name: string | null;
+          // Vidéo de technique de l'élève (migration 20260826090000).
+          // `video_uploaded_at` est DÉRIVÉ par enforce_exercise_feedback_write() :
+          // il n'est jamais à écrire depuis l'application, seulement à lire —
+          // c'est lui qui datera la purge des 30 jours.
+          video_path: string | null;
+          video_uploaded_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -755,6 +761,7 @@ export interface Database {
           rpe?: number | null;
           comment?: string;
           substitute_exercise_library_id?: string | null;
+          video_path?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -768,6 +775,7 @@ export interface Database {
           rpe?: number | null;
           comment?: string;
           substitute_exercise_library_id?: string | null;
+          video_path?: string | null;
           created_at?: string;
           updated_at?: string;
         };

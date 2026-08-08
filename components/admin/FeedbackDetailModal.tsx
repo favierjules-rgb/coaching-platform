@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle, Eye, Repeat2 } from "lucide-react";
+import { CheckCircle, Eye, Repeat2, Video } from "lucide-react";
 
 import { TextareaField } from "@/components/admin/AdminFormFields";
 import { Modal, PrimaryButton } from "@/components/admin/Modal";
@@ -133,6 +133,17 @@ export function FeedbackDetailModal({
     ).values(),
   ];
 
+  // VIDÉOS DE TECHNIQUE (F4) — lues sur le RETOUR, pas sur `exerciseEntries`.
+  // Elles y sont déjà une par exercice : plus rien à dédoublonner, et un
+  // exercice filmé sans aucune série saisie apparaît lui aussi.
+  //
+  // `videoUrl` est une URL SIGNÉE d'une heure, fabriquée en lot par
+  // getAdminWorkoutFeedbackList — le chemin que /admin/retours emprunte
+  // réellement. Absente = la RLS a refusé ce chemin à ce coach (il n'est pas
+  // rattaché à cet élève), ou la vidéo a été purgée : dans les deux cas on le
+  // DIT, on ne laisse pas un lecteur vide.
+  const videos = feedback.videos ?? [];
+
   return (
     <>
       <button
@@ -193,6 +204,37 @@ export function FeedbackDetailModal({
                   ]
                     .filter(Boolean)
                     .join(" · ")}
+                </div>
+              </div>
+            )}
+
+            {videos.length > 0 && (
+              <div className="rounded-panel border border-primary/40 bg-primary/5 p-3">
+                <h4 className="mb-2 flex items-center gap-1.5 text-xs uppercase tracking-wide text-primary">
+                  <Video size={13} aria-hidden="true" />
+                  Vidéos envoyées par l&apos;élève
+                </h4>
+                <div className="flex flex-col gap-3">
+                  {videos.map((video) => (
+                    <div key={video.videoPath}>
+                      <p className="mb-1 text-sm text-foreground">{video.realizedName}</p>
+                      {video.videoUrl ? (
+                        <video
+                          src={video.videoUrl}
+                          controls
+                          playsInline
+                          preload="metadata"
+                          className="w-full rounded-control bg-black"
+                          style={{ maxHeight: 280 }}
+                        />
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          Vidéo indisponible : soit elle a dépassé sa durée de conservation, soit
+                          cet élève ne t&apos;est pas rattaché.
+                        </p>
+                      )}
+                    </div>
+                  ))}
                 </div>
               </div>
             )}

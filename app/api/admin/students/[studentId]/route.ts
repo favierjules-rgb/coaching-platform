@@ -39,7 +39,15 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ s
   const result = await deleteStudentCompletely(supabase, studentId);
   if (!result.ok) {
     const status = result.error === "not_found" ? 404 : 500;
-    const error = result.error === "not_found" ? "Élève introuvable." : "Échec de la suppression.";
+    // `storage_error` est nommé à part : l'élève est TOUJOURS LÀ, et c'est
+    // une information utile. Un « Échec de la suppression » indistinct
+    // laisserait croire à un état inconnu.
+    const error =
+      result.error === "not_found"
+        ? "Élève introuvable."
+        : result.error === "storage_error"
+          ? "Les vidéos de cet élève n'ont pas toutes pu être supprimées. Rien n'a été effacé : réessaie."
+          : "Échec de la suppression.";
     return NextResponse.json({ error }, { status });
   }
 
