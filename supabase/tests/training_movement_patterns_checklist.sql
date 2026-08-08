@@ -256,30 +256,48 @@ begin
       values ('3300ffff-0000-4000-8000-000000000001'::uuid, 'Faux pattern', 'poussee_oblique')
     $q$));
 
-  -- B4bis. ÉTAT TRANSITOIRE. Les 4 clés retirées du vocabulaire sont encore
-  -- ACCEPTÉES par le CHECK — c'est délibéré, et c'est ce qui protège la
-  -- fenêtre de déploiement : PostgreSQL revalide un CHECK sur la ligne
-  -- entière à chaque UPDATE, donc une fiche portant encore `flexion_coude`
-  -- deviendrait immodifiable si la clé disparaissait maintenant.
-  -- Elles seront retirées par la migration de nettoyage, écrite après la
-  -- mise en Production et le réétiquetage manuel des fiches concernées.
-  insert into public.exercise_library (id, name, movement_pattern) values
-    ('3300ffff-0000-4000-8000-000000000003'::uuid, 'Legacy fusionnée', 'charniere_de_hanche'),
-    ('3300ffff-0000-4000-8000-000000000004'::uuid, 'Legacy scindée 1', 'tirage_horizontal'),
-    ('3300ffff-0000-4000-8000-000000000005'::uuid, 'Legacy scindée 2', 'flexion_coude'),
-    ('3300ffff-0000-4000-8000-000000000006'::uuid, 'Legacy scindée 3', 'extension_coude');
-  select count(*) into v_n from public.exercise_library where name like 'Legacy %';
-  perform pg_temp.noter('B',
-    format('B4bis. TRANSITION : les 4 clés DEPRECATED sont encore acceptées (%s)', v_n),
-    v_n = 4);
+  -- B4bis. ÉTAT FINAL. Les 4 clés retirées du vocabulaire sont désormais
+  -- REFUSÉES. Elles ont été tolérées le temps de la fenêtre de déploiement
+  -- (20260824), parce que PostgreSQL revalide un CHECK sur la ligne entière
+  -- à chaque écriture : une fiche portant encore `flexion_coude` serait
+  -- devenue immodifiable. 20260825 a refermé cette parenthèse — chacune des
+  -- quatre doit maintenant être rejetée, une par une et nommément.
+  perform pg_temp.noter('B', 'B4bis. « charniere_de_hanche » (fusionnée dans « hinge ») est REFUSÉE',
+    pg_temp.refuse($q$
+      insert into public.exercise_library (id, name, movement_pattern)
+      values ('3300ffff-0000-4000-8000-000000000003'::uuid, 'Legacy fusionnée', 'charniere_de_hanche')
+    $q$));
+  perform pg_temp.noter('B', 'B4ter. « tirage_horizontal » (scindée coudes ouverts/fermés) est REFUSÉE',
+    pg_temp.refuse($q$
+      insert into public.exercise_library (id, name, movement_pattern)
+      values ('3300ffff-0000-4000-8000-000000000004'::uuid, 'Legacy scindée 1', 'tirage_horizontal')
+    $q$));
+  perform pg_temp.noter('B', 'B4quater. « flexion_coude » (scindée antérieur/postérieur) est REFUSÉE',
+    pg_temp.refuse($q$
+      insert into public.exercise_library (id, name, movement_pattern)
+      values ('3300ffff-0000-4000-8000-000000000005'::uuid, 'Legacy scindée 2', 'flexion_coude')
+    $q$));
+  perform pg_temp.noter('B', 'B4quinquies. « extension_coude » (scindée antérieur/postérieur) est REFUSÉE',
+    pg_temp.refuse($q$
+      insert into public.exercise_library (id, name, movement_pattern)
+      values ('3300ffff-0000-4000-8000-000000000006'::uuid, 'Legacy scindée 3', 'extension_coude')
+    $q$));
 
-  -- Mais elles ne font PAS partie du vocabulaire : aucun sélecteur ne les
-  -- propose, et la migration de transition les signale comme telles.
-  perform pg_temp.noter('B', 'B4ter. et elles sont marquées DEPRECATED dans la migration',
-    (select count(*) from public.exercise_library
-      where movement_pattern in ('tirage_horizontal', 'flexion_coude',
-                                 'extension_coude', 'charniere_de_hanche')) = 4);
-  delete from public.exercise_library where name like 'Legacy %';
+  -- Et le refus n'est pas qu'un échec d'insertion : aucune de ces lignes
+  -- n'existe. Un CHECK qui laisserait passer en silence serait pire qu'absent.
+  select count(*) into v_n from public.exercise_library where name like 'Legacy %';
+  perform pg_temp.noter('B', 'B4sexies. aucune fiche legacy n''a survécu au refus', v_n = 0);
+
+  -- Le CHECK réellement posé en base ne cite plus aucune des quatre. On lit
+  -- la définition avec les apostrophes : `flexion_coude` est un préfixe de
+  -- `flexion_coude_anterieur`, une recherche nue rendrait un faux positif.
+  perform pg_temp.noter('B', 'B4septies. le CHECK en base ne mentionne plus aucune clé retirée',
+    (select count(*) = 0
+       from unnest(array['tirage_horizontal', 'flexion_coude',
+                         'extension_coude', 'charniere_de_hanche']) as cle
+      where position('''' || cle || '''' in
+                     (select pg_get_constraintdef(oid) from pg_constraint
+                       where conname = 'exercise_library_movement_pattern_check')) > 0));
 
   insert into public.exercise_library (id, name, movement_pattern)
   values ('3300ffff-0000-4000-8000-000000000002'::uuid, 'Sans pattern', null);
