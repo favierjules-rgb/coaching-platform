@@ -678,6 +678,15 @@ export interface Database {
           pain: string;
           status: "a-traiter" | "traité" | "important";
           coach_reply: string;
+          // Réponse VIDÉO du coach (migration 20260827090000).
+          // `coach_reply_video_uploaded_at` est DÉRIVÉ par
+          // enforce_workout_feedback_write() : il n'est jamais à écrire depuis
+          // l'application, seulement à lire — c'est lui qui datera la purge
+          // des 3 jours. Il n'apparaît donc ni dans Insert ni dans Update : le
+          // type PORTE la règle, il ne se contente pas de la commenter.
+          coach_reply_video_path: string | null;
+          coach_reply_video_uploaded_at: string | null;
+          coach_reply_video_annotations: unknown[] | null;
           submitted_at: string;
           created_at: string;
           updated_at: string;
@@ -720,6 +729,12 @@ export interface Database {
           pain?: string;
           status?: "a-traiter" | "traité" | "important";
           coach_reply?: string;
+          // Une réponse vidéo ne NAÎT jamais avec le retour — c'est l'élève
+          // qui crée la ligne, et le gardien lui remet ces colonnes à null.
+          // Elle est ATTACHÉE après coup, par le coach : donc ici, et pas
+          // dans Insert.
+          coach_reply_video_path?: string | null;
+          coach_reply_video_annotations?: unknown[] | null;
           submitted_at?: string;
           created_at?: string;
           updated_at?: string;

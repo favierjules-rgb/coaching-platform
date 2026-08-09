@@ -1,10 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, CheckCircle2, CircleSlash, MessageSquare } from "lucide-react";
 
+import { AnnotatedVideoPlayer } from "@/components/shared/AnnotatedVideoPlayer";
 import { describeCardioBlockResult, isCardioResultEntryName, parseCardioResults } from "@/lib/cardio-feedback";
+import { mentionDelaiCoachReplyVideo } from "@/lib/coach-reply-video";
+import { parseAnnotations } from "@/lib/video-annotations";
+import type { CoachReplyVideoEntry } from "@/types";
 import { exerciseGlobalRpeMentions } from "@/lib/previous-performance";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { getCurrentStudentId } from "@/lib/supabase/current-student";
@@ -30,10 +34,44 @@ import type { AdminStudentFeedback } from "@/types";
  * la phase 1) ; pour les retours antérieurs, seuls les résultats RÉALISÉS
  * sont disponibles — indiqué honnêtement, jamais reconstruit.
  */
+/**
+ * LA RÉPONSE VIDÉO DU COACH, CÔTÉ ÉLÈVE (F5).
+ *
+ * Trois choses à dire, et il faut les dire toutes les trois :
+ *   • la vidéo, avec le calque du coach rejoué par-dessus ;
+ *   • le temps qu'il reste pour la regarder — elle ne dure que 3 jours ;
+ *   • pourquoi il n'y a rien, le cas échéant. Un lecteur vide laisserait
+ *     croire à une panne alors que le délai est simplement passé.
+ */
+function CoachReplyVideo({ entree, maintenant }: { entree: CoachReplyVideoEntry; maintenant: number }) {
+  const annotations = useMemo(() => parseAnnotations(entree.annotations), [entree.annotations]);
+  const mention = maintenant > 0 ? mentionDelaiCoachReplyVideo(entree.uploadedAt, maintenant) : null;
+
+  return (
+    <div className="mt-2">
+      {entree.videoUrl ? (
+        <AnnotatedVideoPlayer src={entree.videoUrl} annotations={annotations} maxHeight={300} />
+      ) : (
+        <p className="text-xs leading-snug text-muted-foreground">
+          Vidéo indisponible : son délai de conservation est passé. Le message écrit de ton coach, lui, reste.
+        </p>
+      )}
+      {entree.videoUrl && mention && <p className="mt-1 text-xs text-muted-foreground">{mention}</p>}
+    </div>
+  );
+}
+
 export default function HistoriqueRetoursPage() {
   const [ready, setReady] = useState(false);
   const [feedbacks, setFeedbacks] = useState<AdminStudentFeedback[]>([]);
   const [ouvert, setOuvert] = useState<string | null>(null);
+  /**
+   * L'instant de référence du compte à rebours, figé au chargement. Le lire à
+   * chaque rendu ferait varier le texte d'un rendu à l'autre sans qu'aucune
+   * donnée n'ait bougé — et l'écart entre serveur et client au premier rendu
+   * est exactement ce qui casse une hydratation.
+   */
+  const [maintenant, setMaintenant] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,9 +86,12 @@ export default function HistoriqueRetoursPage() {
         if (!cancelled) setReady(true);
         return;
       }
-      const liste = await getWorkoutFeedbackForStudent(supabase, studentId);
+      // `avecReponseVideo` : c'est le SEUL écran où l'élève lit la réponse de
+      // son coach, donc le seul qui paie les signatures.
+      const liste = await getWorkoutFeedbackForStudent(supabase, studentId, { avecReponseVideo: true });
       if (!cancelled) {
         setFeedbacks(liste);
+        setMaintenant(Date.now());
         setReady(true);
       }
     }
@@ -203,10 +244,15 @@ export default function HistoriqueRetoursPage() {
                       <p className="text-sm text-muted-foreground">Commentaire : {feedback.comment}</p>
                     )}
                     {feedback.pain && <p className="text-sm text-destructive">Douleurs : {feedback.pain}</p>}
-                    {feedback.coachReply && (
+                    {(feedback.coachReply || feedback.coachReplyVideo) && (
                       <div className="rounded-control border border-primary/30 bg-primary/5 px-3 py-2">
                         <p className="text-xs uppercase tracking-widest text-primary">Réponse du coach</p>
-                        <p className="mt-1 text-sm text-foreground">{feedback.coachReply}</p>
+                        {feedback.coachReply && (
+                          <p className="mt-1 text-sm text-foreground">{feedback.coachReply}</p>
+                        )}
+                        {feedback.coachReplyVideo && (
+                          <CoachReplyVideo entree={feedback.coachReplyVideo} maintenant={maintenant} />
+                        )}
                       </div>
                     )}
                   </div>

@@ -52,17 +52,17 @@ export const FEEDBACK_VIDEO_ORPHAN_GRACE_HOURS = 24;
 export const FEEDBACK_VIDEO_ORPHAN_GRACE_MS = FEEDBACK_VIDEO_ORPHAN_GRACE_HOURS * 60 * 60 * 1000;
 
 /**
- * Plafond de suppressions par exécution.
+ * Plafond de suppressions par exécution. GÉNÉRIQUE : il ne dépend pas du
+ * bucket, mais du temps qu'une route serveur a le droit de prendre.
  *
  * Une route serveur a un temps d'exécution borné ; un bucket qui aurait
  * accumulé des dizaines de milliers d'objets ferait expirer la requête, donc
  * échouer la purge ENTIÈRE, donc ne rien nettoyer du tout. On borne, et le
- * reliquat part au passage suivant : la purge est quotidienne et la rétention
- * de 30 jours, un retard de quelques jours ne perd rien. Les candidats sont
- * traités du PLUS ANCIEN au plus récent, pour que le backlog se draine par
- * le bon bout.
+ * reliquat part au passage suivant : la purge est quotidienne, un retard de
+ * quelques jours ne perd rien. Les candidats sont traités du PLUS ANCIEN au
+ * plus récent, pour que le backlog se draine par le bon bout.
  */
-export const FEEDBACK_VIDEO_PURGE_MAX_PAR_EXECUTION = 500;
+export const PURGE_VIDEO_MAX_PAR_EXECUTION = 500;
 
 /**
  * Âge minimal d'un rattachement avant qu'on ose le déclarer CASSÉ.
@@ -73,12 +73,15 @@ export const FEEDBACK_VIDEO_PURGE_MAX_PAR_EXECUTION = 500;
  * et on effacerait la référence d'un élève qui vient tout juste d'envoyer sa
  * séance. Une heure couvre très largement la durée d'un passage.
  *
- * C'est le SEUL usage légitime de `video_uploaded_at` dans la purge : il ne
- * dit pas l'âge du fichier — une resoumission le redate — mais il dit
- * fidèlement depuis quand CETTE ligne pointe vers CE chemin, ce qui est
+ * C'est le SEUL usage légitime de la date de rattachement dans la purge :
+ * elle ne dit pas l'âge du fichier — une resoumission la redate — mais elle
+ * dit fidèlement depuis quand CETTE ligne pointe vers CE chemin, ce qui est
  * exactement la question posée ici.
+ *
+ * GÉNÉRIQUE, comme le plafond : ce délai borne la durée d'un PASSAGE, pas
+ * la rétention d'un bucket.
  */
-export const FEEDBACK_VIDEO_RECONCILIATION_GRACE_MS = 60 * 60 * 1000;
+export const RECONCILIATION_GRACE_MS = 60 * 60 * 1000;
 
 export type RaisonSuppression = "expired_reference" | "orphan";
 
@@ -96,7 +99,22 @@ export interface ObjetVideo {
 }
 
 /**
- * Le verdict pour UN objet.
+ * Ce qui change d'un bucket vidéo à l'autre, et RIEN d'autre.
+ *
+ * Les deux buckets — `feedback-videos` (30 jours) et `coach-reply-videos`
+ * (3 jours) — se purgent selon exactement la même logique : c'est le SEUIL
+ * qui diffère, pas le raisonnement. Isoler ces trois valeurs permet de
+ * partager la décision sans partager les chiffres, et surtout d'éviter
+ * qu'une correction de la logique ne soit appliquée qu'à un seul des deux.
+ */
+export interface SeuilsRetentionVideo {
+  formeChemin: RegExp;
+  retentionMs: number;
+  graceOrphelinMs: number;
+}
+
+/**
+ * Le verdict pour UN objet, quel que soit le bucket.
  *
  * La forme est vérifiée EN PREMIER, avant toute question d'âge ou de
  * référence : un chemin qu'on ne sait pas lire ne doit jamais tomber dans la
@@ -104,25 +122,40 @@ export interface ObjetVideo {
  * conformes — la RLS les impose à l'écriture — mais une purge est du code
  * qui efface : elle vérifie ce qu'elle croit savoir.
  */
-export function classerObjetFeedbackVideo(
+export function classerObjetVideo(
   objet: ObjetVideo,
   contexte: { estReference: boolean; maintenant: number },
+  seuils: SeuilsRetentionVideo,
 ): VerdictPurge {
-  if (!FEEDBACK_VIDEO_PATH_SHAPE.test(objet.path)) {
+  if (!seuils.formeChemin.test(objet.path)) {
     return { action: "signaler", raison: "chemin_malforme" };
   }
 
   const age = contexte.maintenant - objet.creeLe;
 
   if (contexte.estReference) {
-    return age > FEEDBACK_VIDEO_RETENTION_MS
+    return age > seuils.retentionMs
       ? { action: "supprimer", raison: "expired_reference" }
       : { action: "garder", raison: "referencee_non_expiree" };
   }
 
-  return age > FEEDBACK_VIDEO_ORPHAN_GRACE_MS
+  return age > seuils.graceOrphelinMs
     ? { action: "supprimer", raison: "orphan" }
     : { action: "garder", raison: "delai_de_grace" };
+}
+
+/** Les seuils du bucket des vidéos d'élève. */
+export const SEUILS_FEEDBACK_VIDEO: SeuilsRetentionVideo = {
+  formeChemin: FEEDBACK_VIDEO_PATH_SHAPE,
+  retentionMs: FEEDBACK_VIDEO_RETENTION_MS,
+  graceOrphelinMs: FEEDBACK_VIDEO_ORPHAN_GRACE_MS,
+};
+
+export function classerObjetFeedbackVideo(
+  objet: ObjetVideo,
+  contexte: { estReference: boolean; maintenant: number },
+): VerdictPurge {
+  return classerObjetVideo(objet, contexte, SEUILS_FEEDBACK_VIDEO);
 }
 
 /**
@@ -133,7 +166,7 @@ export function classerObjetFeedbackVideo(
  */
 export function bornerCandidats<T extends ObjetVideo>(
   candidats: T[],
-  maximum = FEEDBACK_VIDEO_PURGE_MAX_PAR_EXECUTION,
+  maximum = PURGE_VIDEO_MAX_PAR_EXECUTION,
 ): { retenus: T[]; reportes: number } {
   const tries = [...candidats].sort((a, b) => a.creeLe - b.creeLe);
   return { retenus: tries.slice(0, maximum), reportes: Math.max(0, tries.length - maximum) };

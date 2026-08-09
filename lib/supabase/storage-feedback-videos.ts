@@ -7,6 +7,11 @@ import {
   validateFeedbackVideoFile,
   type FeedbackVideoMime,
 } from "@/lib/feedback-video";
+import {
+  signerUrlVideo,
+  signerUrlsVideo,
+  viderDossierVideoEleve,
+} from "@/lib/supabase/storage-video-buckets";
 import type { Database } from "@/types/supabase";
 
 /**
@@ -15,6 +20,15 @@ import type { Database } from "@/types/supabase";
  * Même forme que les quatre modules `lib/supabase/storage-*.ts` déjà en
  * place : une constante de bucket, des fonctions qui rendent soit un
  * résultat, soit `{ error }`, et une suppression toujours best-effort.
+ *
+ * CE QUI EST À MOI, ET CE QUI EST PARTAGÉ (depuis F5)
+ *   Ce module garde ce qui est PROPRE à `feedback-videos` : son bucket, et
+ *   les validations qui décident ce qui a le droit d'y entrer. Les trois
+ *   gestes rigoureusement identiques d'un bucket vidéo à l'autre — vider un
+ *   dossier, signer une URL, en signer un lot — vivent dans
+ *   `storage-video-buckets.ts` et sont appelés d'ici. Les recopier pour
+ *   `coach-reply-videos` aurait donné deux versions qui divergent au premier
+ *   correctif appliqué d'un seul côté.
  *
  * CE MODULE NE SUPPRIME JAMAIS UN OBJET DEPUIS L'ÉCRAN D'UN ÉLÈVE
  *   Première version : remplacer une vidéo envoyait la nouvelle puis
@@ -117,39 +131,7 @@ export async function removeAllStudentFeedbackVideos(
   supabase: TypedSupabaseClient,
   studentId: string,
 ): Promise<{ supprimes: number; complet: boolean }> {
-  const seau = supabase.storage.from(FEEDBACK_VIDEO_BUCKET);
-  let supprimes = 0;
-  let complet = true;
-
-  // 1000 pages de 100 objets : un garde-fou, pas une limite attendue. Une
-  // boucle sans borne sur une API distante est une boucle infinie en
-  // puissance.
-  for (let page = 0; page < 1000; page += 1) {
-    const { data: fichiers, error: listError } = await seau.list(studentId, {
-      limit: 100,
-      offset: 0,
-    });
-    if (listError) {
-      devWarn("removeAllStudentFeedbackVideos (list)", listError);
-      complet = false;
-      break;
-    }
-    if (!fichiers || fichiers.length === 0) break;
-
-    const chemins = fichiers.map((f) => `${studentId}/${f.name}`);
-    const { error: removeError } = await seau.remove(chemins);
-    if (removeError) {
-      devWarn("removeAllStudentFeedbackVideos (remove)", removeError);
-      complet = false;
-      break;
-    }
-    supprimes += chemins.length;
-    // `offset` reste à 0 À DESSEIN : on vient de retirer cette page, la
-    // suivante a pris sa place. Avancer l'offset sauterait une page sur deux.
-    if (fichiers.length < 100) break;
-  }
-
-  return { supprimes, complet };
+  return viderDossierVideoEleve(supabase, FEEDBACK_VIDEO_BUCKET, studentId);
 }
 
 /**
@@ -164,12 +146,7 @@ export async function getSignedFeedbackVideoUrl(
   path: string | null,
   expiresIn = 3600,
 ): Promise<string | null> {
-  if (!path) return null;
-  const { data, error } = await supabase.storage
-    .from(FEEDBACK_VIDEO_BUCKET)
-    .createSignedUrl(path, expiresIn);
-  devWarn("getSignedFeedbackVideoUrl", error);
-  return data?.signedUrl ?? null;
+  return signerUrlVideo(supabase, FEEDBACK_VIDEO_BUCKET, path, expiresIn);
 }
 
 /**
@@ -182,25 +159,6 @@ export async function loadSignedFeedbackVideoUrls(
   chemins: readonly (string | null)[],
   expiresIn = 3600,
 ): Promise<Map<string, string>> {
-  const uniques = [...new Set(chemins.filter((c): c is string => Boolean(c)))];
-  const resolues = new Map<string, string>();
-  if (uniques.length === 0) return resolues;
-
-  // UNE requête pour toute la page, pas une par vidéo. `createSignedUrls`
-  // rend un résultat PAR CHEMIN : ceux que la RLS refuse à cet appelant
-  // portent leur propre erreur et sont simplement absents de la carte. C'est
-  // ce qui fait qu'un coach non rattaché n'obtient rien, sans que l'appelant
-  // ait à trier quoi que ce soit.
-  const { data, error } = await supabase.storage
-    .from(FEEDBACK_VIDEO_BUCKET)
-    .createSignedUrls([...uniques], expiresIn);
-  devWarn("loadSignedFeedbackVideoUrls", error);
-  if (!data) return resolues;
-
-  for (const entree of data) {
-    if (entree.signedUrl && !entree.error && entree.path) {
-      resolues.set(entree.path, entree.signedUrl);
-    }
-  }
-  return resolues;
+  // UNE requête pour toute la page, pas une par vidéo : voir `signerUrlsVideo`.
+  return signerUrlsVideo(supabase, FEEDBACK_VIDEO_BUCKET, chemins, expiresIn);
 }

@@ -804,12 +804,27 @@ await test("F7. la modale du coach lit les vidéos DU RETOUR, pas des séries", 
   assert.ok(MODALE_COACH.includes("pas rattaché"));
 });
 
-await test("F8. l'en-tête caméra est ouvert à CE SITE seul, le micro reste fermé", () => {
+await test("F8. l'en-tête n'ouvre QUE ce site, et la capture d'élève reste muette", () => {
   assert.ok(CONFIG.includes("camera=(self)"), "la capture exige que camera ne soit plus fermé");
   assert.ok(!/camera=\*/.test(CONFIG), "jamais toutes les origines");
-  assert.ok(CONFIG.includes("microphone=()"), "le son n'est pas nécessaire, on ne le demande pas");
+
+  // LE MICRO A ÉTÉ OUVERT PAR F5, ET CE CONTRÔLE A DÛ CHANGER.
+  //
+  // Version d'origine : `microphone=()` — le son n'était nécessaire à
+  // personne. F5 donne la parole au COACH, dont la réponse filmée n'aurait
+  // aucun sens en muet : l'en-tête est donc passé à `microphone=(self)`.
+  //
+  // Ce qui reste vrai, et que ce contrôle défend maintenant, c'est la
+  // propriété qui protégeait vraiment l'élève : sa capture À LUI ne demande
+  // toujours PAS le micro. Filmer sa technique n'enregistre pas ce qui se dit
+  // dans la salle. Un en-tête ouvert n'a jamais donné accès à quoi que ce
+  // soit — c'est `getUserMedia` qui demande, et ici il demande `audio: false`.
+  assert.ok(!/microphone=\*/.test(CONFIG), "le micro ne doit jamais être ouvert à toutes les origines");
+  assert.ok(/microphone=\((self)?\)/.test(CONFIG), "le micro reste fermé, ou ouvert à ce site seul");
   const capture = sansCommentairesTs(CAPTURE);
-  assert.ok(capture.includes("audio: false"), "et la capture le confirme");
+  assert.ok(capture.includes("audio: false"), "la capture de l'ÉLÈVE ne demande pas le son");
+  assert.ok(!capture.includes("audio: true"), "et rien ne l'a rouvert au passage");
+
   // media-src : sans lui, la CSP bloquante casserait le lecteur.
   assert.ok(/media-src 'self' blob:/.test(CONFIG));
 });

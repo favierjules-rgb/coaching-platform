@@ -66,7 +66,8 @@
     "20260823090000_workout_feedback_unique_session.sql",
     "20260824090000_training_movement_patterns_v2.sql",
     "20260825090000_training_movement_patterns_remove_legacy.sql",
-    "20260826090000_student_feedback_video.sql"
+    "20260826090000_student_feedback_video.sql",
+    "20260827090000_coach_reply_video.sql"
   ],
   "garanties_de_contenu": {
     "insert_de_donnees_metier": 0,

@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 
 import {
   FEEDBACK_VIDEO_ORPHAN_GRACE_HOURS,
   FEEDBACK_VIDEO_ORPHAN_GRACE_MS,
-  FEEDBACK_VIDEO_PURGE_MAX_PAR_EXECUTION,
+  PURGE_VIDEO_MAX_PAR_EXECUTION,
   FEEDBACK_VIDEO_RETENTION_MS,
   bornerCandidats,
   classerObjetFeedbackVideo,
@@ -159,7 +159,7 @@ await test("P3. le plafond garde les PLUS ANCIENS et reporte le reste", () => {
     MAINTENANT - 6 * JOUR,
     MAINTENANT - 5 * JOUR,
   ]);
-  assert.equal(FEEDBACK_VIDEO_PURGE_MAX_PAR_EXECUTION, 500);
+  assert.equal(PURGE_VIDEO_MAX_PAR_EXECUTION, 500);
 });
 
 /* ════════════════════════════════════════════════════════════════════════
@@ -998,15 +998,44 @@ await test("F3. la purge ne parle QUE du bucket des vidéos, et jamais en SQL", 
   assert.ok(lire("../../lib/supabase/admin.ts").includes('import "server-only"'));
 });
 
-await test("F4. aucune migration n'a été ajoutée par ce chantier", () => {
-  // Tout ce que F4.1 avait besoin de savoir était déjà lisible : l'âge par
-  // l'API Storage, les références par PostgREST. Une migration n'aurait
-  // ajouté qu'une fonction privilégiée de plus à protéger.
+await test("F4. la purge ne repose sur AUCUN objet SQL qui lui soit propre", () => {
+  // Formulation d'origine : « aucune migration n'a été ajoutée par ce
+  // chantier », vérifiée par un compte de migrations. Ce compte mesurait le
+  // dépôt entier, pas F4.1 : F5 a ajouté sa propre migration (pour ses
+  // colonnes et son bucket, qui n'ont rien à voir avec la purge) et le
+  // contrôle est tombé — alors que la propriété qu'il défendait, elle, est
+  // toujours vraie.
+  //
+  // On mesure donc la propriété elle-même : tout ce dont la purge a besoin
+  // est déjà lisible par les API existantes — l'âge par Storage, les
+  // références par PostgREST. Aucune fonction privilégiée à créer, donc
+  // aucune à protéger.
+  for (const fichier of [
+    "../../lib/supabase/purge-feedback-videos.ts",
+    "../../lib/supabase/purge-video-bucket.ts",
+    "../../lib/feedback-video-retention.ts",
+    "../../app/api/cron/purge-feedback-videos/route.ts",
+  ]) {
+    const sansCommentaires = lire(fichier)
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/[^\n]*/g, "");
+    assert.ok(!/\.rpc\(/.test(sansCommentaires), `${fichier} appelle une fonction SQL dédiée`);
+  }
+
+  // Et le manifeste reste le miroir EXACT de ce qu'une base locale doit
+  // rejouer : TOUTES les migrations postérieures au baseline, et rien
+  // d'autre. Un fichier ajouté sans être inscrit ici ne serait jamais appliqué
+  // localement — la suite passerait au vert contre un schéma qui n'est pas
+  // celui de la Production.
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 33, "F4.1 ne doit ajouter aucune migration");
+  const premiere = manifeste.borne.premiere_migration_a_rejouer as string;
+  const surDisque = readdirSync(new URL("../../supabase/migrations", import.meta.url))
+    .filter((f) => f.endsWith(".sql"))
+    .sort()
+    .filter((f) => f >= premiere);
+  assert.deepEqual([...attendues].sort(), surDisque, "manifeste et dossier des migrations divergent");
   assert.ok(attendues.includes("20260826090000_student_feedback_video.sql"));
-  assert.ok(!attendues.some((m) => m.startsWith("20260827")), "aucune 20260827 attendue");
 });
 
 console.log(`\n${réussis} réussis, ${échecs} échecs`);

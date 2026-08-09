@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/purge-feedback-videos",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/purge-coach-reply-videos",
+      "schedule": "30 3 * * *"
     }
   ]
 }

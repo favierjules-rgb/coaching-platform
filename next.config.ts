@@ -70,10 +70,18 @@ const securityHeaders = [
     // droit. Le navigateur redemande de toute façon son accord à l'élève :
     // cet en-tête ne donne pas la caméra, il cesse de l'interdire.
     //
-    // `microphone=()` RESTE fermé : la capture demande
-    // `getUserMedia({ audio: false })`. Une vidéo de technique n'a pas
-    // besoin du son, et ne pas l'ouvrir évite une seconde autorisation.
-    value: "camera=(self), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()",
+    // `microphone=(self)` depuis F5 (feat/coach-reply-video). C'est un
+    // ASSOUPLISSEMENT, et il faut le justifier plutôt que le glisser :
+    // F4 gardait le micro fermé parce qu'une vidéo de technique n'a pas
+    // besoin du son. Une réponse de COACH, si — il EXPLIQUE, et une réponse
+    // muette ne vaudrait rien. La capture demande donc `audio: true`, ce qui
+    // exige cette ouverture.
+    //
+    // Ce qui n'a PAS bougé, et qui est l'essentiel : `(self)`, ce site et lui
+    // seul. Aucune iframe tierce, Stripe comprise, n'hérite du droit, et le
+    // navigateur redemande de toute façon son accord à l'utilisateur — cet
+    // en-tête ne donne pas le micro, il cesse de l'interdire.
+    value: "camera=(self), microphone=(self), geolocation=(), payment=(), usb=(), interest-cohort=()",
   },
   { key: "Content-Security-Policy-Report-Only", value: contentSecurityPolicy },
 ];

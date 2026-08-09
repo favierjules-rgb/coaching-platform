@@ -266,12 +266,24 @@ await test("12. en-têtes de sécurité déclarés", async () => {
   // s'est durci sur les deux points qui comptent :
   //   - `camera=(self)` et rien d'autre : `camera=*` ou une origine tierce
   //     donnerait le droit à une iframe (Stripe comprise) ;
-  //   - `microphone=()` reste FERMÉ : la capture demande `audio: false`, une
-  //     vidéo de technique n'a pas besoin du son.
+  //   - le micro a été ouvert à son tour par F5 (feat/coach-reply-video),
+  //     parce que le coach EXPLIQUE : une réponse vidéo muette ne vaut rien.
+  //     `microphone=(self)`, donc — et surtout PAS `microphone=*`.
+  //
+  // On mesure la valeur EXACTE, et non la seule présence de ce qui doit être
+  // ouvert : un contrôle qui ne regarde que `camera=(self)` et
+  // `microphone=(self)` passerait aussi bien sur un en-tête qui aurait
+  // rouvert la géolocalisation à côté.
   const permissions = parCle.get("Permissions-Policy") ?? "";
+  assert.equal(
+    permissions,
+    "camera=(self), microphone=(self), geolocation=(), payment=(), usb=(), interest-cohort=()",
+    "la politique de permissions doit être exactement celle-ci — ni plus ouverte, ni réordonnée sans décision",
+  );
   assert.ok(permissions.includes("camera=(self)"), "la caméra doit être ouverte à ce site seul");
   assert.ok(!/camera=\*/.test(permissions), "la caméra ne doit jamais être ouverte à toutes les origines");
-  assert.ok(permissions.includes("microphone=()"), "le micro doit rester fermé");
+  assert.ok(permissions.includes("microphone=(self)"), "le micro doit être ouvert à ce site seul");
+  assert.ok(!/microphone=\*/.test(permissions), "le micro ne doit jamais être ouvert à toutes les origines");
   for (const api of ["geolocation=()", "payment=()", "usb=()", "interest-cohort=()"]) {
     assert.ok(permissions.includes(api), `${api} ne doit pas avoir été rouvert`);
   }
@@ -449,7 +461,7 @@ await test("18. le baseline est HORS de supabase/migrations — impossible à po
   // 39 depuis la persistance de l'objectif hebdomadaire des plans v2
   // (migration 20260805090000, feat/nutrition-plan-v2-builder — déclarée
   // dans le manifeste comme le veut la procédure).
-  assert.equal(migrations.filter((f) => f.endsWith(".sql")).length, 60, "les 60 migrations doivent rester intactes");
+  assert.equal(migrations.filter((f) => f.endsWith(".sql")).length, 61, "les 61 migrations doivent rester intactes");
 });
 
 await test("19. manifeste : empreintes exactes et borne cohérente", () => {
@@ -472,7 +484,7 @@ await test("19. manifeste : empreintes exactes et borne cohérente", () => {
   // Les migrations annoncées existent réellement, et ce sont bien celles
   // qui suivent la borne.
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 33);
+  assert.equal(attendues.length, 34);
   const presentes = readdirSync(new URL("../../supabase/migrations", import.meta.url).pathname)
     .filter((f) => f.endsWith(".sql"))
     .filter((f) => f >= "20260724214500")
