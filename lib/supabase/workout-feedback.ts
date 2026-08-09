@@ -4,6 +4,7 @@ import { buildStudentActivityLink, logActivityEvent } from "@/lib/supabase/activ
 import type {
   AdminExerciseFeedbackEntry,
   AdminStudentFeedback,
+  CoachReplyVideoEntry,
   FeedbackStatus,
   FeedbackVideoEntry,
   SupabaseExerciseFeedback,
@@ -12,6 +13,9 @@ import type {
   WorkoutFeedbackPayload,
 } from "@/types";
 import type { Database } from "@/types/supabase";
+import type { ReponseCoach } from "@/lib/coach-reply-video";
+import { serialiserAnnotations } from "@/lib/video-annotations";
+import { loadSignedCoachReplyVideoUrls } from "@/lib/supabase/storage-coach-reply-videos";
 import { loadSignedFeedbackVideoUrls } from "@/lib/supabase/storage-feedback-videos";
 import { exerciseFeedbackWorthPersisting } from "@/lib/workout-feedback-entry";
 import { sanitizeDurationMinutes, sanitizePerformedAt } from "@/lib/workout-history";
@@ -60,6 +64,9 @@ function mapWorkoutFeedbackRow(row: WorkoutFeedbackRow): SupabaseWorkoutFeedback
     pain: row.pain,
     status: row.status as FeedbackStatus,
     coachReply: row.coach_reply,
+    coachReplyVideoPath: row.coach_reply_video_path ?? null,
+    coachReplyVideoUploadedAt: row.coach_reply_video_uploaded_at ?? null,
+    coachReplyVideoAnnotations: row.coach_reply_video_annotations ?? null,
     submittedAt: row.submitted_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -111,24 +118,40 @@ function mapExerciseSetFeedbackRow(row: ExerciseSetFeedbackRow): SupabaseExercis
  * produit déjà SessionFeedbackSection côté mock — un exercice sans aucune
  * série renseignée ne produit aucune entrée, comme en mock.
  */
+interface ResolutionsLecture {
+  /**
+   * Démonstrations ACTUELLES des remplaçants, par id de fiche de banque.
+   * Absente par défaut : seule la lecture destinée à l'écran de l'élève
+   * (getWorkoutFeedbackBySession) paie la requête supplémentaire — les
+   * listes du coach n'affichent aucune vidéo.
+   */
+  substituteVideos?: Map<string, string>;
+  /**
+   * URLs signées des vidéos d'ÉLÈVE, par chemin. Absente par défaut, pour la
+   * même raison : seuls les écrans qui affichent réellement la vidéo paient
+   * les signatures — une URL signée est un jeton d'accès, on n'en fabrique
+   * pas pour des lignes que personne ne regardera.
+   */
+  videoUrls?: Map<string, string>;
+  /** URLs signées des réponses vidéo du COACH (F5), même règle. */
+  coachReplyVideoUrls?: Map<string, string>;
+}
+
 function toAdminStudentFeedback(
   feedback: SupabaseWorkoutFeedback,
   exercises: SupabaseExerciseFeedback[],
   setsByExerciseFeedbackId: Map<string, SupabaseExerciseSetFeedback[]>,
   /**
-   * Démonstrations ACTUELLES des remplaçants, par id de fiche de banque.
-   * Vide par défaut : seule la lecture destinée à l'écran de l'élève
-   * (getWorkoutFeedbackBySession) paie la requête supplémentaire — les
-   * listes du coach n'affichent aucune vidéo.
+   * Ce qui a été résolu EN AMONT, et que ce convertisseur se contente de
+   * poser. Un objet nommé plutôt que trois paramètres positionnels : deux
+   * `Map<string, string>` voisines s'intervertissent sans que TypeScript
+   * n'ait rien à en dire, et l'écran afficherait alors sereinement la
+   * mauvaise vidéo.
    */
-  substituteVideos: Map<string, string> = new Map(),
-  /**
-   * URLs signées des vidéos d'élève, par chemin. Vide par défaut, pour la
-   * même raison que `substituteVideos` : seuls les écrans qui affichent
-   * réellement la vidéo paient les signatures.
-   */
-  videoUrls: Map<string, string> = new Map(),
+  resolutions: ResolutionsLecture = {},
 ): AdminStudentFeedback {
+  const { substituteVideos = new Map(), videoUrls = new Map(), coachReplyVideoUrls = new Map() } = resolutions;
+
   const exerciseEntries: AdminExerciseFeedbackEntry[] = exercises
     .slice()
     .sort((a, b) => (a.exerciseOrder ?? 0) - (b.exerciseOrder ?? 0))
@@ -175,6 +198,17 @@ function toAdminStudentFeedback(
       videoUrl: videoUrls.get(exercise.videoPath as string) ?? null,
     }));
 
+  // RÉPONSE VIDÉO DU COACH (F5) — un objet ou `null`, jamais un tableau : le
+  // coach répond une fois, et remplacer sa réponse écrase la précédente.
+  const coachReplyVideo: CoachReplyVideoEntry | null = feedback.coachReplyVideoPath
+    ? {
+        videoPath: feedback.coachReplyVideoPath,
+        videoUrl: coachReplyVideoUrls.get(feedback.coachReplyVideoPath) ?? null,
+        uploadedAt: feedback.coachReplyVideoUploadedAt,
+        annotations: feedback.coachReplyVideoAnnotations,
+      }
+    : null;
+
   return {
     id: feedback.id,
     studentId: feedback.studentId,
@@ -191,6 +225,7 @@ function toAdminStudentFeedback(
     videos,
     status: feedback.status,
     coachReply: feedback.coachReply,
+    coachReplyVideo,
     prescribedSnapshot: feedback.prescribedSnapshot ?? null,
     performedAt: feedback.performedAt ?? null,
     durationMinutes: feedback.durationMinutes ?? null,
@@ -323,7 +358,13 @@ export async function getWorkoutFeedbackBySession(
   // l'écran où l'élève rouvre son retour pour le modifier.
   const videos = await loadSubstituteVideos(supabase, exercises);
   const videosEleve = await loadFeedbackVideoUrls(supabase, exercises);
-  return toAdminStudentFeedback(feedback, exercises, setsByExerciseFeedbackId, videos, videosEleve);
+  // La réponse du coach n'est PAS signée ici : cet écran est celui où l'élève
+  // remplit ou rouvre son retour, il n'affiche pas la réponse. Elle l'est
+  // dans l'historique, qui l'affiche.
+  return toAdminStudentFeedback(feedback, exercises, setsByExerciseFeedbackId, {
+    substituteVideos: videos,
+    videoUrls: videosEleve,
+  });
 }
 
 /** Liste de tous les retours Supabase pour /admin/retours, plus récents en premier. */
@@ -348,21 +389,36 @@ export async function getAdminWorkoutFeedbackList(supabase: TypedSupabaseClient)
   // signées ici, EN UNE SEULE requête pour toute la page (createSignedUrls),
   // et seulement pour les vidéos que la RLS accorde à CE coach.
   const videoUrls = await loadFeedbackVideoUrls(supabase, [...exercisesByFeedbackId.values()].flat());
+  // Et les réponses du coach lui-même (F5) : il doit VOIR ce qu'il a déjà
+  // envoyé avant de décider de le remplacer. Même signature groupée, même
+  // règle de refus — un coach non rattaché n'obtient rien.
+  const coachReplyVideoUrls = await loadSignedCoachReplyVideoUrls(
+    supabase,
+    feedbacks.map((f) => f.coachReplyVideoPath),
+  );
   return feedbacks.map((feedback) =>
-    toAdminStudentFeedback(
-      feedback,
-      exercisesByFeedbackId.get(feedback.id) ?? [],
-      setsByExerciseFeedbackId,
-      new Map(),
+    toAdminStudentFeedback(feedback, exercisesByFeedbackId.get(feedback.id) ?? [], setsByExerciseFeedbackId, {
       videoUrls,
-    ),
+      coachReplyVideoUrls,
+    }),
   );
 }
 
-/** Retours Supabase d'un élève précis, pour la section "Retours récents" de /admin/eleves/[studentId]. */
+/**
+ * Retours Supabase d'un élève précis — section "Retours récents" de
+ * /admin/eleves/[studentId], historique élève, et calculs de progression.
+ *
+ * `avecReponseVideo` est OPT-IN, et il faut dire pourquoi plutôt que de
+ * signer systématiquement : cette fonction sert aussi aux statistiques
+ * (lib/supabase/progress.ts), qui ne montrent aucune vidéo. Signer là-bas
+ * fabriquerait des jetons d'accès pour des lignes que personne ne regarde,
+ * à chaque calcul. Seul l'historique de l'élève — le seul écran où il lit la
+ * réponse de son coach — le demande.
+ */
 export async function getWorkoutFeedbackForStudent(
   supabase: TypedSupabaseClient,
   studentId: string,
+  options: { avecReponseVideo?: boolean } = {},
 ): Promise<AdminStudentFeedback[]> {
   const { data, error } = await supabase
     .from("workout_feedback")
@@ -379,8 +435,16 @@ export async function getWorkoutFeedbackForStudent(
     supabase,
     feedbacks.map((f) => f.id),
   );
+  const coachReplyVideoUrls = options.avecReponseVideo
+    ? await loadSignedCoachReplyVideoUrls(
+        supabase,
+        feedbacks.map((f) => f.coachReplyVideoPath),
+      )
+    : new Map<string, string>();
   return feedbacks.map((feedback) =>
-    toAdminStudentFeedback(feedback, exercisesByFeedbackId.get(feedback.id) ?? [], setsByExerciseFeedbackId),
+    toAdminStudentFeedback(feedback, exercisesByFeedbackId.get(feedback.id) ?? [], setsByExerciseFeedbackId, {
+      coachReplyVideoUrls,
+    }),
   );
 }
 
@@ -725,15 +789,56 @@ export function markWorkoutFeedbackImportant(supabase: TypedSupabaseClient, feed
   return updateWorkoutFeedbackStatus(supabase, feedbackId, "important");
 }
 
-/** Comme useAdminData().addCoachReply côté mock : enregistre la réponse et marque le retour "traité". */
+/**
+ * La réponse du coach : texte, vidéo, ou les deux. Marque le retour "traité".
+ *
+ * ── POURQUOI UN OBJET, ET PAS UN TROISIÈME PARAMÈTRE ────────────────────────
+ * La réponse a trois faces désormais (texte, chemin de vidéo, calque
+ * d'annotations) et elles se posent ENSEMBLE, en une seule écriture. Les
+ * séparer en plusieurs appels laisserait exister, entre les deux, un retour
+ * portant une vidéo sans son calque — que l'élève pourrait ouvrir.
+ *
+ * ── CE QU'ON N'ENVOIE PAS ───────────────────────────────────────────────────
+ * `coach_reply_video_uploaded_at` n'est pas dans le type `Update` de
+ * `workout_feedback` : ce n'est pas un oubli, c'est la règle rendue
+ * inexprimable. Le gardien la DÉRIVE (`clock_timestamp()` au moment où le
+ * chemin apparaît ou change), et c'est elle qui déclenche la purge à 3 jours.
+ * Qui pourrait l'écrire pourrait garder sa vidéo indéfiniment.
+ *
+ * ── LE CALQUE EST RECONSTRUIT AVANT D'ÊTRE ENVOYÉ ───────────────────────────
+ * `serialiserAnnotations` ne transmet pas l'objet de l'éditeur tel quel : il
+ * le rebâtit champ par champ, pour qu'aucune propriété parasite ne se
+ * retrouve stockée, et arrondit les coordonnées. Un calque vide part en
+ * `null` plutôt qu'en tableau vide — la base refuse d'ailleurs un calque sans
+ * vidéo, et « aucune annotation » n'est pas « un tableau de rien ».
+ */
 export async function updateWorkoutFeedbackCoachReply(
   supabase: TypedSupabaseClient,
   feedbackId: string,
-  reply: string,
+  reponse: ReponseCoach,
 ): Promise<boolean> {
+  const majVideo =
+    reponse.videoPath === undefined
+      ? {}
+      : {
+          coach_reply_video_path: reponse.videoPath,
+          // Retirer la vidéo emporte son calque : la contrainte
+          // `..._annotations_sans_video` refuserait la ligne autrement, et un
+          // calque orphelin ne se rejoue par-dessus rien.
+          coach_reply_video_annotations:
+            reponse.videoPath && reponse.annotations && reponse.annotations.length > 0
+              ? serialiserAnnotations(reponse.annotations)
+              : null,
+        };
+
   const { error } = await supabase
     .from("workout_feedback")
-    .update({ coach_reply: reply, status: "traité", updated_at: new Date().toISOString() })
+    .update({
+      coach_reply: reponse.texte,
+      status: "traité",
+      updated_at: new Date().toISOString(),
+      ...majVideo,
+    })
     .eq("id", feedbackId);
   devWarn("updateWorkoutFeedbackCoachReply", error);
   return !error;

@@ -8,6 +8,7 @@ import {
   updateWorkoutFeedbackCoachReply,
   updateWorkoutFeedbackStatus,
 } from "@/lib/supabase/workout-feedback";
+import type { ReponseCoach } from "@/lib/coach-reply-video";
 import type { AdminStudentFeedback, FeedbackStatus } from "@/types";
 
 /**
@@ -65,11 +66,16 @@ export function useSupabaseAdminFeedback() {
     [refetch],
   );
 
+  /**
+   * La réponse du coach — texte, vidéo, calque d'annotations — posée en UNE
+   * écriture. La vidéo est déjà déposée dans le bucket à ce stade : ce qui
+   * part ici est son CHEMIN, jamais le fichier.
+   */
   const addReply = useCallback(
-    async (feedbackId: string, reply: string) => {
+    async (feedbackId: string, reponse: ReponseCoach) => {
       const supabase = createSupabaseBrowserClient();
       if (!supabase) return;
-      await updateWorkoutFeedbackCoachReply(supabase, feedbackId, reply);
+      await updateWorkoutFeedbackCoachReply(supabase, feedbackId, reponse);
       await refetch();
     },
     [refetch],

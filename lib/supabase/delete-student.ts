@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { removeAllStudentCoachReplyVideos } from "@/lib/supabase/storage-coach-reply-videos";
 import { removeAllStudentFeedbackVideos } from "@/lib/supabase/storage-feedback-videos";
 import { PROGRESS_PHOTOS_BUCKET } from "@/lib/supabase/storage-progress-photos";
 import type { Database } from "@/types/supabase";
@@ -26,12 +27,17 @@ import type { Database } from "@/types/supabase";
  * 1. Le compte `auth.users` lui-même (jamais touché par une cascade sur une
  *    table `public.*`) — supprimé via l'Admin API après la ligne `students`.
  * 2. Les fichiers Storage — un objet Storage n'est pas une ligne
- *    PostgreSQL, aucune cascade ne le supprime. DEUX buckets sont concernés,
- *    tous deux cloisonnés par `{studentId}/...` :
+ *    PostgreSQL, aucune cascade ne le supprime. TROIS buckets sont concernés,
+ *    tous cloisonnés par `{studentId}/...` :
  *      • `progress-photos` (photos de progression) ;
  *      • `feedback-videos` (vidéos de technique, F4) — oublier ce dossier
  *        laisserait des vidéos d'un élève supprimé sur nos serveurs, ce qui
- *        n'est pas un défaut de ménage mais un manquement RGPD.
+ *        n'est pas un défaut de ménage mais un manquement RGPD ;
+ *      • `coach-reply-videos` (réponses vidéo du coach, F5) — même exigence,
+ *        et il faut se méfier de l'intuition inverse : ce n'est pas parce que
+ *        le COACH a filmé cette vidéo qu'elle ne concerne pas l'élève. Elle
+ *        le nomme, commente sa technique, et vit dans SON dossier. Elle part
+ *        avec lui.
  *    On efface TOUT le dossier, pas seulement les chemins encore référencés :
  *    un fichier déposé puis jamais rattaché à un retour est tout aussi
  *    personnel. Suppression best-effort avant le DELETE SQL (n'échoue jamais
@@ -88,6 +94,18 @@ export async function deleteStudentCompletely(supabase: TypedSupabaseClient, stu
   if (!videos.complet) {
     console.error(
       `[delete-student] Purge incomplète de feedback-videos/${studentId}/ (${videos.supprimes} objet(s) retiré(s)). ` +
+        "L'élève n'a PAS été supprimé : réessayer, ou vider le dossier à la main avant de relancer.",
+    );
+    return { ok: false, error: "storage_error" };
+  }
+
+  // Réponses vidéo du coach (F5). Même règle, et pour la même raison : une
+  // fois la ligne `students` supprimée, `coach-reply-videos/<student_id>/` ne
+  // désigne plus personne.
+  const reponses = await removeAllStudentCoachReplyVideos(supabase, studentId);
+  if (!reponses.complet) {
+    console.error(
+      `[delete-student] Purge incomplète de coach-reply-videos/${studentId}/ (${reponses.supprimes} objet(s) retiré(s)). ` +
         "L'élève n'a PAS été supprimé : réessayer, ou vider le dossier à la main avant de relancer.",
     );
     return { ok: false, error: "storage_error" };

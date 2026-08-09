@@ -4,12 +4,15 @@ import { useState } from "react";
 import { CheckCircle, Eye, Repeat2, Video } from "lucide-react";
 
 import { TextareaField } from "@/components/admin/AdminFormFields";
+import { CoachReplyVideoField } from "@/components/admin/CoachReplyVideoField";
 import { Modal, PrimaryButton } from "@/components/admin/Modal";
 import { StatusBadge, feedbackStatusTone } from "@/components/admin/StatusBadge";
 import { feedbackStatusLabels, feedbackTypeLabels, formatDate, fullName } from "@/lib/admin";
 import { isCardioResultEntryName, parseCardioResults, type CardioBlockResult } from "@/lib/cardio-feedback";
 import { formatDistanceMeters, formatDurationSeconds } from "@/lib/cardio";
+import type { ReponseCoach } from "@/lib/coach-reply-video";
 import { exerciseGlobalRpeMentions } from "@/lib/previous-performance";
+import { parseAnnotations, type Annotation } from "@/lib/video-annotations";
 import type { AdminStudent, AdminStudentFeedback } from "@/types";
 
 /** Ligne prévu/réalisé d'une métrique d'un bloc cardio (valeurs absentes masquées proprement). */
@@ -80,11 +83,17 @@ export function FeedbackDetailModal({
 }: {
   feedback: AdminStudentFeedback;
   student: AdminStudent | undefined;
-  onReply: (reply: string) => void;
+  onReply: (reponse: ReponseCoach) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [reply, setReply] = useState("");
   const [sent, setSent] = useState(false);
+  // F5 : la réponse vidéo suit exactement le même cycle que le texte — un
+  // brouillon local, envoyé avec le reste. La vidéo, elle, est déjà dans le
+  // bucket dès que le coach l'a jointe ; ce qui est en brouillon ici, c'est
+  // son CHEMIN et son calque.
+  const [videoPath, setVideoPath] = useState<string | null>(null);
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
 
   // La réponse enregistrée est chargée UNE fois par retour (comparaison par
   // id UNIQUEMENT — jamais par le contenu du brouillon) : si la liste se
@@ -96,6 +105,10 @@ export function FeedbackDetailModal({
   if (loadedForId !== feedback.id) {
     setLoadedForId(feedback.id);
     setReply(feedback.coachReply ?? "");
+    setVideoPath(feedback.coachReplyVideo?.videoPath ?? null);
+    // On ne fait jamais confiance au `jsonb` : un calque abîmé est écarté
+    // tracé par tracé, il ne fait pas disparaître la vidéo.
+    setAnnotations(parseAnnotations(feedback.coachReplyVideo?.annotations));
   }
 
   function close() {
@@ -103,9 +116,13 @@ export function FeedbackDetailModal({
     setSent(false);
   }
 
+  // Une réponse peut être uniquement écrite, uniquement filmée, ou les deux.
+  // Ce qui n'a pas de sens, c'est une réponse vide.
+  const peutEnvoyer = Boolean(reply.trim()) || Boolean(videoPath);
+
   function handleSend() {
-    if (!reply.trim()) return;
-    onReply(reply.trim());
+    if (!peutEnvoyer) return;
+    onReply({ texte: reply.trim(), videoPath, annotations });
     setSent(true);
   }
 
@@ -299,7 +316,26 @@ export function FeedbackDetailModal({
             ) : (
               <>
                 <TextareaField label="Réponse coach" value={reply} onChange={setReply} rows={3} />
-                <PrimaryButton onClick={handleSend} disabled={!reply.trim()}>
+                <div>
+                  <p className="mb-1.5 text-xs uppercase tracking-wide text-muted-foreground">Réponse vidéo</p>
+                  <CoachReplyVideoField
+                    studentId={feedback.studentId}
+                    videoPath={videoPath}
+                    annotations={annotations}
+                    urlExistante={
+                      // Déjà signée par la lecture de liste quand le chemin
+                      // n'a pas changé depuis. Inutile de re-signer ce qu'on a.
+                      feedback.coachReplyVideo?.videoPath === videoPath
+                        ? (feedback.coachReplyVideo?.videoUrl ?? null)
+                        : null
+                    }
+                    onChange={(etat) => {
+                      setVideoPath(etat.videoPath);
+                      setAnnotations(etat.annotations);
+                    }}
+                  />
+                </div>
+                <PrimaryButton onClick={handleSend} disabled={!peutEnvoyer}>
                   Envoyer la réponse
                 </PrimaryButton>
               </>

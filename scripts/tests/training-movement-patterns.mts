@@ -96,7 +96,8 @@ const MIGRATION_METADONNEES = lire("../../supabase/migrations/20260822090000_wor
  * classe dans la migration qui l'ajoute. Le contrôle BB1 lit l'ensemble.
  */
 const MIGRATION_VIDEO = lire("../../supabase/migrations/20260826090000_student_feedback_video.sql");
-const MATRICE = [MIGRATION_AUTORITAIRE, MIGRATION_METADONNEES, MIGRATION_VIDEO].join("\n");
+const MIGRATION_REPONSE_VIDEO = lire("../../supabase/migrations/20260827090000_coach_reply_video.sql");
+const MATRICE = [MIGRATION_AUTORITAIRE, MIGRATION_METADONNEES, MIGRATION_VIDEO, MIGRATION_REPONSE_VIDEO].join("\n");
 const COUCHE_ECRITURE = lire("../../lib/supabase/workout-feedback.ts");
 const CHECKLIST = lire("../../supabase/tests/training_movement_patterns_checklist.sql");
 const CARTE = lire("../../components/student/ExerciseFeedbackCard.tsx");
@@ -464,7 +465,7 @@ await test("B7. aucune migration déjà appliquée n'est touchée", () => {
   const fichiers = readdirSync(new URL("../../supabase/migrations", import.meta.url).pathname)
     .filter((f) => f.endsWith(".sql"))
     .sort();
-  assert.equal(fichiers.length, 60, "60 migrations attendues après ce chantier");
+  assert.equal(fichiers.length, 61, "61 migrations attendues après ce chantier");
   // On ancre sur la migration qui PRÉCÈDE le chantier plutôt que sur la fin
   // du dossier : ce qui doit rester vrai, c'est que les six migrations F3 se
   // suivent sans rien d'intercalé — pas qu'elles soient les dernières. Un
@@ -487,7 +488,7 @@ await test("B7. aucune migration déjà appliquée n'est touchée", () => {
 
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 33);
+  assert.equal(attendues.length, 34);
   assert.ok(attendues.includes("20260820090000_training_movement_patterns.sql"), "manifeste non mis à jour");
   assert.ok(attendues.includes("20260821090000_workout_feedback_authoritative.sql"), "manifeste non mis à jour");
   assert.ok(attendues.includes("20260822090000_workout_feedback_session_metadata.sql"), "manifeste non mis à jour");
@@ -710,7 +711,7 @@ await test("BB7. la couche d'écriture n'écrit plus AUCUNE colonne dérivée ou
   assert.ok(!/buildPrescribedSnapshot|loadSessionRowsForSnapshot/.test(couche));
   // Le coach, lui, garde ses deux écritures — la protection ne l'a pas amputé.
   assert.ok(/\.update\(\{ status, updated_at/.test(couche), "updateWorkoutFeedbackStatus intact");
-  assert.ok(/coach_reply: reply/.test(couche), "updateWorkoutFeedbackCoachReply intact");
+  assert.ok(/coach_reply: reponse\.texte/.test(couche), "updateWorkoutFeedbackCoachReply intact");
 });
 
 await test("BB8. la vidéo du remplaçant est RÉSOLUE à la lecture, jamais stockée dans le retour", () => {

@@ -30,6 +30,15 @@ export interface OptionsBase {
   /** Fiches de banque, pour dériver le nom du remplaçant comme le fait le trigger. */
   banque?: Record<string, string>;
   /**
+   * Le bucket que `objets` et `datesObjets` représentent. `feedback-videos`
+   * par défaut (F4) ; la suite F5 le bascule sur `coach-reply-videos`.
+   *
+   * Tout AUTRE bucket vit dans `autresBuckets`, ce qui permet de prouver
+   * qu'une purge cloisonnée n'y touche jamais — quel que soit celui des deux
+   * qu'on balaie.
+   */
+  bucketPrincipal?: string;
+  /**
    * RLS du bucket, reproduite : rend `true` si l'appelant a le droit de lire
    * ce chemin. Par défaut tout est lisible — les tests qui veulent prouver un
    * cloisonnement fournissent leur propre prédicat.
@@ -41,8 +50,10 @@ export interface OptionsBase {
    */
   echecSuppression?: (chemin: string) => string | null;
   /**
-   * Fait échouer l'UPDATE de `exercise_feedback` qui vise un `video_path`
-   * donné — pour prouver qu'un nettoyage DB raté n'efface aucun fichier.
+   * Fait échouer l'UPDATE qui vise un chemin de vidéo donné — pour prouver
+   * qu'un nettoyage DB raté n'efface aucun fichier. Vaut pour les deux
+   * tables : `exercise_feedback.video_path` (F4) comme
+   * `workout_feedback.coach_reply_video_path` (F5).
    */
   echecNettoyageBase?: (cheminVise: string) => string | null;
   /**
@@ -84,6 +95,7 @@ export function creerBase(options: OptionsBase = {}): BaseFactice {
     "33000000-0000-4000-8000-0000000000a3": "Pompes lestées",
   };
   const peutLireVideo = options.peutLireVideo ?? (() => true);
+  const bucketPrincipal = options.bucketPrincipal ?? "feedback-videos";
 
   const tables = new Map<string, Ligne[]>();
   const table = (nom: string) => {
@@ -95,6 +107,10 @@ export function creerBase(options: OptionsBase = {}): BaseFactice {
       session_id: null, program_id: null, completed: false, global_rpe: null, global_comment: "",
       pain: "", status: "a-traiter", coach_reply: "", prescribed_snapshot: null, performed_at: null,
       duration_minutes: null, session_status: null,
+      // F5 — réponse vidéo du coach. `coach_reply_video_uploaded_at` est
+      // DÉRIVÉ par le gardien, jamais reçu : voir le trigger reproduit plus bas.
+      coach_reply_video_path: null, coach_reply_video_uploaded_at: null,
+      coach_reply_video_annotations: null,
       submitted_at: "2026-08-08T10:00:00Z", created_at: "2026-08-08T10:00:00Z", updated_at: "2026-08-08T10:00:00Z",
     },
     exercise_feedback: {
@@ -166,19 +182,57 @@ export function creerBase(options: OptionsBase = {}): BaseFactice {
             }
             ligne.video_uploaded_at = chemin ? `2026-08-08T10:00:${String((horloge += 1)).padStart(2, "0")}Z` : null;
           }
+          // F5 — même gardien, autre table : le chemin d'une réponse doit
+          // désigner l'élève DE CE RETOUR, et la date est dérivée.
+          if (nom === "workout_feedback") {
+            const chemin = ligne.coach_reply_video_path as string | null;
+            if (chemin && chemin.split("/")[0] !== ligne.student_id) {
+              throw new Error(`Réponse vidéo refusée : le chemin ${chemin} ne désigne pas l'élève de ce retour`);
+            }
+            ligne.coach_reply_video_uploaded_at = chemin
+              ? `2026-08-08T10:00:${String((horloge += 1)).padStart(2, "0")}Z`
+              : null;
+            if (!chemin) ligne.coach_reply_video_annotations = null;
+          }
           lignes.push(ligne);
           return { ...ligne };
         });
       }
       if (état.op === "update") {
-        if (nom === "exercise_feedback" && options.echecNettoyageBase) {
-          const vise = état.filtres.find(([c]) => c === "video_path")?.[1];
+        if (options.echecNettoyageBase) {
+          const vise = état.filtres.find(([c]) => c === "video_path" || c === "coach_reply_video_path")?.[1];
           const echec = typeof vise === "string" ? options.echecNettoyageBase(vise) : null;
           if (echec) throw new Error(echec);
         }
         const touchées = lignes.filter(correspond);
+        // ── LE GARDIEN F5 REFUSE AVANT D'ÉCRIRE ──────────────────────────
+        // En base, une exception avorte TOUT l'ordre : aucune ligne n'est
+        // modifiée. Valider après un `Object.assign` laisserait le double
+        // dans un état que PostgreSQL n'atteint jamais — et un test verrait
+        // « refusé » avec la mauvaise valeur écrite quand même.
+        if (nom === "workout_feedback" && "coach_reply_video_path" in (état.valeurs ?? {})) {
+          const vise = (état.valeurs as Ligne).coach_reply_video_path as string | null;
+          for (const l of touchées) {
+            if (vise && vise.split("/")[0] !== l.student_id) {
+              throw new Error(`Réponse vidéo refusée : le chemin ${vise} ne désigne pas l'élève de ce retour`);
+            }
+          }
+        }
         for (const l of touchées) {
+          const cheminAvant = l.coach_reply_video_path as string | null;
           Object.assign(l, état.valeurs);
+          if (nom === "workout_feedback" && "coach_reply_video_path" in (état.valeurs ?? {})) {
+            const chemin = l.coach_reply_video_path as string | null;
+            l.coach_reply_video_uploaded_at =
+              chemin === null
+                ? null
+                : chemin !== cheminAvant
+                  ? `2026-08-08T10:00:${String((horloge += 1)).padStart(2, "0")}Z`
+                  : l.coach_reply_video_uploaded_at;
+            // Retirer la vidéo emporte le calque — mais SEULEMENT sur la
+            // transition, comme en base.
+            if (chemin === null && cheminAvant !== null) l.coach_reply_video_annotations = null;
+          }
           // ── LE TRIGGER, à l'UPDATE aussi ────────────────────────────
           // `video_uploaded_at` est DÉRIVÉ : la base le remet à NULL dès que
           // `video_path` tombe. Sans cela, la purge semblerait laisser une
@@ -240,12 +294,13 @@ export function creerBase(options: OptionsBase = {}): BaseFactice {
    * Le Storage. Un ensemble de chemins par bucket, une date de création par
    * objet, et la RLS de lecture.
    *
-   * `feedback-videos` est le bucket « réel » : c'est lui que `objets` porte.
+   * `bucketPrincipal` est le bucket « réel » : c'est lui que `objets` porte.
    * Tout autre nom de bucket vit dans `autresBuckets` — ce qui permet de
-   * prouver qu'une purge cloisonnée n'y touche jamais.
+   * prouver qu'une purge cloisonnée n'y touche jamais, y compris quand
+   * l'autre bucket est l'AUTRE bucket vidéo.
    */
   const sacDe = (bucket: string): Set<string> => {
-    if (bucket === "feedback-videos") return objets;
+    if (bucket === bucketPrincipal) return objets;
     if (!autresBuckets.has(bucket)) autresBuckets.set(bucket, new Set());
     return autresBuckets.get(bucket)!;
   };

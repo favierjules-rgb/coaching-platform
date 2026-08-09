@@ -1391,6 +1391,45 @@ export interface FeedbackVideoEntry {
 }
 
 /**
+ * RÉPONSE VIDÉO DU COACH (F5).
+ *
+ * Le pendant exact de `FeedbackVideoEntry`, dans l'autre sens : l'élève filme
+ * sa technique, le coach répond en vidéo. Une seule par retour — c'est une
+ * réponse, pas une conversation — d'où un objet et non un tableau.
+ *
+ * Portée par le RETOUR, à côté de `coachReply` : la réponse écrite et la
+ * réponse filmée sont deux formes de la même chose, et le coach peut n'en
+ * envoyer qu'une des deux.
+ */
+export interface CoachReplyVideoEntry {
+  /** CHEMIN dans le bucket privé `coach-reply-videos`, jamais une URL. */
+  videoPath: string;
+  /**
+   * URL SIGNÉE, résolue À LA LECTURE et valable une heure. `null` quand la
+   * résolution n'a pas été demandée (listes qui n'affichent pas la vidéo),
+   * quand la RLS refuse ce chemin à cet appelant, ou quand la vidéo a été
+   * purgée. Dans les trois cas, l'écran doit le DIRE plutôt qu'afficher un
+   * lecteur vide.
+   */
+  videoUrl: string | null;
+  /**
+   * Instant du dépôt par le coach — c'est de LUI que partent les 3 jours,
+   * pas de la première ouverture par l'élève. Nullable parce que la colonne
+   * l'est ; en base, la contrainte de cohérence garantit qu'une vidéo sans
+   * date n'existe pas.
+   */
+  uploadedAt: string | null;
+  /**
+   * Calque d'annotations BRUT, tel que la colonne `jsonb` le porte. Il est
+   * traduit par `parseAnnotations` au moment de l'affichage — comme
+   * `prescribedSnapshot` l'est par `resolvePrescription`. On ne fait jamais
+   * confiance à ce qui vient de la base : un calque abîmé ne doit pas faire
+   * disparaître la vidéo.
+   */
+  annotations: unknown;
+}
+
+/**
  * Retour élève consolidé côté admin (entraînement, nutrition ou profil).
  * Correspond à une future table Supabase `student_feedback` ; les détails
  * par exercice restent une sous-liste (exerciseEntries) plutôt qu'une
@@ -1424,6 +1463,12 @@ export interface AdminStudentFeedback {
   videos?: FeedbackVideoEntry[];
   status: FeedbackStatus;
   coachReply: string;
+  /**
+   * Réponse VIDÉO du coach (F5), à côté de la réponse écrite. Absente sur
+   * tout l'historique et sur le chemin mock ; `null` quand le coach n'a
+   * répondu qu'en texte.
+   */
+  coachReplyVideo?: CoachReplyVideoEntry | null;
   createdAt: string;
   /** Photographie du prescrit posée à la première soumission — null pour les
    *  anciens retours (le récapitulatif retombe alors sur la séance vivante,
@@ -1460,6 +1505,12 @@ export interface SupabaseWorkoutFeedback {
   pain: string;
   status: FeedbackStatus;
   coachReply: string;
+  /** Réponse vidéo du coach (F5) — null partout ailleurs. */
+  coachReplyVideoPath: string | null;
+  /** DÉRIVÉ par le gardien, jamais écrit depuis l'application. */
+  coachReplyVideoUploadedAt: string | null;
+  /** Calque BRUT ; traduit par `parseAnnotations` à l'affichage. */
+  coachReplyVideoAnnotations: unknown;
   submittedAt: string;
   createdAt: string;
   updatedAt: string;

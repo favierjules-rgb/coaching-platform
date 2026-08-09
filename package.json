@@ -62,7 +62,9 @@
     "test:nutrition-v2-unified": "npx tsx scripts/tests/nutrition-v2-unified.mts",
     "test:training-movement-patterns": "tsx scripts/tests/training-movement-patterns.mts",
     "test:student-feedback-video": "tsx scripts/tests/student-feedback-video.mts",
-    "test:student-feedback-video-retention": "tsx --conditions=react-server scripts/tests/student-feedback-video-retention.mts"
+    "test:student-feedback-video-retention": "tsx --conditions=react-server scripts/tests/student-feedback-video-retention.mts",
+    "test:coach-reply-video": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/coach-reply-video.mts",
+    "test:coach-reply-video-render": "npx tsx scripts/tests/coach-reply-video-render.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

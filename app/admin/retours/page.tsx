@@ -135,7 +135,13 @@ export default function AdminFeedbackPage() {
                   <FeedbackDetailModal
                     feedback={f}
                     student={student}
-                    onReply={(reply) => (useSupabase ? supabaseFeedback.addReply(f.id, reply) : addCoachReply(f.id, reply))}
+                    // Le chemin MOCK ne connaît que le texte : il n'a ni
+                    // bucket, ni élève réel à qui adresser une vidéo. On ne
+                    // lui invente pas une réponse vidéo qu'il ne saurait ni
+                    // stocker ni relire.
+                    onReply={(reponse) =>
+                      useSupabase ? supabaseFeedback.addReply(f.id, reponse) : addCoachReply(f.id, reponse.texte)
+                    }
                   />
                   {f.status !== "important" && (
                     <button
