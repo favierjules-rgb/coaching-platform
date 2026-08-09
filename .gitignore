@@ -60,3 +60,4 @@ brand/transformations/approved/
 
 # Supabase CLI local state
 supabase/.temp/
+_to_delete/

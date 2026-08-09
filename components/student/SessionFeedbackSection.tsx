@@ -9,9 +9,9 @@ import {
   normalizeExerciseName,
   parseRpeInput,
 } from "@/lib/previous-performance";
-import { CheckCircle } from "lucide-react";
 
 import { ExerciseFeedbackCard } from "@/components/student/ExerciseFeedbackCard";
+import { SessionCompletionCard } from "@/components/student/SessionCompletionCard";
 import { StudentSessionBlockList } from "@/components/student/StudentSessionBlockList";
 import { TrainingStatCards } from "@/components/shared/TrainingMetricsSummary";
 import { useAdminData } from "@/hooks/useAdminData";
@@ -35,6 +35,7 @@ import {
 import { cardioTypeLabels, formatDistanceMeters, formatDurationSeconds } from "@/lib/cardio";
 import { orderedStrengthExercises, orderedStudentSessionBlocks, type StudentSessionBlockView } from "@/lib/student-session-blocks";
 import { calculatePlannedVsActualMetrics, formatTonnage } from "@/lib/training-metrics";
+import { construireBilanFinSeance } from "@/lib/session-completion";
 import { isUuid } from "@/lib/uuid";
 import type {
   ActualSetEntry,
@@ -277,6 +278,41 @@ export function SessionFeedbackSection({
   // sert qu'à l'affichage (bouton désactivé + libellé).
   const submittingRef = useRef(false);
   const [submitting, setSubmitting] = useState(false);
+  /**
+   * F2 — la carte de fin de séance s'ALLUME-t-elle ?
+   *
+   * Vrai uniquement quand l'élève vient de cliquer sur « Enregistrer mon
+   * retour » pour une PREMIÈRE soumission. C'est de l'état de composant :
+   * il ne survit donc pas à un rechargement, et rouvrir la séance demain
+   * montrera la même carte, chiffres compris, mais immobile.
+   *
+   * Une CORRECTION (« Modifier mon retour ») ne rallume rien : la séance
+   * s'est terminée une fois, pas à chaque faute de frappe rattrapée.
+   */
+  const [celebration, setCelebration] = useState(false);
+
+  /**
+   * Le bilan affiché sur la carte de fin de séance.
+   *
+   * Calculé ICI, avant tout retour conditionnel : un hook ne peut pas vivre
+   * derrière un `if`. Il est recalculé depuis le retour lui-même à chaque
+   * rendu — rien n'est stocké en base, aucune colonne n'a été ajoutée.
+   *
+   * L'historique vient du même chargement groupé que les repères
+   * « Dernières perfs » : aucune requête supplémentaire n'est payée pour la
+   * carte. Sur le chemin mock il est vide, donc la carte montre les chiffres
+   * du jour sans comparaison — ce qui est exact, pas dégradé.
+   */
+  const bilanFinSeance = useMemo(
+    () =>
+      construireBilanFinSeance({
+        // `?? null` : le chemin mock passe par `Array.find`, qui rend
+        // `undefined` et non `null`. Les deux veulent dire « pas de retour ».
+        feedback: existingFeedback ?? null,
+        historique: supabaseFeedback.history,
+      }),
+    [existingFeedback, supabaseFeedback.history],
+  );
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   if (!supabaseFeedback.ready) {
@@ -437,6 +473,9 @@ export function SessionFeedbackSection({
           releaseForRetry();
           return;
         }
+        // `editing` est lu AVANT d'être remis à faux : c'est lui qui distingue
+        // « je termine ma séance » de « je corrige ce que j'ai déjà envoyé ».
+        if (!editing) setCelebration(true);
         setEditing(false);
         return;
       }
@@ -489,6 +528,7 @@ export function SessionFeedbackSection({
       };
 
       addFeedback(feedback);
+      setCelebration(true);
     } catch {
       setSubmitError("L'enregistrement a échoué. Vérifie ta connexion puis réessaie.");
       releaseForRetry();
@@ -639,24 +679,27 @@ export function SessionFeedbackSection({
     return (
       // Refonte apple-ui : récapitulatif recentré dans la colonne principale.
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 animate-fade-in">
-        <div className="rounded-card border border-primary/30 bg-card p-8 text-center shadow-soft">
-          <CheckCircle size={32} className="mx-auto mb-3 text-primary" />
-          <h3 className="mb-1 font-heading text-base font-bold uppercase text-foreground">
-            Retour envoyé
-          </h3>
-          <p className="text-sm text-muted-foreground">
-            Ton coach recevra ton retour avant la prochaine séance.
-          </p>
+        {/*
+          F2 — la carte de fin de séance prend la place du bloc « Retour
+          envoyé ». Même point de montage, même rôle : confirmer que c'est
+          parti. Elle y ajoute ce que l'élève vient de faire, en chiffres, et
+          l'emblème qui s'allume — mais uniquement au moment de l'envoi.
+
+          Le bilan est RECALCULÉ à chaque rendu depuis le retour lui-même :
+          rien n'est stocké, aucune colonne n'a été ajoutée, et rouvrir la
+          séance dans six mois affichera les mêmes chiffres.
+        */}
+        <SessionCompletionCard bilan={bilanFinSeance} celebre={celebration}>
           {supabaseFeedback.active && (
             <button
               type="button"
               onClick={startEditing}
-              className="pressable mx-auto mt-4 flex min-h-[44px] items-center gap-2 rounded-control border border-border px-5 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+              className="pressable mx-auto mt-5 flex min-h-[44px] items-center gap-2 rounded-control border border-border px-5 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             >
               Modifier mon retour
             </button>
           )}
-        </div>
+        </SessionCompletionCard>
 
         {prescription.source === "snapshot" && prescription.snapshot && (
           <div className="rounded-card border border-border bg-card p-6 shadow-soft">

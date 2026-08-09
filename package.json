@@ -17,6 +17,7 @@
     "test:muscle-overlays": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/muscle-overlays.mts",
     "test:weight-chart": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/weight-chart.mts",
     "test:session-summary": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/session-summary.mts",
+    "test:session-completion": "npx tsx scripts/tests/session-completion.mts",
     "test:student-session-blocks": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/student-session-blocks.mts",
     "test:admin-shell-nav": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/admin-shell-nav.mts",
     "test:admin-program-preview": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/admin-program-preview.mts",

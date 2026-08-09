@@ -1278,3 +1278,96 @@ body {
     --recettes-halo-angle: 118deg;
   }
 }
+
+/*
+ * ════════════════════════════════════════════════════════════════════════
+ * F2 — CARTE DE FIN DE SÉANCE : l'allumage de la double étoile
+ * ════════════════════════════════════════════════════════════════════════
+ * Où : components/student/SessionCompletionCard.tsx, à l'instant précis où
+ * l'élève clique sur « Enregistrer mon retour ».
+ *
+ * POURQUOI ON S'AUTORISE UNE ANIMATION ICI
+ *   La table de fréquence (review-animations/STANDARDS.md) range ce moment
+ *   dans « rare / première fois — peut ajouter du plaisir ». Une séance se
+ *   termine trois ou quatre fois par semaine, jamais cent fois par jour, et
+ *   l'élève vient d'accomplir quelque chose : c'est exactement le cas où le
+ *   mouvement porte un sens plutôt qu'un décor. Elle ne se rejoue PAS au
+ *   rechargement d'un retour déjà envoyé — le composant ne la demande qu'à
+ *   la soumission.
+ *
+ * LES VALEURS, ET D'OÙ ELLES VIENNENT
+ *   • `--ease-out` (courbe forte déjà en place) : entrée, donc ease-out —
+ *     jamais ease-in, qui retarde l'instant que l'œil regarde.
+ *   • 380 ms par étoile : au-dessus du budget des 300 ms de l'interface
+ *     courante, en dessous de ce qu'on lit comme une attente. Le décalage de
+ *     120 ms crée la CASCADE — les deux étoiles ensemble donneraient un
+ *     clignotement, pas un allumage.
+ *   • `scale(0.86)` au départ, jamais `scale(0)` : rien n'apparaît de rien.
+ *     Le léger dépassement à 1.03 donne le « pop » sans rebond appuyé.
+ *   • `both` : l'étoile décalée reste invisible pendant son délai, au lieu
+ *     de s'afficher pleine puis de disparaître pour s'animer.
+ *
+ * Chaque étoile tourne autour de SON centre (`transform-box: fill-box`) :
+ * sans cela, les deux grandiraient depuis le centre du groupe et glisseraient
+ * en diagonale.
+ */
+@keyframes double-star-allumage {
+  from {
+    opacity: 0;
+    transform: scale(0.86);
+  }
+  70% {
+    opacity: 1;
+    transform: scale(1.03);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.double-star-a,
+.double-star-b {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: double-star-allumage 380ms var(--ease-out) both;
+}
+
+.double-star-b {
+  animation-delay: 120ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* On ne cache pas l'emblème, on l'immobilise : les deux étoiles sont là,
+     entières, dès le premier rendu. */
+  .double-star-a,
+  .double-star-b {
+    animation: none;
+  }
+}
+
+/*
+ * Entrée de la carte elle-même : un fondu montant très court, pour que les
+ * chiffres ne surgissent pas sous les étoiles. Rien de plus — le mouvement
+ * qui porte le sens est celui de l'emblème, pas celui de la boîte.
+ */
+@keyframes session-completion-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.session-completion-in {
+  animation: session-completion-in var(--duration-modal) var(--ease-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-completion-in {
+    animation: none;
+  }
+}
