@@ -90,6 +90,19 @@ interface ExerciseVideoFieldProps {
   onChange: (chemin: string | null) => void;
   deposer?: DeposeurVideo;
   resoudreUrl?: ResolveurUrlVideo;
+  /**
+   * Sans réseau, AUCUNE vidéo nouvelle ne peut naître.
+   *
+   * F4/F5 restent online-only : un téléversement exige le bucket, et il n'y
+   * a pas de Blob dans IndexedDB — stocker une vidéo localement pour
+   * l'envoyer plus tard remplirait le téléphone et n'a jamais été le
+   * chantier. On retire donc les deux commandes d'ajout et on le dit, au
+   * lieu de laisser l'élève déclencher un envoi qui échouera.
+   *
+   * Ce qui est DÉJÀ enregistré, lui, reste affiché et conservé : voir
+   * `cheminsVideoConnus` dans `construireWorkoutFeedbackPayload`.
+   */
+  horsLigne?: boolean;
 }
 
 type Etat =
@@ -104,6 +117,7 @@ export function ExerciseVideoField({
   onChange,
   deposer = deposeurParDefaut,
   resoudreUrl = resolveurParDefaut,
+  horsLigne = false,
 }: ExerciseVideoFieldProps) {
   const [etat, setEtat] = useState<Etat>({ phase: "repos" });
   const [erreur, setErreur] = useState<string | null>(null);
@@ -328,6 +342,19 @@ export function ExerciseVideoField({
   }
 
   /* ── Aucune vidéo ───────────────────────────────────────────────────── */
+  if (horsLigne) {
+    // Aucun `<input type="file">`, aucun bouton de capture : l'ajout n'est
+    // pas seulement désactivé, il n'est pas MONTÉ. Rien ne peut donc
+    // déclencher `deposer()` — ni un clic, ni un raccourci, ni un test.
+    return (
+      <div className="mt-3">
+        <p className="text-xs leading-snug text-muted-foreground/70">
+          Une connexion est nécessaire pour ajouter une vidéo.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="mt-3">
       <div className="flex flex-wrap items-center gap-2">

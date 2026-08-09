@@ -1371,3 +1371,26 @@ body {
     animation: none;
   }
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+ * MODE APPLICATION (PWA)
+ * ══════════════════════════════════════════════════════════════════════
+ * `display-mode: standalone` est vrai UNIQUEMENT quand la page tourne dans
+ * l'application installée sur l'écran d'accueil — jamais dans un onglet.
+ *
+ * Ce que ça sert : la demande est que l'application « n'affiche que la page
+ * de connexion, sans la home page du site ». Le manifeste s'occupe du
+ * lancement ; il reste les liens qui RAMÈNENT à la vitrine depuis l'espace
+ * connecté. Un « Retour à l'accueil » dans l'application ferait entrer le
+ * Hero, les transformations et la newsletter dans une fenêtre sans barre
+ * d'adresse — donc sans bouton retour visible sur iOS.
+ *
+ * Fait en CSS et pas en JavaScript à dessein : pas de test de plateforme à
+ * maintenir, pas de différence entre le rendu serveur et le rendu client,
+ * et le lien reste parfaitement fonctionnel partout ailleurs.
+ */
+@media (display-mode: standalone) {
+  .navigateur-seulement {
+    display: none;
+  }
+}

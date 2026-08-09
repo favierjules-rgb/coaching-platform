@@ -7,6 +7,7 @@ import { CoachingSummaryCard } from "@/components/student/CoachingSummaryCard";
 import { EditPersonalInfoModal } from "@/components/student/EditPersonalInfoModal";
 import { GoalsSection } from "@/components/student/GoalsSection";
 import { InjurySection } from "@/components/student/InjurySection";
+import { InstallAppSection } from "@/components/student/InstallAppSection";
 import { MeasurementsSection } from "@/components/student/MeasurementsSection";
 import { InfoRow, ProfileSection, TagList } from "@/components/student/ProfileSection";
 import { NewsletterPreferenceToggle } from "@/components/student/NewsletterPreferenceToggle";
@@ -287,6 +288,11 @@ export function ProfilPageContent({
           </div>
         </>
       )}
+    {/* Chantier PWA : ne s'affiche pas du tout quand l'espace est déjà
+        ouvert depuis l'écran d'accueil. */}
+    <div className="mb-6">
+      <InstallAppSection />
+    </div>
     <NewsletterPreferenceToggle />
     </div>
   );

@@ -12,44 +12,83 @@ import {
   getWorkoutSession,
   student,
 } from "@/data/student";
-import { useSupabaseTrainingProgram } from "@/hooks/useSupabaseTrainingProgram";
-import { toEleveWorkoutSession } from "@/lib/training-schedule";
+import { useSeanceHorsLigne } from "@/hooks/useSeanceHorsLigne";
+
+/**
+ * LA SÉANCE — SIX ÉTATS, ET PLUS UN SEUL BOOLÉEN.
+ *
+ * ════════════════════════════════════════════════════════════════════════
+ * CE QUI A CHANGÉ ICI, ET POURQUOI
+ * ════════════════════════════════════════════════════════════════════════
+ * Cette page faisait `if (supabaseTraining.active) … else mock`. Ce `else`
+ * couvrait quatre situations sans rapport, dont une panne réseau : un élève
+ * réel, en avion, voyait la séance de DÉMONSTRATION de `data/student.ts` et
+ * la remplissait. Rien à l'écran ne l'en distinguait.
+ *
+ * `useSeanceHorsLigne` rend désormais un état explicite. La démonstration
+ * n'apparaît QUE pour `mock`, c'est-à-dire quand Supabase n'est réellement
+ * pas configuré. Une erreur serveur dit qu'il y a une erreur ; un compte
+ * sans fiche le dit aussi ; et seule une panne de transport constatée
+ * ouvre la lecture du dépôt local.
+ */
+
+function CadreSeance({ titre, message }: { titre: string; message: string }) {
+  return (
+    <div>
+      <Link
+        href="/entrainement"
+        className="mb-6 inline-flex min-h-[44px] w-fit items-center gap-2 rounded-control text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+      >
+        <ArrowLeft size={14} />
+        Entraînement
+      </Link>
+      <h1 className="mb-2 font-heading text-2xl font-extrabold uppercase text-foreground">{titre}</h1>
+      <p className="text-sm text-muted-foreground">{message}</p>
+    </div>
+  );
+}
 
 export default function SessionDetailPage() {
   const params = useParams<{ sessionId: string }>();
-  const supabaseTraining = useSupabaseTrainingProgram();
+  const seance = useSeanceHorsLigne(params.sessionId);
 
-  if (!supabaseTraining.ready) {
+  if (seance.etat === "chargement") {
     return <p className="text-sm text-muted-foreground">Chargement…</p>;
   }
 
-  if (supabaseTraining.active) {
-    let realSession: ReturnType<typeof toEleveWorkoutSession> | null = null;
-    let realProgramName: string | null = null;
-    let realProgramId: string | null = null;
+  /* ── ÉTATS SANS DONNÉES ÉLÈVE ──────────────────────────────────────────
+   * Aucun d'eux ne retombe sur `data/student.ts`, et aucun ne présente un
+   * vieux snapshot comme si la séance était disponible. */
+  if (seance.etat === "erreur") {
+    return (
+      <CadreSeance
+        titre="Séance indisponible"
+        message="Le serveur n'a pas pu répondre correctement. Réessaie dans un instant — rien n'a été perdu."
+      />
+    );
+  }
+  if (seance.etat === "indisponible") {
+    return (
+      <CadreSeance
+        titre="Séance introuvable"
+        message="Cette séance n'est pas disponible sur cet appareil. Connecte-toi à Internet pour la charger."
+      />
+    );
+  }
 
-    for (const program of supabaseTraining.programs) {
-      const match = program.sessions.find((s) => s.id === params.sessionId);
-      if (match) {
-        realSession = toEleveWorkoutSession(match);
-        realProgramName = program.name;
-        realProgramId = program.id;
-        break;
-      }
-    }
+  if (seance.etat === "online" || seance.etat === "offline") {
+    const contenu = seance.contenu;
+    const realSession = contenu?.session ?? null;
+    const realProgramName = contenu?.programName ?? null;
+    const realProgramId = contenu?.programId ?? null;
 
-    if (!realSession) {
+    // Chemins de vidéo DÉJÀ déposés : ils viennent du retour enregistré, et
+    // ce sont les seuls qu'un payload hors ligne a le droit de reconduire.
+    const cheminsVideoConnus = (contenu?.feedbackExistant?.videos ?? []).map((v) => v.videoPath);
+
+    if (!realSession || !contenu) {
       return (
-        <div>
-          <Link
-            href="/entrainement"
-            className="mb-6 inline-flex min-h-[44px] w-fit items-center gap-2 rounded-control text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-          >
-            <ArrowLeft size={14} />
-            Entraînement
-          </Link>
-          <p className="text-sm text-muted-foreground">Séance introuvable.</p>
-        </div>
+        <CadreSeance titre="Séance introuvable" message="Cette séance n'existe pas dans tes programmes." />
       );
     }
 
@@ -107,8 +146,16 @@ export default function SessionDetailPage() {
           </div>
         )}
 
+        {/*
+          LES QUATRE PROPS DU CHEMIN RÉEL.
+          Elles sont optionnelles dans le composant — pour que les contextes
+          historiques (démonstration, harnais de rendu) continuent de
+          fonctionner sans rien changer — mais la page élève les fournit
+          TOUTES, explicitement. `scripts/tests/seance-page-props.mts` échoue
+          si l'une d'elles disparaît d'ici.
+        */}
         <SessionFeedbackSection
-          studentId={supabaseTraining.studentId ?? ""}
+          studentId={contenu.studentId}
           sessionId={realSession.id}
           programId={realProgramId}
           sessionRefLabel={realSession.name}
@@ -116,11 +163,20 @@ export default function SessionDetailPage() {
           exercises={realSession.exercises}
           cardioBlocks={realSession.cardioBlocks}
           sessionMuscleGroup={realSession.muscleGroups}
+          source={seance.etat === "offline" ? "offline" : "supabase"}
+          authUserId={seance.identite?.userId ?? null}
+          businessDate={seance.businessDate}
+          cheminsVideoConnus={cheminsVideoConnus}
+          chargerRemplacants={seance.chargerRemplacants}
         />
       </div>
     );
   }
 
+  /* ── DÉMONSTRATION ────────────────────────────────────────────────────
+   * Le seul état qui mène encore à `data/student.ts`, et il n'est atteint
+   * que si `createSupabaseBrowserClient()` n'a rien rendu : environnement
+   * volontairement non configuré. Un vrai compte n'arrive jamais ici. */
   const session = getWorkoutSession(params.sessionId);
 
   if (!session) {

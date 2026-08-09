@@ -1,7 +1,18 @@
 "use client";
 
-import { useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { resolvePrescription } from "@/lib/workout-history";
+import {
+  analyserDuree,
+  construireWorkoutFeedbackPayload,
+  corpsPourServeur,
+} from "@/lib/workout-feedback-payload";
+import { choisirOrigineFormulaire } from "@/lib/offline/priorite-etat";
+import { soumettreRetour } from "@/lib/offline/soumission";
+import { useBrouillonSeance } from "@/hooks/useBrouillonSeance";
+import { useSynchronisation } from "@/hooks/useSynchronisation";
+import type { DepotOffline } from "@/lib/offline/depot";
+import type { Transport } from "@/lib/offline/synchronisateur";
 import {
   buildPreviousPerformanceIndex,
   findPreviousPerformance,
@@ -36,7 +47,6 @@ import { cardioTypeLabels, formatDistanceMeters, formatDurationSeconds } from "@
 import { orderedStrengthExercises, orderedStudentSessionBlocks, type StudentSessionBlockView } from "@/lib/student-session-blocks";
 import { calculatePlannedVsActualMetrics, formatTonnage } from "@/lib/training-metrics";
 import { construireBilanFinSeance } from "@/lib/session-completion";
-import { isUuid } from "@/lib/uuid";
 import type {
   ActualSetEntry,
   AdminCardioBlock,
@@ -78,6 +88,64 @@ function buildInitialFeedback(
         comment: "",
       },
     ]),
+  );
+}
+
+/**
+ * LE BROUILLON, TEL QU'IL EST ÉCRIT SUR LE DISQUE.
+ *
+ * Exactement les champs que l'élève saisit — et RIEN d'autre. Aucune colonne
+ * du coach (`status`, `coachReply`, `prescribedSnapshot`) n'entre ici : ce
+ * sont des données que le serveur produit et protège, et les rendre
+ * éditables localement reviendrait à proposer à l'élève de les réécrire.
+ */
+interface EtatBrouillonSeance {
+  exerciseFeedback: Record<string, ExerciseFeedback>;
+  substitutions: Record<string, ExerciseSubstituteOption | null>;
+  videosExercice: Record<string, string | null>;
+  blockDrafts: Record<string, CardioBlockDraft>;
+  completed: boolean;
+  globalRpe: string;
+  globalComment: string;
+  pain: string;
+  painLevel: PainLevel;
+  painDetail: string;
+  durationMinutes: string;
+}
+
+/**
+ * CE BROUILLON A-T-IL LA FORME D'UN ÉTAT DE FORMULAIRE ?
+ *
+ * ════════════════════════════════════════════════════════════════════════
+ * BUG TROUVÉ PAR LE HARNAIS REACT (09/08/2026)
+ * ════════════════════════════════════════════════════════════════════════
+ * Le magasin `training_draft` reçoit DEUX formes différentes :
+ *
+ *   • l'autosave y écrit l'état du FORMULAIRE (`EtatBrouillonSeance`, où
+ *     `globalRpe` et `durationMinutes` sont des chaînes de saisie) ;
+ *   • `validerRetourHorsLigne` y écrit, dans la même transaction que
+ *     l'outbox, le PAYLOAD validé (`WorkoutFeedbackPayload`, où `globalRpe`
+ *     vaut `8` et `durationMinutes` vaut `65` — des nombres).
+ *
+ * Après une validation hors ligne, rouvrir la séance faisait donc hydrater
+ * le formulaire avec un payload : `analyserDuree` appelait `.trim()` sur un
+ * nombre, et l'écran entier tombait — sur la séance que l'élève venait
+ * précisément de mettre à l'abri.
+ *
+ * Ce contrôle refuse d'hydrater ce qui n'est pas un état de formulaire. Le
+ * retour n'est pas perdu pour autant : il attend dans l'outbox, le bandeau
+ * le dit, et la synchronisation l'enverra.
+ */
+function estEtatBrouillonSeance(valeur: unknown): valeur is EtatBrouillonSeance {
+  if (typeof valeur !== "object" || valeur === null) return false;
+  const b = valeur as Partial<EtatBrouillonSeance>;
+  return (
+    typeof b.globalRpe === "string" &&
+    typeof b.globalComment === "string" &&
+    typeof b.durationMinutes === "string" &&
+    typeof b.completed === "boolean" &&
+    typeof b.exerciseFeedback === "object" &&
+    b.exerciseFeedback !== null
   );
 }
 
@@ -158,6 +226,52 @@ interface SessionFeedbackSectionProps {
   exercises?: Exercise[];
   cardioBlocks?: AdminCardioBlock[];
   sessionMuscleGroup: string;
+  /* ══════════════════════════════════════════════════════════════════════
+   * BRANCHEMENT HORS LIGNE — TOUT EST OPTIONNEL
+   * ══════════════════════════════════════════════════════════════════════
+   * Sans ces props, le composant se comporte EXACTEMENT comme avant : même
+   * chemin Supabase, même repli mock, même formulaire. C'est ce qui rend ce
+   * branchement incrémental — la page de séance peut les fournir, les
+   * autres appelants (démonstration, historique) n'ont rien à changer.
+   *
+   * `source` est l'état explicite rendu par `useSeanceHorsLigne`. Le
+   * composant ne fait donc PLUS `if (!active) useMock()` : une erreur
+   * serveur n'est pas une absence de configuration.
+   */
+  source?: "supabase" | "offline";
+  /** Id Auth — clé du dépôt local. Sans lui, aucune écriture locale. */
+  authUserId?: string | null;
+  /** Date métier de la SÉANCE — celle qui figera `performedAt`. */
+  businessDate?: string;
+  /** Chemins de vidéo déjà déposés, connus du retour existant ou du snapshot. */
+  cheminsVideoConnus?: readonly string[];
+  /**
+   * Options de remplacement, lisibles SANS réseau.
+   *
+   * `useSeanceHorsLigne` les sert depuis le snapshot ; le sélecteur accepte
+   * déjà ce chargeur injectable, il n'a pas été modifié.
+   */
+  chargerRemplacants?: (exerciseLibraryId: string) => Promise<ExerciseSubstituteOption[]>;
+  /**
+   * SEAM DE TEST — le dépôt local à utiliser.
+   *
+   * En production, `undefined` : le hook construit lui-même un
+   * `DepotOffline(new MoteurIndexedDB())` sur la base de l'élève. Le harnais
+   * React/Chromium, lui, injecte un dépôt visant une base jetable (ou un
+   * moteur volontairement en panne, pour P12).
+   *
+   * C'est le MÊME code produit qui tourne dans les deux cas — seule la base
+   * visée change, par la seam de test du moteur (voir `lib/offline/idb.ts`).
+   */
+  depot?: DepotOffline;
+  /**
+   * SEAM DE TEST — le transport de synchronisation.
+   *
+   * En production, `undefined` : le hook utilise le chemin serveur existant
+   * (`POST /api/student/workout-feedback` puis relecture Supabase). Le
+   * harnais injecte un transport qu'il pilote.
+   */
+  transport?: Transport;
 }
 
 /**
@@ -178,7 +292,15 @@ export function SessionFeedbackSection({
   exercises,
   cardioBlocks,
   sessionMuscleGroup,
+  source,
+  authUserId = null,
+  businessDate,
+  cheminsVideoConnus,
+  chargerRemplacants,
+  depot,
+  transport,
 }: SessionFeedbackSectionProps) {
+  const horsLigne = source === "offline";
   // Normalisation UNIQUE à la frontière : `blocks[]` si présent, sinon legacy.
   // Le rendu (liste ordonnée + état de retour + analyse) ne manipule ensuite
   // QUE `blockViews` / `strengthExercises`.
@@ -213,7 +335,42 @@ export function SessionFeedbackSection({
   // connecté, ou compte sans fiche élève) on continue sur le mock/localStorage
   // existant (useAdminData) — voir hooks/useSupabaseWorkoutFeedback.ts.
   const supabaseFeedback = useSupabaseWorkoutFeedback(sessionId);
-  const existingFeedback = supabaseFeedback.active ? supabaseFeedback.existingFeedback : mockExistingFeedback;
+  /**
+   * Y a-t-il une opération EN ATTENTE pour cette séance ?
+   *
+   * Lu dans IndexedDB, jamais déduit du résultat d'un POST. C'est la
+   * différence entre « le serveur a répondu OK » et « il ne reste plus rien
+   * à envoyer » : quand une correction B a remplacé A pendant l'envoi, le
+   * POST réussit ET l'outbox reste pleine. Le bandeau doit alors rester.
+   *
+   * ────────────────────────────────────────────────────────────────────
+   * TROIS VALEURS, ET `null` EST LA PLUS IMPORTANTE
+   * ────────────────────────────────────────────────────────────────────
+   * BUG TROUVÉ PAR LE HARNAIS (09/08/2026) : partir de `false` revenait à
+   * affirmer « rien n'attend » avant d'avoir regardé. Entre le montage et
+   * la première lecture de l'outbox, le récapitulatif de fin de séance
+   * pouvait donc s'afficher sur une séance qui n'était pas partie — et
+   * `surEtatServeur` s'exécutant AVANT l'acquittement, la même fenêtre
+   * existait pendant une synchronisation.
+   *
+   * `null` veut dire « on ne sait pas encore ». Le récapitulatif exige
+   * `false` : un constat, jamais une valeur par défaut.
+   */
+  const [pendingLocal, setPendingLocal] = useState<boolean | null>(null);
+
+  /**
+   * L'état SERVEUR relu après une synchronisation réussie.
+   *
+   * Il remplace EN BLOC ce que l'écran connaissait : aucune fusion manuelle
+   * de colonnes coach côté React — le serveur reste seul autoritaire sur
+   * `status`, `coachReply`, `prescribedSnapshot` et le reste.
+   */
+  const [feedbackServeurSync, setFeedbackServeurSync] = useState<AdminStudentFeedback | null>(null);
+
+  const existingFeedbackSource = supabaseFeedback.active ? supabaseFeedback.existingFeedback : mockExistingFeedback;
+
+  // SERVER WINS : dès qu'une relecture serveur a eu lieu, c'est elle qui fait foi.
+  const existingFeedback = feedbackServeurSync ?? existingFeedbackSource;
 
   // « Dernières perfs » (feat/student-previous-set-performance) : index des
   // dernières performances passées, construit UNE fois en mémoire depuis
@@ -291,6 +448,39 @@ export function SessionFeedbackSection({
    */
   const [celebration, setCelebration] = useState(false);
 
+  /* ══════════════════════════════════════════════════════════════════════
+   * DURÉE DÉCLARÉE
+   * ══════════════════════════════════════════════════════════════════════
+   * Chaîne brute, comme tous les autres champs de ce formulaire : c'est
+   * `analyserDuree` qui la valide au moment de construire le payload, et
+   * `sanitizeDurationMinutes` qui fait autorité côté serveur. Aucun
+   * chronomètre, aucun `startedAt` : 65 minutes déclarées restent 65
+   * minutes, même si l'application est restée ouverte trois heures.
+   */
+  const [durationMinutes, setDurationMinutes] = useState("");
+
+  /**
+   * HYDRATATION — le formulaire est-il prêt à être sauvegardé ?
+   *
+   * Injecter un brouillon restauré déclenche une cascade de `setState`. Si
+   * l'autosave écoutait déjà, il enregistrerait des états INTERMÉDIAIRES :
+   * une révision de plus pour un formulaire à moitié rempli, et un
+   * brouillon partiel qui remplacerait le brouillon complet qu'on vient
+   * tout juste de lire.
+   *
+   * Ce drapeau sépare donc les deux temps : d'abord on remplit, ensuite
+   * seulement on écoute.
+   */
+  const [hydrate, setHydrate] = useState(false);
+
+
+  const brouillonLocal = useBrouillonSeance<EtatBrouillonSeance>({
+    userId: horsLigne || source === "supabase" ? authUserId : null,
+    sessionId,
+    businessDate: businessDate ?? "",
+    ...(depot ? { depot } : {}),
+  });
+
   /**
    * Le bilan affiché sur la carte de fin de séance.
    *
@@ -314,6 +504,185 @@ export function SessionFeedbackSection({
     [existingFeedback, supabaseFeedback.history],
   );
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  /**
+   * L'identité élève réellement disponible.
+   *
+   * En ligne elle vient du hook Supabase ; hors ligne, du snapshot, transmis
+   * par la page dans `studentId`. C'est la même valeur — seule la voie
+   * change.
+   */
+  const studentIdEffectif = supabaseFeedback.studentId ?? (horsLigne ? studentId : null);
+
+  /**
+   * Le formulaire attend-il encore son brouillon ?
+   *
+   * Uniquement quand un compte est identifié : sans compte, il n'y a rien à
+   * restaurer et rien à attendre.
+   */
+  const attenteHydratation = Boolean(authUserId) && !hydrate;
+
+  /** Erreur de durée montrée EN CONTINU, sans attendre le clic. */
+  const dureeInvalide = !analyserDuree(durationMinutes).ok;
+
+  /** L'état de saisie complet, tel qu'il part au brouillon ET au payload. */
+  const etatSaisie: EtatBrouillonSeance = useMemo(
+    () => ({
+      exerciseFeedback,
+      substitutions,
+      videosExercice,
+      blockDrafts,
+      completed,
+      globalRpe,
+      globalComment,
+      pain,
+      painLevel,
+      painDetail,
+      durationMinutes,
+    }),
+    [
+      exerciseFeedback, substitutions, videosExercice, blockDrafts, completed,
+      globalRpe, globalComment, pain, painLevel, painDetail, durationMinutes,
+    ],
+  );
+
+  /**
+   * Relit l'outbox — la SEULE source de vérité du bandeau.
+   *
+   * Appelée après l'hydratation, après une validation hors ligne, et après
+   * chaque synchronisation. Un échec de lecture ne change rien : on
+   * n'affirme pas qu'il n'y a plus rien à envoyer sous prétexte qu'on n'a
+   * pas pu regarder.
+   */
+  const rafraichirPending = useCallback(async () => {
+    if (!authUserId) return;
+    try {
+      const operation = await brouillonLocal.depot.lireOperation(authUserId, sessionId);
+      setPendingLocal(operation !== null);
+    } catch {
+      /* stockage indisponible : l'état affiché ne bouge pas */
+    }
+  }, [authUserId, sessionId, brouillonLocal.depot]);
+
+  /* ══════════════════════════════════════════════════════════════════════
+   * SYNCHRONISATION AUTOMATIQUE
+   * ══════════════════════════════════════════════════════════════════════
+   * Monter ce hook ICI, c'est le quatrième déclencheur : ouvrir la séance
+   * tente l'envoi de ce qui attend. Les trois autres — démarrage de
+   * l'espace élève, retour du réseau, retour au premier plan — sont posés
+   * par le hook lui-même.
+   *
+   * `surFlush` ne suppose rien : il RELIT l'outbox. Un POST réussi ne suffit
+   * pas à faire disparaître le bandeau si une correction plus récente attend
+   * déjà.
+   */
+  useSynchronisation({
+    actif: Boolean(authUserId),
+    depot: brouillonLocal.depot,
+    ...(transport ? { transport } : {}),
+    identite: async () => authUserId,
+    surFlush: () => {
+      void rafraichirPending();
+    },
+    surEtatServeur: (sessionIdRelu, feedback) => {
+      if (sessionIdRelu === sessionId) setFeedbackServeurSync(feedback);
+    },
+  });
+
+  /* ══════════════════════════════════════════════════════════════════════
+   * RESTAURATION — QUI GAGNE, LE BROUILLON OU LE SERVEUR ?
+   * ══════════════════════════════════════════════════════════════════════
+   * La règle n'est pas décidée ici : `choisirOrigineFormulaire` la porte, et
+   * elle est vérifiée dans Node (R1/R2/R3). Le composant se contente
+   * d'appliquer la décision, puis d'ouvrir l'autosave.
+   */
+  useEffect(() => {
+    if (hydrate || brouillonLocal.chargement || !supabaseFeedback.ready) return;
+
+    const decision = choisirOrigineFormulaire({
+      horsLigne,
+      brouillon: brouillonLocal.restaure
+        ? { revision: brouillonLocal.revision, payload: brouillonLocal.restaure }
+        : null,
+      // Une opération en attente signifie que le serveur est en retard d'au
+      // moins une révision : le brouillon doit rester visible.
+      operationEnAttente:
+        brouillonLocal.revision > 0 && brouillonLocal.restaure ? { revision: brouillonLocal.revision } : null,
+      feedbackServeur: existingFeedback ?? null,
+    });
+
+    if (decision.origine === "brouillon" && estEtatBrouillonSeance(decision.payload)) {
+      const b = decision.payload;
+      /*
+       * Les états sont remplis AVANT que `hydrate` ne passe à `true` :
+       * l'autosave, qui en dépend, ne verra jamais un formulaire à moitié
+       * rempli.
+       *
+       * `set-state-in-effect` est désactivé ICI, et seulement ici. C'est le
+       * cas que la règle elle-même décrit comme légitime — synchroniser
+       * l'état React depuis un système EXTERNE (IndexedDB) — et le garde
+       * `hydrate` limite l'exécution à une fois par montage.
+       *
+       * L'alternative — injecter dans une microtâche pour satisfaire la
+       * règle — ouvrirait une fenêtre pendant laquelle une frappe de
+       * l'élève serait écrasée par le brouillon restauré. Un avertissement
+       * de performance vaut mieux qu'une saisie perdue.
+       */
+      /*
+       * BUG TROUVÉ PAR LE HARNAIS REACT (09/08/2026).
+       *
+       * Un brouillon ne décrit QUE les exercices qui existaient au moment
+       * où il a été écrit. Si le coach a depuis retiré, ajouté ou remplacé
+       * un exercice, `exerciseFeedback[exercise.id]` devient `undefined`
+       * pour la carte concernée — et `ExerciseFeedbackCard` lit
+       * `feedback.sets` : l'écran entier tombe, en salle, sur une saisie
+       * que l'élève croyait à l'abri.
+       *
+       * On FUSIONNE donc sur la structure fraîche : la séance d'aujourd'hui
+       * décide des exercices présents, le brouillon ne fait que remplir
+       * ceux qu'il connaît encore. Ce qui a disparu du programme est
+       * ignoré ; ce qui est apparu démarre vide.
+       */
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- restauration ponctuelle depuis IndexedDB, voir ci-dessus
+      setExerciseFeedback(() => {
+        const frais = buildInitialFeedback(strengthExercises, studentId, sessionId);
+        for (const [id, saisie] of Object.entries(b.exerciseFeedback ?? {})) {
+          if (frais[id]) frais[id] = saisie;
+        }
+        return frais;
+      });
+      setSubstitutions(b.substitutions ?? {});
+      setVideosExercice(b.videosExercice ?? {});
+      setBlockDrafts(b.blockDrafts ?? {});
+      setCompleted(b.completed);
+      setGlobalRpe(b.globalRpe);
+      setGlobalComment(b.globalComment);
+      setPain(b.pain);
+      setPainLevel(b.painLevel);
+      setPainDetail(b.painDetail);
+      setDurationMinutes(b.durationMinutes ?? "");
+    }
+    // `origine === "serveur"` : rien à faire ici, le récapitulatif et
+    // `startEditing` prérempliront comme aujourd'hui.
+    setHydrate(true);
+    void rafraichirPending();
+  }, [
+    hydrate, horsLigne, brouillonLocal.chargement, brouillonLocal.restaure,
+    brouillonLocal.revision, supabaseFeedback.ready, existingFeedback,
+    strengthExercises, studentId, sessionId, rafraichirPending,
+  ]);
+
+  /* ══════════════════════════════════════════════════════════════════════
+   * AUTOSAVE
+   * ══════════════════════════════════════════════════════════════════════
+   * Seulement une fois hydraté, et seulement si un compte est identifié.
+   * Le différé et la révision sont dans `creerPlanificateurBrouillon` et
+   * dans le dépôt — ce hook ne fait que transmettre.
+   */
+  useEffect(() => {
+    if (!hydrate || !authUserId) return;
+    brouillonLocal.enregistrer(etatSaisie);
+  }, [hydrate, authUserId, etatSaisie, brouillonLocal]);
 
   if (!supabaseFeedback.ready) {
     return <p className="text-sm text-muted-foreground">Chargement du retour…</p>;
@@ -383,21 +752,52 @@ export function SessionFeedbackSection({
 
     const painText = hasCardio ? composePainText(painLevel, painDetail) : pain;
 
-    // Option B — RPE PAR SÉRIE : validation AVANT toute écriture, erreur
-    // VISIBLE, aucune valeur écrêtée ni inventée. "" = null (série sans RPE
-    // acceptée) ; seules les valeurs entières 1-10 passent (mêmes bornes que
-    // le schéma zod de la route et le CHECK SQL).
+    /* ── LE PAYLOAD, CONSTRUIT UNE SEULE FOIS ──────────────────────────
+     * La validation du RPE par série et celle de la durée vivent désormais
+     * dans `construireWorkoutFeedbackPayload`, avec la composition
+     * elle-même. Les deux chemins — envoi immédiat et mise en file — se
+     * servent de CET objet : il n'existe plus aucun endroit où séries,
+     * cardio ou remplacements soient reconstruits une seconde fois. */
+    const construction = construireWorkoutFeedbackPayload(
+      {
+        exerciseFeedback,
+        cardioPayloads,
+        substitutions,
+        videosExercice,
+        completed,
+        globalRpe,
+        globalComment,
+        painText,
+        durationMinutes,
+      },
+      {
+        studentId: supabaseFeedback.studentId ?? studentId,
+        sessionKey: sessionId,
+        sessionRefLabel,
+        sessionId,
+        programId,
+        // La date de la SÉANCE, jamais celle du clic : une séance ouverte
+        // dimanche 23h50 et validée lundi 00h20 reste de dimanche.
+        performedAt: businessDate ?? new Date().toISOString().slice(0, 10),
+        horsLigne,
+        cheminsVideoConnus,
+      },
+    );
+    if (!construction.ok) {
+      // Message précis, saisie intacte — comme avant.
+      setSubmitError(construction.erreur);
+      return;
+    }
+    const payload = construction.payload;
+
+    // Le chemin mock/localStorage, plus bas, a besoin du RPE par série sous
+    // forme de table. La VALIDATION, elle, a déjà eu lieu ci-dessus : ici on
+    // ne fait plus que relire des valeurs déjà acceptées.
     const rpeParSerie = new Map<string, number | null>();
     for (const exerciseFb of Object.values(exerciseFeedback)) {
       for (const set of exerciseFb.sets) {
         const parsed = parseRpeInput(set.rpe);
-        if (!parsed.ok) {
-          setSubmitError(
-            `RPE invalide (série ${set.setNumber} — ${exerciseFb.exerciseName}) : saisis un entier de 1 à 10, ou laisse vide.`,
-          );
-          return;
-        }
-        rpeParSerie.set(`${exerciseFb.exerciseId}#${set.setNumber}`, parsed.rpe);
+        rpeParSerie.set(`${exerciseFb.exerciseId}#${set.setNumber}`, parsed.ok ? parsed.rpe : null);
       }
     }
 
@@ -415,64 +815,62 @@ export function SessionFeedbackSection({
       setSubmitting(false);
     };
     try {
-      if (supabaseFeedback.active) {
-        const exercisesPayload: ExerciseFeedbackPayload[] = Object.values(exerciseFeedback)
-          .map((exerciseFb, index) => ({
-            exerciseName: exerciseFb.exerciseName,
-            exerciseOrder: index,
-            // `exerciseFb.exerciseId` EST `workout_exercises.id` (clé de
-            // `buildInitialFeedback`). Transmis seulement quand c'est un
-            // uuid réel — une séance mock n'en a pas.
-            exerciseId: isUuid(exerciseFb.exerciseId) ? exerciseFb.exerciseId : null,
-            // On envoie l'IDENTIFIANT du remplaçant, jamais son nom : la
-            // base le dérive elle-même et refuse tout pattern discordant.
-            substituteExerciseLibraryId: substitutions[exerciseFb.exerciseId]?.id ?? null,
-            // Vidéo de technique : le CHEMIN déjà déposé. La route vérifie
-            // qu'il désigne bien le dossier de cet élève, et le trigger le
-            // revérifie — le client ne fait que transporter.
-            videoPath: videosExercice[exerciseFb.exerciseId] ?? null,
-            // Option B : plus de saisie RPE au niveau exercice pour la
-            // musculation — le RPE vit PAR SÉRIE (exercise_set_feedback.rpe).
-            // Aucune moyenne ni valeur globale inventée. (Le cardio garde son
-            // rpe de bloc au niveau exercice via cardioPayloads, inchangé.)
-            rpe: null,
-            comment: exerciseFb.comment,
-            // hasRealizedSetInput : seules les séries réellement SAISIES
-            // partent en base (charge, reps OU RPE) — un placeholder
-            // « Dernières perfs » ne vit que dans l'attribut placeholder du
-            // DOM, jamais dans cet état.
-            sets: exerciseFb.sets
-              .filter(hasRealizedSetInput)
-              .map((set) => ({
-                setNumber: set.setNumber,
-                loadUsed: set.loadUsed,
-                repsDone: set.repsDone,
-                rpe: rpeParSerie.get(`${exerciseFb.exerciseId}#${set.setNumber}`) ?? null,
-              })),
-          }))
-          .filter((exerciseFb) => exerciseFb.sets.length > 0);
-        exercisesPayload.push(...cardioPayloads);
-
-        const ok = await supabaseFeedback.submit({
-          sessionRefLabel,
-          completed,
-          globalRpe: globalRpeValue,
-          globalComment,
-          pain: painText,
-          exercises: exercisesPayload,
-          // Renseignées uniquement quand la séance vient d'un vrai programme
-          // Supabase (voir lib/supabase/programs.ts) — sessionId/programId
-          // mock ("session-upper", "prog-1"...) ne sont pas des uuid valides
-          // et resteraient null, comme avant la migration des programmes.
-          sessionId: isUuid(sessionId) ? sessionId : null,
-          programId: isUuid(programId) ? programId : null,
+      /* ── HORS LIGNE ────────────────────────────────────────────────────
+       * Aucune tentative de POST, aucun téléversement : on sait qu'il n'y a
+       * pas de réseau. Le différé en cours est ABANDONNÉ — la validation
+       * écrit elle-même le brouillon définitif, dans la même transaction que
+       * l'opération à envoyer. */
+      if (horsLigne) {
+        brouillonLocal.abandonnerDiffere();
+        const resultat = await soumettreRetour({
+          payload,
+          // Le formulaire tel qu'il est à l'écran : c'est CE qui sera
+          // réaffiché à la réouverture, et non le payload envoyé.
+          etatFormulaire: etatSaisie,
+          userId: authUserId ?? "",
+          sessionId,
+          businessDate: businessDate ?? payload.performedAt ?? "",
+          operationId: crypto.randomUUID(),
+          reseau: null,
+          // Le MÊME dépôt que l'autosave : une seule connexion, une seule
+          // vérité locale.
+          depot: brouillonLocal.depot,
         });
+        if (resultat.etat === "en_attente") {
+          // ET SEULEMENT MAINTENANT — après le commit IndexedDB confirmé, et
+          // en RELISANT l'outbox plutôt qu'en supposant qu'elle est pleine.
+          await rafraichirPending();
+          return;
+        }
+        // Ni serveur, ni disque : on ne prétend RIEN, et la saisie reste.
+        setSubmitError(
+          "Impossible d'enregistrer sur cet appareil. Ta saisie est toujours à l'écran — ne ferme pas la page.",
+        );
+        releaseForRetry();
+        return;
+      }
+
+      if (supabaseFeedback.active) {
+        /* ── EN LIGNE ────────────────────────────────────────────────
+         * Le MÊME payload, réduit au corps attendu par la route. Plus
+         * aucune reconstruction : `corpsPourServeur` retire `studentId` —
+         * l'identité élève est dérivée de la session authentifiée côté
+         * serveur, et le schéma `.strict()` refuserait cette clé. */
+        const ok = await supabaseFeedback.submit(corpsPourServeur(payload));
         if (!ok) {
           // Les données saisies restent en place — l'élève peut réessayer.
           setSubmitError("L'enregistrement a échoué. Vérifie ta connexion puis réessaie.");
           releaseForRetry();
           return;
         }
+        /* Le serveur fait désormais foi : le brouillon local n'est plus
+         * qu'un résidu, et le laisser ferait gagner le cas C à la prochaine
+         * ouverture avec une version périmée. La purge est BEST-EFFORT —
+         * son échec ne transforme jamais un enregistrement serveur réussi
+         * en erreur utilisateur. */
+        brouillonLocal.abandonnerDiffere();
+        void brouillonLocal.purger();
+
         // `editing` est lu AVANT d'être remis à faux : c'est lui qui distingue
         // « je termine ma séance » de « je corrige ce que j'ai déjà envoyé ».
         if (!editing) setCelebration(true);
@@ -656,7 +1054,21 @@ export function SessionFeedbackSection({
     setEditing(true);
   }
 
-  if (existingFeedback && !editing) {
+  /*
+   * F2 — LA CARTE DE FIN DE SÉANCE NE MENT PAS.
+   *
+   * Elle a pris la place du bloc « Retour envoyé » : même point de montage,
+   * même rôle, CONFIRMER QUE C'EST PARTI. Hors ligne, rien n'est parti. La
+   * montrer après une validation locale ferait croire à une confirmation
+   * distante qui n'a pas eu lieu.
+   *
+   * La règle est donc adossée à l'OUTBOX, pas au mode d'affichage : tant
+   * qu'une opération attend, le récapitulatif est interdit. Dès qu'elle a
+   * été acquittée — c'est-à-dire après relecture serveur — la logique F2
+   * historique reprend, y compris hors ligne sur un retour confirmé avant
+   * la coupure.
+   */
+  if (existingFeedback && !editing && pendingLocal === false) {
     const parsed = parseCardioResults(existingFeedback.exerciseEntries);
     // Historique (phase 1) : si la photographie du prescrit a été posée à la
     // soumission, le récapitulatif l'affiche — c'est elle qui fait foi, même
@@ -833,6 +1245,29 @@ export function SessionFeedbackSection({
     // Refonte apple-ui : formulaire recentré dans une colonne principale à
     // largeur maximale cohérente (grand écran) — purement visuel.
     <form onSubmit={handleSubmit} className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+      {/*
+        LA COURSE D'HYDRATATION, FERMÉE PAR LE NAVIGATEUR LUI-MÊME.
+
+        La lecture du brouillon est asynchrone. Entre le premier rendu et son
+        arrivée, un élève rapide pourrait saisir une charge — qui serait
+        ensuite ÉCRASÉE par le brouillon restauré, sans un mot.
+
+        `<fieldset disabled>` ferme la fenêtre de façon déterministe : le
+        navigateur refuse la saisie, le focus et la soumission de tout ce
+        qu'il contient. Pas de drapeau à tenir à jour dans chaque champ, pas
+        d'événement à intercepter — une seule ligne, et la course n'existe
+        plus.
+
+        `attenteHydratation` reste faux quand aucun compte n'est identifié :
+        il n'y a alors aucun brouillon à attendre, et le formulaire ne doit
+        pas rester bloqué.
+      */}
+      <fieldset disabled={attenteHydratation} className="contents">
+      {attenteHydratation && (
+        <p role="status" className="text-xs uppercase tracking-widest text-muted-foreground">
+          Restauration de ta saisie…
+        </p>
+      )}
       {/* SEULE source de rendu : la liste ordonnée de blocs. Chaque bloc
           Strength affiche ses propres exercices (ordre canonique) ; chaque bloc
           Cardio est rendu à sa position. Jamais de liste globale aplatie. */}
@@ -847,21 +1282,32 @@ export function SessionFeedbackSection({
             onSetChange={(setNumber, field, value) => handleSetChange(exercise.id, setNumber, field, value)}
             onCommentChange={(value) => handleCommentChange(exercise.id, value)}
             substitute={substitutions[exercise.id] ?? null}
-            // Le remplacement n'est proposé QUE sur le chemin Supabase réel :
-            // il s'appuie sur la banque d'exercices et sur une trace écrite
-            // en base. Sur le chemin mock/localStorage, ni l'une ni l'autre
+            // Le remplacement n'est proposé QUE sur un chemin RÉEL : il
+            // s'appuie sur la banque d'exercices et sur une trace écrite en
+            // base. Sur le chemin mock/localStorage, ni l'une ni l'autre
             // n'existent — on ne montre pas un bouton qui ne mènerait à rien.
-            {...(supabaseFeedback.active
+            //
+            // HORS LIGNE, il reste proposé : c'est précisément en salle,
+            // devant un appareil occupé, qu'on change d'exercice. Les options
+            // admissibles viennent du snapshot (`chargerRemplacants`), et le
+            // serveur les revalidera à la synchronisation.
+            {...(supabaseFeedback.active || horsLigne
               ? { onSubstituteChange: (option: ExerciseSubstituteOption | null) => remplacerExercice(exercise.id, option) }
               : {})}
-            // La vidéo, comme le remplacement, n'existe que sur le chemin
-            // Supabase réel : elle exige un bucket, une identité d'élève et
-            // une ligne en base. Sur le chemin mock, aucun des trois.
-            {...(supabaseFeedback.active && supabaseFeedback.studentId
+            {...(chargerRemplacants ? { chargerRemplacants } : {})}
+            // La vidéo exige un bucket, une identité d'élève et une ligne en
+            // base. Sur le chemin mock, aucun des trois — le champ n'est même
+            // pas monté.
+            //
+            // HORS LIGNE il est monté, mais `horsLigne` en retire les deux
+            // commandes d'ajout : une vidéo déjà enregistrée reste visible et
+            // conservée, aucune nouvelle ne peut naître.
+            {...((supabaseFeedback.active || horsLigne) && studentIdEffectif
               ? {
-                  studentId: supabaseFeedback.studentId,
+                  studentId: studentIdEffectif,
                   videoPath: videosExercice[exercise.id] ?? null,
                   onVideoChange: (chemin: string | null) => changerVideo(exercise.id, chemin),
+                  horsLigne,
                 }
               : {})}
           />
@@ -921,6 +1367,44 @@ export function SessionFeedbackSection({
                 </option>
               ))}
             </select>
+          </div>
+
+          {/*
+            DURÉE DÉCLARÉE — arbitrage du 09/08/2026.
+            Facultative, entière, 1 à 600. Déclarée et jamais mesurée : une
+            séance d'une heure laissée trois heures dans une poche resterait
+            une séance d'une heure. Aucun chronomètre, aucun `startedAt`.
+          */}
+          <div>
+            <label
+              htmlFor="duration-minutes"
+              className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground"
+            >
+              Durée de la séance
+              <span className="ml-2 normal-case tracking-normal">(optionnel)</span>
+            </label>
+            <div className="flex items-center gap-3">
+              <input
+                id="duration-minutes"
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={600}
+                step={1}
+                value={durationMinutes}
+                onChange={(event) => setDurationMinutes(event.target.value)}
+                aria-invalid={dureeInvalide}
+                aria-describedby={dureeInvalide ? "duration-error" : undefined}
+                placeholder="65"
+                className="min-h-[44px] w-32 rounded-control border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 aria-[invalid=true]:border-destructive"
+              />
+              <span className="text-sm text-muted-foreground">min</span>
+            </div>
+            {dureeInvalide && (
+              <p id="duration-error" role="alert" className="mt-2 text-sm text-destructive">
+                Saisis un nombre entier de minutes entre 1 et 600, ou laisse vide.
+              </p>
+            )}
           </div>
 
           <div>
@@ -999,6 +1483,21 @@ export function SessionFeedbackSection({
             </p>
           )}
 
+          {/*
+            Affiché UNIQUEMENT après un commit IndexedDB confirmé (voir
+            `soumettreRetour`). Discret, et surtout exact : le retour n'est
+            pas « envoyé », il attend de l'être.
+          */}
+          {pendingLocal === true && (
+            <p
+              role="status"
+              className="flex items-start gap-2 rounded-panel border border-border bg-card px-4 py-3 text-sm text-muted-foreground"
+            >
+              Synchronisation en attente — ton retour est enregistré sur cet appareil et partira
+              dès que la connexion reviendra.
+            </p>
+          )}
+
           <button
             type="submit"
             disabled={submitting}
@@ -1008,6 +1507,7 @@ export function SessionFeedbackSection({
           </button>
         </div>
       </div>
+      </fieldset>
     </form>
   );
 }

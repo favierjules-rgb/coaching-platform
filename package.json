@@ -65,7 +65,20 @@
     "test:student-feedback-video": "tsx scripts/tests/student-feedback-video.mts",
     "test:student-feedback-video-retention": "tsx --conditions=react-server scripts/tests/student-feedback-video-retention.mts",
     "test:coach-reply-video": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/coach-reply-video.mts",
-    "test:coach-reply-video-render": "npx tsx scripts/tests/coach-reply-video-render.mts"
+    "test:coach-reply-video-render": "npx tsx scripts/tests/coach-reply-video-render.mts",
+    "test:pwa-manifest": "npx tsx scripts/tests/pwa-manifest.mts",
+    "test:pwa-service-worker": "npx tsx scripts/tests/pwa-service-worker.mts",
+    "test:pwa-install": "npx tsx scripts/tests/pwa-install.mts",
+    "test:pwa-render": "npx tsx scripts/tests/pwa-render.mts",
+    "test:pwa-lancement": "NODE_OPTIONS=\"--no-warnings\" npx tsx --experimental-test-module-mocks scripts/tests/pwa-lancement.mts",
+    "test:pwa-coquille": "NODE_OPTIONS=\"--no-warnings\" npx tsx --experimental-test-module-mocks scripts/tests/pwa-coquille.mts",
+    "test:offline-depot": "npx tsx scripts/tests/offline-depot.mts",
+    "test:offline-idb": "npx tsx scripts/tests/idb/index.mts",
+    "test:offline-integration": "npx tsx scripts/tests/offline-integration.mts",
+    "test:seance-page-props": "npx tsx scripts/tests/seance-page-props.mts",
+    "test:seance-offline-render": "npx tsx scripts/tests/seance-offline-render.mts",
+    "test:garde-fous-affichage": "npx tsx scripts/tests/garde-fous-affichage.mts",
+    "test:logout-menu": "npx tsx scripts/tests/logout-menu-render.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",
@@ -85,8 +98,10 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "esbuild": "^0.28.2",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
+    "playwright-core": "^1.62.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   },
