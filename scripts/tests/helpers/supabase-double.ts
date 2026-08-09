@@ -35,6 +35,24 @@ export interface OptionsBase {
    * cloisonnement fournissent leur propre prédicat.
    */
   peutLireVideo?: (chemin: string) => boolean;
+  /**
+   * Fait échouer `remove()` sur certains chemins — pour prouver qu'un échec
+   * Storage n'arrête pas les autres objets et ne lève pas la référence.
+   */
+  echecSuppression?: (chemin: string) => string | null;
+  /**
+   * Fait échouer l'UPDATE de `exercise_feedback` qui vise un `video_path`
+   * donné — pour prouver qu'un nettoyage DB raté n'efface aucun fichier.
+   */
+  echecNettoyageBase?: (cheminVise: string) => string | null;
+  /**
+   * Appelé JUSTE AVANT que `remove()` n'efface — la seule façon de placer un
+   * événement dans la fenêtre entre le nettoyage DB et la suppression du
+   * fichier, et donc de reproduire la course distribuée.
+   */
+  avantSuppression?: (chemin: string) => void;
+  /** Fait échouer `list()` — pour prouver qu'un inventaire partiel ne conclut rien. */
+  echecListe?: (prefixe: string) => string | null;
 }
 
 export interface BaseFactice {
@@ -46,6 +64,14 @@ export interface BaseFactice {
   envoyé: Ligne[];
   /** Objets présents dans le bucket `feedback-videos`, par chemin. */
   objets: Set<string>;
+  /**
+   * `storage.objects.created_at` par chemin, en ISO. Un objet absent de cette
+   * carte est réputé créé à l'instant `dateParDefaut` — c'est ce qui permet à
+   * un test de VIEILLIR un fichier sans attendre trente jours.
+   */
+  datesObjets: Map<string, string>;
+  /** Objets d'AUTRES buckets — la purge ne doit jamais les voir. */
+  autresBuckets: Map<string, Set<string>>;
   /** Journal des appels Storage, dans l'ordre — `upload:…`, `remove:…`, `sign:…`, `list:…`. */
   journalStorage: string[];
   /** Pose une erreur sur le PROCHAIN insert de `workout_feedback`. */
@@ -83,6 +109,9 @@ export function creerBase(options: OptionsBase = {}): BaseFactice {
   let horloge = 0;
   const envoyé: Ligne[] = [];
   const objets = new Set<string>();
+  const datesObjets = new Map<string, string>();
+  const autresBuckets = new Map<string, Set<string>>();
+  const dateParDefaut = "2026-08-08T10:00:00.000Z";
   const journalStorage: string[] = [];
   /** Erreur d'unicité posée par l'insert simulé, relue par `single()`. */
   let collision: { code: string; message: string } | null = null;
@@ -95,13 +124,17 @@ export function creerBase(options: OptionsBase = {}): BaseFactice {
       valeurs?: Ligne | Ligne[];
       filtres: [string, unknown][];
       dans: [string, unknown[]][];
+      borne?: { de: number; a: number };
     } = { op: "select", filtres: [], dans: [] };
     const correspond = (l: Ligne) =>
       état.filtres.every(([c, v]) => l[c] === v) &&
       état.dans.every(([c, vs]) => vs.includes(l[c]));
     const exécuter = (): Ligne[] => {
       const lignes = table(nom);
-      if (état.op === "select") return lignes.filter(correspond).map((l) => ({ ...l }));
+      if (état.op === "select") {
+        const trouvees = lignes.filter(correspond).map((l) => ({ ...l }));
+        return état.borne ? trouvees.slice(état.borne.de, état.borne.a + 1) : trouvees;
+      }
       if (état.op === "insert") {
         const valeurs = Array.isArray(état.valeurs) ? état.valeurs : [état.valeurs ?? {}];
         // L'INDEX UNIQUE PARTIEL, reproduit (migration 20260823090000) :
@@ -138,8 +171,26 @@ export function creerBase(options: OptionsBase = {}): BaseFactice {
         });
       }
       if (état.op === "update") {
+        if (nom === "exercise_feedback" && options.echecNettoyageBase) {
+          const vise = état.filtres.find(([c]) => c === "video_path")?.[1];
+          const echec = typeof vise === "string" ? options.echecNettoyageBase(vise) : null;
+          if (echec) throw new Error(echec);
+        }
         const touchées = lignes.filter(correspond);
-        for (const l of touchées) Object.assign(l, état.valeurs);
+        for (const l of touchées) {
+          Object.assign(l, état.valeurs);
+          // ── LE TRIGGER, à l'UPDATE aussi ────────────────────────────
+          // `video_uploaded_at` est DÉRIVÉ : la base le remet à NULL dès que
+          // `video_path` tombe. Sans cela, la purge semblerait laisser une
+          // date orpheline derrière elle — et le test qui le vérifie
+          // échouerait pour une raison qui n'existe pas en production.
+          if (nom === "exercise_feedback" && "video_path" in (état.valeurs ?? {})) {
+            const chemin = l.video_path as string | null;
+            l.video_uploaded_at = chemin
+              ? `2026-08-08T10:00:${String((horloge += 1)).padStart(2, "0")}Z`
+              : null;
+          }
+        }
         return touchées.map((l) => ({ ...l }));
       }
       const gardées = lignes.filter((l) => !correspond(l));
@@ -154,7 +205,8 @@ export function creerBase(options: OptionsBase = {}): BaseFactice {
       eq(c: string, v: unknown) { état.filtres.push([c, v]); return chaîne; },
       in(c: string, v: unknown[]) { état.dans.push([c, v]); return chaîne; },
       order: () => chaîne,
-      limit: () => chaîne,
+      limit(n: number) { état.borne = { de: 0, a: n - 1 }; return chaîne; },
+      range(de: number, a: number) { état.borne = { de, a }; return chaîne; },
       maybeSingle: () => Promise.resolve({ data: exécuter()[0] ?? null, error: null }),
       single: () => {
         if (nom === "workout_feedback" && état.op === "insert" && erreurInjectée) {
@@ -170,41 +222,102 @@ export function creerBase(options: OptionsBase = {}): BaseFactice {
         }
         return Promise.resolve({ data: première ?? null, error: première ? null : { message: "aucune ligne" } });
       },
-      then: (résoudre: (v: { data: Ligne[]; error: null }) => void) => résoudre({ data: exécuter(), error: null }),
+      then: (résoudre: (v: { data: Ligne[] | null; error: { message: string } | null }) => void) => {
+        try {
+          return résoudre({ data: exécuter(), error: null });
+        } catch (erreur) {
+          // Une panne côté base se rend comme `{ error }`, jamais comme une
+          // exception : c'est ainsi que supabase-js se comporte, et c'est ce
+          // que le code appelant sait traiter.
+          return résoudre({ data: null, error: { message: (erreur as Error).message } });
+        }
+      },
     };
     return chaîne;
   }
 
-  /** Le Storage : un ensemble de chemins, plus la RLS de lecture. */
+  /**
+   * Le Storage. Un ensemble de chemins par bucket, une date de création par
+   * objet, et la RLS de lecture.
+   *
+   * `feedback-videos` est le bucket « réel » : c'est lui que `objets` porte.
+   * Tout autre nom de bucket vit dans `autresBuckets` — ce qui permet de
+   * prouver qu'une purge cloisonnée n'y touche jamais.
+   */
+  const sacDe = (bucket: string): Set<string> => {
+    if (bucket === "feedback-videos") return objets;
+    if (!autresBuckets.has(bucket)) autresBuckets.set(bucket, new Set());
+    return autresBuckets.get(bucket)!;
+  };
+
   const storage = {
     from(bucket: string) {
+      const sac = () => sacDe(bucket);
       return {
         // Le contenu et les options ne sont pas relus : ce double prouve
         // QUEL chemin part et dans QUEL ordre, pas ce que contient le fichier.
         async upload(chemin: string) {
           journalStorage.push(`upload:${bucket}:${chemin}`);
-          if (objets.has(chemin)) return { error: { message: "The resource already exists" } };
-          objets.add(chemin);
+          if (sac().has(chemin)) return { error: { message: "The resource already exists" } };
+          sac().add(chemin);
           return { error: null };
         },
         async remove(chemins: string[]) {
           journalStorage.push(`remove:${bucket}:${chemins.join(",")}`);
-          for (const c of chemins) objets.delete(c);
+          for (const c of chemins) options.avantSuppression?.(c);
+          for (const c of chemins) {
+            const echec = options.echecSuppression?.(c);
+            if (echec) return { data: null, error: { message: echec } };
+          }
+          for (const c of chemins) {
+            sac().delete(c);
+            datesObjets.delete(c);
+          }
           return { data: chemins.map((c) => ({ name: c })), error: null };
         },
+        /**
+         * `list("")` rend les DOSSIERS (entrées à `id` nul), comme Storage :
+         * il n'y a pas de vrais répertoires, seulement des préfixes. Une
+         * profondeur plus grande rend les fichiers, avec leur `created_at`.
+         */
+        /**
+         * `list("")` rend les DOSSIERS (entrées à `id` nul) ET les fichiers
+         * posés directement à la racine, comme Storage : il n'y a pas de
+         * vrais répertoires, seulement des préfixes. Une profondeur plus
+         * grande rend les fichiers avec leur `created_at`, et signale les
+         * SOUS-DOSSIERS par une entrée à `id` nul — c'est exactement ce que
+         * l'inventaire doit savoir repérer pour ne rien laisser invisible.
+         */
         async list(prefixe: string, opts?: { limit?: number; offset?: number }) {
           journalStorage.push(`list:${bucket}:${prefixe}:${opts?.offset ?? 0}`);
-          const tous = [...objets]
-            .filter((c) => c.startsWith(`${prefixe}/`))
-            .sort()
-            .map((c) => ({ name: c.slice(prefixe.length + 1) }));
+          const echec = options.echecListe?.(prefixe);
+          if (echec) return { data: null, error: { message: echec } };
           const début = opts?.offset ?? 0;
           const fin = opts?.limit ? début + opts.limit : undefined;
-          return { data: tous.slice(début, fin), error: null };
+          const dateDe = (c: string) => datesObjets.get(c) ?? dateParDefaut;
+
+          const enfantsDe = (racine: string) => {
+            const dossiers = new Set<string>();
+            const fichiers: { name: string; id: string; created_at: string }[] = [];
+            for (const chemin of sac()) {
+              if (racine !== "" && !chemin.startsWith(`${racine}/`)) continue;
+              const reste = racine === "" ? chemin : chemin.slice(racine.length + 1);
+              if (reste === "") continue;
+              const coupure = reste.indexOf("/");
+              if (coupure >= 0) dossiers.add(reste.slice(0, coupure));
+              else fichiers.push({ name: reste, id: chemin, created_at: dateDe(chemin) });
+            }
+            return [
+              ...[...dossiers].sort().map((nom) => ({ name: nom, id: null, created_at: null })),
+              ...fichiers.sort((a, b) => a.name.localeCompare(b.name)),
+            ];
+          };
+
+          return { data: enfantsDe(prefixe).slice(début, fin), error: null };
         },
         async createSignedUrl(chemin: string, duree: number) {
           journalStorage.push(`sign:${bucket}:${chemin}:${duree}`);
-          if (!objets.has(chemin) || !peutLireVideo(chemin)) {
+          if (!sac().has(chemin) || !peutLireVideo(chemin)) {
             return { data: null, error: { message: "Object not found" } };
           }
           return { data: { signedUrl: `https://signee.test/${chemin}?exp=${duree}` }, error: null };
@@ -213,7 +326,7 @@ export function creerBase(options: OptionsBase = {}): BaseFactice {
           journalStorage.push(`signLot:${bucket}:${chemins.length}:${duree}`);
           return {
             data: chemins.map((chemin) =>
-              objets.has(chemin) && peutLireVideo(chemin)
+              sac().has(chemin) && peutLireVideo(chemin)
                 ? { path: chemin, signedUrl: `https://signee.test/${chemin}?exp=${duree}`, error: null }
                 : { path: chemin, signedUrl: null, error: "Object not found" },
             ),
@@ -230,6 +343,8 @@ export function creerBase(options: OptionsBase = {}): BaseFactice {
     table,
     envoyé,
     objets,
+    datesObjets,
+    autresBuckets,
     journalStorage,
     injecterErreur: (e) => { erreurInjectée = e; },
   };
