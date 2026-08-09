@@ -218,6 +218,25 @@ export class BacServiceWorker {
     await Promise.all(attentes);
   }
 
+  /**
+   * Rejoue un `postMessage` venu d'une page contrôlée, et attend ce que le
+   * service worker a mis en attente.
+   *
+   * C'est le seul canal par lequel une page peut PARLER à son service
+   * worker. Dans une application Next.js, c'est aussi le seul moment où le
+   * service worker apprend qu'une page élève est ouverte : le routeur
+   * client ne produit aucune requête de navigation qu'il pourrait
+   * intercepter.
+   */
+  async message(donnees: unknown): Promise<void> {
+    const attentes: Promise<unknown>[] = [];
+    await this.declencher("message", {
+      data: donnees,
+      waitUntil: (promesse: Promise<unknown>) => attentes.push(promesse),
+    });
+    await Promise.all(attentes);
+  }
+
   /** Envoie une requête et rapporte ce que le service worker en a fait. */
   async requeter(requete: RequeteFausse): Promise<Verdict> {
     let promesse: Promise<Response> | null = null;

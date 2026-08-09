@@ -28,6 +28,8 @@ import { exportDefaut } from "./helpers/export-defaut";
 
 const CHEMIN_SW = fileURLToPath(new URL("../../public/sw.js", import.meta.url));
 const ORIGINE = "https://seth.example";
+/** Doit suivre `VERSION` dans public/sw.js. */
+const VERSION_CACHE = "seth-pwa-v2";
 
 let réussis = 0;
 let échecs = 0;
@@ -167,14 +169,14 @@ await test("II1bis. la coquille élève est gardée, mais SEULEMENT la coquille"
   const bac = await bacInstalle();
   await bac.requeter(navigation(`${ORIGINE}/dashboard`));
 
-  const coquilles = bac.contenu("seth-pwa-v1-coquille");
+  const coquilles = bac.contenu("seth-pwa-v2-coquille");
   assert.deepEqual(coquilles, [`${ORIGINE}/dashboard`]);
 
   // Rien d'autre n'a bougé : ni le cache statique, ni celui de la page de
   // secours. Ce que la coquille CONTIENT est vérifié sur le vrai HTML par
   // `pwa-coquille.mts` — l'affirmer ici ne prouverait que ma propre fixture.
-  assert.ok(!bac.contenu("seth-pwa-v1-statique").some((u) => u.endsWith("/dashboard")));
-  assert.ok(!bac.contenu("seth-pwa-v1-hors-ligne").some((u) => u.endsWith("/dashboard")));
+  assert.ok(!bac.contenu("seth-pwa-v2-statique").some((u) => u.endsWith("/dashboard")));
+  assert.ok(!bac.contenu("seth-pwa-v2-hors-ligne").some((u) => u.endsWith("/dashboard")));
 });
 
 await test("II1ter. une réponse OBTENUE APRÈS REDIRECTION n'est jamais gardée", async () => {
@@ -196,7 +198,7 @@ await test("II1ter. une réponse OBTENUE APRÈS REDIRECTION n'est jamais gardée
   await bac.installer();
   await bac.activer();
   await bac.requeter(navigation(`${ORIGINE}/dashboard`));
-  assert.deepEqual(bac.contenu("seth-pwa-v1-coquille"), []);
+  assert.deepEqual(bac.contenu("seth-pwa-v2-coquille"), []);
 });
 
 await test("II2. un appel /api/ n'est même pas intercepté", async () => {
@@ -372,7 +374,7 @@ await test("A29bis. LE LANCEMENT EST PRÉPARÉ SANS QUE L'ÉLÈVE AIT VISITÉ /e
   // L'élève ouvre SON PROFIL, et rien d'autre.
   await bac.requeter(navigation(`${ORIGINE}/profil`));
 
-  const coquilles = bac.contenu("seth-pwa-v1-coquille");
+  const coquilles = bac.contenu("seth-pwa-v2-coquille");
   assert.ok(coquilles.includes(`${ORIGINE}/entrainement`), "le point de lancement doit être préparé tout seul");
 
   // Kill + mode avion + lancement depuis l'icône.
@@ -402,7 +404,7 @@ await test("A29ter. la préparation ne garde JAMAIS un formulaire de connexion",
   await bac.installer();
   await bac.activer();
   await bac.requeter(navigation(`${ORIGINE}/profil`));
-  assert.ok(!bac.contenu("seth-pwa-v1-coquille").includes(`${ORIGINE}/entrainement`));
+  assert.ok(!bac.contenu("seth-pwa-v2-coquille").includes(`${ORIGINE}/entrainement`));
 });
 
 await test("A29quater. la SÉANCE n'est jamais préparée d'avance", async () => {
@@ -578,7 +580,7 @@ await test("IV5. le cache statique est PLAFONNÉ — il ne grossit pas sans fin"
     await bac.requeter(sousRequete(`${ORIGINE}/_next/static/chunks/v${i}.js`));
   }
 
-  const statique = bac.contenu("seth-pwa-v1-statique");
+  const statique = bac.contenu("seth-pwa-v2-statique");
   assert.ok(statique.length <= 120, `le cache statique compte ${statique.length} entrées, plafond 120`);
   // Les plus RÉCENTES sont gardées, les plus anciennes expulsées.
   assert.ok(statique.includes(`${ORIGINE}/_next/static/chunks/v149.js`), "le dernier fichier doit rester");
@@ -600,7 +602,7 @@ await test("IV6. le plafond n'expulse jamais les fichiers de la page hors ligne"
     await bac.requeter(sousRequete(`${ORIGINE}/_next/static/chunks/v${i}.js`));
   }
 
-  const horsLigne = bac.contenu("seth-pwa-v1-hors-ligne");
+  const horsLigne = bac.contenu("seth-pwa-v2-hors-ligne");
   assert.ok(horsLigne.includes(`${ORIGINE}/_next/static/css/abc123.css`), "la feuille de style doit survivre");
   assert.ok(horsLigne.includes(`${ORIGINE}/hors-ligne`));
 
@@ -654,7 +656,7 @@ await test("V3. UN NOUVEAU DÉPLOIEMENT N'EST JAMAIS BLOQUÉ PAR LE CACHE", asyn
 
   // Version N : l'élève charge la page et son fichier.
   await bac.requeter(sousRequete(`${ORIGINE}/_next/static/chunks/page-jkl012.js`));
-  assert.ok(bac.contenu("seth-pwa-v1-statique").includes(`${ORIGINE}/_next/static/chunks/page-jkl012.js`));
+  assert.ok(bac.contenu("seth-pwa-v2-statique").includes(`${ORIGINE}/_next/static/chunks/page-jkl012.js`));
 
   // Version N+1 : nouveau HTML, nouvelle empreinte.
   const nouveauHtml = `<!DOCTYPE html><html><body><p>version N+1</p>
@@ -677,6 +679,117 @@ await test("V3. UN NOUVEAU DÉPLOIEMENT N'EST JAMAIS BLOQUÉ PAR LE CACHE", asyn
   // de s'en servir : rien n'est cassé pendant le déploiement.
   const ancien = await bac.requeter(sousRequete(`${ORIGINE}/_next/static/chunks/page-jkl012.js`));
   assert.equal(await ancien.reponse!.text(), "// page");
+});
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * LE PARCOURS RÉEL D'UN IPHONE — ET POURQUOI A29 NE LE COUVRAIT PAS
+ * ══════════════════════════════════════════════════════════════════════════
+ * A29 rejouait le scénario produit en supposant que chaque changement de
+ * page passe par le service worker. Sur un vrai téléphone, ce n'est vrai
+ * NI pour le premier chargement, NI pour les suivants :
+ *
+ *   • le tout premier document part AVANT que `register()` n'ait été
+ *     exécuté — il n'y a pas encore de service worker pour l'intercepter,
+ *     et `clients.claim()` arrive trop tard pour cette requête-là ;
+ *
+ *   • ensuite, le routeur de Next.js ne recharge plus jamais le document :
+ *     il va chercher la charge RSC en `fetch`. `requete.mode` vaut alors
+ *     "cors", pas "navigate" — le service worker la laisse passer, comme il
+ *     doit.
+ *
+ * Conséquence : pendant TOUTE une session en ligne, le gestionnaire
+ * `navigation()` peut ne jamais s'exécuter une seule fois. Et comme la
+ * préparation du point de lancement n'était appelée que depuis lui, elle
+ * n'avait jamais lieu non plus.
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+await test("A31. SESSION RÉELLE : le service worker ne voit AUCUNE navigation, et le lancement marche quand même", async () => {
+  const SEANCE = "77777777-7777-4777-8777-777777777777";
+  const bac = new BacServiceWorker(CHEMIN_SW, {
+    origine: ORIGINE,
+    reseau: {
+      ...reseauNormal(),
+      "/entrainement": () => new Response(HTML_COQUILLE_ELEVE, { status: 200 }),
+      [`/entrainement/seance/${SEANCE}`]: () =>
+        new Response(`<html><nav>Entraînement</nav><main>Chargement…</main></html>`, { status: 200 }),
+    },
+  });
+
+  // 1. Lancement depuis l'icône, EN LIGNE. Le document `/entrainement` est
+  //    demandé par le navigateur AVANT que le service worker n'existe : il
+  //    n'y a donc volontairement AUCUN `requeter(navigation(...))` ici.
+  //    C'est la page rendue qui l'enregistre ensuite.
+  await bac.installer();
+  await bac.activer();
+
+  // 2. La page annonce sa présence — le seul canal disponible.
+  await bac.message({ type: "coquille-eleve", url: `${ORIGINE}/entrainement` });
+
+  // 3. L'élève tape sur sa séance. Next.js ne recharge pas le document :
+  //    il va chercher la charge RSC. Le service worker n'y touche pas.
+  const rsc = await bac.requeter(sousRequete(`${ORIGINE}/entrainement/seance/${SEANCE}?_rsc=1f2e3d`));
+  assert.equal(rsc.repondu, false, "une charge RSC n'est pas une navigation : elle doit passer sans être touchée");
+  await bac.message({ type: "coquille-eleve", url: `${ORIGINE}/entrainement/seance/${SEANCE}` });
+
+  // 4. Kill complet + mode avion.
+  bac.horsLigne = true;
+
+  // 5. Relance depuis l'icône : LE bogue du 09/08/2026.
+  const lancement = await bac.requeter(navigation(`${ORIGINE}/entrainement`));
+  const html = await lancement.reponse!.text();
+  assert.ok(
+    !html.includes("Pas de connexion"),
+    "le lancement hors ligne tombe sur la page de secours alors que l'application a servi toute la session",
+  );
+
+  // 6. Et le geste suivant : ouvrir sa séance. Hors ligne, la charge RSC
+  //    échoue et le navigateur retombe sur un chargement complet du
+  //    document — donc sur le service worker.
+  const seance = await bac.requeter(navigation(`${ORIGINE}/entrainement/seance/${SEANCE}`));
+  const htmlSeance = await seance.reponse!.text();
+  assert.ok(!htmlSeance.includes("Pas de connexion"), "la séance ouverte en ligne doit rouvrir hors ligne");
+  assert.ok(htmlSeance.includes("Entraînement"));
+});
+
+await test("A32. le message ne garde QUE des coquilles élève, et jamais après une redirection", async () => {
+  const bac = new BacServiceWorker(CHEMIN_SW, {
+    origine: ORIGINE,
+    reseau: {
+      ...reseauNormal(),
+      "/entrainement": () => new Response(HTML_COQUILLE_ELEVE, { status: 200 }),
+      "/mentions-legales": () => new Response("<html>mentions</html>", { status: 200 }),
+      "/admin/eleves": () => new Response("<html>admin</html>", { status: 200 }),
+    },
+  });
+  await bac.installer();
+  await bac.activer();
+
+  // Une page publique et une page d'administration annoncent leur URL : le
+  // service worker ne doit garder ni l'une ni l'autre. Seule la préparation
+  // du point de lancement a lieu.
+  await bac.message({ type: "coquille-eleve", url: `${ORIGINE}/mentions-legales` });
+  await bac.message({ type: "coquille-eleve", url: `${ORIGINE}/admin/eleves` });
+
+  const coquilles = bac.contenu(`${VERSION_CACHE}-coquille`);
+  assert.ok(!coquilles.some((u) => u.endsWith("/mentions-legales")), "une page publique n'est pas une coquille élève");
+  assert.ok(!coquilles.some((u) => u.endsWith("/admin/eleves")), "une page d'administration n'est pas une coquille élève");
+});
+
+await test("A33. un message d'une autre origine ne fait rien mettre en cache", async () => {
+  // Le paramètre vient d'une page : il est traité comme une entrée, pas
+  // comme une vérité. Une URL d'ailleurs ne doit produire aucune requête.
+  const bac = new BacServiceWorker(CHEMIN_SW, {
+    origine: ORIGINE,
+    reseau: { ...reseauNormal(), "/entrainement": () => new Response(HTML_COQUILLE_ELEVE, { status: 200 }) },
+  });
+  await bac.installer();
+  await bac.activer();
+  await bac.message({ type: "coquille-eleve", url: "https://ailleurs.example/entrainement" });
+  assert.ok(
+    !bac.appelsReseau.some((u) => u.startsWith("https://ailleurs.example")),
+    "le service worker a suivi une URL étrangère",
+  );
 });
 
 console.log(`\n${réussis} réussis, ${échecs} échecs`);

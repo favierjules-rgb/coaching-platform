@@ -135,11 +135,39 @@ test("C3. la coquille ne dépend d'aucune donnée passée par le serveur", () =>
   // personnel — et le cache, une fuite.
   assert.equal(StudentShell.length, 1, "StudentShell doit n'accepter qu'un seul argument (les props)");
   const layout = lire("app/(student)/layout.tsx");
-  assert.match(
-    layout,
-    /<StudentShell>\{children\}<\/StudentShell>/,
+
+  // La balise ouvrante ne porte AUCUN attribut : c'est ce qui garantit
+  // qu'aucune donnée du serveur n'entre dans la coquille mise en cache.
+  const ouvrante = layout.match(/<StudentShell(\s[^>]*)?>/);
+  assert.ok(ouvrante, "le layout élève doit rendre <StudentShell>");
+  assert.equal(
+    (ouvrante[1] ?? "").trim(),
+    "",
     "le layout élève ne doit passer AUCUNE prop à la coquille",
   );
+
+  // Ce qu'il y a DEDANS : `{children}`, et rien d'autre que des composants
+  // PWA inertes (ils rendent `null`). Le motif d'origine exigeait
+  // `<StudentShell>{children}</StudentShell>` mot pour mot — il est devenu
+  // faux dès qu'un de ces composants a été monté, sans que la propriété
+  // qu'il protégeait ait bougé d'un pouce. On vérifie donc la propriété,
+  // pas la mise en page.
+  const interieur = layout.slice(layout.indexOf(ouvrante[0]) + ouvrante[0].length, layout.indexOf("</StudentShell>"));
+  assert.ok(interieur.includes("{children}"), "la coquille doit contenir {children}");
+  const expressions = interieur.match(/\{(?!\/\*)[^}]*\}/g) ?? [];
+  assert.deepEqual(
+    Array.from(new Set(expressions)),
+    ["{children}"],
+    "aucune valeur autre que `children` ne doit descendre dans la coquille",
+  );
+  const montes = Array.from(interieur.matchAll(/<([A-Z][A-Za-z0-9]*)/g)).map((m) => m[1]);
+  for (const nom of montes) {
+    assert.match(
+      layout,
+      new RegExp(`import \\{ ${nom} \\} from "@/components/pwa/`),
+      `${nom} est monté dans la coquille sans venir de components/pwa — il pourrait y injecter des données`,
+    );
+  }
 });
 
 test("C4. le rendu de la coquille est déterministe", () => {

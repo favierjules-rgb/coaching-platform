@@ -62,7 +62,7 @@
  * À incrémenter quand la logique de ce fichier change, ou quand la page
  * hors ligne change assez pour qu'une version en cache devienne fausse.
  */
-const VERSION = "seth-pwa-v1";
+const VERSION = "seth-pwa-v2";
 const CACHE_HORS_LIGNE = VERSION + "-hors-ligne";
 const CACHE_STATIQUE = VERSION + "-statique";
 const CACHE_COQUILLE = VERSION + "-coquille";
@@ -280,23 +280,20 @@ async function borner(cache, plafond) {
 }
 
 /**
- * S'assure que la coquille du point de lancement est disponible.
+ * Va chercher la coquille d'une URL et la garde — si et seulement si le
+ * serveur l'a rendue telle quelle.
  *
  * Silencieux en cas d'échec : ce n'est qu'une préparation. Si elle rate, le
  * site continue exactement comme avant, et la prochaine visite réessaiera.
+ * En particulier, sans réseau, RIEN n'est écrasé : une coquille déjà
+ * connue survit à toutes les tentatives ratées.
  */
-async function preparerLancement(cache, origine) {
-  const adresse = origine + LANCEMENT;
-  const deja = await cache.match(adresse);
-  if (deja) {
-    return;
-  }
+async function capturerCoquille(cache, adresse) {
   try {
     const reponse = await fetch(adresse, { credentials: "same-origin" });
-    // Mêmes conditions que pour une coquille visitée : 200, sans
-    // redirection. Un élève non authentifié est redirigé vers /connexion —
-    // on ne garde donc jamais un formulaire de connexion comme point de
-    // lancement.
+    // 200, sans redirection. Un élève non authentifié est redirigé vers
+    // /connexion — on ne garde donc jamais un formulaire de connexion, qui
+    // enfermerait l'application hors ligne sur un écran infranchissable.
     if (reponse.status === 200 && !reponse.redirected) {
       await cache.put(adresse, reponse);
     }
@@ -304,6 +301,83 @@ async function preparerLancement(cache, origine) {
     // Pas de réseau au moment de la préparation : rien à faire ici.
   }
 }
+
+/** S'assure que la coquille du point de lancement est disponible. */
+async function preparerLancement(cache, origine) {
+  const adresse = origine + LANCEMENT;
+  const deja = await cache.match(adresse);
+  if (deja) {
+    return;
+  }
+  await capturerCoquille(cache, adresse);
+}
+
+/**
+ * ════════════════════════════════════════════════════════════════════════
+ * LE CANAL PAR LEQUEL UNE PAGE ÉLÈVE S'ANNONCE
+ * ════════════════════════════════════════════════════════════════════════
+ * Ce qui a manqué, et qui a coûté un test iPhone : dans une application
+ * Next.js, le gestionnaire `navigation()` ci-dessous peut ne JAMAIS
+ * s'exécuter de toute une session.
+ *
+ *   • Le tout premier document part avant que `register()` n'ait tourné :
+ *     il n'y a pas encore de service worker pour l'intercepter, et
+ *     `clients.claim()` arrive trop tard pour CETTE requête.
+ *   • Ensuite, le routeur de Next.js ne recharge plus le document : il va
+ *     chercher la charge RSC en `fetch`. `requete.mode` vaut "cors", pas
+ *     "navigate" — et ce fichier la laisse passer, comme il doit.
+ *
+ * Faire dépendre la mise en cache de la coquille d'une requête de
+ * navigation, c'était donc la faire dépendre d'un évènement qui n'arrive
+ * pas. D'où ce canal : la page élève, une fois affichée, dit son URL.
+ *
+ * Ce qu'on accepte d'une page — et rien de plus : une URL de MÊME ORIGINE
+ * qui figure dans la liste blanche. Le message est traité comme une
+ * entrée, jamais comme une vérité : c'est le serveur, interrogé avec les
+ * cookies de la session, qui décide en dernier ressort si la réponse est
+ * gardable (200 sans redirection).
+ */
+self.addEventListener("message", function (evenement) {
+  const donnees = evenement.data;
+  if (!donnees || donnees.type !== "coquille-eleve") {
+    return;
+  }
+  evenement.waitUntil(
+    (async function () {
+      const origine = self.location.origin;
+      const cache = await caches.open(CACHE_COQUILLE);
+
+      // Le point de lancement, TOUJOURS et à chaque ouverture : c'est lui
+      // qui ouvrira l'application au prochain démarrage sans réseau. Il est
+      // rafraîchi plutôt que conservé tel quel — une coquille figée finirait
+      // par désigner des fichiers d'un déploiement disparu.
+      await capturerCoquille(cache, origine + LANCEMENT);
+
+      // Puis la page réellement ouverte. Sans elle, l'élève démarrerait bien
+      // hors ligne, et n'irait pas plus loin : sa séance n'est atteinte que
+      // par une navigation client, que ce fichier ne voit jamais.
+      let visee = null;
+      try {
+        visee = new URL(String(donnees.url), origine);
+      } catch (erreur) {
+        visee = null;
+      }
+      if (
+        visee &&
+        visee.origin === origine &&
+        estCoquilleEleve(visee.pathname) &&
+        visee.pathname !== LANCEMENT
+      ) {
+        // La clé est le CHEMIN seul : c'est ce que le navigateur demandera
+        // au prochain démarrage. Une clé portant la requête (`?_rsc=…`) ne
+        // serait jamais retrouvée.
+        await capturerCoquille(cache, origine + visee.pathname);
+      }
+
+      await borner(cache, MAX_COQUILLES);
+    })(),
+  );
+});
 
 /**
  * Navigation. Le réseau d'abord, TOUJOURS — la coquille en cache n'est là
