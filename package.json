@@ -61,7 +61,8 @@
     "test:nutrition-recipe-images": "tsx scripts/tests/nutrition-recipe-images.mts",
     "test:nutrition-v2-unified": "npx tsx scripts/tests/nutrition-v2-unified.mts",
     "test:training-movement-patterns": "tsx scripts/tests/training-movement-patterns.mts",
-    "test:student-feedback-video": "tsx scripts/tests/student-feedback-video.mts"
+    "test:student-feedback-video": "tsx scripts/tests/student-feedback-video.mts",
+    "test:student-feedback-video-retention": "tsx --conditions=react-server scripts/tests/student-feedback-video-retention.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

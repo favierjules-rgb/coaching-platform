@@ -1,1 +1,8 @@
-{}
+{
+  "crons": [
+    {
+      "path": "/api/cron/purge-feedback-videos",
+      "schedule": "0 3 * * *"
+    }
+  ]
+}
