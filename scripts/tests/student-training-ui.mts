@@ -60,7 +60,7 @@ function rendreCarte(options: {
   const nb = options.sets ?? 3;
   const exercice: Exercise = {
     id: "ex-1", name: options.nom ?? "Butterfly arrière d'épaule", sets: nb, reps: "13-12-11",
-    restSeconds: 180, tempo: "2-0-1-0", recommendedLoad: "30", videoUrl: options.videoUrl ?? "https://exemple.test/demo",
+    restSeconds: 180, tempo: "2-0-1-0", recommendedLoad: "30", videoUrl: options.videoUrl ?? "https://youtu.be/dQw4w9WgXcQ",
     recommendedRpe: options.recommendedRpe ?? "",
   };
   const saisie: ExerciseFeedback = {
@@ -149,12 +149,24 @@ await (async () => {
     assert.ok(html.includes("Commentaire exercice (optionnel)"));
   });
 
-  await test("10. bouton démonstration : lien 44px, état désactivé honnête sans vidéo", () => {
+  await test("10. bouton démonstration : 44px, ouverture DANS SETH, état honnête sans vidéo", () => {
     const avec = rendreCarte({});
     assert.ok(avec.includes("Voir la démo") && avec.includes("min-h-11"), "zone tactile ≥ 44px");
-    assert.ok(avec.includes('rel="noopener noreferrer"'));
+    // Cette assertion a changé le 10/08/2026 avec le lecteur intégré. Elle
+    // exigeait `rel="noopener noreferrer"` — c'est-à-dire un LIEN EXTERNE,
+    // celui qui envoyait l'élève sur YouTube au milieu de sa séance. Le
+    // déclencheur est maintenant un bouton, et il ne doit jamais redevenir
+    // un lien : voir scripts/tests/video-player-render.mts.
+    assert.ok(!avec.includes('rel="noopener noreferrer"'), "plus aucun lien externe");
+    assert.ok(!avec.includes('target="_blank"'), "et surtout pas de nouvel onglet");
+    assert.ok(avec.includes('type="button"'), "un bouton, qui n'envoie pas le formulaire");
+
+    // Une URL que le résolveur refuse (hôte inconnu) vaut « aucune vidéo » :
+    // mieux qu'un lecteur qui échouerait à l'écran.
     const sans = rendreCarte({ videoUrl: " " });
     assert.ok(sans.includes("Aucune vidéo") && !sans.includes("Voir la démo"));
+    const inconnue = rendreCarte({ videoUrl: "https://videos.seth-coaching.mock/x.mp4" });
+    assert.ok(inconnue.includes("Aucune vidéo"), "un hôte non reconnu n'ouvre aucun lecteur");
   });
 
   await test("11-12. thèmes clair et sombre : uniquement des tokens, aucune couleur codée en dur", () => {

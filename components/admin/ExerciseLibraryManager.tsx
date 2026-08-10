@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Archive, ArchiveRestore, Library, PlayCircle, Trash2 } from "lucide-react";
 
 import { ExerciseLibraryItemModal } from "@/components/admin/ExerciseLibraryItemModal";
+import { VideoPlayerModal } from "@/components/shared/VideoPlayerModal";
 import { SearchInput } from "@/components/admin/SearchAndFilters";
 import {
   exerciseCategoryLabels,
@@ -12,6 +13,7 @@ import {
   matchesExerciseSearch,
 } from "@/lib/admin";
 import { movementPatternLabels } from "@/lib/movement-patterns";
+import { videoLisible } from "@/lib/video/source";
 import { muscleGroupLabels } from "@/lib/training-metrics";
 import type { ExerciseLibraryItem, MuscleGroup } from "@/types";
 
@@ -30,6 +32,8 @@ function muscleLabel(group: MuscleGroup): string {
 export function ExerciseLibraryManager({ items, onCreate, onUpdate, onSetStatus, onDelete }: ExerciseLibraryManagerProps) {
   const [query, setQuery] = useState("");
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  /** La démo en cours de lecture. `null` = aucune modale ouverte. */
+  const [demo, setDemo] = useState<{ titre: string; url: string } | null>(null);
   const filtered = items.filter((item) => matchesExerciseSearch(item, query));
 
   return (
@@ -88,16 +92,15 @@ export function ExerciseLibraryManager({ items, onCreate, onUpdate, onSetStatus,
                 </div>
               )}
               <div className="mt-1 flex flex-wrap gap-2">
-                {(item.videoUrl.trim() || item.alternativeVideoUrl.trim()) && (
-                  <a
-                    href={item.videoUrl.trim() || item.alternativeVideoUrl.trim()}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                {videoLisible(item.videoUrl.trim() || item.alternativeVideoUrl.trim()) && (
+                  <button
+                    type="button"
+                    onClick={() => setDemo({ titre: item.name, url: item.videoUrl.trim() || item.alternativeVideoUrl.trim() })}
                     className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-border px-3 py-1.5 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                   >
                     <PlayCircle size={12} />
                     Voir la démo
-                  </a>
+                  </button>
                 )}
                 <ExerciseLibraryItemModal item={item} onSave={(data) => onUpdate(item.id, data)} />
                 {item.status === "active" ? (
@@ -146,6 +149,14 @@ export function ExerciseLibraryManager({ items, onCreate, onUpdate, onSetStatus,
           ))}
         </div>
       )}
+
+      {/* Une seule modale pour toute la liste : elle porte la démo choisie. */}
+      <VideoPlayerModal
+        ouvert={demo !== null}
+        onFermer={() => setDemo(null)}
+        titre={demo?.titre ?? ""}
+        url={demo?.url ?? null}
+      />
     </div>
   );
 }

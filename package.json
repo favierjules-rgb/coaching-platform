@@ -85,7 +85,10 @@
     "test:profil-push": "npx tsx scripts/tests/profil-push-render.mts",
     "test:push-test-admin": "NODE_OPTIONS=\"--conditions=react-server --no-warnings\" npx tsx --experimental-test-module-mocks scripts/tests/push-test-admin.mts",
     "test:admin-notifications": "NODE_OPTIONS=\"--conditions=react-server --no-warnings\" npx tsx --experimental-test-module-mocks scripts/tests/admin-notifications.mts",
-    "test:dashboard-notifications": "npx tsx scripts/tests/dashboard-notifications.mts"
+    "test:dashboard-notifications": "npx tsx scripts/tests/dashboard-notifications.mts",
+    "test:video-source": "npx tsx scripts/tests/video-source.mts",
+    "test:video-garde-fous": "npx tsx scripts/tests/video-garde-fous.mts",
+    "test:video-player": "npx tsx scripts/tests/video-player-render.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

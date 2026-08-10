@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { PlayCircle } from "lucide-react";
 
+import { VideoPlayerModal } from "@/components/shared/VideoPlayerModal";
 import {
   ExerciseSubstitutionPicker,
   type ChargeurRemplacants,
@@ -14,6 +16,7 @@ import {
   resolveSetPlaceholders,
   type PreviousExercisePerf,
 } from "@/lib/previous-performance";
+import { videoLisible } from "@/lib/video/source";
 import type { Exercise, ExerciseFeedback, ExerciseSubstituteOption } from "@/types";
 
 interface ExerciseFeedbackCardProps {
@@ -104,6 +107,10 @@ export function ExerciseFeedbackCard({
   // `exercise` : c'est la prescription, elle ne bouge pas.
   const nomAffiche = substitute?.name ?? exercise.name;
   const videoAffichee = (substitute ? substitute.videoUrl || substitute.alternativeVideoUrl : exercise.videoUrl).trim();
+  // L'ouverture du lecteur est un état LOCAL à la carte : elle ne remonte
+  // pas dans l'état de la séance, ne change pas la route et ne provoque
+  // aucune nouvelle révision du brouillon.
+  const [lecteurOuvert, setLecteurOuvert] = useState(false);
   const champ =
     "w-full min-w-0 rounded-control border border-border bg-background px-3 py-2.5 text-sm text-foreground transition-colors placeholder:text-muted-foreground/60 focus:border-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30";
 
@@ -137,16 +144,27 @@ export function ExerciseFeedbackCard({
               .join(" · ")}
           </p>
         </div>
-        {videoAffichee ? (
-          <a
-            href={videoAffichee}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="pressable inline-flex min-h-11 items-center gap-2 rounded-control border border-border px-4 py-2 text-xs font-medium text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-          >
-            <PlayCircle size={16} />
-            Voir la démo
-          </a>
+        {videoLisible(videoAffichee) ? (
+          <>
+            {/* Le design du bouton est INCHANGÉ : seul `<a href>` devient
+                `<button onClick>`. `type="button"` est indispensable — ce
+                bouton vit dans le formulaire de séance, et un bouton sans
+                type y déclencherait un envoi. */}
+            <button
+              type="button"
+              onClick={() => setLecteurOuvert(true)}
+              className="pressable inline-flex min-h-11 items-center gap-2 rounded-control border border-border px-4 py-2 text-xs font-medium text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            >
+              <PlayCircle size={16} />
+              Voir la démo
+            </button>
+            <VideoPlayerModal
+              ouvert={lecteurOuvert}
+              onFermer={() => setLecteurOuvert(false)}
+              titre={exercise.name}
+              url={videoAffichee}
+            />
+          </>
         ) : (
           <span
             title="Aucune vidéo disponible"
