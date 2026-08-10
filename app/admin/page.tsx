@@ -17,6 +17,7 @@ import {
 
 import { ActivityFeed } from "@/components/admin/ActivityFeed";
 import { DashboardNotifications } from "@/components/admin/DashboardNotifications";
+import { NotificationComposer } from "@/components/admin/NotificationComposer";
 import { StatCard } from "@/components/admin/StatCard";
 import { StatusBadge, studentStatusTone } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
@@ -201,10 +202,23 @@ export default function AdminDashboardPage() {
       </div>
 
       <div className="mb-8 rounded-card border border-border bg-card p-6 shadow-soft">
-        <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
-          Notifications
-        </h2>
-        <DashboardNotifications events={supabaseActivity.events} loading={supabaseActivity.loading} />
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-heading text-lg font-bold uppercase text-foreground">
+            Notifications
+          </h2>
+          {/* La gestion avancée — programmation, répétitions, historique —
+              vit sur sa propre page. Ce bloc reste court à dessein. */}
+          <Link
+            href="/admin/notifications"
+            className="text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary"
+          >
+            Gérer →
+          </Link>
+        </div>
+        <NotificationComposer students={students} compact />
+        <div className="mt-6">
+          <DashboardNotifications events={supabaseActivity.events} loading={supabaseActivity.loading} />
+        </div>
       </div>
 
       <div className="mb-8 rounded-card border border-border bg-card p-6 shadow-soft">

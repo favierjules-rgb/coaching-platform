@@ -7,6 +7,7 @@ import { CoachingSummaryCard } from "@/components/student/CoachingSummaryCard";
 import { EditPersonalInfoModal } from "@/components/student/EditPersonalInfoModal";
 import { GoalsSection } from "@/components/student/GoalsSection";
 import { InjurySection } from "@/components/student/InjurySection";
+import { InstallAppSection } from "@/components/student/InstallAppSection";
 import { MeasurementsSection } from "@/components/student/MeasurementsSection";
 import { InfoRow, ProfileSection, TagList } from "@/components/student/ProfileSection";
 import { NewsletterPreferenceToggle } from "@/components/student/NewsletterPreferenceToggle";
@@ -14,6 +15,9 @@ import { ProgressPhotoGallerySection } from "@/components/student/ProgressPhotoG
 import { StudentOnboardingDetailModal } from "@/components/student/StudentOnboardingDetailModal";
 import { SubscriptionSection } from "@/components/student/SubscriptionSection";
 import { WeightEvolutionCard } from "@/components/student/WeightEvolutionCard";
+import { SectionIndisponible } from "@/components/pwa/SectionIndisponible";
+import { NotificationsSection } from "@/components/student/NotificationsSection";
+import { useEtatOfflineEleve } from "@/hooks/useEtatOfflineEleve";
 import { useStudentProfile, type StudentProfileState } from "@/hooks/useStudentProfile";
 import { useSupabaseStudentProfile } from "@/hooks/useSupabaseStudentProfile";
 import type { FoodPreferences, InjuryNote, SportPreferences, StudentGoal } from "@/types";
@@ -51,6 +55,10 @@ export function ProfilPageContent({
   const mockProfile = useStudentProfile(studentId, seed);
   const supabaseProfile = useSupabaseStudentProfile();
   const useSupabase = supabaseProfile.ready && supabaseProfile.state !== null;
+  // POURQUOI le chargement n'a rien donné. Même diagnostic que les autres
+  // écrans élève ; aucune requête tant que le verdict en ligne n'est pas
+  // tombé.
+  const local = useEtatOfflineEleve(supabaseProfile.ready && !useSupabase);
   // Compte "achat unique" (chantier suppression auto. 6 mois) : accès à
   // /profil réduit à l'essentiel (nom, email, mot de passe) — jamais aux
   // mensurations/photos/préférences réservées aux vrais clients coaching.
@@ -72,6 +80,45 @@ export function ProfilPageContent({
 
   if (!supabaseProfile.ready) {
     return <p className="text-sm text-muted-foreground">Chargement du profil…</p>;
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
+   * SUPABASE CONFIGURÉ, MAIS RIEN N'EST ARRIVÉ
+   * ══════════════════════════════════════════════════════════════════
+   * `useSupabase === false` couvrait quatre situations, dont la panne
+   * réseau. En avion, l'élève voyait donc le profil de démonstration —
+   * un autre prénom, d'autres mensurations, d'autres photos — avec des
+   * boutons d'édition qui écrivaient dans le localStorage du mock.
+   *
+   * Ce chemin manquait au garde-fou MOCK1 : l'import de `data/student`
+   * est dans la PAGE, l'appel des hooks dans CE composant. Le contrôle
+   * a été élargi en conséquence.
+   *
+   * ── LA GARDE `!useSupabase` N'EST PAS DÉCORATIVE ────────────────────
+   * `useEtatOfflineEleve` n'est INTERROGÉ que si `!useSupabase` (ligne du
+   * dessus) ; son effet sort à sa première ligne autrement, et son état
+   * reste `"chargement"` POUR TOUJOURS. Sans cette garde, un profil
+   * Supabase parfaitement chargé tombait donc dans la branche d'attente
+   * ci-dessous et `/profil` ne s'affichait jamais — constaté sur iPhone
+   * le 10/08/2026, Safari comme PWA. Ces deux branches ne concernent que
+   * l'élève dont le profil n'est PAS arrivé ; `DashboardContent` porte la
+   * même garde depuis toujours. Voir `scripts/tests/profil-push-render.mts`. */
+  if (!useSupabase) {
+    if (local.etat === "chargement") {
+      return <p className="text-sm text-muted-foreground">Chargement du profil…</p>;
+    }
+
+    if (local.etat !== "mock") {
+      return (
+        <SectionIndisponible
+          zone="/profil"
+          titre="Profil"
+          etat={local.etat}
+          messageOffline="Ton profil demande une connexion : il n'est pas conservé sur cet appareil. Ta séance du jour, elle, reste disponible."
+          lignes={{ auth: local.identite ? "oui" : "non" }}
+        />
+      );
+    }
   }
 
   if (isProgramOnly) {
@@ -287,6 +334,14 @@ export function ProfilPageContent({
           </div>
         </>
       )}
+    {/* Chantier PWA : ne s'affiche pas du tout quand l'espace est déjà
+        ouvert depuis l'écran d'accueil. */}
+    <div className="mb-6">
+      <NotificationsSection />
+    </div>
+    <div className="mb-6">
+      <InstallAppSection />
+    </div>
     <NewsletterPreferenceToggle />
     </div>
   );

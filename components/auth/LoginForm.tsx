@@ -87,7 +87,12 @@ export function LoginForm({ supabaseConfigured }: { supabaseConfigured: boolean 
       footer={
         <Link
           href="/"
-          className="mt-6 flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary"
+          // `navigateur-seulement` : masqué dans l'application installée
+          // (voir app/globals.css). Dans un onglet, le lien ne bouge pas.
+          // L'application ouvre sur cette page ET N'A PAS DE BARRE
+          // D'ADRESSE : y proposer la vitrine, c'est y envoyer l'élève sans
+          // moyen évident d'en revenir.
+          className="navigateur-seulement mt-6 flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary"
         >
           <ArrowLeft size={14} />
           Retour à l&apos;accueil

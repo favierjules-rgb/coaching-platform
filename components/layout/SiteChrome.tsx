@@ -30,6 +30,10 @@ const PRIVATE_PREFIXES = [
   "/reinitialiser-mot-de-passe",
   "/onboarding",
   "/newsletter/desinscription",
+  // Page servie par le service worker quand le réseau ne répond pas
+  // (chantier PWA) : le Header et le Footer n'y proposeraient que des liens
+  // morts, et le Header charge une image de fond qui ne sera pas là.
+  "/hors-ligne",
 ];
 
 export function SiteChrome({ children }: { children: ReactNode }) {

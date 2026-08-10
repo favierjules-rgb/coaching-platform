@@ -1022,11 +1022,12 @@ await test("63. toutes les garanties de sécurité sont reconduites", () => {
 await test("64. la migration est déclarée au manifeste et comptée", () => {
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  assert.equal(attendues.length, 34);
+  // 35 depuis 20260828090000_web_push_notifications.sql (socle Web Push).
+  assert.equal(attendues.length, 35);
   assert.ok(attendues.includes("20260805090000_nutrition_plan_v2_weekly_target.sql"));
   const secu = lire("../../scripts/tests/security-hardening.mts");
-  assert.ok(secu.includes(".length, 61,"), "le compteur de migrations suit les migrations réelles");
-  assert.ok(secu.includes("assert.equal(attendues.length, 34);"));
+  assert.ok(secu.includes(".length, 62,"), "le compteur de migrations suit les migrations réelles");
+  assert.ok(secu.includes("assert.equal(attendues.length, 35);"));
 });
 
 /* ══════════ Refonte « semaine d'abord » — rendu réel ══════════ */

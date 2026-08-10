@@ -65,7 +65,27 @@
     "test:student-feedback-video": "tsx scripts/tests/student-feedback-video.mts",
     "test:student-feedback-video-retention": "tsx --conditions=react-server scripts/tests/student-feedback-video-retention.mts",
     "test:coach-reply-video": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/coach-reply-video.mts",
-    "test:coach-reply-video-render": "npx tsx scripts/tests/coach-reply-video-render.mts"
+    "test:coach-reply-video-render": "npx tsx scripts/tests/coach-reply-video-render.mts",
+    "test:pwa-manifest": "npx tsx scripts/tests/pwa-manifest.mts",
+    "test:pwa-service-worker": "npx tsx scripts/tests/pwa-service-worker.mts",
+    "test:pwa-install": "npx tsx scripts/tests/pwa-install.mts",
+    "test:pwa-render": "npx tsx scripts/tests/pwa-render.mts",
+    "test:pwa-lancement": "NODE_OPTIONS=\"--no-warnings\" npx tsx --experimental-test-module-mocks scripts/tests/pwa-lancement.mts",
+    "test:pwa-coquille": "NODE_OPTIONS=\"--no-warnings\" npx tsx --experimental-test-module-mocks scripts/tests/pwa-coquille.mts",
+    "test:offline-depot": "npx tsx scripts/tests/offline-depot.mts",
+    "test:offline-idb": "npx tsx scripts/tests/idb/index.mts",
+    "test:offline-integration": "npx tsx scripts/tests/offline-integration.mts",
+    "test:seance-page-props": "npx tsx scripts/tests/seance-page-props.mts",
+    "test:seance-offline-render": "npx tsx scripts/tests/seance-offline-render.mts",
+    "test:garde-fous-affichage": "npx tsx scripts/tests/garde-fous-affichage.mts",
+    "test:logout-menu": "npx tsx scripts/tests/logout-menu-render.mts",
+    "test:parcours-offline": "npx tsx scripts/tests/parcours-offline-render.mts",
+    "test:menu-offline": "npx tsx scripts/tests/menu-offline-render.mts",
+    "test:push-socle": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/push-socle.mts",
+    "test:profil-push": "npx tsx scripts/tests/profil-push-render.mts",
+    "test:push-test-admin": "NODE_OPTIONS=\"--conditions=react-server --no-warnings\" npx tsx --experimental-test-module-mocks scripts/tests/push-test-admin.mts",
+    "test:admin-notifications": "NODE_OPTIONS=\"--conditions=react-server --no-warnings\" npx tsx --experimental-test-module-mocks scripts/tests/admin-notifications.mts",
+    "test:dashboard-notifications": "npx tsx scripts/tests/dashboard-notifications.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",
@@ -78,6 +98,7 @@
     "resend": "^6.17.2",
     "server-only": "^0.0.1",
     "stripe": "^22.3.0",
+    "web-push": "^3.6.7",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -85,8 +106,11 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/web-push": "^3.6.4",
+    "esbuild": "^0.28.2",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
+    "playwright-core": "^1.62.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   },

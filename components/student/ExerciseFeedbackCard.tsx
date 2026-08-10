@@ -44,6 +44,8 @@ interface ExerciseFeedbackCardProps {
    * de `exercise`, toujours, et n'est jamais recalculée. `null` = aucun
    * remplacement.
    */
+  /** Sans réseau : l'ajout de vidéo n'est pas monté (F4/F5 restent online-only). */
+  horsLigne?: boolean;
   substitute?: ExerciseSubstituteOption | null;
   onSubstituteChange?: (option: ExerciseSubstituteOption | null) => void;
   /** Injectable pour les tests — voir ExerciseSubstitutionPicker. */
@@ -96,6 +98,7 @@ export function ExerciseFeedbackCard({
   onVideoChange,
   deposerVideo,
   resoudreUrlVideo,
+  horsLigne = false,
 }: ExerciseFeedbackCardProps) {
   // Le nom et la vidéo RÉELLEMENT réalisés. Tout le reste vient de
   // `exercise` : c'est la prescription, elle ne bouge pas.
@@ -254,6 +257,7 @@ export function ExerciseFeedbackCard({
             onChange={onVideoChange}
             {...(deposerVideo ? { deposer: deposerVideo } : {})}
             {...(resoudreUrlVideo ? { resoudreUrl: resoudreUrlVideo } : {})}
+            horsLigne={horsLigne}
           />
         )}
 

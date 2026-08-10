@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
   ArrowLeft,
+  BellRing,
   CalendarDays,
   ChevronDown,
   CreditCard,
@@ -42,6 +43,7 @@ const adminLinks = [
   { href: "/admin/documents", label: "Documents", icon: FileText },
   { href: "/admin/paiements", label: "Paiements", icon: CreditCard },
   { href: "/admin/emails", label: "Emails", icon: Mail },
+  { href: "/admin/notifications", label: "Notifications", icon: BellRing },
   { href: "/admin/retours", label: "Retours élèves", icon: MessageSquare },
   { href: "/admin/parametres", label: "Paramètres", icon: Settings },
 ];

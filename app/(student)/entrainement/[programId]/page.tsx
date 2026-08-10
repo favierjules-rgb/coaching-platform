@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
+import { DiagnosticOffline } from "@/components/pwa/DiagnosticOffline";
 import { MuscleHeatmapSection } from "@/components/student/MuscleHeatmapSection";
 import { NextSessionHighlight } from "@/components/student/NextSessionHighlight";
 import { ProgramWeekCalendar } from "@/components/student/ProgramWeekCalendar";
@@ -16,6 +17,7 @@ import {
   getWorkoutSession,
   workoutSessions,
 } from "@/data/student";
+import { useEtatOfflineEleve } from "@/hooks/useEtatOfflineEleve";
 import { useSupabaseTrainingProgram } from "@/hooks/useSupabaseTrainingProgram";
 import {
   buildScheduleForWeek,
@@ -27,6 +29,9 @@ import {
 export default function ProgramDetailPage() {
   const params = useParams<{ programId: string }>();
   const supabaseTraining = useSupabaseTrainingProgram();
+  // Même diagnostic que /entrainement et /dashboard. Aucune requête tant que
+  // le chargement en ligne n'a pas rendu son verdict.
+  const local = useEtatOfflineEleve(supabaseTraining.ready && !supabaseTraining.active);
 
   if (!supabaseTraining.ready) {
     return <p className="text-sm text-muted-foreground">Chargement…</p>;
@@ -153,6 +158,68 @@ export default function ProgramDetailPage() {
     );
   }
 
+  /* ══════════════════════════════════════════════════════════════════
+   * LE SERVEUR N'A PAS RÉPONDU
+   * ══════════════════════════════════════════════════════════════════
+   * Le détail d'un programme — semaines, calendrier, analyse de volume — ne
+   * tient pas dans le snapshot, et l'y mettre reviendrait à faire tout le
+   * programme hors ligne pour corriger un repli. On le dit donc, et on
+   * s'arrête là.
+   *
+   * Ce qu'on peut montrer sans mentir : le nom du programme, s'il s'agit
+   * bien de CELUI-CI, et la séance du jour — les deux viennent du snapshot
+   * réel préparé en ligne. */
+  if (local.etat === "chargement") {
+    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+  }
+
+  if (local.etat === "offline" || local.etat === "erreur" || local.etat === "indisponible") {
+    const memeProgramme = local.contenu?.programId === params.programId;
+    return (
+      <div>
+        <DiagnosticOffline
+          titre="/entrainement/[programId]"
+          lignes={{
+            etat: local.etat,
+            programIdUrl: params.programId,
+            programIdSnapshot: local.contenu?.programId ?? null,
+            sessionIdSnapshot: local.sessionId,
+            businessDate: local.businessDate,
+          }}
+        />
+        <Link
+          href="/entrainement"
+          className="mb-6 inline-flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ArrowLeft size={14} />
+          Mes programmes
+        </Link>
+
+        <div className="mb-8">
+          <h1 className="font-heading text-3xl font-extrabold uppercase text-foreground md:text-4xl">
+            {local.etat === "offline" && memeProgramme && local.contenu?.programName
+              ? local.contenu.programName
+              : "Programme"}
+          </h1>
+        </div>
+
+        <p className="mb-8 text-sm text-muted-foreground">
+          {local.etat === "erreur"
+            ? "Le serveur n'a pas pu répondre correctement. Réessaie dans un instant — rien n'a été perdu."
+            : "Cette partie nécessite une connexion : le détail d'un programme n'est pas conservé sur cet appareil."}
+        </p>
+
+        {local.etat === "offline" && memeProgramme && local.contenu && (
+          <div className="mb-8">
+            <NextSessionHighlight session={local.contenu.session} dayLabel="Aujourd'hui" />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  /* ── DÉMONSTRATION ──────────────────────────────────────────────────
+   * Seul `local.etat === "mock"` arrive ici : Supabase non configuré. */
   const program = getTrainingProgram(params.programId);
 
   if (!program) {

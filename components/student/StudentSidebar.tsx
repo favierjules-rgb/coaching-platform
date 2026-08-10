@@ -19,6 +19,10 @@ import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { Logo } from "@/components/ui/Logo";
 import { useSupabaseAccessType } from "@/hooks/useSupabaseAccessType";
 import { useSupabaseMyAccess } from "@/hooks/useSupabaseMyAccess";
+import {
+  fenetreReelle,
+  naviguerParDocumentSiHorsLigne,
+} from "@/lib/pwa/navigation-document";
 import { isStudentRouteActive } from "@/lib/student-shell-nav";
 
 const studentLinks = [
@@ -91,7 +95,14 @@ export function StudentSidebar({
             <Link
               key={href}
               href={href}
-              onClick={onNavigate}
+              onClick={(evenement) => {
+                // Hors ligne : on recharge le document au lieu de laisser le
+                // routeur chercher une charge RSC qui n'arrivera pas.
+                if (naviguerParDocumentSiHorsLigne(href, evenement, fenetreReelle())) {
+                  return;
+                }
+                onNavigate?.();
+              }}
               aria-label={locked ? `${label} (accès verrouillé — abonnement requis)` : label}
               className={`flex min-h-11 items-center gap-3 rounded-control px-4 py-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
                 active

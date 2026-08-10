@@ -99,6 +99,13 @@ const PRIVATE_PATHS = [
   // Atteinte par un lien porteur d'un jeton à usage unique : ni cache
   // partagé, ni conservation par un intermédiaire (incident du 27/07/2026).
   "/reinitialiser-mot-de-passe",
+  // Chantier PWA : /connexion lit désormais le cookie de session pour
+  // rediriger un élève déjà connecté vers son espace (écran de lancement de
+  // l'application — voir app/manifest.ts). Sa réponse dépend donc de QUI la
+  // demande : elle ne doit jamais être conservée par un intermédiaire
+  // partagé, qui servirait à un visiteur anonyme la redirection destinée à
+  // quelqu'un d'autre.
+  "/connexion",
   "/dashboard",
   "/admin",
   "/entrainement",
@@ -167,6 +174,30 @@ const nextConfig: NextConfig = {
       {
         source: "/reinitialiser-mot-de-passe",
         headers: [{ key: "Referrer-Policy", value: "no-referrer" }],
+      },
+      // LE SERVICE WORKER (chantier PWA).
+      //
+      // `Cache-Control: no-store` est le point important, et il n'a rien
+      // d'esthétique : `/sw.js` est le seul fichier du site que le
+      // navigateur peut garder plusieurs heures ET qui s'exécute avant
+      // chaque page. S'il était mis en cache, une correction urgente
+      // resterait sans effet aussi longtemps que la copie survit — sur un
+      // fichier dont un bogue casse tout le site. Complète (et ne remplace
+      // pas) `updateViaCache: "none"` posé à l'enregistrement : l'un vient
+      // du serveur, l'autre du client.
+      //
+      // La CSP est ici BLOQUANTE, alors qu'elle est en Report-Only partout
+      // ailleurs. Ce n'est pas une incohérence : elle s'applique au contexte
+      // d'exécution du service worker, pas aux pages. Ce contexte ne charge
+      // rien et ne contacte que sa propre origine — la resserrer ne casse
+      // donc rien, et elle limite ce qu'un `/sw.js` altéré pourrait faire.
+      {
+        source: "/sw.js",
+        headers: [
+          { key: "Content-Type", value: "application/javascript; charset=utf-8" },
+          { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
+          { key: "Content-Security-Policy", value: "default-src 'self'; script-src 'self'" },
+        ],
       },
       ...PRIVATE_PATHS.map((path) => ({ source: path, headers: privateCacheHeaders })),
       ...PRIVATE_PATHS.map((path) => ({
