@@ -18,6 +18,11 @@
  */
 
 import assert from "node:assert/strict";
+
+import {
+  fenetreReelle,
+  naviguerParDocumentSiHorsLigne,
+} from "../../lib/pwa/navigation-document";
 import { mock } from "node:test";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -181,6 +186,65 @@ await test("L8. la fonction s'arrête à la PREMIÈRE redirection", async () => 
     assert.fail("aucune redirection alors qu'un élève est connecté");
   } catch (erreur) {
     assert.equal(destinationDeLErreur(erreur), "/dashboard", "une seule redirection, vers /dashboard");
+  }
+});
+
+
+/* ════════════════════════════════════════════════════════════════════════
+ * LE CLIC DE MENU HORS LIGNE
+ * ════════════════════════════════════════════════════════════════════════
+ * `<Link>` va chercher la charge RSC de la route ; sans réseau elle échoue
+ * et `app/error.tsx` s'affiche. Une navigation de document, elle, est
+ * interceptée par le service worker. La DÉCISION est ici ; le chemin
+ * document est prouvé par `scripts/tests/menu-offline-render.mts`, dans un
+ * vrai navigateur avec le vrai service worker.
+ * ════════════════════════════════════════════════════════════════════════ */
+
+function evenementFactice() {
+  let empeche = false;
+  return {
+    evenement: { preventDefault: () => { empeche = true; } },
+    empeche: () => empeche,
+  };
+}
+
+await test("NAV1. hors ligne : le clic est repris et le document rechargé", () => {
+  const allees: string[] = [];
+  const { evenement, empeche } = evenementFactice();
+  const pris = naviguerParDocumentSiHorsLigne("/nutrition", evenement, {
+    enLigne: false,
+    aller: (href) => allees.push(href),
+  });
+  assert.equal(pris, true, "l'appelant doit savoir que la navigation est prise en charge");
+  assert.equal(empeche(), true, "sans preventDefault, le routeur partirait quand même chercher la charge RSC");
+  assert.deepEqual(allees, ["/nutrition"]);
+});
+
+await test("NAV2. EN LIGNE : la fonction ne fait RIEN", () => {
+  // La correction ne doit transformer aucune navigation quand le réseau est
+  // là — le routeur de Next garde la main, comme avant.
+  const allees: string[] = [];
+  const { evenement, empeche } = evenementFactice();
+  const pris = naviguerParDocumentSiHorsLigne("/nutrition", evenement, {
+    enLigne: true,
+    aller: (href) => allees.push(href),
+  });
+  assert.equal(pris, false);
+  assert.equal(empeche(), false, "empêcher le clic en ligne casserait la navigation client");
+  assert.deepEqual(allees, []);
+});
+
+await test("NAV3. sans `navigator`, on considère qu'il y a du réseau", () => {
+  // Rendu serveur, environnement de test, navigateur exotique : dans le
+  // doute on ne détourne rien. Un faux hors-ligne serait pire que le bogue.
+  const navigateurOriginal = (globalThis as { navigator?: unknown }).navigator;
+  try {
+    delete (globalThis as { navigator?: unknown }).navigator;
+    assert.equal(fenetreReelle().enLigne, true);
+  } finally {
+    if (navigateurOriginal !== undefined) {
+      (globalThis as { navigator?: unknown }).navigator = navigateurOriginal;
+    }
   }
 });
 

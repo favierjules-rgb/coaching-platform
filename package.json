@@ -79,7 +79,8 @@
     "test:seance-offline-render": "npx tsx scripts/tests/seance-offline-render.mts",
     "test:garde-fous-affichage": "npx tsx scripts/tests/garde-fous-affichage.mts",
     "test:logout-menu": "npx tsx scripts/tests/logout-menu-render.mts",
-    "test:parcours-offline": "npx tsx scripts/tests/parcours-offline-render.mts"
+    "test:parcours-offline": "npx tsx scripts/tests/parcours-offline-render.mts",
+    "test:menu-offline": "npx tsx scripts/tests/menu-offline-render.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

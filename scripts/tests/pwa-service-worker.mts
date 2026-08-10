@@ -32,7 +32,7 @@ const ORIGINE = "https://seth.example";
 /** La page de secours, telle que `public/sw.js` la nomme. */
 const PAGE_HORS_LIGNE_TEST = "/hors-ligne";
 /** Doit suivre `VERSION` dans public/sw.js. */
-const VERSION_CACHE = "seth-pwa-v3";
+const VERSION_CACHE = "seth-pwa-v4";
 
 let réussis = 0;
 let échecs = 0;
@@ -172,14 +172,14 @@ await test("II1bis. la coquille élève est gardée, mais SEULEMENT la coquille"
   const bac = await bacInstalle();
   await bac.requeter(navigation(`${ORIGINE}/dashboard`));
 
-  const coquilles = bac.contenu("seth-pwa-v3-coquille");
+  const coquilles = bac.contenu("seth-pwa-v4-coquille");
   assert.deepEqual(coquilles, [`${ORIGINE}/dashboard`]);
 
   // Rien d'autre n'a bougé : ni le cache statique, ni celui de la page de
   // secours. Ce que la coquille CONTIENT est vérifié sur le vrai HTML par
   // `pwa-coquille.mts` — l'affirmer ici ne prouverait que ma propre fixture.
-  assert.ok(!bac.contenu("seth-pwa-v3-statique").some((u) => u.endsWith("/dashboard")));
-  assert.ok(!bac.contenu("seth-pwa-v3-hors-ligne").some((u) => u.endsWith("/dashboard")));
+  assert.ok(!bac.contenu("seth-pwa-v4-statique").some((u) => u.endsWith("/dashboard")));
+  assert.ok(!bac.contenu("seth-pwa-v4-hors-ligne").some((u) => u.endsWith("/dashboard")));
 });
 
 await test("II1ter. une réponse OBTENUE APRÈS REDIRECTION n'est jamais gardée", async () => {
@@ -201,7 +201,7 @@ await test("II1ter. une réponse OBTENUE APRÈS REDIRECTION n'est jamais gardée
   await bac.installer();
   await bac.activer();
   await bac.requeter(navigation(`${ORIGINE}/dashboard`));
-  assert.deepEqual(bac.contenu("seth-pwa-v3-coquille"), []);
+  assert.deepEqual(bac.contenu("seth-pwa-v4-coquille"), []);
 });
 
 await test("II2. un appel /api/ n'est même pas intercepté", async () => {
@@ -377,7 +377,7 @@ await test("A29bis. LE LANCEMENT EST PRÉPARÉ SANS QUE L'ÉLÈVE AIT VISITÉ /e
   // L'élève ouvre SON PROFIL, et rien d'autre.
   await bac.requeter(navigation(`${ORIGINE}/profil`));
 
-  const coquilles = bac.contenu("seth-pwa-v3-coquille");
+  const coquilles = bac.contenu("seth-pwa-v4-coquille");
   assert.ok(coquilles.includes(`${ORIGINE}/entrainement`), "le point de lancement doit être préparé tout seul");
 
   // Kill + mode avion + lancement depuis l'icône.
@@ -407,7 +407,7 @@ await test("A29ter. la préparation ne garde JAMAIS un formulaire de connexion",
   await bac.installer();
   await bac.activer();
   await bac.requeter(navigation(`${ORIGINE}/profil`));
-  assert.ok(!bac.contenu("seth-pwa-v3-coquille").includes(`${ORIGINE}/entrainement`));
+  assert.ok(!bac.contenu("seth-pwa-v4-coquille").includes(`${ORIGINE}/entrainement`));
 });
 
 await test("A29quater. la SÉANCE n'est jamais préparée d'avance", async () => {
@@ -583,7 +583,7 @@ await test("IV5. le cache statique est PLAFONNÉ — il ne grossit pas sans fin"
     await bac.requeter(sousRequete(`${ORIGINE}/_next/static/chunks/v${i}.js`));
   }
 
-  const statique = bac.contenu("seth-pwa-v3-statique");
+  const statique = bac.contenu("seth-pwa-v4-statique");
   assert.ok(statique.length <= 120, `le cache statique compte ${statique.length} entrées, plafond 120`);
   // Les plus RÉCENTES sont gardées, les plus anciennes expulsées.
   assert.ok(statique.includes(`${ORIGINE}/_next/static/chunks/v149.js`), "le dernier fichier doit rester");
@@ -605,7 +605,7 @@ await test("IV6. le plafond n'expulse jamais les fichiers de la page hors ligne"
     await bac.requeter(sousRequete(`${ORIGINE}/_next/static/chunks/v${i}.js`));
   }
 
-  const horsLigne = bac.contenu("seth-pwa-v3-hors-ligne");
+  const horsLigne = bac.contenu("seth-pwa-v4-hors-ligne");
   assert.ok(horsLigne.includes(`${ORIGINE}/_next/static/css/abc123.css`), "la feuille de style doit survivre");
   assert.ok(horsLigne.includes(`${ORIGINE}/hors-ligne`));
 
@@ -659,7 +659,7 @@ await test("V3. UN NOUVEAU DÉPLOIEMENT N'EST JAMAIS BLOQUÉ PAR LE CACHE", asyn
 
   // Version N : l'élève charge la page et son fichier.
   await bac.requeter(sousRequete(`${ORIGINE}/_next/static/chunks/page-jkl012.js`));
-  assert.ok(bac.contenu("seth-pwa-v3-statique").includes(`${ORIGINE}/_next/static/chunks/page-jkl012.js`));
+  assert.ok(bac.contenu("seth-pwa-v4-statique").includes(`${ORIGINE}/_next/static/chunks/page-jkl012.js`));
 
   // Version N+1 : nouveau HTML, nouvelle empreinte.
   const nouveauHtml = `<!DOCTYPE html><html><body><p>version N+1</p>
@@ -943,6 +943,195 @@ await test("A37. un NOUVEAU DÉPLOIEMENT rafraîchit les coquilles du menu", asy
     apres.includes("app-v2.js"),
     "la coquille de /nutrition désigne encore les fichiers du déploiement précédent",
   );
+});
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * UNE COQUILLE SANS SES FICHIERS NE DÉMARRE PAS
+ * ══════════════════════════════════════════════════════════════════════════
+ * A34 prouvait que le HTML de /nutrition était en cache. Il ne prouvait pas
+ * que la page pouvait S'OUVRIR : le document référence des fichiers
+ * `/_next/static/`, et ceux-là n'entrent dans le cache que lorsque le
+ * navigateur les DEMANDE — c'est-à-dire à la visite. Préparer la coquille
+ * d'une route jamais visitée ne les fait donc jamais entrer.
+ *
+ * Hors ligne, le document s'affiche et reste inerte : pas d'hydratation,
+ * pas de React, pas de `SectionIndisponible`. Pire que la page de secours,
+ * parce que ça ne dit rien.
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/** Une coquille réaliste : elle référence les fichiers dont elle a besoin. */
+function coquilleAvecFichiers(route: string, empreinte = "abc123"): Response {
+  return new Response(
+    `<!DOCTYPE html><html><head>` +
+      `<link rel="stylesheet" href="/_next/static/css/app-${empreinte}.css"/>` +
+      `<script src="/_next/static/chunks/framework-${empreinte}.js"></script>` +
+      `<script src="/_next/static/chunks/app${route.replace(/\//g, "-")}-${empreinte}.js"></script>` +
+      `</head><body><nav>menu</nav><main>Chargement…</main></body></html>`,
+    { status: 200 },
+  );
+}
+
+await test("A38. les FICHIERS de chaque coquille préparée sont en cache, pas seulement son HTML", async () => {
+  const menu = cheminsDuMenu();
+  const reseau = reseauNormal();
+  for (const chemin of menu) {
+    reseau[chemin] = () => coquilleAvecFichiers(chemin);
+  }
+  // Le réseau sait servir les fichiers eux-mêmes.
+  const bac = new BacServiceWorker(CHEMIN_SW, {
+    origine: ORIGINE,
+    reseau: new Proxy(reseau, {
+      get(cible, cle: string) {
+        if (cle in cible) return cible[cle];
+        if (typeof cle === "string" && cle.startsWith("/_next/static/")) {
+          return () => new Response("/* fichier de build */", { status: 200 });
+        }
+        return undefined;
+      },
+      has(cible, cle: string) {
+        return cle in cible || (typeof cle === "string" && cle.startsWith("/_next/static/"));
+      },
+    }),
+  });
+  await bac.installer();
+  await bac.activer();
+  await bac.message({ type: "coquille-eleve", url: `${ORIGINE}/entrainement` });
+
+  const enCache = bac.toutLeCache();
+  for (const chemin of menu) {
+    const attendu = `${ORIGINE}/_next/static/chunks/app${chemin.replace(/\//g, "-")}-abc123.js`;
+    assert.ok(
+      enCache.includes(attendu),
+      `le fichier propre à ${chemin} manque : la coquille sera servie mais ne démarrera pas`,
+    );
+  }
+  assert.ok(
+    enCache.includes(`${ORIGINE}/_next/static/css/app-abc123.css`),
+    "la feuille de style de la coquille manque",
+  );
+});
+
+await test("A39. seuls des fichiers `/_next/static/` sont préchargés — rien d'autre", async () => {
+  const reseau = reseauNormal();
+  for (const chemin of cheminsDuMenu()) {
+    reseau[chemin] = () =>
+      new Response(
+        `<!DOCTYPE html><html><head>` +
+          `<script src="/_next/static/chunks/ok-1.js"></script>` +
+          `<script src="/api/session"></script>` +
+          `<script src="https://cdn.example/analytics.js"></script>` +
+          `<link rel="stylesheet" href="/brand/logo/logo.svg"/>` +
+          `</head><body><nav>menu</nav></body></html>`,
+        { status: 200 },
+      );
+  }
+  reseau["/_next/static/chunks/ok-1.js"] = () => new Response("ok", { status: 200 });
+  const bac = new BacServiceWorker(CHEMIN_SW, { origine: ORIGINE, reseau });
+  await bac.installer();
+  await bac.activer();
+  await bac.message({ type: "coquille-eleve", url: `${ORIGINE}/entrainement` });
+
+  for (const interdit of ["/api/session", "https://cdn.example/analytics.js", "/brand/logo/logo.svg"]) {
+    assert.ok(
+      !bac.appelsReseau.some((u) => u === interdit || u === `${ORIGINE}${interdit}`),
+      `${interdit} a été suivi — seuls les fichiers de build publics sont autorisés`,
+    );
+  }
+  assert.ok(bac.toutLeCache().includes(`${ORIGINE}/_next/static/chunks/ok-1.js`));
+});
+
+await test("A40. un nouveau déploiement remplace AUSSI les fichiers des coquilles", async () => {
+  let empreinte = "v1";
+  const reseau = reseauNormal();
+  for (const chemin of cheminsDuMenu()) {
+    reseau[chemin] = () => coquilleAvecFichiers(chemin, empreinte);
+  }
+  const bac = new BacServiceWorker(CHEMIN_SW, {
+    origine: ORIGINE,
+    reseau: new Proxy(reseau, {
+      get(cible, cle: string) {
+        if (cle in cible) return cible[cle];
+        if (typeof cle === "string" && cle.startsWith("/_next/static/")) {
+          return () => new Response("/* build */", { status: 200 });
+        }
+        return undefined;
+      },
+      has(cible, cle: string) {
+        return cle in cible || (typeof cle === "string" && cle.startsWith("/_next/static/"));
+      },
+    }),
+  });
+  await bac.installer();
+  await bac.activer();
+  await bac.message({ type: "coquille-eleve", url: `${ORIGINE}/entrainement` });
+  assert.ok(bac.toutLeCache().includes(`${ORIGINE}/_next/static/chunks/app-nutrition-v1.js`));
+
+  empreinte = "v2";
+  await bac.message({ type: "coquille-eleve", url: `${ORIGINE}/entrainement` });
+  assert.ok(
+    bac.toutLeCache().includes(`${ORIGINE}/_next/static/chunks/app-nutrition-v2.js`),
+    "les fichiers du nouveau déploiement n'ont pas été pris",
+  );
+  // Le point de lancement AUSSI : sa coquille est rafraîchie à chaque
+  // message, mais ses fichiers partaient avec la purge sans que rien ne les
+  // redemande.
+  assert.ok(
+    bac.toutLeCache().includes(`${ORIGINE}/_next/static/chunks/app-entrainement-v2.js`),
+    "les fichiers de la coquille de lancement n'ont pas suivi le déploiement",
+  );
+  assert.ok(
+    !bac.toutLeCache().includes(`${ORIGINE}/_next/static/chunks/app-nutrition-v1.js`),
+    "les fichiers du déploiement précédent traînent encore",
+  );
+});
+
+await test("V4. les caches des générations PRÉCÉDENTES disparaissent, ceux de la génération courante restent", async () => {
+  // La stratégie de cache a changé (précache des fichiers de coquille,
+  // navigation document hors ligne) : une génération neuve garantit qu'aucun
+  // téléphone ne mélange l'ancienne et la nouvelle. Ce cas vérifie que le
+  // ménage se fait vraiment, et qu'il ne va pas trop loin.
+  const bac = new BacServiceWorker(CHEMIN_SW, { origine: ORIGINE, reseau: reseauNormal() });
+  const ouvrir = (nom: string) =>
+    (bac as unknown as { ouvrir: (n: string) => { put: (u: string, r: Response) => Promise<void> } }).ouvrir(nom);
+
+  // Trois générations obsolètes, avec les suffixes réellement utilisés.
+  for (const version of ["seth-pwa-v1", "seth-pwa-v2", "seth-pwa-v3"]) {
+    for (const suffixe of ["-hors-ligne", "-statique", "-coquille", "-meta", "-assets"]) {
+      await ouvrir(version + suffixe).put(`/vestige${version}${suffixe}`, new Response("x"));
+    }
+  }
+  assert.ok(bac.toutLeCache().some((u) => u.includes("/vestige")), "les vestiges doivent exister avant l'activation");
+
+  await bac.installer();
+  await bac.activer();
+
+  for (const nom of Array.from(bac.caches.keys())) {
+    assert.ok(
+      nom.startsWith(`${VERSION_CACHE}-`),
+      `${nom} appartient à une génération obsolète et aurait dû être supprimé`,
+    );
+  }
+  assert.ok(
+    !bac.toutLeCache().some((u) => u.includes("/vestige")),
+    "des entrées d'une génération précédente ont survécu",
+  );
+  // Et la génération courante est bien là, pas seulement vide.
+  assert.ok(bac.toutLeCache().includes(`${ORIGINE}/hors-ligne`), "la page de secours doit être reprise");
+});
+
+await test("V5. le service worker ne touche JAMAIS à IndexedDB", async () => {
+  // Les caches sont jetés à chaque génération ; les données hors ligne, non.
+  // Elles vivent dans IndexedDB (snapshot, brouillon, outbox), et ce fichier
+  // n'a aucun moyen de les atteindre — ni pour lire, ni pour effacer. Un
+  // changement de VERSION ne peut donc rien faire perdre à l'élève.
+  const source = readFileSync(CHEMIN_SW, "utf8");
+  for (const interdit of ["indexedDB", "IDBDatabase", "IDBFactory", "openDatabase"]) {
+    assert.ok(
+      !source.includes(interdit),
+      `${interdit} apparaît dans public/sw.js — le cache et les données doivent rester étanches`,
+    );
+  }
 });
 
 console.log(`\n${réussis} réussis, ${échecs} échecs`);

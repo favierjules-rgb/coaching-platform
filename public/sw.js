@@ -62,13 +62,19 @@
  * À incrémenter quand la logique de ce fichier change, ou quand la page
  * hors ligne change assez pour qu'une version en cache devienne fausse.
  */
-const VERSION = "seth-pwa-v3";
+const VERSION = "seth-pwa-v4";
 const CACHE_HORS_LIGNE = VERSION + "-hors-ligne";
 const CACHE_STATIQUE = VERSION + "-statique";
 const CACHE_COQUILLE = VERSION + "-coquille";
 /** Une seule entrée : l'empreinte du déploiement dont viennent les coquilles. */
 const CACHE_META = VERSION + "-meta";
-const CACHES_CONNUS = [CACHE_HORS_LIGNE, CACHE_STATIQUE, CACHE_COQUILLE, CACHE_META];
+/**
+ * Les fichiers `/_next/static/` dont les coquilles préparées ont besoin pour
+ * DÉMARRER. Séparé du cache statique ordinaire, qui est plafonné : ceux-ci
+ * ne doivent jamais être expulsés par une visite ultérieure.
+ */
+const CACHE_ASSETS = VERSION + "-assets";
+const CACHES_CONNUS = [CACHE_HORS_LIGNE, CACHE_STATIQUE, CACHE_COQUILLE, CACHE_META, CACHE_ASSETS];
 const CLE_EMPREINTE = "/__empreinte-coquilles";
 
 const PAGE_HORS_LIGNE = "/hors-ligne";
@@ -355,10 +361,52 @@ async function capturerCoquille(cache, adresse) {
     // /connexion — on ne garde donc jamais un formulaire de connexion, qui
     // enfermerait l'application hors ligne sur un écran infranchissable.
     if (reponse.status === 200 && !reponse.redirected) {
+      const html = await reponse.clone().text();
       await cache.put(adresse, reponse);
+      // Un document sans ses fichiers ne démarre pas : il s'affiche et reste
+      // inerte, sans React, sans état hors ligne, sans rien dire. Constaté
+      // sur iPhone le 10/08/2026.
+      await precacherFichiers(html);
     }
   } catch (erreur) {
     // Pas de réseau au moment de la préparation : rien à faire ici.
+  }
+}
+
+/**
+ * Précharge les fichiers `/_next/static/` référencés par une coquille.
+ *
+ * ════════════════════════════════════════════════════════════════════════
+ * CE QUI EST SUIVI, ET RIEN D'AUTRE
+ * ════════════════════════════════════════════════════════════════════════
+ * `relevesStatiques` ne relève que des `href`/`src` commençant par
+ * `/_next/static/` : des fichiers de BUILD, publics, portant l'empreinte de
+ * leur contenu. Ni `/api/`, ni une autre origine, ni une image de marque, ni
+ * la moindre charge RSC — aucun de ces motifs ne passe le filtre, et
+ * `scripts/tests/pwa-service-worker.mts` (A39) le vérifie sur un document
+ * qui contient les quatre à la fois.
+ *
+ * `caches.match` interroge TOUS les caches : un fichier déjà connu n'est
+ * jamais redemandé, même s'il a été rangé ailleurs.
+ */
+async function precacherFichiers(html) {
+  const urls = relevesStatiques(html);
+  if (urls.length === 0) {
+    return;
+  }
+  const cache = await caches.open(CACHE_ASSETS);
+  for (let i = 0; i < urls.length; i += 1) {
+    const deja = await caches.match(urls[i]);
+    if (deja) {
+      continue;
+    }
+    // Un fichier manquant ne doit pas interrompre les suivants : la coquille
+    // reste plus utile amputée d'une police que pas préparée du tout.
+    try {
+      await cache.add(urls[i]);
+    } catch (erreur) {
+      /* ignoré volontairement */
+    }
   }
 }
 
@@ -380,14 +428,23 @@ async function preparerMenu(cache, origine, empreinte) {
   if (empreinte) {
     const connue = await meta.match(CLE_EMPREINTE);
     const precedente = connue ? await connue.text() : "";
-    if (precedente !== empreinte) {
+    // `precedente` vide = première préparation : il n'y a rien à remplacer, et
+    // surtout rien à jeter — les fichiers de la coquille de lancement
+    // viennent d'être mis en cache quelques lignes plus haut.
+    if (precedente && precedente !== empreinte) {
+      // TOUTES, coquille de lancement comprise. On pourrait croire qu'elle
+      // vient d'être rafraîchie et qu'il suffit de la garder — mais la purge
+      // des fichiers, juste en dessous, emporterait AUSSI les siens, et rien
+      // ne les redemanderait puisque son HTML serait toujours là. Elle est
+      // donc jetée avec les autres et reprise par la boucle finale.
       for (let i = 0; i < COQUILLES_MENU.length; i += 1) {
-        // La coquille de lancement vient d'être rafraîchie : la jeter serait
-        // la redemander pour rien.
-        if (COQUILLES_MENU[i] !== LANCEMENT) {
-          await cache.delete(origine + COQUILLES_MENU[i]);
-        }
+        await cache.delete(origine + COQUILLES_MENU[i]);
       }
+      // Les fichiers de l'ancien déploiement ne servent plus à rien : leurs
+      // noms portent une empreinte que plus aucune coquille ne référence.
+      await caches.delete(CACHE_ASSETS);
+    }
+    if (precedente !== empreinte) {
       await meta.put(CLE_EMPREINTE, new Response(empreinte));
     }
   }
