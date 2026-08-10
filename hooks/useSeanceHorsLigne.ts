@@ -8,6 +8,7 @@ import { identiteDepuisSession, type IdentiteOffline } from "@/lib/offline/ident
 import {
   assemblerSnapshot,
   charge,
+  fichesRemplacables,
   lireSnapshotPourSeance,
   manque,
   type ContenuSnapshot,
@@ -267,17 +268,16 @@ export function useSeanceHorsLigne(sessionId: string): ResultatSeance {
       // exercice n'a pas de substitut) — et à ce stade le réseau est
       // nécessairement debout, puisque les trois chargements précédents ont
       // abouti.
-      const fiches = new Set<string>();
-      for (const bloc of seance.blocks ?? []) {
-        for (const exercice of (bloc as { exercises?: { exerciseLibraryId?: string | null }[] }).exercises ?? []) {
-          if (exercice.exerciseLibraryId) fiches.add(exercice.exerciseLibraryId);
-        }
-      }
+      // Les clés viennent de `fichesRemplacables` : une fonction pure,
+      // typée, testée dans Node. Ce qui vivait ici était une boucle avec un
+      // cast qui inventait le nom du champ — voir son en-tête.
+      const fiches = fichesRemplacables(seance);
+
       const remplacants: Record<string, ExerciseSubstituteOption[]> = {};
       let remplacantsCharges = true;
       try {
         await Promise.all(
-          [...fiches].map(async (fiche) => {
+          fiches.map(async (fiche) => {
             remplacants[fiche] = await listExerciseSubstitutes(client, fiche);
           }),
         );

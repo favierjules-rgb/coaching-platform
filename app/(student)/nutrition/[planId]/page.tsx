@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft, ShoppingCart } from "lucide-react";
 
+import { SectionIndisponible } from "@/components/pwa/SectionIndisponible";
 import { NutritionPlanWorkspace } from "@/components/student/NutritionPlanWorkspace";
 import { RecipesHighlightLink } from "@/components/student/RecipesHighlightLink";
 import { StatusBadge } from "@/components/student/StatusBadge";
@@ -13,6 +14,7 @@ import { StatCard } from "@/components/shared/StatCard";
 import { nutritionGoalLabels } from "@/lib/nutrition";
 import { dailyTargetsByWeekday, weeklyCaloriesFromDays } from "@/lib/nutrition/plan-v2-week";
 import { getNutritionPlan, student } from "@/data/student";
+import { useEtatOfflineEleve } from "@/hooks/useEtatOfflineEleve";
 import { useStudentNutritionPlanV2 } from "@/hooks/useStudentNutritionPlanV2";
 import { useSupabaseNutritionForStudent } from "@/hooks/useSupabaseNutritionForStudent";
 
@@ -22,6 +24,7 @@ export default function NutritionPlanDetailPage() {
   // Le plan v2 COMPLET : profils, sept jours, repas prescrits, et la
   // bibliothèque de recettes que la RLS autorise pour cet élève.
   const v2 = useStudentNutritionPlanV2(supabaseNutrition.active ? (params.planId ?? null) : null);
+  const local = useEtatOfflineEleve(supabaseNutrition.ready && !supabaseNutrition.active);
 
   if (!supabaseNutrition.ready) {
     return <p className="text-sm text-muted-foreground">Chargement…</p>;
@@ -185,6 +188,31 @@ export default function NutritionPlanDetailPage() {
     );
   }
 
+  /* ══════════════════════════════════════════════════════════════════
+   * LE SERVEUR N'A PAS RÉPONDU
+   * ══════════════════════════════════════════════════════════════════
+   * Le détail d'un plan — sept jours, repas prescrits, recettes — n'est pas
+   * conservé sur l'appareil. On le dit. Ce qu'on ne fait plus : ouvrir le
+   * plan de démonstration sous l'identifiant demandé, ce qui donnait à un
+   * élève réel des macros qui n'étaient pas les siennes. */
+  if (local.etat === "chargement") {
+    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+  }
+
+  if (local.etat !== "mock") {
+    return (
+      <SectionIndisponible
+        zone="/nutrition/[planId]"
+        titre="Plan alimentaire"
+        etat={local.etat}
+        retour={{ href: "/nutrition", libelle: "Mes plans alimentaires" }}
+        lignes={{ planIdUrl: params.planId, auth: local.identite ? "oui" : "non" }}
+      />
+    );
+  }
+
+  /* ── DÉMONSTRATION ──────────────────────────────────────────────────
+   * Seul `local.etat === "mock"` arrive ici : Supabase non configuré. */
   const plan = getNutritionPlan(params.planId);
 
   if (!plan) {

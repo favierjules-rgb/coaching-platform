@@ -3,15 +3,17 @@
 import Link from "next/link";
 import { Bell, CalendarDays, Dumbbell, Flame, Scale, Target, TrendingUp } from "lucide-react";
 
+import { DiagnosticOffline } from "@/components/pwa/DiagnosticOffline";
 import { StatCard } from "@/components/shared/StatCard";
 import { WeightChart } from "@/components/shared/WeightChart";
+import { NextSessionHighlight } from "@/components/student/NextSessionHighlight";
+import { useEtatOfflineEleve } from "@/hooks/useEtatOfflineEleve";
 import { useStudentProfile, type StudentProfileState } from "@/hooks/useStudentProfile";
 import { useSupabaseAppointmentsForStudent } from "@/hooks/useSupabaseAppointmentsForStudent";
 import { useSupabaseNutritionForStudent } from "@/hooks/useSupabaseNutritionForStudent";
 import { useSupabaseStudentProfile } from "@/hooks/useSupabaseStudentProfile";
 import { useSupabaseTrainingProgram } from "@/hooks/useSupabaseTrainingProgram";
 import { formatDateTime } from "@/lib/admin";
-import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { coachingStatusLabels, computeWeightEvolution } from "@/lib/profile";
 import { getHighlightedScheduleDay } from "@/data/student";
 import { derivedSessionTypeLabel } from "@/lib/session-summary";
@@ -58,29 +60,90 @@ export function DashboardContent({
   // existant (même hook/même clé que /profil, pour rester cohérent).
   const mockProfile = useStudentProfile(studentId, seed);
   const supabaseProfile = useSupabaseStudentProfile();
-  const useSupabase = supabaseProfile.ready && supabaseProfile.state !== null;
   const supabaseTraining = useSupabaseTrainingProgram();
   const supabaseNutrition = useSupabaseNutritionForStudent();
   const supabaseAppointments = useSupabaseAppointmentsForStudent();
+  /*
+   * POURQUOI LE CHARGEMENT A ÉCHOUÉ — la même question que sur /entrainement,
+   * et la MÊME réponse : `useEtatOfflineEleve` (donc `diagnostiquer` +
+   * `classerSource`). On ne rediagnostique rien ici, et on n'invente pas une
+   * troisième détection de réseau.
+   *
+   * Il n'interroge rien tant que le chargement en ligne n'a pas rendu son
+   * verdict, ni quand Supabase n'est pas configuré : l'environnement de
+   * démonstration garde exactement le comportement d'avant.
+   */
+  const useSupabase = supabaseProfile.ready && supabaseProfile.state !== null;
+  const local = useEtatOfflineEleve(supabaseProfile.ready && !useSupabase);
 
   if (!supabaseProfile.ready) {
     return <p className="text-sm text-muted-foreground">Chargement du dashboard…</p>;
   }
 
-  // Supabase configuré et utilisateur connecté, mais aucune fiche élève
-  // reliée à ce compte (élève pas encore lié par le coach, ou coach/admin
-  // qui prévisualise l'espace élève — voir lib/supabase/guards.ts) : ne
-  // jamais afficher les données mock (Alexandre) à la place, ce qui ferait
-  // croire à un vrai compte qu'il s'agit de ses propres données.
-  if (isSupabaseConfigured() && !useSupabase) {
+  /* ══════════════════════════════════════════════════════════════════
+   * SUPABASE CONFIGURÉ, MAIS RIEN N'EST ARRIVÉ — POURQUOI ?
+   * ══════════════════════════════════════════════════════════════════
+   * Ce bloc disait UNE seule chose — « ce compte n'est pas relié à une
+   * fiche élève » — pour quatre situations sans rapport. En avion, l'élève
+   * lisait donc qu'il devait contacter son coach. C'était faux, et ça
+   * l'envoyait chercher un problème qui n'existait pas.
+   *
+   * Aucune de ces branches ne montre `data/student.ts` : la démonstration
+   * n'est atteinte que plus bas, et UNIQUEMENT sur `local.etat === "mock"`,
+   * c'est-à-dire quand `createSupabaseBrowserClient()` ne rend rien.
+   *
+   * On n'interroge plus `isSupabaseConfigured()` ici : c'était une SECONDE
+   * détection de l'environnement, à côté de celle du hook. Deux détections
+   * finissent toujours par diverger — et celle-ci divergeait déjà, puisque
+   * l'une regardait les variables d'environnement et l'autre le client. */
+  if (local.etat !== "mock" && !useSupabase) {
+    if (local.etat === "chargement") {
+      return <p className="text-sm text-muted-foreground">Chargement du dashboard…</p>;
+    }
+
     return (
-      <div className="flex flex-col items-center justify-center gap-3 border border-dashed border-border py-20 text-center">
-        <p className="font-heading text-lg font-bold uppercase text-foreground">
-          Profil élève non configuré
-        </p>
-        <p className="max-w-md text-sm text-muted-foreground">
-          Ce compte n&apos;est pas encore relié à une fiche élève. Contacte ton coach pour finaliser ton accès.
-        </p>
+      <div>
+        <DiagnosticOffline
+          titre="/dashboard"
+          lignes={{
+            etat: local.etat,
+            sessionIdSnapshot: local.sessionId,
+            businessDate: local.businessDate,
+            auth: local.identite ? "oui" : "non",
+            remplacantsCles: local.contenu ? Object.keys(local.contenu.remplacants ?? {}).length : null,
+          }}
+        />
+        <div className="mb-8">
+          <h1 className="font-heading text-3xl font-extrabold uppercase text-foreground md:text-4xl">
+            Ton espace
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {local.etat === "offline"
+              ? "Pas de connexion — voici ce qui est disponible sur cet appareil."
+              : local.etat === "erreur"
+                ? "Le serveur n'a pas pu répondre correctement. Réessaie dans un instant — rien n'a été perdu."
+                : "Ce compte n'est pas encore relié à une fiche élève. Contacte ton coach pour finaliser ton accès."}
+          </p>
+        </div>
+
+        {/* La séance du jour, et RIEN d'autre : c'est tout ce que le snapshot
+            contient. Elle porte l'identifiant réel, donc son lien ouvre la
+            vraie séance, préparée en ligne. */}
+        {local.etat === "offline" && local.contenu && (
+          <div className="mb-8">
+            <NextSessionHighlight session={local.contenu.session} dayLabel="Aujourd'hui" />
+          </div>
+        )}
+
+        {/* Poids, notifications, plan alimentaire, rendez-vous, documents :
+            tout cela vient du serveur. On le dit une fois, sobrement, au lieu
+            d'afficher cinq cartes vides — et surtout au lieu d'afficher les
+            chiffres de quelqu'un d'autre. */}
+        <div className="rounded-card border border-dashed border-border bg-card p-6 text-sm text-muted-foreground">
+          {local.etat === "offline"
+            ? "Poids, plan alimentaire, rendez-vous et documents demandent une connexion. Ils reviendront dès que le réseau sera là."
+            : "Ces informations n'ont pas pu être chargées."}
+        </div>
       </div>
     );
   }

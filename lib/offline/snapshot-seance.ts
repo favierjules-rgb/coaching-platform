@@ -1,6 +1,7 @@
 import type {
   AdminStudentFeedback,
   ExerciseSubstituteOption,
+  TrainingBlock,
   WorkoutSession,
 } from "@/types";
 
@@ -73,8 +74,11 @@ export interface ContenuSnapshot {
   /** Historique de l'élève — repères « Dernières perfs » et bilan de fin de séance. */
   historique: AdminStudentFeedback[];
   /**
-   * Options de remplacement admissibles, indexées par
-   * `exercise_library_id` de l'exercice PRESCRIT.
+   * Options de remplacement admissibles, indexées par le
+   * `libraryExerciseId` de l'exercice PRESCRIT — le NOM DU CHAMP TypeScript,
+   * pas celui de la colonne. C'est cette clé exacte que
+   * `ExerciseSubstitutionPicker` demandera ; s'en écarter d'une lettre rend
+   * le sélecteur vide sans qu'aucun type ne proteste.
    *
    * Le serveur les revalidera de toute façon : ce cache sert à faire
    * fonctionner le sélecteur, pas à trancher ce qui est autorisé.
@@ -82,6 +86,34 @@ export interface ContenuSnapshot {
   remplacants: Record<string, ExerciseSubstituteOption[]>;
   /** Type d'accès — AFFICHAGE du menu uniquement (voir `schema.ts`). */
   accessType: TypeAcces | null;
+}
+
+/**
+ * Les fiches de banque référencées par une séance — les clés du cache de
+ * remplaçants, et rien d'autre.
+ *
+ * ════════════════════════════════════════════════════════════════════════
+ * POURQUOI CETTE FONCTION EXISTE SÉPARÉMENT
+ * ════════════════════════════════════════════════════════════════════════
+ * Cette boucle vivait en ligne dans `useSeanceHorsLigne`, derrière un
+ * `as { exercises?: { exerciseLibraryId?: string }[] }`. Ce cast INVENTAIT
+ * le nom du champ : le vrai est `libraryExerciseId`. TypeScript validait
+ * l'assertion, la boucle ne trouvait jamais rien, `remplacants` restait
+ * vide, et l'élève lisait « Aucun remplaçant enregistré pour ce mouvement »
+ * en salle — pour tous ses exercices. Constaté sur iPhone le 09/08/2026.
+ *
+ * Sortie ici, elle est testable dans Node sans navigateur ni réseau, et le
+ * nom du champ est vérifié par le compilateur au lieu d'être affirmé.
+ */
+export function fichesRemplacables(session: { blocks?: readonly TrainingBlock[] | null }): string[] {
+  const fiches = new Set<string>();
+  for (const bloc of session.blocks ?? []) {
+    if (bloc.category !== "strength") continue;
+    for (const exercice of bloc.exercises ?? []) {
+      if (exercice.libraryExerciseId) fiches.add(exercice.libraryExerciseId);
+    }
+  }
+  return [...fiches];
 }
 
 /* ════════════════════════════════════════════════════════════════════════

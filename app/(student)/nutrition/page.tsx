@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Droplet, Lightbulb, Pill } from "lucide-react";
 
+import { SectionIndisponible } from "@/components/pwa/SectionIndisponible";
 import { StatusBadge } from "@/components/student/StatusBadge";
 import { NutritionPlansListClient } from "@/components/student/NutritionPlansListClient";
 import { RecipesHighlightLink } from "@/components/student/RecipesHighlightLink";
@@ -14,6 +15,7 @@ import {
   nutritionPlans,
   student,
 } from "@/data/student";
+import { useEtatOfflineEleve } from "@/hooks/useEtatOfflineEleve";
 import { useStudentNutritionPlanV2 } from "@/hooks/useStudentNutritionPlanV2";
 import { useSupabaseNutritionForStudent } from "@/hooks/useSupabaseNutritionForStudent";
 import { dailyTargetsByWeekday, weeklyCaloriesFromDays } from "@/lib/nutrition/plan-v2-week";
@@ -49,6 +51,9 @@ function décrireObjectifQuotidien(
 
 export default function NutritionPage() {
   const supabaseNutrition = useSupabaseNutritionForStudent();
+  // POURQUOI le chargement n'a rien donné. Même diagnostic que partout
+  // ailleurs, aucune requête tant que le verdict en ligne n'est pas tombé.
+  const local = useEtatOfflineEleve(supabaseNutrition.ready && !supabaseNutrition.active);
 
   // Appelé à CHAQUE rendu, avant toute sortie anticipée : un hook ne peut pas
   // être conditionnel. La semaine du plan actif est nécessaire ici parce que
@@ -202,6 +207,30 @@ export default function NutritionPage() {
     );
   }
 
+  /* ══════════════════════════════════════════════════════════════════
+   * LE SERVEUR N'A PAS RÉPONDU
+   * ══════════════════════════════════════════════════════════════════
+   * La nutrition n'est PAS disponible hors ligne, et ce n'est pas l'objet de
+   * ce correctif. Ce qui l'est : ne plus présenter le plan de démonstration
+   * — « 3 000 kcal », des compléments, un conseil du jour — à un élève réel
+   * qui a simplement perdu le réseau. */
+  if (local.etat === "chargement") {
+    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+  }
+
+  if (local.etat !== "mock") {
+    return (
+      <SectionIndisponible
+        zone="/nutrition"
+        titre="Nutrition"
+        etat={local.etat}
+        lignes={{ auth: local.identite ? "oui" : "non", businessDate: local.businessDate }}
+      />
+    );
+  }
+
+  /* ── DÉMONSTRATION ──────────────────────────────────────────────────
+   * Seul `local.etat === "mock"` arrive ici : Supabase non configuré. */
   return (
     <div>
       <div className="mb-8">

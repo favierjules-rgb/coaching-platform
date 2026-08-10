@@ -121,5 +121,94 @@ await test("MENU8b. le contrôle sait DÉTECTER une violation", async () => {
   );
 });
 
+
+/* ════════════════════════════════════════════════════════════════════════
+ * `!active` N'EST PAS UN SYNONYME DE « DÉMONSTRATION »
+ * ════════════════════════════════════════════════════════════════════════
+ * Le défaut le plus coûteux de ce chantier, répété sur trois écrans : un
+ * hook rendait `active: false` dès que le chargement n'aboutissait pas —
+ * panne réseau comprise — et la page traitait ce `false` comme « nous
+ * sommes en démonstration », donc affichait `data/student.ts`.
+ *
+ * En avion, un élève réel voyait les programmes d'Alexandre, une séance qui
+ * n'était pas la sienne, et un lien vers un identifiant qui n'existait nulle
+ * part. Rien à l'écran ne le disait.
+ *
+ * La règle : un écran élève qui peut afficher la démonstration doit d'abord
+ * DEMANDER POURQUOI le chargement a échoué — via le diagnostic partagé
+ * (`useEtatOfflineEleve` ou `useSeanceHorsLigne`, tous deux adossés à
+ * `diagnostiquer` + `classerSource`). Sans cette question, `!active` reste
+ * un fourre-tout.
+ *
+ * Ce contrôle lit le source : la propriété à prouver est une propriété du
+ * source, exactement comme les garde-fous de `scripts/tests/idb/`.
+ * ════════════════════════════════════════════════════════════════════════ */
+
+/** Les écrans élève. */
+const ZONES_ELEVE = [join("app", "(student)"), join("components", "student")];
+
+/**
+ * ÉCRANS ENCORE À FERMER — dette CONNUE, pas dette oubliée.
+ *
+ * ELLE EST VIDE, et c'est le but : les six écrans élève qui pouvaient
+ * afficher `data/student.ts` demandent tous, désormais, POURQUOI le
+ * chargement a échoué avant de le faire.
+ *
+ * Cette liste n'a le droit que de rétrécir. Elle reste ici parce qu'un jour
+ * quelqu'un ajoutera un écran, MOCK1 le signalera, et la tentation sera de
+ * l'inscrire ici « en attendant ». Ce sera un choix explicite, écrit, revu —
+ * pas un oubli silencieux. MOCK2 refuse d'y laisser un écran déjà corrigé.
+ */
+const RESTENT_A_FERMER: string[] = [];
+
+const UTILISE_DEMONSTRATION = /from "@\/data\/student"/;
+const CHARGE_DEPUIS_SUPABASE = /\buseSupabase[A-Za-z]*\s*\(/;
+const DEMANDE_POURQUOI = /useEtatOfflineEleve|useSeanceHorsLigne/;
+
+async function ecransSuspects(): Promise<string[]> {
+  const suspects: string[] = [];
+  for (const zone of ZONES_ELEVE) {
+    for (const chemin of await fichiers(zone)) {
+      const source = await readFile(chemin, "utf8");
+      if (!UTILISE_DEMONSTRATION.test(source)) continue;
+      if (!CHARGE_DEPUIS_SUPABASE.test(source)) continue;
+      if (DEMANDE_POURQUOI.test(source)) continue;
+      suspects.push(relative(RACINE, chemin).split(sep).join(sep));
+    }
+  }
+  return suspects.sort();
+}
+
+await test("MOCK1. aucun NOUVEL écran élève ne traite `!active` comme « démonstration »", async () => {
+  const suspects = await ecransSuspects();
+  const nouveaux = suspects.filter((f) => !RESTENT_A_FERMER.includes(f));
+  assert.deepEqual(
+    nouveaux,
+    [],
+    "cet écran affiche data/student.ts sans avoir demandé POURQUOI le chargement a échoué : en avion, il montrera la démonstration à un élève réel",
+  );
+});
+
+await test("MOCK2. la liste de dette ne contient que des écrans RÉELLEMENT encore ouverts", async () => {
+  const suspects = await ecransSuspects();
+  const dejaFermes = RESTENT_A_FERMER.filter((f) => !suspects.includes(f));
+  assert.deepEqual(
+    dejaFermes,
+    [],
+    "ces écrans ont été corrigés : retire-les de RESTENT_A_FERMER, sinon la liste protège du vide",
+  );
+});
+
+await test("MOCK3. le contrôle sait DÉTECTER le motif", async () => {
+  // Sans cette vérification, MOCK1 pourrait passer parce qu'il ne reconnaît
+  // plus rien — un renommage de hook suffirait à le rendre aveugle.
+  const fautif = 'import { activeProgram } from "@/data/student";\nconst t = useSupabaseTrainingProgram();';
+  assert.ok(UTILISE_DEMONSTRATION.test(fautif) && CHARGE_DEPUIS_SUPABASE.test(fautif));
+  assert.equal(DEMANDE_POURQUOI.test(fautif), false);
+
+  const corrige = fautif + '\nconst local = useEtatOfflineEleve(t.ready && !t.active);';
+  assert.ok(DEMANDE_POURQUOI.test(corrige), "un écran corrigé ne doit plus être signalé");
+});
+
 console.log(`\n${réussis} réussis, ${échecs} échecs`);
 process.exit(échecs === 0 ? 0 : 1);

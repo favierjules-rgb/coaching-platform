@@ -3,6 +3,7 @@ process.env.TZ = "Europe/Paris";
 
 import assert from "node:assert/strict";
 
+
 import { workoutFeedbackPayloadSchema } from "../../lib/api/schemas/workout-feedback";
 import { DepotOffline, MoteurMemoire } from "../../lib/offline/depot";
 import { ErreurStockage } from "../../lib/offline/idb";
@@ -31,6 +32,7 @@ import {
 import {
   assemblerSnapshot,
   charge,
+  fichesRemplacables,
   datePourRetour,
   lireSnapshotPourSeance,
   manque,
@@ -1463,6 +1465,79 @@ await test("R18. source `erreur` : ni mock, ni mise en file hors ligne", () => {
   assert.equal(autoriseSoumissionHorsLigne("offline"), true);
   assert.equal(autoriseSoumissionHorsLigne("mock"), false);
   assert.equal(autoriseSoumissionHorsLigne("supabase"), false);
+});
+
+
+/* ════════════════════════════════════════════════════════════════════════
+ * XII. LES CLÉS DU CACHE DE REMPLAÇANTS
+ * ════════════════════════════════════════════════════════════════════════
+ * Le sélecteur demande ses options par `libraryExerciseId`. Le snapshot doit
+ * les avoir rangées sous LA MÊME clé — à une lettre près, il est vide et
+ * personne ne le voit : ni le compilateur, ni l'écran, qui affiche
+ * simplement « Aucun remplaçant enregistré pour ce mouvement ».
+ *
+ * C'est exactement ce qui s'est produit : la collecte lisait
+ * `exerciseLibraryId`, un champ inventé par un cast.
+ * ════════════════════════════════════════════════════════════════════════ */
+
+function blocMuscu(exercices: unknown[]) {
+  return {
+    id: "bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb",
+    category: "strength" as const,
+    position: 1,
+    title: null,
+    colorKey: "neutral",
+    exercises: exercices,
+  };
+}
+
+await test("REMP1. les fiches sont relevées sous `libraryExerciseId`", () => {
+  const fiches = fichesRemplacables({
+    blocks: [
+      blocMuscu([
+        { id: "e1", name: "Tirage", libraryExerciseId: "fiche-A" },
+        { id: "e2", name: "Rowing", libraryExerciseId: "fiche-B" },
+        { id: "e3", name: "Texte libre" },
+      ]),
+    ],
+  } as never);
+  assert.deepEqual(fiches.sort(), ["fiche-A", "fiche-B"]);
+});
+
+await test("REMP2. le champ INVENTÉ `exerciseLibraryId` ne relève rien", () => {
+  // Le test qui aurait attrapé le bogue du 09/08/2026 : la boucle lisait ce
+  // nom-là, il n'existe pas, et l'ensemble restait vide.
+  const fiches = fichesRemplacables({
+    blocks: [blocMuscu([{ id: "e1", name: "Tirage", exerciseLibraryId: "fiche-A" }])],
+  } as never);
+  assert.deepEqual(fiches, [], "un champ qui n'existe pas ne doit pas devenir une clé");
+});
+
+await test("REMP3. un bloc cardio n'apporte aucune fiche, et ne fait pas tomber la collecte", () => {
+  const fiches = fichesRemplacables({
+    blocks: [
+      { id: "c1", category: "cardio", position: 1, title: null, colorKey: "neutral", prescriptions: [] },
+      blocMuscu([{ id: "e1", name: "Tirage", libraryExerciseId: "fiche-A" }]),
+    ],
+  } as never);
+  assert.deepEqual(fiches, ["fiche-A"]);
+});
+
+await test("REMP4. une séance sans blocs ne rend rien, sans lever", () => {
+  assert.deepEqual(fichesRemplacables({} as never), []);
+  assert.deepEqual(fichesRemplacables({ blocks: null } as never), []);
+});
+
+await test("REMP5. la même fiche prescrite deux fois n'est demandée qu'UNE fois", () => {
+  const fiches = fichesRemplacables({
+    blocks: [
+      blocMuscu([
+        { id: "e1", name: "Tirage", libraryExerciseId: "fiche-A" },
+        { id: "e2", name: "Tirage (2e passage)", libraryExerciseId: "fiche-A" },
+      ]),
+    ],
+  } as never);
+  assert.deepEqual(fiches, ["fiche-A"]);
 });
 
 console.log(`\n${réussis} réussis, ${échecs} échecs`);

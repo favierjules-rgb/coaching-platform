@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft, Flame, MessageSquare } from "lucide-react";
 
+import { DiagnosticOffline } from "@/components/pwa/DiagnosticOffline";
 import { MuscleHeatmapSection } from "@/components/student/MuscleHeatmapSection";
 import { SessionAnalysisSection } from "@/components/student/SessionAnalysisSection";
 import { SessionFeedbackSection } from "@/components/student/SessionFeedbackSection";
@@ -154,6 +155,30 @@ export default function SessionDetailPage() {
           TOUTES, explicitement. `scripts/tests/seance-page-props.mts` échoue
           si l'une d'elles disparaît d'ici.
         */}
+        <DiagnosticOffline
+          titre="/entrainement/seance"
+          lignes={{
+            etat: seance.etat,
+            source: seance.etat === "offline" ? "offline" : "supabase",
+            horsLigne: seance.etat === "offline",
+            sessionIdUrl: params.sessionId,
+            sessionIdRendu: realSession.id,
+            businessDate: seance.businessDate,
+            auth: seance.identite ? "oui" : "non",
+            studentEleve: contenu.studentId,
+            remplacantsCles: Object.keys(contenu.remplacants ?? {}).length,
+            remplacantsTotal: Object.values(contenu.remplacants ?? {}).reduce((n, o) => n + o.length, 0),
+            exercicesAvecFiche: (realSession.blocks ?? []).reduce(
+              (n, bloc) =>
+                n +
+                (bloc.category === "strength"
+                  ? (bloc.exercises ?? []).filter((e) => Boolean(e.libraryExerciseId)).length
+                  : 0),
+              0,
+            ),
+          }}
+        />
+
         <SessionFeedbackSection
           studentId={contenu.studentId}
           sessionId={realSession.id}
@@ -241,6 +266,17 @@ export default function SessionDetailPage() {
           </p>
         </div>
       </div>
+
+      <DiagnosticOffline
+        titre="/entrainement/seance"
+        lignes={{
+          etat: seance.etat,
+          source: "mock",
+          horsLigne: false,
+          sessionIdUrl: params.sessionId,
+          sessionIdRendu: session.id,
+        }}
+      />
 
       <SessionFeedbackSection
         studentId={student.id}

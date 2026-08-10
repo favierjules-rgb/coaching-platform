@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 
+import { DiagnosticOffline } from "@/components/pwa/DiagnosticOffline";
 import { NextSessionHighlight } from "@/components/student/NextSessionHighlight";
 import { TrainingProgramCard } from "@/components/student/TrainingProgramCard";
 import {
@@ -10,6 +11,7 @@ import {
   getWorkoutSession,
   trainingPrograms,
 } from "@/data/student";
+import { useEtatOfflineEleve } from "@/hooks/useEtatOfflineEleve";
 import { useSupabaseTrainingProgram } from "@/hooks/useSupabaseTrainingProgram";
 import { computeCurrentWeekNumber, toEleveTrainingProgram, toEleveWorkoutSession } from "@/lib/training-schedule";
 
@@ -22,6 +24,9 @@ import { computeCurrentWeekNumber, toEleveTrainingProgram, toEleveWorkoutSession
  */
 export default function EntrainementPage() {
   const supabaseTraining = useSupabaseTrainingProgram();
+  // On ne diagnostique QUE si le chargement en ligne n'a rien donné : en
+  // ligne, ce hook ne fait aucune requête.
+  const local = useEtatOfflineEleve(supabaseTraining.ready && !supabaseTraining.active);
 
   if (!supabaseTraining.ready) {
     return <p className="text-sm text-muted-foreground">Chargement…</p>;
@@ -111,6 +116,106 @@ export default function EntrainementPage() {
     );
   }
 
+  /* ══════════════════════════════════════════════════════════════════
+   * LE SERVEUR N'A PAS RÉPONDU — ET CE N'EST PAS UNE DÉMONSTRATION
+   * ══════════════════════════════════════════════════════════════════
+   * Tout ce qui suit était autrefois un `else` unique menant à
+   * `data/student.ts`. Il couvrait quatre situations sans rapport, dont la
+   * panne réseau : un élève réel, en avion, voyait « Force & Hypertrophie »
+   * et « Remise en route » — et surtout un LIEN vers une séance de
+   * démonstration qui ne correspondait à rien.
+   *
+   * Même règle que sur l'écran de séance : la démonstration n'est atteinte
+   * que si Supabase n'est réellement pas configuré. */
+  if (local.etat === "chargement") {
+    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+  }
+
+  if (local.etat === "offline" && local.contenu && local.sessionId) {
+    const seanceDuJour = local.contenu.session;
+    return (
+      <div>
+        <DiagnosticOffline
+          titre="/entrainement"
+          lignes={{
+            etat: local.etat,
+            source: "offline",
+            sessionIdSnapshot: local.sessionId,
+            sessionIdRendu: seanceDuJour.id,
+            businessDate: local.businessDate,
+            auth: local.identite ? "oui" : "non",
+            remplacantsCles: Object.keys(local.contenu.remplacants ?? {}).length,
+          }}
+        />
+        <div className="mb-8">
+          <h1 className="font-heading text-3xl font-extrabold uppercase text-foreground md:text-4xl">
+            Entraînement
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {local.contenu.programName
+              ? `Programme actif : ${local.contenu.programName}`
+              : "Programme actif"}
+          </p>
+        </div>
+
+        <div className="mb-8">
+          {/*
+            La carte du jour porte l'identifiant EXACT du snapshot : c'est
+            la même clé que celle mise en cache par le service worker, et
+            celle que `lireSnapshotPourSeance` exigera à l'ouverture.
+          */}
+          <NextSessionHighlight session={seanceDuJour} dayLabel="Aujourd'hui" />
+        </div>
+
+        {/*
+          Ce qui a besoin du serveur reste VIDE, et le dit. Ni programmes,
+          ni progression, ni historique : rien de tout cela n'est dans le
+          snapshot, et l'inventer serait le défaut qu'on vient de corriger.
+        */}
+        <div className="rounded-card border border-border bg-card p-6 shadow-soft">
+          <h2 className="mb-2 font-heading text-lg font-bold uppercase text-foreground">
+            Mes programmes
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Tes programmes et ta progression demandent une connexion. Ta séance du jour, elle,
+            est disponible ci-dessus — tu peux la remplir maintenant, elle partira toute seule
+            au retour du réseau.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (local.etat !== "mock") {
+    return (
+      <div>
+        <DiagnosticOffline
+          titre="/entrainement"
+          lignes={{
+            etat: local.etat,
+            diagnostic: local.diagnostic ?? null,
+            sessionIdSnapshot: local.sessionId,
+            auth: local.identite ? "oui" : "non",
+          }}
+        />
+        <div className="mb-8">
+          <h1 className="font-heading text-3xl font-extrabold uppercase text-foreground md:text-4xl">
+            Entraînement
+          </h1>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          {local.etat === "erreur"
+            ? "Le serveur n'a pas pu répondre correctement. Réessaie dans un instant — rien n'a été perdu."
+            : local.etat === "offline"
+              ? "Ta séance du jour n'a pas été préparée sur cet appareil. Connecte-toi à Internet pour la charger."
+              : "Ton entraînement n'est pas disponible sur cet appareil. Connecte-toi à Internet pour le charger."}
+        </p>
+      </div>
+    );
+  }
+
+  /* ── DÉMONSTRATION ──────────────────────────────────────────────────
+   * Seul `local.etat === "mock"` arrive ici : Supabase non configuré. */
   const highlightedDay = getHighlightedScheduleDay(activeProgram.schedule);
   const highlightedSession = highlightedDay?.sessionId
     ? getWorkoutSession(highlightedDay.sessionId)
