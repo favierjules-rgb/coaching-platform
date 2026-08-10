@@ -48,6 +48,14 @@ function versOctets(base64url: string): Uint8Array<ArrayBuffer> {
   return octets;
 }
 
+/**
+ * Assez long pour qu'un enregistrement normal (premier chargement de la
+ * PWA) arrive largement avant, assez court pour qu'un élève ne reste pas
+ * devant un bloc absent. Dépassé, l'état est provisoire : il est corrigé
+ * dès que `ready` répond.
+ */
+const DELAI_ENREGISTREMENT_MS = 3000;
+
 function supporte(): boolean {
   return (
     typeof window !== "undefined" &&
@@ -63,25 +71,60 @@ export function useNotificationsPush(): ResultatNotifications {
 
   useEffect(() => {
     let annule = false;
+    let tranche = false;
+
+    /**
+     * `navigator.serviceWorker.ready` PEUT NE JAMAIS SE RÉSOUDRE.
+     *
+     * Ce n'est pas une hypothèse : tant qu'aucun service worker n'est
+     * enregistré et actif pour cette portée — Safari hors PWA installée,
+     * `next dev`, un enregistrement qui a échoué — la promesse reste en
+     * attente indéfiniment. Elle ne rejette pas. Elle ne s'arme d'aucun
+     * délai. Il n'existe aucun moyen de l'annuler.
+     *
+     * Sans borne, l'état restait donc `chargement` pour toujours et
+     * `NotificationsSection` — qui rend `null` dans cet état — ne
+     * s'affichait jamais : l'élève n'avait aucune explication, et aucun
+     * bouton. On tranche donc au bout d'un délai, avec la seule
+     * conclusion honnête à ce stade (« cet appareil ne gère pas les
+     * notifications ; sur iPhone, ajoute d'abord SETH à l'écran
+     * d'accueil »)…
+     */
+    const minuteur = setTimeout(() => {
+      if (!annule && !tranche) setEtat("non_supporte");
+    }, DELAI_ENREGISTREMENT_MS);
+
     void (async () => {
       if (!supporte()) {
+        tranche = true;
+        clearTimeout(minuteur);
         if (!annule) setEtat("non_supporte");
         return;
       }
       if (Notification.permission === "denied") {
+        tranche = true;
+        clearTimeout(minuteur);
         if (!annule) setEtat("refuse");
         return;
       }
       try {
         const enregistrement = await navigator.serviceWorker.ready;
         const abonnement = await enregistrement.pushManager.getSubscription();
+        // …et on CORRIGE si l'enregistrement finit par arriver : un délai
+        // dépassé décrit une lenteur, pas un verdict.
+        tranche = true;
+        clearTimeout(minuteur);
         if (!annule) setEtat(abonnement ? "active" : "inactif");
       } catch {
+        tranche = true;
+        clearTimeout(minuteur);
         if (!annule) setEtat("erreur");
       }
     })();
+
     return () => {
       annule = true;
+      clearTimeout(minuteur);
     };
   }, []);
 

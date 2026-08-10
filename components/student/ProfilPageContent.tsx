@@ -92,21 +92,33 @@ export function ProfilPageContent({
    *
    * Ce chemin manquait au garde-fou MOCK1 : l'import de `data/student`
    * est dans la PAGE, l'appel des hooks dans CE composant. Le contrôle
-   * a été élargi en conséquence. */
-  if (local.etat === "chargement") {
-    return <p className="text-sm text-muted-foreground">Chargement du profil…</p>;
-  }
+   * a été élargi en conséquence.
+   *
+   * ── LA GARDE `!useSupabase` N'EST PAS DÉCORATIVE ────────────────────
+   * `useEtatOfflineEleve` n'est INTERROGÉ que si `!useSupabase` (ligne du
+   * dessus) ; son effet sort à sa première ligne autrement, et son état
+   * reste `"chargement"` POUR TOUJOURS. Sans cette garde, un profil
+   * Supabase parfaitement chargé tombait donc dans la branche d'attente
+   * ci-dessous et `/profil` ne s'affichait jamais — constaté sur iPhone
+   * le 10/08/2026, Safari comme PWA. Ces deux branches ne concernent que
+   * l'élève dont le profil n'est PAS arrivé ; `DashboardContent` porte la
+   * même garde depuis toujours. Voir `scripts/tests/profil-push-render.mts`. */
+  if (!useSupabase) {
+    if (local.etat === "chargement") {
+      return <p className="text-sm text-muted-foreground">Chargement du profil…</p>;
+    }
 
-  if (local.etat !== "mock") {
-    return (
-      <SectionIndisponible
-        zone="/profil"
-        titre="Profil"
-        etat={local.etat}
-        messageOffline="Ton profil demande une connexion : il n'est pas conservé sur cet appareil. Ta séance du jour, elle, reste disponible."
-        lignes={{ auth: local.identite ? "oui" : "non" }}
-      />
-    );
+    if (local.etat !== "mock") {
+      return (
+        <SectionIndisponible
+          zone="/profil"
+          titre="Profil"
+          etat={local.etat}
+          messageOffline="Ton profil demande une connexion : il n'est pas conservé sur cet appareil. Ta séance du jour, elle, reste disponible."
+          lignes={{ auth: local.identite ? "oui" : "non" }}
+        />
+      );
+    }
   }
 
   if (isProgramOnly) {

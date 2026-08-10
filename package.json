@@ -81,7 +81,8 @@
     "test:logout-menu": "npx tsx scripts/tests/logout-menu-render.mts",
     "test:parcours-offline": "npx tsx scripts/tests/parcours-offline-render.mts",
     "test:menu-offline": "npx tsx scripts/tests/menu-offline-render.mts",
-    "test:push-socle": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/push-socle.mts"
+    "test:push-socle": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/push-socle.mts",
+    "test:profil-push": "npx tsx scripts/tests/profil-push-render.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",
