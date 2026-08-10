@@ -206,7 +206,7 @@ export default function AdminDashboardPage() {
           Notifications
         </h2>
         {/* Socle push : un bouton, le temps de valider le test réel. */}
-        <NotificationTestButton />
+        <NotificationTestButton students={students} />
         <DashboardNotifications events={supabaseActivity.events} loading={supabaseActivity.loading} />
       </div>
 

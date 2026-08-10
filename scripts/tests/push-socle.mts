@@ -297,10 +297,34 @@ await test("PUSH16. le désabonnement ne peut viser que SES propres appareils", 
   assert.ok(bloc.includes('.eq("user_id", userId)'), "la suppression doit être filtrée sur l'utilisateur");
 });
 
-await test("PUSH17. l'envoi de test est réservé au staff (ADMINPUSH13)", () => {
-  const source = lire("app/api/admin/notifications/test/route.ts");
-  assert.ok(source.includes("requireStaff()"), "un envoi à soi-même doit exiger le staff");
-  assert.ok(source.includes("requireAdmin()"), "un envoi à quelqu'un d'autre doit exiger l'administrateur");
+await test("PUSH17. l'envoi de test est rattaché à un ÉLÈVE, jamais à l'appelant (ADMINPUSH13)", () => {
+  // Les COMMENTAIRES sont retirés avant l'inspection : le fichier raconte
+  // justement le défaut qu'il a corrigé, et une recherche naïve prendrait ce
+  // récit pour le code qu'il décrit.
+  const source = lire("app/api/admin/notifications/test/route.ts")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "");
+  // Cette assertion a changé le 10/08/2026, et c'est le correctif lui-même.
+  // Elle exigeait `requireStaff()` + `requireAdmin()` — c'est-à-dire le
+  // schéma « sans destinataire, j'envoie à MOI-MÊME », qui faisait chercher
+  // les appareils de l'administrateur pendant que ceux de l'élève dormaient
+  // dans `push_subscriptions`. Le repli implicite ne doit pas revenir.
+  assert.ok(
+    source.includes("requireStaffForStudent(studentId)"),
+    "l'accès doit être jugé sur l'ÉLÈVE visé (admin, ou coach de cet élève)",
+  );
+  assert.ok(
+    !source.includes("acces.user.id"),
+    "la route ne doit JAMAIS retomber sur le compte de l'appelant",
+  );
+  assert.ok(
+    !/corps\.userId|body\.userId/.test(source),
+    "un identifiant de compte venu du navigateur ne doit pas être lu",
+  );
+  assert.ok(
+    source.includes('.from("students").select("user_id")'),
+    "le compte destinataire doit être résolu côté serveur depuis la fiche élève",
+  );
 });
 
 await test("PUSH18. sans configuration VAPID, RIEN ne part", async () => {
