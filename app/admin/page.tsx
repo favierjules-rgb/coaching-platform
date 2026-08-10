@@ -17,6 +17,7 @@ import {
 
 import { ActivityFeed } from "@/components/admin/ActivityFeed";
 import { DashboardNotifications } from "@/components/admin/DashboardNotifications";
+import { NotificationTestButton } from "@/components/admin/NotificationTestButton";
 import { StatCard } from "@/components/admin/StatCard";
 import { StatusBadge, studentStatusTone } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
@@ -204,6 +205,8 @@ export default function AdminDashboardPage() {
         <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
           Notifications
         </h2>
+        {/* Socle push : un bouton, le temps de valider le test réel. */}
+        <NotificationTestButton />
         <DashboardNotifications events={supabaseActivity.events} loading={supabaseActivity.loading} />
       </div>
 

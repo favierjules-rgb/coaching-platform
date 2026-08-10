@@ -16,6 +16,7 @@ import { StudentOnboardingDetailModal } from "@/components/student/StudentOnboar
 import { SubscriptionSection } from "@/components/student/SubscriptionSection";
 import { WeightEvolutionCard } from "@/components/student/WeightEvolutionCard";
 import { SectionIndisponible } from "@/components/pwa/SectionIndisponible";
+import { NotificationsSection } from "@/components/student/NotificationsSection";
 import { useEtatOfflineEleve } from "@/hooks/useEtatOfflineEleve";
 import { useStudentProfile, type StudentProfileState } from "@/hooks/useStudentProfile";
 import { useSupabaseStudentProfile } from "@/hooks/useSupabaseStudentProfile";
@@ -323,6 +324,9 @@ export function ProfilPageContent({
       )}
     {/* Chantier PWA : ne s'affiche pas du tout quand l'espace est déjà
         ouvert depuis l'écran d'accueil. */}
+    <div className="mb-6">
+      <NotificationsSection />
+    </div>
     <div className="mb-6">
       <InstallAppSection />
     </div>

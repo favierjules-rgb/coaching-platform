@@ -108,6 +108,14 @@ export class BacServiceWorker {
   horsLigne = false;
   skipWaitingAppele = false;
   claimAppele = false;
+  /** Ce que `showNotification` a reçu. */
+  readonly notifications: { titre: string; options: Record<string, unknown> }[] = [];
+  /** Les fenêtres que `clients.matchAll` doit rendre. */
+  fenetres: { url: string; focus: () => Promise<void>; navigate?: (u: string) => Promise<void> }[] = [];
+  /** Les URL passées à `clients.openWindow`. */
+  readonly fenetresOuvertes: string[] = [];
+  /** Les URL passées à `client.navigate`. */
+  readonly navigations: string[] = [];
 
   private readonly ecouteurs = new Map<string, Array<(evenement: unknown) => void>>();
   private readonly reseau: Record<string, () => Response>;
@@ -139,6 +147,17 @@ export class BacServiceWorker {
     bac.clients = {
       claim: async () => {
         this.claimAppele = true;
+      },
+      // Fenêtres déjà ouvertes, pour `notificationclick`.
+      matchAll: async () => this.fenetres,
+      openWindow: async (url: string) => {
+        this.fenetresOuvertes.push(url);
+        return null;
+      },
+    };
+    bac.registration = {
+      showNotification: async (titre: string, options: Record<string, unknown>) => {
+        this.notifications.push({ titre, options });
       },
     };
     bac.fetch = (entree: string | RequeteFausse) => this.fetch(entree);
@@ -236,6 +255,46 @@ export class BacServiceWorker {
     });
     await Promise.all(attentes);
   }
+
+  /** Rejoue une notification poussée par le serveur. */
+  async pousser(charge: unknown): Promise<void> {
+    const attentes: Promise<unknown>[] = [];
+    await this.declencher("push", {
+      data:
+        charge === undefined
+          ? null
+          : {
+              json: () => {
+                if (typeof charge === "string") {
+                  return JSON.parse(charge) as unknown;
+                }
+                return charge;
+              },
+            },
+      waitUntil: (promesse: Promise<unknown>) => attentes.push(promesse),
+    });
+    await Promise.all(attentes);
+  }
+
+  /** Rejoue un clic sur une notification affichée. */
+  async cliquerNotification(donnees: unknown): Promise<void> {
+    const attentes: Promise<unknown>[] = [];
+    let fermee = false;
+    await this.declencher("notificationclick", {
+      notification: {
+        data: donnees,
+        close: () => {
+          fermee = true;
+        },
+      },
+      waitUntil: (promesse: Promise<unknown>) => attentes.push(promesse),
+    });
+    await Promise.all(attentes);
+    this.notificationFermee = fermee;
+  }
+
+  /** La dernière notification cliquée a-t-elle été fermée ? */
+  notificationFermee = false;
 
   /** Envoie une requête et rapporte ce que le service worker en a fait. */
   async requeter(requete: RequeteFausse): Promise<Verdict> {

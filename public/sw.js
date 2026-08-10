@@ -654,3 +654,112 @@ self.addEventListener("fetch", function (evenement) {
   // Tout le reste — images, manifeste, polices locales, appels de données :
   // aucune réponse fournie, le navigateur fait son travail habituel.
 });
+
+/* ════════════════════════════════════════════════════════════════════════
+ * NOTIFICATIONS PUSH
+ * ════════════════════════════════════════════════════════════════════════
+ * AJOUT, pas réécriture : rien de ce qui précède n'est modifié. Le cache, la
+ * navigation hors ligne et la préparation des coquilles fonctionnent
+ * exactement comme avant — `scripts/tests/pwa-service-worker.mts` continue
+ * de le vérifier sur ce même fichier.
+ *
+ * Ces deux gestionnaires n'ouvrent, ne lisent et n'écrivent AUCUN cache et
+ * AUCUNE base : une notification ne touche pas aux données hors ligne.
+ * ════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Les destinations qu'une notification a le droit d'ouvrir.
+ *
+ * Cette liste existe en trois endroits — ici, dans
+ * `lib/push/destinations.ts`, et dans la contrainte CHECK de la migration.
+ * Ce n'est pas une négligence : ce fichier est du JavaScript brut exécuté
+ * par le navigateur, il ne peut rien importer du projet. Le contrôle
+ * `scripts/tests/push-socle.mts` compare les trois et échoue à la première
+ * divergence.
+ *
+ * Ce que ça empêche : une charge utile altérée en transit ne peut pas faire
+ * ouvrir un site tiers depuis une notification signée SETH — le clic ouvre
+ * alors /dashboard, jamais l'adresse fournie.
+ */
+const DESTINATIONS_NOTIFICATION = [
+  "/dashboard",
+  "/entrainement",
+  "/nutrition",
+  "/documents",
+  "/profil",
+  "/progression",
+  "/rendez-vous",
+];
+const DESTINATION_SEANCE = /^\/entrainement\/seance\/[0-9a-fA-F-]{36}$/;
+
+function destinationSure(valeur) {
+  if (typeof valeur !== "string" || valeur.length === 0) {
+    return "/dashboard";
+  }
+  // `//` en tête : URL protocole-relative, elle changerait de domaine.
+  if (valeur.charAt(0) !== "/" || valeur.indexOf("//") === 0) {
+    return "/dashboard";
+  }
+  if (DESTINATIONS_NOTIFICATION.indexOf(valeur) !== -1 || DESTINATION_SEANCE.test(valeur)) {
+    return valeur;
+  }
+  return "/dashboard";
+}
+
+self.addEventListener("push", function (evenement) {
+  evenement.waitUntil(
+    (async function () {
+      let donnees = {};
+      try {
+        donnees = evenement.data ? evenement.data.json() : {};
+      } catch (erreur) {
+        // Charge illisible : on affiche quand même quelque chose plutôt que
+        // rien. Une notification muette inquiète plus qu'elle n'informe.
+        donnees = {};
+      }
+      const titre = typeof donnees.titre === "string" && donnees.titre.length > 0 ? donnees.titre : "SETH";
+      const corps = typeof donnees.corps === "string" ? donnees.corps : "";
+      const options = {
+        body: corps,
+        icon: "/icons/icon-192.png",
+        badge: "/icons/icon-192.png",
+        data: { destination: destinationSure(donnees.destination) },
+      };
+      if (typeof donnees.etiquette === "string" && donnees.etiquette.length > 0) {
+        // Deux rappels du même sujet se remplacent au lieu de s'empiler.
+        options.tag = donnees.etiquette;
+      }
+      await self.registration.showNotification(titre, options);
+    })(),
+  );
+});
+
+self.addEventListener("notificationclick", function (evenement) {
+  evenement.notification.close();
+  const destination = destinationSure(
+    evenement.notification.data ? evenement.notification.data.destination : null,
+  );
+  evenement.waitUntil(
+    (async function () {
+      // Une fenêtre SETH déjà ouverte ? On la reprend plutôt que d'en ouvrir
+      // une deuxième — sur iPhone, deux fenêtres de la même PWA sèment.
+      const fenetres = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      for (let i = 0; i < fenetres.length; i += 1) {
+        const fenetre = fenetres[i];
+        if (new URL(fenetre.url).origin !== self.location.origin) {
+          continue;
+        }
+        await fenetre.focus();
+        if (typeof fenetre.navigate === "function") {
+          try {
+            await fenetre.navigate(destination);
+          } catch (erreur) {
+            /* certaines plateformes refusent `navigate` : le focus suffit */
+          }
+        }
+        return;
+      }
+      await self.clients.openWindow(destination);
+    })(),
+  );
+});

@@ -1134,5 +1134,102 @@ await test("V5. le service worker ne touche JAMAIS à IndexedDB", async () => {
   }
 });
 
+/* ══════════════════════════════════════════════════════════════════════════
+ * LES NOTIFICATIONS PUSH
+ * ══════════════════════════════════════════════════════════════════════════
+ * Ajout au service worker, pas réécriture : les 46 cas précédents portent sur
+ * le même fichier et restent verts. Ces gestionnaires n'ouvrent aucun cache
+ * et ne touchent à aucune base.
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/** La destination portée par une notification affichée. */
+function destinationDe(notification: { options: Record<string, unknown> }): string | null {
+  const donnees = notification.options.data as { destination?: unknown } | undefined;
+  return typeof donnees?.destination === "string" ? donnees.destination : null;
+}
+
+await test("PUSHSW1. une notification poussée est AFFICHÉE, avec sa destination", async () => {
+  const bac = await bacInstalle();
+  await bac.pousser({ titre: "Rappel poids", corps: "Pense à ton poids.", destination: "/progression" });
+  assert.equal(bac.notifications.length, 1, "rien n'a été affiché");
+  assert.equal(bac.notifications[0].titre, "Rappel poids");
+  assert.equal(bac.notifications[0].options.body, "Pense à ton poids.");
+  // `deepEqual` compare aussi les prototypes : les objets fabriqués dans le
+  // contexte du service worker viennent d'un autre « realm ». On lit donc la
+  // valeur, pas la forme.
+  assert.equal(destinationDe(bac.notifications[0]), "/progression");
+});
+
+await test("PUSHSW2. une destination EXTERNE est ramenée à /dashboard", async () => {
+  // Une charge altérée en transit ne doit pas faire ouvrir un site tiers
+  // depuis une notification signée SETH.
+  const bac = await bacInstalle();
+  for (const malveillante of [
+    "https://evil.example/vol",
+    "//evil.example/vol",
+    "/admin",
+    "javascript:alert(1)",
+    "../../etc",
+  ]) {
+    bac.notifications.length = 0;
+    await bac.pousser({ titre: "X", corps: "Y", destination: malveillante });
+    assert.equal(destinationDe(bac.notifications[0]), "/dashboard", `${malveillante} a survécu au filtre`);
+  }
+});
+
+await test("PUSHSW3. une charge ILLISIBLE affiche quand même quelque chose", async () => {
+  // Une notification muette inquiète plus qu'elle n'informe.
+  const bac = await bacInstalle();
+  await bac.pousser("{ceci n'est pas du JSON");
+  assert.equal(bac.notifications.length, 1);
+  assert.equal(bac.notifications[0].titre, "SETH");
+});
+
+await test("PUSHSW4. le clic REPREND une fenêtre déjà ouverte plutôt que d'en ouvrir une seconde", async () => {
+  const bac = await bacInstalle();
+  const visitees: string[] = [];
+  let focus = 0;
+  bac.fenetres = [
+    {
+      url: `${ORIGINE}/dashboard`,
+      focus: async () => {
+        focus += 1;
+      },
+      navigate: async (u: string) => {
+        visitees.push(u);
+      },
+    },
+  ];
+  await bac.cliquerNotification({ destination: "/entrainement" });
+  assert.equal(focus, 1, "la fenêtre existante doit être reprise");
+  assert.deepEqual(visitees, ["/entrainement"]);
+  assert.deepEqual(bac.fenetresOuvertes, [], "aucune seconde fenêtre ne doit s'ouvrir");
+  assert.equal(bac.notificationFermee, true, "la notification doit être fermée");
+});
+
+await test("PUSHSW5. sans fenêtre ouverte, le clic OUVRE l'application sur la bonne route", async () => {
+  const bac = await bacInstalle();
+  bac.fenetres = [];
+  await bac.cliquerNotification({ destination: "/entrainement/seance/33333333-3333-4333-8333-777777777777" });
+  assert.deepEqual(bac.fenetresOuvertes, ["/entrainement/seance/33333333-3333-4333-8333-777777777777"]);
+});
+
+await test("PUSHSW6. un clic sans destination lisible ouvre /dashboard", async () => {
+  const bac = await bacInstalle();
+  bac.fenetres = [];
+  await bac.cliquerNotification(null);
+  assert.deepEqual(bac.fenetresOuvertes, ["/dashboard"]);
+});
+
+await test("PUSHSW7. les gestionnaires push ne touchent NI au cache NI aux données", async () => {
+  const bac = await bacInstalle();
+  const avant = bac.toutLeCache().slice().sort();
+  const requetesAvant = bac.appelsReseau.length;
+  await bac.pousser({ titre: "X", corps: "Y", destination: "/profil" });
+  await bac.cliquerNotification({ destination: "/profil" });
+  assert.deepEqual(bac.toutLeCache().slice().sort(), avant, "le cache a bougé");
+  assert.equal(bac.appelsReseau.length, requetesAvant, "une requête réseau a été émise");
+});
+
 console.log(`\n${réussis} réussis, ${échecs} échecs`);
 if (échecs > 0) process.exit(1);

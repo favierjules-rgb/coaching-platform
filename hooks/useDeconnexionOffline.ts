@@ -8,6 +8,7 @@ import {
   preparerDeconnexion,
   type DecisionDeconnexion,
 } from "@/lib/offline/deconnexion";
+import { retirerAbonnementDeCetAppareil } from "@/lib/push/appareil";
 import { identiteDepuisSession } from "@/lib/offline/identite";
 import { MoteurIndexedDB } from "@/lib/offline/idb";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -27,6 +28,10 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
  *     le serveur n'a jamais reçue. La purger reviendrait à effacer le
  *     travail de quelqu'un pour tenir une promesse d'hygiène — sans que
  *     l'élève voie rien.
+ *
+ *   • LES NOTIFICATIONS DE CET APPAREIL sont retirées dans les deux cas :
+ *     les rappels de l'ancien compte ne doivent pas continuer d'arriver sur
+ *     un téléphone qu'il vient de quitter. Best-effort, jamais bloquant.
  *
  *   • LE STOCKAGE NE RÉPOND PAS → on se déconnecte quand même, et on ne
  *     prétend PAS avoir purgé. Rester connecté de force parce qu'IndexedDB
@@ -118,6 +123,7 @@ export function useDeconnexionOffline(options: OptionsDeconnexion = {}) {
         // Voir plus haut : une purge impossible ne retient personne.
       }
     }
+    await retirerAbonnementDeCetAppareil();
     await signOut();
   }, [identite, obtenirDepot, signOut]);
 
@@ -126,6 +132,7 @@ export function useDeconnexionOffline(options: OptionsDeconnexion = {}) {
   /** Déconnexion immédiate, quand `demanderDeconnexion` a rendu `true`. */
   const deconnecter = useCallback(async (): Promise<void> => {
     setEtat({ phase: "en_cours" });
+    await retirerAbonnementDeCetAppareil();
     await signOut();
   }, [signOut]);
 
