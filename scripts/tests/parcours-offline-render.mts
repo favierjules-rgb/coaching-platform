@@ -611,6 +611,25 @@ await test("DIAG1. aucun identifiant d'utilisateur complet dans l'encart", async
   });
 });
 
+await test("PROF1. profil HORS LIGNE : jamais le profil de démonstration", async () => {
+  // Le huitième écran, trouvé en auditant le menu : l'import de
+  // `data/student` était dans la page, l'appel des hooks dans le composant.
+  // En avion, l'élève voyait un autre prénom, d'autres mensurations, et des
+  // boutons d'édition qui écrivaient dans le localStorage du mock.
+  await atelier(async (page, appeler) => {
+    await appeler("monterProfil");
+    await page.waitForFunction(
+      () => !/Chargement du profil/.test(document.getElementById("racine")?.textContent ?? ""),
+      undefined,
+      { timeout: 5000 },
+    );
+    const vu = await appeler<Vu>("vu");
+    assert.ok(!vu.texte.includes("Alexandre"), "le profil de démonstration ne doit jamais apparaître");
+    assert.ok(/demande une connexion/.test(vu.texte), "l'écran doit dire ce qui manque");
+    assert.match(vu.diagnostics.join(" "), /etat\s*offline/, "l'état retenu doit être « offline »");
+  });
+});
+
 await navigateur.close();
 serveur.close();
 

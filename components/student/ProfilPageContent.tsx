@@ -15,6 +15,8 @@ import { ProgressPhotoGallerySection } from "@/components/student/ProgressPhotoG
 import { StudentOnboardingDetailModal } from "@/components/student/StudentOnboardingDetailModal";
 import { SubscriptionSection } from "@/components/student/SubscriptionSection";
 import { WeightEvolutionCard } from "@/components/student/WeightEvolutionCard";
+import { SectionIndisponible } from "@/components/pwa/SectionIndisponible";
+import { useEtatOfflineEleve } from "@/hooks/useEtatOfflineEleve";
 import { useStudentProfile, type StudentProfileState } from "@/hooks/useStudentProfile";
 import { useSupabaseStudentProfile } from "@/hooks/useSupabaseStudentProfile";
 import type { FoodPreferences, InjuryNote, SportPreferences, StudentGoal } from "@/types";
@@ -52,6 +54,10 @@ export function ProfilPageContent({
   const mockProfile = useStudentProfile(studentId, seed);
   const supabaseProfile = useSupabaseStudentProfile();
   const useSupabase = supabaseProfile.ready && supabaseProfile.state !== null;
+  // POURQUOI le chargement n'a rien donné. Même diagnostic que les autres
+  // écrans élève ; aucune requête tant que le verdict en ligne n'est pas
+  // tombé.
+  const local = useEtatOfflineEleve(supabaseProfile.ready && !useSupabase);
   // Compte "achat unique" (chantier suppression auto. 6 mois) : accès à
   // /profil réduit à l'essentiel (nom, email, mot de passe) — jamais aux
   // mensurations/photos/préférences réservées aux vrais clients coaching.
@@ -73,6 +79,33 @@ export function ProfilPageContent({
 
   if (!supabaseProfile.ready) {
     return <p className="text-sm text-muted-foreground">Chargement du profil…</p>;
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
+   * SUPABASE CONFIGURÉ, MAIS RIEN N'EST ARRIVÉ
+   * ══════════════════════════════════════════════════════════════════
+   * `useSupabase === false` couvrait quatre situations, dont la panne
+   * réseau. En avion, l'élève voyait donc le profil de démonstration —
+   * un autre prénom, d'autres mensurations, d'autres photos — avec des
+   * boutons d'édition qui écrivaient dans le localStorage du mock.
+   *
+   * Ce chemin manquait au garde-fou MOCK1 : l'import de `data/student`
+   * est dans la PAGE, l'appel des hooks dans CE composant. Le contrôle
+   * a été élargi en conséquence. */
+  if (local.etat === "chargement") {
+    return <p className="text-sm text-muted-foreground">Chargement du profil…</p>;
+  }
+
+  if (local.etat !== "mock") {
+    return (
+      <SectionIndisponible
+        zone="/profil"
+        titre="Profil"
+        etat={local.etat}
+        messageOffline="Ton profil demande une connexion : il n'est pas conservé sur cet appareil. Ta séance du jour, elle, reste disponible."
+        lignes={{ auth: local.identite ? "oui" : "non" }}
+      />
+    );
   }
 
   if (isProgramOnly) {

@@ -62,11 +62,14 @@
  * À incrémenter quand la logique de ce fichier change, ou quand la page
  * hors ligne change assez pour qu'une version en cache devienne fausse.
  */
-const VERSION = "seth-pwa-v2";
+const VERSION = "seth-pwa-v3";
 const CACHE_HORS_LIGNE = VERSION + "-hors-ligne";
 const CACHE_STATIQUE = VERSION + "-statique";
 const CACHE_COQUILLE = VERSION + "-coquille";
-const CACHES_CONNUS = [CACHE_HORS_LIGNE, CACHE_STATIQUE, CACHE_COQUILLE];
+/** Une seule entrée : l'empreinte du déploiement dont viennent les coquilles. */
+const CACHE_META = VERSION + "-meta";
+const CACHES_CONNUS = [CACHE_HORS_LIGNE, CACHE_STATIQUE, CACHE_COQUILLE, CACHE_META];
+const CLE_EMPREINTE = "/__empreinte-coquilles";
 
 const PAGE_HORS_LIGNE = "/hors-ligne";
 const PREFIXE_STATIQUE = "/_next/static/";
@@ -150,6 +153,49 @@ const MAX_COQUILLES = 30;
  * n'y a rien à préparer d'avance pour une séance qu'on ne connaît pas.
  */
 const LANCEMENT = "/entrainement";
+
+/**
+ * ════════════════════════════════════════════════════════════════════════
+ * LES ENTRÉES DU MENU ÉLÈVE
+ * ════════════════════════════════════════════════════════════════════════
+ * Recopiées de `components/student/StudentSidebar.tsx` (`studentLinks`), et
+ * uniquement les routes STATIQUES. `scripts/tests/pwa-coquille.mts` compare
+ * les deux listes et échoue dès qu'elles divergent : ajouter une entrée au
+ * menu sans l'ajouter ici casserait le test, pas le téléphone de l'élève.
+ *
+ * ────────────────────────────────────────────────────────────────────────
+ * POURQUOI LES PRÉPARER TOUTES
+ * ────────────────────────────────────────────────────────────────────────
+ * Constaté sur iPhone le 10/08/2026 : démarrage à froid réussi, séance du
+ * jour disponible, puis « Pas de connexion » au premier clic sur Nutrition.
+ * Ces routes étaient pourtant AUTORISÉES depuis le début — elles n'étaient
+ * jamais PRÉPARÉES. Leur coquille n'existait que si l'élève y était passé en
+ * ligne, c'est-à-dire par hasard.
+ *
+ * Sept documents de quelques kilo-octets, sans donnée personnelle (voir
+ * l'encadré « LA COQUILLE DE L'ESPACE ÉLÈVE »), capturés une fois par
+ * déploiement. C'est le prix pour que le menu ne mente plus.
+ *
+ * ────────────────────────────────────────────────────────────────────────
+ * ET SEULEMENT LES STATIQUES
+ * ────────────────────────────────────────────────────────────────────────
+ * Aucune route dynamique n'est fabriquée ici : ni séance, ni programme, ni
+ * plan alimentaire. Leur coquille porte un identifiant, et deviner un
+ * identifiant n'a aucun sens. Elles restent capturées à la visite, une par
+ * une, comme aujourd'hui.
+ */
+const COQUILLES_MENU = [
+  "/dashboard",
+  "/entrainement",
+  "/nutrition",
+  "/rendez-vous",
+  "/progression",
+  "/documents",
+  "/profil",
+];
+
+/** Les chemins que le plafond n'a PAS le droit d'expulser. */
+const CHEMINS_PROTEGES = COQUILLES_MENU;
 
 function estCoquilleEleve(chemin) {
   for (let i = 0; i < COQUILLES_ELEVE.length; i += 1) {
@@ -264,8 +310,16 @@ self.addEventListener("activate", function (evenement) {
   );
 });
 
-/** Ramène un cache sous son plafond, en partant des entrées les plus anciennes. */
-async function borner(cache, plafond) {
+/**
+ * Ramène un cache sous son plafond, en partant des entrées les plus
+ * anciennes — SANS jamais toucher aux chemins protégés.
+ *
+ * Les coquilles du menu sont les premières insérées : elles seraient donc
+ * les premières expulsées. Trente séances ouvertes auraient suffi à vider le
+ * menu, et l'application serait redevenue inutilisable hors ligne plusieurs
+ * semaines plus tard, sans que rien ne l'explique.
+ */
+async function borner(cache, plafond, proteges) {
   const cles = await cache.keys();
   const trop = cles.length - plafond;
   if (trop <= 0) {
@@ -274,8 +328,14 @@ async function borner(cache, plafond) {
   // `keys()` rend les entrées dans leur ORDRE D'INSERTION (spécification de
   // l'API Cache) : les premières sont les plus anciennes. C'est ce qui rend
   // cette expulsion prévisible sans avoir à stocker de dates à côté.
-  for (let i = 0; i < trop; i += 1) {
+  const liste = proteges || [];
+  let restant = trop;
+  for (let i = 0; i < cles.length && restant > 0; i += 1) {
+    if (liste.indexOf(new URL(cles[i].url).pathname) !== -1) {
+      continue;
+    }
     await cache.delete(cles[i]);
+    restant -= 1;
   }
 }
 
@@ -299,6 +359,44 @@ async function capturerCoquille(cache, adresse) {
     }
   } catch (erreur) {
     // Pas de réseau au moment de la préparation : rien à faire ici.
+  }
+}
+
+/**
+ * Prépare les coquilles des entrées STATIQUES du menu.
+ *
+ * `empreinte` est le premier fichier `/_next/static/` référencé par la
+ * coquille de lancement — donc une signature du déploiement. Quand elle
+ * change, les coquilles gardées désignent des fichiers qui n'existent plus :
+ * elles sont jetées et reprises. Hors ligne, l'empreinte ne peut pas
+ * changer (la coquille de lancement n'est pas rafraîchie), donc rien n'est
+ * jeté au pire moment.
+ *
+ * Best-effort de bout en bout : un échec n'interrompt pas les suivants et ne
+ * change rien à la page affichée.
+ */
+async function preparerMenu(cache, origine, empreinte) {
+  const meta = await caches.open(CACHE_META);
+  if (empreinte) {
+    const connue = await meta.match(CLE_EMPREINTE);
+    const precedente = connue ? await connue.text() : "";
+    if (precedente !== empreinte) {
+      for (let i = 0; i < COQUILLES_MENU.length; i += 1) {
+        // La coquille de lancement vient d'être rafraîchie : la jeter serait
+        // la redemander pour rien.
+        if (COQUILLES_MENU[i] !== LANCEMENT) {
+          await cache.delete(origine + COQUILLES_MENU[i]);
+        }
+      }
+      await meta.put(CLE_EMPREINTE, new Response(empreinte));
+    }
+  }
+  for (let i = 0; i < COQUILLES_MENU.length; i += 1) {
+    const adresse = origine + COQUILLES_MENU[i];
+    const deja = await cache.match(adresse);
+    if (!deja) {
+      await capturerCoquille(cache, adresse);
+    }
   }
 }
 
@@ -353,6 +451,21 @@ self.addEventListener("message", function (evenement) {
       // par désigner des fichiers d'un déploiement disparu.
       await capturerCoquille(cache, origine + LANCEMENT);
 
+      // L'empreinte du déploiement, relue dans la coquille qu'on vient de
+      // rafraîchir. Sans réseau, c'est celle déjà en cache : inchangée, donc
+      // rien n'est jeté.
+      let empreinte = "";
+      const lancement = await cache.match(origine + LANCEMENT);
+      if (lancement) {
+        const releves = relevesStatiques(await lancement.clone().text());
+        empreinte = releves.length > 0 ? releves[0] : "";
+      }
+
+      // TOUTES les entrées du menu, pas seulement celle-ci. C'est ce qui
+      // permet à un élève qui n'a ouvert que son entraînement de naviguer
+      // ensuite dans Nutrition ou Documents sans réseau.
+      await preparerMenu(cache, origine, empreinte);
+
       // Puis la page réellement ouverte. Sans elle, l'élève démarrerait bien
       // hors ligne, et n'irait pas plus loin : sa séance n'est atteinte que
       // par une navigation client, que ce fichier ne voit jamais.
@@ -374,7 +487,7 @@ self.addEventListener("message", function (evenement) {
         await capturerCoquille(cache, origine + visee.pathname);
       }
 
-      await borner(cache, MAX_COQUILLES);
+      await borner(cache, MAX_COQUILLES, CHEMINS_PROTEGES);
     })(),
   );
 });
@@ -410,7 +523,7 @@ async function navigation(requete) {
       const cache = await caches.open(CACHE_COQUILLE);
       await cache.put(requete.url, reponse.clone());
       await preparerLancement(cache, adresse.origin);
-      await borner(cache, MAX_COQUILLES);
+      await borner(cache, MAX_COQUILLES, CHEMINS_PROTEGES);
     }
     return reponse;
   } catch (erreur) {
@@ -443,7 +556,7 @@ async function cacheDAbord(requete) {
   if (reponse && reponse.status === 200) {
     const cache = await caches.open(CACHE_STATIQUE);
     await cache.put(requete, reponse.clone());
-    await borner(cache, MAX_ENTREES_STATIQUES);
+    await borner(cache, MAX_ENTREES_STATIQUES, null);
   }
   return reponse;
 }

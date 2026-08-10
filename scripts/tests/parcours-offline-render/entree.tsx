@@ -33,6 +33,7 @@ import {
 
 import DashboardPage from "@/app/(student)/dashboard/page";
 import DocumentsPage from "@/app/(student)/documents/page";
+import ProfilPage from "@/app/(student)/profil/page";
 import NutritionPage from "@/app/(student)/nutrition/page";
 import NutritionPlanPage from "@/app/(student)/nutrition/[planId]/page";
 import EntrainementPage from "@/app/(student)/entrainement/page";
@@ -252,6 +253,10 @@ const harnais = {
     monterDans(
       avecContexteNext(`/nutrition/${planId}`, { planId }, createElement(NutritionPlanPage)),
     );
+  },
+
+  monterProfil() {
+    monterDans(avecContexteNext("/profil", {}, createElement(ProfilPage)));
   },
 
   monterDocuments() {

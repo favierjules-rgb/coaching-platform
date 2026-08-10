@@ -161,7 +161,16 @@ const ZONES_ELEVE = [join("app", "(student)"), join("components", "student")];
  */
 const RESTENT_A_FERMER: string[] = [];
 
-const UTILISE_DEMONSTRATION = /from "@\/data\/student"/;
+/**
+ * « Cet écran peut afficher la démonstration. »
+ *
+ * Deux formes, et il a fallu les deux : l'import direct de `data/student`,
+ * et l'usage de `useStudentProfile` — le profil mock/localStorage.
+ * `ProfilPageContent` n'avait que la seconde (l'import vivait dans la page,
+ * l'appel des hooks dans le composant) et passait donc sous le radar. Il a
+ * fallu un huitième écran fautif pour s'en apercevoir.
+ */
+const UTILISE_DEMONSTRATION = /from "@\/data\/student"|\buseStudentProfile\s*\(/;
 const CHARGE_DEPUIS_SUPABASE = /\buseSupabase[A-Za-z]*\s*\(/;
 const DEMANDE_POURQUOI = /useEtatOfflineEleve|useSeanceHorsLigne/;
 

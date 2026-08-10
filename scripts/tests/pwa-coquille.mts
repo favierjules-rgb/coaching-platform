@@ -243,5 +243,61 @@ test("C8. un identifiant qui n'est pas un UUID n'ouvre pas la liste", () => {
   assert.ok(!couvert("/entrainement/seance/12"));
 });
 
+
+/* ════════════════════════════════════════════════════════════════════════
+ * III. LE MENU ET LE SERVICE WORKER NE DOIVENT PAS DIVERGER
+ * ════════════════════════════════════════════════════════════════════════
+ * La liste préparée d'avance est une COPIE de `studentLinks`. Une copie
+ * dérive : quelqu'un ajoutera une entrée au menu, l'oubliera ici, et la
+ * découvrira six mois plus tard sur le téléphone d'un élève, en salle, sans
+ * réseau. Ces contrôles comparent les deux listes à chaque exécution.
+ * ════════════════════════════════════════════════════════════════════════ */
+
+/** Les entrées du menu, relues dans la barre latérale. */
+function liensDuMenu(): string[] {
+  const source = lire("components/student/StudentSidebar.tsx");
+  const debut = source.indexOf("const studentLinks = [");
+  const fin = source.indexOf("];", debut);
+  assert.ok(debut !== -1 && fin !== -1, "studentLinks introuvable");
+  return Array.from(source.slice(debut, fin).matchAll(/href:\s*"([^"]+)"/g)).map((m) => m[1]);
+}
+
+/** Les chemins que `public/sw.js` prépare d'avance. */
+function cheminsPrepares(): string[] {
+  const debut = SW.indexOf("const COQUILLES_MENU = [");
+  const fin = SW.indexOf("];", debut);
+  assert.ok(debut !== -1 && fin !== -1, "COQUILLES_MENU introuvable dans public/sw.js");
+  return Array.from(SW.slice(debut, fin).matchAll(/"([^"]+)"/g)).map((m) => m[1]);
+}
+
+test("C9. le service worker prépare EXACTEMENT les entrées du menu élève", () => {
+  assert.deepEqual(
+    cheminsPrepares().slice().sort(),
+    liensDuMenu().slice().sort(),
+    "une entrée du menu n'est pas préparée (ou l'inverse) : elle tombera sur « Pas de connexion »",
+  );
+});
+
+test("C10. chaque chemin préparé est AUTORISÉ par la liste blanche", () => {
+  // Préparer une route que `navigation()` refuserait de servir reviendrait à
+  // remplir le cache pour rien — et à croire le problème réglé.
+  for (const chemin of cheminsPrepares()) {
+    assert.ok(couvert(chemin), `${chemin} est préparé mais n'est pas dans COQUILLES_ELEVE`);
+  }
+});
+
+test("C11. AUCUNE route dynamique, publique ou d'administration n'est préparée", () => {
+  for (const chemin of cheminsPrepares()) {
+    assert.ok(chemin.startsWith("/"), `${chemin} n'est pas un chemin absolu`);
+    assert.ok(!chemin.includes("["), `${chemin} ressemble à un gabarit de route dynamique`);
+    assert.ok(!/[0-9a-fA-F-]{36}/.test(chemin), `${chemin} contient un identifiant fabriqué`);
+    assert.ok(!chemin.startsWith("/admin"), `${chemin} est une route d'administration`);
+    assert.ok(
+      !["/", "/connexion", "/tarifs", "/mentions-legales", "/cgv"].includes(chemin),
+      `${chemin} est une page publique`,
+    );
+  }
+});
+
 console.log(`\n${réussis} réussis, ${échecs} échecs`);
 if (échecs > 0) process.exit(1);
