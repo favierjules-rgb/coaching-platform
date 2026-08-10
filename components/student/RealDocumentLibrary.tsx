@@ -1,13 +1,16 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { AlertTriangle, Download, ExternalLink, FileText, Loader2, Lock, PlayCircle } from "lucide-react";
+import { Download, ExternalLink, FileText, Loader2, Lock, PlayCircle } from "lucide-react";
 
 import { ImportantMark } from "@/components/admin/ImportantMark";
+import { FileViewerModal } from "@/components/shared/FileViewerModal";
+import { VideoPlayerModal } from "@/components/shared/VideoPlayerModal";
 import { documentCategoryLabels, documentTypeLabels, formatDate, matchesTextSearch } from "@/lib/admin";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import type { StudentDocumentWithAvailability } from "@/lib/supabase/documents";
 import { getSignedDocumentFileUrl } from "@/lib/supabase/storage-documents";
+import { videoLisible } from "@/lib/video/source";
 import type { AdminDocumentStatus, DocumentCategory } from "@/types";
 
 type FilterKey = "tous" | DocumentCategory | "vidéo" | "guide" | "verrouilles";
@@ -54,26 +57,72 @@ const statusDotTone: Record<AdminDocumentStatus, string> = {
  * plus bas), donc ce chemin n'est jamais atteint pour un document non
  * débloqué.
  */
-function StorageFileButton({ storagePath, label, icon: Icon }: { storagePath: string; label: string; icon: typeof Download }) {
+/**
+ * Une vidéo dont l'adresse est PUBLIQUE (YouTube) : pas de signature à
+ * demander, mais surtout pas de redirection non plus. Le lecteur s'ouvre
+ * dans SETH, comme partout ailleurs.
+ */
+function VideoLienButton({ titre, url }: { titre: string; url: string }) {
+  const [ouvert, setOuvert] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOuvert(true)}
+        className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-primary px-3 py-2 text-xs uppercase tracking-widest text-primary hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+      >
+        <PlayCircle size={14} />
+        Voir la vidéo
+      </button>
+      <VideoPlayerModal ouvert={ouvert} onFermer={() => setOuvert(false)} titre={titre} url={url} />
+    </>
+  );
+}
+
+function StorageFileButton({
+  storagePath,
+  label,
+  icon: Icon,
+  genre,
+  titre,
+}: {
+  storagePath: string;
+  label: string;
+  icon: typeof Download;
+  /** Ce qu'on ouvrira : un lecteur vidéo, ou la visionneuse de document. */
+  genre: "video" | "fichier";
+  titre: string;
+}) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
+  const [url, setUrl] = useState<string | null>(null);
+  const [ouvert, setOuvert] = useState(false);
+
+  /**
+   * Une URL SIGNÉE, obtenue à la demande et jamais conservée ailleurs que
+   * dans cet état React : ni localStorage, ni IndexedDB, ni Cache Storage.
+   * Elle expire, et c'est voulu — `onRafraichir` en redemande une par le
+   * même mécanisme plutôt que de rendre le document public.
+   */
+  async function signer(): Promise<string | null> {
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) return null;
+    return getSignedDocumentFileUrl(supabase, storagePath);
+  }
 
   async function handleOpen() {
     setLoading(true);
     setError(false);
-    const supabase = createSupabaseBrowserClient();
-    if (!supabase) {
-      setLoading(false);
-      setError(true);
-      return;
-    }
-    const url = await getSignedDocumentFileUrl(supabase, storagePath);
+    const fraiche = await signer();
     setLoading(false);
-    if (!url) {
+    if (!fraiche) {
       setError(true);
       return;
     }
-    window.open(url, "_blank", "noopener,noreferrer");
+    setUrl(fraiche);
+    // La voie normale, et la seule : la modale SETH. Aucune redirection,
+    // aucun nouvel onglet.
+    setOuvert(true);
   }
 
   return (
@@ -88,10 +137,24 @@ function StorageFileButton({ storagePath, label, icon: Icon }: { storagePath: st
         {label}
       </button>
       {error && (
-        <p className="flex items-center gap-1.5 text-[11px] text-destructive">
-          <AlertTriangle size={12} className="flex-shrink-0" />
-          Impossible d&apos;ouvrir ce fichier.
-        </p>
+        <span className="text-[11px] text-destructive">Ce document n&apos;est pas disponible.</span>
+      )}
+      {genre === "video" ? (
+        <VideoPlayerModal
+          ouvert={ouvert}
+          onFermer={() => setOuvert(false)}
+          titre={titre}
+          url={url}
+          onRafraichir={signer}
+        />
+      ) : (
+        <FileViewerModal
+          ouvert={ouvert}
+          onFermer={() => setOuvert(false)}
+          titre={titre}
+          url={url}
+          onRafraichir={signer}
+        />
       )}
     </div>
   );
@@ -126,23 +189,15 @@ function DocumentCard({ item }: { item: StudentDocumentWithAvailability }) {
           )}
           {document.type === "vidéo" &&
             (document.storagePath ? (
-              <StorageFileButton storagePath={document.storagePath} label="Voir la vidéo" icon={PlayCircle} />
+              <StorageFileButton storagePath={document.storagePath} label="Voir la vidéo" icon={PlayCircle} genre="video" titre={document.title} />
             ) : (
-              document.videoUrl && (
-                <a
-                  href={document.videoUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-primary px-3 py-2 text-xs uppercase tracking-widest text-primary hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                >
-                  <PlayCircle size={14} />
-                  Voir la vidéo
-                </a>
+              videoLisible(document.videoUrl) && (
+                <VideoLienButton titre={document.title} url={document.videoUrl} />
               )
             ))}
           {document.type === "pdf" &&
             (document.storagePath ? (
-              <StorageFileButton storagePath={document.storagePath} label="Télécharger" icon={Download} />
+              <StorageFileButton storagePath={document.storagePath} label="Ouvrir le PDF" icon={FileText} genre="fichier" titre={document.title} />
             ) : (
               document.externalUrl && (
                 <a
@@ -160,7 +215,7 @@ function DocumentCard({ item }: { item: StudentDocumentWithAvailability }) {
             document.type !== "pdf" &&
             document.type !== "texte" &&
             (document.storagePath ? (
-              <StorageFileButton storagePath={document.storagePath} label="Ouvrir" icon={ExternalLink} />
+              <StorageFileButton storagePath={document.storagePath} label="Ouvrir" icon={ExternalLink} genre="fichier" titre={document.title} />
             ) : (
               document.externalUrl && (
                 <a

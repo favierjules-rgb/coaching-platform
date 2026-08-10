@@ -14,6 +14,44 @@ import type { NextConfig } from "next";
  * Vercel dépouillés — procédure en fin de fichier.
  */
 
+/**
+ * L'ORIGINE EXACTE DU PROJET SUPABASE — PAS TOUS LES PROJETS SUPABASE.
+ *
+ * `frame-src https://*.supabase.co` autoriserait N'IMPORTE QUEL projet
+ * Supabase du monde à être encadré par SETH. Ce n'est pas ce qu'on veut :
+ * les URLs signées du Storage viennent d'un projet et d'un seul, et son
+ * origine est déjà connue au build par `NEXT_PUBLIC_SUPABASE_URL` — une
+ * variable PUBLIQUE, celle que le navigateur reçoit déjà.
+ *
+ * La valeur n'est jamais recopiée telle quelle dans la politique : elle est
+ * relue par `new URL(...).origin`, et l'hôte doit satisfaire un motif qui
+ * exclut par construction l'espace, le point-virgule et l'astérisque —
+ * c'est-à-dire tout ce qui permettrait d'injecter une directive.
+ */
+const MOTIF_HOTE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
+
+export function origineSupabase(brut = process.env.NEXT_PUBLIC_SUPABASE_URL): string | null {
+  if (!brut) return null;
+  try {
+    const url = new URL(brut);
+    if (url.protocol !== "https:") return null;
+    if (!MOTIF_HOTE.test(url.hostname)) return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
+const SUPABASE_FRAME = origineSupabase();
+if (!SUPABASE_FRAME && process.env.NODE_ENV === "production") {
+  // Sans elle, la CSP passée en mode bloquant empêcherait l'affichage des
+  // documents privés. Mieux vaut un avertissement au build qu'un cadre vide
+  // découvert en production.
+  console.warn(
+    "[csp] NEXT_PUBLIC_SUPABASE_URL absente ou invalide : frame-src n'autorisera pas les documents Storage.",
+  );
+}
+
 /** Domaines réellement contactés par le navigateur, relevés dans le code. */
 const CSP_SOURCES = {
   // Supabase : REST, Auth, Storage et temps réel (websocket).
@@ -21,6 +59,14 @@ const CSP_SOURCES = {
   // Stripe : redirection Checkout, portail client, scripts embarqués.
   stripe: "https://js.stripe.com https://api.stripe.com https://checkout.stripe.com",
   stripeFrames: "https://js.stripe.com https://hooks.stripe.com https://checkout.stripe.com",
+  // Lecteur vidéo intégré (chantier « lecteur vidéo SETH ») : les vidéos de
+  // démonstration sont hébergées sur YouTube et lues DANS l'application, plus
+  // jamais par redirection. `youtube-nocookie` et lui seul — le domaine sans
+  // cookie de suivi tant que la lecture n'a pas commencé. Aucun joker : ni
+  // `https:`, ni `*`, ni `youtube.com` complet.
+  youtubeFrames: "https://www.youtube-nocookie.com",
+  // L'origine EXACTE du projet, jamais `*.supabase.co` : voir ci-dessus.
+  supabaseFrames: SUPABASE_FRAME ?? "",
   // Images : Storage Supabase, Stripe, et data:/blob: pour les aperçus
   // locaux (upload d'une photo de progression).
   images: "'self' data: blob: https://*.supabase.co https://*.stripe.com",
@@ -44,7 +90,10 @@ const contentSecurityPolicy = [
   `media-src 'self' blob: ${CSP_SOURCES.supabase}`,
   `font-src 'self' data:`,
   `connect-src 'self' ${CSP_SOURCES.supabase} ${CSP_SOURCES.stripe} ${CSP_SOURCES.vercel}`,
-  `frame-src ${CSP_SOURCES.stripeFrames}`,
+  // Les documents privés (PDF) sont affichés dans une modale SETH à partir
+  // d'une URL SIGNÉE du Storage : sans cette origine, la CSP passée en mode
+  // bloquant afficherait un cadre vide, sans autre symptôme.
+  `frame-src ${[CSP_SOURCES.stripeFrames, CSP_SOURCES.youtubeFrames, CSP_SOURCES.supabaseFrames].filter(Boolean).join(" ")}`,
   // Le site n'a aucune raison d'être encadré : protection contre le
   // clickjacking, en complément de X-Frame-Options pour les navigateurs
   // anciens.
