@@ -37,19 +37,24 @@ export interface NutritionPlanBuilderData {
   days: AdminNutritionDay[];
 }
 
+// Ces deux fonctions doublent volontairement celles de
+// lib/nutrition/plan-v2-week-form.ts : ce constructeur-ci parle le séparateur
+// « - » et le type AdminMealFoodItem, l'autre le « — » et le modèle v2. La
+// mutualisation n'appartient pas à ce chantier ; la RÈGLE, elle, doit être la
+// même des deux côtés — une ligne vide est une donnée, pas un déchet.
 function itemsToText(items: AdminMealFoodItem[]): string {
-  return items.map((i) => `${i.name} - ${i.quantity}`).join("\n");
+  return items.map((i) => (i.quantity ? `${i.name} - ${i.quantity}` : i.name)).join("\n");
 }
 
 function textToItems(text: string): AdminMealFoodItem[] {
-  return text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [name, quantity = ""] = line.split(" - ");
-      return { name: name.trim(), quantity: quantity.trim() };
-    });
+  const lines = text.split("\n").map((line) => line.trim());
+  while (lines.length > 0 && lines[0] === "") lines.shift();
+  while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+  return lines.map((line) => {
+    if (line === "") return { name: "", quantity: "" };
+    const [name, quantity = ""] = line.split(" - ");
+    return { name: name.trim(), quantity: quantity.trim() };
+  });
 }
 
 function blankMeal(): AdminMeal {

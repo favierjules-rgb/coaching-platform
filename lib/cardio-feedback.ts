@@ -1,4 +1,5 @@
 import { formatDistanceMeters, formatDurationSeconds } from "@/lib/cardio";
+import { formatRpeFr } from "@/lib/rpe";
 import type { AdminExerciseFeedbackEntry, ExerciseFeedbackPayload } from "@/types";
 import type { StudentSessionBlockView } from "@/lib/student-session-blocks";
 
@@ -497,7 +498,7 @@ export function describeCardioBlockResult(result: CardioBlockResult): { title: s
   if (result.repetitionsDone !== null) {
     parts.push(`${result.repetitionsDone} répétition${result.repetitionsDone > 1 ? "s" : ""}`);
   }
-  if (result.rpe !== null) parts.push(`RPE ${result.rpe}`);
+  if (result.rpe !== null) parts.push(`RPE ${formatRpeFr(result.rpe)}`);
   return {
     title: result.title.trim() || "Bloc cardio",
     details: parts.join(" · "),

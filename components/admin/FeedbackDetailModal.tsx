@@ -12,6 +12,7 @@ import { isCardioResultEntryName, parseCardioResults, type CardioBlockResult } f
 import { formatDistanceMeters, formatDurationSeconds } from "@/lib/cardio";
 import type { ReponseCoach } from "@/lib/coach-reply-video";
 import { exerciseGlobalRpeMentions } from "@/lib/previous-performance";
+import { formatRpeFr } from "@/lib/rpe";
 import { parseAnnotations, type Annotation } from "@/lib/video-annotations";
 import type { AdminStudent, AdminStudentFeedback } from "@/types";
 
@@ -60,7 +61,7 @@ function CardioBlockResultCard({ result }: { result: CardioBlockResult }) {
         {lines.map((line) => (
           <p key={line}>{line}</p>
         ))}
-        {result.rpe !== null && <p>RPE : {result.rpe}/10</p>}
+        {result.rpe !== null && <p>RPE : {formatRpeFr(result.rpe)}/10</p>}
         {result.pain && <p className="text-warning">Douleur / gêne : {result.pain}</p>}
         {result.comment && <p className="text-foreground">{result.comment}</p>}
       </div>
@@ -192,7 +193,7 @@ export function FeedbackDetailModal({
               </>
             )}
             {feedback.rpe !== null && (
-              <p className="text-sm text-foreground">RPE global : {feedback.rpe} / 10</p>
+              <p className="text-sm text-foreground">RPE global : {formatRpeFr(feedback.rpe)} / 10</p>
             )}
             {feedback.pain && (
               <p className="text-sm text-warning">Douleur / gêne : {feedback.pain}</p>
@@ -291,7 +292,7 @@ export function FeedbackDetailModal({
                             <span className="text-primary"> · réalisé : {entry.substituteExerciseName}</span>
                           )}
                         </span>
-                        {entry.rpe !== null && <span className="text-muted-foreground">RPE {entry.rpe}</span>}
+                        {entry.rpe !== null && <span className="text-muted-foreground">RPE {formatRpeFr(entry.rpe)}</span>}
                       </div>
                       <div className="mt-1 text-xs text-muted-foreground">
                         {entry.loadUsed} · {entry.repsDone} reps
@@ -302,7 +303,7 @@ export function FeedbackDetailModal({
                 </div>
                 {exerciseGlobalRpeMentions(feedback.exerciseEntries).map((mention) => (
                   <p key={mention.exerciseName} className="mt-2 text-xs text-muted-foreground">
-                    {mention.exerciseName} — RPE global de l&apos;exercice : {mention.rpe}
+                    {mention.exerciseName} — RPE global de l&apos;exercice : {formatRpeFr(mention.rpe)}
                   </p>
                 ))}
               </div>

@@ -274,13 +274,23 @@ await (async () => {
     assert.deepEqual(parseRpeInput(" 10 "), { ok: true, rpe: 10 });
     assert.deepEqual(parseRpeInput("0"), { ok: false });
     assert.deepEqual(parseRpeInput("11"), { ok: false });
-    assert.deepEqual(parseRpeInput("9,5"), { ok: false });
+    // Depuis feat/nutrition-linebreaks-rpe-halves, le RPE avance par pas de
+    // 0,5 : « 9,5 » est désormais VALIDE, et la virgule française est
+    // acceptée à la saisie. Ce qui reste refusé, c'est le hors-grille.
+    assert.deepEqual(parseRpeInput("9,5"), { ok: true, rpe: 9.5 });
+    assert.deepEqual(parseRpeInput("9.5"), { ok: true, rpe: 9.5 });
+    assert.deepEqual(parseRpeInput("9,2"), { ok: false });
+    assert.equal(workoutFeedbackPayloadSchema.safeParse(avecRpe(7.5)).success, true, "7,5 accepté");
+    assert.equal(workoutFeedbackPayloadSchema.safeParse(avecRpe(7.2)).success, false, "7,2 refusé");
     // Migration : contrainte SQL avec les bornes exactes, colonne nullable.
     // Les commentaires SQL (--) et littéraux ('…') sont retirés AVANT les
     // gardes négatives — mes propres commentaires documentent justement
     // « aucun backfill » (pattern maison anti-faux-positif).
     const migrationSql = sourceMigration.replace(/--[^\n]*/g, "").replace(/'(?:[^']|'')*'/g, "''");
     assert.ok(/rpe is null or \(rpe >= 1 and rpe <= 10\)/.test(migrationSql));
+    // La migration d'ORIGINE créait bien la colonne en `integer` : elle n'est
+    // pas réécrite, c'est 20260830090000 qui la passe en `numeric` par la
+    // suite. Ce test décrit l'histoire, il ne la corrige pas.
     assert.ok(/add column if not exists rpe integer/.test(migrationSql));
     assert.ok(!/default/i.test(migrationSql), "aucun défaut : les lignes existantes restent intactes");
     assert.ok(!/\bupdate\b|backfill/i.test(migrationSql), "aucun backfill");
@@ -343,7 +353,8 @@ await (async () => {
 
   await test("12. affichage coach : RPE de série sur la ligne, mention globale unique (jamais recopiée)", () => {
     const coach = sansCommentaires(sourceModaleCoach);
-    assert.ok(coach.includes("entry.rpe !== null") && coach.includes("RPE {entry.rpe}"), "RPE affiché par série seulement s'il existe");
+    assert.ok(coach.includes("entry.rpe !== null") && coach.includes("RPE {formatRpeFr(entry.rpe)}"),
+      "RPE affiché par série seulement s'il existe, et francisé (7,5 et non 7.5)");
     assert.ok(coach.includes("exerciseGlobalRpeMentions(feedback.exerciseEntries)"), "mention globale calculée une fois par exercice");
     assert.ok(!/entry\.exerciseRpe[^=]*RPE \{/.test(coach), "le global n'est jamais rendu sur une ligne de série");
   });
@@ -373,7 +384,8 @@ await (async () => {
 
   await test("14. historique élève : RPE par série réel + mention globale unique", () => {
     const histo = sansCommentaires(sourceHistorique);
-    assert.ok(histo.includes("entree.rpe != null") && histo.includes("RPE ${entree.rpe}"), "RPE de série seulement s'il existe");
+    assert.ok(histo.includes("entree.rpe != null") && histo.includes("RPE ${formatRpeFr(entree.rpe)}"),
+      "RPE de série seulement s'il existe, et francisé");
     assert.ok(histo.includes("exerciseGlobalRpeMentions(feedback.exerciseEntries)"), "mention globale unique par exercice");
   });
 
@@ -401,7 +413,11 @@ await (async () => {
       exercise: exercice, index: 0, feedback: saisie,
       onSetChange: () => {}, onCommentChange: () => {},
     }));
-    assert.equal(html.split('inputMode="numeric"').length - 1, 3, "clavier numérique mobile sur chaque RPE");
+    // `decimal` et non `numeric` depuis feat/nutrition-linebreaks-rpe-halves :
+    // le clavier `numeric` d'iOS n'expose ni point ni virgule, ce qui rendait
+    // le demi-point insaisissable au doigt.
+    assert.equal(html.split('inputMode="decimal"').length - 1, 3, "clavier décimal mobile sur chaque RPE");
+    assert.equal(html.split('inputMode="numeric"').length - 1, 0, "plus aucun clavier entier sur un RPE");
     assert.equal(html.split("aria-label").length - 1, 3, "chaque RPE de série est étiqueté");
     assert.ok(html.includes('value="5"'), "la saisie RPE est un état contrôlé");
     assert.equal(html.split("grid-cols-2").length - 1, 3, "grille mobile charge+reps côte à côte, par série (refonte apple-ui)");

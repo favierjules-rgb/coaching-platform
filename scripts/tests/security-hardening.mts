@@ -458,12 +458,11 @@ await test("18. le baseline est HORS de supabase/migrations — impossible à po
   for (const fichier of migrations) {
     assert.ok(!/baseline/i.test(fichier), `un fichier de baseline traîne dans migrations/ : ${fichier}`);
   }
-  // 62 depuis le socle Web Push (migration 20260828090000, versionnée et
-  // déjà appliquée sur Supabase distant — déclarée dans le manifeste comme
-  // le veut la procédure). Ce compte ne bouge QUE par ce chemin : une
-  // migration qui apparaît sans passer par le manifeste doit faire échouer
-  // ce test, c'est sa seule raison d'être.
-  assert.equal(migrations.filter((f) => f.endsWith(".sql")).length, 62, "les 62 migrations doivent rester intactes");
+  // 63 depuis le RPE par demi-point (migration 20260830090000, déclarée au
+  // manifeste comme le veut la procédure). Ce compte ne bouge QUE par ce
+  // chemin : une migration qui apparaît sans passer par le manifeste doit
+  // faire échouer ce test, c'est sa seule raison d'être.
+  assert.equal(migrations.filter((f) => f.endsWith(".sql")).length, 63, "les 63 migrations doivent rester intactes");
 });
 
 await test("19. manifeste : empreintes exactes et borne cohérente", () => {
@@ -487,7 +486,7 @@ await test("19. manifeste : empreintes exactes et borne cohérente", () => {
   // qui suivent la borne.
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
   // 35 depuis 20260828090000_web_push_notifications.sql.
-  assert.equal(attendues.length, 35);
+  assert.equal(attendues.length, 36);
   const presentes = readdirSync(new URL("../../supabase/migrations", import.meta.url).pathname)
     .filter((f) => f.endsWith(".sql"))
     .filter((f) => f >= "20260724214500")

@@ -16,6 +16,7 @@ import {
   resolveSetPlaceholders,
   type PreviousExercisePerf,
 } from "@/lib/previous-performance";
+import { formatRpeFr } from "@/lib/rpe";
 import { videoLisible } from "@/lib/video/source";
 import type { Exercise, ExerciseFeedback, ExerciseSubstituteOption } from "@/types";
 
@@ -186,7 +187,7 @@ export function ExerciseFeedbackCard({
           // l'exercice — affiché UNE fois, avec un libellé honnête, jamais
           // recopié dans les lignes ou placeholders de série.
           <p className="mb-3 text-xs leading-tight text-muted-foreground/70">
-            Dernières perfs — RPE global de l&apos;exercice : {previous.exerciseRpe}
+            Dernières perfs — RPE global de l&apos;exercice : {formatRpeFr(previous.exerciseRpe)}
           </p>
         )}
 
@@ -243,8 +244,11 @@ export function ExerciseFeedbackCard({
                     onChange={(event) =>
                       onSetChange(set.setNumber, "rpe", event.target.value)
                     }
-                    inputMode="numeric"
-                    aria-label={`RPE série ${set.setNumber} (1 à 10)`}
+                    // `decimal` et non `numeric` : sur iOS, le clavier
+                    // `numeric` n'expose NI point NI virgule — le demi-point
+                    // aurait été insaisissable au doigt.
+                    inputMode="decimal"
+                    aria-label={`RPE série ${set.setNumber} (1 à 10, par pas de 0,5)`}
                     placeholder={placeholders.rpe}
                     className={`${champ} col-span-2 sm:col-span-1`}
                   />

@@ -130,12 +130,18 @@ await (async () => {
   });
 
   await test("7. texte invalide refusé + message clair côté builder", () => {
-    for (const invalide of ["abc", "8-x", "8/9", "9,5", "8--9", "-8"]) {
+    // « 9,5 » a QUITTÉ cette liste : le demi-point est valide depuis
+    // feat/nutrition-linebreaks-rpe-halves. « 9,2 » et « 9,55 » le
+    // remplacent — ce qui est refusé, c'est le hors-grille, pas la virgule.
+    for (const invalide of ["abc", "8-x", "8/9", "9,2", "9,55", "8--9", "-8"]) {
       assert.deepEqual(parsePrescribedRpe(invalide), { ok: false }, `« ${invalide} » doit être refusé`);
       assert.equal(prescribedRpeForSet(invalide, 1), null);
     }
     const builder = sansCommentaires(sourceBuilder);
-    assert.ok(builder.includes("RPE cible (ex : 8 ou 8-8-9)"), "champ visible avec son format");
+    assert.ok(builder.includes("RPE cible (ex : 8, 8,5 ou 8-8,5-9)"), "champ visible avec son format");
+    // Et le demi-point passe réellement, seul comme en séquence.
+    assert.deepEqual(parsePrescribedRpe("8,5"), { ok: true, values: [8.5] });
+    assert.deepEqual(parsePrescribedRpe("8-8,5-9"), { ok: true, values: [8, 8.5, 9] });
     assert.ok(builder.includes("parsePrescribedRpe(exercise.recommendedRpe"), "validation branchée sur la saisie");
     assert.ok(builder.includes("RPE cible invalide"), "message d'erreur clair");
   });
@@ -266,7 +272,10 @@ await (async () => {
   await test("20. mobile et clavier non régressés (grille, champs, mention RPE cible unique)", () => {
     const html = carteHtml({ recommendedRpe: "8-8-9", previousRpe: 8 });
     assert.equal(html.split("sm:grid-cols-[72px_1fr_1fr_84px]").length - 1, 3, "une grille responsive par série");
-    assert.equal(html.split('inputMode="numeric"').length - 1, 3, "clavier numérique sur chaque RPE de série");
+    // `decimal` et non `numeric` depuis feat/nutrition-linebreaks-rpe-halves :
+    // le clavier `numeric` d'iOS n'expose ni point ni virgule, ce qui rendait
+    // le demi-point insaisissable au doigt.
+    assert.equal(html.split('inputMode="decimal"').length - 1, 3, "clavier décimal sur chaque RPE de série");
     assert.equal(html.split("RPE cible").length - 1, 1, "mention « RPE cible : 8-8-9 » affichée une fois dans l'en-tête");
     // Séquence appliquée par index dans les placeholders.
     assert.ok(html.includes('placeholder="RPE 8"') && html.includes('placeholder="RPE 9"'));

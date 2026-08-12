@@ -32,8 +32,19 @@
  * et la ligne d'affichage.
  */
 import { isCardioResultEntryName } from "@/lib/cardio-feedback";
+import { formatRpeFr, lireRpe } from "@/lib/rpe";
 import { isPrescribedSnapshot } from "@/lib/workout-history";
 import type { AdminStudentFeedback } from "@/types";
+
+/**
+ * Bornes du RPE RESSENTI (élève et prescription d'exercice) : 1 à 10.
+ * Ce sont celles des CHECK `exercise_feedback_rpe_check`,
+ * `exercise_set_feedback_rpe_check` et `workout_feedback_global_rpe_check` —
+ * la migration 20260830090000 n'a ajouté que le pas de 0,5, jamais élargi.
+ * La cible d'un segment cardio a les SIENNES (0-10) et ne passe pas par ici.
+ */
+const RPE_ELEVE_MIN = 1;
+const RPE_ELEVE_MAX = 10;
 
 /* ─── Normalisation du nom (fallback de correspondance) ─── */
 
@@ -94,15 +105,16 @@ export function hasRealizedSetInput(set: { loadUsed: string; repsDone: string; r
 
 /**
  * Saisie RPE d'un champ de série → valeur payload. "" = null (non saisi) ;
- * entier 1-10 accepté ; tout le reste = invalide (erreur VISIBLE côté
- * formulaire, jamais de valeur inventée/écrêtée — mêmes bornes que le CHECK
- * SQL et le schéma zod).
+ * 1 à 10 par pas de 0,5 accepté, virgule ou point ; tout le reste = invalide
+ * (erreur VISIBLE côté formulaire, jamais de valeur inventée/écrêtée — mêmes
+ * bornes que le CHECK SQL et le schéma zod).
  */
 export function parseRpeInput(value: string): { ok: true; rpe: number | null } | { ok: false } {
   const brut = value.trim();
   if (brut === "") return { ok: true, rpe: null };
-  if (!/^(10|[1-9])$/.test(brut)) return { ok: false };
-  return { ok: true, rpe: Number(brut) };
+  const valeur = lireRpe(brut);
+  if (valeur === null || valeur < RPE_ELEVE_MIN || valeur > RPE_ELEVE_MAX) return { ok: false };
+  return { ok: true, rpe: valeur };
 }
 
 function feedbackSortKey(feedback: AdminStudentFeedback): string {
@@ -225,7 +237,7 @@ export function formatPreviousSetLabel(set: PreviousSetPerf | null | undefined):
   const charge = set.loadUsed.trim();
   const reps = set.repsDone.trim();
   const principal = charge && reps ? `${charge} × ${reps}` : charge || reps;
-  const morceaux = [principal, set.rpe !== null ? `RPE ${set.rpe}` : ""].filter(Boolean);
+  const morceaux = [principal, set.rpe !== null ? `RPE ${formatRpeFr(set.rpe)}` : ""].filter(Boolean);
   return morceaux.length > 0 ? morceaux.join(" · ") : null;
 }
 
@@ -236,8 +248,12 @@ export function formatPreviousSetLabel(set: PreviousSetPerf | null | undefined):
  * values null) ; "8" = valeur unique ; "8-8-9" = séquence par série
  * (séparateur tiret, espaces tolérés — même esprit que les répétitions
  * "8-10", mais ici une SÉQUENCE par index de série). Chaque valeur doit
- * être un entier de 1 à 10, sinon la prescription est invalide (ok: false)
- * — jamais écrêtée, jamais devinée.
+ * être de 1 à 10 par pas de 0,5, sinon la prescription est invalide
+ * (ok: false) — jamais écrêtée, jamais devinée.
+ *
+ * Le séparateur reste le TIRET, et il ne devient pas ambigu avec le
+ * demi-point : la partie décimale s'écrit avec une virgule ou un point,
+ * jamais avec un tiret. « 8,5-9 » se découpe donc proprement en 8,5 et 9.
  */
 export function parsePrescribedRpe(
   value: string | null | undefined,
@@ -247,8 +263,9 @@ export function parsePrescribedRpe(
   const morceaux = brut.split("-").map((part) => part.trim());
   const values: number[] = [];
   for (const part of morceaux) {
-    if (!/^(10|[1-9])$/.test(part)) return { ok: false };
-    values.push(Number(part));
+    const valeur = lireRpe(part);
+    if (valeur === null || valeur < RPE_ELEVE_MIN || valeur > RPE_ELEVE_MAX) return { ok: false };
+    values.push(valeur);
   }
   return { ok: true, values };
 }
@@ -290,7 +307,7 @@ export function resolveSetPlaceholders(
   return {
     load: prescriptionCharge ? `Charge (${prescriptionCharge})` : histoCharge || "Charge",
     reps: prescriptionReps ? `Reps (${prescriptionReps})` : histoReps || "Reps",
-    rpe: prescriptionRpe !== null ? `RPE ${prescriptionRpe}` : "RPE",
+    rpe: prescriptionRpe !== null ? `RPE ${formatRpeFr(prescriptionRpe)}` : "RPE",
   };
 }
 

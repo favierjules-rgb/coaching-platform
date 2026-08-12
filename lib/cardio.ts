@@ -1,4 +1,5 @@
 import { generateId } from "@/lib/admin";
+import { formatRpeFr } from "@/lib/rpe";
 import type {
   AdminCardioBlock,
   AdminCardioSegment,
@@ -192,7 +193,9 @@ export function formatIntensityTargetRaw(
     case "power":
       return segment.targetPowerWatts ? `${segment.targetPowerWatts} W` : "—";
     case "rpe":
-      return segment.intensityMin !== undefined ? `RPE ${segment.intensityMin}/10` : "—";
+      return segment.intensityMin !== undefined
+        ? `RPE ${formatRpeFr(segment.intensityMin)}/10`
+        : "—";
     case "race_pace":
       return "Allure course";
     case "free":
