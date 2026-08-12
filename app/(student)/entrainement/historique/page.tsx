@@ -10,6 +10,7 @@ import { mentionDelaiCoachReplyVideo } from "@/lib/coach-reply-video";
 import { parseAnnotations } from "@/lib/video-annotations";
 import type { CoachReplyVideoEntry } from "@/types";
 import { exerciseGlobalRpeMentions } from "@/lib/previous-performance";
+import { formatRpeFr } from "@/lib/rpe";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { getCurrentStudentId } from "@/lib/supabase/current-student";
 import { getWorkoutFeedbackForStudent } from "@/lib/supabase/workout-feedback";
@@ -153,7 +154,7 @@ export default function HistoriqueRetoursPage() {
                   </span>
                   <span className="flex items-center gap-3 text-xs text-muted-foreground">
                     {feedback.coachReply && <MessageSquare size={14} className="text-primary" />}
-                    {feedback.rpe != null && <span>RPE {feedback.rpe}</span>}
+                    {feedback.rpe != null && <span>RPE {formatRpeFr(feedback.rpe)}</span>}
                     <span>{date}</span>
                   </span>
                 </button>
@@ -199,14 +200,14 @@ export default function HistoriqueRetoursPage() {
                               <span className="text-foreground">{entree.exerciseName}</span>
                               {" · série "}
                               {entree.setNumber} : {entree.loadUsed || "—"} × {entree.repsDone || "—"}
-                              {entree.rpe != null && ` · RPE ${entree.rpe}`}
+                              {entree.rpe != null && ` · RPE ${formatRpeFr(entree.rpe)}`}
                               {entree.comment && ` — ${entree.comment}`}
                             </li>
                           ))}
                         </ul>
                         {exerciseGlobalRpeMentions(feedback.exerciseEntries).map((mention) => (
                           <p key={`${feedback.id}-${mention.exerciseName}`} className="mt-2 text-xs text-muted-foreground">
-                            {mention.exerciseName} — RPE global de l&apos;exercice : {mention.rpe}
+                            {mention.exerciseName} — RPE global de l&apos;exercice : {formatRpeFr(mention.rpe)}
                           </p>
                         ))}
                       </div>

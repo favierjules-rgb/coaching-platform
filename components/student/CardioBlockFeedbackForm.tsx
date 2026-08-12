@@ -2,11 +2,14 @@
 
 import { PAIN_LEVELS, type CardioBlockDraft, type CardioBlockPrescribedSnapshot, type PainLevel } from "@/lib/cardio-feedback";
 import { formatDistanceMeters, formatDurationSeconds } from "@/lib/cardio";
+import { formatRpeFr, grilleRpe } from "@/lib/rpe";
 
 const inputClass =
   "min-h-[44px] w-full rounded-control border border-border bg-background px-4 py-2 text-sm text-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40";
 
-const rpeOptions = Array.from({ length: 10 }, (_, index) => index + 1);
+// 1 → 10 PAR PAS DE 0,5. Même borne qu'avant (CHECK exercise_feedback_rpe_check),
+// même valeur numérique en sortie ; seul le libellé porte la virgule française.
+const rpeOptions = grilleRpe(1, 10);
 
 /**
  * « Réalisation du bloc » — formulaire de retour d'UN bloc cardio, rendu
@@ -143,7 +146,7 @@ export function CardioBlockFeedbackForm({
               <option value="">Non renseigné</option>
               {rpeOptions.map((value) => (
                 <option key={value} value={value}>
-                  {value} / 10
+                  {formatRpeFr(value)} / 10
                 </option>
               ))}
             </select>

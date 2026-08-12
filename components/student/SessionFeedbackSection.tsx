@@ -20,6 +20,7 @@ import {
   normalizeExerciseName,
   parseRpeInput,
 } from "@/lib/previous-performance";
+import { formatRpeFr, grilleRpe } from "@/lib/rpe";
 
 import { ExerciseFeedbackCard } from "@/components/student/ExerciseFeedbackCard";
 import { SessionCompletionCard } from "@/components/student/SessionCompletionCard";
@@ -59,7 +60,10 @@ import type {
   TrainingBlock,
 } from "@/types";
 
-const rpeOptions = Array.from({ length: 10 }, (_, index) => index + 1);
+// 1 → 10 PAR PAS DE 0,5 : 19 valeurs. La borne 1-10 est celle du CHECK
+// workout_feedback_global_rpe_check, inchangée — seul le pas a bougé.
+// La valeur reste numérique (`7.5`) ; seul le libellé est francisé.
+const rpeOptions = grilleRpe(1, 10);
 
 function buildInitialFeedback(
   exercises: Exercise[],
@@ -1185,7 +1189,7 @@ export function SessionFeedbackSection({
                 </dl>
                 <div className="mt-3 flex flex-col gap-1 text-sm text-muted-foreground">
                   <p>{result.completed ? "Bloc terminé" : "Bloc non terminé"}</p>
-                  {result.rpe !== null && <p>RPE du bloc : {result.rpe} / 10</p>}
+                  {result.rpe !== null && <p>RPE du bloc : {formatRpeFr(result.rpe)} / 10</p>}
                   {result.pain && <p>Douleur / gêne : {result.pain}</p>}
                   {result.comment && <p className="text-foreground">{result.comment}</p>}
                 </div>
@@ -1224,7 +1228,7 @@ export function SessionFeedbackSection({
           <div className="rounded-card border border-border bg-card p-6 shadow-soft">
             <h3 className="mb-3 font-heading text-sm font-bold uppercase text-foreground">Résumé global de la séance</h3>
             <div className="flex flex-col gap-1 text-sm text-muted-foreground">
-              {existingFeedback.rpe !== null && <p>RPE global : {existingFeedback.rpe} / 10</p>}
+              {existingFeedback.rpe !== null && <p>RPE global : {formatRpeFr(existingFeedback.rpe)} / 10</p>}
               {existingFeedback.pain && <p>Douleur / gêne : {existingFeedback.pain}</p>}
               {existingFeedback.comment && <p className="text-foreground">{existingFeedback.comment}</p>}
             </div>
@@ -1363,7 +1367,7 @@ export function SessionFeedbackSection({
               </option>
               {rpeOptions.map((value) => (
                 <option key={value} value={value}>
-                  {value} / 10
+                  {formatRpeFr(value)} / 10
                 </option>
               ))}
             </select>

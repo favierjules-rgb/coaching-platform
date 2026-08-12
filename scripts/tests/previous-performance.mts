@@ -391,7 +391,10 @@ await (async () => {
     // <input>.
     assert.equal(html.split("sm:grid-cols-[72px_1fr_1fr_84px]").length - 1, 2, "une grille par série");
     assert.equal(html.split("<input").length - 1, 7, "2 séries × 3 champs + commentaire");
-    assert.equal(html.split('inputMode="numeric"').length - 1, 2, "clavier numérique mobile sur chaque RPE de série");
+    // `decimal` et non `numeric` depuis feat/nutrition-linebreaks-rpe-halves :
+    // le clavier `numeric` d'iOS n'expose ni point ni virgule, ce qui rendait
+    // le demi-point insaisissable au doigt.
+    assert.equal(html.split('inputMode="decimal"').length - 1, 2, "clavier décimal mobile sur chaque RPE de série");
     // 3 aria-label : la ligne repère de la série 1 + les 2 champs RPE.
     assert.equal(html.split("aria-label").length - 1, 3, "repère et RPE de série étiquetés pour le lecteur d'écran");
     // Repère UNIQUEMENT sur la série 1 (série 2 sans historique), discret

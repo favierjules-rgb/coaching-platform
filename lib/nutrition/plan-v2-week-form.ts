@@ -507,20 +507,52 @@ export function initializeAllDays(
 
 /* ═════════════════════ Aliments ═════════════════════ */
 
-/** Texte multi-lignes → aliments. « Nom — quantité » ou « Nom - quantité ». */
+/**
+ * Texte multi-lignes → aliments. « Nom — quantité » ou « Nom - quantité ».
+ *
+ * ────────────────────────────────────────────────────────────────────────
+ * LES LIGNES VIDES SONT DES DONNÉES
+ * ────────────────────────────────────────────────────────────────────────
+ * Cette fonction faisait `.filter(Boolean)` : toute ligne vide disparaissait
+ * AVANT d'atteindre la base. Un coach qui écrivait
+ *
+ *     PROTÉINES
+ *     150 g fromage blanc 0 %
+ *                                ← ligne vide, volontaire
+ *     GLUCIDES
+ *     100 g riz
+ *
+ * enregistrait quatre aliments collés, et aucune règle CSS ne pouvait le
+ * rattraper : la séparation n'existait plus nulle part. La perte était donc
+ * à la PERSISTANCE, pas au rendu.
+ *
+ * Une ligne vide devient maintenant `{ name: "", quantity: "" }` — une
+ * valeur que le modèle actuel accepte déjà (la RPC `save_nutrition_plan_v2`
+ * fait `coalesce(…, '')` sur les deux champs) et que l'affichage rend comme
+ * une respiration. Aucune migration, aucun changement de forme.
+ *
+ * Les lignes vides de BORD sont retirées : elles viennent d'un retour à la
+ * ligne de frappe, jamais d'une intention de mise en page, et les conserver
+ * ferait grandir le bloc à chaque aller-retour saisie ↔ relecture.
+ */
 export function textToItems(texte: string): readonly { name: string; quantity: string }[] {
-  return texte
-    .split("\n")
-    .map((ligne) => ligne.trim())
-    .filter(Boolean)
-    .map((ligne) => {
-      const séparateur = ligne.includes(" — ") ? " — " : " - ";
-      const [nom, quantité = ""] = ligne.split(séparateur);
-      return { name: nom.trim(), quantity: quantité.trim() };
-    });
+  const lignes = texte.split("\n").map((ligne) => ligne.trim());
+  while (lignes.length > 0 && lignes[0] === "") lignes.shift();
+  while (lignes.length > 0 && lignes[lignes.length - 1] === "") lignes.pop();
+  return lignes.map((ligne) => {
+    if (ligne === "") return { name: "", quantity: "" };
+    const séparateur = ligne.includes(" — ") ? " — " : " - ";
+    const [nom, quantité = ""] = ligne.split(séparateur);
+    return { name: nom.trim(), quantity: quantité.trim() };
+  });
 }
 
-/** Aliments → texte multi-lignes, pour le champ de saisie. */
+/**
+ * Aliments → texte multi-lignes, pour le champ de saisie.
+ * Un aliment vide rend une ligne vide : l'aller-retour
+ * `textToItems(itemsToText(x))` est donc stable, y compris sur les
+ * respirations voulues par le coach.
+ */
 export function itemsToText(items: readonly { name: string; quantity: string }[]): string {
   return items.map((i) => (i.quantity ? `${i.name} — ${i.quantity}` : i.name)).join("\n");
 }

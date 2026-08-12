@@ -217,7 +217,7 @@ export function ExerciseRow({
         <Field label="Tempo" value={exercise.tempo} onChange={(v) => onChange({ tempo: v })} />
         <div>
           <Field
-            label="RPE cible (ex : 8 ou 8-8-9)"
+            label="RPE cible (ex : 8, 8,5 ou 8-8,5-9)"
             value={exercise.recommendedRpe ?? ""}
             onChange={(v) => onChange({ recommendedRpe: v })}
           />
@@ -226,7 +226,7 @@ export function ExerciseRow({
               invalide n'est JAMAIS appliquée côté élève (parse défensif). */}
           {!parsePrescribedRpe(exercise.recommendedRpe ?? "").ok && (
             <p role="alert" className="mt-1 text-xs text-destructive">
-              RPE cible invalide : une valeur (« 8 ») ou une séquence par série (« 8-8-9 »), entiers de 1 à 10.
+              RPE cible invalide : une valeur (« 8 » ou « 8,5 ») ou une séquence par série (« 8-8,5-9 »), de 1 à 10 par pas de 0,5.
             </p>
           )}
         </div>
@@ -439,8 +439,12 @@ export function CardioSegmentRow({
           )}
           {segment.intensityTargetType === "rpe" && (
             <Field
-              label="RPE (0-10)"
+              // Borne 0-10 CONSERVÉE : celle de
+              // training_prescriptions_target_rpe_check, où 0 veut dire « au
+              // repos » pour un segment cardio. Seul le pas change.
+              label="RPE (0-10, pas de 0,5)"
               type="number"
+              step="0.5"
               value={segment.intensityMin !== undefined ? String(segment.intensityMin) : ""}
               onChange={(v) => onChange({ intensityMin: v ? Number(v) : undefined })}
             />

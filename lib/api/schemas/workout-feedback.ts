@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { estRpeSurLaGrille } from "@/lib/rpe";
+
 import { FEEDBACK_VIDEO_PATH_SHAPE } from "@/lib/feedback-video";
 
 /**
@@ -20,6 +22,30 @@ import { FEEDBACK_VIDEO_PATH_SHAPE } from "@/lib/feedback-video";
  * `sessionStatus` — toute clé inconnue est toujours rejetée.
  */
 
+/**
+ * Un RPE valide : de `min` à `max`, PAR PAS DE 0,5.
+ *
+ * `Number.isInteger(v * 2)` est le contrôle exact ici, et pas une
+ * approximation : seuls les multiples de 0,5 sont représentés SANS PERTE en
+ * binaire, donc 7,5 × 2 vaut exactement 15 tandis que 7,2 × 2 vaut
+ * 14,4 — non entier. Aucune tolérance à régler, aucun epsilon.
+ *
+ * Les bornes restent PARAMÉTRÉES parce que le schéma n'en a pas qu'une :
+ * les retours d'élève vont de 1 à 10 (CHECK exercise_set_feedback_rpe_check,
+ * workout_feedback_global_rpe_check), une cible de segment cardio part de 0
+ * (training_prescriptions_target_rpe_check). On ajoute le demi-point, on
+ * n'aligne pas les bornes entre elles.
+ */
+function rpeDemiPoint(min: number, max: number) {
+  return z
+    .number()
+    .min(min)
+    .max(max)
+    .refine(estRpeSurLaGrille, {
+      message: "Le RPE avance par pas de 0,5 (par exemple 7 ou 7,5).",
+    });
+}
+
 const setSchema = z.object({
   setNumber: z.number().int().min(1).max(50),
   loadUsed: z.string().max(200),
@@ -27,8 +53,9 @@ const setSchema = z.object({
   // RPE PAR SÉRIE (option B, feat/student-previous-set-performance) —
   // optionnel/null : une série sans RPE est acceptée, et le contrat cardio
   // existant (serializeCardioBlockResult) n'émet pas cette clé. Mêmes
-  // bornes que le CHECK exercise_set_feedback_rpe_check (1-10).
-  rpe: z.number().int().min(1).max(10).nullable().optional(),
+  // bornes que le CHECK exercise_set_feedback_rpe_check (1-10), et même pas
+  // de 0,5 depuis la migration 20260830090000.
+  rpe: rpeDemiPoint(1, 10).nullable().optional(),
   })
   // STRICT ici AUSSI (durcissement F3). La strictesse ne portait que sur
   // l'enveloppe : une clé inconnue GLISSÉE DANS UN EXERCICE ou dans une
@@ -43,7 +70,7 @@ const exerciseSchema = z.object({
   exerciseName: z.string().min(1).max(200),
   // Musculation : index 0..n. Cardio : 900 + position (contrat historique).
   exerciseOrder: z.number().int().min(0).max(2000),
-  rpe: z.number().int().min(1).max(10).nullable(),
+  rpe: rpeDemiPoint(1, 10).nullable(),
   // Enveloppe JSON cardio incluse (commentaire libre de l'élève à l'intérieur).
   comment: z.string().max(10000),
   sets: z.array(setSchema).max(50),
@@ -75,7 +102,7 @@ export const workoutFeedbackPayloadSchema = z
     sessionKey: z.string().min(1).max(120),
     sessionRefLabel: z.string().max(300),
     completed: z.boolean(),
-    globalRpe: z.number().int().min(1).max(10).nullable(),
+    globalRpe: rpeDemiPoint(1, 10).nullable(),
     globalComment: z.string().max(10000),
     pain: z.string().max(10000),
     exercises: z.array(exerciseSchema).max(60),

@@ -133,16 +133,25 @@ export function StudentPrescribedWeek({ week }: { week: PlanV2Week }) {
                       </p>
                     )}
 
+                    {/* Une ligne sans nom NI quantité est la respiration
+                        voulue par le coach entre deux groupes d'aliments :
+                        on rend l'espace, pas une puce vide. */}
                     {repas.items.length > 0 && (
                       <ul className="mt-2 flex flex-col gap-1 text-sm text-foreground">
-                        {repas.items.map((aliment, index) => (
-                          <li key={`${repas.id}-${index}`} className="flex flex-wrap gap-x-2">
-                            <span>{aliment.name}</span>
-                            {aliment.quantity && (
-                              <span className="text-muted-foreground">{aliment.quantity}</span>
-                            )}
-                          </li>
-                        ))}
+                        {repas.items.map((aliment, index) =>
+                          !aliment.name && !aliment.quantity ? (
+                            <li key={`${repas.id}-${index}`} aria-hidden="true" className="h-3" />
+                          ) : (
+                            <li key={`${repas.id}-${index}`} className="flex flex-wrap gap-x-2">
+                              <span className="whitespace-pre-wrap">{aliment.name}</span>
+                              {aliment.quantity && (
+                                <span className="whitespace-pre-wrap text-muted-foreground">
+                                  {aliment.quantity}
+                                </span>
+                              )}
+                            </li>
+                          ),
+                        )}
                       </ul>
                     )}
 

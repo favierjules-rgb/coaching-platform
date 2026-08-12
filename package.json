@@ -88,7 +88,8 @@
     "test:dashboard-notifications": "npx tsx scripts/tests/dashboard-notifications.mts",
     "test:video-source": "npx tsx scripts/tests/video-source.mts",
     "test:video-garde-fous": "npx tsx scripts/tests/video-garde-fous.mts",
-    "test:video-player": "npx tsx scripts/tests/video-player-render.mts"
+    "test:video-player": "npx tsx scripts/tests/video-player-render.mts",
+    "test:nutrition-linebreaks-rpe-halves": "npx tsx scripts/tests/nutrition-linebreaks-rpe-halves.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

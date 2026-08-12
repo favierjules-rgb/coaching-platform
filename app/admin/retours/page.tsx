@@ -10,6 +10,7 @@ import { useAdminData } from "@/hooks/useAdminData";
 import { useSupabaseAdminFeedback } from "@/hooks/useSupabaseAdminFeedback";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { feedbackStatusLabels, formatDate, fullName, matchesTextSearch } from "@/lib/admin";
+import { formatRpeFr } from "@/lib/rpe";
 import type { FeedbackStatus, FeedbackType } from "@/types";
 
 type StatusFilter = "tous" | FeedbackStatus;
@@ -122,7 +123,7 @@ export default function AdminFeedbackPage() {
                   <div className="min-w-0">
                     <span className="block text-xs uppercase tracking-wide text-muted-foreground">Date</span>
                     <span className="text-sm text-foreground">{formatDate(f.date)}</span>
-                    {f.rpe !== null && <span className="block text-xs text-muted-foreground">RPE {f.rpe}/10</span>}
+                    {f.rpe !== null && <span className="block text-xs text-muted-foreground">RPE {formatRpeFr(f.rpe)}/10</span>}
                   </div>
                   <div className="min-w-0">
                     <span className="block text-xs uppercase tracking-wide text-muted-foreground">Statut</span>
