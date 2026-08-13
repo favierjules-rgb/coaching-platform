@@ -90,7 +90,8 @@
     "test:video-garde-fous": "npx tsx scripts/tests/video-garde-fous.mts",
     "test:video-player": "npx tsx scripts/tests/video-player-render.mts",
     "test:nutrition-linebreaks-rpe-halves": "npx tsx scripts/tests/nutrition-linebreaks-rpe-halves.mts",
-    "test:aliments-a1": "npx tsx scripts/tests/aliments-a1.mts"
+    "test:aliments-a1": "npx tsx scripts/tests/aliments-a1.mts",
+    "test:aliments-a2": "npx tsx scripts/tests/aliments-a2.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

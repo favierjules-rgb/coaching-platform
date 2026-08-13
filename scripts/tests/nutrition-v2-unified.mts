@@ -985,12 +985,43 @@ await test("45 bis. l'entrée « Recettes » est mise en avant, en haut, une seu
   assert.ok(halo.includes("var(--success)"), "la couleur vient du thème");
 });
 
-await test("46. la semaine prescrite est en LECTURE SEULE côté élève", () => {
+await test("46. la PRESCRIPTION reste en lecture seule côté élève", () => {
+  // MIS À JOUR PAR ALIMENTS A2 — l'intention est la même, elle est même
+  // resserrée. Avant A2, « aucun <input> dans ce fichier » suffisait à dire
+  // « l'élève ne modifie pas le plan de son coach ». A2 ajoute au même écran
+  // le suivi de ce que l'élève a réellement mangé, et donc un champ : celui
+  // où il NOMME SON PROPRE REPAS (Collation, Restaurant…).
+  //
+  // Interdire tout champ ferait échouer ce test pour une raison qui n'a rien
+  // à voir avec la règle qu'il défend. On vérifie donc la règle elle-même,
+  // et plus précisément qu'avant :
+  //   1. le composant n'a AUCUN chemin d'écriture propre ;
+  //   2. aucun champ n'est lié à une donnée du COACH ;
+  //   3. le seul champ présent nomme un repas de l'élève.
   const code = sansCommentairesTs(SEMAINE_ELEVE);
-  assert.ok(!/<input|<textarea|<select/.test(code), "aucun champ de saisie");
-  assert.ok(!/onChange|onSubmit/.test(code), "aucun callback de modification");
-  assert.ok(!code.includes("@/lib/supabase"), "aucune écriture possible");
+
+  assert.ok(!code.includes("@/lib/supabase"), "aucune écriture possible depuis ce composant");
+  assert.ok(!/\.rpc\(|\.insert\(|\.update\(|\.delete\(/.test(code), "aucun appel d'écriture");
   assert.ok(!code.includes("solveRecipe"), "l'outil 3 n'utilise jamais le solveur");
+
+  // Rien de ce que le coach a écrit n'est éditable : ni le nom du repas, ni
+  // ses aliments, ni ses notes, ni ses macros.
+  for (const champCoach of ["repas.name", "repas.items", "repas.coachNotes", "cible."]) {
+    const lié = new RegExp(`value=\\{[^}]*${champCoach.replace(".", "\\.")}`);
+    assert.ok(!lié.test(code), `« ${champCoach} » ne doit être lié à aucun champ de saisie`);
+  }
+
+  // Le seul champ du fichier nomme un repas de l'ÉLÈVE, et il est câblé à son
+  // propre état local — jamais à une donnée du plan.
+  const champs = code.match(/<input/g) ?? [];
+  assert.equal(champs.length, 1, "un seul champ de saisie, celui du nom d'un repas de l'élève");
+  assert.ok(code.includes("aria-label=\"Nom du repas\"") || code.includes("Nom du repas"), "et il est bien celui-là");
+  assert.ok(code.includes("onChange={(e) => setNom(e.target.value)}"), "câblé à un état local, pas au plan");
+
+  // Et l'écriture réelle passe par des rappels fournis par l'appelant, jamais
+  // par le composant : c'est le hook qui parle aux RPC `security definer`.
+  assert.ok(code.includes("suivi.onCreerRepas"), "la création passe par un rappel");
+  assert.ok(!/textarea|<select/.test(code), "ni zone de texte, ni liste déroulante");
 });
 
 await test("47. une erreur réseau n'est plus présentée comme « aucun plan »", () => {
@@ -1087,7 +1118,7 @@ await test("51. les quatre migrations sont déclarées au manifeste et comptées
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
   // 35 depuis 20260828090000_web_push_notifications.sql (socle Web Push).
-  assert.equal(attendues.length, 37);
+  assert.equal(attendues.length, 38);
   for (const nom of [
     "20260810090000_harden_nutrition_privileges.sql",
     "20260811090000_nutrition_v2_unification.sql",
@@ -1097,8 +1128,8 @@ await test("51. les quatre migrations sont déclarées au manifeste et comptées
     assert.ok(attendues.includes(nom), nom);
   }
   const secu = lire("../../scripts/tests/security-hardening.mts");
-  assert.ok(secu.includes(".length, 64,"), "le compteur de migrations suit les migrations réelles");
-  assert.ok(secu.includes("assert.equal(attendues.length, 37);"));
+  assert.ok(secu.includes(".length, 65,"), "le compteur de migrations suit les migrations réelles");
+  assert.ok(secu.includes("assert.equal(attendues.length, 38);"));
 });
 
 /* ─── 52-53. Outils 1 et 3 après la PR C.1 ─────────────────────────────── */
@@ -1451,7 +1482,7 @@ await test("61. aucun nouveau chemin d'écriture, aucune migration ajoutée", ()
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
   // 35 depuis 20260828090000_web_push_notifications.sql (socle Web Push).
-  assert.equal(attendues.length, 37);
+  assert.equal(attendues.length, 38);
   assert.ok(attendues.includes("20260814090000_nutrition_plan_v2_blocking_issue_week.sql"));
 });
 
