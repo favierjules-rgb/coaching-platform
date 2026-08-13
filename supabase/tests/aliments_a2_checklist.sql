@@ -231,10 +231,20 @@ create temporary table _profils_avant on commit drop as
 
 do $$
 begin
-  perform pg_temp.noter('0', 'les six comptes, les deux plans et le catalogue existent',
+  -- MIS À JOUR PAR A3 PHASE 2. Cette checklist comptait TOUT le catalogue,
+  -- ce qui supposait qu'il soit vide en dehors de ses propres décors — vrai
+  -- jusqu'à l'import Ciqual, qui y ajoute 3 330 aliments. On compte donc les
+  -- QUATRE ALIMENTS DE TEST, identifiés par leur clé, plutôt que la table
+  -- entière : l'intention est la même, et elle ne dépend plus de ce que
+  -- d'autres lots mettent dans le catalogue.
+  perform pg_temp.noter('0', 'les six comptes, les deux plans et les quatre aliments de test existent',
     (select count(*) from public.students) = 3
     and (select count(*) from public.meals) = 4
-    and (select count(*) from public.food_catalog) = 4);
+    and (select count(*) from public.food_catalog
+          where id in ('f0000000-0000-4000-8000-00000000000a',
+                       'f0000000-0000-4000-8000-00000000000b',
+                       'f0000000-0000-4000-8000-00000000000c',
+                       'f0000000-0000-4000-8000-00000000000d')) = 4);
 end $$;
 
 -- ---------------------------------------------------------------------
