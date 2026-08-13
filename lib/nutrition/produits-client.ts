@@ -112,15 +112,72 @@ export async function rechercherProduitsExternes(
  * main » que d'enregistrer une quantité dans une unité qu'on n'a pas vérifiée.
  */
 export async function hydraterProduit(gtin: string, fetcher: Fetch): Promise<ProduitLocal | null> {
+  const issue = await lireProduitParGtin(gtin, fetcher);
+  return issue.type === "produit" ? issue.produit : null;
+}
+
+/**
+ * LE MÊME APPEL, MAIS AVEC LE MOTIF (ALIMENTS A4, PHASE 3).
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * POURQUOI LE SCANNER A BESOIN DE PLUS QUE `null`
+ * ────────────────────────────────────────────────────────────────────────────
+ * `hydraterProduit` rend `null` pour tout ce qui n'est pas un succès, et c'était
+ * suffisant tant que l'appelant venait de TAPER sur un produit déjà affiché :
+ * le produit existait, il ne manquait que sa fiche complète, et le seul message
+ * utile était « pas maintenant ».
+ *
+ * Après un SCAN, la situation est différente : l'élève est debout devant un
+ * rayon, il vient de viser un code, et trois issues appellent trois gestes
+ * différents —
+ *
+ *   • le produit n'est pas dans la base    → en scanner un autre, ou le saisir ;
+ *   • ses valeurs ne sont pas renseignées  → le saisir depuis l'emballage ;
+ *   • le réseau a échoué                   → réessayer.
+ *
+ * Les confondre en un seul « impossible » enverrait quelqu'un réessayer
+ * indéfiniment un produit qui n'existe pas. Le motif est donc REMONTÉ.
+ *
+ * ⚠️ Ce module reste la seule porte vers le réseau, et il ne connaît toujours
+ * pas Open Food Facts : il lit le champ `code` de NOTRE route, dont le
+ * vocabulaire est fermé depuis la phase 3 d'A3. Aucun code HTTP de tiers, aucune
+ * URL externe, aucun nom de fournisseur.
+ */
+export type IssueLookup =
+  | { readonly type: "produit"; readonly produit: ProduitLocal }
+  | { readonly type: "introuvable" }
+  | { readonly type: "incomplet" }
+  | { readonly type: "indisponible" };
+
+export async function lireProduitParGtin(gtin: string, fetcher: Fetch): Promise<IssueLookup> {
   try {
     const réponse = await fetcher(`/api/food-products/${encodeURIComponent(gtin)}`, {
       headers: { Accept: "application/json" },
     });
-    if (!réponse.ok) return null;
+    if (!réponse.ok) {
+      // Le CODE MÉTIER, jamais le statut HTTP : c'est lui qui est stable, et
+      // c'est lui que la route s'est engagée à rendre. Un 404 pourrait un jour
+      // venir d'un routage cassé plutôt que d'un produit absent.
+      let code: string | null = null;
+      try {
+        const corps = (await réponse.json()) as { code?: unknown };
+        if (typeof corps.code === "string") code = corps.code;
+      } catch {
+        // Corps illisible : c'est une indisponibilité, traitée comme telle
+        // ci-dessous. Rien à réparer.
+      }
+      if (code === "PRODUCT_NOT_FOUND") return { type: "introuvable" };
+      if (code === "PRODUCT_NUTRITION_INCOMPLETE") return { type: "incomplet" };
+      // Tout le reste — quota, panne du fournisseur, réponse illisible, session
+      // expirée, et même un GTIN refusé — est une INDISPONIBILITÉ pour l'élève.
+      // Inventer un quatrième message par code technique ne lui apprendrait rien
+      // qu'il puisse utiliser debout dans un rayon.
+      return { type: "indisponible" };
+    }
     const corps = (await réponse.json()) as { produit?: ProduitDTO };
-    if (!corps.produit || typeof corps.produit.id !== "string") return null;
-    return versProduitLocal(corps.produit, true);
+    if (!corps.produit || typeof corps.produit.id !== "string") return { type: "indisponible" };
+    return { type: "produit", produit: versProduitLocal(corps.produit, true) };
   } catch {
-    return null;
+    return { type: "indisponible" };
   }
 }

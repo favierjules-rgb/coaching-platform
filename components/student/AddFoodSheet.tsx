@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, PencilLine, Package, Search, X } from "lucide-react";
+import { AlertTriangle, PencilLine, Package, ScanBarcode, Search, X } from "lucide-react";
 
 import { NBSP, formatDecimalFr } from "@/lib/nutrition/basis-points";
 import {
@@ -14,8 +14,16 @@ import {
 import {
   type Fetch,
   hydraterProduit,
+  lireProduitParGtin,
   rechercherProduitsExternes,
 } from "@/lib/nutrition/produits-client";
+import {
+  type EchecLookup,
+  LIBELLE_ACTION,
+  MESSAGE_LOOKUP,
+  actionsPourLookup,
+} from "@/lib/scan/parcours";
+import { ScannerCodeBarres } from "@/components/student/ScannerCodeBarres";
 import {
   doitHydrater,
   fusionnerProduits,
@@ -129,6 +137,17 @@ export function AddFoodSheet({
   const [échecHydratation, setÉchecHydratation] = useState(false);
   const [quantitéChoix, setQuantitéChoix] = useState("100");
   const [unitéChoix, setUnitéChoix] = useState<ConsumedUnit>("g");
+
+  // ── Scan ─────────────────────────────────────────────────────────────────
+  // `sessionScan` est un COMPTEUR, pas un booléen : il sert de `key` au
+  // scanner. Chaque ouverture monte donc un composant NEUF — flux, moteur,
+  // verrou, état d'erreur, tout repart de zéro. C'est ce qui rend la
+  // réouverture après un scan aussi propre que la première fois, sans une
+  // seule ligne de remise à zéro à écrire ni à oublier.
+  const [scanOuvert, setScanOuvert] = useState(false);
+  const [sessionScan, setSessionScan] = useState(0);
+  const [scanEnCours, setScanEnCours] = useState(false);
+  const [échecScan, setÉchecScan] = useState<EchecLookup | null>(null);
 
   // ── Saisie manuelle ──────────────────────────────────────────────────────
   const [nom, setNom] = useState("");
@@ -250,7 +269,62 @@ export function AddFoodSheet({
 
   function basculerVersManuel() {
     setNom(terme.trim());
+    fermerScan();
     setOnglet("manuel");
+  }
+
+  /* ── LE SCAN ────────────────────────────────────────────────────────────
+   *
+   * LE SCANNER EST UNE MÉTHODE DE RECHERCHE, PAS UN TROISIÈME ONGLET.
+   *
+   * Un onglet supplémentaire raconterait qu'il existe trois façons d'ajouter un
+   * aliment. Il en existe deux : le retrouver, ou le saisir. Viser un
+   * code-barres est une manière de le retrouver — plus rapide qu'un nom tapé au
+   * clavier, mais qui aboutit exactement au même endroit : la fiche produit et
+   * son étape quantité.
+   */
+  function ouvrirScan() {
+    setÉchecScan(null);
+    setChoix(null);
+    setÉchecHydratation(false);
+    setSessionScan((n) => n + 1);
+    setScanOuvert(true);
+  }
+
+  function fermerScan() {
+    setScanOuvert(false);
+    setScanEnCours(false);
+    setÉchecScan(null);
+  }
+
+  /**
+   * LE GTIN EST ARRIVÉ — et la caméra est DÉJÀ éteinte quand on entre ici.
+   *
+   * Le scanner l'a arrêtée avant d'appeler, verrou posé : un code-barres reste
+   * visible une vingtaine d'images, et sans ce verrou ce seraient vingt appels
+   * à la route produit pour un seul geste de l'élève.
+   *
+   * Un scan aboutit à la MÊME étape quantité qu'un produit choisi dans la
+   * liste. Pas de seconde interface produit : ce serait deux endroits à
+   * maintenir, et deux occasions de diverger sur l'unité.
+   */
+  async function traiterGtin(gtin: string) {
+    setScanOuvert(false);
+    setScanEnCours(true);
+    setÉchecScan(null);
+    try {
+      const issue = await lireProduitParGtin(gtin, appeler);
+      if (issue.type === "produit") {
+        // La fiche revient de `/api/food-products/{gtin}` : elle est hydratée
+        // par construction, son unité est observée et non supposée.
+        setProduits((actuels) => fusionnerProduits(actuels, [issue.produit]));
+        ouvrirQuantitéProduit(issue.produit);
+        return;
+      }
+      setÉchecScan(issue.type);
+    } finally {
+      setScanEnCours(false);
+    }
   }
 
   // ── VALIDATION ───────────────────────────────────────────────────────────
@@ -335,6 +409,24 @@ export function AddFoodSheet({
           )}
 
           {onglet === "recherche" ? (
+            scanOuvert ? (
+              /* LA VUE SCANNER PREND TOUTE LA FEUILLE. Sur un téléphone de
+                 375 px, garder le champ de recherche, la liste et les
+                 attributions autour d'une image de caméra donnerait un écran
+                 illisible et une image minuscule. Le bouton « Fermer » du
+                 scanner ramène tout cela.
+
+                 `key={sessionScan}` : chaque ouverture monte un composant NEUF.
+                 C'est ce qui garantit la réouverture propre — aucun flux mort
+                 réutilisé, aucun verrou resté fermé, aucune erreur d'avant. */
+              <ScannerCodeBarres
+                key={sessionScan}
+                onGtin={(gtin) => void traiterGtin(gtin)}
+                onFermer={fermerScan}
+                onRechercheParNom={fermerScan}
+                onSaisieManuelle={basculerVersManuel}
+              />
+            ) : (
             <div className="flex flex-col gap-4">
               <div>
                 <label
@@ -353,11 +445,56 @@ export function AddFoodSheet({
                     setExterneFaite(false);
                     setExterneIndisponible(false);
                     setÉchecHydratation(false);
+                    setÉchecScan(null);
                   }}
                   placeholder="banane, riz, poulet…"
                   className="min-h-[48px] w-full rounded-control border border-border bg-background px-4 py-3 text-base text-foreground transition-colors focus:border-primary focus:outline-none"
                 />
               </div>
+
+              {/* LE SCAN, JUSTE SOUS LE CHAMP. C'est le geste le plus rapide
+                  pour un produit emballé : viser vaut mieux que taper une
+                  marque au clavier d'une main, l'autre tenant le paquet. */}
+              {!choix && !scanEnCours && (
+                <button
+                  type="button"
+                  onClick={ouvrirScan}
+                  className="pressable inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-control border border-border py-3 text-xs font-bold uppercase tracking-widest text-foreground transition-colors hover:border-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                >
+                  <ScanBarcode size={14} />
+                  Scanner un code-barres
+                </button>
+              )}
+
+              {scanEnCours && (
+                <p className="py-2 text-center text-sm text-muted-foreground" role="status">
+                  Recherche du produit…
+                </p>
+              )}
+
+              {/* APRÈS UN SCAN QUI N'A PAS ABOUTI — jamais un cul-de-sac.
+                  Trois issues, trois messages, et à chaque fois au moins deux
+                  gestes possibles. Aucun code HTTP, aucun nom de fournisseur :
+                  « 429 » n'apprend rien à quelqu'un debout dans un rayon. */}
+              {échecScan && (
+                <div className="flex flex-col gap-2 rounded-panel border border-border bg-surface-soft/40 p-4">
+                  <p className="text-sm text-foreground">{MESSAGE_LOOKUP[échecScan]}</p>
+                  {actionsPourLookup(échecScan).map((action) => (
+                    <button
+                      key={action}
+                      type="button"
+                      onClick={() => {
+                        if (action === "rescanner") ouvrirScan();
+                        else if (action === "recherche") setÉchecScan(null);
+                        else basculerVersManuel();
+                      }}
+                      className="pressable inline-flex min-h-[48px] w-full items-center justify-center rounded-control border border-border bg-card py-3 text-xs font-bold uppercase tracking-widest text-foreground transition-colors hover:border-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                    >
+                      {LIBELLE_ACTION[action]}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               {choix ? (
                 <FormulaireQuantité
@@ -528,6 +665,7 @@ export function AddFoodSheet({
                 </>
               )}
             </div>
+            )
           ) : (
             <div className="flex flex-col gap-4">
               {/* Le texte suit l'unité choisie. Il ne parle NI de serveur, NI
