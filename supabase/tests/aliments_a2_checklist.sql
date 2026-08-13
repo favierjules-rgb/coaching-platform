@@ -784,6 +784,87 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------
+-- A2-POLISH3…7 — LA RÉFÉRENCE SUIT L'UNITÉ, ET RIEN D'AUTRE
+-- ---------------------------------------------------------------------
+-- Contrat A2.1 : en grammes, les valeurs saisies valent POUR 100 G ; en
+-- millilitres, POUR 100 ML. Le serveur multiplie par la quantité dans CETTE
+-- MÊME unité, et n'invente aucune densité pour passer de l'une à l'autre —
+-- `food_catalog` n'en porte pas, et en imaginer une créerait une seconde
+-- convention nutritionnelle à côté du 4/4/9.
+--
+-- Le contrôle DISCRIMINANT est le second : la même référence, la même
+-- quantité, deux unités différentes doivent rendre des nombres IDENTIQUES.
+-- Toute conversion implicite ml → g (× 1,03, × 1, n'importe quoi) les ferait
+-- diverger, et ce contrôle rougirait.
+do $$
+declare v_repas uuid; v_ml uuid; v_g uuid; v_dec uuid; v_ok boolean;
+begin
+  v_repas := public.creer_repas_eleve(date '2026-08-13', 'Controle des unites');
+
+  -- ── A2-POLISH4 : 250 ml, valeurs pour 100 ml → × 2,5 ──────────────────
+  v_ml := public.ajouter_aliment_manuel(v_repas, 'Boisson', 250, 'ml', 3, 5, 2);
+  perform pg_temp.noter('A2-POLISH4', '250 ml avec des valeurs /100 ml donnent exactement × 2,5',
+    (select unit = 'ml' and quantity = 250
+        and protein_g = 7.5 and carb_g = 12.5 and fat_g = 5
+       from public.meal_entries where id = v_ml));
+
+  -- ── A2-POLISH3 : 250 g, valeurs pour 100 g → × 2,5 aussi ──────────────
+  v_g := public.ajouter_aliment_manuel(v_repas, 'Poudre', 250, 'g', 3, 5, 2);
+  perform pg_temp.noter('A2-POLISH3', '250 g avec des valeurs /100 g donnent exactement × 2,5',
+    (select unit = 'g' and quantity = 250
+        and protein_g = 7.5 and carb_g = 12.5 and fat_g = 5
+       from public.meal_entries where id = v_g));
+
+  -- ── A2-POLISH6 : AUCUNE conversion implicite ml → g ───────────────────
+  perform pg_temp.noter('A2-POLISH6', 'même référence, même quantité, deux unités : nombres IDENTIQUES',
+    (select protein_g from public.meal_entries where id = v_ml)
+      = (select protein_g from public.meal_entries where id = v_g)
+    and (select carb_g from public.meal_entries where id = v_ml)
+      = (select carb_g from public.meal_entries where id = v_g)
+    and (select fat_g from public.meal_entries where id = v_ml)
+      = (select fat_g from public.meal_entries where id = v_g));
+
+  perform pg_temp.noter('A2-POLISH6', 'aucune densité, aucun facteur de conversion nulle part',
+    not exists (select 1 from information_schema.columns
+                 where table_schema = 'public'
+                   and column_name ~* '(densite|density|g_per_ml|ml_per_g)')
+    and (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+          where n.nspname = 'public' and p.proname = 'ajouter_aliment_manuel'
+            and p.prosrc ~* '(densit|1\.03|/ 1000|\* 1000)') = 0);
+
+  -- ── A2-POLISH5 : la correction conserve la référence /100 ml ──────────
+  v_ok := pg_temp.accepte(format('select public.modifier_quantite_entree(%L, 400, ''ml'')', v_ml));
+  perform pg_temp.noter('A2-POLISH5', 'corriger 250 ml → 400 ml garde la référence /100 ml',
+    v_ok and (select quantity = 400 and protein_g = 12 and carb_g = 20 and fat_g = 8
+                from public.meal_entries where id = v_ml));
+
+  perform pg_temp.noter('A2-POLISH6', 'changer d''unité pendant une correction est REFUSÉ',
+    pg_temp.refuse(format('select public.modifier_quantite_entree(%L, 400, ''g'')', v_ml)));
+
+  -- ── A2-POLISH7 : quantité ≤ 0 refusée, dans les deux unités ───────────
+  perform pg_temp.noter('A2-POLISH7', 'quantité nulle ou négative refusée, en g comme en ml',
+    pg_temp.refuse(format($q$ select public.ajouter_aliment_manuel(%L, 'X', 0, 'ml', 1, 1, 1) $q$, v_repas))
+    and pg_temp.refuse(format($q$ select public.ajouter_aliment_manuel(%L, 'X', -5, 'ml', 1, 1, 1) $q$, v_repas))
+    and pg_temp.refuse(format($q$ select public.ajouter_aliment_manuel(%L, 'X', 0, 'g', 1, 1, 1) $q$, v_repas))
+    and pg_temp.refuse(format($q$ select public.modifier_quantite_entree(%L, 0, 'ml') $q$, v_ml)));
+
+  -- ── A2-POLISH8 : les décimales traversent intactes ────────────────────
+  -- 250 ml × 1,5 / 100 = 3,75. Un arrondi prématuré côté serveur donnerait 4.
+  v_dec := public.ajouter_aliment_manuel(v_repas, 'Decimales', 250, 'ml', 1.5, 0.25, 0.125);
+  perform pg_temp.noter('A2-POLISH8', 'les décimales des valeurs /100 traversent sans arrondi prématuré',
+    (select protein_g = 3.75 and carb_g = 0.625 and fat_g = 0.3125
+       from public.meal_entries where id = v_dec));
+
+  -- Une unité hors g/ml reste refusée : la pièce n'a pas de sens pour un
+  -- aliment saisi à la main, qui ne dit pas ce que pèse une pièce.
+  perform pg_temp.noter('A2-POLISH3', 'une unité hors g/ml reste refusée en saisie manuelle',
+    pg_temp.refuse(format($q$ select public.ajouter_aliment_manuel(%L, 'X', 1, 'piece', 1, 1, 1) $q$, v_repas))
+    and pg_temp.refuse(format($q$ select public.ajouter_aliment_manuel(%L, 'X', 1, 'portion', 1, 1, 1) $q$, v_repas)));
+
+  perform public.supprimer_repas_eleve(v_repas);
+end $$;
+
+-- ---------------------------------------------------------------------
 -- A2-DB9 / A2-DB10 — corriger une quantité, sans jamais suivre sa source
 -- ---------------------------------------------------------------------
 do $$

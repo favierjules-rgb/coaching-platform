@@ -42,7 +42,11 @@ import {
   type ConsumedMeal,
   entryKcal,
   kcalFromMacros,
+  lireMacroPour100,
+  lireNombreFr,
+  lireQuantite,
   prescribedConsumedMeal,
+  remainingForTarget,
   studentMealsForDate,
   totalsForDay,
   totalsForMeal,
@@ -946,4 +950,365 @@ await test("RÉCAP. les seize contrats A2-DB et les quatorze A2-UI sont couverts
   // La checklist SQL et la migration sont bien celles de A2.
   assert.ok(checklist.includes("Migration couverte : 20260901090000_consumed_meals.sql"));
   assert.ok(prescribedConsumedMeal([], "meal-pdj", "2026-08-13") === null);
+});
+
+/* ═════════════════ A2-POLISH — LE LOT DE FINITION A2.1 ═════════════════ */
+
+const feuilleAjout = lire("../../components/student/AddFoodSheet.tsx");
+const sectionRepas = lire("../../components/student/ConsumedMealSection.tsx");
+const feuilleDétail = lire("../../components/student/ConsumedFoodDetailSheet.tsx");
+
+/** Un repas LIBRE, prêt à être rendu, avec le nombre d'aliments voulu. */
+function repasLibre(nbAliments: number, label = "Collation du soir"): ConsumedMeal {
+  return repasAvec(
+    Array.from({ length: nbAliments }, (_, i) => entrée({ id: `e${i}` })),
+    {
+      id: "cm-libre",
+      kind: "student",
+      label,
+      target: null,
+      prescribedMealId: null,
+      slotKey: null,
+      position: 1000,
+    },
+  );
+}
+
+function rendreRepasLibre(nbAliments: number, label?: string): string {
+  return renderToString(
+    createElement(StudentMealCard, {
+      repas: repasLibre(nbAliments, label),
+      enCours: false,
+      erreur: null,
+      onRenommer: async () => true,
+      onSupprimerRepas: async () => true,
+      onAjouterCatalogue: async () => true,
+      onAjouterManuel: async () => true,
+      onCorriger: async () => true,
+      onSupprimerAliment: async () => true,
+      onEffacerErreur: () => {},
+    } as never),
+  );
+}
+
+await test("A2-POLISH1. la suppression d'un repas dit exactement « et tout son contenu ? »", () => {
+  // La formulation est FIXE : elle ne dépend ni du nombre d'aliments, ni d'une
+  // pluralisation. On l'éprouve donc sur zéro, un et plusieurs.
+  assert.ok(
+    sectionRepas.includes("et tout son contenu"),
+    "le composant doit porter la formulation fixe",
+  );
+  for (const nb of [0, 1, 3]) {
+    const html = rendreRepasLibre(nb);
+    // La confirmation n'apparaît qu'après un premier appui : on vérifie donc
+    // la SOURCE pour la formulation, et le rendu pour l'absence de comptage.
+    assert.ok(
+      !/\d+\s*aliments?\s*qu/i.test(html),
+      `aucun comptage d'aliments ne doit fuir dans le rendu (${nb} aliment(s))`,
+    );
+  }
+  // Les deux boutons restent ceux d'avant. Le libellé du premier est
+  // conditionnel — « Suppression… » pendant l'écriture — donc on cherche la
+  // paire, pas une chaîne isolée.
+  assert.ok(
+    sectionRepas.includes('{enCours ? "Suppression…" : "Supprimer"}'),
+    "bouton SUPPRIMER conservé, avec son état de chargement",
+  );
+  assert.ok(/>\s*Annuler\s*</.test(sectionRepas), "bouton ANNULER conservé");
+});
+
+await test("A2-POLISH2. plus aucune trace de l'ancien texte compté", () => {
+  // L'ancien rendu produisait « et les 0 alimentqu'il contient ? » — les deux
+  // mots se collaient parce que la pluralisation était un nœud JSX séparé.
+  // On interdit le motif dans TOUS les composants du lot, pas seulement dans
+  // celui qu'on vient de corriger.
+  const composants = [
+    sectionRepas,
+    feuilleAjout,
+    feuilleDétail,
+    lire("../../components/student/StudentPrescribedWeek.tsx"),
+    lire("../../components/student/ConsumedFoodBar.tsx"),
+    lire("../../components/student/DailyIntakeSummary.tsx"),
+  ];
+  for (const source of composants) {
+    assert.ok(!source.includes("qu&apos;il contient"), "l'ancienne tournure ne doit plus exister");
+    assert.ok(
+      !/\{repas\.entries\.length\}\s*aliment/.test(source),
+      "aucun comptage d'aliments dans une phrase de confirmation",
+    );
+    assert.ok(
+      !/entries\.length\s*>\s*1\s*\?\s*"s"/.test(source),
+      "aucune pluralisation dynamique",
+    );
+  }
+  // Et le rendu réel ne contient jamais « alimentqu ».
+  assert.ok(!rendreRepasLibre(0).includes("alimentqu"), "le mot-valise ne peut plus apparaître");
+});
+
+await test("A2-POLISH3. en grammes, la référence est /100 g", () => {
+  // L'écran : la légende et le libellé de quantité suivent l'unité choisie.
+  assert.ok(
+    feuilleAjout.includes("Valeurs pour 100&nbsp;{unitéManuelle}"),
+    "la légende doit être paramétrée par l'unité, jamais figée sur « g »",
+  );
+  assert.ok(
+    feuilleAjout.includes("pour 100&nbsp;{unitéManuelle}</strong>"),
+    "le texte d'accompagnement doit suivre l'unité lui aussi",
+  );
+  assert.ok(
+    !/pour 100&nbsp;g\b/.test(feuilleAjout),
+    "aucun « pour 100 g » codé en dur ne doit subsister",
+  );
+
+  // La base : le contrat est démontré par des contrôles EXÉCUTÉS.
+  assert.ok(
+    checklist.includes("noter('A2-POLISH3'"),
+    "la checklist SQL doit éprouver la référence en grammes",
+  );
+  assert.ok(
+    checklist.includes("250 g avec des valeurs /100 g donnent exactement × 2,5"),
+    "avec les valeurs exactes",
+  );
+});
+
+await test("A2-POLISH4. en millilitres, la référence est /100 ml", () => {
+  // Les deux seules unités proposées en saisie manuelle.
+  assert.ok(feuilleAjout.includes('(["g", "ml"] as const)'), "g et ml, et rien d'autre");
+  assert.ok(
+    checklist.includes("noter('A2-POLISH4'"),
+    "la checklist SQL doit éprouver la référence en millilitres",
+  );
+
+  // La RPC ne prend qu'un `p_*_per_100` — jamais un `per_100_g` : le paramètre
+  // est délibérément AGNOSTIQUE de l'unité, et c'est ce qui rend le contrat
+  // possible sans densité.
+  assert.match(migration, /p_protein_per_100 numeric/);
+  assert.ok(
+    !/per_100_g|per_100g|_par_100_g/.test(migration),
+    "aucun paramètre ne doit figer la référence sur les grammes",
+  );
+});
+
+await test("A2-POLISH5. 250 ml avec des valeurs /100 ml calcule × 2,5 côté serveur", () => {
+  // Le calcul attendu, refait à la main : 250 / 100 = 2,5.
+  assert.equal(Number((3 * 2.5).toFixed(4)), 7.5);
+  assert.equal(Number((5 * 2.5).toFixed(4)), 12.5);
+  assert.equal(Number((2 * 2.5).toFixed(4)), 5);
+  assert.ok(
+    checklist.includes("250 ml avec des valeurs /100 ml donnent exactement × 2,5"),
+    "la checklist SQL doit éprouver ce cas exact, sur une vraie base",
+  );
+
+  // Le serveur multiplie par la quantité BRUTE, sans passer par une base
+  // convertie : c'est la ligne qui garantit le × 2,5.
+  assert.ok(
+    migration.includes("round(p_quantity * p_protein_per_100 / 100, 4)"),
+    "l'aliment manuel doit multiplier la quantité telle quelle",
+  );
+});
+
+await test("A2-POLISH6. aucune conversion implicite ml → g", () => {
+  // Rien dans la migration ne convertit un volume en masse.
+  //
+  // ATTENTION AU FAUX ROUGE : le mot « densité » apparaît légitimement dans
+  // les commentaires qui EXPLIQUENT qu'il n'y en a pas, et dans les `comment
+  // on function`. Chercher le mot dans le fichier entier ferait échouer ce
+  // test à cause de la phrase même qui énonce la règle. On dépouille donc les
+  // commentaires SQL — y compris les `comment on … is '…'`, qui sont des
+  // instructions exécutables et survivent au retrait des « -- ».
+  const migrationSansProse = migration
+    .replace(/comment on [\s\S]*?is\s+'(?:[^']|'')*';/g, "")
+    .replace(/--[^\n]*/g, "");
+  assert.ok(
+    !/densit|1\.03|0\.97/i.test(migrationSansProse),
+    "aucune densité, même « inoffensive », ne doit apparaître dans le CODE de la migration",
+  );
+  assert.ok(
+    !/densit/i.test(migrationSansProse.match(/create table[\s\S]*?\);/)?.[0] ?? ""),
+    "aucune colonne de densité n'est ajoutée",
+  );
+
+  // Contrôle NÉGATIF de ce contrôle : la prose, elle, doit bien contenir le
+  // mot — sinon c'est que le dépouillage a tout mangé et que l'assertion
+  // ci-dessus passerait sur n'importe quoi.
+  assert.ok(/densit/i.test(migration), "le dépouillage ne doit pas vider le fichier");
+  // `quantite_en_base_nutritionnelle` REFUSE explicitement la conversion, elle
+  // ne la contourne pas en silence.
+  assert.ok(migration.includes("UNITE_INCOMPATIBLE"), "l'unité incompatible est refusée franchement");
+  assert.ok(
+    migration.includes("AUCUNE CONVERSION ml ↔ g"),
+    "la règle est écrite dans la migration, pas seulement respectée par hasard",
+  );
+  assert.ok(
+    checklist.includes("même référence, même quantité, deux unités : nombres IDENTIQUES"),
+    "le contrôle discriminant doit exister dans la checklist SQL",
+  );
+
+  // Côté écran, la correction ne propose pas de changer d'unité — le serveur
+  // la refuserait, et proposer un choix qui se fait refuser est une fausse
+  // liberté.
+  assert.ok(
+    feuilleDétail.includes("onCorriger(valeur, entrée.unit)"),
+    "la correction renvoie TOUJOURS l'unité d'origine",
+  );
+});
+
+await test("A2-POLISH7. une quantité inférieure ou égale à zéro est refusée", () => {
+  // Le module pur, d'abord : c'est lui qui désactive le bouton.
+  assert.equal(lireQuantite("0"), null);
+  assert.equal(lireQuantite("0,0"), null);
+  assert.equal(lireQuantite("-1"), null);
+  assert.equal(lireQuantite(""), null);
+  assert.equal(lireQuantite("   "), null);
+  assert.equal(lireQuantite("abc"), null);
+  assert.equal(lireQuantite("120"), 120);
+  assert.equal(lireQuantite("0,5"), 0.5);
+
+  // Puis la base, qui ne fait confiance à personne.
+  assert.ok(checklist.includes("noter('A2-POLISH7'"), "la checklist SQL éprouve le refus serveur");
+  assert.ok(migration.includes("QUANTITE_INVALIDE"), "le code d'erreur existe");
+});
+
+await test("A2-POLISH8. les décimales françaises sont acceptées, les saisies douteuses refusées", () => {
+  // Virgule ET point : le clavier décimal d'iOS produit une virgule en
+  // français et un point sur un clavier physique. C'est déjà le contrat de
+  // `lireRpe` — A2.1 ne crée pas une seconde convention de saisie.
+  assert.deepEqual(lireNombreFr("1,5"), { ok: true, valeur: 1.5 });
+  assert.deepEqual(lireNombreFr("1.5"), { ok: true, valeur: 1.5 });
+  assert.deepEqual(lireNombreFr("0,125"), { ok: true, valeur: 0.125 });
+  assert.deepEqual(lireNombreFr("  2,25  "), { ok: true, valeur: 2.25 });
+
+  // Deux séparateurs : faute de frappe, pas intention. Refusé, jamais tronqué.
+  assert.deepEqual(lireNombreFr("1,5.2"), { ok: false, raison: "illisible" });
+  assert.deepEqual(lireNombreFr("abc"), { ok: false, raison: "illisible" });
+  assert.deepEqual(lireNombreFr("-1"), { ok: false, raison: "negatif" });
+  assert.deepEqual(lireNombreFr(""), { ok: false, raison: "vide" });
+
+  // Une MACRO vide vaut zéro — une eau pétillante, c'est 0/0/0. Une macro
+  // ILLISIBLE ne vaut pas zéro : elle invalide le formulaire.
+  assert.equal(lireMacroPour100(""), 0);
+  assert.equal(lireMacroPour100("   "), 0);
+  assert.equal(lireMacroPour100("abc"), null);
+  assert.equal(lireMacroPour100("-1"), null);
+  assert.equal(lireMacroPour100("1,5"), 1.5);
+
+  // Et l'écran s'appuie sur CE lecteur, pas sur un `Number()` local qui ferait
+  // passer un champ oublié pour un zéro délibéré.
+  assert.ok(feuilleAjout.includes("lireMacroPour100"), "la feuille d'ajout utilise le lecteur partagé");
+  assert.ok(feuilleAjout.includes("lireQuantite"), "pour la quantité aussi");
+  assert.ok(feuilleDétail.includes("lireQuantite"), "la feuille de détail également");
+  assert.ok(
+    !/Number\([^)]*\.replace\(",", "\."\)\)/.test(feuilleAjout + feuilleDétail),
+    "plus aucune conversion numérique artisanale dans les composants",
+  );
+
+  // Le bouton reste désactivé tant que le formulaire est invalide.
+  assert.ok(
+    feuilleAjout.includes("disabled={!manuelValide || enCours}"),
+    "le bouton d'ajout manuel suit la validité",
+  );
+  assert.ok(
+    feuilleAjout.includes("disabled={!valide || enCours}"),
+    "le bouton d'ajout catalogue aussi",
+  );
+});
+
+await test("A2-POLISH9. la double soumission est protégée à deux niveaux", () => {
+  // 1. Le composant : garde explicite AVANT l'appel, en plus de `disabled`.
+  //    Deux tapes très rapprochées peuvent partir avant que React n'ait
+  //    repeint le bouton.
+  assert.ok(
+    feuilleAjout.includes("if (!manuelValide || enCours) return;"),
+    "la feuille d'ajout garde l'envoi manuel",
+  );
+  assert.ok(
+    feuilleAjout.includes("if (!catalogueValide || enCours) return;"),
+    "et l'envoi catalogue",
+  );
+  assert.ok(
+    feuilleDétail.includes("if (!modifiée || enCours || valeur === null) return;"),
+    "la feuille de détail garde la correction",
+  );
+
+  // 2. Le hook : un verrou par référence, insensible au rythme des rendus.
+  //    C'est lui le rempart réel — un composant qui oublierait `disabled` ne
+  //    suffirait pas à créer deux entrées.
+  const hook = lire("../../hooks/useConsumedMeals.ts");
+  assert.ok(hook.includes("if (enCoursRef.current) return null;"), "le hook refuse une écriture concurrente");
+  assert.ok(hook.includes("enCoursRef.current = true;"), "le verrou est posé AVANT l'appel");
+  assert.ok(
+    hook.indexOf("enCoursRef.current = true;") < hook.indexOf("await action(supabase)"),
+    "et il est bien posé avant, pas après",
+  );
+
+  // 3. L'ouverture d'un conteneur est idempotente côté serveur : même si deux
+  //    appels passaient, il n'y aurait qu'un repas.
+  assert.ok(sectionRepas.includes("if (ouverture || enCours) return;"), "l'ouverture est gardée aussi");
+  assert.ok(checklist.includes("noter('A2-DB1'"), "et l'idempotence serveur est éprouvée");
+});
+
+await test("A2-POLISH10. aucune régression sur A2-DB1..16 et A2-UI1..14", () => {
+  // Les seize contrats de base sont toujours exécutés par la checklist…
+  for (let n = 1; n <= 16; n += 1) {
+    assert.ok(checklist.includes(`noter('A2-DB${n}',`), `A2-DB${n} doit rester couvert`);
+  }
+  // …et les quatorze contrats d'écran ont toujours leur test ici.
+  const moi = lire("./aliments-a2.mts");
+  for (let n = 1; n <= 14; n += 1) {
+    assert.ok(moi.includes(`A2-UI${n}.`), `A2-UI${n} doit rester couvert`);
+  }
+
+  // Les points explicitement conservés par l'énoncé A2.1 :
+  assert.ok(
+    lire("../../components/student/ConsumedFoodBar.tsx").includes("Saisi à la main"),
+    "la mention « Saisi à la main » reste sur la barre",
+  );
+  assert.ok(
+    sectionRepas.includes("Repas ajouté par toi") || sectionRepas.includes("aucun objectif coach"),
+    "la mention du repas personnel est conservée",
+  );
+  assert.ok(
+    feuilleAjout.includes("Aucun aliment trouvé dans le catalogue."),
+    "l'état vide de la recherche est conservé",
+  );
+  assert.ok(
+    feuilleAjout.includes("Ajouter cet aliment manuellement"),
+    "et sa sortie vers la saisie manuelle aussi",
+  );
+
+  // Le périmètre A2.1 : rien de A3 n'a été branché.
+  const tout = [feuilleAjout, sectionRepas, feuilleDétail, lire("../../lib/supabase/consumed-meals.ts")].join("\n");
+  for (const interdit of ["openfoodfacts", "ciqual", "food_products", "BarcodeDetector", "ZXing", "gtin"]) {
+    assert.ok(
+      !new RegExp(interdit, "i").test(tout),
+      `« ${interdit} » est hors périmètre A2.1 et ne doit apparaître nulle part`,
+    );
+  }
+});
+
+await test("A2-POLISH+. un dépassement reste négatif partout où il s'affiche", () => {
+  // Le module : `remainingForTarget` ne borne pas à zéro.
+  const restant = remainingForTarget(
+    { kcal: 500, proteinG: 30, carbG: 50, fatG: 15 },
+    { kcal: 815, proteinG: 45, carbG: 80, fatG: 25 },
+  );
+  assert.ok(restant !== null);
+  assert.equal(restant.kcal, -315);
+  assert.equal(restant.proteinG, -15);
+  assert.equal(restant.carbG, -30);
+  assert.equal(restant.fatG, -10);
+
+  // La synthèse du jour : les MACROS restantes sont négatives elles aussi, et
+  // affichées telles quelles — pas seulement les kcal.
+  const html = renderToString(
+    createElement(DailyIntakeSummary, {
+      objectif: { proteinG: 150, carbG: 200, fatG: 66, kcal: 2000 },
+      consommé: { proteinG: 200, carbG: 300, fatG: 90, kcal: 2810 },
+    } as never),
+  );
+  assert.ok(html.includes(formatIntegerFr(-810)), "les kcal restantes négatives");
+  assert.ok(html.includes("-50"), "les protéines restantes négatives");
+  assert.ok(html.includes("-100"), "les glucides restants négatifs");
+  assert.ok(html.includes("-24"), "les lipides restants négatifs");
+  assert.ok(!/Restant[\s\S]{0,200}>0<\/p>/.test(html), "aucune valeur n'est ramenée à zéro");
 });

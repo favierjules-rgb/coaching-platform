@@ -4,7 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, PencilLine, Search, X } from "lucide-react";
 
 import { NBSP, formatDecimalFr } from "@/lib/nutrition/basis-points";
-import { CONSUMED_UNIT_LABELS_FR, type ConsumedUnit } from "@/lib/nutrition/consumed";
+import {
+  CONSUMED_UNIT_LABELS_FR,
+  type ConsumedUnit,
+  lireMacroPour100,
+  lireQuantite,
+} from "@/lib/nutrition/consumed";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
   type CatalogFood,
@@ -127,16 +132,25 @@ export function AddFoodSheet({
     setOnglet("manuel");
   }
 
-  const qCatalogue = Number(quantitéCatalogue.replace(",", "."));
-  const catalogueValide = choisi !== null && Number.isFinite(qCatalogue) && qCatalogue > 0;
+  // ── VALIDATION ───────────────────────────────────────────────────────────
+  // `lireQuantite` et `lireMacroPour100` viennent de lib/nutrition/consumed.ts :
+  // un seul lecteur, testable hors React, qui accepte « 1,5 » comme « 1.5 »,
+  // refuse « 1,5.2 », et distingue un champ VIDE d'un champ ILLISIBLE. Un
+  // `Number("")` vaut 0 : s'appuyer dessus ferait passer un champ oublié pour
+  // un zéro délibéré.
+  const qCatalogue = lireQuantite(quantitéCatalogue);
+  const catalogueValide = choisi !== null && qCatalogue !== null;
 
-  const nombres = [protéines, glucides, lipides, quantitéManuelle].map((v) =>
-    Number(v.replace(",", ".")),
-  );
+  const macroP = lireMacroPour100(protéines);
+  const macroG = lireMacroPour100(glucides);
+  const macroL = lireMacroPour100(lipides);
+  const qManuelle = lireQuantite(quantitéManuelle);
   const manuelValide =
     nom.trim().length > 0 &&
-    nombres.every((n) => Number.isFinite(n) && n >= 0) &&
-    nombres[3] > 0;
+    macroP !== null &&
+    macroG !== null &&
+    macroL !== null &&
+    qManuelle !== null;
 
   return (
     <div
@@ -229,7 +243,10 @@ export function AddFoodSheet({
                   onQuantité={setQuantitéCatalogue}
                   onUnité={setUnitéCatalogue}
                   onRetour={() => setChoisi(null)}
-                  onAjouter={() => void onAjouterCatalogue(choisi.id, qCatalogue, unitéCatalogue)}
+                  onAjouter={() => {
+                    if (!catalogueValide || enCours) return;
+                    void onAjouterCatalogue(choisi.id, qCatalogue, unitéCatalogue);
+                  }}
                 />
               ) : cherche ? (
                 <p className="py-4 text-center text-sm text-muted-foreground">Recherche…</p>
@@ -281,10 +298,14 @@ export function AddFoodSheet({
             </div>
           ) : (
             <div className="flex flex-col gap-4">
+              {/* Le texte suit l'unité choisie. Il ne parle NI de serveur, NI
+                  d'instantané : ce sont des mots d'architecture, et l'élève n'a
+                  pas à connaître l'architecture pour saisir une banane. */}
               <p className="rounded-panel border border-border bg-surface-soft/40 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
-                Recopie les valeurs <strong className="text-foreground">pour 100&nbsp;g</strong> lues
-                sur l&apos;emballage, puis la quantité que tu as réellement mangée. C&apos;est le
-                serveur qui calcule ce que ça représente — tu n&apos;as aucun calcul à faire.
+                Recopie les valeurs indiquées sur l&apos;emballage{" "}
+                <strong className="text-foreground">pour 100&nbsp;{unitéManuelle}</strong>, puis
+                renseigne la quantité réellement consommée. Les calculs sont effectués
+                automatiquement.
               </p>
 
               <Champ
@@ -296,7 +317,12 @@ export function AddFoodSheet({
               />
 
               <fieldset className="rounded-panel border border-border p-3">
-                <legend className="px-1 text-xs uppercase tracking-wide text-muted-foreground">
+                {/* LA RÉFÉRENCE SUIT L'UNITÉ, sans exception : en g elle vaut
+                    pour 100 g, en ml pour 100 ml. Le serveur multiplie par la
+                    quantité dans CETTE MÊME unité — 250 ml de valeurs /100 ml
+                    donnent × 2,5 — et n'invente aucune densité pour passer de
+                    l'une à l'autre. */}
+                <legend className="px-1 text-xs font-bold uppercase tracking-wide text-muted-foreground">
                   Valeurs pour 100&nbsp;{unitéManuelle}
                 </legend>
                 <div className="grid grid-cols-3 gap-2">
@@ -311,7 +337,7 @@ export function AddFoodSheet({
                   htmlFor="manuel-quantite"
                   className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground"
                 >
-                  Quantité consommée
+                  Quantité consommée ({unitéManuelle})
                 </label>
                 <div className="flex gap-2">
                   <input
@@ -345,16 +371,21 @@ export function AddFoodSheet({
 
               <button
                 type="button"
-                onClick={() =>
+                onClick={() => {
+                  // Garde de double soumission EN PLUS de `disabled` : deux
+                  // tapes très rapprochées peuvent partir avant que React n'ait
+                  // repeint le bouton désactivé. Le hook porte le même garde,
+                  // pour que ni l'un ni l'autre ne soit le seul rempart.
+                  if (!manuelValide || enCours) return;
                   void onAjouterManuel(
                     nom.trim(),
-                    nombres[3],
+                    qManuelle,
                     unitéManuelle,
-                    nombres[0],
-                    nombres[1],
-                    nombres[2],
-                  )
-                }
+                    macroP,
+                    macroG,
+                    macroL,
+                  );
+                }}
                 disabled={!manuelValide || enCours}
                 className="pressable min-h-[48px] w-full rounded-control bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
               >

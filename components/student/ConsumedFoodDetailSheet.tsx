@@ -9,6 +9,7 @@ import {
   type ConsumedEntry,
   type ConsumedUnit,
   entryKcal,
+  lireQuantite,
 } from "@/lib/nutrition/consumed";
 
 /**
@@ -67,9 +68,13 @@ export function ConsumedFoodDetailSheet({
     setQuantité(String(entrée.quantity));
   }
 
-  const valeur = Number(quantité.replace(",", "."));
-  const quantitéValide = Number.isFinite(valeur) && valeur > 0;
-  const modifiée = quantitéValide && valeur !== entrée.quantity;
+  // Même lecteur que la feuille d'ajout : « 1,5 » comme « 1.5 », « 1,5.2 »
+  // refusé, zéro et négatif refusés. Une seule convention de saisie.
+  const valeur = lireQuantite(quantité);
+  const quantitéValide = valeur !== null;
+  // « Rien n'a changé » désactive le bouton : réenvoyer la même quantité
+  // écrirait un instantané neuf pour rien, et ferait bouger `updated_at`.
+  const modifiée = valeur !== null && valeur !== entrée.quantity;
 
   return (
     <div
@@ -148,7 +153,12 @@ export function ConsumedFoodDetailSheet({
 
         <button
           type="button"
-          onClick={() => void onCorriger(valeur, entrée.unit)}
+          onClick={() => {
+            // Garde de double soumission en plus de `disabled` : deux tapes
+            // rapprochées peuvent partir avant le repaint.
+            if (!modifiée || enCours || valeur === null) return;
+            void onCorriger(valeur, entrée.unit);
+          }}
           disabled={!modifiée || enCours}
           className="pressable mt-4 min-h-[48px] w-full rounded-control bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"
         >

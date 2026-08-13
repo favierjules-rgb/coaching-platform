@@ -222,3 +222,68 @@ export function prescribedConsumedMeal(
     ) ?? null
   );
 }
+
+/**
+ * LIRE UN NOMBRE TAPÉ PAR UN ÉLÈVE (A2.1).
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * POURQUOI UN RÉSULTAT TYPÉ PLUTÔT QU'UN `number | null`
+ * ────────────────────────────────────────────────────────────────────────────
+ * Un champ vide et un champ illisible ne veulent pas dire la même chose. Sur
+ * une macro, « vide » vaut légitimement zéro — une eau pétillante, c'est
+ * 0 / 0 / 0. Sur une quantité, « vide » est une saisie incomplète. Et
+ * « abc » n'est jamais zéro, nulle part.
+ *
+ * `Number("")` rend 0 et `Number(" ")` aussi : s'appuyer dessus ferait passer
+ * un champ oublié pour un zéro délibéré. On distingue donc les trois cas, et
+ * l'appelant décide.
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * VIRGULE ET POINT
+ * ────────────────────────────────────────────────────────────────────────────
+ * Les deux sont acceptés — « 1,5 » comme « 1.5 » — parce que le clavier
+ * décimal d'iOS produit une virgule en français et un point sur un clavier
+ * physique. C'est déjà le contrat de `lireRpe` (lib/rpe.ts) : A2.1 ne crée pas
+ * une seconde convention de saisie.
+ *
+ * En revanche « 1,5.2 » est REFUSÉ, et non pas silencieusement tronqué : deux
+ * séparateurs dans un même nombre sont une faute de frappe, pas une intention.
+ */
+export type LectureNombre =
+  | { readonly ok: true; readonly valeur: number }
+  | { readonly ok: false; readonly raison: "vide" | "illisible" | "negatif" };
+
+export function lireNombreFr(saisie: string): LectureNombre {
+  const propre = saisie.trim();
+  if (propre === "") return { ok: false, raison: "vide" };
+
+  // Un seul séparateur décimal, virgule OU point.
+  const séparateurs = (propre.match(/[.,]/g) ?? []).length;
+  if (séparateurs > 1) return { ok: false, raison: "illisible" };
+  if (!/^[+-]?\d*[.,]?\d*$/.test(propre)) return { ok: false, raison: "illisible" };
+
+  const valeur = Number(propre.replace(",", "."));
+  if (!Number.isFinite(valeur)) return { ok: false, raison: "illisible" };
+  if (valeur < 0) return { ok: false, raison: "negatif" };
+  return { ok: true, valeur };
+}
+
+/**
+ * Une MACRO pour 100 : un champ vide vaut zéro, tout le reste doit être un
+ * nombre positif. `null` quand la saisie est inexploitable.
+ */
+export function lireMacroPour100(saisie: string): number | null {
+  const lu = lireNombreFr(saisie);
+  if (lu.ok) return lu.valeur;
+  return lu.raison === "vide" ? 0 : null;
+}
+
+/**
+ * Une QUANTITÉ consommée : strictement positive, jamais vide. `null` sinon —
+ * et c'est cette valeur qui désactive le bouton d'ajout.
+ */
+export function lireQuantite(saisie: string): number | null {
+  const lu = lireNombreFr(saisie);
+  if (!lu.ok) return null;
+  return lu.valeur > 0 ? lu.valeur : null;
+}

@@ -337,9 +337,13 @@ export function StudentMealCard({
 
       {confirmeSuppression && (
         <div className="mt-3 rounded-panel border border-destructive/40 bg-destructive/5 p-3">
+          {/* FORMULATION FIXE, quel que soit le nombre d'aliments. La version
+              dynamique disait « et les 0 aliment qu'il contient ? » sur un
+              repas vide, et imposait une pluralisation qui se collait aux mots
+              au rendu. « tout son contenu » couvre les trois cas — zéro, un,
+              plusieurs — sans compter ni accorder quoi que ce soit. */}
           <p className="text-sm text-foreground">
-            Supprimer « {repas.label} » et les {repas.entries.length} aliment
-            {repas.entries.length > 1 ? "s" : ""} qu&apos;il contient ?
+            Supprimer «&nbsp;{repas.label}&nbsp;» et tout son contenu&nbsp;?
           </p>
           <div className="mt-3 flex gap-2">
             <button
