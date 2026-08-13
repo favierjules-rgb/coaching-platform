@@ -126,3 +126,33 @@ export const NEWSLETTER_UNSUBSCRIBE_IP: RateLimitRule = {
   windowMs: 10 * MINUTE,
   failClosed: true,
 };
+
+/**
+ * Recherche EXTERNE de produits (ALIMENTS A3 phase 4). Le quota protégé n'est
+ * pas le nôtre : Open Food Facts limite les recherches à 10 par minute et par
+ * IP — celle du SERVEUR, donc partagée par tous les élèves — et bannit les
+ * récidivistes. Un seul élève impatient peut donc mettre la recherche hors
+ * service pour tout le monde.
+ *
+ * La limite est posée PAR ÉLÈVE (la route la compose avec son identifiant),
+ * et volontairement plus basse que celle d'OFF : 6 recherches par minute
+ * laissent largement de quoi chercher, corriger sa frappe et rechercher, sans
+ * qu'un seul compte puisse consommer le quota collectif.
+ *
+ * `failClosed` reste FAUX, à la différence des routes qui envoient des emails
+ * ou créent des comptes : une recherche ne coûte rien et n'a aucun effet
+ * durable. En production sans magasin partagé, une protection partielle en
+ * mémoire vaut mieux qu'un refus qui casserait une fonctionnalité inoffensive.
+ */
+export const FOOD_PRODUCT_SEARCH_EXTERNAL: RateLimitRule = {
+  name: "food_product_search_external",
+  limit: 6,
+  windowMs: MINUTE,
+};
+
+/** Recherche LOCALE : aucun appel sortant, quota large et purement anti-abus. */
+export const FOOD_PRODUCT_SEARCH_LOCAL: RateLimitRule = {
+  name: "food_product_search_local",
+  limit: 60,
+  windowMs: MINUTE,
+};

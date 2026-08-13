@@ -1,0 +1,154 @@
+{"alim_code":"1000","name":"Pastis","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"1001","name":"Eau de vie de fruits","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"1002","name":"Gin","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"1003","name":"Liqueur","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"1004","name":"Rhum","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"1005","name":"Whisky","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"1006","name":"Vin doux","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"1007","name":"Apéritif à base de vin ou vermouth","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"1008","name":"Vodka","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"1010","name":"Pastis, prêt à boire (1+ 5)","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"1011","name":"Apéritif anisé sans alcool, à diluer","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"1012","name":"Cocktail à base de rhum","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"1013","name":"Cocktail à base de whisky","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"1014","name":"Alcool pur","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"1015","name":"Marsala","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"1016","name":"Marsala aux oeufs","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"1017","name":"Sangria, faite maison","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"1018","name":"Kir (vin blanc, crème de cassis)","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"1019","name":"Kir royal (champagne, crème de cassis)","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"1021","name":"Crème de cassis","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"1022","name":"Cocktail type punch, 16% alcool, préemballé","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"1023","name":"Eau de vie de vin type armagnac ou cognac","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"1024","name":"Eau de vie type calvados","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"1026","name":"Saké ou alcool de riz","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"2008","name":"Cocktail ou boisson apéritive sans alcool à base de jus de fruits et de sirop","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"2011","name":"Jus multifruit, base orange, multivitaminé","motif":"seuil_trop_haut","macro":"lipides","brut":"< 0,8"}
+{"alim_code":"2381","name":"Jus de canneberge ou cranberry","motif":"macro_manquante","macro":"protéines","brut":"-"}
+{"alim_code":"5000","name":"Bière brune","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"5001","name":"Bière \"coeur de marché\" (4-5° alcool)","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"5002","name":"Bière forte (>8° alcool)","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"5003","name":"Cidre (aliment moyen)","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"5004","name":"Panaché (limonade et bière)","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"5005","name":"Panaché préemballé (<1° alc.), aromatisé ou non","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"5006","name":"Cidre brut","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"5007","name":"Cidre doux","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"5008","name":"Bière faiblement alcoolisée (3° alcool)","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"5009","name":"Bière blanche","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"5010","name":"Bière \"spéciale\" (5-6° alcool)","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"5011","name":"Bière \"de spécialités\" ou d'abbaye, régionales ou d'une brasserie (degré d'alcool variable)","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"5020","name":"Cidre traditionnel","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"5021","name":"Cidre bouché demi-sec","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"5022","name":"Cidre aromatisé aux fruits","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"5029","name":"Bière sans alcool, sucrée, aromatisée ou au jus de fruits","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"5030","name":"Bière sans alcool (<1,2° alcool) et sans sucres ajoutés, aromatisée ou non","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"5100","name":"Pétillant de fruits","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"5201","name":"Vin blanc mousseux","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"5207","name":"Champagne","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"5209","name":"Vin blanc mousseux aromatisé","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"5210","name":"Vin (aliment moyen)","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"5214","name":"Vin rouge","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"5215","name":"Vin blanc sec","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"5216","name":"Vin rosé","motif":"boisson_alcoolisee","macro":null,"brut":"alim_ssgrp_code=0603"}
+{"alim_code":"6150","name":"Boeuf, jarret cru","motif":"macro_manquante","macro":"protéines","brut":"-"}
+{"alim_code":"8380","name":"Oeuf au jambon en gelée","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"9107","name":"Riz blanc, précuit, cuit, sans sel ajouté","motif":"macro_manquante","macro":"protéines","brut":"-"}
+{"alim_code":"10074","name":"Bigorneau, cru","motif":"macro_manquante","macro":"protéines","brut":"-"}
+{"alim_code":"11004","name":"Cornichon, au vinaigre","motif":"seuil_trop_haut","macro":"lipides","brut":"< 0,6"}
+{"alim_code":"11057","name":"Vanille, gousse","motif":"macro_manquante","macro":"protéines","brut":"-"}
+{"alim_code":"11085","name":"Agar (algue), séché","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"11091","name":"Vinaigre balsamique","motif":"seuil_trop_haut","macro":"lipides","brut":"< 0,6"}
+{"alim_code":"11092","name":"Estragon, frais","motif":"macro_manquante","macro":"lipides","brut":"-"}
+{"alim_code":"11095","name":"Ciboulette, séchée","motif":"macro_manquante","macro":"protéines","brut":"-"}
+{"alim_code":"11506","name":"Édulcorant à l'aspartame, en pastilles","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"12768","name":"Fromage type feta, au lait de brebis 100%, à l'huile et aux aromates, égoutté","motif":"macro_manquante","macro":"lipides","brut":"-"}
+{"alim_code":"13119","name":"Pruneau, sans noyau, cuit","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"13172","name":"Boisson infantile céréales lactées aux légumes pour diner dès 12 mois","motif":"macro_manquante","macro":"protéines","brut":"-"}
+{"alim_code":"13402","name":"Ananas, chair sans peau, cru , prélevé à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"13403","name":"Caïmite (ou pomme étoile ou pomme de lait), chair sans peau, cru, prélevé à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"13404","name":"Cerise acérola, chair et peau, sans noyau, crue, prélevée à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"13405","name":"Chadèque, chair sans peau, sans pépins, cru, prélevé à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"13407","name":"Goyave, chair sans peau, purée, prélevée à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"13408","name":"Jus de carambole, prélevé à la Martinique, jus filtré","motif":"macro_manquante","macro":"protéines","brut":"-"}
+{"alim_code":"13409","name":"Jus de carambole, prélevée à la Martinique, jus non filtré","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"13410","name":"Jus de citron punch (variété petit calibre), pur jus, prélevé à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"13411","name":"Jus de citron vert (variété gros calibre), pur jus, prélevé à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"13412","name":"Jus de corossol, prélevé à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"13413","name":"Jus de fruit de la passion ou maracudja, prélevé à la Martinique, pur jus","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"13414","name":"Jus de grenade, prélevée à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"13415","name":"Jus de lime, pur jus, prélevé à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"13416","name":"Jus de mandarine commune, pur jus filtré pasteurisé, prélevée à la Martinique","motif":"macro_manquante","macro":"protéines","brut":"-"}
+{"alim_code":"13419","name":"Jus de moubin, pur jus, prélevé à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"13420","name":"Jus de pamplemousse (variété locale), pur jus, prélevé à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"13425","name":"Mandarine commune, chair sans peau, sans pépins, au sirop, appertisée, non égouttée, prélevée à la Martinique","motif":"macro_manquante","macro":"protéines","brut":"-"}
+{"alim_code":"13430","name":"Melon, chair sans peau, sans pépins, cru, prélevé à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"13431","name":"Orange (variété locale), chair sans peau, sans pépins, prélevée à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"13432","name":"Orange amère, chair sans peau, sans pépins, crue, prélevée à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"13433","name":"Pastèque, chair sans peau, sans pépins, crue, prélevée à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"13434","name":"Pomme cajou, chair et peau, crue, prélevée à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"13435","name":"Pomme cannelle, chair sans peau, sans pépins, crue, prélevée à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"13436","name":"Pomme d'eau ou pomme malaca, chair sans peau, sans noyau, crue, prélevée à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"13437","name":"Pomme liane, chair sans peau, avec pépins, crue, prélevée à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"13438","name":"Prune de cythère, chair et peau, avec pépins, mûre, crue, prélevée à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"13439","name":"Prune de cythère, chair et peau, avec pépins, verte ou immature, crue, prélevée à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"13440","name":"Fruit du jacquier ou jacque, chair sans peau, cru, prélevé à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"15015","name":"Purée de marrons, appertisée","motif":"macro_manquante","macro":"lipides","brut":"-"}
+{"alim_code":"15030","name":"Graine germée de radis, fraîche, crue","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"17800","name":"Huile de cameline","motif":"macro_manquante","macro":"lipides","brut":"-"}
+{"alim_code":"19010","name":"Lait entier, cru","motif":"macro_manquante","macro":"protéines","brut":"-"}
+{"alim_code":"19015","name":"Lait infantile pour prématurés, prêt à consommer","motif":"macro_manquante","macro":"protéines","brut":"-"}
+{"alim_code":"19270","name":"Lait de bufflesse, entier","motif":"macro_manquante","macro":"protéines","brut":"-"}
+{"alim_code":"20040","name":"Poireau, cuit","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"20106","name":"Champignon, truffe noire, crue","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"20127","name":"Pourpier, feuille, cru","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"20135","name":"Fondue de poireau, préemballée","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"20159","name":"Champignon, oronge vraie, crue","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"20161","name":"Champignon, rosé des prés, cru","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"20202","name":"Champignon noir, séché","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"20343","name":"Tomate marmande, crue","motif":"macro_manquante","macro":"protéines","brut":"-"}
+{"alim_code":"20344","name":"Tomate noire de Crimée, crue","motif":"macro_manquante","macro":"protéines","brut":"-"}
+{"alim_code":"20345","name":"Tomate allongée, crue","motif":"macro_manquante","macro":"protéines","brut":"-"}
+{"alim_code":"20800","name":"Banane jaune, chair sans peau, cuite à la vapeur, prélevée à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"20801","name":"Chips de chair de giraumon (variété locale), prélevé à la Martinique","motif":"macro_manquante","macro":"protéines","brut":"-"}
+{"alim_code":"20802","name":"Chips de chair de giraumon (variété phoenix), prélevé à la Martinique","motif":"macro_manquante","macro":"protéines","brut":"-"}
+{"alim_code":"20803","name":"Chou dur ou chou caraïbe ou macabo, pulpe, cuit à la vapeur, prélevé à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"20806","name":"Chayote ou christophine ou chouchou à peau blanche, chaire sans peau, sans noyau, appertisée, non égouttée, prélevée à la Martinique","motif":"macro_manquante","macro":"protéines","brut":"-"}
+{"alim_code":"20807","name":"Chayote ou christophine ou chouchou, chair et peau, sans noyau, cuite à la vapeur, surgelée, prélevée à la Martinique","motif":"macro_manquante","macro":"protéines","brut":"-"}
+{"alim_code":"20808","name":"Concombre, chair sans peau, avec pépins, cru, prélevé à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"20809","name":"Concombre, chair et peau, cru, prélevé à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"20811","name":"Dachine, pulpe, cuit à la vapeur, prélevé à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"20812","name":"Farine de pulpe de patate douce, prélevée à la Martinique","motif":"macro_manquante","macro":"protéines","brut":"-"}
+{"alim_code":"20815","name":"Giraumon (variété locale), chair sans peau, cuit à la vapeur, surgelé, prélevé à la Martinique","motif":"macro_manquante","macro":"protéines","brut":"-"}
+{"alim_code":"20816","name":"Giraumon (variété locale), chair sans peau, râpé, cru, prélevé à la Martinique","motif":"macro_manquante","macro":"protéines","brut":"-"}
+{"alim_code":"20818","name":"Giraumon (variété phoenix), chair sans peau, râpé, cru, prélevé à la Martinique","motif":"macro_manquante","macro":"protéines","brut":"-"}
+{"alim_code":"20819","name":"Giraumon (variété phoenix), chair sans peau, surgelé, cuit à la vapeur, prélevé à la Martinique","motif":"macro_manquante","macro":"protéines","brut":"-"}
+{"alim_code":"20820","name":"Gombo, entier, appertisé, non égoutté, prélevé à la Martinique","motif":"macro_manquante","macro":"protéines","brut":"-"}
+{"alim_code":"20826","name":"Topinambour, pulpe, cuit à la vapeur, prélevé à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"20827","name":"Kamanioc, pulpe, cuit à la vapeur, prélevé à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"20828","name":"Massissi, chair, cru, prélevé à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"20829","name":"Papaye verte, chair sans peau, crue, prélevée à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"20830","name":"Papaye verte, chair sans peau, cuite à la vapeur, prélevée à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"20831","name":"Patate douce, pulpe, blanchie, surgelée, prélevée à la Martinique","motif":"macro_manquante","macro":"protéines","brut":"-"}
+{"alim_code":"20834","name":"Ti nain, chair sans peau, cuit à la vapeur, prélevé à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"20835","name":"Tomate, entière, crue, prélevée à la Martinique","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"20989","name":"Maërl ou lithothamne (Lithothamnion), séché ou déshydraté","motif":"macro_manquante","macro":"lipides","brut":"-"}
+{"alim_code":"21007","name":"Mouton, gigot rôti/cuit au four","motif":"macro_manquante","macro":"protéines","brut":"-"}
+{"alim_code":"25035","name":"Sauté d'agneau au curry, préemballé","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"25400","name":"Croque-monsieur, jambon, fromage et beurre, fait maison","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"25504","name":"Brochette de volaille, crue","motif":"macro_manquante","macro":"lipides","brut":"-"}
+{"alim_code":"25505","name":"Brochette de boeuf, crue","motif":"macro_manquante","macro":"lipides","brut":"-"}
+{"alim_code":"26015","name":"Lieu noir, cuit","motif":"seuil_trop_haut","macro":"glucides","brut":"< 1"}
+{"alim_code":"26186","name":"Maquereau, mariné","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"30102","name":"Saucisse fumée à cuire","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"30125","name":"Saucisse alsacienne fumée ou gendarme","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"30151","name":"Merguez crue (aliment moyen)","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"30152","name":"Merguez, pur boeuf, crue","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"30153","name":"Merguez, boeuf et porc, crue","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"30154","name":"Merguez, boeuf, mouton et porc, crue","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"30177","name":"Diot cru","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"30750","name":"Saucisse viennoise crue","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"30766","name":"Saucisse de bière","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"30778","name":"Saucisse de langue à la pistache","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"31108","name":"Gelée royale","motif":"macro_manquante","macro":"glucides","brut":"-"}
+{"alim_code":"36031","name":"Poulet, cuisse, viande et peau bouillie/cuite à l'eau","motif":"seuil_trop_haut","macro":"glucides","brut":"< 0,55"}
+{"alim_code":"36311","name":"Dinde, haut de cuisse cru","motif":"macro_manquante","macro":"protéines","brut":"-"}

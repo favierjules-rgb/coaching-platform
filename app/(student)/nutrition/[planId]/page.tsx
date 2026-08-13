@@ -1,5 +1,7 @@
 "use client";
 
+import { useMemo } from "react";
+
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft, ShoppingCart } from "lucide-react";
@@ -13,7 +15,10 @@ import { WeeklyNutritionTracker } from "@/components/student/WeeklyNutritionTrac
 import { StatCard } from "@/components/shared/StatCard";
 import { nutritionGoalLabels } from "@/lib/nutrition";
 import { dailyTargetsByWeekday, weeklyCaloriesFromDays } from "@/lib/nutrition/plan-v2-week";
+import { WEEKDAY_KEYS, type WeekdayKey } from "@/lib/nutrition/weekdays";
+import { getCurrentWeekDates } from "@/lib/nutrition-weekly";
 import { getNutritionPlan, student } from "@/data/student";
+import { useConsumedMeals } from "@/hooks/useConsumedMeals";
 import { useEtatOfflineEleve } from "@/hooks/useEtatOfflineEleve";
 import { useStudentNutritionPlanV2 } from "@/hooks/useStudentNutritionPlanV2";
 import { useSupabaseNutritionForStudent } from "@/hooks/useSupabaseNutritionForStudent";
@@ -25,6 +30,25 @@ export default function NutritionPlanDetailPage() {
   // bibliothèque de recettes que la RLS autorise pour cet élève.
   const v2 = useStudentNutritionPlanV2(supabaseNutrition.active ? (params.planId ?? null) : null);
   const local = useEtatOfflineEleve(supabaseNutrition.ready && !supabaseNutrition.active);
+
+  // ── LE PONT ENTRE LE JOUR-TYPE ET LA DATE (ALIMENTS A2) ────────────────
+  // La prescription n'a aucune date : `nutrition_days.day` vaut `monday`…, et
+  // `week_start_date` est NULL sur les 70 lignes de Production. La
+  // consommation, elle, est datée. On réutilise `getCurrentWeekDates()` — la
+  // convention DÉJÀ en place pour le suivi hebdomadaire — plutôt que d'écrire
+  // un second calendrier qui pourrait diverger d'un jour.
+  //
+  // `useMemo` sur une chaîne, et non sur le tableau : un littéral recréé à
+  // chaque rendu relancerait la lecture indéfiniment.
+  const datesSemaine = useMemo(() => getCurrentWeekDates(), []);
+  const datesParJour = useMemo(
+    () =>
+      Object.fromEntries(
+        WEEKDAY_KEYS.map((jour, index) => [jour, datesSemaine[index]]),
+      ) as Record<WeekdayKey, string>,
+    [datesSemaine],
+  );
+  const consommation = useConsumedMeals(datesSemaine, supabaseNutrition.active);
 
   if (!supabaseNutrition.ready) {
     return <p className="text-sm text-muted-foreground">Chargement…</p>;
@@ -157,7 +181,29 @@ export default function NutritionPlanDetailPage() {
           ) : v2.error ? (
             <ÉtatErreur message={v2.error} onRéessayer={() => void v2.refetch()} />
           ) : v2.week ? (
-            <StudentPrescribedWeek week={v2.week} />
+            <StudentPrescribedWeek
+              week={v2.week}
+              // Le suivi est OPTIONNEL : sans cette prop, le composant rend
+              // exactement la prescription d'avant A2. C'est la garantie de
+              // non-régression demandée — on ajoute, on ne remplace pas.
+              suivi={{
+                datesParJour,
+                meals: consommation.meals,
+                chargement: consommation.loading,
+                enCours: consommation.enCours,
+                erreur: consommation.error,
+                onEffacerErreur: consommation.effacerErreur,
+                onOuvrirPrescrit: consommation.ouvrirPrescrit,
+                onCreerRepas: consommation.creerRepas,
+                onRenommerRepas: consommation.renommerRepas,
+                onSupprimerRepas: consommation.supprimerRepas,
+                onAjouterCatalogue: consommation.ajouterCatalogue,
+                onAjouterProduit: consommation.ajouterProduit,
+                onAjouterManuel: consommation.ajouterManuel,
+                onCorriger: consommation.corrigerQuantité,
+                onSupprimerAliment: consommation.supprimerAliment,
+              }}
+            />
           ) : (
             <p className="rounded-panel border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
               Ce plan n&apos;a pas encore de semaine.

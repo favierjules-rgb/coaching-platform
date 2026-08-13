@@ -1,6 +1,34 @@
 -- ============================================================================
 -- Checklist PostgreSQL — ALIMENTS A1, FONDATIONS DATA
 -- Migration couverte : 20260831090000_food_catalog_and_meal_entries.sql
+-- Exécutée contre le schéma COURANT, donc A2 (20260901090000) comprise.
+--
+-- ────────────────────────────────────────────────────────────────────────────
+-- CE QUE A2 A CHANGÉ DANS CETTE CHECKLIST, ET POURQUOI
+-- ────────────────────────────────────────────────────────────────────────────
+-- Une checklist se lit sur une base reconstruite baseline → TOUTES les
+-- migrations. Elle vit donc avec le schéma d'aujourd'hui, pas avec celui du
+-- jour où son chantier a été écrit. A2 a modifié deux contrats posés par A1,
+-- et les contrôles concernés ont été RÉÉCRITS — jamais supprimés :
+--
+--   1. `consumed_on` et `slot_key` ont QUITTÉ meal_entries pour consumed_meals.
+--      Les garder aux deux endroits en ferait une seconde source de vérité.
+--      → MEAL-A2 et MEAL-A5 constatent le déplacement et éprouvent la clé
+--        étrangère composite qui le remplace ; le vocabulaire du créneau est
+--        éprouvé sur sa nouvelle table par aliments_a2_checklist.sql.
+--
+--   2. `insert, update, delete` ont été RETIRÉS à `authenticated`. Tant qu'ils
+--      existaient, un client pouvait écrire ses propres macros par PostgREST
+--      et contourner tout le calcul serveur ; une policy dit quelles LIGNES,
+--      jamais quelles VALEURS.
+--      → MEAL-A6, A7, A8, A9, A11 et A12 gardent leur intention et changent de
+--        véhicule : ils passent par les RPC `security definer` de A2. Des
+--        contrôles NEUFS prouvent en plus que la porte directe est fermée,
+--        pour l'élève, pour le coach ET pour l'administrateur.
+--
+-- Réécrire un contrôle « tel quel » aurait produit un FAUX VERT : un INSERT
+-- qui échoue parce que la colonne n'existe plus n'éprouve pas le vocabulaire
+-- qu'il prétendait éprouver.
 --
 -- CE QU'ELLE VÉRIFIE
 --   FOOD-A1  macros négatives refusées
@@ -160,6 +188,25 @@ insert into public.students (id, user_id, coach_id, first_name, last_name, email
 -- Une recette de coach A, pour éprouver meal_entries.recipe_id.
 insert into public.nutrition_recipes (id, coach_id, name, status) values
   ('40000000-0000-4000-8000-00000000000a', 'c0000000-0000-4000-8000-00000000000a', 'Recette test A', 'active');
+
+-- ── LES CONTENEURS DE REPAS (ajoutés par ALIMENTS A2) ──────────────────
+-- Depuis 20260901090000, une meal_entry appartient à un `consumed_meal` et
+-- c'est LUI qui porte la date et le créneau. Ces conteneurs sont ici de
+-- simples DÉCORS : ce que cette checklist éprouve reste meal_entries. Leur
+-- propre contrat (cible figée, repas prescrit vs libre, RPC) est éprouvé par
+-- supabase/tests/aliments_a2_checklist.sql, pas ici.
+--
+-- Insertion DIRECTE, sous l'identité `postgres` : A2 a retiré ce privilège à
+-- `authenticated`, et c'est précisément ce que MEAL-A6 vérifie plus bas.
+insert into public.consumed_meals (id, student_id, consumed_on, kind, label, position) values
+  ('d0000000-0000-4000-8000-0000000000a1', '50000000-0000-4000-8000-00000000000a',
+   date '2026-08-10', 'student', 'Repas decor A', 1000),
+  ('d0000000-0000-4000-8000-0000000000a2', '50000000-0000-4000-8000-00000000000a',
+   date '2026-08-09', 'student', 'Repas decor A veille', 1000),
+  ('d0000000-0000-4000-8000-0000000000b1', '50000000-0000-4000-8000-00000000000b',
+   date '2026-08-10', 'student', 'Repas decor B', 1000),
+  ('d0000000-0000-4000-8000-0000000000f1', '50000000-0000-4000-8000-00000000000f',
+   date '2026-08-10', 'student', 'Repas decor orphelin', 1000);
 
 do $$
 begin
@@ -588,8 +635,8 @@ begin
   -- L'élève orphelin n'a ni coach ni plan : il doit pouvoir manger quand même.
   perform pg_temp.noter('MEAL-A1', 'une entrée s''enregistre sans le moindre plan assigné', pg_temp.accepte($q$
     insert into public.meal_entries
-      (student_id, consumed_on, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
-    values ('50000000-0000-4000-8000-00000000000f', date '2026-08-10', 'free',
+      (student_id, consumed_meal_id, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
+    values ('50000000-0000-4000-8000-00000000000f', 'd0000000-0000-4000-8000-0000000000f1', 'free',
             'Pomme', 150, 'g', 0.4, 20, 0.3) $q$));
 
   perform pg_temp.noter('MEAL-A1', 'aucun plan n''existe pour cet élève — la preuve que rien ne l''exige',
@@ -604,38 +651,66 @@ do $$
 begin
   perform pg_temp.noter('MEAL-A2', 'quantité nulle refusée', pg_temp.refuse($q$
     insert into public.meal_entries
-      (student_id, consumed_on, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
-    values ('50000000-0000-4000-8000-00000000000a', date '2026-08-10', 'free', 'Rien', 0, 'g', 0, 0, 0) $q$));
+      (student_id, consumed_meal_id, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
+    values ('50000000-0000-4000-8000-00000000000a', 'd0000000-0000-4000-8000-0000000000a1', 'free', 'Rien', 0, 'g', 0, 0, 0) $q$));
 
   perform pg_temp.noter('MEAL-A2', 'quantité négative refusée', pg_temp.refuse($q$
     insert into public.meal_entries
-      (student_id, consumed_on, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
-    values ('50000000-0000-4000-8000-00000000000a', date '2026-08-10', 'free', 'Negatif', -1, 'g', 0, 0, 0) $q$));
+      (student_id, consumed_meal_id, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
+    values ('50000000-0000-4000-8000-00000000000a', 'd0000000-0000-4000-8000-0000000000a1', 'free', 'Negatif', -1, 'g', 0, 0, 0) $q$));
 
   perform pg_temp.noter('MEAL-A2', 'macro négative refusée', pg_temp.refuse($q$
     insert into public.meal_entries
-      (student_id, consumed_on, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
-    values ('50000000-0000-4000-8000-00000000000a', date '2026-08-10', 'free', 'Macro', 100, 'g', -1, 0, 0) $q$));
+      (student_id, consumed_meal_id, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
+    values ('50000000-0000-4000-8000-00000000000a', 'd0000000-0000-4000-8000-0000000000a1', 'free', 'Macro', 100, 'g', -1, 0, 0) $q$));
 
   perform pg_temp.noter('MEAL-A2', 'libellé vide refusé', pg_temp.refuse($q$
     insert into public.meal_entries
-      (student_id, consumed_on, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
-    values ('50000000-0000-4000-8000-00000000000a', date '2026-08-10', 'free', '  ', 100, 'g', 0, 0, 0) $q$));
+      (student_id, consumed_meal_id, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
+    values ('50000000-0000-4000-8000-00000000000a', 'd0000000-0000-4000-8000-0000000000a1', 'free', '  ', 100, 'g', 0, 0, 0) $q$));
 
   perform pg_temp.noter('MEAL-A2', 'unité hors vocabulaire refusée', pg_temp.refuse($q$
     insert into public.meal_entries
-      (student_id, consumed_on, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
-    values ('50000000-0000-4000-8000-00000000000a', date '2026-08-10', 'free', 'Unite', 1, 'poignee', 0, 0, 0) $q$));
+      (student_id, consumed_meal_id, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
+    values ('50000000-0000-4000-8000-00000000000a', 'd0000000-0000-4000-8000-0000000000a1', 'free', 'Unite', 1, 'poignee', 0, 0, 0) $q$));
 
-  perform pg_temp.noter('MEAL-A2', 'créneau hors vocabulaire v2 refusé', pg_temp.refuse($q$
-    insert into public.meal_entries
-      (student_id, consumed_on, slot_key, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
-    values ('50000000-0000-4000-8000-00000000000a', date '2026-08-10', 'brunch', 'free', 'Creneau', 1, 'g', 0, 0, 0) $q$));
+  -- ── DÉPLACÉ PAR A2, PAS SUPPRIMÉ ──────────────────────────────────────
+  -- A1 posait `consumed_on` et `slot_key` SUR L'ENTRÉE, et deux contrôles
+  -- éprouvaient ici le vocabulaire du créneau. A2 (20260901090000) a déplacé
+  -- les deux sur `consumed_meals` : les garder aux deux endroits en ferait
+  -- une seconde source de vérité — rien n'empêcherait une entrée datée du 13
+  -- d'être rattachée à un repas du 14.
+  --
+  -- Les réécrire tels quels ici donnerait un FAUX VERT : l'INSERT échouerait
+  -- pour « column slot_key does not exist », c'est-à-dire pour une raison qui
+  -- n'a rien à voir avec le vocabulaire éprouvé. On constate donc le
+  -- déplacement, et le vocabulaire lui-même est éprouvé sur sa nouvelle
+  -- table par A2-DB (supabase/tests/aliments_a2_checklist.sql).
+  perform pg_temp.noter('MEAL-A2', 'consumed_on et slot_key ont QUITTÉ meal_entries (déplacés sur consumed_meals par A2)',
+    not exists (select 1 from information_schema.columns
+                 where table_schema = 'public' and table_name = 'meal_entries'
+                   and column_name in ('consumed_on', 'slot_key'))
+    and (select count(*) from information_schema.columns
+          where table_schema = 'public' and table_name = 'consumed_meals'
+            and column_name in ('consumed_on', 'slot_key')) = 2);
 
-  perform pg_temp.noter('MEAL-A2', 'créneau NULL accepté (consommation hors créneau)', pg_temp.accepte($q$
+  perform pg_temp.noter('MEAL-A2', 'une entrée ne peut PAS flotter sans conteneur', pg_temp.refuse($q$
     insert into public.meal_entries
-      (student_id, consumed_on, slot_key, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
-    values ('50000000-0000-4000-8000-00000000000a', date '2026-08-10', null, 'free', 'Grignotage', 30, 'g', 1, 5, 2) $q$));
+      (student_id, consumed_meal_id, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
+    values ('50000000-0000-4000-8000-00000000000a', null, 'free', 'Orpheline', 30, 'g', 1, 5, 2) $q$));
+
+  -- La clé étrangère est COMPOSITE : le conteneur ET l'élève. Rattacher son
+  -- entrée au repas d'un autre est refusé par la base, pas par une règle
+  -- applicative.
+  perform pg_temp.noter('MEAL-A2', 'une entrée ne peut PAS être rattachée au repas d''un autre élève', pg_temp.refuse($q$
+    insert into public.meal_entries
+      (student_id, consumed_meal_id, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
+    values ('50000000-0000-4000-8000-00000000000a', 'd0000000-0000-4000-8000-0000000000b1', 'free', 'Vol', 30, 'g', 1, 5, 2) $q$));
+
+  perform pg_temp.noter('MEAL-A2', 'une entrée normale, elle, s''enregistre', pg_temp.accepte($q$
+    insert into public.meal_entries
+      (student_id, consumed_meal_id, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
+    values ('50000000-0000-4000-8000-00000000000a', 'd0000000-0000-4000-8000-0000000000a1', 'free', 'Grignotage', 30, 'g', 1, 5, 2) $q$));
 end $$;
 
 -- ---------------------------------------------------------------------
@@ -646,26 +721,26 @@ declare v_ok boolean := true;
 begin
   perform pg_temp.noter('MEAL-A3', 'source_type inventé refusé', pg_temp.refuse($q$
     insert into public.meal_entries
-      (student_id, consumed_on, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
-    values ('50000000-0000-4000-8000-00000000000a', date '2026-08-10', 'scan', 'X', 1, 'g', 0, 0, 0) $q$));
+      (student_id, consumed_meal_id, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
+    values ('50000000-0000-4000-8000-00000000000a', 'd0000000-0000-4000-8000-0000000000a1', 'scan', 'X', 1, 'g', 0, 0, 0) $q$));
 
   -- Les quatre valeurs du vocabulaire, y compris `product` qui n'a pas
   -- encore de table : elle est déclarée d'avance, donc elle doit passer.
   perform pg_temp.noter('MEAL-A3', 'les quatre valeurs du vocabulaire sont acceptées, product compris',
     pg_temp.accepte($q$
       insert into public.meal_entries
-        (student_id, consumed_on, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
-      values ('50000000-0000-4000-8000-00000000000a', date '2026-08-09', 'free',         'A', 1, 'g', 0, 0, 0),
-             ('50000000-0000-4000-8000-00000000000a', date '2026-08-09', 'product',      'B', 1, 'g', 0, 0, 0) $q$)
+        (student_id, consumed_meal_id, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
+      values ('50000000-0000-4000-8000-00000000000a', 'd0000000-0000-4000-8000-0000000000a2', 'free',         'A', 1, 'g', 0, 0, 0),
+             ('50000000-0000-4000-8000-00000000000a', 'd0000000-0000-4000-8000-0000000000a2', 'product',      'B', 1, 'g', 0, 0, 0) $q$)
     and pg_temp.accepte($q$
       insert into public.meal_entries
-        (student_id, consumed_on, source_type, recipe_id, label, quantity, unit, protein_g, carb_g, fat_g)
-      values ('50000000-0000-4000-8000-00000000000a', date '2026-08-09', 'recipe',
+        (student_id, consumed_meal_id, source_type, recipe_id, label, quantity, unit, protein_g, carb_g, fat_g)
+      values ('50000000-0000-4000-8000-00000000000a', 'd0000000-0000-4000-8000-0000000000a2', 'recipe',
               '40000000-0000-4000-8000-00000000000a', 'C', 1, 'portion', 0, 0, 0) $q$)
     and pg_temp.accepte($q$
       insert into public.meal_entries
-        (student_id, consumed_on, source_type, food_id, label, quantity, unit, protein_g, carb_g, fat_g)
-      values ('50000000-0000-4000-8000-00000000000a', date '2026-08-09', 'catalog_food',
+        (student_id, consumed_meal_id, source_type, food_id, label, quantity, unit, protein_g, carb_g, fat_g)
+      values ('50000000-0000-4000-8000-00000000000a', 'd0000000-0000-4000-8000-0000000000a2', 'catalog_food',
               'f0000000-0000-4000-8000-000000000001', 'D', 1, 'g', 0, 0, 0) $q$));
 
   perform pg_temp.noter('MEAL-A3', 'le vocabulaire déclaré est exactement recipe|catalog_food|product|free',
@@ -682,20 +757,20 @@ do $$
 begin
   perform pg_temp.noter('MEAL-A4', 'food_id sans source_type = catalog_food refusé', pg_temp.refuse($q$
     insert into public.meal_entries
-      (student_id, consumed_on, source_type, food_id, label, quantity, unit, protein_g, carb_g, fat_g)
-    values ('50000000-0000-4000-8000-00000000000a', date '2026-08-10', 'free',
+      (student_id, consumed_meal_id, source_type, food_id, label, quantity, unit, protein_g, carb_g, fat_g)
+    values ('50000000-0000-4000-8000-00000000000a', 'd0000000-0000-4000-8000-0000000000a1', 'free',
             'f0000000-0000-4000-8000-000000000001', 'X', 1, 'g', 0, 0, 0) $q$));
 
   perform pg_temp.noter('MEAL-A4', 'recipe_id sans source_type = recipe refusé', pg_temp.refuse($q$
     insert into public.meal_entries
-      (student_id, consumed_on, source_type, recipe_id, label, quantity, unit, protein_g, carb_g, fat_g)
-    values ('50000000-0000-4000-8000-00000000000a', date '2026-08-10', 'catalog_food',
+      (student_id, consumed_meal_id, source_type, recipe_id, label, quantity, unit, protein_g, carb_g, fat_g)
+    values ('50000000-0000-4000-8000-00000000000a', 'd0000000-0000-4000-8000-0000000000a1', 'catalog_food',
             '40000000-0000-4000-8000-00000000000a', 'X', 1, 'g', 0, 0, 0) $q$));
 
   perform pg_temp.noter('MEAL-A4', 'les deux pointeurs à la fois refusés', pg_temp.refuse($q$
     insert into public.meal_entries
-      (student_id, consumed_on, source_type, recipe_id, food_id, label, quantity, unit, protein_g, carb_g, fat_g)
-    values ('50000000-0000-4000-8000-00000000000a', date '2026-08-10', 'recipe',
+      (student_id, consumed_meal_id, source_type, recipe_id, food_id, label, quantity, unit, protein_g, carb_g, fat_g)
+    values ('50000000-0000-4000-8000-00000000000a', 'd0000000-0000-4000-8000-0000000000a1', 'recipe',
             '40000000-0000-4000-8000-00000000000a', 'f0000000-0000-4000-8000-000000000001',
             'X', 1, 'g', 0, 0, 0) $q$));
 
@@ -704,8 +779,8 @@ begin
   -- NULL reste légale — sinon supprimer une recette deviendrait impossible.
   perform pg_temp.noter('MEAL-A4', 'une entrée « recipe » au pointeur NULL reste légale', pg_temp.accepte($q$
     insert into public.meal_entries
-      (student_id, consumed_on, source_type, recipe_id, label, quantity, unit, protein_g, carb_g, fat_g)
-    values ('50000000-0000-4000-8000-00000000000a', date '2026-08-08', 'recipe', null,
+      (student_id, consumed_meal_id, source_type, recipe_id, label, quantity, unit, protein_g, carb_g, fat_g)
+    values ('50000000-0000-4000-8000-00000000000a', 'd0000000-0000-4000-8000-0000000000a1', 'recipe', null,
             'Recette disparue', 1, 'portion', 10, 20, 5) $q$));
 end $$;
 
@@ -717,19 +792,28 @@ end $$;
 -- que la ligne est immuable — ce serait une autre règle, et ce n'est pas
 -- celle qu'on veut : la correction volontaire est éprouvée en MEAL-A11.
 insert into public.meal_entries
-  (id, student_id, consumed_on, slot_key, source_type, food_id, label, quantity, unit, protein_g, carb_g, fat_g,
+  (id, student_id, consumed_meal_id, source_type, food_id, label, quantity, unit, protein_g, carb_g, fat_g,
    created_at, updated_at)
-values ('e0000000-0000-4000-8000-000000000001', '50000000-0000-4000-8000-00000000000a',
-        date '2026-08-07', 'lunch', 'catalog_food', 'f0000000-0000-4000-8000-000000000001',
+values ('e0000000-0000-4000-8000-000000000001', '50000000-0000-4000-8000-00000000000a', 'd0000000-0000-4000-8000-0000000000a1', 'catalog_food', 'f0000000-0000-4000-8000-000000000001',
         'Blanc de poulet', 200, 'g', 46, 0, 3,
         now() - interval '2 days', now() - interval '2 days');
 
 do $$
 begin
-  -- Ce qui n'est pas l'instantané se corrige évidemment.
-  perform pg_temp.noter('MEAL-A5', 'la note, le créneau et la date sont modifiables', pg_temp.accepte($q$
-    update public.meal_entries
-       set note = 'note ajoutee', slot_key = 'dinner', consumed_on = date '2026-08-06'
+  -- Ce qui n'est pas l'instantané se corrige évidemment. Depuis A2, le
+  -- créneau et la date ne sont plus sur l'entrée : ce qui reste à ce niveau,
+  -- c'est la note. Changer de repas se fait en changeant de conteneur — et
+  -- c'est cette seconde forme que le contrôle suivant éprouve.
+  perform pg_temp.noter('MEAL-A5', 'la note est modifiable', pg_temp.accepte($q$
+    update public.meal_entries set note = 'note ajoutee'
+     where id = 'e0000000-0000-4000-8000-000000000001' $q$));
+
+  perform pg_temp.noter('MEAL-A5', 'déplacer l''entrée vers un AUTRE repas du même élève est possible', pg_temp.accepte($q$
+    update public.meal_entries set consumed_meal_id = 'd0000000-0000-4000-8000-0000000000a2'
+     where id = 'e0000000-0000-4000-8000-000000000001' $q$));
+
+  perform pg_temp.noter('MEAL-A5', 'la déplacer vers le repas d''un AUTRE élève est refusé', pg_temp.refuse($q$
+    update public.meal_entries set consumed_meal_id = 'd0000000-0000-4000-8000-0000000000b1'
      where id = 'e0000000-0000-4000-8000-000000000001' $q$));
 
   -- Et AUCUN trigger ne s'interpose sur l'UPDATE de meal_entries hormis
@@ -789,12 +873,10 @@ end $$;
 -- MEAL-A6 — RLS élève
 -- ---------------------------------------------------------------------
 insert into public.meal_entries
-  (id, student_id, consumed_on, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
+  (id, student_id, consumed_meal_id, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
 values
-  ('e0000000-0000-4000-8000-0000000000b1', '50000000-0000-4000-8000-00000000000b',
-   date '2026-08-10', 'free', 'Repas eleve B', 100, 'g', 10, 10, 10),
-  ('e0000000-0000-4000-8000-0000000000f1', '50000000-0000-4000-8000-00000000000f',
-   date '2026-08-10', 'free', 'Repas eleve orphelin', 100, 'g', 10, 10, 10);
+  ('e0000000-0000-4000-8000-0000000000b1', '50000000-0000-4000-8000-00000000000b', 'd0000000-0000-4000-8000-0000000000b1', 'free', 'Repas eleve B', 100, 'g', 10, 10, 10),
+  ('e0000000-0000-4000-8000-0000000000f1', '50000000-0000-4000-8000-00000000000f', 'd0000000-0000-4000-8000-0000000000f1', 'free', 'Repas eleve orphelin', 100, 'g', 10, 10, 10);
 
 set local role authenticated;
 select pg_temp.connecte('a0000000-0000-4000-8000-000000000004');  -- élève A
@@ -808,34 +890,63 @@ begin
     pg_temp.compte($q$ select count(*)::int from public.meal_entries
                         where student_id <> '50000000-0000-4000-8000-00000000000a' $q$) = 0);
 
-  perform pg_temp.noter('MEAL-A6', 'l''élève A crée une entrée pour lui-même', pg_temp.accepte($q$
+  -- ── LE CHEMIN D'ÉCRITURE A CHANGÉ EN A2 ───────────────────────────────
+  -- A1 accordait `insert, update, delete` sur meal_entries à `authenticated`,
+  -- et cette section prouvait que la RLS suffisait à cloisonner les élèves.
+  -- A2 a RETIRÉ ces trois privilèges : tant qu'ils existaient, un client
+  -- pouvait écrire ses propres protein_g / carb_g / fat_g par PostgREST et
+  -- contourner intégralement le calcul serveur. La RLS ne pouvait pas s'y
+  -- opposer : une policy dit QUELLES LIGNES, jamais QUELLES VALEURS.
+  --
+  -- L'INTENTION des contrôles ci-dessous est inchangée — « l'élève écrit ses
+  -- entrées, et seulement les siennes ». Seul le VÉHICULE change : les RPC
+  -- `security definer` de 20260901090000. On ajoute donc, en plus, la preuve
+  -- que la porte directe est bien fermée.
+  perform pg_temp.noter('MEAL-A6', 'la porte DIRECTE est fermée : insert refusé', pg_temp.refuse($q$
     insert into public.meal_entries
-      (id, student_id, consumed_on, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
-    values ('e0000000-0000-4000-8000-0000000000a1', '50000000-0000-4000-8000-00000000000a',
-            date '2026-08-10', 'free', 'Saisie eleve A', 100, 'g', 1, 2, 3) $q$));
+      (student_id, consumed_meal_id, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
+    values ('50000000-0000-4000-8000-00000000000a', 'd0000000-0000-4000-8000-0000000000a1',
+            'free', 'Macros fabriquees', 1, 'g', 9999, 0, 0) $q$));
 
-  perform pg_temp.noter('MEAL-A6', 'l''élève A ne peut PAS créer une entrée au nom de l''élève B', pg_temp.refuse($q$
-    insert into public.meal_entries
-      (student_id, consumed_on, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
-    values ('50000000-0000-4000-8000-00000000000b', date '2026-08-10', 'free', 'Usurpation', 1, 'g', 0, 0, 0) $q$));
+  perform pg_temp.noter('MEAL-A6', 'la porte DIRECTE est fermée : update et delete refusés',
+    pg_temp.refuse($q$ update public.meal_entries set protein_g = 9999
+                        where student_id = '50000000-0000-4000-8000-00000000000a' $q$)
+    and pg_temp.refuse($q$ delete from public.meal_entries
+                            where student_id = '50000000-0000-4000-8000-00000000000a' $q$));
 
-  perform pg_temp.noter('MEAL-A6', 'l''élève A ne modifie aucune entrée de l''élève B',
-    pg_temp.compte($q$ with maj as (
-        update public.meal_entries set note = 'intrusion'
-         where id = 'e0000000-0000-4000-8000-0000000000b1' returning 1)
-      select count(*)::int from maj $q$) = 0);
+  perform pg_temp.noter('MEAL-A6', 'aucun privilège d''écriture ne subsiste pour authenticated',
+    not exists (select 1 from information_schema.role_table_grants
+                 where table_schema = 'public' and table_name = 'meal_entries'
+                   and grantee = 'authenticated'
+                   and privilege_type in ('INSERT', 'UPDATE', 'DELETE'))
+    and exists (select 1 from information_schema.role_table_grants
+                 where table_schema = 'public' and table_name = 'meal_entries'
+                   and grantee = 'authenticated' and privilege_type = 'SELECT'));
 
-  perform pg_temp.noter('MEAL-A6', 'l''élève A ne supprime aucune entrée de l''élève B',
-    pg_temp.compte($q$ with sup as (
-        delete from public.meal_entries
-         where id = 'e0000000-0000-4000-8000-0000000000b1' returning 1)
-      select count(*)::int from sup $q$) = 0);
+  -- L'élève écrit — par la RPC, qui calcule les macros elle-même.
+  perform pg_temp.noter('MEAL-A6', 'l''élève A crée une entrée pour lui-même, PAR LA RPC', pg_temp.accepte($q$
+    select public.ajouter_aliment_manuel('d0000000-0000-4000-8000-0000000000a1',
+             'Saisie eleve A', 100, 'g', 1, 2, 3) $q$));
+
+  -- Et il ne peut pas viser le repas d'un autre : la RPC résout l'élève par
+  -- current_student_id(), jamais par un identifiant reçu du client.
+  perform pg_temp.noter('MEAL-A6', 'l''élève A ne peut PAS écrire dans le repas de l''élève B', pg_temp.refuse($q$
+    select public.ajouter_aliment_manuel('d0000000-0000-4000-8000-0000000000b1',
+             'Usurpation', 1, 'g', 0, 0, 0) $q$));
+
+  perform pg_temp.noter('MEAL-A6', 'l''élève A ne modifie aucune entrée de l''élève B', pg_temp.refuse($q$
+    select public.modifier_quantite_entree('e0000000-0000-4000-8000-0000000000b1', 500, 'g') $q$));
+
+  perform pg_temp.noter('MEAL-A6', 'l''élève A ne supprime aucune entrée de l''élève B', pg_temp.refuse($q$
+    select public.supprimer_entree('e0000000-0000-4000-8000-0000000000b1') $q$));
 
   perform pg_temp.noter('MEAL-A6', 'l''élève A supprime bien SA propre entrée',
-    pg_temp.compte($q$ with sup as (
-        delete from public.meal_entries
-         where id = 'e0000000-0000-4000-8000-0000000000a1' returning 1)
-      select count(*)::int from sup $q$) = 1);
+    pg_temp.accepte($q$ select public.supprimer_entree(
+      (select id from public.meal_entries
+        where student_id = '50000000-0000-4000-8000-00000000000a'
+          and label = 'Saisie eleve A')) $q$)
+    and pg_temp.compte($q$ select count(*)::int from public.meal_entries
+                            where label = 'Saisie eleve A' $q$) = 0);
 end $$;
 
 reset role;
@@ -870,21 +981,27 @@ begin
 
   perform pg_temp.noter('MEAL-A7', 'coach A ne peut pas ÉCRIRE une entrée pour son élève', pg_temp.refuse($q$
     insert into public.meal_entries
-      (student_id, consumed_on, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
-    values ('50000000-0000-4000-8000-00000000000a', date '2026-08-10', 'free',
+      (student_id, consumed_meal_id, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
+    values ('50000000-0000-4000-8000-00000000000a', 'd0000000-0000-4000-8000-0000000000a1', 'free',
             'Saisie par le coach', 1, 'g', 0, 0, 0) $q$));
 
-  perform pg_temp.noter('MEAL-A7', 'coach A ne modifie aucune entrée de son élève',
-    pg_temp.compte($q$ with maj as (
-        update public.meal_entries set note = 'coach'
-         where student_id = '50000000-0000-4000-8000-00000000000a' returning 1)
-      select count(*)::int from maj $q$) = 0);
+  -- A1 : la RLS laissait passer l'UPDATE et il touchait zéro ligne. A2 :
+  -- le privilège lui-même a disparu, l'instruction est REFUSÉE. Les deux
+  -- disent « le coach ne change rien » ; le contrôle nomme lequel des deux
+  -- barrages a joué, pour qu'un futur relâchement du privilège se voie.
+  perform pg_temp.noter('MEAL-A7', 'coach A ne modifie aucune entrée de son élève', pg_temp.refuse($q$
+    update public.meal_entries set note = 'coach'
+     where student_id = '50000000-0000-4000-8000-00000000000a' $q$));
 
-  perform pg_temp.noter('MEAL-A7', 'coach A ne supprime aucune entrée de son élève',
-    pg_temp.compte($q$ with sup as (
-        delete from public.meal_entries
-         where student_id = '50000000-0000-4000-8000-00000000000a' returning 1)
-      select count(*)::int from sup $q$) = 0);
+  perform pg_temp.noter('MEAL-A7', 'coach A ne supprime aucune entrée de son élève', pg_temp.refuse($q$
+    delete from public.meal_entries
+     where student_id = '50000000-0000-4000-8000-00000000000a' $q$));
+
+  -- Le coach n'a pas non plus de porte dérobée par les RPC : elles résolvent
+  -- toutes l'élève par current_student_id(), qui est NULL pour un coach.
+  perform pg_temp.noter('MEAL-A7', 'les RPC de A2 ne donnent au coach aucune porte dérobée', pg_temp.refuse($q$
+    select public.ajouter_aliment_manuel('d0000000-0000-4000-8000-0000000000a1',
+             'Saisie par le coach via RPC', 1, 'g', 0, 0, 0) $q$));
 
   perform pg_temp.noter('MEAL-A7', 'le helper relationnel répond juste pour chacun des trois élèves',
     public.is_coach_of_student('50000000-0000-4000-8000-00000000000a')
@@ -912,11 +1029,27 @@ do $$
 begin
   perform pg_temp.noter('MEAL-A7', 'l''administrateur lit les entrées des TROIS élèves',
     pg_temp.compte($q$ select count(distinct student_id)::int from public.meal_entries $q$) = 3);
-  perform pg_temp.noter('MEAL-A7', 'l''administrateur peut écrire', pg_temp.accepte($q$
-    insert into public.meal_entries
-      (student_id, consumed_on, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
-    values ('50000000-0000-4000-8000-00000000000f', date '2026-08-05', 'free',
-            'Correction administrative', 10, 'g', 0, 0, 0) $q$));
+  -- ── CONSÉQUENCE ASSUMÉE DE A2, ÉNONCÉE PLUTÔT QUE CONTOURNÉE ─────────
+  -- En A1 l'administrateur écrivait directement : sa policy meal_entries_
+  -- manage_admin le permettait. A2 retire insert/update/delete à
+  -- `authenticated` TOUT ENTIER — l'administrateur en fait partie. Sa policy
+  -- subsiste mais ne peut plus s'exercer : un privilège absent n'est pas
+  -- rattrapable par une policy permissive.
+  --
+  -- C'est voulu : la règle « le navigateur ne dicte jamais les macros » ne
+  -- souffre pas d'exception par rôle, sans quoi il suffirait d'usurper un
+  -- profil admin pour la contourner. Une correction administrative se fait
+  -- côté serveur (service_role) ou en SQL, jamais depuis le navigateur.
+  perform pg_temp.noter('MEAL-A7', 'l''administrateur non plus n''écrit directement (conséquence assumée de A2)',
+    pg_temp.refuse($q$
+      insert into public.meal_entries
+        (student_id, consumed_meal_id, source_type, label, quantity, unit, protein_g, carb_g, fat_g)
+      values ('50000000-0000-4000-8000-00000000000f', 'd0000000-0000-4000-8000-0000000000f1', 'free',
+              'Correction administrative', 10, 'g', 0, 0, 0) $q$));
+
+  perform pg_temp.noter('MEAL-A7', 'sa policy d''administration existe toujours, elle est simplement sans privilège',
+    exists (select 1 from pg_policies where schemaname = 'public'
+             and tablename = 'meal_entries' and policyname = 'meal_entries_manage_admin'));
 end $$;
 reset role;
 
@@ -947,10 +1080,9 @@ insert into public.food_catalog (id, name, protein_per_100, carb_per_100, fat_pe
 values ('f0000000-0000-4000-8000-0000000000c1', 'Banane', 1.1, 23, 0.3);
 
 insert into public.meal_entries
-  (id, student_id, consumed_on, slot_key, source_type, food_id,
+  (id, student_id, consumed_meal_id, source_type, food_id,
    label, quantity, unit, protein_g, carb_g, fat_g, created_at, updated_at)
-values ('e0000000-0000-4000-8000-0000000000c1', '50000000-0000-4000-8000-00000000000a',
-        date '2026-08-10', 'morning_snack', 'catalog_food', 'f0000000-0000-4000-8000-0000000000c1',
+values ('e0000000-0000-4000-8000-0000000000c1', '50000000-0000-4000-8000-00000000000a', 'd0000000-0000-4000-8000-0000000000a1', 'catalog_food', 'f0000000-0000-4000-8000-0000000000c1',
         'Banane', 120, 'g', 1.32, 27.6, 0.36,
         now() - interval '2 days', now() - interval '2 days');
 
@@ -965,57 +1097,71 @@ begin
     from public.meal_entries where id = 'e0000000-0000-4000-8000-0000000000c1';
 
   -- ── MEAL-A8 ────────────────────────────────────────────────────────
-  -- L'élève corrige 120 g → 150 g. L'application a recalculé les macros
-  -- depuis food_catalog (1,1 / 23 / 0,3 pour 100 g) AVANT d'écrire : c'est
-  -- ce couple quantité + macros qui part en une seule instruction.
-  perform pg_temp.noter('MEAL-A8', 'l''élève corrige la quantité ET les macros de SA propre entrée',
-    pg_temp.compte($q$ with maj as (
-        update public.meal_entries
-           set quantity = 150, protein_g = 1.65, carb_g = 34.5, fat_g = 0.45
-         where id = 'e0000000-0000-4000-8000-0000000000c1' returning 1)
-      select count(*)::int from maj $q$) = 1);
+  -- L'élève corrige 120 g → 150 g. En A1, l'application recalculait les
+  -- macros depuis food_catalog puis écrivait le couple quantité + macros en
+  -- une instruction. En A2, c'est le SERVEUR qui recharge food_catalog et
+  -- recalcule : le client n'envoie que la quantité et l'unité, et il ne
+  -- pourrait pas envoyer autre chose — le privilège d'écriture directe lui a
+  -- été retiré (MEAL-A6).
+  --
+  -- L'intention du contrôle est intacte : « corriger sa saisie est possible,
+  -- et le résultat est un instantané neuf, cohérent ». Les valeurs attendues
+  -- sont les mêmes qu'en A1, puisque l'aliment est le même : 1,1 / 23 / 0,3
+  -- pour 100 g, appliqués à 150 g.
+  perform pg_temp.noter('MEAL-A8', 'l''élève corrige la quantité de SA propre entrée', pg_temp.accepte($q$
+    select public.modifier_quantite_entree('e0000000-0000-4000-8000-0000000000c1', 150, 'g') $q$));
 
-  perform pg_temp.noter('MEAL-A8', 'l''élève peut aussi corriger le libellé et l''unité',
-    pg_temp.accepte($q$
-      update public.meal_entries set label = 'Banane bien mûre'
-       where id = 'e0000000-0000-4000-8000-0000000000c1' $q$));
+  perform pg_temp.noter('MEAL-A8', 'le SERVEUR a recalculé les macros, le client ne les a jamais dictées',
+    (select quantity = 150 and protein_g = 1.65 and carb_g = 34.5 and fat_g = 0.45
+       from public.meal_entries where id = 'e0000000-0000-4000-8000-0000000000c1'));
 
+  -- Le libellé d'un aliment du catalogue n'est PLUS corrigible par l'élève :
+  -- il fait partie de l'instantané que le serveur calcule, et la RPC le
+  -- réécrit depuis food_catalog. C'est un durcissement voulu par A2 — un
+  -- libellé libre permettrait de faire passer n'importe quoi pour autre chose.
+  perform pg_temp.noter('MEAL-A8', 'le libellé suit le catalogue, il n''est pas dicté par le client',
+    (select label from public.meal_entries
+      where id = 'e0000000-0000-4000-8000-0000000000c1') = 'Banane');
+
+  -- Les contraintes de A1 tiennent toujours : c'est la RPC qui les rencontre
+  -- désormais, et elle refuse AVANT d'écrire.
   perform pg_temp.noter('MEAL-A8', 'les contraintes tiennent toujours pendant une correction',
-    pg_temp.refuse($q$
-      update public.meal_entries set quantity = 0
-       where id = 'e0000000-0000-4000-8000-0000000000c1' $q$)
-    and pg_temp.refuse($q$
-      update public.meal_entries set protein_g = -1
-       where id = 'e0000000-0000-4000-8000-0000000000c1' $q$)
-    and pg_temp.refuse($q$
-      update public.meal_entries set label = '   '
-       where id = 'e0000000-0000-4000-8000-0000000000c1' $q$));
+    pg_temp.refuse($q$ select public.modifier_quantite_entree(
+      'e0000000-0000-4000-8000-0000000000c1', 0, 'g') $q$)
+    and pg_temp.refuse($q$ select public.modifier_quantite_entree(
+      'e0000000-0000-4000-8000-0000000000c1', -5, 'g') $q$)
+    and pg_temp.refuse($q$ select public.modifier_quantite_entree(
+      'e0000000-0000-4000-8000-0000000000c1', 150, 'poignee') $q$));
 
-  -- Corriger ne doit pas non plus permettre de sortir des états cohérents.
+  -- Sortir d'un état cohérent n'est même plus exprimable : aucune RPC ne
+  -- prend `source_type` en paramètre, et l'UPDATE direct est fermé.
   perform pg_temp.noter('MEAL-A8', 'une correction ne peut pas produire un état impossible',
     pg_temp.refuse($q$
       update public.meal_entries set source_type = 'free'
-       where id = 'e0000000-0000-4000-8000-0000000000c1' $q$));
+       where id = 'e0000000-0000-4000-8000-0000000000c1' $q$)
+    and not exists (
+      select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'public'
+         and p.proname in ('modifier_quantite_entree', 'ajouter_aliment_catalogue',
+                           'ajouter_aliment_manuel')
+         and pg_get_function_arguments(p.oid) ~ 'source_type'));
 
   -- ── MEAL-A11 ───────────────────────────────────────────────────────
   perform pg_temp.noter('MEAL-A11', 'le nouvel instantané a bien REMPLACÉ l''ancien',
     (select quantity = 150 and protein_g = 1.65 and carb_g = 34.5 and fat_g = 0.45
-            and label = 'Banane bien mûre'
        from public.meal_entries where id = 'e0000000-0000-4000-8000-0000000000c1'));
 
   perform pg_temp.noter('MEAL-A11', 'le rattachement à la source est conservé',
     (select food_id = 'f0000000-0000-4000-8000-0000000000c1' and source_type = 'catalog_food'
        from public.meal_entries where id = 'e0000000-0000-4000-8000-0000000000c1'));
 
-  -- Atomicité : quantité et macros voyagent dans la MÊME instruction. Si
-  -- l'une échoue, aucune ne passe — sinon un instantané mi-ancien mi-neuf
-  -- pourrait exister, ce qui est pire qu'un refus.
-  perform pg_temp.noter('MEAL-A11', 'une correction partielle qui viole une contrainte n''écrit RIEN',
-    pg_temp.refuse($q$
-      update public.meal_entries
-         set quantity = 200, protein_g = -5
-       where id = 'e0000000-0000-4000-8000-0000000000c1' $q$)
-    and (select quantity = 150 from public.meal_entries
+  -- Atomicité : quantité et macros voyagent dans la MÊME instruction, à
+  -- l'intérieur de la RPC. Si l'une échoue, aucune ne passe — sinon un
+  -- instantané mi-ancien mi-neuf pourrait exister, ce qui est pire qu'un refus.
+  perform pg_temp.noter('MEAL-A11', 'une correction refusée n''écrit RIEN',
+    pg_temp.refuse($q$ select public.modifier_quantite_entree(
+      'e0000000-0000-4000-8000-0000000000c1', 200, 'litre') $q$)
+    and (select quantity = 150 and protein_g = 1.65 from public.meal_entries
           where id = 'e0000000-0000-4000-8000-0000000000c1'));
 
   -- ── MEAL-A12 ───────────────────────────────────────────────────────
@@ -1040,19 +1186,23 @@ begin
                         where id = 'e0000000-0000-4000-8000-0000000000c1' $q$) = 0);
 
   perform pg_temp.noter('MEAL-A9', 'l''élève B ne corrige AUCUNE ligne de l''élève A',
-    pg_temp.compte($q$ with maj as (
-        update public.meal_entries set quantity = 999
-         where id = 'e0000000-0000-4000-8000-0000000000c1' returning 1)
-      select count(*)::int from maj $q$) = 0);
+    pg_temp.refuse($q$ select public.modifier_quantite_entree(
+      'e0000000-0000-4000-8000-0000000000c1', 999, 'g') $q$)
+    and pg_temp.refuse($q$ update public.meal_entries set quantity = 999
+                            where id = 'e0000000-0000-4000-8000-0000000000c1' $q$));
 
-  -- Le cas sournois : déplacer une entrée vers soi. Le `with check` de la
-  -- policy évalue la ligne RÉSULTANTE, donc même un élève qui verrait la
-  -- ligne ne pourrait pas se l'attribuer.
+  -- Le cas sournois : déplacer une entrée vers soi. Deux barrages désormais.
+  -- L'UPDATE direct n'a plus de privilège ; et même s'il en retrouvait un, la
+  -- clé étrangère composite (consumed_meal_id, student_id) refuserait une
+  -- ligne dont l'élève ne correspond plus au conteneur.
   perform pg_temp.noter('MEAL-A9', 'l''élève B ne peut pas s''approprier une entrée',
-    pg_temp.compte($q$ with maj as (
-        update public.meal_entries set student_id = '50000000-0000-4000-8000-00000000000b'
-         where id = 'e0000000-0000-4000-8000-0000000000c1' returning 1)
-      select count(*)::int from maj $q$) = 0);
+    pg_temp.refuse($q$
+      update public.meal_entries set student_id = '50000000-0000-4000-8000-00000000000b'
+       where id = 'e0000000-0000-4000-8000-0000000000c1' $q$)
+    and exists (select 1 from pg_constraint
+                 where conrelid = 'public.meal_entries'::regclass
+                   and conname = 'meal_entries_consumed_meal_same_student'
+                   and contype = 'f' and cardinality(conkey) = 2));
 end $$;
 reset role;
 
@@ -1064,10 +1214,10 @@ begin
   perform pg_temp.noter('MEAL-A9', 'le coach de l''élève A la LIT mais ne la corrige pas',
     pg_temp.compte($q$ select count(*)::int from public.meal_entries
                         where id = 'e0000000-0000-4000-8000-0000000000c1' $q$) = 1
-    and pg_temp.compte($q$ with maj as (
-        update public.meal_entries set quantity = 999
-         where id = 'e0000000-0000-4000-8000-0000000000c1' returning 1)
-      select count(*)::int from maj $q$) = 0);
+    and pg_temp.refuse($q$ update public.meal_entries set quantity = 999
+                            where id = 'e0000000-0000-4000-8000-0000000000c1' $q$)
+    and pg_temp.refuse($q$ select public.modifier_quantite_entree(
+      'e0000000-0000-4000-8000-0000000000c1', 999, 'g') $q$));
 end $$;
 reset role;
 
@@ -1160,18 +1310,30 @@ end $$;
 do $$
 declare v_fonctions text[];
 begin
-  -- Aucune fonction du schéma public ne mentionne food_catalog, hormis les
-  -- trois posées par A1 elle-même.
+  -- Aucune fonction du schéma public ne mentionne food_catalog, hormis celles
+  -- posées par A1 et A2 elles-mêmes. La liste est ÉNUMÉRÉE plutôt que filtrée
+  -- par préfixe : une nouvelle fonction qui se mettrait à lire le catalogue
+  -- doit faire rougir ce contrôle, et non se glisser dans une exception large.
+  --
+  -- A2 y ajoute exactement deux lectrices, et ce sont les deux qui calculent
+  -- l'instantané côté serveur — c'est leur raison d'être.
   select coalesce(array_agg(p.proname order by p.proname), '{}') into v_fonctions
     from pg_proc p
     join pg_namespace n on n.oid = p.pronamespace
    where n.nspname = 'public'
      and p.prokind = 'f'
      and coalesce(p.prosrc, '') ~ 'food_catalog'
-     and p.proname not in ('food_slug', 'is_coach_of_student', 'meal_entries_freeze_snapshot');
+     and p.proname not in ('food_slug', 'is_coach_of_student', 'meal_entries_freeze_snapshot',
+                           'ajouter_aliment_catalogue', 'modifier_quantite_entree');
 
   perform pg_temp.noter('RECIPE-A2', 'aucune fonction existante ne s''est mise à lire food_catalog',
     v_fonctions = '{}'::text[]);
+
+  perform pg_temp.noter('RECIPE-A2', 'les deux lectrices de A2 sont bien là, et ce sont les seules ajoutées',
+    (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.prokind = 'f'
+        and coalesce(p.prosrc, '') ~ 'food_catalog'
+        and p.proname in ('ajouter_aliment_catalogue', 'modifier_quantite_entree')) = 2);
 
   perform pg_temp.noter('RECIPE-A2', 'les RPC de recettes n''ont pas été retouchées par A1',
     (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace

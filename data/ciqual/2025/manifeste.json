@@ -1,0 +1,70 @@
+{
+  "$commentaire": [
+    "Provenance et règles de génération du jeu de données Ciqual normalisé.",
+    "Régénérer :  npx tsx scripts/ciqual/generer-dataset.mts <xlsx officiel>",
+    "La Production ne télécharge JAMAIS Ciqual : elle lit la migration générée."
+  ],
+  "source": {
+    "cle": "ciqual",
+    "version_dataset": "2025",
+    "version": "Ciqual 2025",
+    "editeur": "Anses",
+    "publie_le": "2025-11-19",
+    "extrait_le": "2025-11-03",
+    "doi": "10.57745/RDMHWY",
+    "licence": "Licence Ouverte / Open Licence (Etalab) 2.0",
+    "attribution": "Anses. 2025. Table de composition nutritionnelle des aliments Ciqual",
+    "attribution_longue": "Anses. 2025. Table de composition nutritionnelle des aliments Ciqual 2025. https://doi.org/10.57745/RDMHWY",
+    "page": "https://ciqual.anses.fr/",
+    "fichier": "ciqual.xlsx",
+    "sha256_source": "d2082938522d909119fbdc8772c028017163650dd81e31d13fdb8a8bd702f32e",
+    "octets_source": 1544342,
+    "feuille": "composition nutritionnelle"
+  },
+  "regles": {
+    "proteines": "const 25003 — Protéines, N x 6.25 (base étiquetage UE), et non le facteur de Jones (25000)",
+    "glucides": "const 31000 — Glucides (g/100 g), fibres exclues",
+    "lipides": "const 40000 — Lipides (g/100 g)",
+    "energie": "const 328 — conservée en MÉTADONNÉE d'audit uniquement. food_catalog ne porte aucune kcal : les kcal SETH restent 4×P + 4×G + 9×L.",
+    "unite": "toutes les teneurs Ciqual sont pour 100 g de partie comestible → nutrition_unit = 'g'",
+    "identite": "source = 'ciqual' (fournisseur, stable) + source_ref = alim_code (objet, stable). Le millésime est source_version = '2025', une PROPRIÉTÉ de la ligne : un réimport 2027 met à jour la même ligne au lieu d'en créer une seconde.",
+    "traces": "valeur opérationnelle 0, chaîne brute conservée dans `censures`",
+    "censure_acceptable": "« < X » avec X ≤ 0.5 g/100 g → valeur opérationnelle 0, chaîne brute conservée",
+    "censure_trop_haute": "« < X » avec X > 0.5 g/100 g sur P, G ou L → aucune valeur inventée, aliment exclu",
+    "manquant": "« - » ou vide sur P, G ou L → jamais zéro, aliment exclu",
+    "alcool": "sous-groupe 0603 « boisson alcoolisées » exclu en entier ; les aliments d'autres groupes contenant un peu d'alcool sont conservés",
+    "colonnes": "repérées par POSITION — les « / » des en-têtes sont des retours à la ligne dans le fichier Anses"
+  },
+  "compteurs": {
+    "lignes_source": 3484,
+    "aliments_importables": 3330,
+    "aliments_exclus": 154,
+    "exclusions_par_motif": {
+      "boisson_alcoolisee": 50,
+      "seuil_trop_haut": 5,
+      "macro_manquante": 99
+    },
+    "aliments_avec_valeur_censuree": 305,
+    "cellules_pgl": {
+      "valeur": 9868,
+      "traces": 151,
+      "censure_acceptable": 159,
+      "censure_trop_haute": 5,
+      "manquant": 119,
+      "illisible": 0
+    }
+  },
+  "sorties": {
+    "aliments.jsonl": {
+      "lignes": 3330,
+      "sha256": "64732d8c6f719ac488addfdc9b5d6b5bd65e4d95242c68f9a4280ef37efcafde",
+      "octets": 965149
+    },
+    "exclusions.jsonl": {
+      "lignes": 154,
+      "sha256": "f8d60ac61f3320ae64dfa842b0e62c6e5e8e0b2c5a73efaf4cc86a2533c37426",
+      "octets": 21045
+    }
+  },
+  "generateur": "scripts/ciqual/generer-dataset.mts"
+}
