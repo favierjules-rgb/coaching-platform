@@ -717,6 +717,114 @@ end $$;
 reset role;
 
 -- ---------------------------------------------------------------------
+-- A3-PROD-HYDRATE — LA CONSOMMATION SUIT L'HYDRATATION (phase 4.1)
+-- ---------------------------------------------------------------------
+do $$
+begin
+  perform pg_temp.noter('A3-PROD-HYDRATE', 'detail_fetched_at existe et est NULLABLE',
+    (select is_nullable from information_schema.columns
+      where table_schema = 'public' and table_name = 'food_products'
+        and column_name = 'detail_fetched_at') = 'YES');
+
+  -- Une fiche née d'une RECHERCHE : vue à l'instant, jamais hydratée. La base
+  -- doit l'accepter telle quelle — c'est l'état normal d'un produit trouvé par
+  -- son nom, et le rendre impossible obligerait à mentir sur la date.
+  perform pg_temp.noter('A3-PROD-HYDRATE', 'une fiche non hydratée est acceptée (detail_fetched_at NULL)',
+    pg_temp.accepte($q$
+      insert into public.food_products (id, gtin, brand, product_name, nutrition_unit,
+        protein_per_100, carb_per_100, fat_per_100, source, source_version,
+        source_fetched_at, detail_fetched_at)
+      values ('70000000-0000-4000-8000-000000000005', '5449000131836', 'Marque L',
+              'Boisson trouvee par recherche', 'g', 0, 10.6, 0,
+              'open_food_facts', 'v3.4', now(), null) $q$));
+end $$;
+
+set local role authenticated;
+select pg_temp.connecte('b0000000-0000-4000-8000-000000000004');
+
+do $$
+declare v_repas uuid; v_entree_avant uuid;
+begin
+  select id into v_repas from public.consumed_meals
+   where student_id = '60000000-0000-4000-8000-00000000000a' limit 1;
+
+  -- L'élève consomme la fiche NON HYDRATÉE : elle dit « pour 100 g », faute
+  -- de mieux. 200 g → 21,2 g de glucides.
+  v_entree_avant := public.ajouter_aliment_produit(
+    v_repas, '70000000-0000-4000-8000-000000000005', 200, 'g');
+  perform set_config('pg_temp.entree_avant_hydratation', v_entree_avant::text, true);
+
+  perform pg_temp.noter('A3-PROD-HYDRATE', 'avant hydratation, la RPC lit l''unité provisoire',
+    (select carb_g = 21.2 and unit = 'g' from public.meal_entries where id = v_entree_avant));
+end $$;
+reset role;
+
+-- HYDRATATION : le lookup GTIN a chargé la fiche complète, qui dit « ml »,
+-- donne la quantité nette et pose `detail_fetched_at`.
+update public.food_products
+   set nutrition_unit = 'ml', net_quantity = 1000, net_unit = 'ml',
+       ingredients_text = 'Eau gazeifiee, sucre', detail_fetched_at = now()
+ where id = '70000000-0000-4000-8000-000000000005';
+
+do $$
+declare v_entree uuid;
+begin
+  v_entree := current_setting('pg_temp.entree_avant_hydratation')::uuid;
+
+  -- CONTRAT A1, inchangé depuis le premier jour : hydrater une fiche ne
+  -- réécrit AUCUN instantané déjà posé. L'élève a mangé ce qu'il a mangé.
+  perform pg_temp.noter('A3-PROD-HYDRATE', 'l''hydratation ne touche AUCUN instantané déjà saisi',
+    (select carb_g = 21.2 and unit = 'g' from public.meal_entries where id = v_entree));
+end $$;
+
+set local role authenticated;
+select pg_temp.connecte('b0000000-0000-4000-8000-000000000004');
+
+do $$
+declare v_repas uuid; v_entree_apres uuid;
+begin
+  select id into v_repas from public.consumed_meals
+   where student_id = '60000000-0000-4000-8000-00000000000a' limit 1;
+
+  -- Une consommation POSTÉRIEURE à l'hydratation utilise la fiche corrigée :
+  -- l'unité est « ml », et demander des grammes est désormais refusé.
+  perform pg_temp.noter('A3-PROD-HYDRATE', 'après hydratation, les grammes sont refusés sur ce produit',
+    pg_temp.refuse(format($q$ select public.ajouter_aliment_produit(%L,
+      '70000000-0000-4000-8000-000000000005', 200, 'g') $q$, v_repas)));
+
+  v_entree_apres := public.ajouter_aliment_produit(
+    v_repas, '70000000-0000-4000-8000-000000000005', 250, 'ml');
+  perform pg_temp.noter('A3-PROD-HYDRATE', '250 ml après hydratation donnent 26,5 g de glucides',
+    (select carb_g = 26.5 and unit = 'ml' from public.meal_entries where id = v_entree_apres));
+end $$;
+reset role;
+
+-- Et la correction VOLONTAIRE d'une quantité relit bien la fiche courante —
+-- contrat de la phase 3, qu'on revérifie ici sur une fiche hydratée entre
+-- temps. L'entrée d'avant était en grammes ; le produit est passé en ml : la
+-- correction doit échouer plutôt que convertir en silence.
+set local role authenticated;
+select pg_temp.connecte('b0000000-0000-4000-8000-000000000004');
+
+do $$
+declare v_entree uuid;
+begin
+  v_entree := current_setting('pg_temp.entree_avant_hydratation')::uuid;
+  perform pg_temp.noter('A3-PROD-HYDRATE', 'corriger en grammes une entrée dont le produit est passé en ml est REFUSÉ',
+    pg_temp.refuse(format($q$ select public.modifier_quantite_entree(%L, 300, 'g') $q$, v_entree)));
+end $$;
+reset role;
+
+do $$
+declare v_entree uuid;
+begin
+  v_entree := current_setting('pg_temp.entree_avant_hydratation')::uuid;
+  perform pg_temp.noter('A3-PROD-HYDRATE', 'et l''instantané d''origine est resté intact après ce refus',
+    (select carb_g = 21.2 and quantity = 200 and unit = 'g'
+       from public.meal_entries where id = v_entree));
+end $$;
+
+-- ---------------------------------------------------------------------
 -- Récapitulatif
 -- ---------------------------------------------------------------------
 do $$

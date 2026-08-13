@@ -465,7 +465,7 @@ await test("B7. aucune migration déjà appliquée n'est touchée", () => {
   const fichiers = readdirSync(new URL("../../supabase/migrations", import.meta.url).pathname)
     .filter((f) => f.endsWith(".sql"))
     .sort();
-  assert.equal(fichiers.length, 69, "69 migrations attendues après ALIMENTS A3 phase 3");
+  assert.equal(fichiers.length, 70, "70 migrations attendues après ALIMENTS A3 phase 4.1");
   // On ancre sur la migration qui PRÉCÈDE le chantier plutôt que sur la fin
   // du dossier : ce qui doit rester vrai, c'est que les six migrations F3 se
   // suivent sans rien d'intercalé — pas qu'elles soient les dernières. Un
@@ -489,7 +489,7 @@ await test("B7. aucune migration déjà appliquée n'est touchée", () => {
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
   // 35 depuis 20260828090000_web_push_notifications.sql (socle Web Push).
-  assert.equal(attendues.length, 42);
+  assert.equal(attendues.length, 43);
   assert.ok(attendues.includes("20260820090000_training_movement_patterns.sql"), "manifeste non mis à jour");
   assert.ok(attendues.includes("20260821090000_workout_feedback_authoritative.sql"), "manifeste non mis à jour");
   assert.ok(attendues.includes("20260822090000_workout_feedback_session_metadata.sql"), "manifeste non mis à jour");

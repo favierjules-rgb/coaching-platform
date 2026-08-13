@@ -599,6 +599,9 @@ function fausseFiche(stale: boolean, proteine = 6.3) {
     proteinPer100: proteine,
     id: "70000000-0000-4000-8000-000000000001",
     fetchedAt: "2026-07-01T00:00:00.000Z",
+    // Phase 4.1 : une fiche « fraîche » est une fiche HYDRATÉE récemment.
+    detailFetchedAt: stale ? "2026-06-01T00:00:00.000Z" : "2026-08-13T00:00:00.000Z",
+    hydratee: true,
     stale,
   };
 }
@@ -607,7 +610,7 @@ test("A3-OFF13 · une fiche fraîche est servie SANS aucun appel réseau", async
   let appelsOff = 0;
   let écritures = 0;
   const produit = await resoudreProduitParGtin("3017620422003", {
-    lireCache: async () => ({ produit: fausseFiche(false), frais: true }),
+    lireCache: async () => ({ produit: fausseFiche(false), detailFrais: true }),
     interrogerOff: async () => {
       appelsOff += 1;
       return { produit: PRODUIT_SETH, brut: PRODUIT_SETH };
@@ -627,7 +630,7 @@ test("A3-OFF13 · une fiche fraîche est servie SANS aucun appel réseau", async
 test("A3-OFF14 · fiche PÉRIMÉE + OFF en panne : la copie est servie, marquée stale", async () => {
   for (const code of ["OFF_UNAVAILABLE", "OFF_RATE_LIMITED", "OFF_INVALID_RESPONSE"] as const) {
     const produit = await resoudreProduitParGtin("3017620422003", {
-      lireCache: async () => ({ produit: fausseFiche(true, 5.5), frais: false }),
+      lireCache: async () => ({ produit: fausseFiche(true, 5.5), detailFrais: false }),
       interrogerOff: async () => {
         throw new OffErreur(code);
       },
@@ -642,7 +645,7 @@ test("A3-OFF14 · fiche PÉRIMÉE + OFF en panne : la copie est servie, marquée
 test("A3-OFF14 · fiche périmée + OFF disponible : elle est rafraîchie et n'est plus stale", async () => {
   let écritures = 0;
   const produit = await resoudreProduitParGtin("3017620422003", {
-    lireCache: async () => ({ produit: fausseFiche(true, 5.5), frais: false }),
+    lireCache: async () => ({ produit: fausseFiche(true, 5.5), detailFrais: false }),
     interrogerOff: async () => ({ produit: PRODUIT_SETH, brut: PRODUIT_SETH }),
     ecrireCache: async () => {
       écritures += 1;
@@ -689,7 +692,7 @@ test("A3-OFF16 · produit démenti par la source : PAS de repli sur la copie pé
     await assert.rejects(
       () =>
         resoudreProduitParGtin("3017620422003", {
-          lireCache: async () => ({ produit: fausseFiche(true), frais: false }),
+          lireCache: async () => ({ produit: fausseFiche(true), detailFrais: false }),
           interrogerOff: async () => {
             throw new OffErreur(code);
           },
@@ -762,15 +765,59 @@ test("A3-OFF-SUP · les allergènes sont déclaratifs, sans aucun jugement", () 
 });
 
 test("A3-OFF-SUP · le périmètre de la phase est tenu : rien de plus n'a été branché", () => {
-  // Ce que la phase 3 ne fait PAS encore, et qui doit rester absent : la
-  // recherche texte Search-a-licious, le scanner, le Service Worker.
-  const fautifs: string[] = [];
+  // ⚠️ RÉÉCRIT LE 13/08/2026, ET C'EST LA TROISIÈME FOIS QUE CE MOTIF SE
+  // PRÉSENTE — après les deux contrôles jumeaux d'A2 et d'A3 phase 2.
+  //
+  // Ce contrôle interdisait « search.openfoodfacts » PARTOUT dans l'arbre.
+  // C'était juste tant que la recherche texte n'existait pas ; la phase 4 l'a
+  // branchée, avec autorisation explicite. Le rouge ne disait donc pas que la
+  // phase 3 avait débordé : il disait que le contrôle parlait de L'ARBRE
+  // ENTIER pour décrire le périmètre D'UNE PHASE.
+  //
+  // La garantie n'est pas abandonnée. Elle est déplacée là où elle reste
+  // vraie : la phase 3 n'a rien branché de la recherche — ses PROPRES
+  // fichiers ne la nomment pas —, et Search-a-licious reste confiné à
+  // l'unique module de la phase 4 (éprouvé par A3-SEARCH-SUP).
+  const MODULE_RECHERCHE = "lib/open-food-facts/recherche.ts";
+
+  // 1. Ce qui reste interdit PARTOUT : le scanner et l'endpoint legacy. Ce
+  //    sont les phases suivantes, et rien ne doit les avoir anticipées.
+  const anticipes: string[] = [];
+  // 2. Search-a-licious n'a le droit d'exister que dans SON module.
+  const deborde: string[] = [];
   for (const dossier of ["../../lib", "../../app", "../../components", "../../hooks"]) {
     for (const chemin of fichiersTs(new URL(dossier + "/", import.meta.url))) {
       const source = sansProse(readFileSync(chemin, "utf8"));
-      if (/search\.openfoodfacts|search-a-licious|BarcodeDetector|ZXing|cgi\/search\.pl/i.test(source)) {
-        fautifs.push(chemin);
+      // `getUserMedia` n'est PAS dans cette liste, et l'y avoir mis un instant
+      // a rendu le contrôle rouge sur `lib/feedback-video-capture.ts` : la
+      // capture vidéo des retours de séance s'en sert depuis des mois, sans le
+      // moindre rapport avec un code-barres. Un mot n'est pas une intention —
+      // ce qui trahirait un scanner, c'est un décodeur.
+      if (/BarcodeDetector|ZXing|cgi\/search\.pl/i.test(source)) anticipes.push(chemin);
+      if (
+        /search\.openfoodfacts|search-a-licious/i.test(source) &&
+        !chemin.endsWith(MODULE_RECHERCHE)
+      ) {
+        deborde.push(chemin);
       }
+    }
+  }
+  assert.deepEqual(anticipes, [], `scanner ou endpoint legacy anticipé : ${anticipes.join(", ")}`);
+  assert.deepEqual(deborde, [], `Search-a-licious hors de son module : ${deborde.join(", ")}`);
+
+  // 3. Et les fichiers DE LA PHASE 3, eux, n'en parlent toujours pas — c'est
+  //    la formulation durable de la garantie d'origine.
+  const fautifs: string[] = [];
+  for (const fichier of [
+    "../../lib/open-food-facts/contrat.ts",
+    "../../lib/open-food-facts/client.ts",
+    "../../app/api/food-products/[gtin]/route.ts",
+    "../../supabase/migrations/20260903090000_food_products.sql",
+    "../../supabase/migrations/20260903090100_ajouter_aliment_produit.sql",
+  ]) {
+    const source = sansProse(lireFichier(fichier));
+    if (/search\.openfoodfacts|search-a-licious|BarcodeDetector|ZXing/i.test(source)) {
+      fautifs.push(fichier);
     }
   }
   assert.deepEqual(fautifs, [], `hors périmètre de la phase 3 : ${fautifs.join(", ")}`);

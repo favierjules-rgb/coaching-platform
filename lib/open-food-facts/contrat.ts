@@ -465,6 +465,27 @@ export function versProduitSeth(gtin: string, corps: ReponseOff): ProduitSeth {
  * `maintenant` est un PARAMÈTRE, jamais `Date.now()` lu à l'intérieur : une
  * fonction qui lit l'horloge ne se teste qu'en attendant trente jours.
  */
+/**
+ * LA FRAÎCHEUR QUI DÉCIDE D'UN APPEL RÉSEAU (phase 4.1).
+ *
+ * `detailFetchedAt` est la date de la dernière HYDRATATION réussie depuis
+ * `/api/v3.4/product/{gtin}` — et `null` quand il n'y en a jamais eu, ce qui
+ * est le cas de tout produit découvert par la recherche texte.
+ *
+ * `null` rend donc `false`, toujours : une fiche jamais chargée en détail
+ * n'est pas « fraîche », même si on vient de voir son code-barres passer dans
+ * une recherche il y a trente secondes. C'est tout le correctif de la phase
+ * 4.1 tenu en une ligne — avant elle, ce cas rendait `true` et empêchait le
+ * chargement de la vraie fiche pendant trente jours.
+ */
+export function detailEstFrais(
+  detailFetchedAt: string | Date | null | undefined,
+  maintenant: Date,
+): boolean {
+  if (detailFetchedAt === null || detailFetchedAt === undefined) return false;
+  return cacheEstFrais(detailFetchedAt, maintenant);
+}
+
 export function cacheEstFrais(sourceFetchedAt: string | Date, maintenant: Date): boolean {
   const date = sourceFetchedAt instanceof Date ? sourceFetchedAt : new Date(sourceFetchedAt);
   const age = maintenant.getTime() - date.getTime();
