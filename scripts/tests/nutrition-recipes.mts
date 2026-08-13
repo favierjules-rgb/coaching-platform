@@ -629,11 +629,11 @@ await test("39. la migration est déclarée au manifeste et comptée", () => {
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
   // 35 depuis 20260828090000_web_push_notifications.sql (socle Web Push).
-  assert.equal(attendues.length, 40);
+  assert.equal(attendues.length, 42);
   assert.ok(attendues.includes("20260807090000_nutrition_recipes.sql"));
   const secu = lire("../../scripts/tests/security-hardening.mts");
-  assert.ok(secu.includes(".length, 67,"), "le compteur de migrations suit les migrations réelles");
-  assert.ok(secu.includes("assert.equal(attendues.length, 40);"));
+  assert.ok(secu.includes(".length, 69,"), "le compteur de migrations suit les migrations réelles");
+  assert.ok(secu.includes("assert.equal(attendues.length, 42);"));
 });
 
 await test("40. la checklist PostgreSQL couvre le périmètre exigé", () => {

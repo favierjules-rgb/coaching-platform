@@ -1223,11 +1223,47 @@ begin
          and coalesce(p.prosrc, '') ~ 'nutrition_daily_logs'));
 
   -- Aucun scanner, aucun réseau, aucune extension : le périmètre du lot.
-  perform pg_temp.noter('A2-SUP', 'aucune table de produits, aucun GTIN, aucune extension nouvelle',
-    to_regclass('public.food_products') is null
-    and not exists (select 1 from information_schema.columns
-                     where table_schema = 'public' and column_name ~* '(gtin|barcode|ean)')
+  --
+  -- ⚠️ CE CONTRÔLE A ÉTÉ RÉÉCRIT LE 13/08/2026, ET IL FAUT DIRE POURQUOI.
+  --
+  -- Il exigeait `to_regclass('public.food_products') is null`. C'était juste
+  -- tant que la table n'existait pas ; la phase 3 d'A3 l'a créée, avec
+  -- autorisation explicite. Le contrôle est alors devenu rouge — non parce
+  -- qu'A2 avait débordé, mais parce qu'il interrogeait L'ÉTAT FINAL DE LA
+  -- BASE pour parler du périmètre d'UN LOT. Ces deux choses ont cessé de
+  -- coïncider le jour où un lot suivant est arrivé.
+  --
+  -- On ne l'a pas simplement supprimé pour retrouver du vert : la garantie
+  -- « A2 n'a pas introduit de produits » est CONSERVÉE, et elle est éprouvée
+  -- là où elle est durable — sur les FICHIERS d'A2, qui eux ne changent plus,
+  -- par scripts/tests/aliments-a2.mts (« food_products », « gtin »,
+  -- « openfoodfacts » interdits dans le code du lot).
+  --
+  -- Ce qui reste ici est ce qui demeure vrai et vérifiable en base : les
+  -- tables d'A1 et d'A2 ne portent AUCUN concept de produit, et aucune
+  -- extension n'a été installée.
+  perform pg_temp.noter('A2-SUP', 'les tables d''A1/A2 ne portent aucun GTIN, et aucune extension n''a été installée',
+    not exists (select 1 from information_schema.columns
+                 where table_schema = 'public'
+                   and table_name in ('consumed_meals', 'meal_entries', 'food_catalog', 'food_aliases')
+                   and column_name ~* '(gtin|barcode|ean)')
     and not exists (select 1 from pg_extension where extname in ('pg_trgm', 'unaccent', 'citext', 'http')));
+
+  -- Et les huit RPC d'A2 sont exactement les huit d'A2 : le lot n'a pas
+  -- introduit de RPC de produit en douce.
+  perform pg_temp.noter('A2-SUP', 'A2 n''a introduit aucune RPC de produit',
+    (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public'
+        and p.proname in ('ouvrir_repas_prescrit', 'creer_repas_eleve', 'renommer_repas_eleve',
+                          'supprimer_repas_eleve', 'ajouter_aliment_catalogue',
+                          'ajouter_aliment_manuel', 'modifier_quantite_entree', 'supprimer_entree')) = 8
+    and not exists (
+      select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'public'
+         and p.proname in ('ouvrir_repas_prescrit', 'creer_repas_eleve', 'renommer_repas_eleve',
+                           'supprimer_repas_eleve', 'ajouter_aliment_catalogue',
+                           'ajouter_aliment_manuel', 'supprimer_entree')
+         and coalesce(p.prosrc, '') ~* '(food_products|gtin)'));
 end $$;
 
 -- ---------------------------------------------------------------------

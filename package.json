@@ -92,7 +92,8 @@
     "test:nutrition-linebreaks-rpe-halves": "npx tsx scripts/tests/nutrition-linebreaks-rpe-halves.mts",
     "test:aliments-a1": "npx tsx scripts/tests/aliments-a1.mts",
     "test:aliments-a2": "npx tsx scripts/tests/aliments-a2.mts",
-    "test:aliments-a3": "npx tsx scripts/tests/aliments-a3.mts"
+    "test:aliments-a3": "npx tsx scripts/tests/aliments-a3.mts",
+    "test:aliments-a3-off": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/aliments-a3-off.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

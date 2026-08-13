@@ -538,10 +538,20 @@ await test("A3-SUP. la phase 2 est bien CIQUAL UNIQUEMENT", () => {
       `« ${interdit} » est hors périmètre de la phase 2`,
     );
   }
-  // La checklist, elle, DOIT nommer food_products — pour prouver son absence.
+  // ⚠️ La checklist exigeait autrefois `to_regclass('public.food_products')
+  // is null`. La phase 3 a créé la table, avec autorisation explicite : ce
+  // contrôle interrogeait l'état FINAL de la base pour parler du périmètre
+  // d'une PHASE, et les deux ont cessé de coïncider. Il a été réécrit là-bas
+  // sur ce qui reste durablement vrai en base — le catalogue ne porte aucun
+  // code-barres —, et la garantie de PÉRIMÈTRE est portée ici, sur les
+  // fichiers de la phase 2, qui eux ne changent plus.
   assert.ok(
-    checklist.includes("to_regclass('public.food_products') is null"),
-    "l'absence de food_products doit être éprouvée en base",
+    checklist.includes("le catalogue d''aliments ne porte aucun GTIN ni code-barres"),
+    "la checklist doit continuer à éprouver en base que le catalogue est sans code-barres",
+  );
+  assert.ok(
+    !sansProseSql(checklist).includes("to_regclass('public.food_products') is null"),
+    "ce contrôle est devenu faux par construction depuis la phase 3 : il ne doit pas revenir",
   );
   // Aucun appel réseau au moment du build ni de l'exécution : le générateur
   // lit un fichier LOCAL passé en argument, il ne télécharge rien.

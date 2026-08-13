@@ -737,10 +737,29 @@ delete from public.food_catalog where source = 'ciqual' and source_ref = '999900
 do $$
 begin
   -- Périmètre : Ciqual uniquement. Aucun produit, aucun code-barres.
-  perform pg_temp.noter('A3-SUP', 'aucune table de produits, aucun GTIN, aucun scanner',
-    to_regclass('public.food_products') is null
-    and (select count(*) from information_schema.columns
-          where table_schema = 'public' and column_name ~* '(gtin|barcode|ean)') = 0);
+  --
+  -- ⚠️ RÉÉCRIT LE 13/08/2026, POUR LA MÊME RAISON QUE SON JUMEAU D'A2.
+  --
+  -- Ce contrôle exigeait `to_regclass('public.food_products') is null`. La
+  -- phase 3 a créé la table, avec autorisation explicite, et le contrôle est
+  -- devenu rouge — non parce que la phase 2 avait débordé, mais parce qu'il
+  -- interrogeait l'état FINAL de la base pour parler du périmètre d'une PHASE.
+  --
+  -- La garantie n'est pas abandonnée pour autant : « la phase 2 n'a rien
+  -- branché de produit » est éprouvée sur les FICHIERS de la phase 2, qui ne
+  -- changent plus, par scripts/tests/aliments-a3.mts. Ce qui reste ici est ce
+  -- qui demeure vrai en base : le CATALOGUE, lui, ne porte aucun code-barres.
+  perform pg_temp.noter('A3-SUP', 'le catalogue d''aliments ne porte aucun GTIN ni code-barres',
+    (select count(*) from information_schema.columns
+      where table_schema = 'public'
+        and table_name in ('food_catalog', 'food_aliases')
+        and column_name ~* '(gtin|barcode|ean)') = 0);
+
+  -- Et un aliment Ciqual reste un aliment GÉNÉRIQUE : aucune ligne importée
+  -- n'a été rattachée à un produit commercial.
+  perform pg_temp.noter('A3-SUP', 'aucun aliment Ciqual n''est rattaché à un produit',
+    (select count(*) from public.food_catalog
+      where source = 'ciqual' and source_ref !~ '^[0-9]+$') = 0);
 
   perform pg_temp.noter('A3-SUP', 'aucune extension nouvelle n''a été installée',
     (select count(*) from pg_extension

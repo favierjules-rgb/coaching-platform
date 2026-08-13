@@ -299,19 +299,19 @@ await test("15. la migration est déclarée au manifeste et comptée partout", (
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
   // 37 depuis 20260830090000 (RPE par demi-point). 36 après ALIMENTS A1.
-  assert.equal(attendues.length, 40);
+  assert.equal(attendues.length, 42);
   assert.ok(attendues.includes(NOM_MIGRATION), "A1 est déclarée au manifeste");
 
   const presentes = readdirSync(new URL("../../supabase/migrations", import.meta.url).pathname)
     .filter((f) => f.endsWith(".sql"));
-  assert.equal(presentes.length, 67, "67 migrations sur le disque");
+  assert.equal(presentes.length, 69, "69 migrations sur le disque");
 
   // Les compteurs vivent dans NEUF fichiers, dont six qui vérifient le TEXTE
   // de security-hardening.mts. Les oublier rendrait rouges des suites vertes
   // qui n'ont rien à voir avec ce chantier — c'est arrivé au lot précédent.
   const secu = lire("../../scripts/tests/security-hardening.mts");
-  assert.ok(secu.includes(".length, 67,"), "security-hardening compte 67 migrations");
-  assert.ok(secu.includes("assert.equal(attendues.length, 40);"));
+  assert.ok(secu.includes(".length, 69,"), "security-hardening compte 69 migrations");
+  assert.ok(secu.includes("assert.equal(attendues.length, 42);"));
   for (const fichier of [
     "nutrition-plan-v2-builder", "nutrition-recipes-admin", "nutrition-recipes",
     "nutrition-single-assigned-plan", "nutrition-v2-unified", "training-movement-patterns",

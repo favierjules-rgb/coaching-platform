@@ -73,7 +73,9 @@
     "20260831090000_food_catalog_and_meal_entries.sql",
     "20260901090000_consumed_meals.sql",
     "20260902090000_food_catalog_sources.sql",
-    "20260902090100_ciqual_2025_food_catalog.sql"
+    "20260902090100_ciqual_2025_food_catalog.sql",
+    "20260903090000_food_products.sql",
+    "20260903090100_ajouter_aliment_produit.sql"
   ],
   "garanties_de_contenu": {
     "insert_de_donnees_metier": 0,
