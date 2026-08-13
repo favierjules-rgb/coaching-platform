@@ -69,7 +69,8 @@
     "20260826090000_student_feedback_video.sql",
     "20260827090000_coach_reply_video.sql",
     "20260828090000_web_push_notifications.sql",
-    "20260830090000_rpe_half_points.sql"
+    "20260830090000_rpe_half_points.sql",
+    "20260831090000_food_catalog_and_meal_entries.sql"
   ],
   "garanties_de_contenu": {
     "insert_de_donnees_metier": 0,

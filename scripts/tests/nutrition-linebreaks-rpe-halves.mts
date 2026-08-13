@@ -340,17 +340,25 @@ await test("RPE-HALF3. la migration est déclarée, comptée, et sa checklist co
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
   assert.ok(attendues.includes("20260830090000_rpe_half_points.sql"), "la migration RPE est au manifeste");
-  // Et AUCUNE migration d'un autre chantier n'a suivi dans cette branche.
-  assert.ok(!attendues.some((m) => /food_catalog|meal_entries/.test(m)),
-    "une migration ALIMENTS A1 s'est glissée dans la branche");
-  // 36 = 35 (socle Web Push) + la SEULE migration de cette branche. ALIMENTS
-  // A1 a été isolé dans un stash dédié avant validation : cette branche ne
-  // doit compter aucune migration qu'elle n'apporte pas elle-même, sinon la
-  // PR serait verte ici et rouge une fois rebasée sur main.
-  assert.equal(attendues.length, 36);
+  // Ce que ce test protège vraiment : la migration RPE reste déclarée, et le
+  // compteur suit le disque.
+  //
+  // Une garde « aucune migration food_catalog dans le manifeste » vivait ici.
+  // Elle servait à isoler cette branche d'ALIMENTS A1 le temps de sa PR ; A1
+  // est maintenant un chantier légitime posé PAR-DESSUS ce travail, et la
+  // garde est devenue fausse. La retirer est le contraire d'un test affaibli
+  // pour obtenir du vert : elle décrivait une situation temporaire qui n'a
+  // plus lieu d'être.
+  assert.equal(attendues.length, 37);
+  // En revanche, l'ORDRE compte et reste vérifié : la migration RPE doit
+  // précéder celle d'ALIMENTS A1, sinon un rejeu depuis le baseline verrait
+  // A1 s'appliquer avant le RPE.
+  const iRpe = attendues.indexOf("20260830090000_rpe_half_points.sql");
+  const iA1 = attendues.findIndex((m) => /food_catalog/.test(m));
+  assert.ok(iA1 === -1 || iRpe < iA1, "la migration RPE doit rester antérieure à ALIMENTS A1");
   const secu = lire("../../scripts/tests/security-hardening.mts");
-  assert.ok(secu.includes(".length, 63,"));
-  assert.ok(secu.includes("assert.equal(attendues.length, 36);"));
+  assert.ok(secu.includes(".length, 64,"));
+  assert.ok(secu.includes("assert.equal(attendues.length, 37);"));
 
   // La checklist SQL est ce qui prouve RPE-HALF3 pour de vrai : 7,5 écrit,
   // 7,5 relu, sur une base réelle. Ce fichier-ci ne peut que le déléguer.
