@@ -96,6 +96,8 @@
     "test:aliments-a3-off": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/aliments-a3-off.mts",
     "test:aliments-a4-scan": "npx tsx scripts/tests/aliments-a4-scan.mts",
     "test:aliments-a4-ui": "npx tsx scripts/tests/aliments-a4-ui.mts",
+    "test:aliments-a5": "npx tsx scripts/tests/aliments-a5.mts",
+    "test:aliments-a5-jour": "npx tsx scripts/tests/aliments-a5-jour.mts",
     "test:aliments-a3-ui": "npx tsx scripts/tests/aliments-a3-ui.mts",
     "test:aliments-a3-search": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/aliments-a3-search.mts"
   },

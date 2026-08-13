@@ -934,16 +934,55 @@ test("A3-SEARCH-SUP · le module de recherche est server-only, et la phase 4 n'a
   // migration de ce lot : `detail_fetched_at`. La phase 4 elle-même n'en a
   // créé aucune — c'est la 4.1 qui a dû, faute de pouvoir représenter
   // « hydratée » dans le schéma existant sans mentir.
-  assert.equal(migrations.length, 70, "la phase 4.1 ajoute exactement une migration");
-  // Comparaison sur l'HORODATAGE seul : « 20260903090100_ajouter… » est
-  // lexicalement supérieur à « 20260903090100 » parce qu'il est plus long, et
-  // une comparaison de chaînes entières aurait crié au loup sur la dernière
-  // migration de la phase 3.
-  const horodatages = migrations.map((f) => f.slice(0, 14));
-  assert.ok(
-    horodatages.every((h) => h <= "20260904090000"),
-    `une migration postérieure à la phase 4.1 est apparue : ${migrations.slice(-3).join(", ")}`,
+  // 70 après A3 phase 4.1, 72 depuis ALIMENTS A5 (+2). Ce compteur vit dans
+  // NEUF fichiers : les oublier rend rouges des suites qui n'ont rien à voir
+  // avec le chantier en cours — c'est arrivé, et c'est pour cela qu'ils sont
+  // croisés.
+  assert.equal(migrations.length, 72, "72 migrations depuis ALIMENTS A5");
+  // ⚠️ RÉÉCRIT EN A5 — CINQUIÈME OCCURRENCE DU MÊME MOTIF DANS CE PROJET.
+  //
+  // Ce contrôle exigeait qu'AUCUNE migration ne soit postérieure à la phase 4.1.
+  // C'était vrai tant qu'aucun chantier ne suivait ; A5 en a ajouté deux, avec
+  // validation explicite. Le rouge ne disait donc pas que la phase 4 avait
+  // débordé : il disait, une fois de plus, qu'un contrôle décrivait le
+  // périmètre d'UNE phase en parlant de TOUT le dossier.
+  //
+  // Ce qui reste vrai — et qui est maintenant mesuré — est plus précis et plus
+  // utile : AUCUNE migration, de quelque chantier que ce soit, ne touche à la
+  // recherche texte. Search-a-licious est du TypeScript, confiné à son module.
+  //
+  // ⚠️ ET LE PIÈGE HABITUEL, DIXIÈME OCCURRENCE : `sansProse` ne retire que les
+  // commentaires JavaScript. La migration d'hydratation NOMME Search-a-licious
+  // dans un commentaire SQL `--`, pour expliquer ce que la recherche texte ne
+  // rapporte pas. Sans ce second dépouillement, ce contrôle serait rouge sur
+  // son propre exposé des motifs.
+  const sansCommentairesSql = (sql: string) => sql.replace(/^\s*--.*$/gm, " ");
+  const lireMigration = (f: string) =>
+    readFileSync(new URL(`../../supabase/migrations/${f}`, import.meta.url), "utf8");
+  const motifRecherche = /search-a-licious|search\.openfoodfacts|cgi\/search\.pl/i;
+
+  const migrationsQuiParlentDeRecherche = migrations.filter((f) =>
+    motifRecherche.test(sansCommentairesSql(lireMigration(f))),
   );
+  assert.deepEqual(
+    migrationsQuiParlentDeRecherche,
+    [],
+    "la recherche texte ne doit vivre dans aucune migration",
+  );
+  // CONTRÔLE NÉGATIF DU DÉPOUILLEMENT : la prose, elle, en parle bien — et le
+  // décapage n'a pas vidé le fichier pour autant.
+  assert.ok(motifRecherche.test(lireMigration("20260904090000_food_products_hydratation.sql")));
+  assert.ok(
+    sansCommentairesSql(lireMigration("20260904090000_food_products_hydratation.sql")).includes(
+      "detail_fetched_at",
+    ),
+  );
+
+  // Et la phase 4 elle-même n'en a créé aucune : rien entre la dernière
+  // migration de la phase 3 et celle de la phase 4.1.
+  const horodatages = migrations.map((f) => f.slice(0, 14)).sort();
+  const entreLesDeux = horodatages.filter((h) => h > "20260903090100" && h < "20260904090000");
+  assert.deepEqual(entreLesDeux, [], "la phase 4 n'a créé aucune migration");
   assert.ok(
     migrations.includes("20260904090000_food_products_hydratation.sql"),
     "la migration d'hydratation doit être là",

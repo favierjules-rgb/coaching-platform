@@ -208,12 +208,15 @@ await test("A3-UI3. un aliment générique est identifiable comme tel", () => {
   for (const interdit of ["food_catalog", "food_products", "source_ref", "source_payload", "gtin"]) {
     assert.ok(!html.includes(interdit), `« ${interdit} » ne doit pas être affiché`);
   }
-  // L'étiquette existe bien dans le composant, sur les deux écrans (liste et
-  // quantité).
+  // L'étiquette existe bien dans le composant, sur TOUS les écrans qui
+  // montrent un aliment. Elles étaient deux en A3 (liste de résultats, étape
+  // quantité) ; A5 en a ajouté une troisième — les sections Favoris et Récents
+  // — et l'exigence n'a pas changé : partout où un aliment générique est
+  // affiché, il est identifiable comme tel.
   assert.equal(
     (CODE_SHEET.match(/Aliment générique/g) ?? []).length,
-    2,
-    "l'étiquette doit être posée dans la liste ET dans l'étape quantité",
+    3,
+    "l'étiquette doit être posée dans la liste, dans les raccourcis ET dans l'étape quantité",
   );
   assert.ok(CODE_SHEET.includes('id="titre-aliments"') && CODE_SHEET.includes('id="titre-produits"'));
 });

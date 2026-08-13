@@ -543,15 +543,40 @@ await test("A2-UI2. la cible du coach reste IDENTIQUE après l'ajout d'un alimen
 
   // La zone de PRESCRIPTION est comparée telle quelle : tout ce qui précède la
   // frontière « Ce que j'ai mangé » doit être octet pour octet le même.
+  //
+  // ⚠️ RESSERRÉ EN A5.6, ET LA GARANTIE N'A PAS BOUGÉ. Le résumé visuel de la
+  // journée s'affiche désormais DANS la carte du jour, au-dessus des repas
+  // prescrits — et il change quand un aliment est ajouté : c'est précisément sa
+  // raison d'être. La comparaison démarre donc APRÈS lui.
+  //
+  // Ce qui est protégé reste identique : l'en-tête du jour (kcal et macros
+  // prescrites) et l'article du repas du coach. Si l'ajout d'un aliment
+  // modifiait l'un ou l'autre, ce contrôle redeviendrait rouge.
+  const résumé = 'aria-label="Résumé de la journée"';
   const frontière = "Ce que j";
-  const prescriptionAvant = avant.slice(0, avant.indexOf(frontière));
-  const prescriptionAprès = après.slice(0, après.indexOf(frontière));
+  const zone = (html: string) => {
+    const début = html.indexOf(résumé);
+    const finRésumé = début === -1 ? 0 : html.indexOf("</section>", début) + "</section>".length;
+    return html.slice(finRésumé, html.indexOf(frontière));
+  };
+  const prescriptionAvant = zone(avant);
+  const prescriptionAprès = zone(après);
+  assert.ok(prescriptionAvant.length > 200, "la zone comparée n'est pas vide");
   assert.equal(
     prescriptionAprès,
     prescriptionAvant,
     "l'ajout d'un aliment ne doit rien changer au bloc de prescription",
   );
   assert.ok(prescriptionAprès.includes("500"), "la cible kcal du coach doit y figurer");
+
+  // ET L'EN-TÊTE DU JOUR NON PLUS — il porte les objectifs du coach, et il est
+  // situé AVANT le résumé, donc hors de la zone comparée ci-dessus.
+  const entête = (html: string) => html.slice(0, html.indexOf(résumé));
+  assert.equal(
+    entête(après),
+    entête(avant),
+    "l'en-tête du jour porte les objectifs du coach : il ne bouge pas non plus",
+  );
 });
 
 await test("A2-UI3. ajouter un aliment fait apparaître une barre", () => {

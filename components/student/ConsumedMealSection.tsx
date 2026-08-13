@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Check, Pencil, Plus, Trash2, UtensilsCrossed } from "lucide-react";
 
-import { AddFoodSheet } from "@/components/student/AddFoodSheet";
+import { AddFoodSheet, type RaccourcisAlimentsUI } from "@/components/student/AddFoodSheet";
 import { ConsumedFoodBar } from "@/components/student/ConsumedFoodBar";
 import { ConsumedFoodDetailSheet } from "@/components/student/ConsumedFoodDetailSheet";
 import { NBSP, formatDecimalFr, formatIntegerFr } from "@/lib/nutrition/basis-points";
@@ -47,6 +47,7 @@ export function ConsumedMealSection({
   onCorriger,
   onSupprimerAliment,
   onEffacerErreur,
+  raccourcis,
 }: {
   /** `null` quand rien n'a encore été consommé pour ce repas. */
   repas: ConsumedMeal | null;
@@ -78,6 +79,8 @@ export function ConsumedMealSection({
     g: number,
     l: number,
   ) => Promise<boolean>;
+  /** Favoris et récents (A5) — traversent l'écran sans y être calculés. */
+  raccourcis?: RaccourcisAlimentsUI;
   onCorriger: (entryId: string, quantité: number, unité: ConsumedUnit) => Promise<boolean>;
   onSupprimerAliment: (entryId: string) => Promise<boolean>;
   onEffacerErreur: () => void;
@@ -207,6 +210,7 @@ export function ConsumedMealSection({
                 }
               : undefined
           }
+          raccourcis={raccourcis}
           onAjouterManuel={async (libellé, quantité, unité, p, g, l) => {
             const ok = await onAjouterManuel(conteneurCible, libellé, quantité, unité, p, g, l);
             if (ok) setAjoutOuvert(false);
@@ -263,6 +267,7 @@ export function StudentMealCard({
   onCorriger,
   onSupprimerAliment,
   onEffacerErreur,
+  raccourcis,
 }: {
   repas: ConsumedMeal;
   enCours: boolean;
@@ -290,6 +295,8 @@ export function StudentMealCard({
     g: number,
     l: number,
   ) => Promise<boolean>;
+  /** Favoris et récents (A5) — traversent l'écran sans y être calculés. */
+  raccourcis?: RaccourcisAlimentsUI;
   onCorriger: (entryId: string, quantité: number, unité: ConsumedUnit) => Promise<boolean>;
   onSupprimerAliment: (entryId: string) => Promise<boolean>;
   onEffacerErreur: () => void;
@@ -402,6 +409,7 @@ export function StudentMealCard({
         onCorriger={onCorriger}
         onSupprimerAliment={onSupprimerAliment}
         onEffacerErreur={onEffacerErreur}
+        raccourcis={raccourcis}
       />
     </article>
   );

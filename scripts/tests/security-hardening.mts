@@ -458,11 +458,12 @@ await test("18. le baseline est HORS de supabase/migrations — impossible à po
   for (const fichier of migrations) {
     assert.ok(!/baseline/i.test(fichier), `un fichier de baseline traîne dans migrations/ : ${fichier}`);
   }
-  // 70 depuis ALIMENTS A3 phase 4.1 (migration 20260904090000, déclarée au manifeste
-  // comme le veut la procédure). Ce compte ne bouge QUE par ce
-  // chemin : une migration qui apparaît sans passer par le manifeste doit
-  // faire échouer ce test, c'est sa seule raison d'être.
-  assert.equal(migrations.filter((f) => f.endsWith(".sql")).length, 70, "les 70 migrations doivent rester intactes");
+  // 72 depuis ALIMENTS A5 (20260905090000 index des récents, 20260905090100
+  // table des favoris, toutes deux déclarées au manifeste comme le veut la
+  // procédure). Ce compte ne bouge QUE par ce chemin : une migration qui
+  // apparaît sans passer par le manifeste doit faire échouer ce test, c'est sa
+  // seule raison d'être — et elle l'a fait quand A5 les a ajoutées.
+  assert.equal(migrations.filter((f) => f.endsWith(".sql")).length, 72, "les 72 migrations doivent rester intactes");
 });
 
 await test("19. manifeste : empreintes exactes et borne cohérente", () => {
@@ -485,8 +486,8 @@ await test("19. manifeste : empreintes exactes et borne cohérente", () => {
   // Les migrations annoncées existent réellement, et ce sont bien celles
   // qui suivent la borne.
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  // 35 depuis 20260828090000_web_push_notifications.sql.
-  assert.equal(attendues.length, 43);
+  // 45 depuis ALIMENTS A5 (+2 : index des récents, table des favoris).
+  assert.equal(attendues.length, 45);
   const presentes = readdirSync(new URL("../../supabase/migrations", import.meta.url).pathname)
     .filter((f) => f.endsWith(".sql"))
     .filter((f) => f >= "20260724214500")

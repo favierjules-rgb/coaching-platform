@@ -299,19 +299,24 @@ await test("15. la migration est déclarée au manifeste et comptée partout", (
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
   // 37 depuis 20260830090000 (RPE par demi-point). 36 après ALIMENTS A1.
-  assert.equal(attendues.length, 43);
+  // 45 depuis ALIMENTS A5 (+2 : index des récents, table des favoris).
+  assert.equal(attendues.length, 45);
   assert.ok(attendues.includes(NOM_MIGRATION), "A1 est déclarée au manifeste");
 
   const presentes = readdirSync(new URL("../../supabase/migrations", import.meta.url).pathname)
     .filter((f) => f.endsWith(".sql"));
-  assert.equal(presentes.length, 70, "70 migrations sur le disque");
+  // ⚠️ COMPTEUR VOLONTAIREMENT EXPLICITE. Il doit être mis à jour à CHAQUE
+  // nouvelle migration — c'est le but : ajouter un fichier au dossier est un
+  // acte délibéré, et ce rouge en est l'accusé de réception.
+  //   70 après A4 · +2 en A5 (index des récents, table des favoris) = 72.
+  assert.equal(presentes.length, 72, "72 migrations sur le disque");
 
   // Les compteurs vivent dans NEUF fichiers, dont six qui vérifient le TEXTE
   // de security-hardening.mts. Les oublier rendrait rouges des suites vertes
   // qui n'ont rien à voir avec ce chantier — c'est arrivé au lot précédent.
   const secu = lire("../../scripts/tests/security-hardening.mts");
-  assert.ok(secu.includes(".length, 70,"), "security-hardening compte 70 migrations");
-  assert.ok(secu.includes("assert.equal(attendues.length, 43);"));
+  assert.ok(secu.includes(".length, 72,"), "security-hardening compte 72 migrations");
+  assert.ok(secu.includes("assert.equal(attendues.length, 45);"));
   for (const fichier of [
     "nutrition-plan-v2-builder", "nutrition-recipes-admin", "nutrition-recipes",
     "nutrition-single-assigned-plan", "nutrition-v2-unified", "training-movement-patterns",
