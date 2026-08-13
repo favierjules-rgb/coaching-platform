@@ -1,0 +1,69 @@
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ALIMENTS A5 — L'INDEX DES RÉCENTS
+-- ═══════════════════════════════════════════════════════════════════════════
+--
+-- ────────────────────────────────────────────────────────────────────────────
+-- CE QUE CETTE MIGRATION N'AJOUTE PAS
+-- ────────────────────────────────────────────────────────────────────────────
+-- Aucune table de récents. Aucune colonne. Aucune donnée.
+--
+-- Les « aliments récemment consommés » se DÉRIVENT de `meal_entries` : le
+-- `source_type`, les trois pointeurs de provenance et `created_at` suffisent.
+-- Créer une table pour les stocker reviendrait à recopier des instantanés qui
+-- existent déjà, et à devoir les maintenir cohérents pour toujours.
+--
+-- ────────────────────────────────────────────────────────────────────────────
+-- POURQUOI UN INDEX EST QUAND MÊME NÉCESSAIRE — MESURÉ, PAS SUPPOSÉ
+-- ────────────────────────────────────────────────────────────────────────────
+-- `meal_entries` n'avait AUCUN index sur `student_id`. Ses index couvraient le
+-- conteneur (`consumed_meal_id`) et les trois provenances, c'est-à-dire les
+-- chemins d'A1/A2/A3 — pas celui d'A5.
+--
+-- Banc local, 30 élèves × 180 jours × 4 repas × 3 entrées = 21 600 repas et
+-- 64 800 entrées, `analyze` passé :
+--
+--   forme de requête                                     plan       temps  blocs
+--   ─────────────────────────────────────────────────────────────────────────
+--   where student_id = X order by created_at desc        SEQ SCAN   7,9 ms   926
+--   jointure via consumed_meals, bornée à 60 jours       SEQ SCAN  10,8 ms   994
+--   la même, boucle imbriquée FORCÉE                     index      2,0 ms   806
+--   les 200 dernières entrées, AVEC cet index            index     0,23 ms   303
+--
+-- Deux enseignements, et le second est le moins intuitif :
+--
+--   1. Sans index, chaque ouverture de la feuille d'ajout parcourt la table
+--      entière — celle de TOUS les élèves. 8 ms aujourd'hui, et ça croît
+--      linéairement sans que rien ne le signale.
+--
+--   2. Passer par `consumed_meals` NE SUFFIT PAS. Le conteneur a bien son index
+--      `(student_id, consumed_on, position)`, mais le planificateur a choisi un
+--      hash join et a quand même parcouru `meal_entries` en entier. Compter sur
+--      l'index du conteneur aurait été une supposition — elle a été testée, et
+--      elle est fausse.
+--
+-- Avec cet index, la forme utile — « les 200 dernières entrées de cet élève »,
+-- déduplication faite ensuite côté client — est 34 fois plus rapide et lit
+-- trois fois moins de blocs.
+--
+-- ────────────────────────────────────────────────────────────────────────────
+-- POURQUOI `created_at desc` ET NON `consumed_on`
+-- ────────────────────────────────────────────────────────────────────────────
+-- A2 a DÉPLACÉ `consumed_on` de `meal_entries` vers `consumed_meals` : une
+-- entrée n'a plus de date propre. Trier sur la date du repas obligerait à
+-- joindre, donc à relire le conteneur, donc à perdre le bénéfice de l'index.
+--
+-- `created_at` répond d'ailleurs mieux à la question posée : « qu'ai-je ajouté
+-- en dernier ? » plutôt que « qu'ai-je mangé au dîner d'avant-hier ? ». Une
+-- saisie rétroactive d'hier faite ce matin est bien un aliment récent — c'est
+-- celui que l'élève vient d'utiliser.
+--
+-- Conséquences : un index de plus à maintenir sur les écritures du journal (une
+-- insertion par aliment ajouté, négligeable), et l'espace d'un index à deux
+-- colonnes. Réversible par `drop index`.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+create index if not exists meal_entries_student_recent_idx
+  on public.meal_entries (student_id, created_at desc);
+
+comment on index public.meal_entries_student_recent_idx is
+  'ALIMENTS A5 — sert la section « Récents » de la feuille d''ajout : les dernières entrées d''un élève, les plus récentes d''abord. Les récents sont DÉRIVÉS de cette table, il n''existe aucune table de récents. Mesuré sur 64 800 entrées : sans cet index la requête parcourt la table entière de tous les élèves (7,9 ms) ; avec lui, 0,23 ms. Trie sur created_at et non sur consumed_on, que A2 a déplacé vers consumed_meals.';

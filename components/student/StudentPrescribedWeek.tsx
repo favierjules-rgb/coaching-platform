@@ -8,6 +8,9 @@ import {
   StudentMealCard,
 } from "@/components/student/ConsumedMealSection";
 import { DailyIntakeSummary } from "@/components/student/DailyIntakeSummary";
+import { DailyNutritionProgress } from "@/components/student/DailyNutritionProgress";
+import { NutritionDayCarousel } from "@/components/student/NutritionDayCarousel";
+import type { RaccourcisAlimentsUI } from "@/components/student/AddFoodSheet";
 import { NBSP, formatIntegerFr } from "@/lib/nutrition/basis-points";
 import {
   type ConsumedMeal,
@@ -92,6 +95,16 @@ export interface SuiviConsommation {
     unité: ConsumedUnit,
   ) => Promise<boolean>;
   readonly onSupprimerAliment: (entryId: string) => Promise<boolean>;
+  /** Favoris et récents (A5) — optionnels : l'écran reste entier sans eux. */
+  readonly raccourcis?: RaccourcisAlimentsUI;
+  /**
+   * La date du jour, au format ISO (A5.6).
+   *
+   * INJECTÉE, jamais lue depuis l'horloge dans le rendu : une valeur calculée
+   * pendant le rendu diffère entre le serveur et le client autour de minuit, et
+   * React remplace alors silencieusement le HTML pré-rendu.
+   */
+  readonly aujourdHui?: string;
 }
 
 export function StudentPrescribedWeek({
@@ -111,11 +124,38 @@ export function StudentPrescribedWeek({
     );
   }
 
+  // A5.6 — LES SEPT JOURS EN CARROUSEL, AUJOURD'HUI EN PREMIER.
+  //
+  // Sans `suivi`, il n'y a ni dates ni consommation : l'écran retombe sur la
+  // grille d'origine, qui reste juste — c'est la prescription seule, et elle
+  // n'a pas de « jour courant ».
+  const rendu = (index: number) => rendreJour(jours[index]);
+
+  if (suivi && suivi.aujourdHui) {
+    const dates = jours.map((j) => suivi.datesParJour[j.day] ?? "");
+    return (
+      <NutritionDayCarousel
+        dates={dates}
+        libellés={jours.map((j) => WEEKDAY_LABELS_FR[j.day])}
+        aujourdHui={suivi.aujourdHui}
+        rendreJour={rendu}
+      />
+    );
+  }
+
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-      {jours.map((jour) => {
+      {jours.map((jour) => rendreJour(jour))}
+    </div>
+  );
+
+  function rendreJour(jour: PlanV2Day) {
         const cibles = dailyTargetsForDay(week, jour);
         const date = suivi?.datesParJour[jour.day] ?? null;
+        // Le CONSOMMÉ du jour, pour le résumé visuel. Même source que
+        // `BlocRepasLibres` — `totalsForDay` sur les repas de cette date —, et
+        // surtout pas un second calcul.
+        const repasDuJour = suivi && date ? suivi.meals.filter((r) => r.consumedOn === date) : [];
         return (
           <section
             key={jour.id}
@@ -147,6 +187,28 @@ export function StudentPrescribedWeek({
             </header>
 
             <div className="flex flex-col gap-3 p-4">
+              {/* A5.6 — LE RÉSUMÉ VISUEL, EN TÊTE DE JOURNÉE.
+                  Il ne calcule rien : il reçoit le consommé (`totalsForDay`,
+                  la MÊME source que la synthèse chiffrée plus bas) et
+                  l'objectif du PROFIL DU JOUR — jamais une moyenne
+                  hebdomadaire, erreur qu'une version antérieure de cet écran
+                  avait commise. */}
+              {suivi && date && (
+                <DailyNutritionProgress
+                  objectif={
+                    cibles
+                      ? {
+                          proteinG: cibles.grams.proteinGrams,
+                          carbG: cibles.grams.carbGrams,
+                          fatG: cibles.grams.fatGrams,
+                          kcal: cibles.calories.totalCalories,
+                        }
+                      : null
+                  }
+                  consommé={totalsForDay(repasDuJour)}
+                />
+              )}
+
               {jour.meals.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
                   Aucun repas prescrit ce jour-là.
@@ -254,6 +316,7 @@ export function StudentPrescribedWeek({
                         onCorriger={suivi.onCorriger}
                         onSupprimerAliment={suivi.onSupprimerAliment}
                         onEffacerErreur={suivi.onEffacerErreur}
+                        raccourcis={suivi.raccourcis}
                       />
                     )}
                   </article>
@@ -267,9 +330,7 @@ export function StudentPrescribedWeek({
             </div>
           </section>
         );
-      })}
-    </div>
-  );
+  }
 }
 
 /**
@@ -325,6 +386,7 @@ function BlocRepasLibres({
           onCorriger={suivi.onCorriger}
           onSupprimerAliment={suivi.onSupprimerAliment}
           onEffacerErreur={suivi.onEffacerErreur}
+          raccourcis={suivi.raccourcis}
         />
       ))}
 

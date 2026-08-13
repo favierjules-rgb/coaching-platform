@@ -19,6 +19,7 @@ import { WEEKDAY_KEYS, type WeekdayKey } from "@/lib/nutrition/weekdays";
 import { getCurrentWeekDates } from "@/lib/nutrition-weekly";
 import { getNutritionPlan, student } from "@/data/student";
 import { useConsumedMeals } from "@/hooks/useConsumedMeals";
+import { useRaccourcisAliments } from "@/hooks/useRaccourcisAliments";
 import { useEtatOfflineEleve } from "@/hooks/useEtatOfflineEleve";
 import { useStudentNutritionPlanV2 } from "@/hooks/useStudentNutritionPlanV2";
 import { useSupabaseNutritionForStudent } from "@/hooks/useSupabaseNutritionForStudent";
@@ -41,6 +42,12 @@ export default function NutritionPlanDetailPage() {
   // `useMemo` sur une chaîne, et non sur le tableau : un littéral recréé à
   // chaque rendu relancerait la lecture indéfiniment.
   const datesSemaine = useMemo(() => getCurrentWeekDates(), []);
+  const datesAujourdHui = useMemo(() => {
+    const maintenant = new Date();
+    return `${maintenant.getFullYear()}-${String(maintenant.getMonth() + 1).padStart(2, "0")}-${String(
+      maintenant.getDate(),
+    ).padStart(2, "0")}`;
+  }, []);
   const datesParJour = useMemo(
     () =>
       Object.fromEntries(
@@ -49,6 +56,10 @@ export default function NutritionPlanDetailPage() {
     [datesSemaine],
   );
   const consommation = useConsumedMeals(datesSemaine, supabaseNutrition.active);
+  const raccourcis = useRaccourcisAliments(
+    supabaseNutrition.studentId ?? null,
+    supabaseNutrition.active,
+  );
 
   if (!supabaseNutrition.ready) {
     return <p className="text-sm text-muted-foreground">Chargement…</p>;
@@ -199,6 +210,15 @@ export default function NutritionPlanDetailPage() {
                 onSupprimerRepas: consommation.supprimerRepas,
                 onAjouterCatalogue: consommation.ajouterCatalogue,
                 onAjouterProduit: consommation.ajouterProduit,
+                // FAVORIS ET RÉCENTS (A5). Chargés ICI, une fois, et non dans
+                // la feuille d'ajout : celle-ci est montée et démontée à chaque
+                // ouverture, et un chargement interne repartirait de zéro à
+                // chaque tap sur « Ajouter un aliment ».
+                raccourcis,
+                // La date du jour, INJECTÉE. `datesSemaine` est déjà mémorisée
+                // à partir de la même horloge : lire l'heure une seconde fois
+                // dans le rendu ferait diverger les deux autour de minuit.
+                aujourdHui: datesAujourdHui,
                 onAjouterManuel: consommation.ajouterManuel,
                 onCorriger: consommation.corrigerQuantité,
                 onSupprimerAliment: consommation.supprimerAliment,

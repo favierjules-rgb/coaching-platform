@@ -108,6 +108,82 @@ export function motsDeLaTete(nom: string): number {
   return tete === "" ? 0 : tete.split(" ").length;
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   A5 — DEUX DÉPARTAGES DE PLUS, ET AUCUN N'EST UNE INVENTION
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * L'entrée REPRÉSENTATIVE d'une famille, selon Ciqual elle-même.
+ *
+ * `(aliment moyen)` est la désignation de l'Anses — 163 lignes sur les 3 330
+ * importées. Ce n'est pas une heuristique maison : c'est la source qui dit
+ * « voici l'entrée à prendre quand on ne précise rien ».
+ *
+ * ⚠️ SA PLACE DANS LE TRI A ÉTÉ MESURÉE, ET LA PREMIÈRE ÉTAIT FAUSSE. Placée
+ * juste après le rang, cette règle corrigeait « pomme » mais CASSAIT « pates » :
+ * « Pâtes fraîches farcies (ex : raviolis, tortellinis), cuites (aliment
+ * moyen) » passait devant « Pâtes sèches, standard, crues ». La cause : sa tête
+ * fait sept mots. Déplacée APRÈS le comptage des mots de la tête, elle ne
+ * dégrade plus rien. L'ordre des départages n'est donc pas décoratif.
+ */
+export function estAlimentMoyen(nom: string): boolean {
+  return /\(aliment moyen\)/i.test(nom);
+}
+
+/**
+ * Les formes TRANSFORMÉES, rétrogradées à rang et tête égaux.
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * POURQUOI CETTE LISTE EXISTE
+ * ────────────────────────────────────────────────────────────────────────────
+ * MESURÉ : à rang et tête égaux, c'était le nom le plus COURT qui gagnait — et
+ * le nom le plus court est souvent une préparation marginale. « Pomme, sèche »
+ * (12 caractères) passait devant « Pomme, chair sans peau, crue » ; « Oeuf, en
+ * poudre » devant « Oeuf, blanc (blanc d'oeuf), cru ». Quelqu'un qui tape
+ * « pomme » ne cherche presque jamais une pomme séchée.
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * ELLE EST FERMÉE, COURTE, ET NE REGARDE QUE LES QUALIFICATIFS
+ * ────────────────────────────────────────────────────────────────────────────
+ * ⚠️ La recherche se fait APRÈS la tête, jamais dedans — et c'est ce qui
+ * protège « Pâtes **sèches** ». Là, « sèches » n'est pas une préparation : c'est
+ * l'aliment lui-même, et le rétrograder ferait remonter les pâtes fraîches
+ * farcies à sa place. Le même mot, deux natures, distinguées par sa POSITION
+ * dans le nom Ciqual — pas par une exception écrite à la main.
+ *
+ * Aucun score, aucune pondération : un booléen, appliqué en dernier recours
+ * entre deux aliments par ailleurs équivalents.
+ */
+const FORMES_TRANSFORMEES: readonly string[] = [
+  "en poudre",
+  "seche",
+  "seches",
+  "sechee",
+  "sechees",
+  "deshydrate",
+  "deshydratee",
+  "appertise",
+  "appertisee",
+  "surgele",
+  "surgelee",
+  "fume",
+  "fumee",
+  "confit",
+  "confite",
+  "au sirop",
+  "lyophilise",
+];
+
+export function estFormeTransformee(nom: string): boolean {
+  // On ne regarde QUE ce qui suit la tête : voir l'encadré ci-dessus.
+  const qualificatifs = normaliserPourRecherche(nom.slice(teteDuNom(nom).length));
+  if (qualificatifs === "") return false;
+  const mots = qualificatifs.split(" ");
+  return FORMES_TRANSFORMEES.some((forme) =>
+    forme.includes(" ") ? qualificatifs.includes(forme) : mots.includes(forme),
+  );
+}
+
 export interface Classable {
   readonly id: string;
   readonly name: string;
@@ -141,6 +217,14 @@ export function classerResultats<T extends Classable>(
     const motsA = motsDeLaTete(a.item.name);
     const motsB = motsDeLaTete(b.item.name);
     if (motsA !== motsB) return motsA - motsB;
+    // A5, et DANS CET ORDRE — voir `estAlimentMoyen` : placés avant le comptage
+    // des mots de la tête, ces deux départages dégradaient « pates ».
+    const moyenA = estAlimentMoyen(a.item.name) ? 0 : 1;
+    const moyenB = estAlimentMoyen(b.item.name) ? 0 : 1;
+    if (moyenA !== moyenB) return moyenA - moyenB;
+    const transA = estFormeTransformee(a.item.name) ? 1 : 0;
+    const transB = estFormeTransformee(b.item.name) ? 1 : 0;
+    if (transA !== transB) return transA - transB;
     if (a.item.name.length !== b.item.name.length) return a.item.name.length - b.item.name.length;
     const parNom = a.item.name.localeCompare(b.item.name, "fr");
     if (parNom !== 0) return parNom;
@@ -148,4 +232,123 @@ export function classerResultats<T extends Classable>(
   });
 
   return classés.slice(0, limite).map((c) => c.item);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   A5 — LE CLASSEMENT DES PRODUITS COMMERCIAUX
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Un produit n'est pas un aliment Ciqual, et ne se classe pas comme lui.
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * DEUX DIFFÉRENCES DE NATURE
+ * ────────────────────────────────────────────────────────────────────────────
+ * 1. Pas de virgule structurante. « Skyr nature », pas « Skyr, nature » : la
+ *    notion de TÊTE n'a aucun sens ici, et `classerResultats` s'appuie dessus.
+ * 2. Une MARQUE, qui est un second chemin de recherche légitime — quelqu'un
+ *    qui tape « danone » cherche des produits Danone, pas un produit dont le
+ *    nom contiendrait ce mot.
+ *
+ * ⚠️ CE QUE CE CLASSEMENT CORRIGE. Avant A5, les correspondances de marque
+ * étaient ajoutées À LA SUITE de toutes les correspondances de nom, y compris
+ * les plus faibles : un produit de la marque exacte cherchée passait derrière
+ * un produit dont le nom contenait vaguement le terme. Le rang 2 ci-dessous
+ * remet la marque exacte devant la simple occurrence.
+ */
+export interface ClassableProduit extends Classable {
+  readonly brand: string | null;
+}
+
+/**
+ * Les cinq rangs du §6, du plus proche au plus lointain. `null` quand le terme
+ * n'apparaît ni dans le nom ni dans la marque : l'élément est écarté.
+ *
+ *   0  le nom EST le terme                    « skyr »   → Skyr
+ *   1  le nom COMMENCE par le terme           « skyr »   → Skyr nature
+ *   2  la marque est le terme, ou commence    « danone » → n'importe quel Danone
+ *   3  le terme apparaît dans le nom          « nature » → Skyr nature
+ *   4  le terme apparaît dans la marque       « one »    → Danone
+ */
+export function rangProduit(produit: ClassableProduit, terme: string): number | null {
+  const t = normaliserPourRecherche(terme);
+  if (t === "") return null;
+  const nom = normaliserPourRecherche(produit.name);
+  const marque = normaliserPourRecherche(produit.brand ?? "");
+
+  if (nom === t) return 0;
+  if (nom.startsWith(`${t} `)) return 1;
+  if (marque !== "" && (marque === t || marque.startsWith(`${t} `))) return 2;
+  if (nom.includes(t)) return 3;
+  if (marque !== "" && marque.includes(t)) return 4;
+  return null;
+}
+
+/**
+ * Trie et borne les produits. Départages, après le rang : nom le plus court —
+ * « Skyr nature » avant « Skyr nature vanille édition limitée » —, puis ordre
+ * alphabétique, puis identifiant, pour qu'aucune exécution ne puisse rendre
+ * deux ordres différents.
+ *
+ * Aucune notion d'« aliment moyen » ni de forme transformée ici : ce sont des
+ * conventions de nommage Ciqual, et un produit commercial n'en suit aucune.
+ */
+export function classerProduits<T extends ClassableProduit>(
+  items: readonly T[],
+  terme: string,
+  limite: number,
+): readonly T[] {
+  const classés = items
+    .map((item) => ({ item, rang: rangProduit(item, terme) }))
+    .filter((c): c is { item: T; rang: number } => c.rang !== null);
+
+  classés.sort((a, b) => {
+    if (a.rang !== b.rang) return a.rang - b.rang;
+    if (a.item.name.length !== b.item.name.length) return a.item.name.length - b.item.name.length;
+    const parNom = a.item.name.localeCompare(b.item.name, "fr");
+    if (parNom !== 0) return parNom;
+    return a.item.id.localeCompare(b.item.id);
+  });
+
+  return classés.slice(0, limite).map((c) => c.item);
+}
+
+/**
+ * DÉDOUBLONNAGE PAR IDENTITÉ, ET RIEN D'AUTRE (§7).
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * DEUX GTIN DIFFÉRENTS RESTENT DEUX PRODUITS
+ * ────────────────────────────────────────────────────────────────────────────
+ * Aucune fusion sur un nom qui se ressemble. « Yaourt nature 500 g » et
+ * « Yaourt nature 1 kg » sont deux produits, avec deux codes-barres, deux
+ * fiches et parfois deux compositions — les confondre ferait consommer les
+ * macros de l'un sous l'étiquette de l'autre, définitivement, puisque
+ * l'instantané ne suit jamais sa source.
+ *
+ * L'identité est donc l'identifiant de la ligne `food_products`, et le GTIN est
+ * unique dans cette table : un produit remonté par la recherche externe est
+ * ÉCRIT EN CACHE avant d'être rendu, il ressort donc avec le MÊME identifiant
+ * que sa version locale. C'est ce qui fait qu'un produit trouvé deux fois —
+ * une fois en local, une fois en ligne — n'apparaît qu'une seule fois.
+ *
+ * Le premier vu gagne : l'ordre d'arrivée porte du sens (le local d'abord),
+ * et une déduplication qui inverserait cet ordre déplacerait des lignes sous
+ * les yeux de l'élève.
+ */
+export function dedupliquerProduits<T extends { readonly id: string; readonly gtin?: string }>(
+  produits: readonly T[],
+): readonly T[] {
+  const vus = new Set<string>();
+  const gardés: T[] = [];
+  for (const p of produits) {
+    // Le GTIN est vérifié EN PLUS de l'identifiant : si deux lignes portaient un
+    // jour le même code-barres — ce que l'index unique interdit, mais qu'un
+    // fournisseur externe pourrait rendre deux fois avant écriture —, elles ne
+    // seraient affichées qu'une fois.
+    const clés = [`id:${p.id}`, ...(p.gtin ? [`gtin:${p.gtin}`] : [])];
+    if (clés.some((c) => vus.has(c))) continue;
+    for (const c of clés) vus.add(c);
+    gardés.push(p);
+  }
+  return gardés;
 }

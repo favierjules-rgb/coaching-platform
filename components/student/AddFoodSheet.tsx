@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, PencilLine, Package, ScanBarcode, Search, X } from "lucide-react";
+import { AlertTriangle, PencilLine, Package, ScanBarcode, Search, Star, X } from "lucide-react";
 
 import { NBSP, formatDecimalFr } from "@/lib/nutrition/basis-points";
 import {
@@ -33,11 +33,14 @@ import {
 } from "@/lib/nutrition/selection-aliment";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
+  type AlimentRapide,
   type CatalogFood,
   type ProduitLocal,
+  cleAlimentRapide,
   searchCachedProducts,
   searchCatalogFoods,
 } from "@/lib/supabase/consumed-meals";
+import type { CibleRecente } from "@/lib/nutrition/recents";
 
 /**
  * AJOUTER UN ALIMENT — deux parcours, aucun cul-de-sac.
@@ -81,6 +84,28 @@ import {
 
 type Onglet = "recherche" | "manuel";
 
+/**
+ * Ce dont la feuille a besoin pour afficher favoris et récents.
+ *
+ * Volontairement DÉCRIT ICI plutôt qu'importé du hook : le composant ne doit
+ * rien savoir de la façon dont ces listes sont obtenues, et un harnais de test
+ * doit pouvoir les fabriquer à la main.
+ */
+export interface RaccourcisAlimentsUI {
+  readonly favoris: readonly AlimentRapide[];
+  readonly recents: readonly AlimentRapide[];
+  readonly chargement: boolean;
+  readonly estFavori: (cible: CibleRecente) => boolean;
+  readonly basculerFavori: (cible: CibleRecente) => void;
+}
+
+/** La cible d'un raccourci, dans le vocabulaire des favoris. */
+function cibleDe(élément: AlimentRapide): CibleRecente {
+  return élément.type === "aliment"
+    ? { type: "aliment", id: élément.aliment.id }
+    : { type: "produit", id: élément.produit.id };
+}
+
 /** Ce que l'élève a choisi, avant l'étape quantité. */
 type Choix =
   | { readonly type: "aliment"; readonly aliment: CatalogFood }
@@ -95,6 +120,7 @@ export function AddFoodSheet({
   onAjouterProduit,
   onAjouterManuel,
   fetcher,
+  raccourcis,
 }: {
   titreRepas: string;
   enCours: boolean;
@@ -116,6 +142,14 @@ export function AddFoodSheet({
   ) => Promise<boolean>;
   /** Injectable pour les tests ; `fetch` du navigateur en production. */
   fetcher?: Fetch;
+  /**
+   * FAVORIS ET RÉCENTS (A5) — optionnels, et l'écran reste entier sans eux.
+   *
+   * Ils sont chargés par le parent, pas ici : la feuille est montée et démontée
+   * à chaque ouverture, et un chargement interne repartirait de zéro à chaque
+   * fois. Les passer en propriété les rend aussi éprouvables sans réseau.
+   */
+  raccourcis?: RaccourcisAlimentsUI;
 }) {
   const [onglet, setOnglet] = useState<Onglet>("recherche");
 
@@ -261,6 +295,25 @@ export function AddFoodSheet({
     }
   }
 
+  /**
+   * TAP SUR UN FAVORI OU UN RÉCENT — aucune logique d'ajout nouvelle (§9).
+   *
+   * Un aliment du catalogue ouvre directement l'étape quantité, comme un
+   * résultat de recherche. Un produit passe par `choisirProduit`, donc par
+   * l'HYDRATATION d'A3 si sa fiche n'a jamais été chargée : un produit mis en
+   * favori après une recherche texte a pu arriver sans son unité réelle, et le
+   * consommer en grammes écrirait 250 g là où il y avait 250 ml.
+   */
+  function choisirRapide(élément: AlimentRapide) {
+    if (élément.type === "aliment") {
+      setChoix({ type: "aliment", aliment: élément.aliment });
+      setUnitéChoix(unitesPourAliment(élément.aliment)[0]);
+      setQuantitéChoix("100");
+      return;
+    }
+    void choisirProduit(élément.produit);
+  }
+
   function ouvrirQuantitéProduit(produit: ProduitLocal) {
     setChoix({ type: "produit", produit });
     setUnitéChoix(produit.nutritionUnit);
@@ -348,6 +401,8 @@ export function AddFoodSheet({
     qManuelle !== null;
 
   const riensTrouvé = aliments.length === 0 && produits.length === 0;
+  // « Vide » au sens de l'élève : deux espaces ne sont pas une recherche.
+  const champVide = terme.trim() === "";
 
   return (
     <div
@@ -452,24 +507,37 @@ export function AddFoodSheet({
                 />
               </div>
 
-              {/* LE SCAN, JUSTE SOUS LE CHAMP. C'est le geste le plus rapide
-                  pour un produit emballé : viser vaut mieux que taper une
-                  marque au clavier d'une main, l'autre tenant le paquet. */}
-              {!choix && !scanEnCours && (
-                <button
-                  type="button"
-                  onClick={ouvrirScan}
-                  className="pressable inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-control border border-border py-3 text-xs font-bold uppercase tracking-widest text-foreground transition-colors hover:border-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                >
-                  <ScanBarcode size={14} />
-                  Scanner un code-barres
-                </button>
-              )}
+              {/* FAVORIS puis RÉCENTS — et SEULEMENT quand le champ est vide.
+                  Dès que l'élève tape, ce qu'il cherche prime sur ce qu'il a
+                  l'habitude de manger : garder les deux à l'écran pousserait
+                  les résultats sous la ligne de flottaison d'un téléphone.
 
-              {scanEnCours && (
-                <p className="py-2 text-center text-sm text-muted-foreground" role="status">
-                  Recherche du produit…
-                </p>
+                  Une section sans contenu n'est pas rendue du tout — pas un
+                  titre suivi d'un vide, qui donnerait l'impression d'un écran
+                  cassé au premier jour d'utilisation. */}
+              {champVide && raccourcis && !choix && !scanEnCours && (
+                <>
+                  {raccourcis.favoris.length > 0 && (
+                    <SectionRapide
+                      titre="Favoris"
+                      éléments={raccourcis.favoris}
+                      désactivé={hydratation}
+                      estFavori={raccourcis.estFavori}
+                      onBasculerFavori={raccourcis.basculerFavori}
+                      onChoisir={choisirRapide}
+                    />
+                  )}
+                  {raccourcis.recents.length > 0 && (
+                    <SectionRapide
+                      titre="Récents"
+                      éléments={raccourcis.recents}
+                      désactivé={hydratation}
+                      estFavori={raccourcis.estFavori}
+                      onBasculerFavori={raccourcis.basculerFavori}
+                      onChoisir={choisirRapide}
+                    />
+                  )}
+                </>
               )}
 
               {/* APRÈS UN SCAN QUI N'A PAS ABOUTI — jamais un cul-de-sac.
@@ -494,6 +562,26 @@ export function AddFoodSheet({
                     </button>
                   ))}
                 </div>
+              )}
+
+              {/* LE SCAN, JUSTE SOUS LE CHAMP. C'est le geste le plus rapide
+                  pour un produit emballé : viser vaut mieux que taper une
+                  marque au clavier d'une main, l'autre tenant le paquet. */}
+              {!choix && !scanEnCours && (
+                <button
+                  type="button"
+                  onClick={ouvrirScan}
+                  className="pressable inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-control border border-border py-3 text-xs font-bold uppercase tracking-widest text-foreground transition-colors hover:border-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                >
+                  <ScanBarcode size={14} />
+                  Scanner un code-barres
+                </button>
+              )}
+
+              {scanEnCours && (
+                <p className="py-2 text-center text-sm text-muted-foreground" role="status">
+                  Recherche du produit…
+                </p>
               )}
 
               {choix ? (
@@ -551,6 +639,17 @@ export function AddFoodSheet({
                               p={aliment.proteinPer100}
                               g={aliment.carbPer100}
                               l={aliment.fatPer100}
+                              favori={
+                                raccourcis
+                                  ? raccourcis.estFavori({ type: "aliment", id: aliment.id })
+                                  : undefined
+                              }
+                              onBasculerFavori={
+                                raccourcis
+                                  ? () =>
+                                      raccourcis.basculerFavori({ type: "aliment", id: aliment.id })
+                                  : undefined
+                              }
                               onChoisir={() => {
                                 setChoix({ type: "aliment", aliment });
                                 setUnitéChoix(unitesPourAliment(aliment)[0]);
@@ -583,6 +682,17 @@ export function AddFoodSheet({
                               l={produit.fatPer100}
                               imageUrl={produit.imageUrl}
                               désactivé={hydratation}
+                              favori={
+                                raccourcis
+                                  ? raccourcis.estFavori({ type: "produit", id: produit.id })
+                                  : undefined
+                              }
+                              onBasculerFavori={
+                                raccourcis
+                                  ? () =>
+                                      raccourcis.basculerFavori({ type: "produit", id: produit.id })
+                                  : undefined
+                              }
                               onChoisir={() => void choisirProduit(produit)}
                             />
                           </li>
@@ -774,6 +884,89 @@ export function AddFoodSheet({
 }
 
 /**
+ * FAVORIS ou RÉCENTS — une section, la même forme pour les deux.
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * COMPACTE, PARCE QU'ELLE PASSE AVANT LE CONTENU PRINCIPAL
+ * ────────────────────────────────────────────────────────────────────────────
+ * Ces lignes s'affichent AU-DESSUS du scanner et de la saisie manuelle. Elles
+ * doivent aider sans encombrer : une ligne par aliment, son nom, son unité, et
+ * une étoile. Pas de macros détaillées ici — l'élève qui tape sur un favori
+ * connaît déjà ce qu'il mange, et l'étape quantité les affichera de toute façon.
+ */
+function SectionRapide({
+  titre,
+  éléments,
+  désactivé,
+  estFavori,
+  onBasculerFavori,
+  onChoisir,
+}: {
+  titre: string;
+  éléments: readonly AlimentRapide[];
+  désactivé?: boolean;
+  estFavori: (cible: CibleRecente) => boolean;
+  onBasculerFavori: (cible: CibleRecente) => void;
+  onChoisir: (élément: AlimentRapide) => void;
+}) {
+  const identifiant = `titre-${titre.toLowerCase()}`;
+  return (
+    <section aria-labelledby={identifiant}>
+      <h4
+        id={identifiant}
+        className="mb-2 text-xs font-bold uppercase tracking-widest text-muted-foreground"
+      >
+        {titre}
+      </h4>
+      <ul className="flex flex-col gap-2">
+        {éléments.map((élément) => {
+          const cible = cibleDe(élément);
+          const nom = élément.type === "aliment" ? élément.aliment.name : élément.produit.name;
+          const secondaire =
+            élément.type === "aliment"
+              ? "Aliment générique"
+              : (élément.produit.brand ?? "Produit");
+          const favori = estFavori(cible);
+          return (
+            <li key={cleAlimentRapide(élément)} className="flex items-stretch gap-2">
+              <button
+                type="button"
+                onClick={() => onChoisir(élément)}
+                disabled={désactivé}
+                className="pressable flex min-h-[48px] flex-1 items-center gap-3 rounded-control border border-border bg-surface-soft/40 px-3 py-2 text-left transition-colors hover:border-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate text-sm font-semibold text-foreground">{nom}</span>
+                  <span className="truncate text-[11px] uppercase tracking-wide text-muted-foreground">
+                    {secondaire}
+                  </span>
+                </span>
+              </button>
+              {/* L'ÉTOILE EST UN BOUTON À PART, et non une zone du premier :
+                  un bouton dans un bouton n'est pas du HTML valide, et le tap
+                  sur l'étoile ne doit surtout pas ouvrir l'étape quantité. */}
+              <button
+                type="button"
+                onClick={() => onBasculerFavori(cible)}
+                aria-pressed={favori}
+                aria-label={favori ? `Retirer ${nom} des favoris` : `Ajouter ${nom} aux favoris`}
+                className={`pressable flex min-h-[48px] w-12 flex-shrink-0 items-center justify-center rounded-control border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+                  favori
+                    ? "border-primary/60 text-foreground"
+                    : "border-border text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Star size={16} fill={favori ? "currentColor" : "none"} />
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+/**
  * Une ligne de résultat, la même forme pour un aliment et pour un produit.
  *
  * La distinction se lit dans la LIGNE SECONDAIRE — « Aliment générique » ou la
@@ -790,6 +983,8 @@ function LigneRésultat({
   imageUrl,
   désactivé,
   onChoisir,
+  favori,
+  onBasculerFavori,
 }: {
   nom: string;
   secondaire: string;
@@ -800,11 +995,14 @@ function LigneRésultat({
   imageUrl?: string | null;
   désactivé?: boolean;
   onChoisir: () => void;
+  /** `undefined` quand les favoris ne sont pas chargés : aucune étoile n'est rendue. */
+  favori?: boolean;
+  onBasculerFavori?: () => void;
 }) {
   // Les kcal suivent l'unique convention SETH — 4/4/9 — et sont dérivées à
   // l'affichage. Aucune calorie n'est stockée nulle part.
   const kcal = kcalFromMacros(p, g, l);
-  return (
+  const ligne = (
     <button
       type="button"
       onClick={onChoisir}
@@ -838,6 +1036,29 @@ function LigneRésultat({
         </span>
       </span>
     </button>
+  );
+
+  // ÉTAT FAVORI DANS LA LISTE (§8). Sans favoris chargés, la ligne est rendue
+  // telle quelle : l'écran ne change pas de forme selon qu'une requête a
+  // abouti ou non.
+  if (favori === undefined || !onBasculerFavori) return ligne;
+  return (
+    <div className="flex items-stretch gap-2">
+      <div className="min-w-0 flex-1">{ligne}</div>
+      <button
+        type="button"
+        onClick={onBasculerFavori}
+        aria-pressed={favori}
+        aria-label={favori ? `Retirer ${nom} des favoris` : `Ajouter ${nom} aux favoris`}
+        className={`pressable flex w-12 flex-shrink-0 items-center justify-center rounded-control border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+          favori
+            ? "border-primary/60 text-foreground"
+            : "border-border text-muted-foreground hover:text-foreground"
+        }`}
+      >
+        <Star size={16} fill={favori ? "currentColor" : "none"} />
+      </button>
+    </div>
   );
 }
 

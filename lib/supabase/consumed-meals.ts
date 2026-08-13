@@ -9,9 +9,19 @@ import {
 } from "@/lib/nutrition/consumed";
 import { MEAL_SLOT_KEYS, type MealSlotKey } from "@/lib/nutrition/meal-distribution";
 import {
+  classerProduits,
   classerResultats,
+  dedupliquerProduits,
   normaliserPourRecherche,
 } from "@/lib/nutrition/recherche-aliments";
+import {
+  type CibleRecente,
+  FENETRE_RECENTS,
+  type LigneRecente,
+  MAX_RECENTS,
+  type Recent,
+  ordonnerRecents,
+} from "@/lib/nutrition/recents";
 import type { Database } from "@/types/supabase";
 
 /**
@@ -359,7 +369,7 @@ export async function searchCachedProducts(
     detail_fetched_at: string | null;
   }[];
 
-  const uniques = [...new Map(lignes.map((p) => [p.id, p])).values()].map((p) => ({
+  const uniques = dedupliquerProduits(lignes.map((p) => ({ id: p.id, gtin: p.gtin, ligne: p }))).map(({ ligne: p }) => ({
     id: p.id,
     gtin: p.gtin,
     // `name` porte le NOM DU PRODUIT seul : c'est lui que le classement
@@ -375,13 +385,14 @@ export async function searchCachedProducts(
     hydratee: p.detail_fetched_at !== null,
   }));
 
-  // Un produit trouvé PAR SA MARQUE ne contient pas forcément le terme dans son
-  // nom : `classerResultats` l'écarterait. On classe donc ceux qui matchent par
-  // le nom, puis on complète par les autres, dans l'ordre du fournisseur.
-  const parNomClassés = classerResultats(uniques, terme, limite);
-  const vus = new Set(parNomClassés.map((p) => p.id));
-  const complément = uniques.filter((p) => !vus.has(p.id));
-  return [...parNomClassés, ...complément].slice(0, limite);
+  // A5 — UN SEUL CLASSEMENT, QUI CONNAÎT LA MARQUE.
+  //
+  // Avant A5, les correspondances de marque étaient ajoutées À LA SUITE de
+  // toutes les correspondances de nom : un produit de la marque exactement
+  // cherchée passait derrière un produit dont le nom contenait vaguement le
+  // terme. `classerProduits` remet la marque exacte à sa place — rang 2, devant
+  // la simple occurrence dans le nom.
+  return classerProduits(uniques, terme, limite);
 }
 
 /**
@@ -573,4 +584,201 @@ export function supprimerEntree(
   entryId: string,
 ): Promise<void> {
   return appeler<void>(supabase, "supprimer_entree", { p_entry_id: entryId });
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   A5 — LES ALIMENTS RÉCEMMENT CONSOMMÉS
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Un aliment proposé en RACCOURCI — récent ou favori.
+ *
+ * Il porte sa SOURCE VIVANTE (`CatalogFood` ou `ProduitLocal`), jamais un
+ * instantané : c'est ce qui permet de le taper et d'ouvrir l'étape quantité
+ * d'A3 sans aucune logique d'ajout nouvelle.
+ */
+export type AlimentRapide =
+  | { readonly type: "aliment"; readonly aliment: CatalogFood }
+  | { readonly type: "produit"; readonly produit: ProduitLocal };
+
+/** L'identifiant d'un raccourci, pour le comparer sans confondre les deux types. */
+export function cleAlimentRapide(élément: AlimentRapide): string {
+  return élément.type === "aliment"
+    ? `aliment:${élément.aliment.id}`
+    : `produit:${élément.produit.id}`;
+}
+
+/**
+ * CHARGE LES SOURCES d'une liste de cibles — deux requêtes, jamais une par
+ * cible.
+ *
+ * Partagé par les récents ET les favoris : les deux ont besoin de la même
+ * chose (l'aliment ou le produit vivant, pas l'instantané), et écrire deux fois
+ * ce chargement donnerait deux occasions de diverger sur l'unité ou sur le
+ * filtre des aliments archivés.
+ *
+ * L'ORDRE RENDU EST CELUI DES CIBLES REÇUES. Une source disparue — aliment
+ * archivé, produit purgé du cache — est simplement OMISE : un raccourci qui ne
+ * mène nulle part serait un bouton qui ne fait rien.
+ */
+export async function chargerAlimentsRapides(
+  supabase: TypedSupabaseClient,
+  cibles: readonly CibleRecente[],
+): Promise<readonly AlimentRapide[]> {
+  if (cibles.length === 0) return [];
+  const idsAliments = cibles.filter((c) => c.type === "aliment").map((c) => c.id);
+  const idsProduits = cibles.filter((c) => c.type === "produit").map((c) => c.id);
+
+  const [aliments, produits] = await Promise.all([
+    idsAliments.length === 0
+      ? Promise.resolve({ data: [], error: null })
+      : supabase
+          .from("food_catalog")
+          .select(
+            "id, name, nutrition_unit, protein_per_100, carb_per_100, fat_per_100, piece_weight_g",
+          )
+          .in("id", idsAliments)
+          // Un aliment ARCHIVÉ ne doit plus être proposé : il a été retiré du
+          // catalogue pour une raison. Le journal qui le mentionne garde de
+          // toute façon son instantané, intact.
+          .eq("status", "active"),
+    idsProduits.length === 0
+      ? Promise.resolve({ data: [], error: null })
+      : supabase
+          .from("food_products")
+          .select(
+            "id, gtin, product_name, brand, nutrition_unit, protein_per_100, carb_per_100, " +
+              "fat_per_100, image_url, detail_fetched_at",
+          )
+          .in("id", idsProduits),
+  ]);
+  devWarn("chargerAlimentsRapides (food_catalog)", aliments.error);
+  devWarn("chargerAlimentsRapides (food_products)", produits.error);
+
+  const parAliment = new Map(
+    ((aliments.data ?? []) as unknown as {
+      id: string;
+      name: string;
+      nutrition_unit: string;
+      protein_per_100: number;
+      carb_per_100: number;
+      fat_per_100: number;
+      piece_weight_g: number | null;
+    }[])
+      .filter((f) => f.nutrition_unit === "g" || f.nutrition_unit === "ml")
+      .map((f) => [
+        f.id,
+        {
+          id: f.id,
+          name: f.name,
+          nutritionUnit: f.nutrition_unit as "g" | "ml",
+          proteinPer100: Number(f.protein_per_100),
+          carbPer100: Number(f.carb_per_100),
+          fatPer100: Number(f.fat_per_100),
+          pieceWeightG: f.piece_weight_g === null ? null : Number(f.piece_weight_g),
+        } satisfies CatalogFood,
+      ]),
+  );
+
+  const parProduit = new Map(
+    ((produits.data ?? []) as unknown as {
+      id: string;
+      gtin: string;
+      product_name: string;
+      brand: string | null;
+      nutrition_unit: string;
+      protein_per_100: number;
+      carb_per_100: number;
+      fat_per_100: number;
+      image_url: string | null;
+      detail_fetched_at: string | null;
+    }[]).map((p) => [
+      p.id,
+      {
+        id: p.id,
+        gtin: p.gtin,
+        name: p.product_name,
+        brand: p.brand,
+        nutritionUnit: (p.nutrition_unit === "ml" ? "ml" : "g") as "g" | "ml",
+        proteinPer100: Number(p.protein_per_100),
+        carbPer100: Number(p.carb_per_100),
+        fatPer100: Number(p.fat_per_100),
+        imageUrl: p.image_url,
+        hydratee: p.detail_fetched_at !== null,
+      } satisfies ProduitLocal,
+    ]),
+  );
+
+  return cibles
+    .map((c): AlimentRapide | null => {
+      if (c.type === "aliment") {
+        const aliment = parAliment.get(c.id);
+        return aliment ? { type: "aliment", aliment } : null;
+      }
+      const produit = parProduit.get(c.id);
+      return produit ? { type: "produit", produit } : null;
+    })
+    .filter((r): r is AlimentRapide => r !== null);
+}
+
+/**
+ * LES RÉCENTS — TROIS REQUÊTES, JAMAIS UNE PAR ALIMENT.
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * POURQUOI ON RECHARGE LA SOURCE, ET PAS L'INSTANTANÉ
+ * ────────────────────────────────────────────────────────────────────────────
+ * `meal_entries` porte les macros CONSOMMÉES — 250 g de riz, pas les valeurs
+ * pour 100 g. Réafficher un récent depuis son instantané donnerait un aliment
+ * dont les macros dépendraient de la dernière quantité mangée, et le taper
+ * ouvrirait une étape quantité fausse.
+ *
+ * On relit donc la source, exactement comme la recherche. Un récent est un
+ * RACCOURCI vers l'aliment, pas une copie de ce qui a été mangé.
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * TROIS REQUÊTES, ET LEUR COÛT EST MESURÉ
+ * ────────────────────────────────────────────────────────────────────────────
+ *   1. les 200 dernières entrées de l'élève  → index (student_id, created_at desc)
+ *   2. les aliments correspondants           → `in (…)`, au plus 12 identifiants
+ *   3. les produits correspondants           → `in (…)`, au plus 12 identifiants
+ *
+ * Aucun N+1 : les deux dernières prennent une LISTE d'identifiants, pas un
+ * identifiant. Sans l'index de la migration 20260905090000, la première
+ * parcourait la table entière de TOUS les élèves — 7,9 ms contre 0,23 ms,
+ * mesuré sur 64 800 entrées.
+ */
+export async function listerRecents(
+  supabase: TypedSupabaseClient,
+  studentId: string,
+  limite = MAX_RECENTS,
+): Promise<readonly AlimentRapide[]> {
+  const { data, error } = await supabase
+    .from("meal_entries")
+    .select("source_type, food_id, product_id, created_at")
+    .eq("student_id", studentId)
+    // Le filtre est posé EN BASE : recharger des entrées manuelles pour les
+    // écarter côté client ferait remonter du texte libre sur le réseau sans
+    // qu'aucune ne puisse jamais devenir un récent.
+    .in("source_type", ["catalog_food", "product"])
+    .order("created_at", { ascending: false })
+    .limit(FENETRE_RECENTS);
+  devWarn("listerRecents (meal_entries)", error);
+  if (error || !data) return [];
+
+  const lignes: LigneRecente[] = (
+    data as unknown as {
+      source_type: string;
+      food_id: string | null;
+      product_id: string | null;
+      created_at: string;
+    }[]
+  ).map((l) => ({
+    sourceType: l.source_type,
+    foodId: l.food_id,
+    productId: l.product_id,
+    creeLe: l.created_at,
+  }));
+
+  const récents: readonly Recent[] = ordonnerRecents(lignes, limite);
+  return chargerAlimentsRapides(supabase, récents.map((r) => r.cible));
 }
