@@ -212,7 +212,11 @@ test("A3-OFF2 · tout ce qui touche au réseau OFF est marqué server-only", () 
   for (const dossier of ["../../components", "../../hooks"]) {
     for (const chemin of fichiersTs(new URL(dossier + "/", import.meta.url))) {
       const source = sansProse(readFileSync(chemin, "utf8"));
-      if (source.includes("openfoodfacts.org") || source.includes("search.openfoodfacts")) {
+      // ⚠️ AFFINÉ EN PHASE 5. L'écran d'ajout porte désormais l'attribution
+      // ODbL, qui EXIGE un lien vers openfoodfacts.org : l'interdire
+      // reviendrait à interdire de respecter la licence. Ce qui reste
+      // interdit est ce que l'UI ne doit pas connaître — les adresses d'API.
+      if (/world\.openfoodfacts\.org|search\.openfoodfacts|\/api\/v\d/.test(source)) {
         fautifs.push(chemin);
       }
     }

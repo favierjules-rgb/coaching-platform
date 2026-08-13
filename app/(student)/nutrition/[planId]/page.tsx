@@ -198,6 +198,7 @@ export default function NutritionPlanDetailPage() {
                 onRenommerRepas: consommation.renommerRepas,
                 onSupprimerRepas: consommation.supprimerRepas,
                 onAjouterCatalogue: consommation.ajouterCatalogue,
+                onAjouterProduit: consommation.ajouterProduit,
                 onAjouterManuel: consommation.ajouterManuel,
                 onCorriger: consommation.corrigerQuantité,
                 onSupprimerAliment: consommation.supprimerAliment,

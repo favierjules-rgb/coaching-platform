@@ -7,6 +7,7 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
   ajouterAlimentCatalogue,
   ajouterAlimentManuel,
+  ajouterAlimentProduit,
   creerRepasEleve,
   modifierQuantiteEntree,
   ouvrirRepasPrescrit,
@@ -72,6 +73,12 @@ export interface ConsumedMealsState {
     glucidesPour100: number,
     lipidesPour100: number,
   ) => Promise<boolean>;
+  readonly ajouterProduit: (
+    consumedMealId: string,
+    productId: string,
+    quantité: number,
+    unité: ConsumedUnit,
+  ) => Promise<boolean>;
   readonly corrigerQuantité: (
     entryId: string,
     quantité: number,
@@ -98,6 +105,7 @@ function messageDErreur(brut: string): string {
     REPAS_NON_SUPPRIMABLE: "Un repas prescrit par ton coach ne peut pas être supprimé.",
     LIBELLE_VIDE: "Le nom ne peut pas être vide.",
     ALIMENT_INACCESSIBLE: "Cet aliment n'est plus disponible dans le catalogue.",
+    PRODUIT_INACCESSIBLE: "Ce produit n'est plus disponible. Recherche-le à nouveau.",
     ENTREE_INACCESSIBLE: "Cet aliment n'est pas le tien.",
     QUANTITE_INVALIDE: "La quantité doit être supérieure à zéro.",
     MACROS_INVALIDES: "Les valeurs nutritionnelles doivent être positives.",
@@ -222,6 +230,10 @@ export function useConsumedMeals(dates: readonly string[], actif: boolean): Cons
     ajouterManuel: async (repas, libellé, quantité, unité, p, g, l) =>
       (await écrire((c) =>
         ajouterAlimentManuel(c, repas, libellé, quantité, unité, p, g, l).then(() => true),
+      )) === true,
+    ajouterProduit: async (repas, produit, quantité, unité) =>
+      (await écrire((c) =>
+        ajouterAlimentProduit(c, repas, produit, quantité, unité).then(() => true),
       )) === true,
     corrigerQuantité: async (entryId, quantité, unité) =>
       (await écrire((c) => modifierQuantiteEntree(c, entryId, quantité, unité).then(() => true))) ===

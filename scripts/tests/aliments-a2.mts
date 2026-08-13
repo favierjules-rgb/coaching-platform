@@ -1221,9 +1221,13 @@ await test("A2-POLISH9. la double soumission est protégée à deux niveaux", ()
     feuilleAjout.includes("if (!manuelValide || enCours) return;"),
     "la feuille d'ajout garde l'envoi manuel",
   );
+  // ⚠️ Le nom a changé en phase 5 : l'étape quantité est désormais LA MÊME
+  // pour un aliment générique et pour un produit — `catalogueValide` est
+  // devenu `choixValide`. La garantie, elle, est identique : une garde
+  // explicite AVANT l'appel, en plus de `disabled`.
   assert.ok(
-    feuilleAjout.includes("if (!catalogueValide || enCours) return;"),
-    "et l'envoi catalogue",
+    feuilleAjout.includes("if (!choixValide || enCours) return;"),
+    "et l'envoi depuis l'étape quantité",
   );
   assert.ok(
     feuilleDétail.includes("if (!modifiée || enCours || valeur === null) return;"),
@@ -1277,8 +1281,37 @@ await test("A2-POLISH10. aucune régression sur A2-DB1..16 et A2-UI1..14", () =>
   );
 
   // Le périmètre A2.1 : rien de A3 n'a été branché.
-  const tout = [feuilleAjout, sectionRepas, feuilleDétail, lire("../../lib/supabase/consumed-meals.ts")].join("\n");
-  for (const interdit of ["openfoodfacts", "ciqual", "food_products", "BarcodeDetector", "ZXing", "gtin"]) {
+  // ⚠️ RÉÉCRIT EN PHASE 5, ET IL FAUT DIRE POURQUOI.
+  //
+  // Ce contrôle interdisait « openfoodfacts », « food_products » et « gtin »
+  // dans l'écran d'ajout. C'était le périmètre d'A2.1 ; la phase 5 branche
+  // les produits, avec autorisation explicite, et l'attribution ODbL exige
+  // même un lien vers openfoodfacts.org.
+  //
+  // Ce qui reste interdit est ce qui ne devait JAMAIS arriver dans l'UI, et
+  // qui n'y est toujours pas : les adresses d'API d'un tiers, le scanner, et
+  // le nom du service de recherche. L'écran appelle nos routes, pas les leurs.
+  //
+  // Et on inspecte le CODE, jamais la prose : `consumed-meals.ts` DOCUMENTE que
+  // `hydratee` vaut faux tant que `/api/v3.4/product/{gtin}` n'a pas rempli la
+  // fiche — une phrase qui énonce la règle, et qu'une recherche naïve
+  // prendrait pour sa violation. C'est la cinquième fois que ce piège se
+  // présente sur ce chantier ; on ne le repose pas.
+  const sansProse = (source: string) =>
+    source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/.*$/gm, "$1 ");
+  const tout = [feuilleAjout, sectionRepas, feuilleDétail, lire("../../lib/supabase/consumed-meals.ts")]
+    .map(sansProse)
+    .join("\n");
+  // CONTRÔLE NÉGATIF du dépouillement : il n'a pas vidé les fichiers.
+  assert.ok(tout.includes("AddFoodSheet") && tout.length > 5000, `dépouillement trop agressif (${tout.length})`);
+  for (const interdit of [
+    "world.openfoodfacts.org",
+    "search.openfoodfacts.org",
+    "search-a-licious",
+    "/api/v3",
+    "BarcodeDetector",
+    "ZXing",
+  ]) {
     assert.ok(
       !new RegExp(interdit, "i").test(tout),
       `« ${interdit} » est hors périmètre A2.1 et ne doit apparaître nulle part`,

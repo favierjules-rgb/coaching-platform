@@ -71,6 +71,12 @@ export interface SuiviConsommation {
     quantité: number,
     unité: ConsumedUnit,
   ) => Promise<boolean>;
+  readonly onAjouterProduit?: (
+    consumedMealId: string,
+    productId: string,
+    quantité: number,
+    unité: ConsumedUnit,
+  ) => Promise<boolean>;
   readonly onAjouterManuel: (
     consumedMealId: string,
     libellé: string,
@@ -243,6 +249,7 @@ export function StudentPrescribedWeek({
                         erreur={suivi.erreur}
                         onOuvrirConteneur={() => suivi.onOuvrirPrescrit(repas.id, date)}
                         onAjouterCatalogue={suivi.onAjouterCatalogue}
+                        onAjouterProduit={suivi.onAjouterProduit}
                         onAjouterManuel={suivi.onAjouterManuel}
                         onCorriger={suivi.onCorriger}
                         onSupprimerAliment={suivi.onSupprimerAliment}
@@ -313,6 +320,7 @@ function BlocRepasLibres({
           onRenommer={(libellé) => suivi.onRenommerRepas(repas.id, libellé)}
           onSupprimerRepas={() => suivi.onSupprimerRepas(repas.id)}
           onAjouterCatalogue={suivi.onAjouterCatalogue}
+          onAjouterProduit={suivi.onAjouterProduit}
           onAjouterManuel={suivi.onAjouterManuel}
           onCorriger={suivi.onCorriger}
           onSupprimerAliment={suivi.onSupprimerAliment}

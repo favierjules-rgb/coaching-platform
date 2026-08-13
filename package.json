@@ -94,6 +94,7 @@
     "test:aliments-a2": "npx tsx scripts/tests/aliments-a2.mts",
     "test:aliments-a3": "npx tsx scripts/tests/aliments-a3.mts",
     "test:aliments-a3-off": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/aliments-a3-off.mts",
+    "test:aliments-a3-ui": "npx tsx scripts/tests/aliments-a3-ui.mts",
     "test:aliments-a3-search": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/aliments-a3-search.mts"
   },
   "dependencies": {

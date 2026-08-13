@@ -42,6 +42,7 @@ export function ConsumedMealSection({
   erreur,
   onOuvrirConteneur,
   onAjouterCatalogue,
+  onAjouterProduit,
   onAjouterManuel,
   onCorriger,
   onSupprimerAliment,
@@ -59,6 +60,12 @@ export function ConsumedMealSection({
   onAjouterCatalogue: (
     consumedMealId: string,
     foodId: string,
+    quantité: number,
+    unité: ConsumedUnit,
+  ) => Promise<boolean>;
+  onAjouterProduit?: (
+    consumedMealId: string,
+    productId: string,
     quantité: number,
     unité: ConsumedUnit,
   ) => Promise<boolean>;
@@ -191,6 +198,15 @@ export function ConsumedMealSection({
             if (ok) setAjoutOuvert(false);
             return ok;
           }}
+          onAjouterProduit={
+            onAjouterProduit
+              ? async (productId, quantité, unité) => {
+                  const ok = await onAjouterProduit(conteneurCible, productId, quantité, unité);
+                  if (ok) setAjoutOuvert(false);
+                  return ok;
+                }
+              : undefined
+          }
           onAjouterManuel={async (libellé, quantité, unité, p, g, l) => {
             const ok = await onAjouterManuel(conteneurCible, libellé, quantité, unité, p, g, l);
             if (ok) setAjoutOuvert(false);
@@ -242,6 +258,7 @@ export function StudentMealCard({
   onRenommer,
   onSupprimerRepas,
   onAjouterCatalogue,
+  onAjouterProduit,
   onAjouterManuel,
   onCorriger,
   onSupprimerAliment,
@@ -255,6 +272,12 @@ export function StudentMealCard({
   onAjouterCatalogue: (
     consumedMealId: string,
     foodId: string,
+    quantité: number,
+    unité: ConsumedUnit,
+  ) => Promise<boolean>;
+  onAjouterProduit?: (
+    consumedMealId: string,
+    productId: string,
     quantité: number,
     unité: ConsumedUnit,
   ) => Promise<boolean>;
@@ -374,6 +397,7 @@ export function StudentMealCard({
         erreur={erreur}
         onOuvrirConteneur={async () => repas.id}
         onAjouterCatalogue={onAjouterCatalogue}
+        onAjouterProduit={onAjouterProduit}
         onAjouterManuel={onAjouterManuel}
         onCorriger={onCorriger}
         onSupprimerAliment={onSupprimerAliment}

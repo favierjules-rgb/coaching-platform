@@ -910,7 +910,13 @@ test("A3-SEARCH-SUP · Search-a-licious est confiné à un seul module", () => {
   for (const dossier of ["../../components", "../../hooks"]) {
     for (const chemin of fichiersTs(new URL(dossier + "/", import.meta.url))) {
       const source = sansProse(readFileSync(chemin, "utf8"));
-      if (/openfoodfacts|food-products\/search/i.test(source)) clients.push(chemin);
+      // Même affinage qu'en A3-OFF2 : le lien d'attribution est légitime, les
+      // adresses d'API ne le sont pas. L'UI appelle NOS routes — et le fait
+      // qu'elle nomme `/api/food-products/...` est justement la preuve
+      // qu'elle passe par nous, pas par eux.
+      if (/world\.openfoodfacts\.org|search\.openfoodfacts|search-a-licious|\/api\/v\d/i.test(source)) {
+        clients.push(chemin);
+      }
     }
   }
   assert.deepEqual(clients, [], `l'UI connaît Open Food Facts : ${clients.join(", ")}`);

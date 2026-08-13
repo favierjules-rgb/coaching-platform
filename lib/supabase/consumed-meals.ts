@@ -8,6 +8,10 @@ import {
   CONSUMED_UNITS,
 } from "@/lib/nutrition/consumed";
 import { MEAL_SLOT_KEYS, type MealSlotKey } from "@/lib/nutrition/meal-distribution";
+import {
+  classerResultats,
+  normaliserPourRecherche,
+} from "@/lib/nutrition/recherche-aliments";
 import type { Database } from "@/types/supabase";
 
 /**
@@ -189,6 +193,28 @@ export interface CatalogFood {
 }
 
 /**
+ * Un PRODUIT du cache local, tel que la recherche le rend à l'écran.
+ *
+ * Délibérément plus pauvre que le `ProduitEnCache` du serveur : ni charge
+ * brute, ni dates. L'écran a besoin de savoir quoi afficher, et d'UNE chose de
+ * plus — `hydratee` —, parce qu'un produit jamais chargé en détail devra
+ * l'être avant d'être consommé (phase 4.1). Il n'a pas à savoir POURQUOI.
+ */
+export interface ProduitLocal {
+  readonly id: string;
+  readonly gtin: string;
+  readonly name: string;
+  readonly brand: string | null;
+  readonly nutritionUnit: "g" | "ml";
+  readonly proteinPer100: number;
+  readonly carbPer100: number;
+  readonly fatPer100: number;
+  readonly imageUrl: string | null;
+  /** Faux tant que `/api/v3.4/product/{gtin}` n'a jamais rempli cette fiche. */
+  readonly hydratee: boolean;
+}
+
+/**
  * Recherche dans le catalogue GLOBAL et actif.
  *
  * Elle interroge `name` ET `slug` : le slug est accent-plié et sans
@@ -199,6 +225,37 @@ export interface CatalogFood {
  * La RLS ne rend que le catalogue global : un aliment privé de coach n'est ni
  * lisible ici, ni ajoutable — `ajouter_aliment_catalogue` le refuse aussi.
  */
+/**
+ * RECHERCHE LOCALE D'ALIMENTS GÉNÉRIQUES — aucun réseau externe, jamais.
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * POURQUOI LE SLUG, ET PAS LE NOM
+ * ────────────────────────────────────────────────────────────────────────────
+ * MESURÉ sur la table Ciqual 2025 réellement importée, le 13/08/2026 :
+ *
+ *   « pates »   par le nom :   0 aliment      par le slug :  39
+ *   « oeuf »    par le nom : 137 aliments     par le slug : 137 (ligature Œ comprise)
+ *
+ * Ciqual écrit « Pâtes ». Un `ilike '%pates%'` sur le nom ne trouve donc RIEN,
+ * et la version A2 de cette fonction laissait un élève sans pâtes sur une table
+ * qui en contient trente-neuf. Le `slug` — posé par `public.food_slug` dès A1 —
+ * est déjà replié : accents retirés, ligatures développées. Il n'y a aucune
+ * extension à installer, seulement une colonne à interroger.
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * POURQUOI DEUX REQUÊTES
+ * ────────────────────────────────────────────────────────────────────────────
+ * PostgREST ne sait pas trier par pertinence, et une seule requête bornée
+ * tronquerait au mauvais endroit : « pomme » a 97 correspondances dont 35
+ * commencent par le terme, et une limite de 20 par ordre alphabétique n'en
+ * ramenait aucune — mesuré, les vingt premières allaient de « Bar » à « Cake ».
+ *
+ * On demande donc SÉPARÉMENT ce qui COMMENCE par le terme (là où vivent les
+ * bonnes réponses) et ce qui le CONTIENT, puis on classe côté client avec une
+ * règle déterministe de quatre rangs (lib/nutrition/recherche-aliments.ts).
+ * Deux requêtes bornées sur 3 330 lignes coûtent moins qu'un index de
+ * pertinence qu'il faudrait installer, mesurer et maintenir.
+ */
 export async function searchCatalogFoods(
   supabase: TypedSupabaseClient,
   requête: string,
@@ -206,19 +263,26 @@ export async function searchCatalogFoods(
 ): Promise<readonly CatalogFood[]> {
   const terme = requête.trim();
   if (terme.length < 2) return [];
-  const motif = `%${terme.replace(/[%_]/g, "")}%`;
+  const normalisé = normaliserPourRecherche(terme).replace(/ /g, "-");
+  if (normalisé === "") return [];
 
-  const { data, error } = await supabase
-    .from("food_catalog")
-    .select("id, name, nutrition_unit, protein_per_100, carb_per_100, fat_per_100, piece_weight_g")
-    .is("owner_coach_id", null)
-    .eq("status", "active")
-    .or(`name.ilike.${motif},slug.ilike.${motif}`)
-    .order("name", { ascending: true })
-    .limit(limite);
-  devWarn("searchCatalogFoods", error);
+  const colonnes =
+    "id, name, nutrition_unit, protein_per_100, carb_per_100, fat_per_100, piece_weight_g";
+  const base = () =>
+    supabase
+      .from("food_catalog")
+      .select(colonnes)
+      .is("owner_coach_id", null)
+      .eq("status", "active");
 
-  return ((data ?? []) as unknown as {
+  const [début, contient] = await Promise.all([
+    base().like("slug", `${normalisé}%`).order("slug", { ascending: true }).limit(60),
+    base().like("slug", `%${normalisé}%`).order("slug", { ascending: true }).limit(40),
+  ]);
+  devWarn("searchCatalogFoods (début)", début.error);
+  devWarn("searchCatalogFoods (contient)", contient.error);
+
+  const lignes = [...(début.data ?? []), ...(contient.data ?? [])] as unknown as {
     id: string;
     name: string;
     nutrition_unit: string;
@@ -226,7 +290,10 @@ export async function searchCatalogFoods(
     carb_per_100: number;
     fat_per_100: number;
     piece_weight_g: number | null;
-  }[])
+  }[];
+
+  const uniques = [...new Map(lignes.map((f) => [f.id, f])).values()];
+  const alimentsBruts = uniques
     .filter((f) => f.nutrition_unit === "g" || f.nutrition_unit === "ml")
     .map((f) => ({
       id: f.id,
@@ -237,6 +304,84 @@ export async function searchCatalogFoods(
       fatPer100: Number(f.fat_per_100),
       pieceWeightG: f.piece_weight_g === null ? null : Number(f.piece_weight_g),
     }));
+
+  return classerResultats(alimentsBruts, terme, limite);
+}
+
+/**
+ * RECHERCHE LOCALE DE PRODUITS DÉJÀ EN CACHE — aucun réseau, jamais.
+ *
+ * Le pendant de la fonction ci-dessus pour `food_products`. Elle est lue avec
+ * le client de l'ÉLÈVE : la policy `food_products_select_all` autorise la
+ * lecture à tout utilisateur authentifié, et le retrait des privilèges
+ * d'écriture (migration 20260903090000) garantit qu'il ne peut rien y mettre.
+ *
+ * Un produit n'a pas de virgule structurante dans son nom — « Skyr nature »,
+ * pas « Skyr, nature » —, d'où l'utilité du rang 2 du classement : « le nom
+ * commence par le terme ».
+ *
+ * ⚠️ `stale` n'est PAS calculé ici, et c'est délibéré : la fraîcheur d'une
+ * fiche produit se mesure sur `detail_fetched_at` (phase 4.1), et cette
+ * décision appartient au serveur. L'écran, lui, n'a besoin que de savoir si la
+ * fiche a été hydratée — pour déclencher le lookup au moment du tap.
+ */
+export async function searchCachedProducts(
+  supabase: TypedSupabaseClient,
+  requête: string,
+  limite = 20,
+): Promise<readonly ProduitLocal[]> {
+  const terme = requête.trim();
+  if (terme.length < 2) return [];
+  const motif = terme.replace(/[\\%_]/g, (c) => `\\${c}`);
+
+  const colonnes =
+    "id, gtin, product_name, brand, nutrition_unit, protein_per_100, carb_per_100, " +
+    "fat_per_100, image_url, detail_fetched_at";
+  const base = () => supabase.from("food_products").select(colonnes);
+
+  const [parNom, parMarque] = await Promise.all([
+    base().ilike("product_name", `%${motif}%`).order("product_name", { ascending: true }).limit(40),
+    base().ilike("brand", `%${motif}%`).order("product_name", { ascending: true }).limit(20),
+  ]);
+  devWarn("searchCachedProducts (nom)", parNom.error);
+  devWarn("searchCachedProducts (marque)", parMarque.error);
+
+  const lignes = [...(parNom.data ?? []), ...(parMarque.data ?? [])] as unknown as {
+    id: string;
+    gtin: string;
+    product_name: string;
+    brand: string | null;
+    nutrition_unit: string;
+    protein_per_100: number;
+    carb_per_100: number;
+    fat_per_100: number;
+    image_url: string | null;
+    detail_fetched_at: string | null;
+  }[];
+
+  const uniques = [...new Map(lignes.map((p) => [p.id, p])).values()].map((p) => ({
+    id: p.id,
+    gtin: p.gtin,
+    // `name` porte le NOM DU PRODUIT seul : c'est lui que le classement
+    // compare au terme. La marque est affichée à part, et sert de second
+    // chemin de recherche, pas de préfixe au nom.
+    name: p.product_name,
+    brand: p.brand,
+    nutritionUnit: (p.nutrition_unit === "ml" ? "ml" : "g") as "g" | "ml",
+    proteinPer100: Number(p.protein_per_100),
+    carbPer100: Number(p.carb_per_100),
+    fatPer100: Number(p.fat_per_100),
+    imageUrl: p.image_url,
+    hydratee: p.detail_fetched_at !== null,
+  }));
+
+  // Un produit trouvé PAR SA MARQUE ne contient pas forcément le terme dans son
+  // nom : `classerResultats` l'écarterait. On classe donc ceux qui matchent par
+  // le nom, puis on complète par les autres, dans l'ordre du fournisseur.
+  const parNomClassés = classerResultats(uniques, terme, limite);
+  const vus = new Set(parNomClassés.map((p) => p.id));
+  const complément = uniques.filter((p) => !vus.has(p.id));
+  return [...parNomClassés, ...complément].slice(0, limite);
 }
 
 /**
@@ -343,6 +488,30 @@ export function ajouterAlimentCatalogue(
   return appeler<string>(supabase, "ajouter_aliment_catalogue", {
     p_consumed_meal_id: consumedMealId,
     p_food_id: foodId,
+    p_quantity: quantité,
+    p_unit: unité,
+  });
+}
+
+/**
+ * PRODUIT COMMERCIAL. Contrat identique à celui du catalogue : le client
+ * envoie le produit, la quantité et l'unité — jamais une macro, jamais un
+ * élève. La RPC charge `food_products`, convertit et fige l'instantané.
+ *
+ * ⚠️ L'écran doit s'être assuré AVANT l'appel que la fiche est hydratée
+ * (phase 4.1) : consommer une fiche née d'une recherche texte reviendrait à
+ * consommer une unité de repli, et 250 ml pourraient devenir 250 g.
+ */
+export function ajouterAlimentProduit(
+  supabase: TypedSupabaseClient,
+  consumedMealId: string,
+  productId: string,
+  quantité: number,
+  unité: ConsumedUnit,
+): Promise<string> {
+  return appeler<string>(supabase, "ajouter_aliment_produit", {
+    p_consumed_meal_id: consumedMealId,
+    p_product_id: productId,
     p_quantity: quantité,
     p_unit: unité,
   });
