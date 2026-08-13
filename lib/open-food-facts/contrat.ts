@@ -177,44 +177,53 @@ export function estOffErreur(erreur: unknown): erreur is OffErreur {
   );
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// 3. LE CODE-BARRES
-// ────────────────────────────────────────────────────────────────────────────
 /**
- * Un GTIN est une CHAÎNE de 8, 12, 13 ou 14 chiffres. Deux règles ici, et
- * elles se contredisent en apparence :
+ * `exigerGtin` DU CÔTÉ A3 — la règle vient de `lib/scan/gtin.ts`, seule la
+ * FORME DE L'EXCEPTION change ici.
  *
- *   - on N'ACCEPTE PAS n'importe quoi : une saisie hors forme est refusée
- *     AVANT tout appel, ce qui économise le quota OFF et rend une erreur
- *     immédiate ;
- *   - on NE RÉPARE RIEN : pas de complétion à 13 chiffres, pas de recalcul de
- *     clé de contrôle, pas de retrait de zéros. Un code « réparé » désigne un
- *     AUTRE produit, et l'élève n'aurait aucun moyen de s'en apercevoir.
+ * Le module de scan est une feuille absolue : il n'importe rien, donc il ne
+ * peut pas lever une `OffErreur` — qui appartient au vocabulaire d'Open Food
+ * Facts. Il lève sa propre `GtinInvalide`, et cette frontière la retraduit
+ * dans le vocabulaire fermé que la route et l'écran connaissent déjà.
  *
- * La clé de contrôle n'est délibérément pas vérifiée : Open Food Facts
- * contient de vrais produits dont le code imprimé ne la respecte pas, et les
- * refuser rendrait un produit réel inajoutable. Un code inventé se fait de
- * toute façon renvoyer PRODUCT_NOT_FOUND.
+ * ⚠️ Une seule implémentation de la RÈGLE existe toujours. Ce qui est ajouté
+ * ici n'est pas une seconde validation, c'est un adaptateur d'erreur — le même
+ * office que celui qui transforme un HTTP 429 en `OFF_RATE_LIMITED`.
  *
- * Seuls les espaces de bord sont retirés — un scanner en ajoute parfois, et
- * un espace n'est pas un chiffre : le retirer ne change aucun produit.
+ * Mesuré en écrivant ce déplacement : sans cette retraduction, `estOffErreur`
+ * rendait `false` sur une `GtinInvalide` (le nom ne correspondait plus), et la
+ * route de lookup répondait 503 « service indisponible » là où elle devait
+ * répondre 400 « code-barres invalide ». Le déplacement d'un module aurait
+ * silencieusement changé un code HTTP.
  */
-export function normaliserGtin(saisie: string): string {
-  return saisie.trim();
-}
-
-export function gtinEstValide(gtin: string): boolean {
-  return /^[0-9]{8}$/.test(gtin) || /^[0-9]{12,14}$/.test(gtin);
-}
-
-/** Refuse hors forme, sans jamais corriger. */
 export function exigerGtin(saisie: string): string {
-  const gtin = normaliserGtin(saisie);
-  if (!gtinEstValide(gtin)) {
+  const gtin = lireGtinPur(saisie);
+  if (gtin === null) {
     throw new OffErreur("INVALID_GTIN", `Code-barres invalide : ${JSON.stringify(saisie)}`);
   }
   return gtin;
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// 3. LE CODE-BARRES
+// ────────────────────────────────────────────────────────────────────────────
+/**
+ * ────────────────────────────────────────────────────────────────────────────
+ * LE CODE-BARRES A DÉMÉNAGÉ — ET IL N'EN EXISTE TOUJOURS QU'UN SEUL
+ * ────────────────────────────────────────────────────────────────────────────
+ * `normaliserGtin`, `gtinEstValide` et `exigerGtin` vivaient ici. Le scanner
+ * (A4) en a besoin DANS LE NAVIGATEUR — et ce fichier exporte aussi
+ * `OFF_BASE_URL`, `urlLookupProduit`, `OFF_FIELDS`… : l'importer depuis un
+ * composant client ferait entrer les adresses d'API d'Open Food Facts dans le
+ * bundle navigateur, ce que trois garde-fous interdisent depuis la phase 3.
+ *
+ * Ils sont donc partis dans `lib/scan/gtin.ts`, une feuille absolue sans la
+ * moindre importation. Et ils sont RÉEXPORTÉS ici : le serveur continue de les
+ * appeler par ce chemin, sans une ligne de changement, et il n'existe toujours
+ * qu'une seule définition dans le dépôt. Un déplacement, pas une copie.
+ */
+export { gtinEstValide, lireGtin, normaliserGtin } from "@/lib/scan/gtin";
+import { lireGtin as lireGtinPur } from "@/lib/scan/gtin";
 
 // ────────────────────────────────────────────────────────────────────────────
 // 4. LE DTO SETH — CE QUE LA ROUTE REND, ET QUI NE RESSEMBLE PAS À OFF

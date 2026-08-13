@@ -94,12 +94,14 @@
     "test:aliments-a2": "npx tsx scripts/tests/aliments-a2.mts",
     "test:aliments-a3": "npx tsx scripts/tests/aliments-a3.mts",
     "test:aliments-a3-off": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/aliments-a3-off.mts",
+    "test:aliments-a4-scan": "npx tsx scripts/tests/aliments-a4-scan.mts",
     "test:aliments-a3-ui": "npx tsx scripts/tests/aliments-a3-ui.mts",
     "test:aliments-a3-search": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/aliments-a3-search.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.110.0",
+    "@zxing/library": "^0.23.0",
     "jspdf": "^4.2.1",
     "lucide-react": "^1.23.0",
     "next": "16.2.12",
@@ -109,7 +111,8 @@
     "server-only": "^0.0.1",
     "stripe": "^22.3.0",
     "web-push": "^3.6.7",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "zxing-wasm": "^3.1.2"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
