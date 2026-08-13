@@ -788,22 +788,23 @@ test("A3-OFF-SUP · le périmètre de la phase est tenu : rien de plus n'a été
   //
   //    ⚠️ RÉÉCRIT LE 13/08/2026 (QUATRIÈME OCCURRENCE DU MÊME MOTIF). Ce
   //    contrôle interdisait « ZXing » dans TOUT l'arbre. C'était juste tant que
-  //    le scanner n'existait pas ; A4 phase 2 l'a construit, avec autorisation
+  //    le scanner n'existait pas ; A4 l'a construit, avec autorisation
   //    explicite. Le rouge ne disait donc pas que la phase 3 avait débordé : il
   //    disait, une fois de plus, que le contrôle parlait de L'ARBRE ENTIER pour
   //    décrire le périmètre D'UNE PHASE.
   //
   //    La garantie n'est pas abandonnée, elle est resserrée là où elle reste
-  //    vraie : un DÉCODEUR n'a le droit d'exister que dans la couche de scan
-  //    d'A4 et dans son banc d'essai temporaire. Qu'il apparaisse dans un
-  //    module d'A3, dans une route d'API ou dans un écran d'élève resterait un
-  //    débordement — et c'est cela que le contrôle doit continuer à voir.
+  //    vraie : un DÉCODEUR n'a le droit d'exister que dans `lib/scan/`. Qu'il
+  //    apparaisse dans un module d'A3, dans une route d'API ou dans un écran
+  //    d'élève resterait un débordement — et c'est cela que le contrôle doit
+  //    continuer à voir. L'écran scanner lui-même n'y échappe pas : il passe par
+  //    l'interface `MoteurScan` et ne nomme aucune bibliothèque.
   //
   //    `BarcodeDetector` et `cgi/search.pl`, eux, restent interdits PARTOUT,
   //    banc d'essai compris : le premier parce qu'A4 a décidé qu'il ne serait
   //    jamais le moteur critique, le second parce que c'est l'endpoint legacy
   //    d'Open Food Facts, que rien ne doit rappeler.
-  const COUCHE_SCAN = /(^|\/)(lib\/scan\/[^/]+\.ts|components\/dev\/BancDEssaiScan\.tsx)$/;
+  const COUCHE_SCAN = /(^|\/)lib\/scan\/[^/]+\.ts$/;
   const anticipes: string[] = [];
   // 2. Search-a-licious n'a le droit d'exister que dans SON module.
   const deborde: string[] = [];

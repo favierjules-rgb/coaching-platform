@@ -274,3 +274,31 @@ export function torcheDisponible(stream: MediaStream): boolean {
   const capacités = piste.getCapabilities() as { torch?: boolean };
   return capacités.torch === true;
 }
+
+/**
+ * Allume ou éteint la torche.
+ *
+ * ⚠️ `torch` n'est pas dans le type `MediaTrackConstraintSet` de TypeScript : il
+ * vit dans le registre des contraintes d'image, que la définition standard ne
+ * couvre pas. Le `as never` est donc une vérité sur l'API, pas un contournement
+ * du typage — et il est confiné à cette ligne plutôt que dispersé dans l'écran.
+ *
+ * Rend `false` sans rien casser si la piste refuse : sur certains appareils,
+ * `torch` est ANNONCÉ mais `applyConstraints` échoue quand même. Le scanner ne
+ * doit jamais dépendre de la lampe — une lampe qui refuse de s'allumer n'est pas
+ * une raison d'interrompre un scan qui marche.
+ */
+export async function basculerTorche(
+  stream: MediaStream | null | undefined,
+  allumee: boolean,
+): Promise<boolean> {
+  if (!stream) return false;
+  const piste = stream.getVideoTracks()[0];
+  if (!piste || typeof piste.applyConstraints !== "function") return false;
+  try {
+    await piste.applyConstraints({ advanced: [{ torch: allumee }] } as never);
+    return true;
+  } catch {
+    return false;
+  }
+}

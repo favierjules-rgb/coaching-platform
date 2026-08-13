@@ -50,7 +50,7 @@ function sansProse(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/.*$/gm, "$1 ");
 }
 
-const CODE_BANC = sansProse(lire("../../components/dev/BancDEssaiScan.tsx"));
+const CODE_SCANNER = sansProse(lire("../../components/student/ScannerCodeBarres.tsx"));
 const CODE_CAMERA = sansProse(lire("../../lib/scan/camera.ts"));
 const CODE_ADAPTATEURS = sansProse(lire("../../lib/scan/adaptateurs.ts"));
 
@@ -135,21 +135,30 @@ const IMAGE = { width: 2, height: 2, data: new Uint8ClampedArray(16) } as unknow
 await test("A4-SCAN1. aucune permission n'est demandée avant une action de l'utilisateur", () => {
   // La preuve tient en deux faits, et aucun n'est une relecture d'intention.
   //
-  // 1. `ouvrirCameraArriere` n'est appelée QUE depuis `demarrer()`, qui est
+  // 1. `ouvrirCameraArriere` n'est appelée QUE depuis `ouvrir()`, qui est
   //    elle-même branchée sur un `onClick`.
-  const posOuvrir = CODE_BANC.indexOf("await ouvrirCameraArriere(");
-  const posDemarrer = CODE_BANC.indexOf("async function demarrer()");
-  const posEffet = CODE_BANC.indexOf("useEffect(");
-  assert.ok(posDemarrer > 0 && posOuvrir > posDemarrer, "l'ouverture vit dans demarrer()");
-  assert.ok(CODE_BANC.includes("onClick={() => void demarrer()}"), "et demarrer() est un onClick");
+  const posOuvrir = CODE_SCANNER.indexOf("await ouvrirCameraArriere(");
+  const posFonction = CODE_SCANNER.indexOf("async function ouvrir()");
+  const posEffet = CODE_SCANNER.indexOf("useEffect(");
+  assert.ok(posFonction > 0 && posOuvrir > posFonction, "l'ouverture vit dans ouvrir()");
+  assert.ok(CODE_SCANNER.includes("onClick={() => void ouvrir()}"), "et ouvrir() est un onClick");
 
   // 2. Le SEUL `useEffect` du composant est un nettoyage de démontage : il ne
   //    peut rien ouvrir. Un effet qui appellerait la caméra au montage
   //    demanderait la permission sans que personne n'ait rien tapé.
-  const effet = CODE_BANC.slice(posEffet, CODE_BANC.indexOf(";", posEffet) + 1);
-  assert.ok(effet.includes("() => toutArreter()"), effet);
-  assert.ok(!effet.includes("demarrer"), "aucun effet ne démarre la caméra");
-  assert.equal((CODE_BANC.match(/useEffect\(/g) ?? []).length, 1, "un seul effet, et c'est le nettoyage");
+  const effet = CODE_SCANNER.slice(posEffet, CODE_SCANNER.indexOf(";", posEffet) + 1);
+  assert.ok(effet.includes("() => toutArrêter()"), effet);
+  assert.ok(!effet.includes("ouvrir("), "aucun effet ne démarre la caméra");
+  assert.equal(
+    (CODE_SCANNER.match(/useEffect\(/g) ?? []).length,
+    1,
+    "un seul effet, et c'est le nettoyage",
+  );
+
+  // 3. Et la FEUILLE ne monte le scanner que sur un `onClick`, jamais d'office.
+  const feuille = sansProse(lire("../../components/student/AddFoodSheet.tsx"));
+  assert.ok(feuille.includes("onClick={ouvrirScan}"), "le scanner s'ouvre sur un tap");
+  assert.ok(feuille.includes("useState(false)"), "et il est fermé au premier rendu");
 });
 
 await test("A4-SCAN2 · REAR1. la contrainte demandée privilégie la caméra arrière", async () => {
@@ -278,7 +287,7 @@ await test("REAR4. plusieurs caméras arrière → aucune question posée à l'u
   assert.equal(r.ok, true);
   assert.equal(journal.contraintes.length, 1);
   assert.equal(journal.enumerations, 0, "on n'énumère même pas : la bonne caméra a répondu");
-  assert.ok(!CODE_BANC.includes("sélecteur") && !CODE_BANC.includes("choisirCamera"));
+  assert.ok(!CODE_SCANNER.includes("sélecteur") && !CODE_SCANNER.includes("choisirCamera"));
 
   // Et quand il faut choisir, la règle est déterministe et tolère les libellés
   // hétérogènes d'iOS et d'Android.
@@ -307,7 +316,7 @@ await test("A4-SCAN6. un GTIN est et reste une CHAÎNE", () => {
       assert.ok(!code.includes(interdit), `« ${interdit} » dans ${fichier}`);
     }
   }
-  assert.ok(!CODE_BANC.includes("Number(") && !CODE_BANC.includes("parseInt("));
+  assert.ok(!CODE_SCANNER.includes("Number(") && !CODE_SCANNER.includes("parseInt("));
 });
 
 await test("A4-SCAN7. les zéros de tête sont conservés, caractère pour caractère", () => {
@@ -437,25 +446,36 @@ await test("A4-SCAN11 · REAR5. arrêter la caméra arrête TOUTES les pistes, e
 await test("A4-SCAN12 · A4-SCAN13. l'arrêt est branché sur les six sorties", () => {
   // La fonction centrale existe, et elle fait les trois choses : couper la
   // cadence, rendre les pistes, détruire le moteur.
-  const bloc = CODE_BANC.slice(
-    CODE_BANC.indexOf("const toutArreter = useCallback"),
-    CODE_BANC.indexOf("useEffect("),
+  const bloc = CODE_SCANNER.slice(
+    CODE_SCANNER.indexOf("const toutArrêter = useCallback"),
+    CODE_SCANNER.indexOf("useEffect("),
   );
   assert.ok(bloc.includes("clearInterval"), "la boucle de décodage est coupée");
-  assert.ok(bloc.includes("arreterCamera(streamRef.current)"), "les pistes sont rendues");
+  assert.ok(bloc.includes("arreterCamera(fluxRef.current)"), "les pistes sont rendues");
   assert.ok(bloc.includes("srcObject = null"), "l'élément vidéo est détaché");
   assert.ok(bloc.includes("moteurRef.current?.detruire()"), "le moteur est détruit");
 
-  // Elle est appelée depuis : le démontage, le bouton fermer, la détection, et
-  // les deux chemins d'échec.
-  assert.ok(CODE_BANC.includes("useEffect(() => () => toutArreter(), [toutArreter])"), "démontage");
-  assert.ok(CODE_BANC.includes("onClick={() => {\n          toutArreter();"), "bouton fermer");
-  const détection = CODE_BANC.slice(CODE_BANC.indexOf('issue.type === "gtin"'));
+  // ⚠️ L'ORDRE DANS LA FONCTION COMPTE. La minuterie est coupée AVANT que le
+  // flux ne soit rendu : l'inverse laisserait passer un dernier tour de boucle
+  // sur une piste déjà morte.
   assert.ok(
-    détection.indexOf("toutArreter()") < détection.indexOf("setEtat(\"detecte\")"),
-    "à la détection, la caméra est coupée AVANT l'affichage",
+    bloc.indexOf("clearInterval") < bloc.indexOf("arreterCamera("),
+    "la cadence est coupée avant que les pistes ne soient rendues",
   );
-  assert.equal((CODE_BANC.match(/toutArreter\(\)/g) ?? []).length >= 5, true);
+
+  // Elle est appelée depuis : le démontage, le bouton fermer, la détection, et
+  // les chemins d'échec.
+  assert.ok(
+    CODE_SCANNER.includes("useEffect(() => () => toutArrêter(), [toutArrêter])"),
+    "démontage",
+  );
+  assert.ok(CODE_SCANNER.includes("function fermer() {\n    toutArrêter();"), "bouton fermer");
+  const détection = CODE_SCANNER.slice(CODE_SCANNER.indexOf('issue.type !== "gtin"'));
+  assert.ok(
+    détection.indexOf("toutArrêter()") < détection.indexOf("onGtin(issue.gtin)"),
+    "à la détection, la caméra est coupée AVANT que l'appelant ne soit prévenu",
+  );
+  assert.equal((CODE_SCANNER.match(/toutArrêter\(\)/g) ?? []).length >= 5, true);
 });
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -476,29 +496,35 @@ await test("A4-SCAN15. aucune image ne quitte l'appareil", () => {
       assert.ok(!code.includes(interdit), `« ${interdit} » dans ${fichier}`);
     }
   }
-  // Le banc d'essai non plus : il MESURE, il n'envoie rien — pas même le GTIN.
+  // L'ÉCRAN NON PLUS. Il lit l'image en mémoire, la décode sur place et
+  // l'oublie : ce qui remonte à la feuille est une suite de chiffres, jamais
+  // une image. Le scanner ne connaît aucune adresse — pas même les nôtres.
   for (const interdit of ["fetch(", "toBlob", "toDataURL", "sendBeacon", "/api/"]) {
-    assert.ok(!CODE_BANC.includes(interdit), `« ${interdit} » dans le banc d'essai`);
+    assert.ok(!CODE_SCANNER.includes(interdit), `« ${interdit} » dans l'écran scanner`);
   }
+  // Et l'image lue ne sort pas de la boucle : elle n'est passée qu'au moteur.
+  assert.ok(CODE_SCANNER.includes("tenterUneImage(boucleRef.current, moteur, image)"));
+  assert.equal((CODE_SCANNER.match(/getImageData\(/g) ?? []).length, 1);
+
   // CONTRÔLE NÉGATIF du dépouillement : les fichiers ne sont pas vides.
   assert.ok(sansProse(lire("../../lib/scan/camera.ts")).includes("ouvrirCameraArriere"));
-  assert.ok(CODE_BANC.length > 3000, `banc trop court (${CODE_BANC.length})`);
+  assert.ok(CODE_SCANNER.length > 3000, `écran trop court (${CODE_SCANNER.length})`);
 });
 
 await test("A4-SCAN16. le moteur est chargé PARESSEUSEMENT, jamais dans le bundle principal", () => {
-  // 1. Les deux bibliothèques ne sont atteintes que par `import()` dynamique.
+  // 1. La bibliothèque n'est atteinte que par `import()` dynamique.
   const adaptateurs = sansProse(lire("../../lib/scan/adaptateurs.ts"));
   assert.ok(adaptateurs.includes('await import("zxing-wasm/reader")'));
-  assert.ok(adaptateurs.includes('await import("@zxing/library")'));
   assert.ok(
-    !/^import .*(zxing-wasm|@zxing\/library)/m.test(adaptateurs),
+    !/^import .*zxing-wasm/m.test(adaptateurs),
     "aucune importation statique d'une bibliothèque de décodage",
   );
 
   // 2. Le module d'adaptateurs lui-même est chargé dynamiquement : c'est ce qui
-  //    empêche le bundler de tirer les deux chunks dès l'ouverture de l'écran.
-  assert.ok(CODE_BANC.includes('await import("@/lib/scan/adaptateurs")'));
-  assert.ok(!/^import .*adaptateurs/m.test(CODE_BANC), "pas d'import statique des adaptateurs");
+  //    empêche le bundler de tirer le WebAssembly dès l'ouverture de l'écran
+  //    d'ajout — et l'écran d'ajout, lui, est dans le chemin normal.
+  assert.ok(CODE_SCANNER.includes('await import("@/lib/scan/adaptateurs")'));
+  assert.ok(!/^import .*adaptateurs/m.test(CODE_SCANNER), "pas d'import statique des adaptateurs");
 
   // 3. Et AUCUN fichier de l'application hors de la couche scan ne les nomme.
   for (const fichier of [
@@ -553,11 +579,18 @@ await test("A4-SCAN19 · A4-SCAN20. A3 et A2 sont intacts", () => {
     "la frontière A3 retraduit dans son vocabulaire fermé",
   );
 
-  // Et l'écran d'ajout d'A3 phase 5 n'a pas été touché par cette phase.
+  // Et l'écran d'ajout d'A3 phase 5 garde ses deux parcours.
+  //
+  // ⚠️ RÉÉCRIT EN PHASE 3. Ce contrôle exigeait qu'AUCUN scanner ne soit branché
+  // dans l'écran d'élève. C'était la frontière de la phase 2 — le scanner
+  // n'existait pas encore — et elle a été franchie par décision explicite. Ce
+  // qui reste vrai, et qui est maintenant mesuré : le scan s'AJOUTE aux deux
+  // parcours d'A2 et d'A3, il ne les remplace pas.
   const feuille = lire("../../components/student/AddFoodSheet.tsx");
   assert.ok(feuille.includes("searchCatalogFoods") && feuille.includes("searchCachedProducts"));
   assert.ok(feuille.includes("lireMacroPour100"), "la saisie manuelle A2 est intacte");
-  assert.ok(!feuille.includes("scan"), "aucun scanner n'est encore branché dans l'écran d'élève");
+  assert.ok(feuille.includes("rechercherProduitsExternes"), "la recherche texte A3 est intacte");
+  assert.ok(feuille.includes("ScannerCodeBarres"), "et le scanner est branché");
 });
 
 await test("A4-SUP. les formats sont bornés aux quatre utiles, et ITF-14 en est exclu", () => {
@@ -578,7 +611,7 @@ await test("A4-SUP. la torche n'est proposée que si la piste l'expose vraiment"
   const sansCapacites = { piste: { kind: "video", stop() {}, getSettings: () => ({}) } };
   assert.equal(torcheDisponible(fauxStream([sansCapacites])), false);
   // Et l'écran ne montre le bouton que dans ce cas.
-  assert.ok(CODE_BANC.includes("torcheDisponible("));
+  assert.ok(CODE_SCANNER.includes("torcheDisponible("));
 });
 
 await test("A4-SUP. le facingMode réellement obtenu est relu quand le navigateur l'expose", () => {
@@ -613,7 +646,7 @@ await test("A4-SUP §12. le WebAssembly est un asset de NOTRE build, jamais un C
   // ⚠️ SUR LE CODE, PAS SUR LA PROSE. Les commentaires ci-dessus nomment
   // `fastly.jsdelivr.net` pour expliquer POURQUOI on le refuse : un contrôle
   // qui lirait le fichier brut échouerait sur son propre exposé des motifs.
-  for (const fichier of ["adaptateurs.ts", "moteur.ts", "camera.ts", "gtin.ts"]) {
+  for (const fichier of ["adaptateurs.ts", "moteur.ts", "camera.ts", "gtin.ts", "parcours.ts"]) {
     const code = sansProse(lire(`../../lib/scan/${fichier}`));
     assert.ok(!/jsdelivr|unpkg|cdn\./i.test(code), `aucun CDN dans lib/scan/${fichier}`);
     assert.ok(!/https?:\/\//.test(code), `aucune URL absolue dans lib/scan/${fichier}`);
@@ -622,7 +655,8 @@ await test("A4-SUP §12. le WebAssembly est un asset de NOTRE build, jamais un C
   // CONTRÔLE NÉGATIF DU DÉCAPAGE : si `sansProse` vidait le fichier, les deux
   // assertions ci-dessus passeraient sur du vide et ne prouveraient rien.
   assert.ok(CODE_ADAPTATEURS.includes("fabriquerMoteurWasm"), "le décapage n'a pas vidé le code");
-  assert.ok(CODE_ADAPTATEURS.length > 1500, "le décapage n'a pas vidé le code");
+  assert.ok(CODE_ADAPTATEURS.includes("prepareZXingModule"), "le décapage n'a pas vidé le code");
+  assert.ok(CODE_ADAPTATEURS.length > 1000, "le décapage n'a pas vidé le code");
   assert.ok(
     !CODE_ADAPTATEURS.includes("LE FICHIER `.wasm` EST SERVI"),
     "le décapage a bien retiré la prose",
@@ -666,21 +700,4 @@ await test("A4-SUP. les noms de formats de la bibliothèque ne fuitent pas dans 
 
   // Un format inconnu n'est pas inventé : il ressort tel quel, et se voit.
   assert.equal(formatWasmVersA4("QRCode"), "QRCode");
-});
-
-await test("A4-SUP. l'interopérabilité CJS/ESM de @zxing/library est traitée, pas supposée", () => {
-  // `@zxing/library@0.23.0` n'a pas de champ `exports` : `main` désigne le
-  // build CommonJS, `module` le build ES. Un bundler navigateur prend le
-  // second — les exportations nommées existent. Node prend le premier, et
-  // `MultiFormatReader` n'est alors accessible que sous `default`. Mesuré :
-  // sans cette précaution, `new MultiFormatReader()` lève « is not a
-  // constructor », et le message ne dit pas pourquoi.
-  assert.ok(
-    /"MultiFormatReader" in importé/.test(CODE_ADAPTATEURS),
-    "la forme du module est TESTÉE avant d'être déstructurée",
-  );
-  assert.ok(
-    /\{ default: typeof importé \}/.test(CODE_ADAPTATEURS),
-    "et la forme CommonJS est traitée",
-  );
 });

@@ -1,20 +1,15 @@
 import { lireGtin } from "@/lib/scan/gtin";
 
 /**
- * LE MOTEUR DE DÉCODAGE — UNE INTERFACE, DEUX CANDIDATS (ALIMENTS A4, PHASE 2).
+ * LE MOTEUR DE DÉCODAGE (ALIMENTS A4, PHASE 3).
  *
  * ────────────────────────────────────────────────────────────────────────────
- * POURQUOI UNE INTERFACE AVANT MÊME D'AVOIR CHOISI
+ * LE CHOIX EST FAIT, ET IL A ÉTÉ MESURÉ
  * ────────────────────────────────────────────────────────────────────────────
- * L'audit de phase 1 a mesuré les deux candidats sur ce qu'on peut mesurer sans
- * téléphone — licence, maintenance, poids — et a buté sur la seule question qui
- * décide vraiment : lequel décode un EAN-13 assez vite sur un iPhone réel. Cette
- * réponse-là ne s'obtient qu'en scannant un paquet de céréales.
- *
- * L'interface existe donc AVANT le choix, précisément pour que le choix reste
- * ouvert : la boucle de scan, la caméra et l'écran ne connaissent que
- * `MoteurScan`, et la bascule d'un candidat à l'autre ne touche pas une ligne
- * d'interface.
+ * `zxing-wasm`, sur benchmark iPhone physique. Le portage JavaScript pur a été
+ * RETIRÉ du dépôt : sur un paquet de galettes de maïs, il n'obtenait aucun code
+ * valide après plus de 200 images là où le WebAssembly lisait le code. Un code
+ * illisible coûte plus cher qu'un téléchargement de plus.
  *
  * ────────────────────────────────────────────────────────────────────────────
  * CE QUE LE MOTEUR NE DÉCIDE JAMAIS
@@ -35,10 +30,11 @@ import { lireGtin } from "@/lib/scan/gtin";
  * une étiquette de prix n'est pas un produit, et le décoder ne peut que nous
  * faire perdre du temps ou verrouiller le scan sur un mauvais code.
  *
- * ⚠️ HYPOTHÈSE À MESURER, PAS À SUPPOSER. « Moins de formats = plus rapide »
- * est plausible et documenté par les auteurs de ZXing, mais je ne l'ai pas
- * mesuré ici. Le banc d'essai de la phase 2 permet de comparer cette liste à
- * une liste élargie, sur le même téléphone et les mêmes produits.
+ * ⚠️ HYPOTHÈSE NON MESURÉE, et signalée comme telle. « Moins de formats = plus
+ * rapide » est plausible et documenté par les auteurs de ZXing, mais le
+ * benchmark iPhone n'a pas comparé cette liste à une liste élargie : il a
+ * comparé deux MOTEURS. La restriction reste justifiée par les faux positifs,
+ * pas par une mesure de vitesse.
  *
  * ITF-14 est volontairement absent : c'est un code de CARTON de regroupement,
  * pas d'unité consommateur. Un ITF-14 encapsule le GTIN-13 de l'unité, mais
@@ -101,60 +97,52 @@ export function formatWasmVersA4(format: string): string {
 }
 
 /**
- * Le contrat que les deux candidats doivent tenir.
+ * Le contrat que le moteur doit tenir.
+ *
+ * ⚠️ L'INTERFACE SURVIT AU BENCHMARK, ET C'EST DÉLIBÉRÉ. Elle a été écrite en
+ * phase 2 pour que le choix reste ouvert ; le choix est fait — `zxing-wasm`,
+ * sur mesure physique — mais l'interface reste, parce que ce qu'elle protège
+ * n'a pas disparu : la boucle de scan, la caméra et l'écran ne connaissent
+ * qu'un `MoteurScan`, et changer de décodeur un jour ne toucherait toujours
+ * qu'`adaptateurs.ts`.
  *
  * `initialiser()` est séparé de `decoder()` parce que le coût n'est pas le
- * même : charger et instancier un WebAssembly de 438 Ko se fait UNE fois, à
- * l'ouverture du scanner, pendant que la caméra démarre — pas à la première
- * image, où il ferait un à-coup visible.
+ * même : charger et instancier le WebAssembly se fait UNE fois, à l'ouverture
+ * du scanner, pendant que la caméra démarre — pas à la première image, où il
+ * ferait un à-coup visible.
  *
  * `detruire()` existe pour la même raison que `arreterCamera` : ce qui est
  * alloué doit pouvoir être rendu, y compris quand l'élève ferme la feuille
  * après deux secondes.
  */
 export interface MoteurScan {
-  readonly nom: NomMoteur;
+  readonly nom: typeof NOM_MOTEUR;
   initialiser(): Promise<void>;
   decoder(image: ImageData): Promise<ResultatScan | null>;
   detruire(): void | Promise<void>;
 }
 
-export const MOTEURS = ["zxing-wasm", "zxing-js"] as const;
-export type NomMoteur = (typeof MOTEURS)[number];
+/**
+ * LE MOTEUR RETENU, ET LE SEUL.
+ *
+ * Décidé sur un iPhone réel, pas sur un tableau de tailles : sur un paquet de
+ * galettes de maïs, `zxing-wasm` lit le code là où le portage JavaScript
+ * n'obtenait rien de valide après plus de 200 images. La robustesse sur un vrai
+ * capteur l'emporte sur les ~270 Ko économisés — un code qu'on n'arrive pas à
+ * scanner coûte infiniment plus cher qu'un téléchargement de plus.
+ */
+export const NOM_MOTEUR = "zxing-wasm" as const;
 
 /**
- * CHARGEMENT PARESSEUX — le cœur du §11.
+ * CHARGEMENT PARESSEUX.
  *
  * `import()` dynamique, et jamais une importation statique en tête de fichier :
  * un élève qui n'ouvre jamais le scanner ne doit pas télécharger un octet de
  * décodeur. Le bundler ne peut le garantir que si le nom du module n'apparaît
- * dans aucune importation statique du graphe principal.
- *
- * Les deux fabriques sont dans des fonctions séparées et non dans un objet
- * indexé : un objet dont les valeurs sont des `import()` serait évalué à la
- * construction, et les deux chunks seraient référencés d'un coup.
+ * dans aucune importation statique du graphe principal — c'est pour cela que
+ * `adaptateurs.ts` n'est jamais importé statiquement, pas même ici.
  */
 export type FabriqueMoteur = () => Promise<MoteurScan>;
-
-/**
- * Les fabriques réelles sont injectées par l'appelant (le composant scanner,
- * ou le banc d'essai). Ce module ne les importe pas lui-même : il resterait
- * sinon impossible de le charger dans un harnais de test sans embarquer un
- * WebAssembly de 1 Mo.
- */
-export interface DependancesMoteur {
-  readonly fabriques: Readonly<Record<NomMoteur, FabriqueMoteur>>;
-}
-
-export async function chargerMoteur(
-  nom: NomMoteur,
-  deps: DependancesMoteur,
-): Promise<{ moteur: MoteurScan; msChargement: number }> {
-  const début = Date.now();
-  const moteur = await deps.fabriques[nom]();
-  await moteur.initialiser();
-  return { moteur, msChargement: Date.now() - début };
-}
 
 /* ══════════════════════════════════════════════════════════════════════════
    LA BOUCLE DE SCAN — CADENCE, NON-CONCURRENCE, VERROU
@@ -166,9 +154,10 @@ export async function chargerMoteur(
  * entre deux images distantes de 33 ms, et l'élève met de toute façon une
  * seconde à cadrer.
  *
- * 8 tentatives par seconde est un compromis à MESURER sur le banc d'essai, pas
- * une vérité : c'est assez pour que la détection paraisse instantanée, et assez
- * peu pour laisser le processeur respirer entre deux décodages.
+ * 8 tentatives par seconde : le benchmark iPhone a lu les codes à cette cadence,
+ * y compris le paquet de galettes de maïs qui départageait les moteurs. Elle est
+ * donc CONSERVÉE — la changer sans mesure ne ferait que remplacer un réglage
+ * éprouvé par un réglage supposé.
  */
 export const CADENCE_PAR_SECONDE = 8;
 export const INTERVALLE_MS = Math.round(1000 / CADENCE_PAR_SECONDE);
@@ -178,7 +167,7 @@ export interface EtatBoucle {
   verrouillee: boolean;
   /** Un décodage est en cours : on saute l'image plutôt que d'en lancer un second. */
   occupee: boolean;
-  /** Diagnostic du banc d'essai. */
+  /** Diagnostic — jamais affiché à l'élève. */
   tentatives: number;
   lecturesRejetees: number;
 }
