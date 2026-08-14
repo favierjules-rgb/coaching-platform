@@ -99,16 +99,75 @@ export interface ResultatCourses {
 }
 
 /**
- * Le rayon d'un ingrédient, déduit de son RÔLE dans la recette puis de son
- * libellé.
+ * LES EXPRESSIONS QUI DÉMENTENT LEURS PROPRES MOTS.
  *
- * Le rôle d'abord : c'est une donnée structurée, saisie par le coach, alors que
- * le libellé est du texte. On ne descend au libellé que pour les rôles qui ne
- * disent rien du rayon (`fixed`, `free`).
+ * ────────────────────────────────────────────────────────────────────────────
+ * POURQUOI UNE TABLE, ET POURQUOI ELLE PASSE EN PREMIER
+ * ────────────────────────────────────────────────────────────────────────────
+ * ⚠️ « Pommes de terre » contient le mot « pommes ». La règle générique des
+ * fruits, qui travaille mot à mot, le voyait et rangeait les pommes de terre
+ * au rayon FRUITS — c'est le défaut observé en Preview. Aucun ordre entre les
+ * règles génériques ne peut le corriger : le mot est réellement là.
+ *
+ * Il faut donc une couche AU-DESSUS des règles génériques, qui reconnaisse la
+ * SUITE DE MOTS et non le mot isolé. Elle est volontairement courte : on n'y
+ * met que les expressions dont le rayon est démenti par leurs propres mots,
+ * pas un dictionnaire d'aliments — ce serait un second système de
+ * catégorisation, et il divergerait du premier.
+ *
+ * L'ordre de déclaration est l'ordre d'évaluation : la première expression
+ * reconnue gagne.
+ */
+const EXPRESSIONS_SPECIFIQUES: readonly (readonly [string, CategorieCourses])[] = [
+  // Le mot « pomme » est un fruit ; « pomme de terre » n'en est pas un.
+  ["pomme de terre", "feculents"],
+  ["pommes de terre", "feculents"],
+  ["patate douce", "feculents"],
+  ["patates douces", "feculents"],
+  ["patate", "feculents"],
+  ["patates", "feculents"],
+  ["potato", "feculents"],
+  ["potatoes", "feculents"],
+];
+
+/**
+ * `expression` apparaît-elle dans `normalise` comme une SUITE DE MOTS entiers ?
+ *
+ * ⚠️ PAS UN `includes` DE CHAÎNE. « pomme de terre » ne doit pas être reconnu
+ * dans un hypothétique « compomme de terrestre », et surtout « patate » ne doit
+ * pas l'être dans un mot plus long. On compare donc des mots, pas des
+ * caractères — la même discipline que `contient` ci-dessous, étendue à
+ * plusieurs mots consécutifs.
+ */
+function contientExpression(normalise: string, expression: string): boolean {
+  const mots = normalise.split(" ");
+  const cible = expression.split(" ");
+  for (let i = 0; i + cible.length <= mots.length; i += 1) {
+    if (cible.every((mot, k) => mots[i + k] === mot)) return true;
+  }
+  return false;
+}
+
+/**
+ * Le rayon d'un ingrédient, déduit de son libellé puis, à défaut, de son RÔLE.
+ *
+ * ⚠️ NOTE DE LECTURE — le commentaire d'origine annonçait l'ordre inverse
+ * (« le rôle d'abord »), alors que le code a toujours lu le libellé en premier.
+ * Corriger l'ordre déplacerait des dizaines d'ingrédients de rayon d'un coup
+ * (un « Skyr » de rôle `protein` quitterait LAITIERS pour PROTÉINES) : c'est
+ * hors du périmètre de cette correction, qui ne touche qu'aux pommes de terre.
+ * Le commentaire est donc aligné sur le code réel, pas l'inverse, et l'écart
+ * est signalé plutôt que corrigé en silence.
  */
 export function rayonDeLIngredient(ing: Pick<RecipeIngredient, "role" | "name">): CategorieCourses {
   const n = normaliserLibelle(ing.name);
   const contient = (...mots: string[]) => mots.some((m) => n.split(" ").includes(m));
+
+  // ⚠️ LE SPÉCIFIQUE AVANT LE GÉNÉRIQUE. Inverser ces deux blocs ramène le
+  // défaut : « Pommes de terre » repart au rayon FRUITS.
+  for (const [expression, rayon] of EXPRESSIONS_SPECIFIQUES) {
+    if (contientExpression(n, expression)) return rayon;
+  }
 
   if (contient("banane", "bananes", "pomme", "pommes", "orange", "kiwi", "fraise", "fraises", "myrtille", "myrtilles"))
     return "fruits";

@@ -529,6 +529,84 @@ await test("MODE-4. ni envie, ni favori, ni habitude n'influencent plan_seul", (
 });
 
 /* ══════════════════════════════════════════════════════════════════════════
+   C1-CAT-01..08 — LE RAYON D'UN LIBELLÉ QUI DÉMENT SES PROPRES MOTS
+
+   Défaut observé en Preview : « Pommes de terre (frites au four) » sortait au
+   rayon FRUITS. La règle générique travaille mot à mot, et le mot « pommes »
+   est réellement présent — aucun ordre entre règles génériques ne pouvait le
+   corriger. Une couche d'expressions passe désormais avant elles.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/** Le rôle réel de ces ingrédients en base ; le libellé doit primer dessus. */
+const rayon = (nom: string, role: RecipeIngredient["role"] = "fixed") =>
+  rayonDeLIngredient({ role, name: nom });
+
+await test("C1-CAT-01. « Pomme » reste un fruit", () => {
+  assert.equal(rayon("Pomme"), "fruits");
+});
+
+await test("C1-CAT-02. « Pomme fraîche » reste un fruit", () => {
+  assert.equal(rayon("Pomme fraîche"), "fruits");
+});
+
+await test("C1-CAT-03. « Pommes de terre » est un féculent", () => {
+  assert.equal(rayon("Pommes de terre"), "feculents");
+  // Le singulier aussi — le coach écrit l'un ou l'autre.
+  assert.equal(rayon("Pomme de terre"), "feculents");
+  assert.equal(rayon("Pomme de terre cuite"), "feculents");
+});
+
+await test("C1-CAT-04. « Pommes de terre (frites au four) » est un féculent", () => {
+  assert.equal(rayon("Pommes de terre (frites au four)"), "feculents");
+  // ⚠️ ET QUEL QUE SOIT LE RÔLE. Le libellé dit ce qu'est l'aliment ; un
+  // ingrédient `fixed` n'a pas de rôle qui parle du rayon.
+  for (const role of ["fixed", "free", "carbohydrate", "protein", "fat"] as const) {
+    assert.equal(rayon("Pommes de terre (frites au four)", role), "feculents");
+  }
+});
+
+await test("C1-CAT-05. « Pommes de terre (potatoes au four) » est un féculent", () => {
+  assert.equal(rayon("Pommes de terre (potatoes au four)"), "feculents");
+  assert.equal(rayon("Potatoes"), "feculents");
+  assert.equal(rayon("Potato wedges"), "feculents");
+});
+
+await test("C1-CAT-06. « Patate douce » est un féculent", () => {
+  assert.equal(rayon("Patate douce"), "feculents");
+  assert.equal(rayon("Patates douces"), "feculents");
+});
+
+await test("C1-CAT-07. « Banane » reste un fruit", () => {
+  assert.equal(rayon("Banane"), "fruits");
+  assert.equal(rayon("Bananes"), "fruits");
+});
+
+await test("C1-CAT-08. « Riz basmati cru » reste un féculent", () => {
+  // Son rôle en base EST `carbohydrate` : le rayon vient de là, et la couche
+  // d'expressions ne l'a pas détourné.
+  assert.equal(rayon("Riz basmati cru", "carbohydrate"), "feculents");
+});
+
+await test("C1-CAT-SUP. la reconnaissance porte sur des MOTS, pas des caractères", () => {
+  // ⚠️ SONDE DU MÉCANISME, ET ELLE EST ASSUMÉE COMME TELLE. Un premier
+  // contre-exemple (« Patatras », « Compomme ») avait été écrit ici : remplacer
+  // la comparaison mot à mot par un `includes` de chaîne le laissait VERT, donc
+  // il ne prouvait rien. « Terreau » est un vrai mot français, et il est le
+  // seul à discriminer : en sous-chaîne, « pomme de terreau » contient
+  // « pomme de terre » ; en mots entiers, « terreau » n'est pas « terre ».
+  assert.equal(rayon("Pomme de terreau"), "fruits");
+  assert.equal(rayon("Patatras"), "autres");
+  // Et la règle générique des fruits reste intacte pour les autres fruits.
+  assert.equal(rayon("Fraises"), "fruits");
+  assert.equal(rayon("Myrtilles"), "fruits");
+  // La table reste courte : c'est une liste d'exceptions, pas un dictionnaire.
+  assert.ok(
+    (CODE_BESOINS.match(/"feculents"\]/g) ?? []).length <= 12,
+    "la table d'expressions grossit — elle deviendrait un second système",
+  );
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
    C1-13..C1-14 — VARIÉTÉ
    ══════════════════════════════════════════════════════════════════════════ */
 
@@ -934,7 +1012,8 @@ await test("C1-SUP. moteur pur, aucune migration, dépouillement honnête", () =
   assert.ok(CODE_BESOINS.includes("export function genererCourses"));
   assert.ok(CODE_BESOINS.length > 2000);
 
-  // Le rayon vient du RÔLE avant le libellé — une donnée structurée d'abord.
+  // Le rayon vient du LIBELLÉ, et du rôle seulement à défaut — c'est l'ordre
+  // réel du code, et C1-CAT-01..08 le gardent.
   assert.equal(rayonDeLIngredient({ role: "protein", name: "Poulet" }), "proteines");
   assert.equal(rayonDeLIngredient({ role: "carbohydrate", name: "Riz" }), "feculents");
   assert.equal(rayonDeLIngredient({ role: "free", name: "Banane" }), "fruits");
