@@ -125,14 +125,32 @@ export function NutritionDayCarousel({
       {/* LA PISTE. `snap-x snap-mandatory` accroche chaque jour au bord ;
           `overflow-x-auto` fait le défilement. Aucune largeur en pixels : sur un
           téléphone de 375 px comme sur un écran large, un jour occupe exactement
-          la largeur disponible, et rien ne déborde horizontalement. */}
+          la largeur disponible, et rien ne déborde horizontalement.
+
+          ⚠️ `min-w-0 w-full` EST INDISPENSABLE, ET C'ÉTAIT LE DÉFAUT.
+          `overflow-x-auto` ne suffit pas à isoler le débordement : les sept
+          jours sont `flex-shrink-0`, donc la largeur MINIMALE de cette piste
+          valait la SOMME de leurs largeurs minimales — mesuré à 1 106 px, quel
+          que soit le viewport. Cette valeur remontait tout l'arbre et élargissait
+          la page au lieu de faire défiler la piste. `min-w-0` autorise la piste
+          à être plus étroite que son contenu ; `w-full` l'accroche à la largeur
+          du parent plutôt qu'à celle de son contenu. C'est ce couple qui fait
+          que le défilement reste À L'INTÉRIEUR du carrousel. */}
       <div
         ref={pisteRef}
         onScroll={surDefilement}
-        className="flex snap-x snap-mandatory overflow-x-auto overscroll-x-contain scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="flex w-full min-w-0 snap-x snap-mandatory overflow-x-auto overscroll-x-contain scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {dates.map((date, index) => (
-          <div key={date} className="w-full flex-shrink-0 snap-start px-0.5">
+          // ⚠️ `relative` EST UNE CORRECTION, PAS UN RÉFLEXE. Un élément en
+          // `position: absolute` n'est PAS clippé par un conteneur défilant si
+          // son bloc conteneur se trouve au-dessus de ce conteneur — et
+          // `sr-only`, en Tailwind, EST `position: absolute`. Sans ce
+          // `relative`, chaque texte réservé aux lecteurs d'écran placé dans un
+          // jour s'échappait de la piste et allongeait le document : mesuré à
+          // 6 727 px de `scrollWidth` pour un viewport de 1 440. Rendre chaque
+          // jour positionné ramène ces éléments sous la coupe de la piste.
+          <div key={date} className="relative w-full flex-shrink-0 snap-start px-0.5">
             {rendreJour(index)}
           </div>
         ))}
