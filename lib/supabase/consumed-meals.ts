@@ -72,6 +72,7 @@ interface MealEntryRow {
   consumed_meal_id: string;
   source_type: string;
   food_id: string | null;
+  product_id: string | null;
   label: string;
   quantity: number;
   unit: string;
@@ -95,6 +96,7 @@ function mapEntry(row: MealEntryRow): ConsumedEntry | null {
     consumedMealId: row.consumed_meal_id,
     sourceType: row.source_type as ConsumedSourceType,
     foodId: row.food_id,
+    productId: row.product_id ?? null,
     label: row.label,
     quantity: Number(row.quantity),
     unit: row.unit as ConsumedUnit,
@@ -129,6 +131,7 @@ function mapMeal(row: ConsumedMealRow, entrées: readonly ConsumedEntry[]): Cons
 
   return {
     id: row.id,
+    studentId: row.student_id,
     consumedOn: row.consumed_on,
     kind: row.kind,
     prescribedMealId: row.prescribed_meal_id,
@@ -141,40 +144,80 @@ function mapMeal(row: ConsumedMealRow, entrées: readonly ConsumedEntry[]): Cons
 }
 
 /**
+ * QUI on lit — et ce paramètre n'a PAS de valeur par défaut (A5.8).
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * POURQUOI UN TYPE PLUTÔT QU'UN `studentId?: string`
+ * ────────────────────────────────────────────────────────────────────────────
+ * Un paramètre optionnel aurait un comportement par défaut : « ne filtre pas ».
+ * Pour l'élève, ce défaut est juste — la RLS ne laisse passer qu'une personne.
+ * Pour le COACH, le même défaut rend les repas de TOUS ses athlètes dans une
+ * seule réponse, mélangés. Le jour où un appelant coach oublierait l'argument,
+ * rien ne le signalerait : ni erreur, ni type, ni test — juste un écran qui
+ * additionne deux élèves.
+ *
+ * Une union DISCRIMINÉE et OBLIGATOIRE supprime ce défaut. Chaque appelant doit
+ * dire ce qu'il veut, et « je veux tout » n'est pas exprimable.
+ */
+export type CibleLecture =
+  /** L'élève connecté, quel qu'il soit. La RLS tranche. Chemin élève. */
+  | { readonly portee: "eleve-connecte" }
+  /** UN élève nommé. Chemin coach et admin. */
+  | { readonly portee: "eleve"; readonly studentId: string };
+
+/**
  * Les repas consommés d'une PLAGE DE DATES, avec leurs aliments.
  *
- * La RLS fait le cloisonnement : cette fonction ne filtre pas par élève, elle
- * demande simplement. Ajouter un filtre client donnerait l'illusion que le
- * navigateur protège quelque chose.
+ * ⚠️ LE FILTRE CLIENT NE PROTÈGE RIEN — C'EST LA RLS QUI PROTÈGE. `.eq(
+ * "student_id", …)` ne remplace aucune policy : un coach qui nommerait l'élève
+ * d'un confrère recevrait une liste VIDE, parce que la base refuse, pas parce
+ * que cette ligne filtre. Ce que le filtre apporte est autre chose, et
+ * nécessaire : DÉSAMBIGUÏSER. Sans lui, un coach de dix athlètes reçoit dix
+ * journaux en un seul tas.
  */
 export async function readConsumedMeals(
   supabase: TypedSupabaseClient,
   dates: readonly string[],
+  cible: CibleLecture,
 ): Promise<readonly ConsumedMeal[]> {
   if (dates.length === 0) return [];
 
-  const { data: mealRows, error: mealError } = await supabase
+  const requêteRepas = supabase
     .from("consumed_meals")
     .select(
       "id, student_id, consumed_on, kind, prescribed_meal_id, slot_key, label, position, target_kcal, target_protein_g, target_carb_g, target_fat_g",
     )
-    .in("consumed_on", [...dates])
+    .in("consumed_on", [...dates]);
+
+  const { data: mealRows, error: mealError } = await (cible.portee === "eleve"
+    ? requêteRepas.eq("student_id", cible.studentId)
+    : requêteRepas
+  )
     .order("consumed_on", { ascending: true })
     .order("position", { ascending: true });
   devWarn("readConsumedMeals (consumed_meals)", mealError);
   const repas = (mealRows ?? []) as unknown as ConsumedMealRow[];
   if (repas.length === 0) return [];
 
-  const { data: entryRows, error: entryError } = await supabase
+  // ⚠️ LA SECONDE REQUÊTE EST FILTRÉE ELLE AUSSI, et ce n'est pas redondant.
+  // Elle porte sur des `consumed_meal_id` déjà restreints à un élève, donc le
+  // résultat serait le même aujourd'hui. Mais `meal_entries.student_id` existe
+  // et est `not null` : le jour où la liste d'identifiants viendrait d'ailleurs
+  // — une future liste de courses, un export — la borne serait toujours là.
+  const requêteEntrées = supabase
     .from("meal_entries")
     .select(
-      "id, consumed_meal_id, source_type, food_id, label, quantity, unit, protein_g, carb_g, fat_g, note, created_at",
+      "id, consumed_meal_id, source_type, food_id, product_id, label, quantity, unit, protein_g, carb_g, fat_g, note, created_at",
     )
     .in(
       "consumed_meal_id",
       repas.map((r) => r.id),
-    )
-    .order("created_at", { ascending: true });
+    );
+
+  const { data: entryRows, error: entryError } = await (cible.portee === "eleve"
+    ? requêteEntrées.eq("student_id", cible.studentId)
+    : requêteEntrées
+  ).order("created_at", { ascending: true });
   devWarn("readConsumedMeals (meal_entries)", entryError);
   const entrées = ((entryRows ?? []) as unknown as MealEntryRow[])
     .map(mapEntry)

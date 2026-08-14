@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -20,6 +20,7 @@ import { getCurrentWeekDates } from "@/lib/nutrition-weekly";
 import { getNutritionPlan, student } from "@/data/student";
 import { useConsumedMeals } from "@/hooks/useConsumedMeals";
 import { useRaccourcisAliments } from "@/hooks/useRaccourcisAliments";
+import { type Semaine, decalerSemaine, semaineContenant } from "@/lib/nutrition/historique";
 import { useEtatOfflineEleve } from "@/hooks/useEtatOfflineEleve";
 import { useStudentNutritionPlanV2 } from "@/hooks/useStudentNutritionPlanV2";
 import { useSupabaseNutritionForStudent } from "@/hooks/useSupabaseNutritionForStudent";
@@ -41,13 +42,25 @@ export default function NutritionPlanDetailPage() {
   //
   // `useMemo` sur une chaîne, et non sur le tableau : un littéral recréé à
   // chaque rendu relancerait la lecture indéfiniment.
-  const datesSemaine = useMemo(() => getCurrentWeekDates(), []);
   const datesAujourdHui = useMemo(() => {
     const maintenant = new Date();
     return `${maintenant.getFullYear()}-${String(maintenant.getMonth() + 1).padStart(2, "0")}-${String(
       maintenant.getDate(),
     ).padStart(2, "0")}`;
   }, []);
+
+  // ── A5.7 — LA SEMAINE AFFICHÉE EST UN ÉTAT, ET LE CHARGEMENT LA SUIT ──────
+  //
+  // Par défaut : la semaine qui contient AUJOURD'HUI. Changer de semaine change
+  // les sept dates, donc la clé de `useConsumedMeals`, donc la lecture — une
+  // requête bornée à sept jours, jamais l'historique entier.
+  //
+  // ⚠️ Naviguer ne déplace RIEN : on change ce qu'on demande à la base, pas ce
+  // qu'elle contient. Aucune écriture n'est déclenchée par ces deux boutons.
+  const [semaine, setSemaine] = useState<Semaine>(
+    () => semaineContenant(datesAujourdHui) ?? { debut: "", fin: "", dates: getCurrentWeekDates() },
+  );
+  const datesSemaine = semaine.dates;
   const datesParJour = useMemo(
     () =>
       Object.fromEntries(
@@ -219,6 +232,8 @@ export default function NutritionPlanDetailPage() {
                 // à partir de la même horloge : lire l'heure une seconde fois
                 // dans le rendu ferait diverger les deux autour de minuit.
                 aujourdHui: datesAujourdHui,
+                onSemainePrecedente: () => setSemaine((s) => decalerSemaine(s, -1)),
+                onSemaineSuivante: () => setSemaine((s) => decalerSemaine(s, 1)),
                 onAjouterManuel: consommation.ajouterManuel,
                 onCorriger: consommation.corrigerQuantité,
                 onSupprimerAliment: consommation.supprimerAliment,

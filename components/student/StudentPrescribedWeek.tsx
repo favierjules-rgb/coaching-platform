@@ -10,6 +10,8 @@ import {
 import { DailyIntakeSummary } from "@/components/student/DailyIntakeSummary";
 import { DailyNutritionProgress } from "@/components/student/DailyNutritionProgress";
 import { NutritionDayCarousel } from "@/components/student/NutritionDayCarousel";
+import { NutritionWeekNav } from "@/components/student/NutritionWeekNav";
+import { type ResumeSemaine, resumeSemaine, semaineContenant, libelleSemaine } from "@/lib/nutrition/historique";
 import type { RaccourcisAlimentsUI } from "@/components/student/AddFoodSheet";
 import { NBSP, formatIntegerFr } from "@/lib/nutrition/basis-points";
 import {
@@ -105,6 +107,13 @@ export interface SuiviConsommation {
    * React remplace alors silencieusement le HTML pré-rendu.
    */
   readonly aujourdHui?: string;
+  /**
+   * NAVIGATION PAR SEMAINE (A5.7) — optionnelle, comme tout le reste : sans
+   * elle, l'écran affiche la semaine que `datesParJour` lui donne, sans en
+   * proposer d'autre.
+   */
+  readonly onSemainePrecedente?: () => void;
+  readonly onSemaineSuivante?: () => void;
 }
 
 export function StudentPrescribedWeek({
@@ -133,13 +142,31 @@ export function StudentPrescribedWeek({
 
   if (suivi && suivi.aujourdHui) {
     const dates = jours.map((j) => suivi.datesParJour[j.day] ?? "");
+    // La semaine AFFICHÉE est celle des dates reçues, pas celle de l'horloge :
+    // c'est ce qui permet de remonter dans l'historique sans que le titre
+    // continue d'annoncer la semaine en cours.
+    const semaine = semaineContenant(dates[0] ?? suivi.aujourdHui);
+    const semaineCourante = semaineContenant(suivi.aujourdHui);
+    const résumé: ResumeSemaine | null = semaine ? resumeSemaine(suivi.meals, semaine) : null;
+
     return (
-      <NutritionDayCarousel
-        dates={dates}
-        libellés={jours.map((j) => WEEKDAY_LABELS_FR[j.day])}
-        aujourdHui={suivi.aujourdHui}
-        rendreJour={rendu}
-      />
+      <div className="flex flex-col gap-3">
+        {semaine && suivi.onSemainePrecedente && suivi.onSemaineSuivante && (
+          <NutritionWeekNav
+            libellé={libelleSemaine(semaine)}
+            resume={résumé}
+            estSemaineCourante={semaine.debut === semaineCourante?.debut}
+            onPrecedente={suivi.onSemainePrecedente}
+            onSuivante={suivi.onSemaineSuivante}
+          />
+        )}
+        <NutritionDayCarousel
+          dates={dates}
+          libellés={jours.map((j) => WEEKDAY_LABELS_FR[j.day])}
+          aujourdHui={suivi.aujourdHui}
+          rendreJour={rendu}
+        />
+      </div>
     );
   }
 

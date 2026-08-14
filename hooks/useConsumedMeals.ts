@@ -150,7 +150,10 @@ export function useConsumedMeals(dates: readonly string[], actif: boolean): Cons
         setError("La connexion à ton espace est indisponible.");
         return;
       }
-      const lus = await readConsumedMeals(supabase, clé.split(","));
+      // L'ÉLÈVE CONNECTÉ, explicitement. Ce hook sert l'écran de l'élève : la
+      // RLS ne laisse passer que lui, et le nommer ici demanderait de connaître
+      // son `students.id` — que cet écran n'a pas, et n'a pas besoin d'avoir.
+      const lus = await readConsumedMeals(supabase, clé.split(","), { portee: "eleve-connecte" });
       if (requête.current !== numéro) return;
       setMeals(lus);
       setError(null);

@@ -48,6 +48,16 @@ export interface ConsumedEntry {
   readonly consumedMealId: string;
   readonly sourceType: ConsumedSourceType;
   readonly foodId: string | null;
+  /**
+   * Le produit commercial d'origine (A3), remonté depuis A5.7.
+   *
+   * ⚠️ AUCUNE MIGRATION : la colonne `meal_entries.product_id` existe depuis la
+   * phase 3 d'A3 ; c'est la couche de LECTURE qui l'oubliait. Sans elle,
+   * l'agrégateur de l'historique ne pourrait pas distinguer deux produits et
+   * retomberait sur leur libellé — exactement la fusion par le nom que le
+   * contrat interdit.
+   */
+  readonly productId: string | null;
   readonly label: string;
   readonly quantity: number;
   readonly unit: ConsumedUnit;
@@ -73,6 +83,18 @@ export interface ConsumedTarget {
  */
 export interface ConsumedMeal {
   readonly id: string;
+  /**
+   * L'élève à qui ce repas appartient (A5.8).
+   *
+   * ⚠️ LA COLONNE ÉTAIT LUE ET JETÉE. `readConsumedMeals` la demandait déjà
+   * dans son `select`, et `mapMeal` ne la reportait pas. Côté élève c'était
+   * sans conséquence — la RLS ne laisse passer qu'une personne. Côté COACH,
+   * la même RLS laisse passer TOUS ses athlètes : sans ce champ, deux élèves
+   * arrivent mélangés dans une liste où plus rien ne les distingue.
+   *
+   * Aucune migration : la colonne est `not null` depuis A2.
+   */
+  readonly studentId: string;
   /** `yyyy-mm-dd`. */
   readonly consumedOn: string;
   readonly kind: "prescribed" | "student";
