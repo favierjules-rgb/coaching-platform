@@ -143,7 +143,17 @@ export function AdminShell({ children }: { children: ReactNode }) {
         </div>
       )}
 
-      <div className="flex flex-1 flex-col">
+      {/* ⚠️ `min-w-0` N'EST PAS DÉCORATIF — SANS LUI, TOUTE LA PAGE DÉBORDE.
+          Cette colonne est un ENFANT FLEX de la rangée ci-dessus. Un enfant
+          flex a `min-width: auto` par défaut, ce qui l'empêche de devenir plus
+          étroit que la largeur MINIMALE de son contenu. Il suffit donc qu'un
+          seul descendant, n'importe où dans l'admin, ait une largeur minimale
+          large — un carrousel, un tableau, une chaîne insécable — pour que
+          cette colonne s'élargisse, pousse la rangée, et fasse défiler la page
+          entière. Mesuré : 1 204 px de colonne dans un viewport de 390 px.
+          Avec `min-w-0`, la colonne peut rétrécir et c'est au descendant de
+          gérer son propre débordement. */}
+      <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex h-16 items-center gap-3 border-b border-border bg-card px-4 lg:hidden">
           <button
             ref={triggerRef}
