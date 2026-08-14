@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Droplet, Lightbulb, Pill } from "lucide-react";
+import { ArrowRight, Droplet, Lightbulb, Pill, ShoppingBasket } from "lucide-react";
 
 import { SectionIndisponible } from "@/components/pwa/SectionIndisponible";
 import { StatusBadge } from "@/components/student/StatusBadge";
@@ -114,8 +114,32 @@ export default function NutritionPage() {
         {/* L'ENTRÉE MISE EN AVANT VERS LES RECETTES.
             Placée avant le suivi, donc visible sans défiler : c'est l'outil
             qu'on ouvre le plus souvent. Elle mène à son propre écran. */}
-        <div className="mb-8">
-          <RecipesHighlightLink planId={activePlan.id} className="w-full sm:max-w-sm" />
+        {/* ⚠️ UNE SEULE MISE EN AVANT ANIMÉE PAR ÉCRAN. Les courses partent du
+            même plan et des mêmes recettes, mais l'anneau lumineux de
+            `RecipesHighlightLink` perdrait tout son sens s'il était répété :
+            l'entrée « Mes courses » est donc sobre, et volontairement seconde. */}
+        <div className="mb-8 flex flex-col gap-3 sm:max-w-sm">
+          <RecipesHighlightLink planId={activePlan.id} className="w-full" />
+          <Link
+            href="/courses"
+            className="pressable group flex min-h-[44px] items-center justify-between gap-3 rounded-card border border-border bg-card px-4 py-3 transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+          >
+            <span className="flex min-w-0 items-center gap-3">
+              <ShoppingBasket size={18} className="flex-shrink-0 text-primary" />
+              <span className="flex min-w-0 flex-col">
+                <span className="font-heading text-sm font-bold uppercase tracking-wide text-foreground">
+                  Mes courses
+                </span>
+                <span className="text-[11px] leading-tight text-muted-foreground">
+                  De 1 à 7 jours, selon tes envies
+                </span>
+              </span>
+            </span>
+            <ArrowRight
+              size={16}
+              className="flex-shrink-0 text-primary transition-transform group-hover:translate-x-0.5"
+            />
+          </Link>
         </div>
 
         {studentId && (

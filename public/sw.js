@@ -128,6 +128,7 @@ const COQUILLES_ELEVE = [
   /^\/profil$/,
   /^\/progression$/,
   /^\/nutrition$/,
+  /^\/courses$/,
   /^\/documents$/,
   /^\/rendez-vous$/,
 ];
