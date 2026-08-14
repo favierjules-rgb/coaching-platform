@@ -938,7 +938,7 @@ test("A3-SEARCH-SUP · le module de recherche est server-only, et la phase 4 n'a
   // NEUF fichiers : les oublier rend rouges des suites qui n'ont rien à voir
   // avec le chantier en cours — c'est arrivé, et c'est pour cela qu'ils sont
   // croisés.
-  assert.equal(migrations.length, 72, "72 migrations depuis ALIMENTS A5");
+  assert.equal(migrations.length, 73, "73 migrations : 72 avant N1, +1 en N1.1");
   // ⚠️ RÉÉCRIT EN A5 — CINQUIÈME OCCURRENCE DU MÊME MOTIF DANS CE PROJET.
   //
   // Ce contrôle exigeait qu'AUCUNE migration ne soit postérieure à la phase 4.1.

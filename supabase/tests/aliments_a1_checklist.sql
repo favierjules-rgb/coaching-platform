@@ -1323,8 +1323,21 @@ begin
    where n.nspname = 'public'
      and p.prokind = 'f'
      and coalesce(p.prosrc, '') ~ 'food_catalog'
+     -- ⚠️ LISTE BLANCHE, ET ELLE S'ÉTEND PAR DÉCISION, JAMAIS PAR COMMODITÉ.
+     --
+     -- `enregistrer_repas_planifie` (N1.1) y entre pour la MÊME raison
+     -- qu'`ajouter_aliment_catalogue` : elle lit `food_catalog` afin de valider
+     -- que l'unité demandée est convertible pour cet aliment — la pièce n'est
+     -- acceptée que si `piece_weight_g` est renseigné. Sans cette lecture, une
+     -- quantité serait planifiable en pièces puis refusée au moment de la
+     -- consommation, c'est-à-dire trop tard.
+     --
+     -- Ce que ce contrôle garde reste intact : AUCUNE fonction du monde des
+     -- RECETTES ne lit `food_catalog`, et l'assertion suivante le vérifie
+     -- nommément sur les quatre RPC de recettes.
      and p.proname not in ('food_slug', 'is_coach_of_student', 'meal_entries_freeze_snapshot',
-                           'ajouter_aliment_catalogue', 'modifier_quantite_entree');
+                           'ajouter_aliment_catalogue', 'modifier_quantite_entree',
+                           'enregistrer_repas_planifie');
 
   perform pg_temp.noter('RECIPE-A2', 'aucune fonction existante ne s''est mise à lire food_catalog',
     v_fonctions = '{}'::text[]);

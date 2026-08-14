@@ -691,8 +691,13 @@ await test("HIST17. l'élève A ne voit jamais l'élève B", () => {
   // ⚠️ A5.7 N'A RIEN ÉLARGI. Aucune migration n'a été ajoutée pour l'historique,
   // donc aucune policy n'a pu l'être : la liste des migrations d'A5 s'arrête
   // aux deux fichiers d'A5.0.
+  // ⚠️ SIXIÈME OCCURRENCE DU MÊME MOTIF DANS CE PROJET, et la leçon est la
+  // même qu'en A5 : « aucune migration postérieure » n'est vrai que tant
+  // qu'aucun chantier ne suit. N1.1 en a créé une. Ce que ce contrôle doit
+  // continuer de prouver, c'est que CE LOT-CI n'en a créé aucune — donc la
+  // liste des migrations postérieures est EXACTEMENT celle de N1, nommée.
   const tardives = lireMigrations().filter((f) => horodatage(f) > "20260905090100");
-  assert.deepEqual(tardives, [], `une migration postérieure à A5 existe : ${tardives.join(", ")}`);
+  assert.deepEqual(tardives, ["20260906090000_nutrition_listes_et_repas_planifies.sql"], `migrations postérieures inattendues : ${tardives.join(", ")}`);
 
   // Et c'est EXÉCUTÉ, pas relu : la checklist crée deux élèves du même coach,
   // se connecte comme B, et compte ce qu'il voit.
@@ -1059,15 +1064,22 @@ await test("HIST-SUP. le dépouillement des commentaires n'a rien vidé", () => 
   // vit aussi dans `supabase/baseline/manifest.json` : les deux doivent
   // s'accorder, sinon l'un des deux ment.
   const migrations = lireMigrations();
-  assert.equal(migrations.length, 72, "72 fichiers de migration, inchangé depuis A5");
+  assert.equal(migrations.length, 73, "73 fichiers : A5.7 n'en a créé aucun, N1.1 en a créé un");
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json")) as {
     migrations_post_baseline_attendues: readonly string[];
   };
-  assert.equal(manifeste.migrations_post_baseline_attendues.length, 45);
+  assert.equal(manifeste.migrations_post_baseline_attendues.length, 46);
 
   // Et rien qui ressemble à une table, une vue ou un agrégat d'historique.
+  //
+  // ⚠️ LA FENÊTRE EST BORNÉE DES DEUX CÔTÉS DEPUIS N1.1. Avec une borne
+  // basse seule, la migration de N1 entrait dans le dépouillement, et son
+  // `comment on table` — qui explique justement pourquoi un repas planifié ne
+  // doit PAS peser sur l'historique A5.7 — faisait rougir un contrôle qui ne
+  // parle que d'A5. Ce que la règle garde est inchangé : A5 n'a créé aucun
+  // agrégat d'historique.
   const sqlA5 = migrations
-    .filter((f) => horodatage(f) >= "20260905")
+    .filter((f) => horodatage(f) >= "20260905" && horodatage(f) < "20260906")
     .map((f) => sansCommentairesSql(lire(`../../supabase/migrations/${f}`)))
     .join("\n")
     .toLowerCase();
