@@ -412,6 +412,7 @@ function entrée(partiel: Partial<ConsumedEntry> & { id: string }): ConsumedEntr
     consumedMealId: "cm-1",
     sourceType: "catalog_food",
     foodId: "f-1",
+    productId: null,
     label: "Banane, crue",
     quantity: 120,
     unit: "g",
@@ -432,6 +433,7 @@ function repasAvec(
 ): ConsumedMeal {
   return {
     id: "cm-1",
+    studentId: "st-1",
     consumedOn: "2026-08-13",
     kind: "prescribed",
     prescribedMealId: "meal-pdj",

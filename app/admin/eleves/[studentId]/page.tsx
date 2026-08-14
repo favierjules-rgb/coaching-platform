@@ -10,6 +10,7 @@ import { AddCoachNoteModal } from "@/components/admin/AddCoachNoteModal";
 import { AdminOnboardingDetailModal } from "@/components/admin/AdminOnboardingDetailModal";
 import { AdminSection, InfoRow, TagList } from "@/components/admin/AdminSection";
 import { AssignContentToStudentModal } from "@/components/admin/AssignContentToStudentModal";
+import { CoachNutritionHistory } from "@/components/admin/CoachNutritionHistory";
 import { EditStudentModal } from "@/components/admin/EditStudentModal";
 import { NutritionWeekSummaryCard } from "@/components/admin/NutritionWeekSummaryCard";
 import { StatusBadge, feedbackStatusTone, studentStatusTone } from "@/components/admin/StatusBadge";
@@ -165,6 +166,16 @@ export default function AdminStudentDetailPage() {
   );
   const guardedNutrition = useGuardedNutritionAssignment(baseSetAssignment, nutritionVersionsById);
   const handleSetAssignment = guardedNutrition.setAssignment;
+
+  // La date du jour, calculée UNE fois (A5.8). Lue pendant le rendu, elle
+  // différerait entre le serveur et le client autour de minuit, et React
+  // remplacerait silencieusement le HTML pré-rendu. Même précaution qu'A5.6.
+  const aujourdHui = useMemo(() => {
+    const maintenant = new Date();
+    return `${maintenant.getFullYear()}-${String(maintenant.getMonth() + 1).padStart(2, "0")}-${String(
+      maintenant.getDate(),
+    ).padStart(2, "0")}`;
+  }, []);
 
   const rawStudent = isSupabaseStudent ? supabaseDetail.student : students.find((s) => s.id === params.studentId);
 
@@ -1003,6 +1014,28 @@ export default function AdminStudentDetailPage() {
               fat: assignedPlan.fat,
               weeklyTargetCalories: assignedPlan.weeklyTargetCalories,
             }}
+          />
+        </div>
+      )}
+
+      {/* NUTRITION → HISTORIQUE (A5.8).
+          ⚠️ CE BLOC N'EST PAS CONDITIONNÉ AU PLAN ASSIGNÉ, contrairement au
+          « Suivi nutrition » ci-dessus. Un élève peut avoir mangé — et noté ce
+          qu'il a mangé — sans qu'aucun plan ne lui soit assigné, ou après qu'un
+          plan lui a été retiré. Exiger `assignedPlan` ferait disparaître un
+          historique qui existe bel et bien. */}
+      {isSupabaseStudent && (
+        <div className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
+          <h2 className="mb-1 font-heading text-lg font-bold uppercase text-foreground">
+            Historique alimentaire
+          </h2>
+          <p className="mb-4 text-xs text-muted-foreground">
+            Ce que l&apos;élève a réellement consommé, semaine par semaine. Lecture seule.
+          </p>
+          <CoachNutritionHistory
+            studentId={student.id}
+            nomEleve={fullName(student)}
+            aujourdHui={aujourdHui}
           />
         </div>
       )}
