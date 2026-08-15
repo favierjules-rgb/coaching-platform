@@ -29,7 +29,8 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 
-import { QuantitesDuRepas, StudentMealChoices } from "../../components/student/StudentMealChoices";
+import { QuantitesDuRepas, StudentMealChoices, ecartsAAfficher } from "../../components/student/StudentMealChoices";
+import { StudentPrescribedWeek } from "../../components/student/StudentPrescribedWeek";
 import {
   AUCUNE_SELECTION,
   alimentsPourLeSolveur,
@@ -548,7 +549,14 @@ await test("N1.5-05. les lignes s'affichent dans l'ordre des occurrences du coac
   // ⚠️ AUCUN TRI, NI PAR QUANTITÉ, NI ALPHABÉTIQUE. L'huile est la plus petite
   // quantité et reste en dernier ; le riz est la plus grosse et reste au milieu.
   assert.ok(!CODE_SOLVEUR.includes(".sort((") || CODE_SOLVEUR.includes("(a, z) => a - z"));
-  assert.ok(!/\.sort\(/.test(CODE_CHOIX), "un tri est appliqué à l'affichage");
+  // ⚠️ N1.5.3 — LE TRIPWIRE EST RESSERRÉ, PAS LEVÉ. « Aucun `.sort(` dans
+  // l'écran » est devenu trop large : les LIGNES D'ÉCART sont triées, par
+  // écart rapporté à la tolérance, pour que la macro la plus significative se
+  // lise en premier. Ce qui reste interdit — et c'est ce que le contrôle
+  // gardait vraiment — c'est de trier les ALIMENTS.
+  assert.ok(!/solution\.items[^;]*\.sort\(/.test(CODE_CHOIX),
+    "les aliments sont triés à l'affichage : l'ordre du coach doit être conservé");
+  assert.ok(!/\bitems\b[^;]*\.sort\(/.test(CODE_CHOIX), "un tri est appliqué aux aliments");
 });
 
 await test("N1.5-06/07. les macros viennent de la VRAIE source, catalogue comme produit", async () => {
@@ -729,7 +737,9 @@ await test("N1.5-16. « approché » se dit en une phrase, jamais en erreur tech
   assert.equal(s.status, "approximate");
   const html = renderToString(createElement(QuantitesDuRepas, { solution: s })).replace(/<!-- -->/g, "");
 
-  assert.ok(html.includes("Cette combinaison approche au mieux les objectifs de ce repas."));
+  // ⚠️ N1.5.3 — LA PHRASE A CHANGÉ, ET C'EST L'ARBITRAGE §12 : on parle à
+  // l'élève de SON objectif, pas des « objectifs de ce repas ».
+  assert.ok(html.includes("Cette combinaison s&#x27;approche au mieux de ton objectif."));
   // Les quantités sont bien là : « approché », ce n'est pas « raté ».
   assert.ok(html.includes("Quantités pour ton repas"));
   assert.ok(html.includes("Cible du repas"));
@@ -740,20 +750,26 @@ await test("N1.5-16. « approché » se dit en une phrase, jamais en erreur tech
   }
 });
 
-await test("N1.5-17. « impossible » n'affiche AUCUNE quantité, et invite à changer un choix", () => {
+await test("N1.5-17 / BEST-03. « impossible » AFFICHE les quantités, et invite à changer un choix", () => {
   const s = solveMealChoices([POULET, SAUMON, HUILE], { proteinGrams: 50, carbGrams: 60, fatGrams: 20 });
   assert.equal(s.status, "impossible");
   const html = renderToString(createElement(QuantitesDuRepas, { solution: s })).replace(/<!-- -->/g, "");
 
-  // ⚠️ PAS UNE SEULE QUANTITÉ. Des grammes accompagnés d'un avertissement
-  // seraient recopiés et suivis quand même.
-  assert.ok(!html.includes("Poulet"), "une quantité mensongère est affichée");
-  assert.ok(!html.includes("Saumon"));
-  assert.ok(html.includes("ne permet pas d&#x27;atteindre les objectifs de ce repas"));
+  // ⚠️ CE CONTRÔLE VÉRIFIAIT EXACTEMENT L'INVERSE, ET C'EST LE CŒUR DE N1.5.3.
+  // Il gardait le choix produit « pas une seule quantité en impossible », posé
+  // en N1.5 sur la prémisse qu'une solution hors cible serait « mensongère ».
+  // Cette prémisse est tombée : le solveur rend désormais l'OPTIMUM CERTIFIÉ de
+  // la boîte (conditions KKT vérifiées, § KKT plus bas). La solution ne ment
+  // pas — elle est loin de la cible, et l'élève a le droit de la voir.
+  assert.ok(html.includes("Poulet"), "les quantités doivent être affichées, même en impossible");
+  assert.ok(html.includes("Saumon"));
+  assert.ok(html.includes("Huile"));
+  assert.ok(html.includes("ne permet pas d&#x27;atteindre exactement ton objectif"));
+  assert.ok(html.includes("meilleure proposition possible avec tes choix"));
   assert.ok(html.includes("Modifie un de tes choix"));
-  // La cible reste dite — l'élève doit savoir ce qu'il visait.
+  // La cible ET le résultat sont dits : l'élève doit pouvoir comparer.
   assert.ok(html.includes("Cible du repas"));
-  assert.ok(!html.includes("Résultat"), "un résultat s'affiche alors qu'il n'y a pas de quantités");
+  assert.ok(html.includes("Résultat"), "le résultat doit être affiché en impossible");
 });
 
 await test("N1.5-18. le RÉSULTAT affiché est produit par les QUANTITÉS affichées", () => {
@@ -954,11 +970,18 @@ await test("N1.5-BOUND-09. banc B : le statut devient honnêtement IMPOSSIBLE", 
   assert.ok(CODE_SOLVEUR.includes("determineStatus(delta, target)"),
     "le verdict doit venir des tolérances existantes de recipe-solver");
 
-  // L'élève ne voit donc AUCUNE quantité — surtout pas 300 g de brocoli.
+  // ⚠️ N1.5.3 — CE CONTRÔLE DISAIT « L'ÉLÈVE NE VOIT AUCUNE QUANTITÉ ». Il dit
+  // maintenant l'inverse, et le plafond garde son rôle intact : il n'existe pas
+  // pour CACHER une mauvaise combinaison, mais pour l'empêcher de se déguiser
+  // en bonne. 300 g de brocoli reste la meilleure quantité réalisable ; ce qui
+  // était interdit, c'est 1 074 g présentés comme « exact ».
   const html = renderToString(createElement(QuantitesDuRepas, { solution: s })).replace(/<!-- -->/g, "");
-  assert.ok(!html.includes("Brocoli"));
-  assert.ok(!html.includes("300"));
+  assert.ok(html.includes("Brocoli"), "la meilleure solution réalisable doit être affichée");
   assert.ok(html.includes("Modifie un de tes choix"));
+  // Et surtout : aucune quantité au-delà du plafond.
+  for (const item of s.items) {
+    assert.ok(item.displayQuantity <= item.maxQuantity, `${item.name} dépasse son plafond`);
+  }
 });
 
 await test("N1.5-BOUND-10/11/12. aucun rôle, aucun referenceGrams, aucun minimum par catégorie", () => {
@@ -1929,14 +1952,516 @@ await test("A5-MIN-10. scanner et ajouts restent utilisables quand le repas est 
   // ⚠️ LE RENDU DE LA CONSOMMATION NE DÉPEND PAS DU STATUT DU CALCUL. Il n'y a
   // aucun `if (status === …)` autour de `<ConsumedMealSection>` : la section
   // est rendue dès qu'il y a un suivi et une date, quel que soit le verdict.
-  assert.ok(CODE_SEMAINE.includes("{suivi && date && ("));
-  const blocConso = CODE_SEMAINE.slice(CODE_SEMAINE.indexOf("{suivi && date && ("));
-  for (const notion of ["status", "impossible", "approximate", "solution"]) {
+  // ⚠️ ANCRÉ SUR `<ConsumedMealSection`, PAS SUR LA PREMIÈRE OCCURRENCE DE LA
+  // CONDITION. Un contrôle négatif l'a exigé : en durcissant la condition de la
+  // section de consommation, `indexOf("{suivi && date && (")` retombait sur un
+  // AUTRE bloc plus bas et ce contrôle restait vert. Il regardait la bonne
+  // chaîne au mauvais endroit.
+  const posConsoRendu = CODE_SEMAINE.indexOf("<ConsumedMealSection");
+  assert.ok(posConsoRendu > 0);
+  // ⚠️ LA CONDITION SEULE, PAS SON VOISINAGE. Les 200 caractères qui précèdent
+  // contiennent la fin de `<StudentMealChoices occurrences={repas.choiceSlots}`,
+  // qui est légitime : c'est l'autre section.
+  const avant = CODE_SEMAINE.slice(Math.max(0, posConsoRendu - 200), posConsoRendu);
+  const debutCondition = avant.lastIndexOf("{suivi");
+  assert.ok(debutCondition >= 0, "la condition de rendu de la consommation a disparu");
+  const conditionAvant = avant.slice(debutCondition);
+  assert.equal(conditionAvant.trim(), "{suivi && date && (",
+    "la condition de rendu de la consommation a changé");
+  const blocConso = CODE_SEMAINE.slice(posConsoRendu);
+  for (const notion of ["status", "impossible", "approximate", "solution", "choiceSlots"]) {
     assert.ok(!blocConso.slice(0, blocConso.indexOf("/>")).includes(notion),
       `le rendu de la consommation dépend de « ${notion} »`);
+    assert.ok(!conditionAvant.includes(notion),
+      `la condition de rendu de la consommation dépend de « ${notion} »`);
   }
   // Et le composant de choix ne rend jamais `null` en fonction du statut :
   // seul un repas SANS occurrence le fait.
   assert.ok(CODE_CHOIX.includes("if (occurrences.length === 0) return null;"));
   assert.equal((CODE_CHOIX.match(/return null;/g) ?? []).length, 1);
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+   N1.5.3 — BEST-01..24 · MEILLEURE SOLUTION FAISABLE ET EXPLICATION DES ÉCARTS
+   ──────────────────────────────────────────────────────────────────────────
+   ⚠️ CE QUE CE LOT CORRIGE, ET CE N'EST PAS QU'UN AFFICHAGE. Le solveur rendait
+   un point FAISABLE, pas le MEILLEUR point faisable : une variable figée à une
+   borne n'était jamais relâchée. Mesuré sur le banc terrain poulet/riz, au
+   point rendu par l'ancien algorithme :
+
+       Riz basmati cuit   q = 0,0   PLANCHER   gradient = −72,1
+
+   Le riz, principale source de glucides du repas, était collé à zéro alors
+   qu'il MANQUAIT 110 g de glucides — et rien ne pouvait plus l'en sortir.
+   L'écran, lui, masquait tout : l'élève voyait une phrase de refus.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/** Les poids de la métrique C, recalculés ICI et jamais importés du solveur. */
+const poidsC = (cible: MealMacroTarget): readonly [number, number, number] =>
+  [cible.proteinGrams, cible.carbGrams, cible.fatGrams].map(
+    (c) => 1 / Math.max(5, Math.abs(c) * 0.1),
+  ) as unknown as readonly [number, number, number];
+
+/**
+ * ⚠️ LE GRADIENT EST RECALCULÉ DEPUIS LES QUANTITÉS RENDUES, PAS LU DANS LE
+ * SOLVEUR. Un test qui interrogerait la structure interne du solveur ne
+ * prouverait que sa cohérence avec lui-même.
+ */
+function gradientMacro(
+  foods: readonly SelectedFoodForMealSolver[],
+  cible: MealMacroTarget,
+  q: readonly number[],
+): number[] {
+  const w = poidsC(cible);
+  const cibles = [cible.proteinGrams, cible.carbGrams, cible.fatGrams];
+  const par100 = (f: SelectedFoodForMealSolver, m: number) =>
+    (m === 0 ? f.proteinPer100 : m === 1 ? f.carbPer100 : f.fatPer100) / 100;
+  const r = [0, 1, 2].map(
+    (m) => (foods.reduce((s, f, j) => s + par100(f, m) * q[j], 0) - cibles[m]) * w[m] * w[m],
+  );
+  return foods.map((f) => 2 * (r[0] * par100(f, 0) + r[1] * par100(f, 1) + r[2] * par100(f, 2)));
+}
+
+/** TOLÉRANCE DUALE DES TESTS, documentée : 1e−9, l'échelle du solveur. */
+const EPS_DUAL = 1e-9;
+
+/**
+ * Le contrôle KKT, appliqué aux quantités EXACTES (avant arrondi) — les seules
+ * sur lesquelles l'optimalité a un sens.
+ */
+function verifierKKT(
+  foods: readonly SelectedFoodForMealSolver[],
+  cible: MealMacroTarget,
+  solution: MealChoiceSolution,
+  contexte: string,
+): void {
+  const q = solution.items.map((i) => i.quantity);
+  const g = gradientMacro(foods, cible, q);
+  solution.items.forEach((item, j) => {
+    const auPlancher = q[j] <= item.minQuantity + 1e-7;
+    const auPlafond = q[j] >= item.maxQuantity - 1e-7;
+    if (item.minQuantity >= item.maxQuantity) return; // aucune direction faisable
+    if (auPlancher) {
+      assert.ok(g[j] >= -EPS_DUAL,
+        `${contexte} · ${item.name} au minimum avec gradient ${g[j]} : le relâcher aurait amélioré`);
+    } else if (auPlafond) {
+      assert.ok(g[j] <= EPS_DUAL,
+        `${contexte} · ${item.name} au maximum avec gradient ${g[j]} : le relâcher aurait amélioré`);
+    } else {
+      assert.ok(Math.abs(g[j]) <= 1e-6,
+        `${contexte} · ${item.name} LIBRE avec gradient ${g[j]} : le point n'est pas stationnaire`);
+    }
+  });
+}
+
+/* ── Les trois bancs terrain, en valeurs Ciqual lues en base ────────────────
+   ⚠️ TOUS EN GRAMMES, Y COMPRIS LES JUS. L'audit d'unités du §14 a établi que
+   les 3 330 lignes du catalogue Ciqual portent `nutrition_unit = 'g'`, jus
+   compris. Les modéliser en `ml` aurait été exactement ce que l'arbitrage
+   interdit : déduire une unité du NOM de l'aliment.                        */
+const BANC_A_FOODS = [
+  aliment("a-avoine", "Flocons d'avoine", 11.4, 57.7, 7.82),
+  aliment("a-beurre", "Beurre de cacahuète", 0.63, 0.71, 83),
+  aliment("a-fblanc", "Fromage blanc 0%", 7.19, 4.22, 0),
+  aliment("a-oeuf", "Œuf cru", 12.8, 0.06, 9.83),
+  aliment("a-sirop", "Sirop d'agave", 0.25, 78, 0.5),
+];
+const BANC_A_CIBLE: MealMacroTarget = { proteinGrams: 55, carbGrams: 93, fatGrams: 32 };
+
+const BANC_B_FOODS = [
+  aliment("b-boeuf", "Boeuf steak haché 5% cuit", 25.5, 0, 5.85),
+  aliment("b-patate", "Patate douce cuite", 1.69, 16.3, 0.15),
+  aliment("b-tomate", "Sauce tomate", 2.04, 4.71, 0.75),
+  aliment("b-poivron", "Poivron rouge cru", 1.06, 5.98, 0),
+  aliment("b-jus", "Jus multifruit", 0.25, 11.2, 0),
+];
+const BANC_B_CIBLE: MealMacroTarget = { proteinGrams: 55, carbGrams: 93, fatGrams: 32 };
+
+const BANC_C_FOODS = [
+  aliment("c-poulet", "Poulet rôti", 28.9, 0, 9.88),
+  aliment("c-riz", "Riz basmati cuit", 3.19, 32.9, 0.4),
+  aliment("c-soja", "Sauce soja", 7.25, 1.72, 0),
+  aliment("c-carotte", "Carotte crue", 0.78, 5.16, 0),
+  aliment("c-jus", "Jus d'orange pur jus", 0.61, 9.61, 0.11),
+];
+const BANC_C_CIBLE: MealMacroTarget = { proteinGrams: 70, carbGrams: 158, fatGrams: 42 };
+
+await test("BEST-01/02/03. exact, approché et impossible affichent TOUS les quantités", () => {
+  const bancs: [string, MealChoiceSolution][] = [
+    ["exact", solveMealChoices(BANC_A_FOODS, BANC_A_CIBLE)],
+    ["approché", solveMealChoices([POULET, SAUMON, HUILE], { proteinGrams: 50, carbGrams: 3, fatGrams: 20 })],
+    ["impossible", solveMealChoices(BANC_C_FOODS, BANC_C_CIBLE)],
+  ];
+  const vus = new Set<string>();
+  for (const [nom, s] of bancs) {
+    vus.add(s.status);
+    const html = renderToString(createElement(QuantitesDuRepas, { solution: s })).replace(/<!-- -->/g, "");
+    assert.ok(html.includes("Quantités pour ton repas"), `${nom} : le titre manque`);
+    assert.ok(html.includes("Cible du repas"), `${nom} : la cible manque`);
+    assert.ok(html.includes("Résultat"), `${nom} : le résultat manque`);
+    // ⚠️ ON COMPARE SUR LE PREMIER MOT : le rendu ÉCHAPPE les apostrophes
+    // (`d&#x27;`), et chercher « Sirop d'agave » brut rougirait pour une
+    // entité HTML, pas pour une absence.
+    for (const item of s.items) {
+      const premierMot = item.name.split(/[ ,']/)[0];
+      assert.ok(html.includes(premierMot), `${nom} : « ${item.name} » n'est pas affiché`);
+    }
+  }
+  // ⚠️ LE BANC DOIT COUVRIR LES TROIS STATUTS, sinon il ne prouve rien.
+  assert.deepEqual([...vus].sort(), ["approximate", "exact", "impossible"]);
+});
+
+await test("BEST-04/05/06/07. bornes respectées, aucune valeur négative, aucun NaN", () => {
+  const minimums = [null, 5, 12.3, 40];
+  let n = 0;
+  for (const foods of [BANC_A_FOODS, BANC_B_FOODS, BANC_C_FOODS]) {
+    for (const cible of [BANC_A_CIBLE, BANC_B_CIBLE, BANC_C_CIBLE, { proteinGrams: 5, carbGrams: 5, fatGrams: 5 }]) {
+      for (const m of minimums) {
+        const avec = foods.map((f, i) => (i % 2 === 0 ? avecMin(f, m) : f));
+        const s = solveMealChoices(avec, cible);
+        for (const item of s.items) {
+          assert.ok(item.displayQuantity >= item.minQuantity, `${item.name} sous son minimum`);
+          assert.ok(item.displayQuantity <= item.maxQuantity, `${item.name} au-dessus de son plafond`);
+          assert.ok(item.displayQuantity >= 0, `${item.name} négatif`);
+          assert.ok(Number.isFinite(item.quantity) && Number.isFinite(item.displayQuantity));
+          assert.ok([item.proteinGrams, item.carbGrams, item.fatGrams].every(Number.isFinite));
+          n += 1;
+        }
+        assert.ok([s.actual.proteinGrams, s.actual.carbGrams, s.actual.fatGrams].every(Number.isFinite));
+      }
+    }
+  }
+  console.log(`    ${n} quantités vérifiées entre plancher et plafond, toutes finies`);
+});
+
+await test("BEST-08. les macros du RÉSULTAT sont celles des quantités AFFICHÉES", () => {
+  for (const [foods, cible] of [[BANC_A_FOODS, BANC_A_CIBLE], [BANC_B_FOODS, BANC_B_CIBLE], [BANC_C_FOODS, BANC_C_CIBLE]] as const) {
+    const s = solveMealChoices(foods, cible);
+    for (const macro of ["proteinGrams", "carbGrams", "fatGrams"] as const) {
+      const par100 = macro === "proteinGrams" ? "proteinPer100" : macro === "carbGrams" ? "carbPer100" : "fatPer100";
+      const recalcul = s.items.reduce((t, item, j) => t + (foods[j][par100] * item.displayQuantity) / 100, 0);
+      assert.ok(Math.abs(s.actual[macro] - recalcul) < 1e-9, `${macro} ne vient pas des quantités affichées`);
+    }
+  }
+});
+
+await test("BEST-09/10/11. ecartsVersLaCible = cible − résultat, et son signe dit l'action", () => {
+  const s = solveMealChoices(BANC_C_FOODS, BANC_C_CIBLE);
+  for (const macro of ["proteinGrams", "carbGrams", "fatGrams"] as const) {
+    // ⚠️ SUR `actual`, DONC SUR LES QUANTITÉS AFFICHÉES (§11 de l'arbitrage).
+    assert.ok(Math.abs(s.ecartsVersLaCible[macro] - (s.target[macro] - s.actual[macro])) < 1e-12);
+    // ⚠️ ET `delta` GARDE SA CONVENTION HISTORIQUE, exactement opposée.
+    assert.ok(Math.abs(s.delta[macro] + s.ecartsVersLaCible[macro]) < 1e-12);
+  }
+
+  const html = renderToString(createElement(QuantitesDuRepas, { solution: s })).replace(/<!-- -->/g, "");
+  const ecarts = ecartsAAfficher(s);
+  assert.ok(ecarts.length > 0, "ce banc doit produire des écarts");
+  for (const e of ecarts) {
+    assert.ok(html.includes(e.grammes > 0 ? "Ajouter" : "Réduire"),
+      `un écart de ${e.grammes} doit se dire « ${e.grammes > 0 ? "Ajouter" : "Réduire"} »`);
+  }
+  // Un manque se dit « Ajouter », un excès « Réduire » — jamais un signe nu.
+  assert.ok(!html.includes("+2 g") && !html.includes("-5 g"));
+});
+
+await test("BEST-12. un écart de moins d'un gramme ne fait pas de bruit", () => {
+  const exact = solveMealChoices(BANC_A_FOODS, BANC_A_CIBLE);
+  assert.equal(exact.status, "exact");
+  assert.deepEqual(ecartsAAfficher(exact), [], "un repas exact ne doit afficher aucun écart");
+
+  // ⚠️ ET LE SEUIL EST LE GRAMME, PAS LE STATUT. Un repas `approximate` a le
+  // droit de dire « réduire environ 2 g » : lier les deux ferait taire l'écran
+  // là où un petit ajustement suffirait.
+  assert.ok(CODE_CHOIX.includes("Math.round(solution.ecartsVersLaCible[macro])"));
+  assert.ok(!/ecartsAAfficher[\s\S]{0,400}status/.test(CODE_CHOIX),
+    "le statut ne doit pas décider de l'affichage des écarts");
+});
+
+await test("BEST-13. le statut reste rendu par determineStatus, et par lui seul", () => {
+  assert.ok(CODE_SOLVEUR.includes("determineStatus(delta, target)"));
+  assert.equal((CODE_SOLVEUR.match(/determineStatus\(/g) ?? []).length, 1);
+  // Aucune tolérance recopiée dans l'écran pour juger : l'écran ne juge rien.
+  assert.ok(!CODE_CHOIX.includes("determineStatus"));
+});
+
+await test("BEST-14. la portion préférée reste SECONDAIRE aux macros", () => {
+  // Une préférence absurde ne doit pas dégrader l'erreur macro.
+  const sans = solveMealChoices(BANC_C_FOODS, BANC_C_CIBLE);
+  const avec = solveMealChoices(
+    BANC_C_FOODS.map((f) => ({ ...f, preferredQuantity: 5 })),
+    BANC_C_CIBLE,
+  );
+  const cout = (s: MealChoiceSolution) => {
+    const w = poidsC(BANC_C_CIBLE);
+    return (
+      (s.delta.proteinGrams * w[0]) ** 2 + (s.delta.carbGrams * w[1]) ** 2 + (s.delta.fatGrams * w[2]) ** 2
+    );
+  };
+  assert.ok(cout(avec) <= cout(sans) + 1e-6,
+    `une préférence a dégradé les macros : ${cout(avec)} > ${cout(sans)}`);
+  // Et les deux points restent optimaux.
+  verifierKKT(BANC_C_FOODS, BANC_C_CIBLE, sans, "BEST-14 sans préférence");
+  verifierKKT(BANC_C_FOODS.map((f) => ({ ...f, preferredQuantity: 5 })), BANC_C_CIBLE, avec, "BEST-14 avec préférence");
+});
+
+await test("BEST-15. minimum contradictoire : la quantité est conservée, le dépassement expliqué", () => {
+  // Cible lipides basse, minimum de beurre qui l'impose déjà.
+  const foods = [avecMin(aliment("m-beurre", "Beurre", 0.63, 0.71, 83), 12), aliment("m-fblanc", "Fromage blanc", 7.19, 4.22, 0)];
+  const s = solveMealChoices(foods, { proteinGrams: 30, carbGrams: 8, fatGrams: 5 });
+  const beurre = s.items[0];
+  assert.equal(beurre.displayQuantity, 12, "le minimum du coach doit être tenu");
+  assert.ok(beurre.boundedToMin);
+  // ⚠️ LE MINIMUM N'EST JAMAIS VIOLÉ POUR EMBELLIR LE RÉSULTAT.
+  assert.ok(s.actual.fatGrams > 5, "le banc doit produire un dépassement de lipides");
+  const ecarts = ecartsAAfficher(s);
+  const lipides = ecarts.find((e) => e.macro === "fatGrams");
+  assert.ok(lipides && lipides.grammes < 0, "le dépassement doit se dire « réduire »");
+  verifierKKT(foods, { proteinGrams: 30, carbGrams: 8, fatGrams: 5 }, s, "BEST-15");
+});
+
+await test("BEST-16. maximum bloquant : quantité au plafond, manque expliqué", () => {
+  const s = solveMealChoices(BANC_C_FOODS, BANC_C_CIBLE);
+  const riz = s.items.find((i) => i.name.startsWith("Riz"));
+  assert.ok(riz);
+  assert.equal(riz.displayQuantity, MAX_SOLIDE_G, "le riz doit aller à son plafond");
+  assert.ok(riz.boundedToMax);
+  const ecarts = ecartsAAfficher(s);
+  assert.ok(ecarts.length > 0, "le manque restant doit être expliqué");
+});
+
+await test("BEST-17. plusieurs écarts simultanés s'affichent, du plus significatif au moins", () => {
+  const s = solveMealChoices(BANC_C_FOODS, BANC_C_CIBLE);
+  const ecarts = ecartsAAfficher(s);
+  assert.ok(ecarts.length >= 2, "ce banc doit produire au moins deux écarts");
+  // ⚠️ L'ORDRE EST CELUI DE LA GÉOMÉTRIE, PAS DES GRAMMES BRUTS. Sinon une
+  // grande cible passerait toujours devant.
+  const poids = (e: (typeof ecarts)[number]) =>
+    Math.abs(s.ecartsVersLaCible[e.macro]) / Math.max(5, Math.abs(s.target[e.macro]) * 0.1);
+  for (let i = 1; i < ecarts.length; i += 1) {
+    assert.ok(poids(ecarts[i - 1]) >= poids(ecarts[i]), "les écarts ne sont pas triés par significativité");
+  }
+  const html = renderToString(createElement(QuantitesDuRepas, { solution: s })).replace(/<!-- -->/g, "");
+  for (const e of ecarts) assert.ok(html.includes(e.libelle), `« ${e.libelle} » n'est pas affiché`);
+});
+
+await test("BEST-18/19. aucun aliment suggéré, aucun rôle, aucun referenceGrams", () => {
+  const s = solveMealChoices(BANC_C_FOODS, BANC_C_CIBLE);
+  const html = renderToString(createElement(QuantitesDuRepas, { solution: s })).replace(/<!-- -->/g, "");
+  const conseils = html.slice(html.indexOf("Pour te rapprocher"));
+  // ⚠️ AUCUN NOM D'ALIMENT DANS LE CONSEIL. Les aliments sont dans la LISTE,
+  // pas dans la recommandation : « ajoute du riz » réintroduirait un rôle.
+  for (const item of s.items) {
+    assert.ok(!conseils.includes(item.name.split(" ")[0]),
+      `« ${item.name} » est suggéré dans le message d'écart`);
+  }
+  // Seules les trois macros sont nommées dans le conseil.
+  assert.ok(["protéines", "glucides", "lipides"].some((m) => conseils.includes(m)));
+
+  // ⚠️ `role="radio"` EST DE L'ACCESSIBILITÉ, PAS UN RÔLE NUTRITIONNEL, et
+  // confondre les deux ferait rougir ce contrôle pour une bonne pratique ARIA.
+  // On cible donc le vocabulaire métier, jamais l'attribut.
+  const sansAria = CODE_CHOIX.replace(/role="[a-z]+"/g, " ");
+  for (const interdit of ["rôle", "solverRole", "referenceGrams", "catégorie", "féculent", "légume", "protéine\\b.*aliment"]) {
+    assert.ok(!new RegExp(interdit).test(sansAria), `« ${interdit} » ne doit pas exister dans l'écran`);
+  }
+});
+
+await test("BEST-20. modifier un choix recalcule solution ET message", () => {
+  const occurrences = repasComplet();
+  const a = calculDuRepas(occurrences, { s1: "o1", s2: "o2", s3: "o3" }, CIBLE_EXACTE);
+  const b = calculDuRepas(occurrences, { s1: "o1b", s2: "o2", s3: "o3" }, CIBLE_EXACTE);
+  if (a.etat !== "calcule" || b.etat !== "calcule") throw new Error("les deux doivent être calculables");
+  assert.notDeepEqual(
+    a.solution.items.map((i) => i.displayQuantity),
+    b.solution.items.map((i) => i.displayQuantity),
+  );
+  assert.notDeepEqual(a.solution.ecartsVersLaCible, b.solution.ecartsVersLaCible);
+  // ⚠️ ET RIEN N'EST MÉMORISÉ : la solution est dérivée, jamais rangée.
+  assert.ok(CODE_CHOIX.includes("useMemo"));
+  assert.ok(!/useState<[^>]*Solution/.test(CODE_CHOIX));
+});
+
+await test("BEST-24. déterminisme : 100 exécutions donnent le même bit", () => {
+  for (const [foods, cible] of [[BANC_A_FOODS, BANC_A_CIBLE], [BANC_B_FOODS, BANC_B_CIBLE], [BANC_C_FOODS, BANC_C_CIBLE]] as const) {
+    const reference = JSON.stringify(solveMealChoices(foods, cible));
+    for (let i = 0; i < 100; i += 1) {
+      assert.equal(JSON.stringify(solveMealChoices(foods, cible)), reference, "le solveur n'est pas déterministe");
+    }
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+   N1.5.3 — KKT : L'OPTIMALITÉ EST VÉRIFIÉE, PAS SUPPOSÉE
+   ══════════════════════════════════════════════════════════════════════════ */
+
+await test("KKT-01. banc A : la solution EXACTE ne bouge pas, et elle est optimale", () => {
+  const s = solveMealChoices(BANC_A_FOODS, BANC_A_CIBLE);
+  assert.equal(s.status, "exact");
+  // ⚠️ MESURÉ AVANT LE LOT : résidu 0, tous gradients nuls. Le relâchement ne
+  // pouvait donc rien y changer — et c'est ce qui rendait la correction sûre.
+  assert.deepEqual(s.items.map((i) => i.displayQuantity), [149, 0, 160, 207, 0]);
+  assert.equal(s.determinism.releasedOrder.length, 0, "aucun relâchement n'était nécessaire");
+  verifierKKT(BANC_A_FOODS, BANC_A_CIBLE, s, "KKT-01 banc A");
+});
+
+await test("KKT-02. banc B : les variables figées à tort sont relâchées", () => {
+  const s = solveMealChoices(BANC_B_FOODS, BANC_B_CIBLE);
+  const parNom = (p: string) => s.items.find((i) => i.name.startsWith(p));
+  console.log(`    banc B : ${s.items.map((i) => `${i.name.split(" ")[0]} ${i.displayQuantity}`).join(", ")} (${s.status})`);
+  console.log(`    écarts : P${s.ecartsVersLaCible.proteinGrams.toFixed(1)} G${s.ecartsVersLaCible.carbGrams.toFixed(1)} L${s.ecartsVersLaCible.fatGrams.toFixed(1)}`);
+
+  // ⚠️ AVANT LE LOT : patate 0, jus 0, et 78,9 g de glucides manquants.
+  assert.ok((parNom("Patate")?.displayQuantity ?? 0) > 0, "la patate douce doit être relâchée");
+  assert.ok((parNom("Jus")?.displayQuantity ?? 0) > 0, "le jus doit être relâché");
+  assert.ok(Math.abs(s.ecartsVersLaCible.carbGrams) < 5,
+    `les glucides doivent être ramenés sous 5 g d'écart, mesuré ${s.ecartsVersLaCible.carbGrams}`);
+  verifierKKT(BANC_B_FOODS, BANC_B_CIBLE, s, "KKT-02 banc B");
+});
+
+await test("KKT-03. banc C : le riz sort du plancher et va au plafond", () => {
+  const s = solveMealChoices(BANC_C_FOODS, BANC_C_CIBLE);
+  const riz = s.items.find((i) => i.name.startsWith("Riz"));
+  console.log(`    banc C : ${s.items.map((i) => `${i.name.split(" ")[0]} ${i.displayQuantity}`).join(", ")} (${s.status})`);
+  console.log(`    écarts : P${s.ecartsVersLaCible.proteinGrams.toFixed(1)} G${s.ecartsVersLaCible.carbGrams.toFixed(1)} L${s.ecartsVersLaCible.fatGrams.toFixed(1)}`);
+
+  // ⚠️ AVANT LE LOT : riz 0 g, gradient −72, 110 g de glucides manquants.
+  assert.ok((riz?.displayQuantity ?? 0) > 0, "le riz doit être relâché");
+  assert.ok(Math.abs(s.ecartsVersLaCible.carbGrams) < 20,
+    `les glucides doivent passer sous 20 g d'écart, mesuré ${s.ecartsVersLaCible.carbGrams}`);
+  assert.ok(s.determinism.releasedOrder.length > 0, "au moins un relâchement doit avoir eu lieu");
+  verifierKKT(BANC_C_FOODS, BANC_C_CIBLE, s, "KKT-03 banc C");
+});
+
+await test("KKT-04. BALAYAGE : aucune solution ne viole les conditions duales", () => {
+  let n = 0;
+  const cibles: MealMacroTarget[] = [
+    { proteinGrams: 55, carbGrams: 93, fatGrams: 32 },
+    { proteinGrams: 70, carbGrams: 158, fatGrams: 42 },
+    { proteinGrams: 10, carbGrams: 200, fatGrams: 3 },
+    { proteinGrams: 120, carbGrams: 5, fatGrams: 60 },
+    { proteinGrams: 5, carbGrams: 5, fatGrams: 5 },
+    { proteinGrams: 300, carbGrams: 400, fatGrams: 150 },
+  ];
+  for (const base of [BANC_A_FOODS, BANC_B_FOODS, BANC_C_FOODS, [POULET, SAUMON, HUILE], [POULET, RIZ]]) {
+    for (const minimum of [null, 5, 20, 60]) {
+      const foods = base.map((f, i) => (i % 2 === 0 ? avecMin(f, minimum) : f));
+      for (const cible of cibles) {
+        const s = solveMealChoices(foods, cible);
+        assert.ok(s.determinism.converged, "le solveur doit converger sur ces entrées");
+        verifierKKT(foods, cible, s, `balayage ${n}`);
+        n += 1;
+      }
+    }
+  }
+  console.log(`    ${n} solutions vérifiées KKT (tolérance duale ${EPS_DUAL})`);
+});
+
+await test("KKT-05. le solveur ne boucle pas, et le dit quand il n'a pas certifié", () => {
+  // Garde-fous présents et NOMMÉS dans le code.
+  assert.ok(CODE_SOLVEUR.includes("ensemblesVus"), "l'anti-cyclage exact a disparu");
+  assert.ok(CODE_SOLVEUR.includes("MAX_TOURS"), "le garde-fou d'itérations a disparu");
+  assert.ok(CODE_SOLVEUR.includes("Number.isFinite(q[i])"), "la garde de non-finitude a disparu");
+  assert.ok(CODE_SOLVEUR.includes("converged = true"));
+
+  // Une entrée non finie ne produit AUCUNE solution certifiée.
+  const s = solveMealChoices([aliment("nan", "Aberrant", Number.POSITIVE_INFINITY, 0, 0)], BANC_A_CIBLE);
+  assert.equal(s.determinism.converged, false);
+  assert.ok(s.warnings.some((w) => w.code === "entree_invalide"));
+});
+
+await test("KKT-06. une solution non certifiée n'atteint JAMAIS l'écran", () => {
+  // ⚠️ C'EST `calculDuRepas` QUI TIENT CETTE FRONTIÈRE, pas le rendu.
+  assert.ok(CODE_SELECTION.includes("if (!solution.determinism.converged) return { etat: \"non-calculable\" };"));
+  const occurrences = repasComplet();
+  const calcul = calculDuRepas(occurrences, { s1: "o1", s2: "o2", s3: "o3" }, CIBLE_EXACTE);
+  if (calcul.etat !== "calcule") throw new Error(calcul.etat);
+  assert.equal(calcul.solution.determinism.converged, true);
+});
+
+await test("UNIT-01. l'unité est LUE, jamais déduite d'un nom ou d'une catégorie", () => {
+  // ⚠️ L'AUDIT DU §14 A MESURÉ : les 3 330 lignes du catalogue Ciqual portent
+  // `nutrition_unit = 'g'`, les 506 boissons comprises. Aucune conversion
+  // g → ml n'existe, et aucun nom d'aliment n'entre dans le choix d'unité.
+  // ⚠️ ON CHERCHE UNE DÉCISION, PAS UN MOT. `MAX_LIQUIDE_ML` contient
+  // « LIQUIDE » et ne décide d'aucune unité : c'est le plafond, une fois
+  // l'unité déjà connue. Ce qui est interdit, c'est de TESTER un nom.
+  for (const source of [CODE_SOLVEUR, CODE_SELECTION, CODE_CHOIX, CODE_LECTURE]) {
+    assert.ok(!/(name|nom|displayName|libelle)[^;\n]{0,60}(includes|match|test|indexOf)[^;\n]{0,60}(jus|boisson|lait|eau|soupe)/i.test(source),
+      "un nom d'aliment sert à décider d'une unité");
+    assert.ok(!/(jus|boisson|lait)[^;\n]{0,40}=>[^;\n]{0,20}"ml"/i.test(source),
+      "une unité est déduite d'une catégorie d'aliment");
+  }
+  // L'unité du solveur vient de l'hydratation, et de rien d'autre.
+  assert.ok(CODE_SELECTION.includes('unit: n.unit === "ml" ? "ml" : "g"'));
+  // Et l'affichage rend l'unité de l'aliment, pas une unité recalculée.
+  assert.ok(CODE_CHOIX.includes("{item.unit}"));
+
+  // Un aliment en grammes reste plafonné à 300, quel que soit son nom.
+  const jusEnGrammes = aliment("u-jus", "Jus d'orange pur jus", 0.61, 9.61, 0.11, "g");
+  const s = solveMealChoices([jusEnGrammes], { proteinGrams: 5, carbGrams: 200, fatGrams: 1 });
+  assert.equal(s.items[0].unit, "g");
+  assert.equal(s.items[0].maxQuantity, MAX_SOLIDE_G);
+  assert.equal(s.items[0].displayQuantity, MAX_SOLIDE_G);
+});
+
+await test("BEST-21/22/23. A5 reste ACCESSIBLE quand le repas est impossible — rendu réel", () => {
+  // ⚠️ CE CONTRÔLE REND VRAIMENT L'ÉCRAN DE LA SEMAINE, et il existe parce
+  // qu'un contrôle négatif l'a exigé. `A5-MIN-10` lisait le SOURCE, pas le
+  // DOM : sabotée pour ne rendre la consommation que sur les repas sans liste,
+  // la page restait verte. Un contrôle qui ne rougit pas ne prouve rien.
+  const semaine = {
+    planId: "plan-best",
+    profiles: [{
+      profileKey: "default", label: "Défaut", dailyCalories: 2200,
+      proteinBp: 3000, carbBp: 4000, fatBp: 3000,
+      slots: [{ slot: "dinner", enabled: true, proteinBp: 10000, carbBp: 10000, fatBp: 10000, displayOrder: 5 }],
+    }],
+    days: [{
+      id: "j1", day: "monday", profileKey: "default", status: "non-commence",
+      meals: [{
+        id: "repas-best", slot: "dinner", name: "Dîner", items: [], calories: 0,
+        protein: 0, carbs: 0, fat: 0, coachNotes: "",
+        // ⚠️ UNE COMPOSITION QUI NE PEUT PAS ATTEINDRE LA CIBLE : que du gras
+        // et de la protéine face à une cible riche en glucides.
+        choiceSlots: repasComplet(),
+      }],
+    }],
+  } as unknown as PlanV2Week;
+
+  const suivi = {
+    datesParJour: { monday: "2026-08-10" },
+    meals: [],
+    chargement: false,
+    enCours: false,
+    erreur: null,
+    onEffacerErreur: () => {},
+    onOuvrirPrescrit: async () => "cm-1",
+    onCreerRepas: async () => "cm-2",
+    onRenommerRepas: async () => true,
+    onSupprimerRepas: async () => true,
+    onAjouterCatalogue: async () => true,
+    onAjouterProduit: async () => true,
+    onAjouterManuel: async () => true,
+    onCorriger: async () => true,
+    onSupprimerAliment: async () => true,
+    aujourdHui: "2026-08-10",
+    onSemainePrecedente: () => {},
+    onSemaineSuivante: () => {},
+  };
+
+  const html = renderToString(
+    createElement(StudentPrescribedWeek, { week: semaine, suivi } as never),
+  ).replace(/<!-- -->/g, "");
+
+  // ⚠️ LA SECTION DE CONSOMMATION EST BIEN RENDUE, sur un repas qui PORTE des
+  // listes — c'est exactement ce que le sabotage supprimait.
+  assert.ok(/Ce que j&#x27;ai mangé|Ce que j'ai mangé|Ajouter un aliment/.test(html),
+    "la section « Ce que j'ai mangé » doit rester rendue");
+  // Et l'écran des choix est là aussi : les deux cohabitent.
+  assert.ok(html.includes("Choix alimentaires"));
+
+  // ⚠️ ET AUCUNE ÉCRITURE DE CONSOMMATION N'EST DÉCLENCHÉE PAR LE RENDU (§19).
+  // Les callbacks ci-dessus n'ont pas été appelés : un rendu ne consomme rien.
+  assert.ok(!CODE_CHOIX.includes("onOuvrirPrescrit"));
 });

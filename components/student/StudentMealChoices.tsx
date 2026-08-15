@@ -14,6 +14,7 @@ import {
   type SelectionDeChoix,
 } from "@/lib/nutrition/meal-choice-selection";
 import type { MealChoiceSolution, MealMacroTarget } from "@/lib/nutrition/meal-choice-solver";
+import { APPROXIMATE_TOLERANCE_GRAMS, APPROXIMATE_TOLERANCE_RATIO } from "@/lib/nutrition/recipe-solver";
 import type { MealChoiceSlot } from "@/lib/nutrition/plan-v2-week";
 
 /**
@@ -162,12 +163,27 @@ export function StudentMealChoices({
 }
 
 /**
- * N1.5 — « QUANTITÉS POUR TON REPAS ».
+ * N1.5 / N1.5.3 — « QUANTITÉS POUR TON REPAS ».
  *
- * ⚠️ ON N'AFFICHE JAMAIS UNE QUANTITÉ QUI MENT. Quand la combinaison ne peut
- * pas atteindre la cible, il n'y a PAS de liste de grammes : des quantités
- * accompagnées d'un avertissement seraient recopiées et suivies quand même.
- * On dit ce qui se passe, et on invite à changer un choix.
+ * ────────────────────────────────────────────────────────────────────────────
+ * N1.5.3 — « IMPOSSIBLE » N'AFFICHE PLUS UNE PAGE VIDE
+ * ────────────────────────────────────────────────────────────────────────────
+ * ⚠️ CE COMPOSANT DISAIT L'INVERSE, ET C'EST LE CŒUR DE CE LOT. Il portait
+ * « ON N'AFFICHE JAMAIS UNE QUANTITÉ QUI MENT » et remplaçait la liste des
+ * grammes par un paragraphe dès que le statut valait `impossible`. Le terrain
+ * a tranché : l'élève voyait une phrase de refus et AUCUN nombre, sans savoir
+ * ni ce qu'il aurait, ni ce qui manquait.
+ *
+ * La prémisse était fausse. Depuis N1.5.3, le solveur ne rend plus « un point
+ * faisable » mais **l'optimum certifié de la boîte** (conditions KKT
+ * vérifiées) : la solution affichée est la MEILLEURE réalisable avec ces
+ * choix-là. Elle ne ment pas — elle est simplement loin de la cible, et l'écran
+ * le dit maintenant en chiffres plutôt qu'en silence.
+ *
+ * ⚠️ LA SEULE RAISON QUI RESTE DE NE RIEN AFFICHER EST STRUCTURELLE, et elle
+ * n'arrive jamais jusqu'ici : unité inconnue, identité introuvable,
+ * minimum > maximum, données invalides, solveur non convergent. Tous ces cas
+ * sont filtrés en amont par `calculDuRepas`, qui rend `non-calculable`.
  *
  * ⚠️ L'ORDRE EST CELUI DES OCCURRENCES DU COACH. Ni par quantité, ni par
  * ordre alphabétique, ni par ordre de résolution : l'élève doit retrouver
@@ -176,11 +192,11 @@ export function StudentMealChoices({
  * ⚠️ LES NOMBRES AFFICHÉS SONT CEUX QUI ONT SERVI AU VERDICT. `actual` est
  * recalculé sur les quantités ARRONDIES, jamais sur les quantités exactes :
  * « RÉSULTAT » est donc littéralement ce que produisent les grammes écrits
- * juste au-dessus.
+ * juste au-dessus — et les écarts aussi.
  */
 export function QuantitesDuRepas({ solution }: { readonly solution: MealChoiceSolution }) {
   const titreId = useId();
-  const impossible = solution.status === "impossible";
+  const ecarts = ecartsAAfficher(solution);
 
   return (
     <section
@@ -191,51 +207,137 @@ export function QuantitesDuRepas({ solution }: { readonly solution: MealChoiceSo
         Quantités pour ton repas
       </h5>
 
-      {impossible ? (
-        <p className="text-xs leading-relaxed text-muted-foreground">
-          Cette combinaison ne permet pas d&apos;atteindre les objectifs de ce repas. Modifie un de
-          tes choix pour t&apos;en rapprocher.
-        </p>
-      ) : (
-        <ul className="flex min-w-0 flex-col gap-1">
-          {solution.items.map((item) => (
-            <li key={item.optionId} className="flex min-w-0 items-baseline justify-between gap-3">
-              <span className="min-w-0 flex-1 truncate text-sm text-foreground">{item.name}</span>
-              {/* ⚠️ L'UNITÉ EST CELLE DE L'ALIMENT. Un yaourt à boire est
-                  compté en millilitres, un riz en grammes, et les deux ne
-                  s'additionnent nulle part — seules leurs macros s'ajoutent. */}
-              <span className="flex-shrink-0 text-sm font-bold tabular-nums text-foreground">
-                {formatIntegerFr(item.displayQuantity)}
-                {NBSP}
-                {item.unit}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
+      {/* ⚠️ TOUJOURS RENDUE, QUEL QUE SOIT LE STATUT. */}
+      <ul className="flex min-w-0 flex-col gap-1">
+        {solution.items.map((item) => (
+          <li key={item.optionId} className="flex min-w-0 items-baseline justify-between gap-3">
+            <span className="min-w-0 flex-1 truncate text-sm text-foreground">{item.name}</span>
+            {/* ⚠️ L'UNITÉ EST CELLE DE L'ALIMENT, LUE ET JAMAIS DEVINÉE. Elle
+                vient de `nutrition_unit`, l'unité dans laquelle ses macros sont
+                données « pour 100 » — jamais de son nom ni de sa catégorie. Un
+                aliment calculé en grammes s'affiche en grammes, même si son nom
+                contient « jus ». */}
+            <span className="flex-shrink-0 text-sm font-bold tabular-nums text-foreground">
+              {formatIntegerFr(item.displayQuantity)}
+              {NBSP}
+              {item.unit}
+            </span>
+          </li>
+        ))}
+      </ul>
 
       <dl className="flex flex-col gap-1 border-t border-border pt-2 text-xs text-muted-foreground">
         <div className="flex flex-wrap items-baseline justify-between gap-x-3">
           <dt className="uppercase tracking-wide">Cible du repas</dt>
           <dd className="tabular-nums">{ligneMacros(solution.target)}</dd>
         </div>
-        {!impossible && (
-          <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-            <dt className="uppercase tracking-wide">Résultat</dt>
-            <dd className="tabular-nums">{ligneMacros(solution.actual)}</dd>
-          </div>
-        )}
+        {/* ⚠️ AFFICHÉ MÊME EN « IMPOSSIBLE ». C'est précisément là qu'il sert. */}
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+          <dt className="uppercase tracking-wide">Résultat</dt>
+          <dd className="tabular-nums">{ligneMacros(solution.actual)}</dd>
+        </div>
       </dl>
 
-      {/* ⚠️ UNE PHRASE, PAS UNE ERREUR TECHNIQUE. « approché » n'est pas un
-          échec : c'est le meilleur que ces aliments-là puissent faire. */}
-      {solution.status === "approximate" && (
+      {/* ⚠️ UNE PHRASE, PAS UNE ERREUR TECHNIQUE. Ni « approché » ni
+          « impossible » ne sont des échecs de l'élève : c'est le meilleur que
+          ces aliments-là puissent faire, et on le lui dit comme tel. */}
+      {solution.status !== "exact" && (
         <p className="text-xs leading-relaxed text-muted-foreground">
-          Cette combinaison approche au mieux les objectifs de ce repas.
+          {solution.status === "approximate"
+            ? "Cette combinaison s'approche au mieux de ton objectif."
+            : "Cette combinaison ne permet pas d'atteindre exactement ton objectif, mais voici la meilleure proposition possible avec tes choix."}
+        </p>
+      )}
+
+      {ecarts.length > 0 && (
+        <div className="flex min-w-0 flex-col gap-1">
+          <p className="text-xs leading-relaxed text-muted-foreground">Pour te rapprocher de la cible :</p>
+          <ul className="flex min-w-0 flex-col gap-0.5">
+            {ecarts.map((ecart) => (
+              <li key={ecart.macro} className="flex min-w-0 items-baseline gap-2 text-xs text-muted-foreground">
+                <span aria-hidden="true" className="flex-shrink-0 text-muted-foreground">
+                  •
+                </span>
+                {/* ⚠️ « AJOUTER » / « RÉDUIRE », JAMAIS UN SIGNE NU. Un « −5 g »
+                    laisse l'élève deviner de quel côté aller. */}
+                <span className="min-w-0">
+                  {ecart.grammes > 0 ? "Ajouter" : "Réduire"} environ{NBSP}
+                  <span className="tabular-nums font-bold text-foreground">
+                    {formatIntegerFr(Math.abs(ecart.grammes))}
+                    {NBSP}g
+                  </span>{" "}
+                  de {ecart.libelle}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* ⚠️ AUCUN ALIMENT PRÉCIS N'EST SUGGÉRÉ, ET CE N'EST PAS UN OUBLI.
+          « Ajoute 10 g d'huile » réintroduirait un rôle nutritionnel par la
+          bande : il faudrait décider que l'huile « sert » les lipides, donc
+          qu'un aliment a une fonction. Tout ce module tient sur le refus de
+          cette idée. On nomme la MACRO, et on renvoie au bouton « Modifier »
+          que l'élève a déjà sous les yeux sur chacune de ses listes. */}
+      {solution.status !== "exact" && (
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Modifie un de tes choix pour t&apos;en rapprocher.
         </p>
       )}
     </section>
   );
+}
+
+/** Le libellé élève d'une macro. Aucun jargon, aucune abréviation. */
+const LIBELLE_MACRO = {
+  proteinGrams: "protéines",
+  carbGrams: "glucides",
+  fatGrams: "lipides",
+} as const;
+
+type MacroClef = keyof typeof LIBELLE_MACRO;
+
+export interface EcartAffiche {
+  readonly macro: MacroClef;
+  readonly libelle: string;
+  /** Arrondi au gramme. > 0 : à ajouter. < 0 : à réduire. */
+  readonly grammes: number;
+}
+
+/**
+ * N1.5.3 — QUELS ÉCARTS MÉRITENT UNE PHRASE.
+ *
+ * ⚠️ UN SEUL SEUIL, ET IL N'EST PAS ARBITRAIRE : LE GRAMME. C'est le pas
+ * d'affichage des quantités ; en dessous, l'écart ARRONDI vaut zéro et il n'y a
+ * littéralement rien à écrire. « Il manque 0,1 g de protéines » serait du bruit.
+ *
+ * ⚠️ LE STATUT NE DÉCIDE PAS DE L'AFFICHAGE DES ÉCARTS, et c'est délibéré. Un
+ * repas `approximate` peut parfaitement dire « réduire environ 2 g de lipides » :
+ * le statut nutritionnel reste jugé par `determineStatus` seul, l'écart reste
+ * une information utile. Lier les deux ferait taire l'écran précisément dans le
+ * cas où un petit ajustement suffirait.
+ *
+ * ⚠️ L'ORDRE EST CELUI DE LA GÉOMÉTRIE DU SOLVEUR, pas celui des grammes bruts.
+ * On trie par écart RAPPORTÉ à la tolérance de la macro — la même grandeur que
+ * `determineStatus` et que la métrique d'optimisation. Sans ça, une grande
+ * cible passerait toujours devant : 9 g de glucides sur 158 pèsent moins que
+ * 6 g de lipides sur 42, et c'est ce dernier qu'il faut lire en premier.
+ */
+export function ecartsAAfficher(solution: MealChoiceSolution): readonly EcartAffiche[] {
+  const tolerance = (cible: number): number =>
+    Math.max(APPROXIMATE_TOLERANCE_GRAMS, Math.abs(cible) * APPROXIMATE_TOLERANCE_RATIO);
+
+  return (Object.keys(LIBELLE_MACRO) as MacroClef[])
+    .map((macro) => ({
+      macro,
+      libelle: LIBELLE_MACRO[macro],
+      grammes: Math.round(solution.ecartsVersLaCible[macro]),
+      poids: Math.abs(solution.ecartsVersLaCible[macro]) / tolerance(solution.target[macro]),
+    }))
+    .filter((ecart) => ecart.grammes !== 0)
+    .sort((a, b) => b.poids - a.poids)
+    .map(({ macro, libelle, grammes }) => ({ macro, libelle, grammes }));
 }
 
 function ligneMacros(macros: {

@@ -1,5 +1,10 @@
 import { KCAL_PER_GRAM } from "@/lib/nutrition/macro-targets";
-import { determineStatus, type SolverStatus } from "@/lib/nutrition/recipe-solver";
+import {
+  APPROXIMATE_TOLERANCE_GRAMS,
+  APPROXIMATE_TOLERANCE_RATIO,
+  determineStatus,
+  type SolverStatus,
+} from "@/lib/nutrition/recipe-solver";
 
 /**
  * N1.5 — LES QUANTITÉS D'UN REPAS COMPOSÉ PAR L'ÉLÈVE, EN UN SEUL CALCUL.
@@ -90,6 +95,24 @@ const NEGATIF_EPSILON = 1e-9;
 
 /** Pas d'affichage des quantités : le gramme (et le millilitre). */
 const PAS_D_AFFICHAGE = 1;
+
+/**
+ * N1.5.3 — TOLÉRANCE DUALE : en deçà, un gradient à une borne est du bruit
+ * flottant et non une raison de relâcher. Relative à l'échelle de l'objectif,
+ * qui est sans dimension une fois la métrique C appliquée.
+ */
+const DUAL_EPSILON = 1e-9;
+
+/**
+ * N1.5.3 — GARDE-FOU D'ITÉRATIONS.
+ *
+ * ⚠️ CE N'EST PAS LA PROTECTION PRINCIPALE CONTRE LE CYCLAGE. Celle-là est
+ * exacte : on mémorise les ensembles actifs visités, et revoir un ensemble
+ * déjà vu prouve un cycle. Ce plafond-ci n'attrape que le cas où le nombre
+ * d'ensembles distincts explose — il est donc dimensionné sur N, pas constant.
+ */
+const MAX_TOURS_PAR_ALIMENT = 8;
+const MAX_TOURS_BASE = 64;
 
 /* ─────────────────────── Garde-fous de faisabilité ─────────────────────── */
 
@@ -289,7 +312,8 @@ export type MealSolverWarningCode =
   | "quantite_bornee_a_zero"
   | "quantite_relevee_au_minimum"
   | "quantite_bornee_au_maximum"
-  | "cible_non_atteinte";
+  | "cible_non_atteinte"
+  | "solveur_non_convergent";
 
 export interface MealSolverWarning {
   readonly code: MealSolverWarningCode;
@@ -342,14 +366,39 @@ export interface MealSolvedItem {
 
 /** Traces de déterminisme — pour les tests et le diagnostic, pas pour l'écran. */
 export interface MealSolverDeterminism {
-  /** Nombre de résolutions effectuées (1 + une par aliment figé à une borne). */
+  /**
+   * Nombre de résolutions effectuées.
+   *
+   * ⚠️ N1.5.3 — CE N'EST PLUS « 1 + une par aliment figé ». L'ensemble actif
+   * sait désormais RELÂCHER une borne : une même variable peut donc être figée
+   * puis rendue libre, et le compte de tours dépasse le nombre de figements
+   * survivants. C'est le signe que l'algorithme cherche vraiment l'optimum, pas
+   * qu'il tourne en rond — `converged` dit lequel des deux.
+   */
   readonly iterations: number;
-  /** Ordre exact dans lequel les aliments ont été bornés à zéro. */
+  /**
+   * Aliments bornés à ZÉRO **dans la solution finale**, en ordre d'entrée.
+   *
+   * ⚠️ N1.5.3 — CE SONT LES FIGEMENTS SURVIVANTS, PAS LA CHRONOLOGIE. Avec le
+   * relâchement, un aliment figé à un tour peut être libre au suivant : publier
+   * la chronologie ferait mentir la liste sur l'état final.
+   */
   readonly zeroedOrder: readonly string[];
-  /** Ordre exact dans lequel les aliments ont été relevés à leur minimum. */
+  /** Aliments maintenus à leur minimum dans la solution finale, en ordre d'entrée. */
   readonly flooredOrder: readonly string[];
-  /** Ordre exact dans lequel les aliments ont été plafonnés. */
+  /** Aliments plafonnés dans la solution finale, en ordre d'entrée. */
   readonly cappedOrder: readonly string[];
+  /** N1.5.3 — ordre CHRONOLOGIQUE des relâchements de borne. */
+  readonly releasedOrder: readonly string[];
+  /**
+   * N1.5.3 — les conditions KKT sont-elles satisfaites au point rendu ?
+   *
+   * ⚠️ `false` NE VEUT PAS DIRE « UN PEU MOINS BON ». Il veut dire qu'aucune
+   * solution ne peut être présentée : entrée non finie, oscillation d'ensemble
+   * actif, ou garde-fou d'itérations atteint. L'appelant DOIT alors traiter le
+   * repas comme non calculable, jamais afficher des quantités non certifiées.
+   */
+  readonly converged: boolean;
   /** Rang du système de la DERNIÈRE résolution (0 à 3). */
   readonly rank: number;
 }
@@ -361,7 +410,32 @@ export interface MealChoiceSolution {
   readonly target: MealMacroTarget;
   /** Ce que les quantités AFFICHÉES apportent réellement. */
   readonly actual: MealMacroTotals;
+  /**
+   * RÉSULTAT − CIBLE. Convention historique, partagée avec `recipe-solver`
+   * (`SolverDeltas`), et c'est celle que `determineStatus` reçoit.
+   *
+   * ⚠️ NE PAS L'INVERSER. `determineStatus` la prend en valeur absolue : une
+   * inversion serait invisible jusqu'au jour où quelqu'un testerait un signe.
+   * Deux « delta » de signes opposés dans le même produit, c'est le piège que
+   * `ecartsVersLaCible` existe précisément pour éviter.
+   */
   readonly delta: {
+    readonly proteinGrams: number;
+    readonly carbGrams: number;
+    readonly fatGrams: number;
+  };
+  /**
+   * N1.5.3 — CIBLE − RÉSULTAT, et le nom dit l'orientation.
+   *
+   * ⚠️ C'EST LE SEUL OBJET QUE L'UX DOIT LIRE POUR DIRE « AJOUTER / RÉDUIRE ».
+   *     > 0 → il MANQUE cette macro    → « ajouter environ N g »
+   *     < 0 → cette macro est EN EXCÈS → « réduire environ N g »
+   *
+   * ⚠️ CALCULÉ SUR `actual`, DONC SUR LES QUANTITÉS AFFICHÉES. Le message ne
+   * peut pas dire « il manque 0,7 g » sous un résultat qui, lui, est arrondi :
+   * les deux nombres viennent du même calcul, après l'arrondi borné N1.5.2.
+   */
+  readonly ecartsVersLaCible: {
     readonly proteinGrams: number;
     readonly carbGrams: number;
     readonly fatGrams: number;
@@ -565,6 +639,48 @@ function plancherApplicable(food: SelectedFoodForMealSolver): number {
   return Math.min(plancherDe(food), borneMaximale(unitéValide(food.unit)));
 }
 
+/**
+ * N1.5.3 — LES POIDS DE LA MÉTRIQUE, ET IL N'Y EN A PAS TROIS AU CHOIX.
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * POURQUOI CETTE MÉTRIQUE-LÀ
+ * ────────────────────────────────────────────────────────────────────────────
+ * Trois candidates ont été MESURÉES sur les bancs terrain (audit du 15/08/2026,
+ * optimum global de la boîte calculé par gradient projeté, conditions KKT
+ * vérifiées) :
+ *
+ *   A. erreur brute Σ (m − m*)²
+ *      → laisse le GRAND NOMBRE dominer. Banc C : glucides ramenés à +1,0 g,
+ *        payés par −6,6 g de protéines. Un gramme de glucide et un gramme de
+ *        protéine n'ont pourtant pas le même poids pour l'élève.
+ *   B. erreur normalisée Σ ((m − m*)/m*)²
+ *      → défaut symétrique. Poids en 1/m*² : une cible de 42 g pèse 14 fois
+ *        une cible de 158 g. Banc C : elle sacrifie 11,3 g de glucides et
+ *        14,9 g de protéines pour grappiller sur les lipides.
+ *   C. erreur normalisée AVEC PLANCHER, poids = 1 / max(5 g, 10 % de la cible)
+ *      → retenue.
+ *
+ * ⚠️ ET L'ARGUMENT DÉCISIF N'EST PAS « C EST ENTRE LES DEUX ». C'est que
+ * `max(5 g, 10 %)` est EXACTEMENT la tolérance avec laquelle `determineStatus`
+ * décide `approximate` contre `impossible`. Optimiser en A ou en B tout en
+ * jugeant en C autoriserait une solution « meilleure » au sens du solveur et
+ * PIRE au sens du verdict affiché. Ici, « meilleure solution » et « meilleur
+ * statut » sont la même phrase.
+ *
+ * ⚠️ POUR m* ≥ 50 g, C EST PROPORTIONNELLE À B — même argmin. Le plancher de
+ * 5 g ne joue que sur les petites cibles, et c'est précisément là qu'il évite
+ * qu'une macro domine artificiellement.
+ *
+ * ⚠️ LE CAS EXACT EST INSENSIBLE À CE CHOIX. Mettre les lignes à l'échelle ne
+ * change pas l'ensemble des solutions de résidu nul : quand la cible est
+ * atteignable, A, B et C donnent le même verdict et la même géométrie.
+ */
+function poidsMetrique(target: MealMacroTarget): readonly [number, number, number] {
+  const poids = (cible: number): number =>
+    1 / Math.max(APPROXIMATE_TOLERANCE_GRAMS, Math.abs(cible) * APPROXIMATE_TOLERANCE_RATIO);
+  return [poids(target.proteinGrams), poids(target.carbGrams), poids(target.fatGrams)];
+}
+
 /** La macro n° m d'un aliment, pour 100. Ordre : protéines, glucides, lipides. */
 function macroDe(food: SelectedFoodForMealSolver, m: number): number {
   if (m === 0) return food.proteinPer100;
@@ -615,11 +731,17 @@ export function solveMealChoices(
             message: "Des valeurs nutritionnelles sont inexploitables : aucune quantité n'est calculée.",
           },
     );
+    // ⚠️ N1.5.3 — `converged: false`. Une entrée non finie ou vide ne produit
+    // pas « une solution à zéro » : elle ne produit AUCUNE solution certifiée.
+    // C'est l'exception structurelle du §3 de l'arbitrage, et c'est ce drapeau
+    // qui empêche l'écran d'afficher des quantités qui ne veulent rien dire.
     return composer(foods, cibleSaine, foods.map(() => 0), new Map(), warnings, {
       iterations: 0,
       zeroedOrder: [],
       flooredOrder: [],
       cappedOrder: [],
+      releasedOrder: [],
+      converged: false,
       rank: 0,
     });
   }
@@ -646,12 +768,124 @@ export function solveMealChoices(
   const actifs = new Set<number>(foods.map((_, i) => i));
   /** index → cause du figement. La valeur figée vit dans `q`. */
   const figés = new Map<number, "zero" | "min" | "max">();
-  const zeroedOrder: string[] = [];
-  const flooredOrder: string[] = [];
-  const cappedOrder: string[] = [];
+  const releasedOrder: string[] = [];
   const q = new Array<number>(foods.length).fill(0);
   let iterations = 0;
   let rang = 0;
+
+  // ── N1.5.3 — LA MÉTRIQUE, LES BORNES, ET LA MÉMOIRE DES ENSEMBLES ACTIFS ──
+  const poids = poidsMetrique(cibleSaine);
+  const plancherDeI = foods.map((f) => plancherApplicable(f));
+  const plafondDeI = foods.map((f) => borneMaximale(unitéValide(f.unit)));
+
+  /**
+   * L'OBJECTIF, EN MÉTRIQUE C, SUR LE POINT COMPLET — figés compris.
+   *
+   * ⚠️ SUR LE POINT COMPLET, ET C'EST TOUT L'INTÉRÊT. Le `résidu()` ci-dessus
+   * décrit ce qui reste à couvrir par les variables LIBRES ; l'objectif, lui,
+   * juge le repas ENTIER. C'est celui-là qu'on améliore, et c'est sur celui-là
+   * que se lit la condition duale.
+   */
+  const objectif = (x: readonly number[]): number => {
+    let total = 0;
+    for (let m = 0; m < 3; m += 1) {
+      let apport = 0;
+      for (let i = 0; i < foods.length; i += 1) apport += (macroDe(foods[i], m) / 100) * x[i];
+      const cible = m === 0 ? cibleSaine.proteinGrams : m === 1 ? cibleSaine.carbGrams : cibleSaine.fatGrams;
+      const écart = (apport - cible) * poids[m];
+      total += écart * écart;
+    }
+    return total;
+  };
+
+  /** ∂objectif/∂qⱼ au point courant. Le signe est tout ce qui compte. */
+  const gradient = (x: readonly number[]): number[] => {
+    const r: number[] = [];
+    for (let m = 0; m < 3; m += 1) {
+      let apport = 0;
+      for (let i = 0; i < foods.length; i += 1) apport += (macroDe(foods[i], m) / 100) * x[i];
+      const cible = m === 0 ? cibleSaine.proteinGrams : m === 1 ? cibleSaine.carbGrams : cibleSaine.fatGrams;
+      r.push((apport - cible) * poids[m] * poids[m]);
+    }
+    return foods.map(
+      (food) =>
+        2 *
+        (r[0] * (food.proteinPer100 / 100) +
+          r[1] * (food.carbPer100 / 100) +
+          r[2] * (food.fatPer100 / 100)),
+    );
+  };
+
+  /**
+   * N1.5.3 — LA CONDITION DUALE, ET C'EST TOUT CE QUI MANQUAIT.
+   *
+   * ────────────────────────────────────────────────────────────────────────
+   * CE QUE LE SOLVEUR FAISAIT, ET POURQUOI C'ÉTAIT INSUFFISANT
+   * ────────────────────────────────────────────────────────────────────────
+   * Jusqu'ici : résoudre, figer la pire violation à sa borne, re-résoudre.
+   * JAMAIS relâcher. Ce « clamp-and-resolve » rend un point FAISABLE, pas le
+   * MEILLEUR point faisable — et l'écart n'a rien de théorique. Mesuré sur le
+   * banc terrain poulet/riz (audit du 15/08/2026), au point rendu :
+   *
+   *     Riz basmati cuit   q = 0,0   PLANCHER   gradient = −72,1
+   *
+   * Le riz — principale source de glucides du repas — était figé à zéro alors
+   * qu'il MANQUAIT 110 g de glucides, et rien ne pouvait plus l'en sortir.
+   *
+   * ────────────────────────────────────────────────────────────────────────
+   * LA RÈGLE
+   * ────────────────────────────────────────────────────────────────────────
+   * À l'optimum d'un problème borné, une variable collée à son PLANCHER doit
+   * avoir un gradient ≥ 0 (la faire monter ne peut qu'empirer), et une variable
+   * à son PLAFOND un gradient ≤ 0. Un gradient de signe contraire prouve qu'il
+   * existe une direction faisable strictement meilleure : on RELÂCHE.
+   *
+   * ⚠️ ON N'EN RELÂCHE QU'UNE PAR TOUR, la plus violée, et à égalité stricte le
+   * plus petit index — critère TOTAL, donc reproductible. En relâcher plusieurs
+   * d'un coup rendrait la trajectoire dépendante de l'ordre d'itération.
+   *
+   * ⚠️ LA PORTION PRÉFÉRÉE N'A PAS VOIX AU CHAPITRE ICI. Le gradient est celui
+   * de l'erreur MACRO seule : une préférence ne peut donc jamais empêcher un
+   * relâchement qui améliore réellement les macros. C'est la hiérarchie
+   * bornes → macros → préférences, écrite dans le code et pas seulement dans un
+   * commentaire.
+   *
+   * Rend l'index relâché, ou −1 si le point satisfait les conditions duales.
+   */
+  const choisirRelâchement = (g: readonly number[]): number => {
+    let pire = -1;
+    let pireViolation = DUAL_EPSILON;
+    for (const [i, cause] of [...figés].sort((a, z) => a[0] - z[0])) {
+      // Un plancher ET un plafond confondus (minimum = plafond) n'offrent
+      // aucune direction faisable : il n'y a rien à relâcher.
+      if (plancherDeI[i] >= plafondDeI[i]) continue;
+      const violation = cause === "max" ? g[i] : -g[i];
+      if (violation > pireViolation) {
+        pireViolation = violation;
+        pire = i;
+      }
+    }
+    if (pire < 0) return -1;
+    figés.delete(pire);
+    actifs.add(pire);
+    releasedOrder.push(foods[pire].optionId);
+    return pire;
+  };
+
+  /**
+   * ANTI-CYCLAGE EXACT. Un ensemble actif déjà visité prouve un cycle : la
+   * théorie dit que l'objectif décroît strictement à chaque relâchement, donc
+   * revoir un ensemble ne peut venir que du flottant. On s'arrête alors sur le
+   * MEILLEUR point faisable rencontré, jamais sur celui du tour en cours.
+   */
+  const ensemblesVus = new Set<string>();
+  const signature = (): string => foods.map((_, i) => figés.get(i) ?? "-").join("|");
+  const MAX_TOURS = MAX_TOURS_BASE + MAX_TOURS_PAR_ALIMENT * foods.length;
+
+  let meilleurQ: number[] | null = null;
+  let meilleurCout = Number.POSITIVE_INFINITY;
+  let meilleursFigés = new Map<number, "zero" | "min" | "max">();
+  let converged = false;
 
   /**
    * Le résidu à couvrir par les variables LIBRES : la cible, moins ce que les
@@ -680,10 +914,31 @@ export function solveMealChoices(
 
   for (;;) {
     iterations += 1;
+
+    // ⚠️ DEUX GARDE-FOUS, ET ILS NE DISENT PAS LA MÊME CHOSE. L'ensemble déjà
+    // vu prouve un CYCLE ; le plafond de tours attrape une explosion du nombre
+    // d'ensembles distincts. Dans les deux cas on sort SANS certifier.
+    const sig = signature();
+    if (ensemblesVus.has(sig) || iterations > MAX_TOURS) break;
+    ensemblesVus.add(sig);
+
     const indices = [...actifs].sort((a, z) => a - z);
     if (indices.length === 0) {
+      // Tout est figé : le point est primal-faisable, il reste à le juger.
       rang = 0;
-      break;
+      const coutTout = objectif(q);
+      if (coutTout < meilleurCout) {
+        meilleurCout = coutTout;
+        meilleurQ = [...q];
+        meilleursFigés = new Map(figés);
+      }
+      const gTout = gradient(q);
+      const relâché = choisirRelâchement(gTout);
+      if (relâché < 0) {
+        converged = true;
+        break;
+      }
+      continue;
     }
 
     // ── N1.5.1 — LE RECENTRAGE, ET C'EST TOUTE LA FORMULATION ────────────
@@ -717,22 +972,32 @@ export function solveMealChoices(
     const centres = indices.map((i) => centreDe(foods[i]));
     const echelles = indices.map((i) => echelleDe(foods[i]));
 
+    // ── N1.5.3 — LA MÉTRIQUE C ENTRE ICI, ET NULLE PART AILLEURS ─────────
+    // Chaque LIGNE macro est multipliée par son poids, et le second membre
+    // avec elle. Mathématiquement, résoudre le système mis à l'échelle revient
+    // à minimiser Σ wₘ² (écartₘ)² — exactement la métrique retenue.
+    //
+    // ⚠️ LE RECENTRAGE N'EST PAS TOUCHÉ. Les poids agissent sur les LIGNES
+    // (les macros), le recentrage sur les COLONNES (les aliments) : les deux
+    // sont orthogonaux, et la hiérarchie macros > préférences est préservée.
+    //
+    // ⚠️ ET LE CAS EXACT NE BOUGE PAS. Une mise à l'échelle de lignes ne change
+    // pas l'ensemble des solutions de résidu nul — vérifié par test sur le banc
+    // terrain du petit déjeuner.
     const lignes = [
-      indices.map((i, k) => (foods[i].proteinPer100 / 100) * echelles[k]),
-      indices.map((i, k) => (foods[i].carbPer100 / 100) * echelles[k]),
-      indices.map((i, k) => (foods[i].fatPer100 / 100) * echelles[k]),
+      indices.map((i, k) => (foods[i].proteinPer100 / 100) * echelles[k] * poids[0]),
+      indices.map((i, k) => (foods[i].carbPer100 / 100) * echelles[k] * poids[1]),
+      indices.map((i, k) => (foods[i].fatPer100 / 100) * echelles[k] * poids[2]),
     ];
 
     // Le résidu que les variables libres doivent couvrir, MOINS ce que les
     // centres apportent déjà : c'est le second membre du système recentré.
     const b = résidu();
-    const bRecentré = [0, 1, 2].map((m) =>
-      b[m] -
-      indices.reduce(
-        (total, i, k) =>
-          total + (macroDe(foods[i], m) / 100) * centres[k],
-        0,
-      ),
+    const bRecentré = [0, 1, 2].map(
+      (m) =>
+        (b[m] -
+          indices.reduce((total, i, k) => total + (macroDe(foods[i], m) / 100) * centres[k], 0)) *
+        poids[m],
     );
 
     const { q: partiel, rang: rangCourant } = solutionNormeMinimale(lignes, bRecentré);
@@ -741,6 +1006,12 @@ export function solveMealChoices(
     indices.forEach((indexAliment, position) => {
       q[indexAliment] = centres[position] + echelles[position] * (partiel[position] ?? 0);
     });
+
+    // ⚠️ N1.5.3 — RIEN DE NON FINI NE SORT D'ICI. Une matrice pathologique peut
+    // produire un `NaN` ou un `Infinity` que l'arrondi ne rattraperait pas : on
+    // abandonne alors le tour et on garde le MEILLEUR point faisable déjà
+    // certifié, plutôt que d'afficher un nombre qui n'en est pas un.
+    if (indices.some((i) => !Number.isFinite(q[i]))) break;
 
     // ── 1. Le plancher d'abord ────────────────────────────────────────────
     // ⚠️ LA NON-NÉGATIVITÉ DE N1.5 EST DEVENUE UN CAS PARTICULIER DE CETTE
@@ -765,22 +1036,10 @@ export function solveMealChoices(
       q[pire] = plancher;
       actifs.delete(pire);
       figés.set(pire, plancher > 0 ? "min" : "zero");
-      (plancher > 0 ? flooredOrder : zeroedOrder).push(foods[pire].optionId);
-      warnings.push(
-        plancher > 0
-          ? {
-              code: "quantite_relevee_au_minimum",
-              optionId: foods[pire].optionId,
-              message:
-                `« ${foods[pire].name} » est maintenu à ${plancher} ${unitéValide(foods[pire].unit)} : ` +
-                `c'est la quantité minimale demandée pour cet aliment.`,
-            }
-          : {
-              code: "quantite_bornee_a_zero",
-              optionId: foods[pire].optionId,
-              message: `« ${foods[pire].name} » est ramené à 0 : les autres aliments de ce repas en apportent déjà assez.`,
-            },
-      );
+      // ⚠️ N1.5.3 — AUCUN AVERTISSEMENT N'EST ÉMIS ICI. Un figement peut être
+      // DÉFAIT au tour suivant par le relâchement dual : publier le message
+      // maintenant décrirait un état transitoire. Les avertissements sont
+      // construits à la fin, depuis l'ensemble actif FINAL.
       continue;
     }
 
@@ -801,18 +1060,80 @@ export function solveMealChoices(
       q[excédent] = borne;
       actifs.delete(excédent);
       figés.set(excédent, "max");
-      cappedOrder.push(foods[excédent].optionId);
-      warnings.push({
-        code: "quantite_bornee_au_maximum",
-        optionId: foods[excédent].optionId,
-        message:
-          `« ${foods[excédent].name} » est plafonné à ${borne} ${unitéValide(foods[excédent].unit)} : ` +
-          `au-delà, la quantité ne serait plus réaliste et masquerait une mauvaise combinaison.`,
-      });
       continue;
     }
 
+    // ── 3. N1.5.3 — LE POINT EST FAISABLE : EST-IL OPTIMAL ? ──────────────
+    // ⚠️ C'EST EXACTEMENT ICI QUE LA BOUCLE S'ARRÊTAIT AVANT, ET C'ÉTAIT
+    // L'ERREUR. « Toutes les quantités sont dans les bornes » est la condition
+    // PRIMALE ; elle ne dit rien de l'optimalité. Il manquait la condition
+    // DUALE — celle qui a mesuré le riz figé à 0 g avec un gradient de −72.
+    const coutCourant = objectif(q);
+    if (coutCourant < meilleurCout) {
+      meilleurCout = coutCourant;
+      meilleurQ = [...q];
+      meilleursFigés = new Map(figés);
+    }
+
+    if (choisirRelâchement(gradient(q)) >= 0) continue;
+
+    // Ni violation primale, ni violation duale : c'est l'optimum de la boîte.
+    converged = true;
     break;
+  }
+
+  // ⚠️ ON REND LE MEILLEUR POINT FAISABLE RENCONTRÉ, PAS CELUI DU DERNIER TOUR.
+  // En marche normale les deux coïncident (l'objectif décroît). En sortie de
+  // garde-fou — cycle, plafond de tours, valeur non finie — le dernier tour peut
+  // être n'importe quoi, et le meilleur point certifié reste bon à prendre.
+  if (meilleurQ !== null && (!converged || objectif(q) > meilleurCout)) {
+    for (let i = 0; i < q.length; i += 1) q[i] = meilleurQ[i];
+    figés.clear();
+    for (const [i, cause] of meilleursFigés) figés.set(i, cause);
+  }
+
+  if (!converged) {
+    warnings.push({
+      code: "solveur_non_convergent",
+      message:
+        "Les quantités n'ont pas pu être certifiées comme les meilleures possibles : aucune n'est affichée.",
+    });
+  }
+
+  // ── Les avertissements par aliment, depuis l'ensemble actif FINAL ────────
+  const zeroedOrder: string[] = [];
+  const flooredOrder: string[] = [];
+  const cappedOrder: string[] = [];
+  for (let i = 0; i < foods.length; i += 1) {
+    const cause = figés.get(i);
+    if (cause === undefined) continue;
+    const unité = unitéValide(foods[i].unit);
+    if (cause === "max") {
+      cappedOrder.push(foods[i].optionId);
+      warnings.push({
+        code: "quantite_bornee_au_maximum",
+        optionId: foods[i].optionId,
+        message:
+          `« ${foods[i].name} » est plafonné à ${borneMaximale(unité)} ${unité} : ` +
+          `au-delà, la quantité ne serait plus réaliste et masquerait une mauvaise combinaison.`,
+      });
+    } else if (cause === "min") {
+      flooredOrder.push(foods[i].optionId);
+      warnings.push({
+        code: "quantite_relevee_au_minimum",
+        optionId: foods[i].optionId,
+        message:
+          `« ${foods[i].name} » est maintenu à ${plancherApplicable(foods[i])} ${unité} : ` +
+          `c'est la quantité minimale demandée pour cet aliment.`,
+      });
+    } else {
+      zeroedOrder.push(foods[i].optionId);
+      warnings.push({
+        code: "quantite_bornee_a_zero",
+        optionId: foods[i].optionId,
+        message: `« ${foods[i].name} » est ramené à 0 : les autres aliments de ce repas en apportent déjà assez.`,
+      });
+    }
   }
 
   // Garde-fou de bruit flottant : un résidu à −1e−15 ne doit pas ressortir en
@@ -841,6 +1162,8 @@ export function solveMealChoices(
     zeroedOrder,
     flooredOrder,
     cappedOrder,
+    releasedOrder,
+    converged,
     rank: rang,
   });
 }
@@ -942,6 +1265,16 @@ function composer(
     fatGrams: actual.fatGrams - target.fatGrams,
   };
 
+  // ⚠️ N1.5.3 — LE MÊME ÉCART, ORIENTÉ POUR L'ÉLÈVE, ET SUR LES MÊMES NOMBRES.
+  // `actual` vient des quantités ARRONDIES : le message ne peut donc pas
+  // annoncer un manque que le « RÉSULTAT » affiché juste au-dessus dément.
+  // Le signe dit l'ACTION : positif → ajouter, négatif → réduire.
+  const ecartsVersLaCible = {
+    proteinGrams: target.proteinGrams - actual.proteinGrams,
+    carbGrams: target.carbGrams - actual.carbGrams,
+    fatGrams: target.fatGrams - actual.fatGrams,
+  };
+
   // ⚠️ LES TOLÉRANCES NE SONT PAS RÉINVENTÉES. `determineStatus` est celle de
   // `recipe-solver` : `exact` si CHAQUE macro est à moins de 0,5 g (donc
   // invisible au gramme affiché), `approximate` si chacune reste sous le plus
@@ -953,12 +1286,15 @@ function composer(
   if (status !== "exact") {
     warnings.push({
       code: "cible_non_atteinte",
+      // ⚠️ N1.5.3 — « IMPOSSIBLE » NE VEUT PLUS DIRE « AUCUNE QUANTITÉ ». Il
+      // veut dire : voici la MEILLEURE solution réalisable avec ces choix, et
+      // elle reste trop loin de la cible. Le message le dit maintenant.
       message:
         status === "approximate"
-          ? "Cette combinaison approche au mieux les objectifs de ce repas."
-          : "Cette combinaison ne permet pas d'atteindre les objectifs de ce repas.",
+          ? "Cette combinaison s'approche au mieux de ton objectif."
+          : "Cette combinaison ne permet pas d'atteindre exactement ton objectif, mais voici la meilleure proposition possible avec tes choix.",
     });
   }
 
-  return { status, items, target, actual, delta, warnings, determinism };
+  return { status, items, target, actual, delta, ecartsVersLaCible, warnings, determinism };
 }

@@ -115,9 +115,18 @@ await test("N1.4-02/15. les occurrences s'affichent dans l'ordre du coach, jamai
   assert.ok(positions.every((p) => p >= 0), "un libellé manque");
   assert.deepEqual([...positions].sort((a, b) => a - b), positions, "l'ordre du coach n'est pas respecté");
 
-  // ⚠️ AUCUN TRI N'EST ÉCRIT. L'ordre vient de `meal_choice_slots.position`,
-  // appliqué par le lecteur ; l'écran ne fait que parcourir le tableau.
-  assert.ok(!CODE_CHOIX.includes(".sort("), "un tri est appliqué à l'affichage");
+  // ⚠️ AUCUN TRI D'OCCURRENCE NI D'ALIMENT N'EST ÉCRIT. L'ordre vient de
+  // `meal_choice_slots.position`, appliqué par le lecteur ; l'écran ne fait que
+  // parcourir le tableau.
+  //
+  // ⚠️ N1.5.3 — LE CONTRÔLE EST RESSERRÉ, PAS LEVÉ. « Aucun `.sort(` nulle part
+  // dans l'écran » est devenu trop large : les LIGNES D'ÉCART macro sont
+  // triées, pour que la plus significative se lise en premier. Ce qui reste
+  // interdit — et c'est ce que le contrôle gardait vraiment — c'est de trier ce
+  // que le coach a ordonné : les occurrences et les aliments.
+  assert.ok(!/occurrences[^;]*\.sort\(/.test(CODE_CHOIX), "les occurrences sont triées à l'affichage");
+  assert.ok(!/\bitems\b[^;]*\.sort\(/.test(CODE_CHOIX), "les aliments sont triés à l'affichage");
+  assert.ok(!/options[^;]*\.sort\(/.test(CODE_CHOIX), "les options d'une liste sont triées à l'affichage");
   assert.ok(CODE_LECTURE.includes('.order("position", { ascending: true })'));
 });
 

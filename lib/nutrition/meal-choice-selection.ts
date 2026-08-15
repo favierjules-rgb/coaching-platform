@@ -286,5 +286,15 @@ export function calculDuRepas(
   if (aliments === null) return { etat: "non-calculable" };
   if (cible === null || aliments.length === 0) return { etat: "sans-cible" };
 
-  return { etat: "calcule", solution: solveMealChoices(aliments, cible) };
+  const solution = solveMealChoices(aliments, cible);
+
+  // ⚠️ N1.5.3 — LA SEULE RAISON QUI RESTE DE NE PAS AFFICHER DE QUANTITÉS.
+  // Depuis ce lot, `impossible` n'en est plus une : un repas hors cible montre
+  // la MEILLEURE solution réalisable. Mais une solution non CERTIFIÉE — entrée
+  // non finie, oscillation d'ensemble actif, garde-fou d'itérations atteint —
+  // n'est pas « un peu moins bonne » : on ne sait pas ce qu'elle vaut, donc on
+  // ne la montre pas. C'est l'exception structurelle du §8 de l'arbitrage.
+  if (!solution.determinism.converged) return { etat: "non-calculable" };
+
+  return { etat: "calcule", solution };
 }
