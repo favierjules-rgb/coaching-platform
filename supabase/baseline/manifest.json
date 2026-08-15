@@ -81,7 +81,8 @@
     "20260905090100_food_favorites.sql",
     "20260906090000_nutrition_listes_et_repas_planifies.sql",
     "20260907090000_n1_3_occurrences_de_listes_dans_les_repas.sql",
-    "20260908090000_n1_5_1_portions_preferees.sql"
+    "20260908090000_n1_5_1_portions_preferees.sql",
+    "20260909090000_n1_5_2_quantite_minimale.sql"
   ],
   "garanties_de_contenu": {
     "insert_de_donnees_metier": 0,

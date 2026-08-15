@@ -587,11 +587,11 @@ await test("22. la migration est déclarée au manifeste et comptée", () => {
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
   // 35 depuis 20260828090000_web_push_notifications.sql (socle Web Push).
-  assert.equal(attendues.length, 48);
+  assert.equal(attendues.length, 49);
   assert.ok(attendues.includes("20260806090000_assign_nutrition_plan_unique.sql"));
   const secu = lire("../../scripts/tests/security-hardening.mts");
-  assert.ok(secu.includes(".length, 75,"), "le compteur de migrations suit les migrations réelles");
-  assert.ok(secu.includes("assert.equal(attendues.length, 48);"));
+  assert.ok(secu.includes(".length, 76,"), "le compteur de migrations suit les migrations réelles");
+  assert.ok(secu.includes("assert.equal(attendues.length, 49);"));
 });
 
 console.log(`\n${réussis} réussis, ${échecs} échecs`);

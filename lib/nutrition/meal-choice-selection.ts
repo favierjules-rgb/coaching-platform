@@ -1,4 +1,5 @@
 import {
+  borneMaximale,
   solveMealChoices,
   type MealChoiceSolution,
   type MealMacroTarget,
@@ -168,12 +169,38 @@ export function choixResolus(
 export function optionCalculable(option: ChoiceOption): boolean {
   const n = option.nutrition;
   if (!n) return false;
-  return (
-    typeof option.optionId === "string" &&
-    [n.proteinPer100, n.carbPer100, n.fatPer100].every(
-      (v) => typeof v === "number" && Number.isFinite(v),
-    )
-  );
+  if (typeof option.optionId !== "string") return false;
+  if (![n.proteinPer100, n.carbPer100, n.fatPer100].every((v) => typeof v === "number" && Number.isFinite(v))) {
+    return false;
+  }
+  return contrainteCoherente(option, n.unit);
+}
+
+/**
+ * N1.5.2 — UN MINIMUM SUPÉRIEUR AU PLAFOND N'EST PAS CALCULABLE.
+ *
+ * ⚠️ ET C'EST ICI QUE ÇA SE JOUE, PAS DANS LE SOLVEUR. Mesuré : si le solveur
+ * reçoit « minimum 350 g » avec un plafond de 300 g, la borne haute écrase
+ * silencieusement la borne basse et affiche 300 — la garantie du coach est
+ * trahie sans un mot. On refuse donc de produire l'entrée : le repas affiche
+ * l'état explicite « non calculable », et personne ne ment.
+ *
+ * ⚠️ ET PAS SEULEMENT À L'ÉCRITURE. Le writer refuse déjà `min > plafond` au
+ * moment où le coach saisit ; mais un snapshot FIGÉ hier resterait incohérent
+ * si le plafond baissait demain. Cette seconde couche est celle qui protège le
+ * passé.
+ *
+ * ⚠️ AUCUNE CONTRAINTE SQL N'EN FAIT AUTANT, ET C'EST VOULU : le plafond est
+ * une décision produit qui vit dans le solveur. L'écrire en base en ferait une
+ * seconde vérité, et le jour où il bougerait il faudrait une migration.
+ */
+function contrainteCoherente(option: ChoiceOption, unit: "g" | "ml"): boolean {
+  const minimum = option.minimumQuantity;
+  if (typeof minimum !== "number" || !Number.isFinite(minimum) || minimum <= 0) return true;
+  // Le minimum ne s'applique que si son unité est celle du calcul ; sinon il
+  // est ignoré plus bas, et il ne peut donc pas rendre l'option incalculable.
+  if (option.quantityUnit !== unit) return true;
+  return minimum <= borneMaximale(unit);
 }
 
 /**
@@ -202,6 +229,7 @@ export function alimentsPourLeSolveur(
   for (const resolu of resolus) {
     if (!optionCalculable(resolu.option)) return null;
     const n = resolu.option.nutrition as NonNullable<ChoiceOption["nutrition"]>;
+    const uniteCoherente = resolu.option.quantityUnit === n.unit;
     aliments.push({
       optionId: resolu.optionId,
       slotId: resolu.slotId,
@@ -210,14 +238,12 @@ export function alimentsPourLeSolveur(
       proteinPer100: n.proteinPer100,
       carbPer100: n.carbPer100,
       fatPer100: n.fatPer100,
-      // ⚠️ N1.5.1 — LA PORTION N'EST RETENUE QUE SI SON UNITÉ EST CELLE DU
-      // CALCUL. Un snapshot figé en `g` sur un aliment devenu `ml` décrirait
-      // une échelle qui n'est plus la sienne : on préfère calculer sans
-      // préférence plutôt qu'avec une préférence fausse. Le cas est théorique
-      // — l'unité d'un aliment ne change pas — mais le silence, lui, ne
-      // serait pas rattrapable.
-      preferredQuantity:
-        resolu.option.preferredUnit === n.unit ? (resolu.option.preferredQuantity ?? null) : null,
+      // ⚠️ N1.5.1/N1.5.2 — LES DEUX QUANTITÉS NE SONT RETENUES QUE SI LEUR
+      // UNITÉ EST CELLE DU CALCUL. Un snapshot figé en `g` sur un aliment
+      // devenu `ml` décrirait une échelle qui n'est plus la sienne : on
+      // préfère calculer sans contrainte plutôt qu'avec une contrainte fausse.
+      preferredQuantity: uniteCoherente ? (resolu.option.preferredQuantity ?? null) : null,
+      minimumQuantity: uniteCoherente ? (resolu.option.minimumQuantity ?? null) : null,
     });
   }
   return aliments;

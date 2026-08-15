@@ -509,11 +509,20 @@ await test("N1.2-21. une liste ne porte ni macro, ni quantité, ni rôle", async
   // silencieusement tolérée.
   for (const [nom, code] of ECRANS) {
     if (nom === "éditeur") {
+      // ⚠️ DEUX SAISIES DEPUIS N1.5.2, ET LEURS DEUX NATURES SONT NOMMÉES :
+      // la PORTION PRÉFÉRÉE (indication dont le calcul s'écarte) et la
+      // QUANTITÉ MINIMALE (garantie de présence). Ni l'une ni l'autre n'est
+      // une quantité à manger, et il n'y en a pas une troisième.
       const champs = code.match(/type="number"/g) ?? [];
-      assert.equal(champs.length, 1, "l'éditeur ne doit porter QU'UNE saisie numérique");
-      assert.ok(code.includes("Portion"), "et cette saisie doit être la portion préférée");
-      assert.ok(!code.includes("grammes à manger") && !code.includes("Quantité"),
-        "aucune quantité à manger n'est demandée au coach");
+      assert.equal(champs.length, 2, "l'éditeur ne doit porter QUE les deux saisies de quantité");
+      assert.ok(code.includes("Portion préférée"), "la portion préférée doit être nommée");
+      assert.ok(code.includes("Quantité minimale"), "la quantité minimale doit être nommée");
+      // ⚠️ « Quantité » TOUT COURT SERAIT TROP LARGE depuis N1.5.2 :
+      // « Quantité minimale » est légitime. Ce qui reste interdit, c'est une
+      // quantité À MANGER — celle-là appartient à l'élève, pas au coach.
+      for (const interdit of ["grammes à manger", "Quantité à manger", "Quantité consommée"]) {
+        assert.ok(!code.includes(interdit), `« ${interdit} » est demandé au coach`);
+      }
     } else {
       assert.ok(!code.includes('type="number"'), `saisie numérique dans ${nom}`);
     }

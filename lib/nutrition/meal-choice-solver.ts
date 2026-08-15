@@ -247,6 +247,19 @@ export interface SelectedFoodForMealSolver {
    * dégénéré de la même formule.
    */
   readonly preferredQuantity?: number | null;
+  /**
+   * N1.5.2 — LA QUANTITÉ MINIMALE GARANTIE, snapshotée, dans `unit`.
+   *
+   * ⚠️ CONTRAINTE DURE, contrairement à la portion préférée. Le solveur
+   * s'écarte librement d'une préférence ; il ne descend JAMAIS sous un
+   * minimum. C'est ce qui empêche un aliment choisi par l'élève de disparaître
+   * du repas à 0 g.
+   *
+   * ⚠️ NI RÔLE, NI CATÉGORIE, NI MINIMUM AUTOMATIQUE. Absente ou nulle = le
+   * minimum vaut ZÉRO, et le solveur retrouve exactement le comportement N1.5.
+   * Aucun plancher n'est jamais deviné.
+   */
+  readonly minimumQuantity?: number | null;
 }
 
 /**
@@ -274,6 +287,7 @@ export type MealSolverWarningCode =
   | "entree_invalide"
   | "systeme_degenere"
   | "quantite_bornee_a_zero"
+  | "quantite_relevee_au_minimum"
   | "quantite_bornee_au_maximum"
   | "cible_non_atteinte";
 
@@ -310,6 +324,10 @@ export interface MealSolvedItem {
   readonly boundedToZero: boolean;
   /** Le garde-fou de faisabilité a plafonné cet aliment. */
   readonly boundedToMax: boolean;
+  /** La quantité minimale du coach a relevé cet aliment (N1.5.2). */
+  readonly boundedToMin: boolean;
+  /** Le plancher applicable, dans SON unité. `0` quand le coach n'en a posé aucun. */
+  readonly minQuantity: number;
   /** Le plafond applicable à cet aliment, dans SON unité. */
   readonly maxQuantity: number;
   /**
@@ -328,6 +346,8 @@ export interface MealSolverDeterminism {
   readonly iterations: number;
   /** Ordre exact dans lequel les aliments ont été bornés à zéro. */
   readonly zeroedOrder: readonly string[];
+  /** Ordre exact dans lequel les aliments ont été relevés à leur minimum. */
+  readonly flooredOrder: readonly string[];
   /** Ordre exact dans lequel les aliments ont été plafonnés. */
   readonly cappedOrder: readonly string[];
   /** Rang du système de la DERNIÈRE résolution (0 à 3). */
@@ -514,6 +534,37 @@ function echelleDe(food: SelectedFoodForMealSolver): number {
   return portionPreferee(food) ?? ECHELLE_NEUTRE;
 }
 
+/**
+ * LE PLANCHER D'UN ALIMENT — le minimum du coach, ou ZÉRO.
+ *
+ * ⚠️ ZÉRO N'EST PAS UN MINIMUM, C'EST L'ABSENCE DE MINIMUM. Et c'est ce qui
+ * rend N1.5.2 additif plutôt que substitutif : la non-négativité de N1.5 n'est
+ * pas une règle à part, c'est ce plancher-ci quand personne n'en a posé.
+ *
+ * ⚠️ ON NE FABRIQUE JAMAIS DE PLANCHER. Une valeur absente, nulle, négative ou
+ * non finie n'en est pas un.
+ */
+function plancherDe(food: SelectedFoodForMealSolver): number {
+  const m = food.minimumQuantity;
+  if (typeof m !== "number" || !Number.isFinite(m) || m <= 0) return 0;
+  return m;
+}
+
+/**
+ * Le plancher EFFECTIVEMENT applicable, jamais au-dessus du plafond.
+ *
+ * ⚠️ CE `min` N'EST PAS UNE POLITESSE : c'est le dernier rempart. Un minimum
+ * supérieur au plafond est refusé DEUX FOIS en amont — à l'écriture par le
+ * coach, et à la résolution, qui rend l'option non calculable plutôt que de
+ * la trahir. S'il arrivait quand même ici, écraser le plancher par le plafond
+ * serait exactement le mensonge qu'on veut éviter ; on préfère une contrainte
+ * dégénérée mais COHÉRENTE (plancher = plafond), et la couche de résolution
+ * a déjà refusé de produire ce cas.
+ */
+function plancherApplicable(food: SelectedFoodForMealSolver): number {
+  return Math.min(plancherDe(food), borneMaximale(unitéValide(food.unit)));
+}
+
 /** La macro n° m d'un aliment, pour 100. Ordre : protéines, glucides, lipides. */
 function macroDe(food: SelectedFoodForMealSolver, m: number): number {
   if (m === 0) return food.proteinPer100;
@@ -567,6 +618,7 @@ export function solveMealChoices(
     return composer(foods, cibleSaine, foods.map(() => 0), new Map(), warnings, {
       iterations: 0,
       zeroedOrder: [],
+      flooredOrder: [],
       cappedOrder: [],
       rank: 0,
     });
@@ -593,8 +645,9 @@ export function solveMealChoices(
   // négatif est un cas particulier de celui-ci, pas une mécanique à part.)
   const actifs = new Set<number>(foods.map((_, i) => i));
   /** index → cause du figement. La valeur figée vit dans `q`. */
-  const figés = new Map<number, "zero" | "max">();
+  const figés = new Map<number, "zero" | "min" | "max">();
   const zeroedOrder: string[] = [];
+  const flooredOrder: string[] = [];
   const cappedOrder: string[] = [];
   const q = new Array<number>(foods.length).fill(0);
   let iterations = 0;
@@ -690,27 +743,44 @@ export function solveMealChoices(
     });
 
     // ── 1. Le plancher d'abord ────────────────────────────────────────────
-    // Le plus négatif ; à égalité stricte, le plus petit index — critère
-    // TOTAL, donc reproductible.
+    // ⚠️ LA NON-NÉGATIVITÉ DE N1.5 EST DEVENUE UN CAS PARTICULIER DE CETTE
+    // RÈGLE-CI. `q < 0` s'écrit `q < plancher` quand le plancher vaut zéro :
+    // N1.5.2 ne rajoute donc pas un troisième cas au solveur, il généralise le
+    // premier. Une règle en moins, pas une de plus.
+    //
+    // La plus grande violation d'abord ; à égalité stricte, le plus petit
+    // index — critère TOTAL, donc reproductible.
     let pire = -1;
     let pireValeur = -NEGATIF_EPSILON;
     for (const i of indices) {
-      if (q[i] < pireValeur) {
-        pireValeur = q[i];
+      const violation = q[i] - plancherApplicable(foods[i]);
+      if (violation < pireValeur) {
+        pireValeur = violation;
         pire = i;
       }
     }
 
     if (pire >= 0) {
-      q[pire] = 0;
+      const plancher = plancherApplicable(foods[pire]);
+      q[pire] = plancher;
       actifs.delete(pire);
-      figés.set(pire, "zero");
-      zeroedOrder.push(foods[pire].optionId);
-      warnings.push({
-        code: "quantite_bornee_a_zero",
-        optionId: foods[pire].optionId,
-        message: `« ${foods[pire].name} » est ramené à 0 : les autres aliments de ce repas en apportent déjà assez.`,
-      });
+      figés.set(pire, plancher > 0 ? "min" : "zero");
+      (plancher > 0 ? flooredOrder : zeroedOrder).push(foods[pire].optionId);
+      warnings.push(
+        plancher > 0
+          ? {
+              code: "quantite_relevee_au_minimum",
+              optionId: foods[pire].optionId,
+              message:
+                `« ${foods[pire].name} » est maintenu à ${plancher} ${unitéValide(foods[pire].unit)} : ` +
+                `c'est la quantité minimale demandée pour cet aliment.`,
+            }
+          : {
+              code: "quantite_bornee_a_zero",
+              optionId: foods[pire].optionId,
+              message: `« ${foods[pire].name} » est ramené à 0 : les autres aliments de ce repas en apportent déjà assez.`,
+            },
+      );
       continue;
     }
 
@@ -756,7 +826,7 @@ export function solveMealChoices(
   // haut, par une re-résolution — mais une protection contre l'affichage d'un
   // « −0 » d'arrondi. Elle est gardée pour cela, et pour rien d'autre : la
   // présenter comme la garantie de non-négativité serait faux.
-  const quantités = q.map((valeur, i) => (figés.has(i) ? valeur : Math.max(0, valeur)));
+  const quantités = q.map((valeur, i) => (figés.has(i) ? valeur : Math.max(plancherApplicable(foods[i]), valeur)));
 
   if (rang < 3 && foods.length > 0) {
     warnings.push({
@@ -769,6 +839,7 @@ export function solveMealChoices(
   return composer(foods, cibleSaine, quantités, figés, warnings, {
     iterations,
     zeroedOrder,
+    flooredOrder,
     cappedOrder,
     rank: rang,
   });
@@ -791,7 +862,7 @@ function composer(
   foods: readonly SelectedFoodForMealSolver[],
   target: MealMacroTarget,
   quantités: readonly number[],
-  figés: ReadonlyMap<number, "zero" | "max">,
+  figés: ReadonlyMap<number, "zero" | "min" | "max">,
   warnings: MealSolverWarning[],
   determinism: MealSolverDeterminism,
 ): MealChoiceSolution {
@@ -807,12 +878,26 @@ function composer(
   const items: MealSolvedItem[] = foods.map((food, i) => {
     const unit = unitéValide(food.unit);
     const maxQuantity = borneMaximale(unit);
+    const minQuantity = plancherApplicable(food);
     const quantity = quantités[i] ?? 0;
-    // ⚠️ L'ARRONDI NE PEUT PAS FAIRE FRANCHIR LE PLAFOND : les bornes sont
-    // entières, et arrondir une valeur qui leur est inférieure ou égale rend au
-    // plus cette borne. Aucun `min` de rattrapage n'est donc nécessaire — en
-    // ajouter un laisserait croire que le cas existe.
-    const displayQuantity = Math.round(quantity / PAS_D_AFFICHAGE) * PAS_D_AFFICHAGE;
+    // ⚠️ L'ARRONDI EST BORNÉ, ET CE N'EST PAS UNE PRÉCAUTION THÉORIQUE.
+    // Un aliment figé à son plancher a une quantité EXACTE égale à ce
+    // plancher ; si le coach a écrit 4,4 g, `Math.round` rendrait 4 — et la
+    // quantité AFFICHÉE, celle qui produit les macros et le verdict,
+    // violerait la contrainte. Mesuré : minimum 4,4 → 4 g ; minimum 12,3 →
+    // 12 g. Les deux sous le plancher.
+    //
+    // ⚠️ `ceil` ET `floor`, PAS `round` : une borne ne s'arrondit pas, elle se
+    // respecte. Le plafond est entier aujourd'hui, donc `floor` n'a rien à
+    // faire — il est écrit quand même, pour que la règle ne dépende pas d'une
+    // propriété des constantes actuelles.
+    const displayQuantity = Math.min(
+      Math.max(
+        Math.round(quantity / PAS_D_AFFICHAGE) * PAS_D_AFFICHAGE,
+        Math.ceil(minQuantity),
+      ),
+      Math.floor(maxQuantity),
+    );
     const proteinGrams = apport(food.proteinPer100, displayQuantity);
     const carbGrams = apport(food.carbPer100, displayQuantity);
     const fatGrams = apport(food.fatPer100, displayQuantity);
@@ -824,6 +909,7 @@ function composer(
       quantity,
       displayQuantity,
       maxQuantity,
+      minQuantity,
       proteinGrams,
       carbGrams,
       fatGrams,
@@ -832,6 +918,7 @@ function composer(
         carbGrams * KCAL_PER_GRAM.carb +
         fatGrams * KCAL_PER_GRAM.fat,
       boundedToZero: figés.get(i) === "zero",
+      boundedToMin: figés.get(i) === "min",
       boundedToMax: figés.get(i) === "max",
       // ⚠️ LA PRÉFÉRENCE MÉTIER, PAS L'ÉCHELLE NEUTRE. `null` quand il n'y en
       // a pas — jamais 100.

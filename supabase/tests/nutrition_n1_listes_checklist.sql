@@ -234,21 +234,28 @@ begin
   -- D'IDENTITÉ. « Un aliment libre ne peut pas être une option structurée »
   -- reste une propriété du schéma.
   --
-  -- N1.5.1 ajoute `meal_choice_options.preferred_unit`, du texte — mais c'est
-  -- une UNITÉ ('g' ou 'ml'), contrainte à deux valeurs par un check, et rien
-  -- ne permet d'y loger un nom d'aliment. Elle est donc nommée en exception,
-  -- avec sa raison, plutôt que la règle affaiblie en « colonnes texte
-  -- tolérées ».
+  -- N1.5.1 avait ajouté `meal_choice_options.preferred_unit` ; N1.5.2 ajoute
+  -- `quantity_unit` À CÔTÉ — stratégie expand → deploy → contract, parce que
+  -- le code déployé lit encore l'ancienne. Il y a donc DEUX colonnes texte, et
+  -- ce sera provisoire : le CONTRACT retirera `preferred_unit`.
+  --
+  -- C'est du texte — mais deux UNITÉS ('g' ou 'ml'), chacune contrainte à ces
+  -- deux valeurs par un check, et rien ne permet d'y loger un nom d'aliment.
+  -- Elles sont donc nommées en exception, avec leur raison, plutôt que la
+  -- règle affaiblie en « colonnes texte tolérées ».
   perform pg_temp.noter('N1-B', 'aucune colonne texte ne peut tenir lieu d''identité',
     (select count(*) from information_schema.columns
       where table_schema = 'public' and table_name in ('food_list_items','meal_choice_options')
         and data_type in ('text','character varying')
-        and column_name <> 'preferred_unit') = 0);
+        and column_name not in ('quantity_unit', 'preferred_unit')) = 0);
 
-  perform pg_temp.noter('N1-B', 'la seule colonne texte tolérée est une unité, contrainte à (g, ml)',
-    (select count(*) = 1 from pg_constraint
+  -- ⚠️ CHACUNE DES DEUX EST CONTRAINTE, PAS SEULEMENT LA NOUVELLE. Pendant la
+  -- transition, une colonne texte laissée libre serait une porte ouverte.
+  perform pg_temp.noter('N1-B', 'les deux colonnes texte tolérées sont des unités contraintes à (g, ml)',
+    (select count(*) = 2 from pg_constraint
       where conrelid = 'public.meal_choice_options'::regclass
-        and pg_get_constraintdef(oid) like '%preferred_unit%'
+        and (pg_get_constraintdef(oid) like '%quantity_unit IS NULL%'
+          or pg_get_constraintdef(oid) like '%preferred_unit IS NULL%')
         and pg_get_constraintdef(oid) like '%''g''%'
         and pg_get_constraintdef(oid) like '%''ml''%'));
 

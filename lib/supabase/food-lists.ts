@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/types/supabase";
 import type { CatalogFood, ProduitLocal } from "@/lib/supabase/consumed-meals";
+import { borneMaximale } from "@/lib/nutrition/meal-choice-solver";
 import type { ChoiceOption } from "@/lib/nutrition/plan-v2-week";
 
 /**
@@ -116,6 +117,14 @@ export type FoodListItem = {
    * `null` = pas d'override, on retombe sur le standard.
    */
   readonly portionOverride: number | null;
+  /**
+   * N1.5.2 — LA QUANTITÉ MINIMALE posée par le coach POUR CETTE LISTE.
+   *
+   * ⚠️ CONTRAINTE DURE, pas une préférence : le solveur ne descendra jamais en
+   * dessous. `null` = aucun minimum, et le minimum effectif vaut zéro.
+   * ⚠️ AUCUN STANDARD GLOBAL : il n'existe pas de minimum sur l'identité.
+   */
+  readonly minimumOverride: number | null;
 } & (
   | { readonly source: "aliment"; readonly aliment: CatalogFood }
   | { readonly source: "produit"; readonly produit: ProduitLocal }
@@ -145,6 +154,7 @@ interface LigneItem {
   catalog_food_id: string | null;
   product_id: string | null;
   preferred_quantity_override: number | string | null;
+  minimum_quantity_override: number | string | null;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -225,7 +235,7 @@ export async function lireFoodList(
 
   const { data: brutes, error: erreurItems } = await supabase
     .from("food_list_items")
-    .select("id, list_id, position, catalog_food_id, product_id, preferred_quantity_override")
+    .select("id, list_id, position, catalog_food_id, product_id, preferred_quantity_override, minimum_quantity_override")
     .eq("list_id", listId)
     .order("position", { ascending: true });
   // ⚠️ UNE LISTE AFFICHÉE VIDE EST UNE INVITATION À LA RE-REMPLIR — puis à
@@ -248,6 +258,7 @@ export async function lireFoodList(
     // une fois, et une valeur non exploitable redevient « pas de portion »
     // plutôt qu'un `NaN` qui contaminerait le solveur.
     const override = nombrePositif(item.preferred_quantity_override);
+    const minimum = nombrePositif(item.minimum_quantity_override);
     if (item.catalog_food_id !== null) {
       const aliment = aliments.map.get(item.catalog_food_id);
       if (aliment) {
@@ -256,6 +267,7 @@ export async function lireFoodList(
           position: item.position,
           portionStandard: aliments.standards.get(item.catalog_food_id) ?? null,
           portionOverride: override,
+          minimumOverride: minimum,
           source: "aliment",
           aliment,
         });
@@ -270,6 +282,7 @@ export async function lireFoodList(
           position: item.position,
           portionStandard: produits.standards.get(item.product_id) ?? null,
           portionOverride: override,
+          minimumOverride: minimum,
           source: "produit",
           produit,
         });
@@ -430,6 +443,33 @@ export function uniteDePortion(item: FoodListItem): "g" | "ml" {
  *
  * Convention du dépôt : un writer rend un booléen et ne lève jamais.
  */
+/**
+ * Pose — ou RETIRE — la quantité minimale d'une ligne de liste.
+ *
+ * ⚠️ PREMIÈRE DES DEUX PROTECTIONS CONTRE `minimum > plafond`. Refuser ici
+ * évite au coach d'enregistrer une contrainte que le calcul ne pourra pas
+ * honorer. La seconde protection vit dans `optionCalculable` : elle couvre les
+ * snapshots DÉJÀ figés, que ce writer ne peut plus atteindre.
+ *
+ * ⚠️ ET LE PLAFOND N'EST PAS RECOPIÉ ICI : il est importé du solveur, qui en
+ * est la seule source. Deux constantes divergeraient au premier ajustement.
+ */
+export async function definirMinimumOverride(
+  supabase: TypedSupabaseClient,
+  itemId: string,
+  unite: "g" | "ml",
+  valeur: number | null,
+): Promise<boolean> {
+  if (valeur !== null && (!Number.isFinite(valeur) || valeur <= 0)) return false;
+  if (valeur !== null && valeur > borneMaximale(unite)) return false;
+  const { error } = await supabase
+    .from("food_list_items")
+    .update({ minimum_quantity_override: valeur } as never)
+    .eq("id", itemId);
+  devWarn("definirMinimumOverride", error);
+  return !error;
+}
+
 export async function definirPortionOverride(
   supabase: TypedSupabaseClient,
   itemId: string,
@@ -841,11 +881,14 @@ export async function lireSnapshotDeListe(
     // l'HYDRATATION — il n'est jamais renvoyé à la RPC.
     options: liste.items.map((item) => {
       const portion = portionEffective(item);
+      const minimum = item.minimumOverride;
       const socle = {
         preferredQuantity: portion,
-        // Pas de portion, pas d'unité : la contrainte de paire de la base dit
-        // la même chose, et inventer une unité seule n'aurait aucun sens.
-        preferredUnit: portion === null ? null : uniteDePortion(item),
+        minimumQuantity: minimum,
+        // ⚠️ L'UNITÉ EST COMMUNE, ET ELLE EXISTE DÈS QU'UNE DES DEUX QUANTITÉS
+        // EXISTE — un minimum SANS portion préférée est le cas le plus
+        // courant. La contrainte de paire de la base dit exactement cela.
+        quantityUnit: portion === null && minimum === null ? null : uniteDePortion(item),
       } as const;
       return item.source === "aliment"
         ? ({ ...socle, type: "aliment", id: item.aliment.id, displayName: item.aliment.name } as const)

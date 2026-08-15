@@ -77,11 +77,26 @@ export type ChoiceOption = {
    */
   readonly preferredQuantity?: number | null;
   /**
-   * L'unité de `preferredQuantity`, figée avec elle. `g` ou `ml`, jamais
-   * autre chose : c'est le vocabulaire de ce qui est CALCULABLE.
-   * Absente dès que `preferredQuantity` l'est — les deux vont ensemble.
+   * N1.5.2 — LA QUANTITÉ MINIMALE GARANTIE, snapshotée elle aussi.
+   *
+   * ⚠️ CONTRAINTE DURE, là où la portion préférée est une simple préférence.
+   * Elle empêche un aliment choisi par l'élève de disparaître à 0 g.
+   * `null` = aucun minimum, et le comportement redevient celui de N1.5.
    */
-  readonly preferredUnit?: "g" | "ml" | null;
+  readonly minimumQuantity?: number | null;
+  /**
+   * L'unité COMMUNE aux deux quantités ci-dessus, figée avec elles. `g` ou
+   * `ml`, jamais autre chose : le vocabulaire de ce qui est CALCULABLE.
+   *
+   * ⚠️ RENOMMÉE EN N1.5.2 (`preferredUnit` → `quantityUnit`). Elle porte
+   * l'unité d'un minimum SANS portion préférée aussi souvent que l'inverse :
+   * l'ancien nom mentait. Il n'existe volontairement pas de `minimumUnit` —
+   * les deux quantités sont figées dans l'unité de la MÊME identité, au MÊME
+   * instant, et une seconde colonne ne pourrait que diverger.
+   *
+   * Absente dès que les DEUX quantités le sont.
+   */
+  readonly quantityUnit?: "g" | "ml" | null;
   /**
    * N1.5 — les macros de l'aliment désigné, ou `null` si la source a disparu.
    * Une option sans macros est affichable mais PAS calculable : voir

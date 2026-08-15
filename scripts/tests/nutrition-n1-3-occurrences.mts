@@ -177,12 +177,22 @@ await test("N1.3-04/05/06. les options n'ont QUE des identités : ni nom, ni mac
     // un repas doit garder la portion du jour où le coach l'a construit, même
     // si la bibliothèque change ensuite. Le libellé et les macros, eux,
     // continuent de ne JAMAIS partir.
+    // ⚠️ CINQ CLÉS DEPUIS N1.5.2, ET PAS UNE DE PLUS. L'identité, la portion
+    // préférée (soft), la quantité minimale (hard), et l'unité COMMUNE aux
+    // deux — `quantity_unit`, la colonne AJOUTÉE à côté de `preferred_unit`
+    // (expand → deploy → contract). La charge utile n'émet QUE le nom neuf :
+    // c'est la RPC qui remplit encore l'ancienne colonne, pas cette couche.
+    // Le libellé et les macros ne partent toujours PAS.
     assert.deepEqual(Object.keys(option).sort(),
-      ["catalog_food_id", "preferred_quantity", "preferred_unit", "product_id"]);
+      ["catalog_food_id", "minimum_quantity", "preferred_quantity", "product_id", "quantity_unit"]);
     // Exactement UNE des deux identités, et c'est un identifiant de base.
     assert.equal((option.catalog_food_id === null) !== (option.product_id === null), true);
-    // Et la portion voyage en PAIRE, ou pas du tout.
-    assert.equal((option.preferred_quantity === null) === (option.preferred_unit === null), true);
+    // ⚠️ L'UNITÉ EXISTE DÈS QU'UNE DES DEUX QUANTITÉS EXISTE — équivalence,
+    // pas implication : c'est exactement la contrainte de la base.
+    assert.equal(
+      (option.preferred_quantity === null && option.minimum_quantity === null) === (option.quantity_unit === null),
+      true,
+    );
   }
 
   const texte = JSON.stringify(occurrences);
@@ -193,8 +203,16 @@ await test("N1.3-04/05/06. les options n'ont QUE des identités : ni nom, ni mac
   for (const interdit of ["protein", "carb", "fat", "calories", "grams", "role", "solver_role", "name\":"]) {
     assert.ok(!texte.includes(interdit), `« ${interdit} » ne doit pas voyager avec une option`);
   }
-  assert.ok(!/[^_]quantity/.test(texte.replace(/preferred_quantity/g, "")),
-    "aucune quantité autre que la portion préférée ne doit voyager");
+  // ⚠️ DEUX QUANTITÉS AUTORISÉES, NOMMÉES, ET PAS UNE DE PLUS. `quantity`
+  // tout court reste interdit : une « quantité » serait un gramme à manger
+  // décidé par le coach ; `preferred_quantity` est une indication et
+  // `minimum_quantity` une garantie de présence.
+  const restant = texte
+    .replace(/preferred_quantity/g, "")
+    .replace(/minimum_quantity/g, "")
+    .replace(/quantity_unit/g, "");
+  assert.ok(!/[^_]quantity/.test(restant),
+    "aucune quantité autre que la portion préférée et le minimum ne doit voyager");
   // ⚠️ `label` est le SEUL texte, et c'est le libellé de l'occurrence — pas
   // un nom d'aliment. Aucun nom d'aliment n'est recopié nulle part.
   assert.ok(!texte.includes("Poulet") && !texte.includes("Saumon"));
@@ -702,7 +720,7 @@ await test("N1.3-NAME-7. aucun nom hydraté ne part vers la RPC", async () => {
   // elle, EST du snapshot — c'est précisément la différence entre les deux.
   for (const option of options) {
     assert.deepEqual(Object.keys(option).sort(),
-      ["catalog_food_id", "preferred_quantity", "preferred_unit", "product_id"]);
+      ["catalog_food_id", "minimum_quantity", "preferred_quantity", "product_id", "quantity_unit"]);
   }
   const texte = JSON.stringify(repas.choice_slots);
   assert.ok(!texte.includes("displayName"));

@@ -229,7 +229,8 @@ interface OptionRowShape {
   catalog_food_id: string | null;
   product_id: string | null;
   preferred_quantity: number | string | null;
-  preferred_unit: string | null;
+  minimum_quantity: number | string | null;
+  quantity_unit: string | null;
 }
 
 /**
@@ -263,7 +264,7 @@ async function lireOccurrences(
     // désigner la ligne snapshotée elle-même, pas l'aliment. Deux occurrences
     // peuvent contenir le même aliment ; l'identifiant de l'aliment ne suffirait
     // donc pas à dire lequel des deux choix a été fait.
-    .select("id, slot_id, position, catalog_food_id, product_id, preferred_quantity, preferred_unit")
+    .select("id, slot_id, position, catalog_food_id, product_id, preferred_quantity, minimum_quantity, quantity_unit")
     .in("slot_id", slots.map((s) => s.id))
     .order("position", { ascending: true });
   devWarn("readNutritionPlanV2Week (meal_choice_options)", optionError);
@@ -290,13 +291,21 @@ async function lireOccurrences(
    * mais pas impossible dans une base non migrée — redevient « pas de
    * préférence » plutôt qu'une portion dont on ignore l'échelle.
    */
-  const portionDe = (o: OptionRowShape): { quantite: number | null; unite: "g" | "ml" | null } => {
-    const n = o.preferred_quantity === null || o.preferred_quantity === ""
-      ? Number.NaN
-      : Number(o.preferred_quantity);
-    const unite = o.preferred_unit === "g" || o.preferred_unit === "ml" ? o.preferred_unit : null;
-    if (!Number.isFinite(n) || n <= 0 || unite === null) return { quantite: null, unite: null };
-    return { quantite: n, unite };
+  const nombre = (v: number | string | null): number | null => {
+    if (v === null || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+
+  const portionDe = (
+    o: OptionRowShape,
+  ): { portion: number | null; minimum: number | null; unite: "g" | "ml" | null } => {
+    const unite = o.quantity_unit === "g" || o.quantity_unit === "ml" ? o.quantity_unit : null;
+    // ⚠️ SANS UNITÉ, AUCUNE DES DEUX QUANTITÉS N'A DE SENS. La contrainte de
+    // base l'interdit ; une base non migrée, elle, pourrait le produire. On
+    // rend « aucune contrainte » plutôt qu'un nombre dont on ignore l'échelle.
+    if (unite === null) return { portion: null, minimum: null, unite: null };
+    return { portion: nombre(o.preferred_quantity), minimum: nombre(o.minimum_quantity), unite };
   };
 
   const parSlot = new Map<string, ChoiceOption[]>();
@@ -312,8 +321,9 @@ async function lireOccurrences(
       optionId: o.id,
       displayName: hydratée?.displayName ?? null,
       nutrition: hydratée?.nutrition ?? null,
-      preferredQuantity: portion.quantite,
-      preferredUnit: portion.unite,
+      preferredQuantity: portion.portion,
+      minimumQuantity: portion.minimum,
+      quantityUnit: portion.unite,
     } as const;
     const cible: ChoiceOption | null =
       o.catalog_food_id !== null

@@ -300,9 +300,15 @@ await test("N1.5-SOLVE-11. une quantité de ZÉRO est un résultat légitime, pa
   const grasse = solveMealChoices([SAUMON, RIZ, HUILE], { proteinGrams: 40, carbGrams: 50, fatGrams: 30 });
   assert.ok((grasse.items.find((i) => i.optionId === "opt-huile")?.displayQuantity ?? 0) > 0);
 
-  // ⚠️ ET AUCUN MINIMUM N'EST IMPOSÉ NULLE PART : pas de plancher, pas de
-  // « portion minimale », pas de règle légumes/fruits.
-  assert.ok(!/minGrams|plancher|Math\.max\(\s*[1-9]/.test(CODE_SOLVEUR));
+  // ⚠️ AUCUN MINIMUM N'EST INVENTÉ, ET C'EST TOUJOURS VRAI APRÈS N1.5.2.
+  // Le solveur connaît désormais un plancher — mais il ne le DEVINE jamais :
+  // il vient d'un champ que le coach a rempli, et vaut ZÉRO sinon. Ce qui
+  // reste interdit, c'est le minimum AUTOMATIQUE : pas de « au moins 1 g »,
+  // pas de plancher par catégorie, pas de règle légumes/fruits.
+  assert.ok(!/minGrams|referenceGrams/.test(CODE_SOLVEUR));
+  assert.ok(!/Math\.max\(\s*[1-9]/.test(CODE_SOLVEUR), "un plancher constant non nul est codé en dur");
+  assert.ok(CODE_SOLVEUR.includes("if (typeof m !== \"number\" || !Number.isFinite(m) || m <= 0) return 0;"),
+    "l'absence de minimum doit rendre ZÉRO, jamais une valeur de repli");
 });
 
 await test("N1.5-SOLVE-12. une cible inatteignable est dite IMPOSSIBLE, sans quantité mensongère", () => {
@@ -968,12 +974,15 @@ await test("N1.5-BOUND-10/11/12. aucun rôle, aucun referenceGrams, aucun minimu
   }
   assert.equal(new Set(s.items.filter((i) => i.unit === "g").map((i) => i.maxQuantity)).size, 1);
 
-  // Aucun MINIMUM nulle part : ni par catégorie, ni global. Une quantité de 0
-  // reste atteignable après l'ajout des plafonds.
+  // ⚠️ AUCUN MINIMUM PAR CATÉGORIE, ET AUCUN MINIMUM CONSTANT. Depuis N1.5.2
+  // le solveur a un plancher, mais il vient TOUJOURS du coach : sans champ
+  // rempli, il vaut zéro, et une quantité de 0 reste atteignable.
+  assert.ok(s.items.every((i) => i.minQuantity === 0), "aucun plancher ne doit apparaître sans champ coach");
   assert.ok(s.items.some((i) => i.displayQuantity === 0) ||
     solveMealChoices([SAUMON, RIZ, HUILE], { proteinGrams: 50, carbGrams: 40, fatGrams: 30 })
       .items.some((i) => i.displayQuantity === 0));
-  assert.ok(!/MIN_[A-Z]|minimum|plancher/.test(CODE_SOLVEUR));
+  assert.ok(!/MIN_SOLIDE|MIN_LIQUIDE|MINIMUM_[A-Z]/.test(CODE_SOLVEUR), "un minimum constant est déclaré");
+  assert.ok(!/proteine|feculent|legume|fruit/i.test(CODE_SOLVEUR), "un minimum par catégorie apparaît");
 
   // Et les deux constantes sont les SEULS nombres de garde-fou du module.
   assert.ok(CODE_SOLVEUR.includes("export const MAX_SOLIDE_G = 300;"));
@@ -1277,12 +1286,13 @@ await test("N1.5.1-PREF-12. override > standard > rien — résolu à UN seul en
 await test("N1.5.1-PREF-13. la portion PART vers la RPC, le libellé et les macros NON", () => {
   // ⚠️ C'EST LA LIGNE DE PARTAGE ENTRE SNAPSHOT ET HYDRATATION.
   assert.ok(CODE_FORM.includes("preferred_quantity: option.preferredQuantity ?? null"));
-  assert.ok(CODE_FORM.includes("preferred_unit:"));
+  assert.ok(CODE_FORM.includes("minimum_quantity: option.minimumQuantity ?? null"));
+  assert.ok(CODE_FORM.includes("quantity_unit:"));
   assert.ok(!CODE_FORM.includes("displayName"), "le libellé ne doit jamais repartir vers la RPC");
   assert.ok(!CODE_FORM.includes("nutrition:"), "les macros ne doivent jamais repartir vers la RPC");
 
   // Les deux clés voyagent ENSEMBLE ou pas du tout.
-  assert.ok(CODE_FORM.includes("option.preferredQuantity == null ? null :"));
+  assert.ok(CODE_FORM.includes("option.preferredQuantity == null && option.minimumQuantity == null"));
 });
 
 await test("N1.5.1-PREF-14. une unité de portion incohérente est IGNORÉE, pas devinée", () => {
@@ -1294,7 +1304,7 @@ await test("N1.5.1-PREF-14. une unité de portion incohérente est IGNORÉE, pas
       {
         type: "aliment", id: F_POULET, optionId: "o1", displayName: "Lait",
         nutrition: { unit: "ml", proteinPer100: 3.3, carbPer100: 4.8, fatPer100: 1.6 },
-        preferredQuantity: 250, preferredUnit: "g",
+        preferredQuantity: 250, quantityUnit: "g",
       } as ChoiceOption,
     ]),
   ];
@@ -1305,7 +1315,7 @@ await test("N1.5.1-PREF-14. une unité de portion incohérente est IGNORÉE, pas
   // Et la même option, unité cohérente : la préférence passe.
   const bonnes = alimentsPourLeSolveur(
     choixResolus(
-      [occurrence("s1", "Ta boisson", [{ ...occurrences[0].options[0], preferredUnit: "ml" } as ChoiceOption])],
+      [occurrence("s1", "Ta boisson", [{ ...occurrences[0].options[0], quantityUnit: "ml" } as ChoiceOption])],
       { s1: "o1" },
     ),
   );
@@ -1351,9 +1361,9 @@ await test("N1.5.1-PREF-17. le SNAPSHOT fige la portion effective, liste par lis
       food_lists: [{ id: listId, name: "Liste", archived_at: null, updated_at: "2026-08-15" }],
       food_list_items: [
         { id: "it-1", list_id: listId, position: 1, catalog_food_id: WHEY, product_id: null,
-          preferred_quantity_override: override },
+          preferred_quantity_override: override, minimum_quantity_override: null },
         { id: "it-2", list_id: listId, position: 2, catalog_food_id: FB, product_id: null,
-          preferred_quantity_override: null },
+          preferred_quantity_override: null, minimum_quantity_override: null },
       ],
       // ⚠️ `numeric` EN CHAÎNE, comme PostgREST le rend vraiment.
       food_catalog: [
@@ -1380,12 +1390,12 @@ await test("N1.5.1-PREF-17. le SNAPSHOT fige la portion effective, liste par lis
   const a = await lireSnapshotDeListe(client("liste-a", 25), "liste-a");
   assert.ok(a);
   assert.equal(a.options[0].preferredQuantity, 25, "l'override doit primer sur le standard");
-  assert.equal(a.options[0].preferredUnit, "g");
+  assert.equal(a.options[0].quantityUnit, "g");
 
   // ⚠️ L'ALIMENT SANS AUCUNE PORTION N'EN REÇOIT PAS UNE INVENTÉE, et son
   // unité reste nulle avec elle — la contrainte de paire dit la même chose.
   assert.equal(a.options[1].preferredQuantity, null);
-  assert.equal(a.options[1].preferredUnit, null);
+  assert.equal(a.options[1].quantityUnit, null);
 
   // Liste B : override 35 g sur LA MÊME whey. Deux listes, deux portions.
   const b = await lireSnapshotDeListe(client("liste-b", 35), "liste-b");
@@ -1398,4 +1408,535 @@ await test("N1.5.1-PREF-17. le SNAPSHOT fige la portion effective, liste par lis
   // ⚠️ ET LE LIBELLÉ N'EST PAS DU SNAPSHOT, LUI. Il est hydraté, et il ne
   // repart jamais vers la RPC — la ligne de partage tient dans les deux sens.
   assert.equal(a.options[0].displayName, "Whey");
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+   N1.5.2-MIN-01..22 — LA QUANTITÉ MINIMALE
+   ──────────────────────────────────────────────────────────────────────────
+   ⚠️ TROIS NATURES DE NOMBRE. La PORTION PRÉFÉRÉE est SOFT — le solveur s'en
+   écarte librement. Le MINIMUM est HARD — il ne descend jamais en dessous. Le
+   PLAFOND est HARD aussi, et il gagne toujours. Confondre les trois, c'est
+   perdre la garantie de présence que ce lot existe pour donner.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+const avecMin = (f: SelectedFoodForMealSolver, minimumQuantity: number | null) =>
+  ({ ...f, minimumQuantity }) as SelectedFoodForMealSolver;
+
+/** Le petit déjeuner TERRAIN où beurre et sirop tombent à 0 (valeurs Ciqual). */
+const AVOINE = aliment("avoine", "Flocons d'avoine", 11.4, 57.7, 7.82);
+const BEURRE = aliment("beurre", "Beurre 80 % MG doux", 0.63, 0.71, 83);
+const FBLANC = aliment("fblanc", "Fromage blanc 0 % MG", 7.19, 4.22, 0);
+const OEUFCRU = aliment("oeufcru", "Œuf cru", 12.8, 0.06, 9.83);
+const SIROP = aliment("sirop", "Sirop d'agave", 0.25, 78, 0.5);
+const PDJ_MIN = [AVOINE, BEURRE, FBLANC, OEUFCRU, SIROP];
+const CIBLE_MIN: MealMacroTarget = { proteinGrams: 55, carbGrams: 93, fatGrams: 32 };
+
+await test("N1.5.2-MIN-01/22. le cas TERRAIN : beurre et sirop ne tombent plus à 0", () => {
+  const sans = solveMealChoices(PDJ_MIN, CIBLE_MIN);
+  const beurreSans = sans.items.find((i) => i.optionId === "opt-beurre");
+  const siropSans = sans.items.find((i) => i.optionId === "opt-sirop");
+  // ⚠️ LE DÉCOR DOIT D'ABORD REPRODUIRE LE DÉFAUT, sinon la correction ne
+  // prouve rien.
+  assert.equal(beurreSans?.displayQuantity, 0, "le banc doit reproduire le beurre à 0 g");
+  assert.equal(siropSans?.displayQuantity, 0, "le banc doit reproduire le sirop à 0 g");
+  assert.equal(beurreSans?.minQuantity, 0, "sans champ coach, le plancher vaut zéro (MIN-01)");
+
+  const avec = solveMealChoices(
+    PDJ_MIN.map((f) => avecMin(f, f.optionId === "opt-beurre" ? 5 : f.optionId === "opt-sirop" ? 10 : null)),
+    CIBLE_MIN,
+  );
+  console.log(`    sans minimum : ${sans.items.map((i) => `${i.name.split(" ")[0]} ${i.displayQuantity}`).join(", ")} (${sans.status})`);
+  console.log(`    beurre>=5 sirop>=10 : ${avec.items.map((i) => `${i.name.split(" ")[0]} ${i.displayQuantity}`).join(", ")} (${avec.status})`);
+
+  assert.ok((avec.items.find((i) => i.optionId === "opt-beurre")?.displayQuantity ?? 0) >= 5);
+  assert.ok((avec.items.find((i) => i.optionId === "opt-sirop")?.displayQuantity ?? 0) >= 10);
+  // Les AUTRES aliments se réajustent : ce n'est pas un simple clamp.
+  assert.notEqual(avec.items[0].displayQuantity, sans.items[0].displayQuantity);
+  assert.notEqual(avec.items[2].displayQuantity, sans.items[2].displayQuantity);
+});
+
+await test("N1.5.2-MIN-02/19. la quantité AFFICHÉE respecte le minimum, arrondi compris", () => {
+  // ⚠️ LE PIÈGE MESURÉ. Un aliment figé à son plancher a une quantité EXACTE
+  // égale à ce plancher ; `Math.round(4.4)` rendrait 4, sous la contrainte.
+  for (const minimum of [4.4, 5, 5.5, 12.3, 27.9]) {
+    const s = solveMealChoices(
+      [avecMin(BEURRE, minimum), AVOINE, FBLANC],
+      { proteinGrams: 50, carbGrams: 90, fatGrams: 3 },
+    );
+    const beurre = s.items.find((i) => i.optionId === "opt-beurre");
+    assert.ok(beurre);
+    assert.ok(beurre.quantity >= minimum - 1e-9, `quantité exacte ${beurre.quantity} < ${minimum}`);
+    assert.ok(beurre.displayQuantity >= minimum, `quantité AFFICHÉE ${beurre.displayQuantity} < ${minimum}`);
+    assert.equal(beurre.minQuantity, minimum);
+  }
+  // Et les macros affichées viennent bien de la quantité affichée.
+  const s = solveMealChoices([avecMin(BEURRE, 12.3), AVOINE, FBLANC], { proteinGrams: 50, carbGrams: 90, fatGrams: 3 });
+  const beurre = s.items.find((i) => i.optionId === "opt-beurre")!;
+  assert.equal(beurre.fatGrams, (BEURRE.fatPer100 * beurre.displayQuantity) / 100);
+});
+
+await test("N1.5.2-MIN-03/04. un aliment figé au minimum RESTE dans le résidu, et les autres se re-résolvent", () => {
+  const s = solveMealChoices(
+    [avecMin(BEURRE, 30), AVOINE, FBLANC],
+    { proteinGrams: 50, carbGrams: 90, fatGrams: 5 },
+  );
+  const beurre = s.items.find((i) => i.optionId === "opt-beurre")!;
+  assert.equal(beurre.boundedToMin, true);
+  assert.ok(s.determinism.flooredOrder.includes("opt-beurre"));
+  // ⚠️ FIGER N'EST PAS RETIRER : les 30 g apportent toujours leurs lipides.
+  assert.ok(beurre.fatGrams > 0);
+  assert.equal(s.actual.fatGrams, s.items.reduce((t, i) => t + i.fatGrams, 0));
+
+  // La preuve directe : le même repas SANS le beurre du tout donne d'autres
+  // quantités aux deux autres — le résidu n'est donc pas le même.
+  const sans = solveMealChoices([AVOINE, FBLANC], { proteinGrams: 50, carbGrams: 90, fatGrams: 5 });
+  assert.notEqual(
+    Math.round(s.items.find((i) => i.optionId === "opt-avoine")!.quantity),
+    Math.round(sans.items[0].quantity),
+  );
+  // Et il y a bien eu une re-résolution.
+  assert.ok(s.determinism.iterations >= 2);
+});
+
+await test("N1.5.2-MIN-05/06. minimum et plafond coexistent ; le plafond gagne toujours", () => {
+  const s = solveMealChoices(
+    [avecMin(BEURRE, 20), avecMin(FBLANC, 50), AVOINE],
+    { proteinGrams: 120, carbGrams: 200, fatGrams: 90 },
+  );
+  for (const item of s.items) {
+    assert.ok(item.displayQuantity >= item.minQuantity, `${item.name} sous son minimum`);
+    assert.ok(item.displayQuantity <= item.maxQuantity, `${item.name} au-dessus de son plafond`);
+  }
+
+  // ⚠️ UN MINIMUM AU-DELÀ DU PLAFOND N'EST PAS CALCULABLE — et c'est REFUSÉ EN
+  // AMONT, pas écrasé par le solveur. Sans cette garde, le solveur afficherait
+  // 300 pour un minimum de 350 : la contrainte serait trahie en silence.
+  const option = {
+    type: "aliment", id: F_POULET, optionId: "o1", displayName: "Beurre",
+    nutrition: { unit: "g", proteinPer100: 0.63, carbPer100: 0.71, fatPer100: 83 },
+    minimumQuantity: 350, quantityUnit: "g",
+  } as ChoiceOption;
+  assert.equal(optionCalculable(option), false, "un minimum de 350 g doit rendre l'option non calculable");
+  assert.equal(optionCalculable({ ...option, minimumQuantity: 300 } as ChoiceOption), true);
+  // Liquide : 600 ml refusé, 500 ml accepté.
+  const liquide = { ...option, nutrition: { unit: "ml", proteinPer100: 3.3, carbPer100: 4.8, fatPer100: 1.6 },
+    quantityUnit: "ml", minimumQuantity: 600 } as ChoiceOption;
+  assert.equal(optionCalculable(liquide), false);
+  assert.equal(optionCalculable({ ...liquide, minimumQuantity: 500 } as ChoiceOption), true);
+});
+
+await test("N1.5.2-MIN-07/08. NULL est l'absence de minimum ; zéro et négatif n'en sont pas", () => {
+  // Côté solveur : une valeur non exploitable ne fabrique jamais un plancher.
+  for (const valeur of [null, undefined, 0, -5, Number.NaN, Number.POSITIVE_INFINITY]) {
+    const s = solveMealChoices([avecMin(BEURRE, valeur as number | null), AVOINE, FBLANC], CIBLE_MIN);
+    assert.equal(s.items[0].minQuantity, 0, `« ${String(valeur)} » ne doit pas devenir un plancher`);
+  }
+  // Côté base : la contrainte refuse 0 et le négatif, pour qu'il n'y ait
+  // qu'UNE façon d'écrire « pas de minimum ».
+  const migration = lire("../../supabase/migrations/20260909090000_n1_5_2_quantite_minimale.sql");
+  assert.ok(migration.includes("check (minimum_quantity is null or minimum_quantity > 0)"));
+  assert.ok(migration.includes("check (minimum_quantity_override is null or minimum_quantity_override > 0)"));
+  // Côté writer : refus avant le réseau.
+  assert.ok(CODE_LISTES.includes("if (valeur !== null && (!Number.isFinite(valeur) || valeur <= 0)) return false;"));
+  assert.ok(CODE_LISTES.includes("if (valeur !== null && valeur > borneMaximale(unite)) return false;"));
+});
+
+await test("N1.5.2-MIN-09/10/11. minimum et préférence ne se confondent jamais", () => {
+  // MIN-11 — préférence SOUS le minimum : le minimum gagne, rien ne plante.
+  const s = solveMealChoices(
+    [{ ...avecMin(BEURRE, 20), preferredQuantity: 10 }, AVOINE, FBLANC],
+    CIBLE_MIN,
+  );
+  const beurre = s.items[0];
+  assert.ok(beurre.displayQuantity >= 20, `le minimum doit gagner, il vaut ${beurre.displayQuantity}`);
+  assert.equal(beurre.preferredQuantity, 10, "la préférence reste dite, même dominée");
+  assert.equal(beurre.minQuantity, 20);
+
+  // MIN-09 — un minimum n'est pas une préférence : il ne recentre rien.
+  const sansPref = solveMealChoices([avecMin(BEURRE, 20), AVOINE, FBLANC], CIBLE_MIN);
+  assert.equal(sansPref.items[0].preferredQuantity, null);
+
+  // MIN-10 — une préférence n'est pas un minimum : elle n'empêche pas 0.
+  const prefSeule = solveMealChoices(
+    [{ ...BEURRE, preferredQuantity: 10 }, AVOINE, FBLANC, OEUFCRU, SIROP],
+    CIBLE_MIN,
+  );
+  assert.equal(prefSeule.items[0].minQuantity, 0);
+});
+
+await test("N1.5.2-MIN-12. des minimums contradictoires avec la cible donnent un statut HONNÊTE", () => {
+  const s = solveMealChoices(
+    [avecMin(OEUFCRU, 300), avecMin(FBLANC, 300), AVOINE],
+    { proteinGrams: 50, carbGrams: 40, fatGrams: 15 },
+  );
+  // ⚠️ LES MINIMUMS NE SONT NI VIOLÉS, NI RABOTÉS, NI CACHÉS.
+  assert.ok(s.items[0].displayQuantity >= 300);
+  assert.ok(s.items[1].displayQuantity >= 300);
+  assert.equal(s.status, "impossible");
+  // Et le verdict vient des macros finales, pas d'une règle nouvelle.
+  assert.ok(Math.abs(s.delta.proteinGrams) > Math.max(5, 0.1 * 50));
+});
+
+await test("N1.5.2-MIN-13/14. le snapshot fige le minimum, liste par liste", async () => {
+  const WHEY = "cc000000-0000-4000-8000-000000000001";
+  const client = (listId: string, minimum: number | null) => {
+    const tables: Record<string, Record<string, unknown>[]> = {
+      food_lists: [{ id: listId, name: "Liste", archived_at: null, updated_at: "2026-08-15" }],
+      food_list_items: [
+        { id: "it-1", list_id: listId, position: 1, catalog_food_id: WHEY, product_id: null,
+          preferred_quantity_override: null, minimum_quantity_override: minimum },
+      ],
+      food_catalog: [
+        { id: WHEY, name: "Whey", nutrition_unit: "g", protein_per_100: "80", carb_per_100: "5",
+          fat_per_100: "2", piece_weight_g: null, preferred_quantity: null },
+      ],
+      food_products: [],
+    };
+    return {
+      from(nom: string) {
+        const chaine: Record<string, unknown> = {
+          select: () => chaine, eq: () => chaine, in: () => chaine, order: () => chaine,
+          maybeSingle: () => Promise.resolve({ data: (tables[nom] ?? [])[0] ?? null, error: null }),
+          then: (r: (v: { data: unknown; error: null }) => void) => r({ data: tables[nom] ?? [], error: null }),
+        };
+        return chaine;
+      },
+    } as never;
+  };
+
+  // ⚠️ UN MINIMUM SEUL, SANS PORTION PRÉFÉRÉE — le cas que la contrainte de
+  // paire de N1.5.1 rendait IMPOSSIBLE, et la raison du renommage de l'unité.
+  const a = await lireSnapshotDeListe(client("liste-a", 10), "liste-a");
+  assert.equal(a?.options[0].minimumQuantity, 10);
+  assert.equal(a?.options[0].preferredQuantity, null);
+  assert.equal(a?.options[0].quantityUnit, "g", "l'unité doit exister même sans portion préférée");
+
+  // MIN-14 — deux listes, deux minimums, indépendants.
+  const b = await lireSnapshotDeListe(client("liste-b", 20), "liste-b");
+  assert.equal(b?.options[0].minimumQuantity, 20);
+
+  // Sans minimum ni portion : les trois champs restent nuls ensemble.
+  const c = await lireSnapshotDeListe(client("liste-c", null), "liste-c");
+  assert.equal(c?.options[0].minimumQuantity, null);
+  assert.equal(c?.options[0].quantityUnit, null);
+});
+
+await test("N1.5.2-MIN-15. un ancien snapshot sans minimum reproduit N1.5 au bit près", () => {
+  for (const jeu of [BANC_A, BANC_B, BANC_C, PDJ_MIN]) {
+    const cible = jeu === PDJ_MIN ? CIBLE_MIN : CIBLE_BANC;
+    const référence = solveMealChoices(jeu, cible);
+    for (const absent of [null, undefined]) {
+      const s = solveMealChoices(jeu.map((f) => avecMin(f, absent as null)), cible);
+      assert.deepEqual(s.items.map((i) => i.quantity), référence.items.map((i) => i.quantity));
+      assert.equal(s.status, référence.status);
+    }
+  }
+});
+
+await test("N1.5.2-MIN-16/21. aucune lecture bibliothèque, aucune écriture consommation", () => {
+  for (const [nom, code] of [["solveur", CODE_SOLVEUR], ["sélection", CODE_SELECTION], ["écran", CODE_CHOIX]] as const) {
+    assert.ok(!code.includes("food_list_items"), `${nom} lit food_list_items`);
+    assert.ok(!code.includes("food_lists"), `${nom} lit food_lists`);
+    assert.ok(!code.includes("consumed_meals"), `${nom} touche consumed_meals`);
+    assert.ok(!code.includes("meal_entries"), `${nom} touche meal_entries`);
+  }
+  const migration = lire("../../supabase/migrations/20260909090000_n1_5_2_quantite_minimale.sql");
+  const sansProseSql = migration.replace(/--[^\n]*/g, " ");
+  for (const table of ["food_list_items", "public.food_catalog", "consumed_meals", "meal_entries"]) {
+    assert.ok(!new RegExp(`from\\s+${table.replace(".", "\\.")}`).test(sansProseSql),
+      `la RPC ne doit pas lire ${table}`);
+  }
+});
+
+await test("N1.5.2-MIN-17. aucun rôle, aucun referenceGrams, aucune catégorie", () => {
+  for (const [nom, code] of [["solveur", CODE_SOLVEUR], ["sélection", CODE_SELECTION], ["listes", CODE_LISTES]] as const) {
+    assert.ok(!/\brole\b/.test(code), `${nom} manipule un rôle`);
+    assert.ok(!/referenceGrams/.test(code), `${nom} manipule un referenceGrams`);
+  }
+  // ⚠️ LE PLANCHER NE DÉPEND QUE DU CHAMP DU COACH. Deux aliments de macros
+  // opposées et de minimum identique ont le même plancher.
+  const s = solveMealChoices([avecMin(BEURRE, 15), avecMin(FBLANC, 15), avecMin(SIROP, 15)], CIBLE_MIN);
+  assert.equal(new Set(s.items.map((i) => i.minQuantity)).size, 1);
+});
+
+await test("N1.5.2-MIN-18. g et ml, chacun son plancher et son plafond", () => {
+  const s = solveMealChoices(
+    [avecMin(LAIT, 150), avecMin(POULET, 20), HUILE],
+    { proteinGrams: 70, carbGrams: 40, fatGrams: 25 },
+  );
+  const lait = s.items.find((i) => i.optionId === "opt-lait")!;
+  assert.equal(lait.unit, "ml");
+  assert.ok(lait.displayQuantity >= 150, `le lait vaut ${lait.displayQuantity} ml`);
+  assert.equal(lait.maxQuantity, MAX_LIQUIDE_ML);
+  assert.equal(s.items.find((i) => i.optionId === "opt-poulet")!.maxQuantity, MAX_SOLIDE_G);
+});
+
+await test("N1.5.2-MIN-20. déterminisme : 100 exécutions identiques avec minimums", () => {
+  const jeu = PDJ_MIN.map((f) => avecMin(f, f.optionId === "opt-beurre" ? 5 : f.optionId === "opt-sirop" ? 10 : null));
+  const référence = JSON.stringify(solveMealChoices(jeu, CIBLE_MIN));
+  for (let i = 0; i < 100; i += 1) {
+    assert.equal(JSON.stringify(solveMealChoices(jeu, CIBLE_MIN)), référence, `divergence au tour ${i}`);
+  }
+});
+
+await test("N1.5.2-MIN-BALAYAGE. min ≤ q ≤ max sur un large balayage, sans NaN", () => {
+  const cat = [AVOINE, BEURRE, FBLANC, OEUFCRU, SIROP, LAIT, HUILE];
+  let n = 0;
+  for (let masque = 1; masque < 1 << cat.length; masque += 1) {
+    const base = cat.filter((_, i) => (masque >> i) & 1);
+    for (const m of [null, 5, 12.3, 60]) {
+      for (const cible of [CIBLE_MIN, { proteinGrams: 10, carbGrams: 10, fatGrams: 5 }, { proteinGrams: 0, carbGrams: 0, fatGrams: 0 }]) {
+        const s = solveMealChoices(base.map((f) => avecMin(f, m)), cible);
+        for (const item of s.items) {
+          assert.ok(item.displayQuantity >= item.minQuantity, `${item.name} : ${item.displayQuantity} < ${item.minQuantity}`);
+          assert.ok(item.displayQuantity <= item.maxQuantity);
+          assert.ok(Number.isFinite(item.quantity) && Number.isFinite(item.displayQuantity));
+          n += 1;
+        }
+      }
+    }
+  }
+  console.log(`    ${n} quantités vérifiées entre plancher et plafond`);
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+   N1.5.2-ROLL-01..10 — EXPAND, PAS RENAME
+   ──────────────────────────────────────────────────────────────────────────
+   ⚠️ CE QUE CETTE SECTION REMPLACE, ET POURQUOI. Elle s'appelait
+   « N1.5.2-RENOMMAGE » et vérifiait exactement l'inverse : que l'ancien nom
+   ait DISPARU partout. C'était juste sur une base neuve, et faux sur la
+   vraie : la production porte 63 options avec `preferred_unit`, et le code
+   DÉPLOYÉ lit cette colonne. Renommer, c'est choisir qui casse — la base
+   migrée avant le déploiement, ou le déploiement avant la base. Il n'existe
+   pas d'ordre sûr.
+
+   Ce lot est donc l'EXPAND d'un expand → deploy → contract : la colonne neuve
+   naît À CÔTÉ, l'unité est recopiée 1:1, l'ancienne colonne SURVIT et reste
+   ÉCRITE. Le CONTRACT — la supprimer — sera un lot séparé, après déploiement
+   et validation terrain.
+
+   ⚠️ ON CHERCHE DU CODE, PAS DE LA PROSE. La migration RACONTE l'expand en
+   commentaires ET dans des `comment on column`, qui sont des CHAÎNES SQL que
+   le nettoyage des `--` ne touche pas. Chercher « drop column » ou « rename »
+   en texte brut ferait rougir ces contrôles pour les phrases qui affirment
+   précisément ce qu'ils vérifient. On cible donc le DDL.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+const MIGRATION_N152 = lire("../../supabase/migrations/20260909090000_n1_5_2_quantite_minimale.sql");
+/** La migration DÉPOUILLÉE de ses commentaires `--` ET de ses `comment on … is '…'`. */
+const DDL_N152 = MIGRATION_N152
+  .replace(/--[^\n]*/g, " ")
+  .replace(/comment on [^;]*;/gi, " ");
+
+await test("N1.5.2-ROLL-01. l'unité neuve est AJOUTÉE, et l'ancienne recopiée 1:1", () => {
+  assert.ok(/add column if not exists quantity_unit text/i.test(DDL_N152),
+    "quantity_unit doit être AJOUTÉE, pas obtenue par renommage");
+  // ⚠️ LA COPIE EST LE CŒUR DU LOT. Sans elle, les 63 snapshots de production
+  // perdent l'échelle de leur portion le jour du déploiement.
+  assert.ok(/set quantity_unit = preferred_unit/i.test(DDL_N152), "la copie 1:1 a disparu");
+  // ⚠️ ET ELLE NE FABRIQUE RIEN : `where preferred_unit is not null` interdit
+  // d'inventer une unité là où il n'y en avait pas.
+  assert.ok(/where preferred_unit is not null/i.test(DDL_N152),
+    "la copie doit être conditionnée à l'existence de l'ancienne valeur");
+});
+
+await test("N1.5.2-ROLL-02. la copie est IDEMPOTENTE et n'écrase jamais le neuf", () => {
+  // `and quantity_unit is null` : au second passage l'update est un no-op, et
+  // il ne peut pas piétiner une valeur posée entre-temps par le nouveau code.
+  assert.ok(/where preferred_unit is not null\s*and quantity_unit is null/i.test(DDL_N152),
+    "sans cette garde, rejouer la migration écraserait des écritures récentes");
+});
+
+await test("N1.5.2-ROLL-09. AUCUN DROP de preferred_unit", () => {
+  assert.ok(!/drop column[^;]*preferred_unit/i.test(DDL_N152), "un DROP de preferred_unit est présent");
+  assert.ok(!/drop\s+column\s+if\s+exists\s+preferred_unit/i.test(DDL_N152));
+});
+
+await test("N1.5.2-ROLL-10. AUCUN RENAME de preferred_unit", () => {
+  assert.ok(!/rename column\s+preferred_unit/i.test(DDL_N152), "un RENAME de preferred_unit est présent");
+  assert.ok(!/rename[^;]*preferred_unit[^;]*to/i.test(DDL_N152));
+  // Et rien n'est renommé du tout dans ce lot : l'expand n'en a pas besoin.
+  assert.ok(!/rename column/i.test(DDL_N152), "ce lot ne doit renommer AUCUNE colonne");
+});
+
+await test("N1.5.2-ROLL-03. les contraintes de N1.5.1 sur preferred_unit sont CONSERVÉES", () => {
+  // ⚠️ NI SUPPRIMÉES, NI RÉÉCRITES. La paire de N1.5.1 dit « portion présente
+  // ⟹ unité legacy présente » : un minimum SEUL la satisfait déjà (les deux
+  // nulles), donc elle n'empêche pas le cas neuf et il n'y avait rien à
+  // généraliser de ce côté. La toucher aurait été une casse gratuite.
+  assert.ok(!/drop constraint[^;]*meal_choice_options_preferred_paire/i.test(DDL_N152),
+    "la paire de N1.5.1 ne doit pas être supprimée");
+  assert.ok(!/drop constraint[^;]*meal_choice_options_preferred_unit_check/i.test(DDL_N152),
+    "le vocabulaire d'unité de N1.5.1 ne doit pas être supprimé");
+});
+
+await test("N1.5.2-ROLL-04. la DIVERGENCE des deux unités est interdite par une contrainte", () => {
+  // Deux colonnes disant deux unités différentes pour la MÊME quantité :
+  // c'est le désastre que le rename voulait éviter et que l'expand pourrait
+  // réintroduire s'il laissait les deux vivre leur vie.
+  assert.ok(DDL_N152.includes("check (preferred_unit is null or preferred_unit = quantity_unit)"),
+    "la contrainte de cohérence legacy a disparu");
+  assert.ok(/add constraint meal_choice_options_unite_legacy_coherente/i.test(DDL_N152));
+});
+
+await test("N1.5.2-ROLL-05. la contrainte MÉTIER couvre les deux quantités", () => {
+  assert.ok(MIGRATION_N152.includes(
+    "check ((preferred_quantity is null and minimum_quantity is null) = (quantity_unit is null))"));
+  // ⚠️ AUCUNE COLONNE `minimum_unit` CRÉÉE. Elle ne pourrait qu'être égale.
+  assert.ok(!/add column[^;]*minimum_unit/i.test(DDL_N152), "une colonne minimum_unit a été créée");
+  assert.ok(!/rename[^;]*to\s+minimum_unit/i.test(DDL_N152));
+  // Et aucune contrainte ne code le plafond — il vit dans le solveur.
+  assert.ok(!/check[^;]*\b(300|500)\b/.test(DDL_N152));
+});
+
+await test("N1.5.2-ROLL-06. la RPC écrit ENCORE preferred_unit, et seulement s'il y a une portion", () => {
+  // ⚠️ SANS DOUBLE ÉCRITURE, UN REPAS CONSTRUIT PENDANT LE ROLLOUT SERAIT
+  // INVISIBLE POUR LE CODE ENCORE DÉPLOYÉ : sa portion aurait une unité que
+  // l'ancien lecteur ne sait pas trouver.
+  assert.ok(DDL_N152.includes("preferred_unit = case when v_opt_pref is not null then v_opt_pref_unit end"),
+    "la double écriture de l'update a disparu");
+  assert.ok(DDL_N152.includes("case when v_opt_pref is not null then v_opt_pref_unit end)"),
+    "la double écriture de l'insert a disparu");
+  // ⚠️ ET UN MINIMUM SEUL NE LA REMPLIT PAS. `preferred_unit` ne dit que
+  // l'unité d'une PORTION : lui faire dire celle d'un minimum ferait déduire
+  // à l'ancien lecteur une portion qui n'existe pas — et la paire de N1.5.1
+  // la refuserait de toute façon.
+  assert.ok(!/preferred_unit = v_opt_pref_unit(?!\s*end)/.test(DDL_N152),
+    "preferred_unit ne doit jamais être écrite inconditionnellement");
+});
+
+await test("N1.5.2-ROLL-07. la clé d'entrée preferred_unit reste acceptée", () => {
+  // Une charge utile écrite AVANT ce lot ne connaît que l'ancien nom. Elle
+  // reste valide : la clé n'a jamais eu d'autre sens que « l'unité de cette
+  // option ». Même politesse que `choice_slots` absente.
+  assert.ok(DDL_N152.includes("nullif(v_option->>'quantity_unit', '')"));
+  assert.ok(DDL_N152.includes("nullif(v_option->>'preferred_unit', '')"));
+  assert.ok(/coalesce\(\s*nullif\(v_option->>'quantity_unit', ''\),\s*nullif\(v_option->>'preferred_unit', ''\)\)/
+    .test(DDL_N152), "le nouveau nom doit avoir la priorité sur l'ancien");
+});
+
+await test("N1.5.2-ROLL-08. le refus de N1.5.1 est conservé, le cas neuf reçoit un nom neuf", () => {
+  // ⚠️ UN MESSAGE D'ERREUR EST LISIBLE PAR DU CODE DÉPLOYÉ. Rebaptiser
+  // `PORTION_SANS_UNITE` aurait été un rename de plus, pour un gain nul.
+  assert.ok(DDL_N152.includes("PORTION_SANS_UNITE"), "le refus de N1.5.1 a été renommé");
+  assert.ok(DDL_N152.includes("MINIMUM_SANS_UNITE"), "le cas neuf doit avoir son propre nom");
+  assert.ok(!DDL_N152.includes("QUANTITE_SANS_UNITE"), "un renommage de message subsiste");
+});
+
+await test("N1.5.2-ROLL-NOUVEAU-LECTEUR. le nouveau code lit quantity_unit, jamais preferred_unit", () => {
+  // ⚠️ L'ANCIENNE COLONNE SURVIT EN BASE, MAIS PAS DANS LA LOGIQUE NEUVE.
+  // C'est toute la différence entre « compatible » et « ambigu » : une seule
+  // source de vérité côté nouveau code, deux colonnes côté base le temps du
+  // rollout.
+  for (const [nom, code] of [
+    ["listes", CODE_LISTES], ["formulaire", CODE_FORM],
+    ["sélection", CODE_SELECTION], ["lecture", CODE_LECTURE],
+  ] as const) {
+    assert.ok(!/preferredUnit|preferred_unit/.test(code),
+      `${nom} : le nouveau code ne doit plus nommer l'ancienne colonne`);
+  }
+  // Et la charge utile n'émet QUE le nom neuf : c'est la RPC qui dérive
+  // l'ancienne colonne, pas la couche TypeScript.
+  assert.ok(CODE_FORM.includes("quantity_unit:"));
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+   A5-MIN-01..10 — LE PARCOURS A5 SURVIT INTACT
+   ──────────────────────────────────────────────────────────────────────────
+   ⚠️ DEUX MODÈLES, PAS UN. Le repas calculé est une PRESCRIPTION ; « ce que
+   j'ai mangé » est la VÉRITÉ DE CONSOMMATION. N1.5.2 ne fusionne rien, ne
+   masque rien, n'écrit rien dans l'un depuis l'autre.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+const CODE_CONSO = sansProse(lire("../../components/student/ConsumedMealSection.tsx"));
+
+await test("A5-MIN-01/02/03/04. les quatre chemins d'ajout restent accessibles", () => {
+  // ⚠️ LE BOUTON D'OUVERTURE EST TOUJOURS LÀ, et il n'est pas conditionné à
+  // l'état du repas prescrit.
+  assert.ok(CODE_CONSO.includes("Ajouter un aliment"));
+  for (const chemin of ["onAjouterCatalogue", "onAjouterProduit", "onAjouterManuel"]) {
+    assert.ok(CODE_CONSO.includes(chemin), `le chemin ${chemin} a disparu`);
+  }
+  // Le scanner et la recherche vivent dans la feuille d'ajout, toujours montée.
+  assert.ok(CODE_CONSO.includes("AddFoodSheet") || CODE_SEMAINE.includes("AddFoodSheet") ||
+    lire("../../components/student/AddFoodSheet.tsx").length > 0);
+  const feuille = sansProse(lire("../../components/student/AddFoodSheet.tsx"));
+  assert.ok(/scan|Scanner|code-barres|gtin/i.test(feuille), "le parcours scanner a disparu de la feuille d'ajout");
+
+  // ⚠️ ET LA SECTION EST TOUJOURS RENDUE PAR L'ÉCRAN DE LA SEMAINE, à côté
+  // des choix, pas à leur place.
+  assert.ok(CODE_SEMAINE.includes("<ConsumedMealSection"));
+  assert.ok(CODE_SEMAINE.includes("<StudentMealChoices"));
+});
+
+await test("A5-MIN-05/06. corriger et supprimer une entrée consommée fonctionnent toujours", () => {
+  assert.ok(CODE_CONSO.includes("onCorriger"));
+  assert.ok(CODE_CONSO.includes("onSupprimerAliment"));
+  // Les deux sont bien câblés depuis l'écran de la semaine.
+  assert.ok(CODE_SEMAINE.includes("onCorriger="));
+  assert.ok(CODE_SEMAINE.includes("onSupprimer") || CODE_SEMAINE.includes("suivi.onSupprimer"));
+});
+
+await test("A5-MIN-07. le calcul N1.5.2 n'écrit RIEN dans la consommation", () => {
+  for (const [nom, code] of [
+    ["solveur", CODE_SOLVEUR], ["sélection", CODE_SELECTION], ["choix", CODE_CHOIX],
+  ] as const) {
+    for (const interdit of ["consumed_meals", "meal_entries", "ouvrir_repas_prescrit", ".rpc(", ".insert(", ".update("]) {
+      assert.ok(!code.includes(interdit), `${nom} touche « ${interdit} »`);
+    }
+    assert.ok(!/from ["']@\/lib\/supabase/.test(code), `${nom} importe Supabase`);
+  }
+  // ⚠️ ET LA MIGRATION NON PLUS : aucune écriture de consommation en base.
+  const sqlSansProse = lire("../../supabase/migrations/20260909090000_n1_5_2_quantite_minimale.sql")
+    .replace(/--[^\n]*/g, " ");
+  for (const table of ["consumed_meals", "meal_entries"]) {
+    assert.ok(!new RegExp(`(insert into|update)\\s+public\\.${table}`).test(sqlSansProse));
+  }
+});
+
+await test("A5-MIN-08/09. les deux modèles ne se touchent pas", () => {
+  // ⚠️ AUCUN CHEMIN NE RELIE UNE CONSOMMATION À UN CHOIX, NI L'INVERSE.
+  // Le composant de choix ne connaît ni les repas consommés, ni leurs entrées.
+  // ⚠️ « meal » TOUT COURT SERAIT TROP LARGE : le composant importe
+  // `meal-choice-selection`. Ce qu'il ne doit pas connaître, c'est la
+  // CONSOMMATION — ni son type, ni ses tables, ni ses hooks.
+  for (const notion of ["ConsumedMeal", "consumed", "meal_entries", "useConsumedMeals", "ConsumedFood"]) {
+    assert.ok(!CODE_CHOIX.includes(notion), `l'écran des choix connaît « ${notion} »`);
+  }
+  // Et la section de consommation ne connaît ni les choix, ni les minimums,
+  // ni les portions préférées, ni les quantités calculées.
+  for (const notion of ["choiceSlots", "MealChoiceSlot", "minimumQuantity", "preferredQuantity",
+                        "solveMealChoices", "displayQuantity"]) {
+    assert.ok(!CODE_CONSO.includes(notion), `la section consommation connaît « ${notion} »`);
+  }
+  // ⚠️ LA FRONTIÈRE EST STRUCTURELLE, PAS SEULEMENT DOCUMENTÉE. Les deux
+  // sections sont des éléments SŒURS : l'une ne contient pas l'autre, et
+  // aucune donnée ne passe de l'une à l'autre par les props.
+  const posChoix = CODE_SEMAINE.indexOf("<StudentMealChoices");
+  const posConso = CODE_SEMAINE.indexOf("<ConsumedMealSection");
+  assert.ok(posChoix > 0 && posConso > posChoix, "l'ordre des deux sections a changé");
+  const propsChoix = CODE_SEMAINE.slice(posChoix, CODE_SEMAINE.indexOf("/>", posChoix));
+  assert.ok(!propsChoix.includes("suivi"), "les choix reçoivent le suivi de consommation");
+  const propsConso = CODE_SEMAINE.slice(posConso, CODE_SEMAINE.indexOf("/>", posConso));
+  for (const notion of ["choiceSlots", "solution", "quantit"]) {
+    assert.ok(!propsConso.includes(notion), `la consommation reçoit « ${notion} »`);
+  }
+  // Et la frontière est aussi ÉCRITE, dans le fichier source (commentaire JSX).
+  assert.ok(lire("../../components/student/StudentPrescribedWeek.tsx").includes("FRONTIÈRE"));
+});
+
+await test("A5-MIN-10. scanner et ajouts restent utilisables quand le repas est approximate ou impossible", () => {
+  // ⚠️ LE RENDU DE LA CONSOMMATION NE DÉPEND PAS DU STATUT DU CALCUL. Il n'y a
+  // aucun `if (status === …)` autour de `<ConsumedMealSection>` : la section
+  // est rendue dès qu'il y a un suivi et une date, quel que soit le verdict.
+  assert.ok(CODE_SEMAINE.includes("{suivi && date && ("));
+  const blocConso = CODE_SEMAINE.slice(CODE_SEMAINE.indexOf("{suivi && date && ("));
+  for (const notion of ["status", "impossible", "approximate", "solution"]) {
+    assert.ok(!blocConso.slice(0, blocConso.indexOf("/>")).includes(notion),
+      `le rendu de la consommation dépend de « ${notion} »`);
+  }
+  // Et le composant de choix ne rend jamais `null` en fonction du statut :
+  // seul un repas SANS occurrence le fait.
+  assert.ok(CODE_CHOIX.includes("if (occurrences.length === 0) return null;"));
+  assert.equal((CODE_CHOIX.match(/return null;/g) ?? []).length, 1);
 });

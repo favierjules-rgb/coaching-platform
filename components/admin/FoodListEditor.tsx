@@ -5,6 +5,7 @@ import { ArrowDown, ArrowUp, Check, Loader2, X } from "lucide-react";
 
 import { Field } from "@/components/admin/AdminFormFields";
 import { FoodSearchPicker, cleIdentite } from "@/components/admin/FoodSearchPicker";
+import { borneMaximale } from "@/lib/nutrition/meal-choice-solver";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
   type CibleAliment,
@@ -12,6 +13,7 @@ import {
   type FoodListItem,
   ajouterAlimentAListe,
   archiverFoodList,
+  definirMinimumOverride,
   definirPortionOverride,
   nomPropre,
   portionEffective,
@@ -122,6 +124,12 @@ export function FoodListEditor({
     [avec],
   );
 
+  const definirMinimum = useCallback(
+    (itemId: string, unite: "g" | "ml", valeur: number | null) =>
+      avec((c) => definirMinimumOverride(c, itemId, unite, valeur)),
+    [avec],
+  );
+
   const deplacer = useCallback(
     (index: number, direction: -1 | 1) => {
       const cible = index + direction;
@@ -205,6 +213,7 @@ export function FoodListEditor({
                 onDescendre={() => void deplacer(index, 1)}
                 onRetirer={() => void retirer(item.id)}
                 onDefinirPortion={(valeur) => void definirPortion(item.id, valeur)}
+                onDefinirMinimum={(valeur) => void definirMinimum(item.id, uniteDePortion(item), valeur)}
               />
             ))}
           </ol>
@@ -227,6 +236,7 @@ function LigneAliment({
   onDescendre,
   onRetirer,
   onDefinirPortion,
+  onDefinirMinimum,
 }: {
   readonly item: FoodListItem;
   readonly index: number;
@@ -236,6 +246,7 @@ function LigneAliment({
   readonly onDescendre: () => void;
   readonly onRetirer: () => void;
   readonly onDefinirPortion: (valeur: number | null) => void;
+  readonly onDefinirMinimum: (valeur: number | null) => void;
 }) {
   const nom =
     item.source === "aliment"
@@ -253,6 +264,7 @@ function LigneAliment({
         <span className="truncate text-sm text-foreground">{nom}</span>
         {/* Lues à la source, jamais stockées dans la liste. */}
         <span className="truncate text-[11px] text-muted-foreground">{detail}</span>
+        <QuantiteMinimale item={item} occupe={occupe} onDefinir={onDefinirMinimum} />
         <PortionPreferee item={item} occupe={occupe} onDefinir={onDefinirPortion} />
       </span>
       <span className="flex flex-shrink-0 items-center gap-1">
@@ -428,6 +440,135 @@ function PortionPreferee({
         <span className="tabular-nums">
           Standard : {item.portionStandard} {unite}
         </span>
+      )}
+    </span>
+  );
+}
+
+
+/**
+ * N1.5.2 — LA QUANTITÉ MINIMALE D'UNE LIGNE DE LISTE.
+ *
+ * ⚠️ CE N'EST PAS UNE PORTION, ET LE VOCABULAIRE DOIT LE DIRE. Une portion
+ * préférée est une indication dont le calcul s'écarte librement ; un minimum
+ * est une GARANTIE DE PRÉSENCE : l'aliment ne descendra jamais en dessous, et
+ * il ne pourra donc plus disparaître à 0 g du repas de l'élève.
+ *
+ * ⚠️ FACULTATIVE, comme la portion. Vide = aucun minimum, et l'écran ne le
+ * présente pas comme une donnée manquante : l'immense majorité des aliments
+ * n'en aura jamais.
+ *
+ * ⚠️ REFUS IMMÉDIAT AU-DELÀ DU PLAFOND. Un minimum de 350 g sur un solide ne
+ * pourrait pas être honoré — le plafond de faisabilité vaut 300 g — et le
+ * solveur écraserait silencieusement la garantie. On le refuse ici, avec le
+ * nombre dit en clair, plutôt que de laisser le coach découvrir un jour que sa
+ * contrainte n'est pas suivie.
+ */
+function QuantiteMinimale({
+  item,
+  occupe,
+  onDefinir,
+}: {
+  readonly item: FoodListItem;
+  readonly occupe: boolean;
+  readonly onDefinir: (valeur: number | null) => void;
+}) {
+  const unite = uniteDePortion(item);
+  const plafond = borneMaximale(unite);
+  const pose = item.minimumOverride !== null;
+  const [ouvert, setOuvert] = useState(pose);
+  const [saisie, setSaisie] = useState(item.minimumOverride === null ? "" : String(item.minimumOverride));
+
+  const valeur = Number(saisie.replace(",", "."));
+  const valide = saisie.trim() !== "" && Number.isFinite(valeur) && valeur > 0 && valeur <= plafond;
+  const tropGrand = saisie.trim() !== "" && Number.isFinite(valeur) && valeur > plafond;
+  const sousLaPortion =
+    valide && item.portionOverride !== null && item.portionOverride < valeur;
+
+  if (!ouvert) {
+    return (
+      <span className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+        {pose ? (
+          <span>
+            Quantité minimale{" "}
+            <span className="font-bold tabular-nums text-foreground">
+              {item.minimumOverride} {unite}
+            </span>
+          </span>
+        ) : (
+          <span>Aucune quantité minimale</span>
+        )}
+        <button
+          type="button"
+          disabled={occupe}
+          onClick={() => setOuvert(true)}
+          className="pressable rounded-control border border-border px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        >
+          {pose ? "Modifier le minimum" : "Définir un minimum"}
+        </button>
+      </span>
+    );
+  }
+
+  return (
+    <span className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+      <label className="flex items-center gap-1">
+        <span>Quantité minimale</span>
+        <input
+          type="number"
+          inputMode="decimal"
+          min={0}
+          max={plafond}
+          step="any"
+          value={saisie}
+          disabled={occupe}
+          onChange={(e) => setSaisie(e.target.value)}
+          aria-label={`Quantité minimale pour ${
+            item.source === "aliment" ? item.aliment.name : item.produit.name
+          }`}
+          className="w-20 rounded-control border border-border bg-card px-2 py-1 text-right text-xs tabular-nums text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        />
+        <span>{unite}</span>
+      </label>
+
+      <button
+        type="button"
+        disabled={occupe || !valide || valeur === item.minimumOverride}
+        onClick={() => onDefinir(valeur)}
+        className="pressable flex items-center gap-1 rounded-control border border-primary px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+      >
+        <Check size={12} aria-hidden="true" />
+        Enregistrer
+      </button>
+
+      {pose && (
+        <button
+          type="button"
+          disabled={occupe}
+          onClick={() => {
+            setSaisie("");
+            setOuvert(false);
+            onDefinir(null);
+          }}
+          className="pressable rounded-control border border-border px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        >
+          Retirer le minimum
+        </button>
+      )}
+
+      {tropGrand && (
+        <span className="text-destructive">
+          Au-delà de {plafond} {unite}, la quantité ne serait plus réaliste.
+        </span>
+      )}
+
+      {/* ⚠️ AVERTISSEMENT, PAS BLOCAGE. « au moins 20 g, idéalement 10 g » est
+          un peu incohérent mais inoffensif : le minimum gagne, et la portion
+          continue de tirer vers le bas à l'intérieur du domaine admissible.
+          Refuser la saisie obligerait le coach à comprendre une règle qu'il
+          n'a pas demandée. */}
+      {sousLaPortion && (
+        <span>La portion préférée est sous ce minimum : elle ne sera jamais atteinte.</span>
       )}
     </span>
   );

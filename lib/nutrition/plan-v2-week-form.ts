@@ -812,7 +812,13 @@ export function toWeekSavePayload(state: WeekFormState): {
               // refuse une quantité sans unité (PORTION_SANS_UNITE), et la
               // base porte la même règle en contrainte de paire.
               preferred_quantity: option.preferredQuantity ?? null,
-              preferred_unit: option.preferredQuantity == null ? null : (option.preferredUnit ?? null),
+              // N1.5.2 — le minimum voyage avec la portion, et l'unité est
+              // commune aux deux : elle est émise dès qu'UNE des deux existe.
+              minimum_quantity: option.minimumQuantity ?? null,
+              quantity_unit:
+                option.preferredQuantity == null && option.minimumQuantity == null
+                  ? null
+                  : (option.quantityUnit ?? null),
             })),
           })),
         })),
