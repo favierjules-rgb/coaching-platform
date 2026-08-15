@@ -37,7 +37,38 @@ export interface PrescribedFoodItem {
  * `food_products`, et tout le reste est lu à la source au moment de
  * l'affichage. Recopier un nom ici ferait vieillir le repas en silence.
  */
+/**
+ * N1.5 — LES FAITS NUTRITIONNELS D'UNE OPTION, HYDRATÉS.
+ *
+ * ⚠️ MÊME STATUT QUE `displayName` : ce n'est PAS dans le snapshot. Les macros
+ * sont lues à la source (`food_catalog` / `food_products`) au moment de
+ * l'affichage, par identité, jamais par libellé. Les recopier dans
+ * `meal_choice_options` ferait vieillir le repas en silence le jour où une
+ * table Ciqual est corrigée — et l'unique garantie d'instantané de ce chantier
+ * est précisément qu'un repas ne relit pas la bibliothèque, pas qu'il ne relit
+ * plus le catalogue.
+ *
+ * ⚠️ JAMAIS RENVOYÉ À LA RPC. `toWeekSavePayload` n'émet que `catalog_food_id`
+ * et `product_id` ; un test l'épingle, pour ce champ comme pour le libellé.
+ *
+ * `unit` est l'unité NUTRITIONNELLE de l'aliment — celle dans laquelle ses
+ * macros sont données « pour 100 ». Aucune conversion g ↔ ml n'existe dans ce
+ * schéma, et aucune n'est inventée ici.
+ */
+export interface OptionNutrition {
+  readonly unit: "g" | "ml";
+  readonly proteinPer100: number;
+  readonly carbPer100: number;
+  readonly fatPer100: number;
+}
+
 export type ChoiceOption = {
+  /**
+   * N1.5 — les macros de l'aliment désigné, ou `null` si la source a disparu.
+   * Une option sans macros est affichable mais PAS calculable : voir
+   * `optionCalculable` dans `meal-choice-selection.ts`.
+   */
+  readonly nutrition?: OptionNutrition | null;
   /**
    * ⚠️ HYDRATATION, PAS DONNÉE MÉTIER. Le libellé n'est PAS dans le snapshot :
    * il est retrouvé à la lecture, à partir de l'identité, et sert uniquement à

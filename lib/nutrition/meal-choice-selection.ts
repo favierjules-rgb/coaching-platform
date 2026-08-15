@@ -1,3 +1,9 @@
+import {
+  solveMealChoices,
+  type MealChoiceSolution,
+  type MealMacroTarget,
+  type SelectedFoodForMealSolver,
+} from "@/lib/nutrition/meal-choice-solver";
 import type { ChoiceOption, MealChoiceSlot } from "@/lib/nutrition/plan-v2-week";
 
 /**
@@ -138,4 +144,113 @@ export function choixResolus(
     }
   }
   return resolus;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   N1.5 — DU CHOIX AU CALCUL
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Une option est CALCULABLE si ses faits nutritionnels ont pu être hydratés.
+ *
+ * ⚠️ CE N'EST PAS LA MÊME QUESTION QU'`optionExploitable`. Celle-là demande
+ * « peut-on la NOMMER, donc la proposer ? » ; celle-ci demande « peut-on la
+ * CALCULER ? ». Elles répondent aujourd'hui ensemble — nom et macros viennent
+ * de la même ligne du catalogue, et disparaissent ensemble — mais les
+ * confondre reviendrait à faire dépendre un calcul de la présence d'un
+ * libellé, ce qui est une coïncidence, pas une règle.
+ *
+ * ⚠️ UNE OPTION AFFICHÉE « ALIMENT INDISPONIBLE » NE PEUT PAS ÊTRE CALCULÉE.
+ * On ne lui invente pas 0/0/0 : un aliment sans macros connues n'est pas un
+ * aliment à zéro calorie, et le traiter comme tel ferait mentir la cible du
+ * repas entier.
+ */
+export function optionCalculable(option: ChoiceOption): boolean {
+  const n = option.nutrition;
+  if (!n) return false;
+  return (
+    typeof option.optionId === "string" &&
+    [n.proteinPer100, n.carbPer100, n.fatPer100].every(
+      (v) => typeof v === "number" && Number.isFinite(v),
+    )
+  );
+}
+
+/**
+ * L'ENTRÉE DU SOLVEUR N1.5 — construite UNIQUEMENT depuis `choixResolus`.
+ *
+ * ⚠️ AUCUNE AUTRE SOURCE. Ni la bibliothèque (`food_lists`), ni un second
+ * état de sélection, ni les items texte du coach : ce que l'élève a choisi,
+ * et rien d'autre.
+ *
+ * ⚠️ L'ORDRE EST CELUI DU COACH, et il est conservé jusqu'à l'écran. Trier
+ * par quantité ou par nom ferait danser les lignes à chaque changement de
+ * choix.
+ *
+ * ⚠️ DEUX OCCURRENCES DU MÊME ALIMENT RESTENT DEUX ENTRÉES. On ne déduplique
+ * pas par `option.id` : « poulet » dans la protéine principale et « poulet »
+ * dans la garniture sont deux variables distinctes du système, et les fondre
+ * en une seule changerait le problème posé.
+ *
+ * Rend `null` dès qu'UN choix n'est pas calculable — on ne calcule pas un
+ * repas amputé d'un de ses aliments.
+ */
+export function alimentsPourLeSolveur(
+  resolus: readonly ChoixResolu[],
+): readonly SelectedFoodForMealSolver[] | null {
+  const aliments: SelectedFoodForMealSolver[] = [];
+  for (const resolu of resolus) {
+    if (!optionCalculable(resolu.option)) return null;
+    const n = resolu.option.nutrition as NonNullable<ChoiceOption["nutrition"]>;
+    aliments.push({
+      optionId: resolu.optionId,
+      slotId: resolu.slotId,
+      name: resolu.option.displayName ?? "",
+      unit: n.unit === "ml" ? "ml" : "g",
+      proteinPer100: n.proteinPer100,
+      carbPer100: n.carbPer100,
+      fatPer100: n.fatPer100,
+    });
+  }
+  return aliments;
+}
+
+/**
+ * L'ÉTAT DU CALCUL D'UN REPAS — une fonction, quatre réponses possibles.
+ *
+ * ⚠️ C'EST ICI QUE SE DÉCIDE S'IL Y A DES QUANTITÉS, PAS DANS LE RENDU. Le
+ * composant ne fait que traduire ces quatre cas en pixels ; les tester exige
+ * donc de tester une fonction, pas de deviner un DOM.
+ *
+ *   incomplet      — il manque au moins un choix. AUCUNE quantité. Un repas à
+ *                    moitié composé n'a pas de « demi-solution » : les trois
+ *                    macros se répartissent entre TOUS les aliments.
+ *   sans-cible     — le jour n'a pas de cible exploitable (profil introuvable,
+ *                    créneau désactivé). Il n'y a rien à viser.
+ *   non-calculable — la composition est complète, mais un aliment n'a plus de
+ *                    faits nutritionnels. On le DIT plutôt que de calculer
+ *                    sans lui.
+ *   calcule        — la solution, quantités comprises.
+ */
+export type EtatDuCalculDuRepas =
+  | { readonly etat: "incomplet" }
+  | { readonly etat: "sans-cible" }
+  | { readonly etat: "non-calculable" }
+  | { readonly etat: "calcule"; readonly solution: MealChoiceSolution };
+
+export function calculDuRepas(
+  occurrences: readonly MealChoiceSlot[],
+  selection: SelectionDeChoix,
+  cible: MealMacroTarget | null,
+): EtatDuCalculDuRepas {
+  // ⚠️ L'ORDRE DES TESTS COMPTE. « Incomplet » vient d'abord : tant que
+  // l'élève n'a pas fini de composer, l'absence de cible n'a aucun intérêt à
+  // être signalée.
+  if (!progressionDesChoix(occurrences, selection).complet) return { etat: "incomplet" };
+
+  const aliments = alimentsPourLeSolveur(choixResolus(occurrences, selection));
+  if (aliments === null) return { etat: "non-calculable" };
+  if (cible === null || aliments.length === 0) return { etat: "sans-cible" };
+
+  return { etat: "calcule", solution: solveMealChoices(aliments, cible) };
 }

@@ -7,6 +7,7 @@ import type {
   PrescribedFoodItem,
   ChoiceOption,
   MealChoiceSlot,
+  OptionNutrition,
   PrescribedMeal,
 } from "@/lib/nutrition/plan-v2-week";
 import { compareWeekdays, toWeekdayKey } from "@/lib/nutrition/weekdays";
@@ -90,36 +91,97 @@ function mapItems(brut: unknown): readonly PrescribedFoodItem[] {
  * et rien d'autre. Une identité absente de la carte reste dans le snapshot,
  * simplement sans libellé.
  */
+interface IdentitéHydratée {
+  readonly displayName: string;
+  readonly nutrition: OptionNutrition | null;
+}
+
+/**
+ * ⚠️ LES MACROS VOYAGENT AVEC LE NOM, DANS LA MÊME REQUÊTE (N1.5). Elles
+ * viennent de la même ligne, elles ont la même durée de vie, et les lire
+ * séparément doublerait les allers-retours pour rien. Une identité dont la
+ * source a disparu n'a NI nom NI macros — les deux manquent ensemble, ce qui
+ * est exactement l'état « aliment indisponible ».
+ */
+function nutritionDeLigne(ligne: {
+  nutrition_unit?: string | null;
+  protein_per_100?: number | string | null;
+  carb_per_100?: number | string | null;
+  fat_per_100?: number | string | null;
+}): OptionNutrition | null {
+  // `numeric` PostgreSQL arrive en CHAÎNE via PostgREST : la conversion se fait
+  // ici, une fois, plutôt que d'être disséminée dans le solveur.
+  //
+  // ⚠️ UNE MACRO ABSENTE EST INCONNUE, PAS ZÉRO. Les trois colonnes sont
+  // `not null` dans les deux tables — ce cas ne peut donc venir que d'une base
+  // non migrée ou d'un `select` incomplet. Y répondre par 0 ferait passer un
+  // aliment inconnu pour un aliment sans calories, et fausserait les quantités
+  // de TOUS les autres aliments du repas. On rend `null` : l'option restera
+  // affichable, mais pas calculable.
+  const valeurs = [ligne.protein_per_100, ligne.carb_per_100, ligne.fat_per_100].map((v) =>
+    v === null || v === undefined || v === "" ? Number.NaN : Number(v),
+  );
+  if (valeurs.some((v) => !Number.isFinite(v))) return null;
+
+  // ⚠️ UNE UNITÉ HORS VOCABULAIRE NE SE DEVINE PAS NON PLUS (N1.5). Les deux
+  // tables contraignent `nutrition_unit in ('g','ml')` : une autre valeur ne
+  // peut venir que d'une base non migrée. Supposer le gramme donnerait des
+  // macros « pour 100 g » à un aliment qui n'est peut-être pas compté ainsi,
+  // et le garde-fou de faisabilité du solveur (300 g / 500 ml) s'appliquerait
+  // à la mauvaise échelle. On rend `null` : l'option reste affichable et
+  // nommée, mais elle n'est pas calculable — ne PAS calculer plutôt que
+  // supposer.
+  if (ligne.nutrition_unit !== "g" && ligne.nutrition_unit !== "ml") return null;
+
+  return {
+    unit: ligne.nutrition_unit,
+    proteinPer100: valeurs[0],
+    carbPer100: valeurs[1],
+    fatPer100: valeurs[2],
+  };
+}
+
 async function lireLibelles(
   supabase: TypedSupabaseClient,
   idsAliments: readonly string[],
   idsProduits: readonly string[],
-): Promise<{ aliments: Map<string, string>; produits: Map<string, string> }> {
-  const aliments = new Map<string, string>();
-  const produits = new Map<string, string>();
+): Promise<{ aliments: Map<string, IdentitéHydratée>; produits: Map<string, IdentitéHydratée> }> {
+  const aliments = new Map<string, IdentitéHydratée>();
+  const produits = new Map<string, IdentitéHydratée>();
 
   const [catalogue, marques] = await Promise.all([
     idsAliments.length === 0
       ? Promise.resolve({ data: [], error: null })
-      : supabase.from("food_catalog").select("id, name").in("id", [...idsAliments]),
+      : supabase
+          .from("food_catalog")
+          .select("id, name, nutrition_unit, protein_per_100, carb_per_100, fat_per_100")
+          .in("id", [...idsAliments]),
     idsProduits.length === 0
       ? Promise.resolve({ data: [], error: null })
-      : supabase.from("food_products").select("id, product_name, brand").in("id", [...idsProduits]),
+      : supabase
+          .from("food_products")
+          .select("id, product_name, brand, nutrition_unit, protein_per_100, carb_per_100, fat_per_100")
+          .in("id", [...idsProduits]),
   ]);
   devWarn("readNutritionPlanV2Week (libellés food_catalog)", catalogue.error);
   devWarn("readNutritionPlanV2Week (libellés food_products)", marques.error);
 
-  for (const f of (catalogue.data ?? []) as unknown as { id: string; name: string }[]) {
-    aliments.set(f.id, f.name);
+  for (const f of (catalogue.data ?? []) as unknown as ({ id: string; name: string } & Parameters<
+    typeof nutritionDeLigne
+  >[0])[]) {
+    aliments.set(f.id, { displayName: f.name, nutrition: nutritionDeLigne(f) });
   }
   // « Marque — Produit », la forme déjà employée par le sélecteur d'aliments
   // et par l'éditeur de listes. Une seule façon de nommer un produit.
-  for (const p of (marques.data ?? []) as unknown as {
+  for (const p of (marques.data ?? []) as unknown as ({
     id: string;
     product_name: string;
     brand: string | null;
-  }[]) {
-    produits.set(p.id, p.brand ? `${p.brand} — ${p.product_name}` : p.product_name);
+  } & Parameters<typeof nutritionDeLigne>[0])[]) {
+    produits.set(p.id, {
+      displayName: p.brand ? `${p.brand} — ${p.product_name}` : p.product_name,
+      nutrition: nutritionDeLigne(p),
+    });
   }
   return { aliments, produits };
 }
@@ -217,11 +279,29 @@ async function lireOccurrences(
 
   const parSlot = new Map<string, ChoiceOption[]>();
   for (const o of options) {
+    const hydratée =
+      o.catalog_food_id !== null
+        ? noms.aliments.get(o.catalog_food_id)
+        : o.product_id !== null
+          ? noms.produits.get(o.product_id)
+          : undefined;
     const cible: ChoiceOption | null =
       o.catalog_food_id !== null
-        ? { type: "aliment", id: o.catalog_food_id, optionId: o.id, displayName: noms.aliments.get(o.catalog_food_id) ?? null }
+        ? {
+            type: "aliment",
+            id: o.catalog_food_id,
+            optionId: o.id,
+            displayName: hydratée?.displayName ?? null,
+            nutrition: hydratée?.nutrition ?? null,
+          }
         : o.product_id !== null
-          ? { type: "produit", id: o.product_id, optionId: o.id, displayName: noms.produits.get(o.product_id) ?? null }
+          ? {
+              type: "produit",
+              id: o.product_id,
+              optionId: o.id,
+              displayName: hydratée?.displayName ?? null,
+              nutrition: hydratée?.nutrition ?? null,
+            }
           : null;
     if (!cible) continue;
     const liste = parSlot.get(o.slot_id) ?? [];

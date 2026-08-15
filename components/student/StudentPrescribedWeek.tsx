@@ -337,9 +337,17 @@ export function StudentPrescribedWeek({
                         un autre, ni d'un lundi vers le lundi suivant : changer
                         l'un ou l'autre démonte le composant, et son brouillon
                         avec lui. */}
+                    {/* N1.5 — LA CIBLE PASSÉE ICI EST EXACTEMENT CELLE
+                        AFFICHÉE PLUS HAUT. `cible` est déjà résolue une fois
+                        pour ce repas (créneau du jour, ou macros saisies à la
+                        main sur un repas antérieur au modèle v2) : la
+                        repasser au calcul plutôt que de la recalculer garantit
+                        que l'en-tête du repas et la ligne « CIBLE DU REPAS »
+                        ne pourront jamais dire deux nombres différents. */}
                     <StudentMealChoices
                       key={cleDeComposition(repas.id, date)}
                       occurrences={repas.choiceSlots}
+                      cible={cible}
                     />
 
                     {/* ── FRONTIÈRE ── Tout ce qui précède appartient au COACH

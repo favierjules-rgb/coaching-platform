@@ -105,7 +105,8 @@
     "test:aliments-a3-search": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/aliments-a3-search.mts",
     "test:nutrition-n1-listes": "npx tsx scripts/tests/nutrition-n1-listes.mts",
     "test:nutrition-n1-3": "npx tsx scripts/tests/nutrition-n1-3-occurrences.mts",
-    "test:nutrition-n1-4": "npx tsx scripts/tests/nutrition-n1-4-choix-eleve.mts"
+    "test:nutrition-n1-4": "npx tsx scripts/tests/nutrition-n1-4-choix-eleve.mts",
+    "test:nutrition-n1-5": "npx tsx scripts/tests/nutrition-n1-5-quantites.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",
