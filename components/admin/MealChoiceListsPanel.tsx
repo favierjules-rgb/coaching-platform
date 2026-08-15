@@ -170,15 +170,18 @@ function LigneOccurrence({
         Voir les aliments
       </button>
       {deplie && (
-        // ⚠️ ON N'AFFICHE QUE CE QU'ON SAIT SANS ALLER LE CHERCHER : le nombre
-        // et le type des identités. Résoudre chaque nom ici lancerait une
-        // requête par occurrence dans un écran qui en compte déjà beaucoup, et
-        // surtout : ces noms viendraient de la SOURCE VIVANTE, ce qui ferait
-        // croire que le snapshot suit la bibliothèque. Il ne la suit pas.
+        // ⚠️ LE NOM AFFICHÉ EST HYDRATÉ, PAS SNAPSHOTÉ. Il a été retrouvé à la
+        // lecture du plan, à partir de l'identité figée — en DEUX requêtes pour
+        // toute la semaine, jamais une par option. Ce que le repas garde, c'est
+        // l'identité ; le nom n'est que la façon de la montrer.
+        //
+        // ⚠️ ET SANS NOM, ON NE MENT PAS. Une identité dont la source a disparu
+        // affiche « Aliment indisponible » : le plan reste ouvrable, et le
+        // coach voit exactement où regarder.
         <ul className="mt-1 flex flex-col gap-0.5 pl-6">
           {occurrence.options.map((option, rang) => (
             <li key={`${option.type}-${option.id}`} className="truncate text-[11px] text-muted-foreground">
-              {rang + 1}. {option.type === "aliment" ? "Aliment du catalogue" : "Produit scanné"}
+              {rang + 1}. {option.displayName ?? "Aliment indisponible"}
             </li>
           ))}
         </ul>

@@ -539,6 +539,11 @@ await test("24. la couche de lecture de la semaine n'écrit RIEN non plus", () =
   // absence — `food_lists` et `food_list_items` hors de cette liste — qui fait
   // l'instantané, et ce contrôle la garde.
   assert.deepEqual([...new Set(froms)].sort(), [
+    // N1.3 — l'HYDRATATION des libellés : deux lectures de plus, groupées, pour
+    // toute la semaine. Elles nomment des identités déjà figées ; elles ne
+    // peuvent ni en ajouter, ni en retirer.
+    "food_catalog",
+    "food_products",
     "meal_choice_options",
     "meal_choice_slots",
     "meals",

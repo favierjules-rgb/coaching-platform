@@ -37,9 +37,22 @@ export interface PrescribedFoodItem {
  * `food_products`, et tout le reste est lu à la source au moment de
  * l'affichage. Recopier un nom ici ferait vieillir le repas en silence.
  */
-export type ChoiceOption =
+export type ChoiceOption = {
+  /**
+   * ⚠️ HYDRATATION, PAS DONNÉE MÉTIER. Le libellé n'est PAS dans le snapshot :
+   * il est retrouvé à la lecture, à partir de l'identité, et sert uniquement à
+   * l'affichage. Il n'est jamais renvoyé à la RPC — `toWeekSavePayload`
+   * n'émet que `catalog_food_id` / `product_id`, et un test l'épingle.
+   *
+   * `null` ou absent = source introuvable. Un aliment supprimé du catalogue ne
+   * doit pas casser le plan : on affiche « Aliment indisponible » plutôt qu'un
+   * nom inventé.
+   */
+  readonly displayName?: string | null;
+} & (
   | { readonly type: "aliment"; readonly id: string }
-  | { readonly type: "produit"; readonly id: string };
+  | { readonly type: "produit"; readonly id: string }
+);
 
 /**
  * N1.3 — UNE OCCURRENCE DE LISTE DANS UN REPAS.

@@ -707,10 +707,19 @@ export async function lireSnapshotDeListe(
   return {
     label: liste.name,
     sourceListId: liste.id,
+    // ⚠️ `displayName` EST POSÉ ICI SANS UNE REQUÊTE DE PLUS : `lireFoodList` a
+    // déjà résolu chaque item contre sa source. C'est de l'HYDRATATION, pas du
+    // snapshot — l'identité reste seule à voyager vers la base.
     options: liste.items.map((item) =>
       item.source === "aliment"
-        ? ({ type: "aliment", id: item.aliment.id } as const)
-        : ({ type: "produit", id: item.produit.id } as const),
+        ? ({ type: "aliment", id: item.aliment.id, displayName: item.aliment.name } as const)
+        : ({
+            type: "produit",
+            id: item.produit.id,
+            displayName: item.produit.brand
+              ? `${item.produit.brand} — ${item.produit.name}`
+              : item.produit.name,
+          } as const),
     ),
   };
 }

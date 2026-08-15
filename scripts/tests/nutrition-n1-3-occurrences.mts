@@ -47,6 +47,7 @@ import {
   type WeekFormState,
 } from "../../lib/nutrition/plan-v2-week-form";
 import type { MealChoiceSlot } from "../../lib/nutrition/plan-v2-week";
+import { readNutritionPlanV2Week } from "../../lib/supabase/nutrition-week";
 
 function lire(chemin: string): string {
   return readFileSync(new URL(chemin, import.meta.url), "utf8");
@@ -510,4 +511,201 @@ await test("N1.3-30. aucun chemin de lecture ne relie un repas à la bibliothèq
   // Et la migration ne crée AUCUNE table ni colonne : N1.1 suffisait.
   assert.ok(!/create table/i.test(MIGRATION));
   assert.ok(!/add column/i.test(MIGRATION));
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+   N1.3-NAME-1..8 — LES VRAIS NOMS, HYDRATÉS À LA LECTURE
+
+   ⚠️ NE PAS CONFONDRE DEUX CHOSES QUI SE RESSEMBLENT.
+   Le SNAPSHOT, c'est la liste exacte des IDENTITÉS autorisées au moment de
+   l'ajout — elle est figée. L'HYDRATATION, c'est retrouver leur libellé pour
+   l'afficher — elle est refaite à chaque lecture. La première ne bouge jamais ;
+   la seconde suit le catalogue, et c'est très bien : un aliment renommé dans
+   `food_catalog` doit s'afficher sous son nouveau nom, puisque c'est le MÊME
+   aliment. Ce qui ne doit pas bouger, c'est QUELS aliments sont autorisés.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Un client minuscule qui JOURNALISE chaque `.from(table)` et rend des lignes
+ * préparées. Ce n'est pas le double de N1.2 : celui-là modélise les contraintes
+ * d'écriture de la bibliothèque, celui-ci compte des LECTURES sur les tables du
+ * plan. Le mélanger au premier lui ferait porter deux métiers.
+ */
+function clientLecteur(tables: Record<string, Record<string, unknown>[]>) {
+  const requetes: string[] = [];
+  const client = {
+    from(nom: string) {
+      requetes.push(nom);
+      const chaine: Record<string, unknown> = {
+        select: () => chaine,
+        eq: () => chaine,
+        in: () => chaine,
+        order: () => chaine,
+        maybeSingle: () => Promise.resolve({ data: (tables[nom] ?? [])[0] ?? null, error: null }),
+        then: (resoudre: (v: { data: unknown; error: null }) => void) =>
+          resoudre({ data: tables[nom] ?? [], error: null }),
+      };
+      return chaine;
+    },
+  } as never;
+  return { client, requetes };
+}
+
+/** Un plan d'une semaine, un repas, une occurrence de N options. */
+function planAvecOptions(options: readonly { catalog_food_id: string | null; product_id: string | null }[]) {
+  return {
+    nutrition_plans: [{ id: "plan-1", name: "Plan", nutrition_model_version: 2 }],
+    nutrition_plan_profiles: [
+      { id: "prof-1", plan_id: "plan-1", profile_key: "default", daily_calories: 2000, protein_bp: 3000, carb_bp: 4000, fat_bp: 3000 },
+    ],
+    nutrition_meal_slot_targets: [
+      { profile_id: "prof-1", slot: "dinner", enabled: true, protein_bp: 10000, carb_bp: 10000, fat_bp: 10000, display_order: 5 },
+    ],
+    nutrition_days: [{ id: "jour-1", plan_id: "plan-1", day: "monday", status: "non-commence", profile_key: "default" }],
+    meals: [{ id: "repas-1", nutrition_day_id: "jour-1", slot: "dinner", name: "Dîner", items: [], macros: {}, coach_notes: "" }],
+    meal_choice_slots: [
+      { id: "slot-1", meal_id: "repas-1", position: 1, label: "Choix de ta protéine", source_list_id: null },
+    ],
+    meal_choice_options: options.map((o, i) => ({ slot_id: "slot-1", position: i + 1, ...o })),
+    food_catalog: [
+      { id: POULET, name: "Poulet, filet sans peau cru" },
+      { id: OEUF, name: "Œuf cru" },
+      { id: SAUMON, name: "Saumon, cuit" },
+      { id: THON, name: "Thon au naturel égoutté" },
+    ],
+    food_products: [{ id: "prod-1", product_name: "Skyr nature", brand: "Arla" }],
+  } as Record<string, Record<string, unknown>[]>;
+}
+
+const premiereOccurrence = (semaine: Awaited<ReturnType<typeof readNutritionPlanV2Week>>) =>
+  semaine!.days.find((j) => j.day === "monday")!.meals[0].choiceSlots[0];
+
+await test("N1.3-NAME-1/2/3. les options affichent leurs VRAIS noms, catalogue et produit", async () => {
+  const { client } = clientLecteur(planAvecOptions([
+    { catalog_food_id: POULET, product_id: null },
+    { catalog_food_id: OEUF, product_id: null },
+    { catalog_food_id: SAUMON, product_id: null },
+    { catalog_food_id: THON, product_id: null },
+    { catalog_food_id: null, product_id: "prod-1" },
+  ]));
+
+  const occurrence = premiereOccurrence(await readNutritionPlanV2Week(client, "plan-1"));
+  const noms = occurrence.options.map((o) => o.displayName);
+
+  assert.equal(noms[0], "Poulet, filet sans peau cru", "NAME-1 : un aliment du catalogue");
+  // NAME-2 : un produit porte sa MARQUE, comme partout ailleurs dans l'app.
+  assert.equal(noms[4], "Arla — Skyr nature");
+  // NAME-3 : cinq noms, tous distincts, aucun repli.
+  assert.equal(noms.length, 5);
+  assert.equal(new Set(noms).size, 5, "cinq noms distincts attendus");
+  assert.ok(!noms.includes("Aliment du catalogue"), "l'ancien libellé générique a survécu");
+  assert.ok(!noms.some((n) => n === null), "aucun nom ne doit manquer ici");
+
+  // Et l'identité reste l'identité : le nom ne la remplace pas.
+  assert.deepEqual(occurrence.options.map((o) => o.id), [POULET, OEUF, SAUMON, THON, "prod-1"]);
+  assert.deepEqual(occurrence.options.map((o) => o.type),
+    ["aliment", "aliment", "aliment", "aliment", "produit"]);
+});
+
+await test("N1.3-NAME-4. aucune requête N+1 : le nombre de lectures ne dépend pas du nombre d'options", async () => {
+  // ⚠️ MÊME FORME DES DEUX CÔTÉS : un aliment ET un produit. Comparer « 1
+  // aliment » à « 49 aliments + 1 produit » mesurerait le saut de la requête
+  // `food_products`, sautée quand aucun produit n'est cité — pas un N+1.
+  const petit = clientLecteur(planAvecOptions([
+    { catalog_food_id: POULET, product_id: null },
+    { catalog_food_id: null, product_id: "prod-1" },
+  ]));
+  await readNutritionPlanV2Week(petit.client, "plan-1");
+
+  // Cinquante options, dont un produit : c'est le cas que le cahier nomme.
+  const beaucoup = clientLecteur(planAvecOptions([
+    ...Array.from({ length: 49 }, () => ({ catalog_food_id: POULET, product_id: null })),
+    { catalog_food_id: null, product_id: "prod-1" },
+  ]));
+  await readNutritionPlanV2Week(beaucoup.client, "plan-1");
+
+  // ⚠️ LE NOMBRE DE REQUÊTES EST LE MÊME. C'est la seule formulation qui
+  // résiste : compter « ≤ 9 » laisserait passer un N+1 sur un petit décor.
+  assert.equal(beaucoup.requetes.length, petit.requetes.length,
+    `N+1 : ${petit.requetes.length} requête(s) pour 1 option, ${beaucoup.requetes.length} pour 50`);
+  assert.equal(beaucoup.requetes.filter((t) => t === "food_catalog").length, 1);
+  assert.equal(beaucoup.requetes.filter((t) => t === "food_products").length, 1);
+
+  // Et une semaine SANS occurrence ne paie pas l'hydratation.
+  const sansListe = clientLecteur({ ...planAvecOptions([]), meal_choice_slots: [], meal_choice_options: [] });
+  await readNutritionPlanV2Week(sansListe.client, "plan-1");
+  assert.equal(sansListe.requetes.filter((t) => t === "food_catalog").length, 0);
+});
+
+await test("N1.3-NAME-5. hydrater ne touche PAS au snapshot", async () => {
+  // Le catalogue contient un aliment que le snapshot ne cite pas : il ne doit
+  // apparaître nulle part. Et un aliment cité qui a été RENOMMÉ s'affiche sous
+  // son nouveau nom — c'est le même aliment, pas un autre.
+  const tables = planAvecOptions([
+    { catalog_food_id: POULET, product_id: null },
+    { catalog_food_id: OEUF, product_id: null },
+  ]);
+  (tables.food_catalog[0] as { name: string }).name = "Poulet fermier, filet cru";
+
+  const occurrence = premiereOccurrence(await readNutritionPlanV2Week(clientLecteur(tables).client, "plan-1"));
+  assert.deepEqual(occurrence.options.map((o) => o.id), [POULET, OEUF], "le snapshot a changé de contenu");
+  assert.equal(occurrence.options[0].displayName, "Poulet fermier, filet cru");
+  assert.ok(!occurrence.options.some((o) => o.id === THON), "un aliment non snapshoté est apparu");
+  assert.ok(!occurrence.options.some((o) => o.id === SAUMON));
+
+  // Le libellé de l'occurrence, lui, reste celui figé à l'ajout.
+  assert.equal(occurrence.label, "Choix de ta protéine");
+});
+
+await test("N1.3-NAME-6. une identité introuvable ne casse rien, et ne ment pas", async () => {
+  const tables = planAvecOptions([
+    { catalog_food_id: POULET, product_id: null },
+    { catalog_food_id: "aa000000-0000-4000-8000-00000000dead", product_id: null },
+  ]);
+  const occurrence = premiereOccurrence(await readNutritionPlanV2Week(clientLecteur(tables).client, "plan-1"));
+
+  // ⚠️ L'OPTION RESTE DANS LE SNAPSHOT. On ne la retire pas : elle y est, et le
+  // plan doit s'ouvrir. Seul son libellé manque.
+  assert.equal(occurrence.options.length, 2, "une option a disparu du snapshot");
+  assert.equal(occurrence.options[1].displayName, null);
+  assert.ok(CODE_PANNEAU.includes('option.displayName ?? "Aliment indisponible"'),
+    "l'écran doit nommer le cas au lieu d'afficher un faux nom");
+});
+
+await test("N1.3-NAME-7. aucun nom hydraté ne part vers la RPC", async () => {
+  const base = decor();
+  const snapshot = (await lireSnapshotDeListe(base.client, await listeProteines(base)))!;
+  // Le pont hydrate lui aussi — sans requête de plus, les noms étaient déjà là.
+  assert.deepEqual(snapshot.options.map((o) => o.displayName), ["Poulet", "Oeuf", "Saumon"]);
+
+  const { state, mealId } = semaineAvecRepas();
+  const [repas] = repasEnvoyes(addChoiceSlot(state, "monday", mealId, snapshot));
+  const options = (repas.choice_slots as readonly { options: readonly Record<string, unknown>[] }[])[0].options;
+
+  // ⚠️ LA CHARGE UTILE NE PORTE QUE L'IDENTITÉ. Un `displayName` qui partirait
+  // vers la base ferait du nom une donnée métier, et le premier renommage du
+  // catalogue rendrait le snapshot menteur.
+  for (const option of options) {
+    assert.deepEqual(Object.keys(option).sort(), ["catalog_food_id", "product_id"]);
+  }
+  const texte = JSON.stringify(repas.choice_slots);
+  assert.ok(!texte.includes("displayName"));
+  assert.ok(!texte.includes("Poulet") && !texte.includes("Saumon"));
+});
+
+await test("N1.3-NAME-8. recharger relit les noms : l'hydratation n'est pas un état d'écran", async () => {
+  // Deux lectures successives du MÊME plan rendent les mêmes noms : rien n'est
+  // mémorisé dans un composant, tout vient de la lecture.
+  const tables = planAvecOptions([
+    { catalog_food_id: POULET, product_id: null },
+    { catalog_food_id: null, product_id: "prod-1" },
+  ]);
+  const un = premiereOccurrence(await readNutritionPlanV2Week(clientLecteur(tables).client, "plan-1"));
+  const deux = premiereOccurrence(await readNutritionPlanV2Week(clientLecteur(tables).client, "plan-1"));
+  assert.deepEqual(un.options.map((o) => o.displayName), deux.options.map((o) => o.displayName));
+  assert.deepEqual(un.options.map((o) => o.displayName), ["Poulet, filet sans peau cru", "Arla — Skyr nature"]);
+
+  // L'hydratation vit dans la COUCHE de lecture, pas dans l'écran.
+  assert.ok(CODE_LECTURE.includes("lireLibelles"));
+  assert.ok(!CODE_PANNEAU.includes('from("food_catalog")'), "l'écran ne va pas chercher un nom lui-même");
 });

@@ -71,6 +71,59 @@ function mapItems(brut: unknown): readonly PrescribedFoodItem[] {
   });
 }
 
+
+/**
+ * LES LIBELLÉS DES IDENTITÉS SNAPSHOTÉES — deux requêtes, pas une par option.
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * POURQUOI PAS `chargerAlimentsRapides`
+ * ────────────────────────────────────────────────────────────────────────────
+ * Ce lecteur groupé existe déjà dans `consumed-meals.ts`, et il filtre
+ * `status = 'active'`. C'est juste pour ce qu'il fait — PROPOSER un aliment :
+ * un aliment retiré du catalogue ne doit plus être proposé. Ici on ne propose
+ * rien, on NOMME ce qui est déjà figé dans un repas. Un aliment archivé après
+ * coup doit garder son nom à l'écran ; le filtrer afficherait « indisponible »
+ * pour un aliment qui existe parfaitement.
+ *
+ * ⚠️ CETTE LECTURE NE TOUCHE PAS AU SNAPSHOT. Elle ne peut ni ajouter, ni
+ * retirer, ni remplacer une identité : elle rend une carte identifiant → nom,
+ * et rien d'autre. Une identité absente de la carte reste dans le snapshot,
+ * simplement sans libellé.
+ */
+async function lireLibelles(
+  supabase: TypedSupabaseClient,
+  idsAliments: readonly string[],
+  idsProduits: readonly string[],
+): Promise<{ aliments: Map<string, string>; produits: Map<string, string> }> {
+  const aliments = new Map<string, string>();
+  const produits = new Map<string, string>();
+
+  const [catalogue, marques] = await Promise.all([
+    idsAliments.length === 0
+      ? Promise.resolve({ data: [], error: null })
+      : supabase.from("food_catalog").select("id, name").in("id", [...idsAliments]),
+    idsProduits.length === 0
+      ? Promise.resolve({ data: [], error: null })
+      : supabase.from("food_products").select("id, product_name, brand").in("id", [...idsProduits]),
+  ]);
+  devWarn("readNutritionPlanV2Week (libellés food_catalog)", catalogue.error);
+  devWarn("readNutritionPlanV2Week (libellés food_products)", marques.error);
+
+  for (const f of (catalogue.data ?? []) as unknown as { id: string; name: string }[]) {
+    aliments.set(f.id, f.name);
+  }
+  // « Marque — Produit », la forme déjà employée par le sélecteur d'aliments
+  // et par l'éditeur de listes. Une seule façon de nommer un produit.
+  for (const p of (marques.data ?? []) as unknown as {
+    id: string;
+    product_name: string;
+    brand: string | null;
+  }[]) {
+    produits.set(p.id, p.brand ? `${p.brand} — ${p.product_name}` : p.product_name);
+  }
+  return { aliments, produits };
+}
+
 /**
  * N1.3 — les occurrences d'un repas, reconstruites depuis les deux tables du
  * snapshot. `parRepas` est bâtie UNE fois pour tous les jours : une requête
@@ -146,13 +199,23 @@ async function lireOccurrences(
   devWarn("readNutritionPlanV2Week (meal_choice_options)", optionError);
   const options = (optionRows ?? []) as unknown as OptionRowShape[];
 
+  // ── L'HYDRATATION : DEUX REQUÊTES POUR TOUTE LA SEMAINE ──────────────────
+  // ⚠️ PAS UNE PAR OPTION. Un plan de cinquante options ferait cinquante
+  // allers-retours ; on collecte les identifiants UNIQUES de la semaine
+  // entière, puis on lit en deux fois — quel que soit le nombre d'occurrences.
+  const noms = await lireLibelles(
+    supabase,
+    [...new Set(options.map((o) => o.catalog_food_id).filter((x): x is string => x !== null))],
+    [...new Set(options.map((o) => o.product_id).filter((x): x is string => x !== null))],
+  );
+
   const parSlot = new Map<string, ChoiceOption[]>();
   for (const o of options) {
     const cible: ChoiceOption | null =
       o.catalog_food_id !== null
-        ? { type: "aliment", id: o.catalog_food_id }
+        ? { type: "aliment", id: o.catalog_food_id, displayName: noms.aliments.get(o.catalog_food_id) ?? null }
         : o.product_id !== null
-          ? { type: "produit", id: o.product_id }
+          ? { type: "produit", id: o.product_id, displayName: noms.produits.get(o.product_id) ?? null }
           : null;
     if (!cible) continue;
     const liste = parSlot.get(o.slot_id) ?? [];
