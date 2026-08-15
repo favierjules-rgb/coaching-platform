@@ -161,6 +161,7 @@ interface SlotRowShape {
 }
 
 interface OptionRowShape {
+  id: string;
   slot_id: string;
   position: number;
   catalog_food_id: string | null;
@@ -193,7 +194,12 @@ async function lireOccurrences(
 
   const { data: optionRows, error: optionError } = await supabase
     .from("meal_choice_options")
-    .select("slot_id, position, catalog_food_id, product_id")
+    // ⚠️ `id` EST LU DEPUIS N1.4, ET C'EST UNE LECTURE, PAS UNE DONNÉE
+    // NOUVELLE. L'élève choisit UNE option d'UNE occurrence : la sélection doit
+    // désigner la ligne snapshotée elle-même, pas l'aliment. Deux occurrences
+    // peuvent contenir le même aliment ; l'identifiant de l'aliment ne suffirait
+    // donc pas à dire lequel des deux choix a été fait.
+    .select("id, slot_id, position, catalog_food_id, product_id")
     .in("slot_id", slots.map((s) => s.id))
     .order("position", { ascending: true });
   devWarn("readNutritionPlanV2Week (meal_choice_options)", optionError);
@@ -213,9 +219,9 @@ async function lireOccurrences(
   for (const o of options) {
     const cible: ChoiceOption | null =
       o.catalog_food_id !== null
-        ? { type: "aliment", id: o.catalog_food_id, displayName: noms.aliments.get(o.catalog_food_id) ?? null }
+        ? { type: "aliment", id: o.catalog_food_id, optionId: o.id, displayName: noms.aliments.get(o.catalog_food_id) ?? null }
         : o.product_id !== null
-          ? { type: "produit", id: o.product_id, displayName: noms.produits.get(o.product_id) ?? null }
+          ? { type: "produit", id: o.product_id, optionId: o.id, displayName: noms.produits.get(o.product_id) ?? null }
           : null;
     if (!cible) continue;
     const liste = parSlot.get(o.slot_id) ?? [];

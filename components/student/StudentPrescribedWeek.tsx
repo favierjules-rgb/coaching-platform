@@ -8,12 +8,14 @@ import {
   StudentMealCard,
 } from "@/components/student/ConsumedMealSection";
 import { DailyIntakeSummary } from "@/components/student/DailyIntakeSummary";
+import { StudentMealChoices } from "@/components/student/StudentMealChoices";
 import { DailyNutritionProgress } from "@/components/student/DailyNutritionProgress";
 import { NutritionDayCarousel } from "@/components/student/NutritionDayCarousel";
 import { NutritionWeekNav } from "@/components/student/NutritionWeekNav";
 import { type ResumeSemaine, resumeSemaine, semaineContenant, libelleSemaine } from "@/lib/nutrition/historique";
 import type { RaccourcisAlimentsUI } from "@/components/student/AddFoodSheet";
 import { NBSP, formatIntegerFr } from "@/lib/nutrition/basis-points";
+import { cleDeComposition } from "@/lib/nutrition/meal-choice-selection";
 import {
   type ConsumedMeal,
   type ConsumedUnit,
@@ -324,6 +326,21 @@ export function StudentPrescribedWeek({
                         <span>{repas.coachNotes}</span>
                       </p>
                     )}
+
+                    {/* N1.4 — LES CHOIX DE L'ÉLÈVE, quand le coach a posé des
+                        listes. Un repas sans occurrence n'affiche RIEN de plus :
+                        le composant rend `null`, et le parcours historique est
+                        inchangé à l'octet près.
+
+                        ⚠️ LA CLÉ PORTE LE REPAS *ET* LA DATE. C'est elle qui
+                        garantit qu'une composition ne fuit pas d'un repas vers
+                        un autre, ni d'un lundi vers le lundi suivant : changer
+                        l'un ou l'autre démonte le composant, et son brouillon
+                        avec lui. */}
+                    <StudentMealChoices
+                      key={cleDeComposition(repas.id, date)}
+                      occurrences={repas.choiceSlots}
+                    />
 
                     {/* ── FRONTIÈRE ── Tout ce qui précède appartient au COACH
                         et n'est jamais modifié. Tout ce qui suit appartient à

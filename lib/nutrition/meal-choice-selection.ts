@@ -1,0 +1,141 @@
+import type { ChoiceOption, MealChoiceSlot } from "@/lib/nutrition/plan-v2-week";
+
+/**
+ * N1.4 — LA COMPOSITION D'UN REPAS PAR L'ÉLÈVE, EN FONCTIONS PURES.
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * CE QU'UNE SÉLECTION EST, ET CE QU'ELLE N'EST PAS
+ * ────────────────────────────────────────────────────────────────────────────
+ * ⚠️ UNE SÉLECTION DÉSIGNE UNE LIGNE DU SNAPSHOT, PAS UN ALIMENT.
+ * `occurrenceId → optionId`, jamais `occurrenceId → alimentId`. Un même repas
+ * peut porter « Choix de ta protéine » deux fois, et « Poulet » figurer dans
+ * les deux : l'identifiant de l'aliment ne dirait pas laquelle des deux
+ * occurrences a été servie. `meal_choice_options.id` le dit, lui, et c'est
+ * exactement ce dont N1.5 aura besoin pour calculer les quantités.
+ *
+ * ⚠️ RIEN ICI N'ÉCRIT NULLE PART. Aucune importation de Supabase, aucune
+ * promesse, aucun effet. Choisir un aliment en N1.4 ne crée NI repas consommé,
+ * NI entrée, NI repas planifié : c'est un brouillon de composition, tenu en
+ * mémoire. Un rafraîchissement le remet à zéro, et c'est assumé pour ce lot —
+ * la persistance viendra avec le calcul, pas avant.
+ */
+
+/** `occurrenceId → optionId`. Une occurrence, un choix, jamais deux. */
+export type SelectionDeChoix = Readonly<Record<string, string>>;
+
+export const AUCUNE_SELECTION: SelectionDeChoix = Object.freeze({});
+
+/**
+ * La portée d'un brouillon : CE repas, CE jour.
+ *
+ * ⚠️ LE JOUR FAIT PARTIE DE LA CLÉ, MÊME SI L'IDENTIFIANT DE REPAS SUFFIRAIT
+ * AUJOURD'HUI. Un repas prescrit appartient déjà à un seul jour du plan ; mais
+ * le même plan est consulté semaine après semaine, et une composition du lundi
+ * 3 n'a rien à faire dans le lundi 10. Nommer la date ici rend la portée
+ * explicite plutôt que dépendante d'une propriété du schéma qui pourrait
+ * changer.
+ */
+export function cleDeComposition(mealId: string, date: string | null): string {
+  return `${mealId}|${date ?? "sans-date"}`;
+}
+
+/**
+ * Choisit — ou REMPLACE — l'option d'une occurrence.
+ *
+ * ⚠️ IL N'Y A JAMAIS DEUX CHOIX ACTIFS POUR UNE OCCURRENCE : la clé est
+ * l'occurrence, donc écrire remplace. Et les autres occurrences ne sont pas
+ * touchées, ce qui est la garantie d'indépendance demandée.
+ */
+export function choisirOption(
+  selection: SelectionDeChoix,
+  slotId: string,
+  optionId: string,
+): SelectionDeChoix {
+  return { ...selection, [slotId]: optionId };
+}
+
+/** L'option retenue pour cette occurrence, ou `null`. */
+export function optionChoisieId(selection: SelectionDeChoix, slotId: string): string | null {
+  return selection[slotId] ?? null;
+}
+
+export function estChoisie(selection: SelectionDeChoix, slotId: string): boolean {
+  return optionChoisieId(selection, slotId) !== null;
+}
+
+/**
+ * L'option elle-même, retrouvée DANS le snapshot de cette occurrence.
+ *
+ * ⚠️ ON CHERCHE DANS `occurrence.options`, ET NULLE PART AILLEURS. Une
+ * sélection qui désignerait une option d'une autre occurrence — ou une option
+ * disparue du snapshot — rend `null` plutôt qu'un aliment trouvé de travers.
+ */
+export function optionChoisie(
+  occurrence: MealChoiceSlot,
+  selection: SelectionDeChoix,
+): ChoiceOption | null {
+  const id = optionChoisieId(selection, occurrence.id);
+  if (id === null) return null;
+  return occurrence.options.find((o) => o.optionId === id) ?? null;
+}
+
+/**
+ * Une option est EXPLOITABLE si son identité a pu être nommée.
+ *
+ * ⚠️ LE CAS EST EXCEPTIONNEL ET IL EST TRAITÉ, PAS IGNORÉ. Une option dont la
+ * source a disparu reste dans le snapshot — on ne la retire pas, le repas doit
+ * rester ouvrable — mais on ne la propose pas comme un choix normal : N1.5 ne
+ * saurait pas en calculer la quantité, faute de macros à lire. Elle est donc
+ * affichée, nommée « Aliment indisponible », et DÉSACTIVÉE.
+ */
+export function optionExploitable(option: ChoiceOption): boolean {
+  return typeof option.optionId === "string" && typeof option.displayName === "string";
+}
+
+export interface ProgressionDesChoix {
+  readonly total: number;
+  readonly choisis: number;
+  readonly complet: boolean;
+}
+
+/**
+ * Combien d'occurrences, combien de choix faits, et si le repas est complet.
+ *
+ * ⚠️ « COMPLET » EST FAUX SUR UN REPAS SANS OCCURRENCE. Un repas libre n'a rien
+ * à compléter : le dire « complet » laisserait croire à N1.5 qu'il y a une
+ * composition à calculer là où il n'y en a aucune.
+ */
+export function progressionDesChoix(
+  occurrences: readonly MealChoiceSlot[],
+  selection: SelectionDeChoix,
+): ProgressionDesChoix {
+  const total = occurrences.length;
+  const choisis = occurrences.filter((o) => optionChoisie(o, selection) !== null).length;
+  return { total, choisis, complet: total > 0 && choisis === total };
+}
+
+/**
+ * La composition retenue, prête pour N1.5 : une occurrence, son option.
+ *
+ * Les occurrences non choisies sont ABSENTES — on ne fabrique pas un choix par
+ * défaut. L'ordre est celui des occurrences, donc celui du coach.
+ */
+export interface ChoixResolu {
+  readonly slotId: string;
+  readonly optionId: string;
+  readonly option: ChoiceOption;
+}
+
+export function choixResolus(
+  occurrences: readonly MealChoiceSlot[],
+  selection: SelectionDeChoix,
+): readonly ChoixResolu[] {
+  const resolus: ChoixResolu[] = [];
+  for (const occurrence of occurrences) {
+    const option = optionChoisie(occurrence, selection);
+    if (option?.optionId) {
+      resolus.push({ slotId: occurrence.id, optionId: option.optionId, option });
+    }
+  }
+  return resolus;
+}

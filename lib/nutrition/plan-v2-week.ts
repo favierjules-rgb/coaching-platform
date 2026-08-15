@@ -49,6 +49,19 @@ export type ChoiceOption = {
    * nom inventé.
    */
   readonly displayName?: string | null;
+  /**
+   * N1.4 — L'IDENTIFIANT DE LA LIGNE SNAPSHOTÉE (`meal_choice_options.id`).
+   *
+   * ⚠️ C'EST LUI QUE L'ÉLÈVE CHOISIT, PAS L'ALIMENT. Deux occurrences d'un même
+   * repas peuvent contenir le même aliment — « Poulet » dans la protéine
+   * principale ET dans la secondaire. Une sélection qui ne retiendrait que
+   * `id` (l'aliment) ne saurait pas dire laquelle des deux a été choisie.
+   *
+   * Absent côté coach : au moment où le constructeur fige une liste, la ligne
+   * n'existe pas encore en base — c'est la RPC qui la crée. Il n'est donc
+   * jamais envoyé, seulement lu.
+   */
+  readonly optionId?: string;
 } & (
   | { readonly type: "aliment"; readonly id: string }
   | { readonly type: "produit"; readonly id: string }
