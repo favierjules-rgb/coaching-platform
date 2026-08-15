@@ -13,6 +13,7 @@ import type {
 import { compareWeekdays, toWeekdayKey } from "@/lib/nutrition/weekdays";
 import { readNutritionPlanV2 } from "@/lib/supabase/nutrition-v2";
 import type { Database } from "@/types/supabase";
+import { isColorKey } from "@/lib/ui/color-keys";
 
 /**
  * LECTURE de la semaine d'un plan v2 : les sept jours, leur profil, et les
@@ -220,6 +221,7 @@ interface SlotRowShape {
   position: number;
   label: string;
   source_list_id: string | null;
+  color_key?: string | null;
 }
 
 interface OptionRowShape {
@@ -250,7 +252,7 @@ async function lireOccurrences(
 
   const { data: slotRows, error: slotError } = await supabase
     .from("meal_choice_slots")
-    .select("id, meal_id, position, label, source_list_id")
+    .select("id, meal_id, position, label, source_list_id, color_key")
     .in("meal_id", [...mealIds])
     .order("position", { ascending: true });
   devWarn("readNutritionPlanV2Week (meal_choice_slots)", slotError);
@@ -343,6 +345,10 @@ async function lireOccurrences(
       id: s.id,
       label: s.label,
       sourceListId: s.source_list_id,
+      // ⚠️ N1.6A — LA COULEUR VIENT DU SNAPSHOT, JAMAIS DE `food_lists`. Un
+      // élève n'a aucune policy `select` sur la bibliothèque : la lire serait
+      // impossible, et la deviner serait pire.
+      colorKey: isColorKey(s.color_key) ? s.color_key : null,
       options: parSlot.get(s.id) ?? [],
     });
     parRepas.set(s.meal_id, liste);

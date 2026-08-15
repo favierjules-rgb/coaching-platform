@@ -106,7 +106,10 @@
     "test:nutrition-n1-listes": "npx tsx scripts/tests/nutrition-n1-listes.mts",
     "test:nutrition-n1-3": "npx tsx scripts/tests/nutrition-n1-3-occurrences.mts",
     "test:nutrition-n1-4": "npx tsx scripts/tests/nutrition-n1-4-choix-eleve.mts",
-    "test:nutrition-n1-5": "npx tsx scripts/tests/nutrition-n1-5-quantites.mts"
+    "test:nutrition-n1-5": "npx tsx scripts/tests/nutrition-n1-5-quantites.mts",
+    "test:nutrition-n1-6-couleurs": "npx tsx scripts/tests/nutrition-n1-6-couleurs.mts",
+    "test:nutrition-contract": "npx tsx scripts/tests/nutrition-contract-preferred-unit.mts",
+    "test:nutrition-n1-6-enregistrement": "npx tsx scripts/tests/nutrition-n1-6-enregistrement.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

@@ -8,6 +8,7 @@ import { useFoodLists } from "@/hooks/useFoodLists";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { lireSnapshotDeListe, type SnapshotDeListe } from "@/lib/supabase/food-lists";
 import type { MealChoiceSlot } from "@/lib/nutrition/plan-v2-week";
+import { ColorKeyDot } from "@/components/ui/ColorKeyDot";
 
 /**
  * N1.3 — LES CHOIX ALIMENTAIRES D'UN REPAS, CÔTÉ COACH.
@@ -134,6 +135,10 @@ function LigneOccurrence({
         <span className="w-5 flex-shrink-0 text-[11px] tabular-nums text-muted-foreground">
           {index + 1}.
         </span>
+        {/* ⚠️ N1.6A — LA COULEUR SNAPSHOTÉE DE L'OCCURRENCE, en pastille. Elle
+            vient du repas, PAS de la bibliothèque : repeindre la liste ensuite
+            ne repeint pas cette occurrence. */}
+        <ColorKeyDot colorKey={occurrence.colorKey} />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-sm text-foreground">{occurrence.label}</span>
           <span className="text-[11px] text-muted-foreground">
@@ -298,6 +303,11 @@ function SelecteurDeListe({
                   disabled={occupe !== null}
                   className="pressable flex min-h-[44px] w-full min-w-0 items-center justify-between gap-3 rounded-control border border-border px-3 py-2 text-left transition-colors hover:border-primary disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                 >
+                  <span className="flex min-w-0 items-center gap-2">
+                    {/* La couleur VIVANTE de la bibliothèque : c'est celle
+                        qu'on s'apprête à figer dans le repas. */}
+                    <ColorKeyDot colorKey={liste.colorKey} />
+                  </span>
                   <span className="flex min-w-0 flex-col">
                     <span className="truncate text-sm text-foreground">{liste.name}</span>
                     <span className="text-[11px] text-muted-foreground">

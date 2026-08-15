@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/supabase";
 import type { CatalogFood, ProduitLocal } from "@/lib/supabase/consumed-meals";
 import { borneMaximale } from "@/lib/nutrition/meal-choice-solver";
+import { isColorKey, type ColorKey } from "@/lib/ui/color-keys";
 import type { ChoiceOption } from "@/lib/nutrition/plan-v2-week";
 
 /**
@@ -94,6 +95,14 @@ export interface FoodListSummary {
   readonly archivedAt: string | null;
   readonly nbAliments: number;
   readonly updatedAt: string;
+  /**
+   * N1.6A — couleur d'affichage, PUREMENT VISUELLE. `null` = aucune couleur
+   * choisie, et c'est un état DIFFÉRENT de `"gray"` : l'un n'affiche aucun
+   * accent, l'autre affiche une pastille grise.
+   *
+   * ⚠️ ELLE NE PORTE AUCUN SENS NUTRITIONNEL. Aucun calcul ne la lit.
+   */
+  readonly colorKey: ColorKey | null;
 }
 
 /** Un aliment d'une liste, résolu contre sa source vivante. */
@@ -135,6 +144,8 @@ export interface FoodListDetail {
   readonly name: string;
   readonly archivedAt: string | null;
   readonly items: readonly FoodListItem[];
+  /** N1.6A — voir `FoodListSummary.colorKey`. Purement visuelle. */
+  readonly colorKey: ColorKey | null;
 }
 
 /** Le résultat d'un ajout — « déjà présent » n'est PAS une erreur. */
@@ -143,6 +154,7 @@ export type ResultatAjout = "ajoute" | "deja-present" | "erreur";
 interface LigneListe {
   id: string;
   name: string;
+  color_key?: string | null;
   archived_at: string | null;
   updated_at: string;
 }
@@ -175,7 +187,7 @@ export async function listerFoodLists(
 ): Promise<readonly FoodListSummary[]> {
   const requête = supabase
     .from("food_lists")
-    .select("id, name, archived_at, updated_at")
+    .select("id, name, archived_at, updated_at, color_key")
     .order("name", { ascending: true });
 
   const { data, error } = options.avecArchivees
@@ -206,6 +218,7 @@ export async function listerFoodLists(
     archivedAt: l.archived_at,
     updatedAt: l.updated_at,
     nbAliments: compte.get(l.id) ?? 0,
+    colorKey: couleurValide(l.color_key),
   }));
 }
 
@@ -223,7 +236,7 @@ export async function lireFoodList(
 ): Promise<FoodListDetail | null> {
   const { data: liste, error } = await supabase
     .from("food_lists")
-    .select("id, name, archived_at, updated_at")
+    .select("id, name, archived_at, updated_at, color_key")
     .eq("id", listId)
     .maybeSingle();
   // ⚠️ `null` NE DOIT VOULOIR DIRE QU'UNE SEULE CHOSE : « pas de ligne visible »
@@ -290,7 +303,7 @@ export async function lireFoodList(
     }
   }
 
-  return { id: l.id, name: l.name, archivedAt: l.archived_at, items: resolus };
+  return { id: l.id, name: l.name, archivedAt: l.archived_at, items: resolus, colorKey: couleurValide(l.color_key) };
 }
 
 /**
@@ -857,9 +870,48 @@ export async function dupliquerFoodList(
  * le fait qu'une fois, à l'instant du clic. Après elle, plus aucun chemin ne
  * relie l'occurrence au modèle : c'est ce qui rend l'instantané structurel.
  */
+/**
+ * N1.6A — UNE COULEUR INCONNUE N'EST PAS UNE COULEUR.
+ *
+ * ⚠️ ON NE DEVINE PAS, ON RETOMBE SUR `null`. La contrainte SQL restreint déjà
+ * la colonne au vocabulaire ; une valeur hors vocabulaire ne peut venir que
+ * d'une base non migrée. La rendre telle quelle ferait chercher une classe
+ * Tailwind qui n'existe pas, et l'accent disparaîtrait sans un mot. `null` dit
+ * la même chose, mais explicitement.
+ */
+function couleurValide(valeur: string | null | undefined): ColorKey | null {
+  return isColorKey(valeur) ? valeur : null;
+}
+
+/**
+ * N1.6A — LE COACH PEINT SA LISTE.
+ *
+ * ⚠️ `null` EST UNE VALEUR, PAS UNE ABSENCE D'APPEL. Passer `null` RETIRE la
+ * couleur ; c'est le « Aucune » du sélecteur, et sans lui on ne pourrait jamais
+ * revenir en arrière.
+ *
+ * ⚠️ AUCUN EFFET DE BORD. Cette écriture ne touche ni les aliments de la liste,
+ * ni leurs portions préférées, ni leurs minimums, ni aucun repas déjà
+ * construit : la couleur des repas est un SNAPSHOT, figé à l'ajout.
+ */
+export async function definirCouleurDeListe(
+  supabase: TypedSupabaseClient,
+  listId: string,
+  couleur: ColorKey | null,
+): Promise<boolean> {
+  if (couleur !== null && !isColorKey(couleur)) return false;
+  const { error } = await supabase
+    .from("food_lists")
+    .update({ color_key: couleur } as never)
+    .eq("id", listId);
+  devWarn("definirCouleurDeListe", error);
+  return !error;
+}
+
 export interface SnapshotDeListe {
   readonly label: string;
   readonly sourceListId: string;
+  readonly colorKey: ColorKey | null;
   readonly options: readonly ChoiceOption[];
 }
 
@@ -872,6 +924,11 @@ export async function lireSnapshotDeListe(
   return {
     label: liste.name,
     sourceListId: liste.id,
+    // ⚠️ LA COULEUR EST DU SNAPSHOT, PAS DE L'HYDRATATION — même règle que la
+    // portion et le minimum. Figée ici, au même instant que l'identité : après
+    // ce point, repeindre la bibliothèque ne touche plus ce repas. Et elle DOIT
+    // être figée, parce qu'un élève n'a aucune policy pour lire `food_lists`.
+    colorKey: liste.colorKey,
     // ⚠️ `displayName` EST POSÉ ICI SANS UNE REQUÊTE DE PLUS : `lireFoodList` a
     // déjà résolu chaque item contre sa source. C'est de l'HYDRATATION, pas du
     // snapshot — l'identité reste seule à voyager vers la base.

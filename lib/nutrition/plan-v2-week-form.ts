@@ -799,6 +799,12 @@ export function toWeekSavePayload(state: WeekFormState): {
             id: estUuid(occurrence.id) ? occurrence.id : null,
             label: occurrence.label.trim(),
             source_list_id: occurrence.sourceListId,
+            // ⚠️ N1.6A — LA COULEUR EST DU SNAPSHOT, DONC ELLE REPART. Même
+            // ligne de partage que la portion préférée : `displayName` et
+            // `nutrition` sont de l'hydratation et ne repartent JAMAIS ; la
+            // couleur est figée, et sans elle un simple ré-enregistrement
+            // l'effacerait.
+            color_key: occurrence.colorKey ?? null,
             options: occurrence.options.map((option) => ({
               catalog_food_id: option.type === "aliment" ? option.id : null,
               product_id: option.type === "produit" ? option.id : null,

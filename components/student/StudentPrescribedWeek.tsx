@@ -8,7 +8,7 @@ import {
   StudentMealCard,
 } from "@/components/student/ConsumedMealSection";
 import { DailyIntakeSummary } from "@/components/student/DailyIntakeSummary";
-import { StudentMealChoices } from "@/components/student/StudentMealChoices";
+import { StudentMealChoices, type ItemPourEnregistrement } from "@/components/student/StudentMealChoices";
 import { DailyNutritionProgress } from "@/components/student/DailyNutritionProgress";
 import { NutritionDayCarousel } from "@/components/student/NutritionDayCarousel";
 import { NutritionWeekNav } from "@/components/student/NutritionWeekNav";
@@ -99,6 +99,24 @@ export interface SuiviConsommation {
     unité: ConsumedUnit,
   ) => Promise<boolean>;
   readonly onSupprimerAliment: (entryId: string) => Promise<boolean>;
+  /**
+   * N1.6B — les repas structurés DÉJÀ enregistrés, clés `mealId|date`.
+   *
+   * ⚠️ IL VIENT DE LA PERSISTANCE (`planned_meals.consumed_meal_id`). Un état
+   * React se perdrait au rafraîchissement, et le bouton mentirait.
+   *
+   * Optionnel : sans lui, l'écran est strictement celui de N1.5.3.
+   */
+  readonly repasStructuresEnregistres?: ReadonlySet<string>;
+  /**
+   * N1.6B — copie la proposition affichée dans « Ce que j'ai mangé ».
+   * Les quantités reçues sont ENTIÈRES, telles qu'affichées.
+   */
+  readonly onEnregistrerRepasStructure?: (
+    mealId: string,
+    date: string,
+    items: readonly ItemPourEnregistrement[],
+  ) => Promise<unknown>;
   /** Favoris et récents (A5) — optionnels : l'écran reste entier sans eux. */
   readonly raccourcis?: RaccourcisAlimentsUI;
   /**
@@ -348,6 +366,33 @@ export function StudentPrescribedWeek({
                       key={cleDeComposition(repas.id, date)}
                       occurrences={repas.choiceSlots}
                       cible={cible}
+                      /* ── N1.6B — LE PONT VERS LA CONSOMMATION ────────────
+                         ⚠️ L'ÉTAT « DÉJÀ ENREGISTRÉ » VIENT DE LA BASE, pas
+                         d'un `useState` : `planned_meals.consumed_meal_id`,
+                         relu à chaque chargement. Après un rafraîchissement ou
+                         sur un autre appareil, le bouton dit la vérité.
+
+                         ⚠️ LA CLÉ EST `repas.id|date` : le déjeuner et le
+                         dîner d'un même jour sont indépendants, et le même
+                         repas prescrit posé lundi et mardi vise deux
+                         consommations distinctes.
+
+                         ⚠️ C'EST ICI QUE L'OPTION REDEVIENT UNE IDENTITÉ.
+                         L'écran des choix ne connaît que `optionId` ; les
+                         `catalog_food_id` / `product_id` vivent dans le
+                         snapshot des occurrences, et c'est ce parent qui les
+                         détient. */
+                      enregistrement={
+                        suivi && date && suivi.onEnregistrerRepasStructure
+                          ? {
+                              dejaEnregistre:
+                                suivi.repasStructuresEnregistres?.has(`${repas.id}|${date}`) === true,
+                              enCours: suivi.enCours,
+                              onEnregistrer: (items) =>
+                                void suivi.onEnregistrerRepasStructure?.(repas.id, date, items),
+                            }
+                          : null
+                      }
                     />
 
                     {/* ── FRONTIÈRE ── Tout ce qui précède appartient au COACH

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Copy, Loader2 } from "lucide-react";
 
 import type { FoodListSummary } from "@/lib/supabase/food-lists";
+import { ColorKeyDot } from "@/components/ui/ColorKeyDot";
 
 /**
  * N1.2 — UNE LIGNE DE L'INDEX.
@@ -35,6 +36,8 @@ export function FoodListRow({
           className="flex min-h-[44px] min-w-0 flex-1 flex-col justify-center rounded-control transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         >
           <span className="flex min-w-0 items-center gap-2">
+            {/* ⚠️ N1.6A — PASTILLE AVANT LE NOM, jamais à la place. */}
+            <ColorKeyDot colorKey={liste.colorKey} />
             <span className="truncate text-sm font-bold text-foreground">{liste.name}</span>
             {liste.archivedAt !== null && (
               <span className="flex-shrink-0 rounded-control border border-border px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">

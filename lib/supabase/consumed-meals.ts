@@ -630,6 +630,111 @@ export function supprimerEntree(
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
+   N1.6B — ENREGISTRER LE REPAS STRUCTURÉ
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/** Un aliment de la proposition, tel qu'il est AFFICHÉ. */
+export interface ItemStructureAEnregistrer {
+  readonly slotId: string;
+  readonly catalogFoodId: string | null;
+  readonly productId: string | null;
+  /**
+   * ⚠️ LA QUANTITÉ ENTIÈRE AFFICHÉE, PAS LA QUANTITÉ EXACTE DU SOLVEUR.
+   * L'écran dit « 163 g » ; la base doit dire 163. Envoyer `quantity` (la
+   * valeur flottante d'avant l'arrondi borné) enregistrerait 162,6.
+   */
+  readonly quantity: number;
+  readonly unit: "g" | "ml";
+}
+
+export interface ResultatEnregistrementStructure {
+  readonly plannedMealId: string;
+  readonly consumedMealId: string;
+  /** `true` si le repas était DÉJÀ enregistré : aucune entrée n'a été créée. */
+  readonly dejaEnregistre: boolean;
+  readonly entreesCreees: number;
+}
+
+/**
+ * N1.6B — COPIE LA PROPOSITION AFFICHÉE DANS « CE QUE J'AI MANGÉ ».
+ *
+ * ⚠️ AUCUNE MACRO NE PART D'ICI, ET C'EST L'INVARIANT A5. Le client envoie
+ * l'identité, la quantité et l'unité ; le serveur recharge la source et
+ * calcule. Envoyer les macros calculées à l'écran créerait un second modèle de
+ * calcul, et rien ne garantirait qu'il dise la même chose que le premier.
+ *
+ * ⚠️ ATOMIQUE ET IDEMPOTENTE, EN BASE. Une erreur sur un aliment annule tout ;
+ * un second appel rend le même conteneur sans créer une seule entrée. Ce n'est
+ * pas le bouton désactivé qui protège — c'est `planned_meals.consumed_meal_id`.
+ */
+export async function enregistrerRepasStructure(
+  supabase: TypedSupabaseClient,
+  mealId: string,
+  date: string,
+  items: readonly ItemStructureAEnregistrer[],
+): Promise<ResultatEnregistrementStructure> {
+  const brut = await appeler<{
+    planned_meal_id: string;
+    consumed_meal_id: string;
+    deja_enregistre: boolean;
+    entrees_creees: number;
+  }>(supabase, "enregistrer_repas_structure_consomme", {
+    p_meal_id: mealId,
+    p_consumed_on: date,
+    p_items: items.map((item) => ({
+      slot_id: item.slotId,
+      catalog_food_id: item.catalogFoodId,
+      product_id: item.productId,
+      quantity: item.quantity,
+      unit: item.unit,
+    })),
+  });
+  return {
+    plannedMealId: brut.planned_meal_id,
+    consumedMealId: brut.consumed_meal_id,
+    dejaEnregistre: brut.deja_enregistre === true,
+    entreesCreees: Number(brut.entrees_creees ?? 0),
+  };
+}
+
+/**
+ * N1.6B — QUELS REPAS STRUCTURÉS SONT DÉJÀ ENREGISTRÉS.
+ *
+ * ⚠️ L'ÉTAT VIENT DE LA PERSISTANCE, JAMAIS D'UN `useState`. Après un
+ * rafraîchissement, un changement d'appareil ou une reconnexion, le bouton doit
+ * dire la vérité — et la vérité est `planned_meals.consumed_meal_id`.
+ *
+ * ⚠️ ET IL SURVIT À LA SUPPRESSION D'UNE ENTRÉE. Effacer une ligne dans « Ce
+ * que j'ai mangé » ne réarme pas le bouton : la prescription A ENCORE ÉTÉ
+ * enregistrée. L'élève corrige sa consommation avec les outils A5.
+ *
+ * Rend les clés `mealId|date` des repas déjà enregistrés.
+ */
+export async function lireRepasStructuresEnregistres(
+  supabase: TypedSupabaseClient,
+  dates: readonly string[],
+): Promise<ReadonlySet<string>> {
+  if (dates.length === 0) return new Set();
+  const { data, error } = await supabase
+    .from("planned_meals")
+    .select("meal_id, planned_on, consumed_meal_id")
+    .in("planned_on", [...dates]);
+  // ⚠️ UNE LECTURE RATÉE N'EST PAS « AUCUN REPAS ENREGISTRÉ ». Le dire ferait
+  // réapparaître un bouton actif sur un repas déjà enregistré, et le second
+  // clic serait idempotent — mais l'élève, lui, aurait été trompé.
+  devWarn("lireRepasStructuresEnregistres", error);
+  if (error) return new Set();
+  const lignes = (data ?? []) as unknown as {
+    meal_id: string;
+    planned_on: string;
+    consumed_meal_id: string | null;
+  }[];
+  return new Set(
+    lignes.filter((l) => l.consumed_meal_id !== null).map((l) => `${l.meal_id}|${l.planned_on}`),
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
    A5 — LES ALIMENTS RÉCEMMENT CONSOMMÉS
    ══════════════════════════════════════════════════════════════════════════ */
 

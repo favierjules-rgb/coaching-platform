@@ -96,7 +96,7 @@ begin
       ('food_products',       'preferred_quantity',          'numeric'),
       ('food_list_items',     'preferred_quantity_override', 'numeric'),
       ('meal_choice_options', 'preferred_quantity',          'numeric'),
-      ('meal_choice_options', 'preferred_unit',              'text')
+      ('meal_choice_options', 'quantity_unit',               'text')
     ) as t(tbl, col, typ)
   loop
     perform pg_temp.noter('P-A', format('%s.%s existe, %s, nullable', v_col.tbl, v_col.col, v_col.typ), (
@@ -110,7 +110,7 @@ begin
   perform pg_temp.noter('P-A', 'aucune des cinq colonnes ne porte de DEFAULT', (
     select count(*) = 0 from information_schema.columns
      where table_schema = 'public'
-       and column_name in ('preferred_quantity', 'preferred_unit', 'preferred_quantity_override')
+       and column_name in ('preferred_quantity', 'quantity_unit', 'preferred_quantity_override')
        and column_default is not null));
 end $$;
 
@@ -160,21 +160,32 @@ update public.food_catalog set preferred_quantity = 30
 -- P-C / P-D — la paire du snapshot, et son vocabulaire.
 do $$
 begin
+  -- ⚠️ TROIS ÉTATS SUCCESSIFS, TOUS CORRECTS À LEUR DATE. N1.5.1 posait
+  -- `meal_choice_options_preferred_paire` (« unité ⟺ portion ») ; N1.5.2 a
+  -- ajouté `meal_choice_options_quantites_unite` (« unité ⟺ portion OU
+  -- minimum ») à côté, en gardant l'ancienne pour le rollout ; le CONTRACT du
+  -- 2026-09-11 a supprimé l'ancienne. La GARANTIE de N1.5.1 — une quantité
+  -- sans unité ne veut rien dire — est intacte, portée par la contrainte
+  -- généralisée.
   perform pg_temp.noter('P-C', 'la contrainte de PAIRE quantité/unité existe', (
     select count(*) = 1 from pg_constraint
      where conrelid = 'public.meal_choice_options'::regclass
-       and conname = 'meal_choice_options_preferred_paire'));
+       and conname = 'meal_choice_options_quantites_unite'));
   perform pg_temp.noter('P-C', 'la paire est écrite comme une ÉQUIVALENCE de nullité', (
-    select upper(pg_get_constraintdef(oid)) like '%IS NULL) = (%IS NULL)%'
+    select upper(pg_get_constraintdef(oid)) like '%IS NULL)) = (%IS NULL)%'
        from pg_constraint
       where conrelid = 'public.meal_choice_options'::regclass
-        and conname = 'meal_choice_options_preferred_paire'));
+        and conname = 'meal_choice_options_quantites_unite'));
+  perform pg_temp.noter('P-C', 'la paire de N1.5.1 a bien été retirée par le CONTRACT', (
+    select count(*) = 0 from pg_constraint
+     where conrelid = 'public.meal_choice_options'::regclass
+       and conname = 'meal_choice_options_preferred_paire'));
 
   perform pg_temp.noter('P-D', 'le vocabulaire d''unité du snapshot est exactement (g, ml)', (
     select pg_get_constraintdef(oid) like '%''g''%' and pg_get_constraintdef(oid) like '%''ml''%'
        from pg_constraint
       where conrelid = 'public.meal_choice_options'::regclass
-        and conname = 'meal_choice_options_preferred_unit_check'));
+        and conname = 'meal_choice_options_quantity_unit_check'));
 
   -- ⚠️ NI « PIECE », NI « PORTION ». `meal_entries` les accepte parce qu'un
   -- ÉLÈVE les tape ; ici la valeur est lue par un SOLVEUR, et aucune des deux
@@ -183,7 +194,7 @@ begin
     select pg_get_constraintdef(oid) not like '%piece%' and pg_get_constraintdef(oid) not like '%portion%'
        from pg_constraint
       where conrelid = 'public.meal_choice_options'::regclass
-        and conname = 'meal_choice_options_preferred_unit_check'));
+        and conname = 'meal_choice_options_quantity_unit_check'));
 end $$;
 
 -- ---------------------------------------------------------------------
@@ -308,18 +319,18 @@ begin
         'options', jsonb_build_array(
           -- L'override du coach, DÉJÀ RÉSOLU par la couche appelante.
           jsonb_build_object('catalog_food_id', 'd5100000-0000-4000-8000-00000000f001',
-                             'preferred_quantity', 25, 'preferred_unit', 'g'),
+                             'preferred_quantity', 25, 'quantity_unit', 'g'),
           -- Aucune préférence métier : les deux clés restent absentes.
           jsonb_build_object('catalog_food_id', 'd5100000-0000-4000-8000-00000000f002')
         )))))));
 
   perform pg_temp.noter('P-F', 'la portion effective (override 25 g) est snapshotée', (
-    select o.preferred_quantity = 25 and o.preferred_unit = 'g'
+    select o.preferred_quantity = 25 and o.quantity_unit = 'g'
        from public.meal_choice_options o
       where o.catalog_food_id = 'd5100000-0000-4000-8000-00000000f001'));
 
   perform pg_temp.noter('P-F', 'une option sans préférence garde les DEUX colonnes nulles', (
-    select o.preferred_quantity is null and o.preferred_unit is null
+    select o.preferred_quantity is null and o.quantity_unit is null
        from public.meal_choice_options o
       where o.catalog_food_id = 'd5100000-0000-4000-8000-00000000f002'));
 
@@ -425,7 +436,7 @@ returns jsonb language sql stable as $$
         'options', jsonb_build_array(
           (jsonb_build_object('catalog_food_id', 'd5100000-0000-4000-8000-00000000f001')
            || case when p_qte  is null then '{}'::jsonb else jsonb_build_object('preferred_quantity', p_qte::numeric) end
-           || case when p_unite is null then '{}'::jsonb else jsonb_build_object('preferred_unit', p_unite) end)
+           || case when p_unite is null then '{}'::jsonb else jsonb_build_object('quantity_unit', p_unite) end)
         ))))));
 $$;
 

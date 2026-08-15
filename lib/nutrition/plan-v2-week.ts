@@ -4,6 +4,7 @@ import { buildRecipeTargetForMealSlot } from "@/lib/nutrition/recipe-matching";
 import type { NutritionPlanV2Profile } from "@/lib/nutrition/plan-v2-validation";
 import type { RecipeWithTags } from "@/lib/nutrition/recipe-rows";
 import { WEEKDAY_KEYS, compareWeekdays, type WeekdayKey } from "@/lib/nutrition/weekdays";
+import type { ColorKey } from "@/lib/ui/color-keys";
 
 /**
  * LA SEMAINE D'UN PLAN V2 — assemblage pur, sans Supabase et sans React.
@@ -149,6 +150,20 @@ export interface MealChoiceSlot {
   readonly id: string;
   readonly label: string;
   readonly sourceListId: string | null;
+  /**
+   * N1.6A — LA COULEUR FIGÉE DE LA LISTE, ET C'EST DU SNAPSHOT.
+   *
+   * ⚠️ NE PAS LA CONFONDRE AVEC `sourceListId`. Celui-ci pointe vers la
+   * bibliothèque VIVANTE ; celle-ci est une valeur COPIÉE au moment de l'ajout.
+   * Repeindre la liste ensuite ne touche pas ce repas — même règle que
+   * `preferredQuantity` et `minimumQuantity`.
+   *
+   * ⚠️ ET C'EST LA SEULE SOURCE CÔTÉ ÉLÈVE. Aucune policy `select` n'existe sur
+   * `food_lists` pour un élève : sans ce snapshot, la couleur serait invisible.
+   *
+   * ⚠️ AUCUN SENS NUTRITIONNEL. Le solveur ne la reçoit pas.
+   */
+  readonly colorKey: ColorKey | null;
   readonly options: readonly ChoiceOption[];
 }
 

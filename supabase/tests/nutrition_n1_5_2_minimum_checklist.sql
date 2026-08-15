@@ -3,7 +3,7 @@
 --
 -- CE QU'ELLE VÉRIFIE
 --   M-A   les deux colonnes de minimum existent, nullables, sans default
---   M-B   l'EXPAND : quantity_unit existe, ET preferred_unit SURVIT
+--   M-B   l'EXPAND est TERMINÉ : quantity_unit seule, preferred_unit supprimée
 --   M-C   NULL ou > 0 : zéro et négatif refusés des deux côtés
 --   M-D   la paire GÉNÉRALISÉE : unité ⟺ (portion OU minimum)
 --   M-E   un MINIMUM SEUL, sans portion, est accepté — le cas que N1.5.1 refusait
@@ -15,7 +15,7 @@
 --         PORTION_SANS_UNITE de N1.5.1 CONSERVÉ
 --   M-L   AUCUNE contrainte ne code 300 ni 500
 --   M-M   aucun minimum global sur food_catalog / food_products
---   ROLL  la TRANSITION : copie 1:1, double écriture, aucune divergence
+--   CONTRACT  la transition est TERMINÉE : quantity_unit seule
 --   Z     après le ROLLBACK, aucune donnée de test ne subsiste
 --
 -- ⚠️ NE JAMAIS exécuter sur la Production.
@@ -99,21 +99,26 @@ begin
     select count(*) = 0 from information_schema.columns
      where table_schema='public' and column_name like 'minimum%' and column_default is not null));
 
-  -- ⚠️ EXPAND, PAS RENAME — ET C'EST L'INVERSE DE CE QUE CETTE CHECKLIST
-  -- AFFIRMAIT. Elle exigeait que l'ancien nom ait DISPARU. Mais la production
-  -- est servie par du code qui lit `preferred_unit` : renommer, c'est choisir
-  -- qui casse (la base migrée avant le déploiement, ou l'inverse). Les deux
-  -- colonnes cohabitent donc DÉLIBÉRÉMENT, et la contrainte de cohérence
-  -- (ROLL) interdit qu'elles divergent. Le CONTRACT viendra plus tard.
+  -- ⚠️ CE CONTRÔLE A CHANGÉ DEUX FOIS, ET LES DEUX FOIS AVAIENT RAISON.
+  -- Il exigeait d'abord que l'ancien nom ait DISPARU (stratégie rename) ;
+  -- N1.5.2 l'a inversé, parce que la production lisait encore
+  -- `preferred_unit` et qu'un rename n'a pas d'ordre sûr. Le CONTRACT du
+  -- 2026-09-11 a terminé le chemin : le code neuf est déployé et validé, la
+  -- colonne est supprimée. On revient donc à la forme d'origine — non pas
+  -- parce qu'on s'était trompé, mais parce que l'expand est ARRIVÉ À SON
+  -- TERME. C'est la trace de trois états successifs, tous corrects à leur date.
   perform pg_temp.noter('M-B', 'quantity_unit existe', (
     select count(*) = 1 from information_schema.columns
      where table_schema='public' and table_name='meal_choice_options' and column_name='quantity_unit'));
-  perform pg_temp.noter('M-B', 'preferred_unit SURVIT (aucun drop, aucun rename)', (
-    select count(*) = 1 from information_schema.columns
+  perform pg_temp.noter('M-B', 'preferred_unit a été SUPPRIMÉE (CONTRACT)', (
+    select count(*) = 0 from information_schema.columns
      where table_schema='public' and table_name='meal_choice_options' and column_name='preferred_unit'));
-  perform pg_temp.noter('M-B', 'preferred_unit reste NULLABLE et sans DEFAULT', (
-    select is_nullable = 'YES' and column_default is null from information_schema.columns
-     where table_schema='public' and table_name='meal_choice_options' and column_name='preferred_unit'));
+  perform pg_temp.noter('M-B', 'les contraintes legacy ont disparu avec elle', (
+    select count(*) = 0 from pg_constraint
+     where conrelid = 'public.meal_choice_options'::regclass
+       and conname in ('meal_choice_options_preferred_paire',
+                       'meal_choice_options_preferred_unit_check',
+                       'meal_choice_options_unite_legacy_coherente')));
   perform pg_temp.noter('M-B', 'quantity_unit est du texte NULLABLE, sans DEFAULT', (
     select data_type = 'text' and is_nullable = 'YES' and column_default is null
        from information_schema.columns
@@ -214,25 +219,17 @@ begin
   -- ⚠️ M-F — UNE PORTION SEULE RESTE ACCEPTÉE. C'est la forme des 63 lignes
   -- déjà en production : la contrainte généralisée ne devait pas les casser.
   --
-  -- ⚠️ ET ELLE PORTE LES DEUX UNITÉS, parce que la paire de N1.5.1 est
-  -- CONSERVÉE : « portion présente ⟹ preferred_unit présente » reste vrai
-  -- pendant toute la transition. Une écriture directe qui l'oublierait serait
-  -- refusée — et c'est exactement ce qu'on veut, la double écriture n'est pas
-  -- une politesse mais une contrainte.
+  -- ⚠️ ET DEPUIS LE CONTRACT, ELLE NE PORTE PLUS QU'UNE SEULE UNITÉ. La paire
+  -- de N1.5.1 exigeait `preferred_unit` à côté ; elle a été supprimée avec la
+  -- colonne. `quantity_unit` est désormais seule source métier.
   perform pg_temp.noter('M-F', 'une PORTION SEULE reste acceptée (lignes d''avant N1.5.2)', (
     select pg_temp.compte($q$
       with ins as (
         insert into public.meal_choice_options
-          (slot_id, position, catalog_food_id, preferred_quantity, quantity_unit, preferred_unit)
+          (slot_id, position, catalog_food_id, preferred_quantity, quantity_unit)
         values ('d5200000-0000-4000-8000-00000000a501', 2,
-                'd5200000-0000-4000-8000-00000000f002', 10, 'g', 'g') returning 1)
+                'd5200000-0000-4000-8000-00000000f002', 10, 'g') returning 1)
       select count(*) from ins $q$) = 1));
-  perform pg_temp.noter('M-F', 'une portion SANS son unité legacy est refusée (paire N1.5.1)',
-    pg_temp.refuse_pour($q$ insert into public.meal_choice_options
-        (slot_id, position, catalog_food_id, preferred_quantity, quantity_unit)
-      values ('d5200000-0000-4000-8000-00000000a501', 8,
-              'd5200000-0000-4000-8000-00000000f002', 10, 'g') $q$,
-      'meal_choice_options_preferred_paire'));
   perform pg_temp.noter('M-D', 'une quantité SANS unité est refusée',
     pg_temp.refuse_pour($q$ insert into public.meal_choice_options
         (slot_id, position, catalog_food_id, minimum_quantity)
@@ -249,73 +246,51 @@ begin
     pg_temp.refuse_pour($q$ update public.meal_choice_options set minimum_quantity = 0
                             where slot_id = 'd5200000-0000-4000-8000-00000000a501' $q$,
                         'meal_choice_options_minimum_positive'));
-  -- ⚠️ CIBLÉ SUR LA LIGNE « MINIMUM SEUL », dont l'unité legacy est nulle :
-  -- sinon deux contraintes seraient violées à la fois et le message rapporté
-  -- dépendrait de l'ordre de création, pas de la règle qu'on veut prouver.
+  -- ⚠️ DEPUIS LE CONTRACT, UNE SEULE CONTRAINTE PEUT ÊTRE VIOLÉE ICI : la
+  -- cohérence legacy a disparu avec la colonne, et le ciblage qu'elle imposait
+  -- n'a plus lieu d'être.
   perform pg_temp.noter('M-D', 'une unité hors (g, ml) est refusée',
     pg_temp.refuse_pour($q$ update public.meal_choice_options set quantity_unit = 'piece'
-                            where slot_id = 'd5200000-0000-4000-8000-00000000a501'
-                              and preferred_unit is null $q$,
+                            where slot_id = 'd5200000-0000-4000-8000-00000000a501' $q$,
                         'meal_choice_options_quantity_unit_check'));
 end $$;
 
 -- ---------------------------------------------------------------------
--- ROLL — LA TRANSITION, MESURÉE PLUTÔT QU'ANNONCÉE
+-- ROLL → CONTRACT — LA TRANSITION EST TERMINÉE
 --
--- ⚠️ CE QUE CETTE SECTION GARDE, ET QU'AUCUNE AUTRE NE GARDE : que ce lot
--- soit un EXPAND et pas un RENAME déguisé. Sans elle, supprimer la copie
--- d'unité ou le `preferred_unit` de la double écriture ne rougirait rien —
--- et la casse n'apparaîtrait qu'en production, sur les 63 lignes réelles.
+-- ⚠️ CETTE SECTION GARDAIT L'EXPAND : copie 1:1, double écriture, cohérence
+-- des deux unités. Le CONTRACT du 2026-09-11 a supprimé la colonne legacy ;
+-- ces contrôles n'ont plus d'objet, et les GARDER VERTS artificiellement
+-- (« la contrainte de cohérence existe ») affirmerait une transition encore en
+-- cours. On garde donc ce qui reste vrai, et une seule chose reste vraie :
+-- l'unité neuve porte TOUTE la donnée, seule.
+--
+-- La preuve que la copie 1:1 n'a rien perdu vit désormais dans
+-- `nutrition_contract_preferred_unit_checklist.sql`, sur des données de forme
+-- production.
 -- ---------------------------------------------------------------------
 do $$
 begin
-  -- ROLL-A — LA COPIE 1:1 EST COMPLÈTE. Aucune ligne ne peut porter une unité
-  -- legacy sans son équivalent neuf : ce serait un snapshot dont le NOUVEAU
-  -- code aurait perdu l'échelle.
-  perform pg_temp.noter('ROLL', 'aucune ligne ne garde preferred_unit sans quantity_unit', (
-    select count(*) = 0 from public.meal_choice_options
-     where preferred_unit is not null and quantity_unit is null));
+  perform pg_temp.noter('CONTRACT', 'quantity_unit est SEULE : aucune unité legacy ne subsiste', (
+    select count(*) = 0 from information_schema.columns
+     where table_schema='public' and table_name='meal_choice_options'
+       and column_name like '%unit%' and column_name <> 'quantity_unit'));
 
-  -- ROLL-B — ET AUCUNE DIVERGENCE. Deux colonnes qui disent deux unités
-  -- différentes pour la MÊME quantité, c'est exactement le désastre que le
-  -- rename voulait éviter et que l'expand pourrait réintroduire.
-  perform pg_temp.noter('ROLL', 'aucune ligne ne fait DIVERGER les deux unités', (
-    select count(*) = 0 from public.meal_choice_options
-     where preferred_unit is not null and preferred_unit is distinct from quantity_unit));
-
-  -- ROLL-C — la divergence n'est pas seulement absente, elle est INTERDITE.
-  perform pg_temp.noter('ROLL', 'la contrainte de cohérence legacy existe', (
+  perform pg_temp.noter('CONTRACT', 'la contrainte métier de N1.5.2 est INTACTE', (
     select count(*) = 1 from pg_constraint
      where conrelid = 'public.meal_choice_options'::regclass
-       and conname = 'meal_choice_options_unite_legacy_coherente'));
-  perform pg_temp.noter('ROLL', 'une divergence des deux unités est REFUSÉE',
-    pg_temp.refuse_pour($q$ update public.meal_choice_options
-                               set preferred_unit = 'ml'
-                             where slot_id = 'd5200000-0000-4000-8000-00000000a501'
-                               and preferred_quantity is not null $q$,
-                        'meal_choice_options_unite_legacy_coherente'));
+       and conname = 'meal_choice_options_quantites_unite'));
+  perform pg_temp.noter('CONTRACT', 'le vocabulaire (g, ml) est INTACT', (
+    select count(*) = 1 from pg_constraint
+     where conrelid = 'public.meal_choice_options'::regclass
+       and conname = 'meal_choice_options_quantity_unit_check'));
 
-  -- ROLL-D / ROLL-E — LES CONTRAINTES DE N1.5.1 SONT CONSERVÉES TELLES
-  -- QUELLES. Un minimum SEUL les satisfait déjà (portion nulle, unité legacy
-  -- nulle) : il n'y avait donc rien à généraliser de ce côté-là, et les
-  -- toucher aurait été une casse gratuite du contrat déployé.
-  perform pg_temp.noter('ROLL', 'la paire N1.5.1 est CONSERVÉE, mot pour mot', (
-    select pg_get_constraintdef(oid) like '%(preferred_quantity IS NULL) = (preferred_unit IS NULL)%'
-       from pg_constraint
-      where conrelid = 'public.meal_choice_options'::regclass
-        and conname = 'meal_choice_options_preferred_paire'));
-  perform pg_temp.noter('ROLL', 'le vocabulaire (g, ml) de N1.5.1 est CONSERVÉ', (
-    select pg_get_constraintdef(oid) like '%''g''%' and pg_get_constraintdef(oid) like '%''ml''%'
-       from pg_constraint
-      where conrelid = 'public.meal_choice_options'::regclass
-        and conname = 'meal_choice_options_preferred_unit_check'));
-
-  -- ROLL-F — le nouveau cas reste possible SOUS la contrainte legacy : une
-  -- ligne « minimum seul » porte une unité neuve et AUCUNE unité legacy.
-  perform pg_temp.noter('ROLL', 'un minimum SEUL vit avec preferred_unit NULL', (
+  -- ⚠️ LE CAS NEUF DE N1.5.2 SURVIT AU CONTRACT : un minimum SEUL, sans
+  -- portion. C'était la raison d'être de tout le chantier d'unité.
+  perform pg_temp.noter('CONTRACT', 'un minimum SEUL vit toujours, sans aucune unité legacy', (
     select count(*) = 1 from public.meal_choice_options
      where slot_id = 'd5200000-0000-4000-8000-00000000a501'
-       and minimum_quantity = 5 and quantity_unit = 'g' and preferred_unit is null));
+       and minimum_quantity = 5 and quantity_unit = 'g'));
 end $$;
 
 -- ---------------------------------------------------------------------
@@ -341,21 +316,16 @@ begin
   perform pg_temp.noter('M-K', 'la RPC refuse un minimum sans unité', v_src like '%MINIMUM_SANS_UNITE%');
   perform pg_temp.noter('M-K', 'la RPC refuse un minimum non positif', v_src like '%MINIMUM_NON_POSITIF%');
 
-  -- ⚠️ LA DOUBLE ÉCRITURE, DANS LE CODE ET PAS SEULEMENT DANS L'INTENTION.
-  -- Sans elle, un repas construit PENDANT le rollout serait invisible pour le
-  -- code encore déployé : sa portion aurait une unité que l'ancien lecteur ne
-  -- sait pas trouver.
-  perform pg_temp.noter('ROLL', 'la RPC écrit ENCORE preferred_unit (double écriture)',
-    v_src like '%preferred_unit = %');
-  perform pg_temp.noter('ROLL', 'la double écriture est CONDITIONNÉE à la portion',
-    v_src like '%case when v_opt_pref is not null then v_opt_pref_unit end%');
-  perform pg_temp.noter('ROLL', 'la RPC accepte encore preferred_unit EN ENTRÉE',
-    v_src like '%v_option->>''preferred_unit''%');
+  -- ⚠️ LA DOUBLE ÉCRITURE A DISPARU AVEC LA COLONNE. Elle protégeait le
+  -- rollout ; le rollout est terminé.
+  perform pg_temp.noter('CONTRACT', 'la RPC n''écrit plus preferred_unit',
+    v_src not like '%preferred_unit =%');
 
-  -- ⚠️ AUCUN DROP, AUCUN RENAME — vérifié sur la BASE, pas sur le fichier :
-  -- la colonne est là, avec sa contrainte de vocabulaire d'origine.
-  perform pg_temp.noter('ROLL', 'la RPC ne supprime ni ne renomme preferred_unit',
-    v_src not like '%drop column%' and v_src not like '%rename column%');
+  -- ⚠️ MAIS LA CLÉ D'ENTRÉE SURVIT, ET C'EST DÉLIBÉRÉ : un onglet ouvert avant
+  -- le déploiement peut encore poster l'ancienne clé. Le CONTRACT retire une
+  -- dépendance de STOCKAGE, pas une politesse d'entrée.
+  perform pg_temp.noter('CONTRACT', 'la RPC accepte encore preferred_unit EN ENTRÉE',
+    v_src like '%v_option->>''preferred_unit''%');
 end $$;
 
 -- ---------------------------------------------------------------------
@@ -423,8 +393,8 @@ begin
   -- ⚠️ LE CŒUR DE L'EXPAND : le nouveau code n'envoie QUE `quantity_unit`, et
   -- l'ancienne colonne est remplie quand même. Un lecteur non redéployé
   -- comprend donc un repas construit aujourd'hui.
-  perform pg_temp.noter('ROLL', 'une portion écrite par la RPC remplit LES DEUX unités', (
-    select o.preferred_quantity = 25 and o.quantity_unit = 'g' and o.preferred_unit = 'g'
+  perform pg_temp.noter('CONTRACT', 'une portion écrite par la RPC porte quantity_unit', (
+    select o.preferred_quantity = 25 and o.quantity_unit = 'g'
        from public.meal_choice_options o
       where o.catalog_food_id = 'd5200000-0000-4000-8000-00000000f001'
         and o.slot_id in (select id from public.meal_choice_slots where label = 'Occurrence N152 RPC')));
@@ -432,9 +402,9 @@ begin
   -- ⚠️ ET UN MINIMUM SEUL NE REMPLIT PAS L'ANCIENNE. Elle ne dit que l'unité
   -- d'une PORTION : lui faire dire celle d'un minimum tromperait l'ancien
   -- lecteur, qui en déduirait une portion qui n'existe pas.
-  perform pg_temp.noter('ROLL', 'un minimum seul laisse preferred_unit NULL', (
+  perform pg_temp.noter('CONTRACT', 'un minimum seul reste écrit sans portion', (
     select o.minimum_quantity = 5 and o.quantity_unit = 'g'
-       and o.preferred_quantity is null and o.preferred_unit is null
+       and o.preferred_quantity is null
        from public.meal_choice_options o
       where o.catalog_food_id = 'd5200000-0000-4000-8000-00000000f002'
         and o.slot_id in (select id from public.meal_choice_slots where label = 'Occurrence N152 RPC')));
@@ -460,8 +430,11 @@ begin
   perform public.save_nutrition_plan_v2(pg_temp.payload(jsonb_build_array(
     jsonb_build_object('catalog_food_id', 'd5200000-0000-4000-8000-00000000f001',
                        'preferred_quantity', 40, 'preferred_unit', 'ml'))));
-  perform pg_temp.noter('ROLL', 'une charge utile ANCIENNE (preferred_unit) remplit les deux', (
-    select o.preferred_quantity = 40 and o.quantity_unit = 'ml' and o.preferred_unit = 'ml'
+  -- ⚠️ ET L'ALIAS D'ENTRÉE SURVIT AU CONTRACT. Une charge utile écrite avant
+  -- le déploiement ne connaît que `preferred_unit` ; elle reste comprise, et
+  -- alimente `quantity_unit`.
+  perform pg_temp.noter('CONTRACT', 'une charge utile ANCIENNE (preferred_unit) alimente quantity_unit', (
+    select o.preferred_quantity = 40 and o.quantity_unit = 'ml'
        from public.meal_choice_options o
       where o.catalog_food_id = 'd5200000-0000-4000-8000-00000000f001'
         and o.slot_id in (select id from public.meal_choice_slots where label = 'Occurrence N152 RPC')));

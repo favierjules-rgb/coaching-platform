@@ -16,6 +16,7 @@ import {
 import type { MealChoiceSolution, MealMacroTarget } from "@/lib/nutrition/meal-choice-solver";
 import { APPROXIMATE_TOLERANCE_GRAMS, APPROXIMATE_TOLERANCE_RATIO } from "@/lib/nutrition/recipe-solver";
 import type { MealChoiceSlot } from "@/lib/nutrition/plan-v2-week";
+import { colorKeyBorderClass } from "@/components/ui/ColorKeyDot";
 
 /**
  * N1.4 — L'ÉLÈVE CHOISIT UN ALIMENT DANS CHAQUE LISTE DE SON REPAS.
@@ -66,8 +67,22 @@ import type { MealChoiceSlot } from "@/lib/nutrition/plan-v2-week";
 export function StudentMealChoices({
   occurrences,
   cible = null,
+  enregistrement = null,
 }: {
   readonly occurrences: readonly MealChoiceSlot[];
+  /**
+   * N1.6B — DE QUOI ENREGISTRER LA PROPOSITION DANS « CE QUE J'AI MANGÉ ».
+   *
+   * ⚠️ `null` LAISSE L'ÉCRAN STRICTEMENT DANS SON ÉTAT N1.5.3 : aucun bouton,
+   * aucune écriture, aucun import Supabase par ce composant. C'est le parent
+   * qui branche la persistance ; celui-ci reste PUR et rendu hors navigateur
+   * par les tests.
+   */
+  readonly enregistrement?: {
+    readonly dejaEnregistre: boolean;
+    readonly enCours: boolean;
+    readonly onEnregistrer: (items: readonly ItemPourEnregistrement[]) => void;
+  } | null;
   /**
    * ⚠️ LA CIBLE DU REPAS VIENT DU PLAN DU COACH, PAS D'ICI. C'est la valeur
    * DÉJÀ affichée en tête du repas par `StudentPrescribedWeek` — donc
@@ -157,7 +172,9 @@ export function StudentMealChoices({
         </p>
       )}
 
-      {calcul.etat === "calcule" && <QuantitesDuRepas solution={calcul.solution} />}
+      {calcul.etat === "calcule" && (
+        <QuantitesDuRepas solution={calcul.solution} enregistrement={enregistrement} />
+      )}
     </section>
   );
 }
@@ -194,7 +211,17 @@ export function StudentMealChoices({
  * « RÉSULTAT » est donc littéralement ce que produisent les grammes écrits
  * juste au-dessus — et les écarts aussi.
  */
-export function QuantitesDuRepas({ solution }: { readonly solution: MealChoiceSolution }) {
+export function QuantitesDuRepas({
+  solution,
+  enregistrement = null,
+}: {
+  readonly solution: MealChoiceSolution;
+  readonly enregistrement?: {
+    readonly dejaEnregistre: boolean;
+    readonly enCours: boolean;
+    readonly onEnregistrer: (items: readonly ItemPourEnregistrement[]) => void;
+  } | null;
+}) {
   const titreId = useId();
   const ecarts = ecartsAAfficher(solution);
 
@@ -274,6 +301,55 @@ export function QuantitesDuRepas({ solution }: { readonly solution: MealChoiceSo
         </div>
       )}
 
+      {/* ── N1.6B — ENREGISTRER LE REPAS ────────────────────────────────
+          ⚠️ LE STATUT NE BLOQUE JAMAIS. `exact`, `approché` et `impossible`
+          s'enregistrent tous : c'est l'élève qui décide de ce qu'il mange, et
+          une « meilleure proposition possible » reste une proposition qu'il
+          peut suivre. Ce qui bloque, ce sont les impossibilités STRUCTURELLES
+          — choix incomplets, aliment non calculable, solveur non convergent —
+          et elles n'atteignent même pas ce composant : `calculDuRepas` rend
+          alors « incomplet » ou « non-calculable », et rien de tout ceci n'est
+          rendu.
+
+          ⚠️ LES QUANTITÉS ENVOYÉES SONT CELLES QUI SONT AFFICHÉES.
+          `displayQuantity`, l'entier d'après l'arrondi borné — jamais
+          `quantity`, la valeur flottante interne. L'écran dit 163 g, la base
+          doit dire 163. */}
+      {enregistrement !== null && (
+        <div className="flex min-w-0 flex-col gap-1 border-t border-border pt-2">
+          {enregistrement.dejaEnregistre ? (
+            <>
+              <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-foreground">
+                <Check size={14} aria-hidden="true" />
+                Repas enregistré
+              </p>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                Les quantités ont été ajoutées à «&nbsp;Ce que j&apos;ai mangé&nbsp;». Modifie-les
+                ci-dessous si tu as mangé autre chose.
+              </p>
+            </>
+          ) : (
+            <button
+              type="button"
+              disabled={enregistrement.enCours}
+              onClick={() =>
+                enregistrement.onEnregistrer(
+                  solution.items.map((item) => ({
+                    slotId: item.slotId,
+                    optionId: item.optionId,
+                    quantity: item.displayQuantity,
+                    unit: item.unit,
+                  })),
+                )
+              }
+              className="pressable flex min-h-[44px] w-full items-center justify-center gap-2 rounded-control border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            >
+              {enregistrement.enCours ? "Enregistrement…" : "Enregistrer le repas"}
+            </button>
+          )}
+        </div>
+      )}
+
       {/* ⚠️ AUCUN ALIMENT PRÉCIS N'EST SUGGÉRÉ, ET CE N'EST PAS UN OUBLI.
           « Ajoute 10 g d'huile » réintroduirait un rôle nutritionnel par la
           bande : il faudrait décider que l'huile « sert » les lipides, donc
@@ -287,6 +363,25 @@ export function QuantitesDuRepas({ solution }: { readonly solution: MealChoiceSo
       )}
     </section>
   );
+}
+
+/**
+ * N1.6B — CE QUE L'ÉCRAN REMET AU PARENT POUR ENREGISTRER.
+ *
+ * ⚠️ AUCUNE MACRO N'EN FAIT PARTIE, et ce n'est pas un oubli : le serveur
+ * recharge la source et calcule. Les envoyer d'ici créerait un second modèle
+ * de calcul dont rien ne garantirait qu'il dise la même chose.
+ *
+ * ⚠️ `optionId` PLUTÔT QUE L'IDENTITÉ. C'est le parent qui résout l'option en
+ * `catalog_food_id` / `product_id` : cet écran ne connaît que ce que le
+ * solveur lui a rendu, et inventer une identité ici serait la deviner.
+ */
+export interface ItemPourEnregistrement {
+  readonly slotId: string;
+  readonly optionId: string;
+  /** ⚠️ L'ENTIER AFFICHÉ, après arrondi borné. Jamais la valeur flottante. */
+  readonly quantity: number;
+  readonly unit: "g" | "ml";
 }
 
 /** Le libellé élève d'une macro. Aucun jargon, aucune abréviation. */
@@ -364,7 +459,11 @@ function LigneChoix({
   const groupeId = useId();
 
   return (
-    <li className="min-w-0 rounded-control border border-border bg-card">
+    /* ⚠️ N1.6A — L'ACCENT DE COULEUR EST UNE BARRE LATÉRALE, ET RIEN D'AUTRE.
+       Le libellé de l'occurrence reste devant, écrit : la couleur ne dit
+       jamais seule ce qu'est cette liste. Sans couleur, la classe est vide et
+       le gabarit est celui d'avant N1.6A, au pixel près. */
+    <li className={`min-w-0 rounded-control border border-border bg-card ${colorKeyBorderClass(occurrence.colorKey)}`}>
       {/* ⚠️ UN VRAI BOUTON, PAS UN DIV CLIQUABLE. `aria-expanded` dit l'état,
           et le libellé ne dépend jamais du seul chevron. */}
       <button

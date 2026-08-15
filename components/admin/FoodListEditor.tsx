@@ -17,11 +17,13 @@ import {
   definirPortionOverride,
   nomPropre,
   portionEffective,
+  definirCouleurDeListe,
   renommerFoodList,
   reordonnerFoodList,
   retirerAlimentDeListe,
   uniteDePortion,
 } from "@/lib/supabase/food-lists";
+import { ColorKeyPicker } from "@/components/ui/ColorKeyPicker";
 
 /**
  * N1.2 — L'ÉDITEUR D'UNE LISTE.
@@ -161,10 +163,34 @@ export function FoodListEditor({
         </p>
       )}
 
-      {/* ── LE NOM ───────────────────────────────────────────────────── */}
+      {/* ── LE NOM ET LA COULEUR ─────────────────────────────────────── */}
       <section className="flex min-w-0 flex-col gap-3">
         <div className="min-w-0 sm:max-w-sm">
           <Field label="Nom de la liste" value={nom} onChange={setNom} disabled={occupe} />
+        </div>
+
+        {/* ⚠️ N1.6A — LA COULEUR EST PUREMENT VISUELLE, ET C'EST ÉCRIT À
+            L'ÉCRAN. Sans cette phrase, un coach pourrait croire qu'il déclare
+            « protéines » ou « légumes » — c'est-à-dire un rôle nutritionnel.
+            Aucun calcul ne lit cette valeur.
+
+            ⚠️ ET ELLE S'ÉCRIT IMMÉDIATEMENT, contrairement au nom et aux
+            portions. Un sélecteur de couleur n'a pas d'état intermédiaire à
+            valider : on clique une pastille, le choix est fait. Exiger un
+            bouton « Enregistrer la couleur » serait du cérémonial. */}
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
+          <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+            Couleur
+          </span>
+          <ColorKeyPicker
+            value={liste.colorKey}
+            ariaLabel={`Couleur de la liste ${liste.name}`}
+            autoriserAucune
+            onChange={(couleur) => void avec((c) => definirCouleurDeListe(c, liste.id, couleur))}
+          />
+          <span className="text-[11px] text-muted-foreground">
+            Repère visuel uniquement — sans effet sur les quantités calculées.
+          </span>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <button

@@ -131,12 +131,14 @@ export function NutritionPlanV2WeekPanel({
               onChange(addChoiceSlot(state, jourOuvert, mealId, {
                 label: snapshot.label,
                 sourceListId: snapshot.sourceListId,
+                colorKey: snapshot.colorKey,
                 options: snapshot.options,
               })),
             onRemplacer: (mealId, slotId, snapshot) =>
               onChange(replaceChoiceSlot(state, jourOuvert, mealId, slotId, {
                 label: snapshot.label,
                 sourceListId: snapshot.sourceListId,
+                colorKey: snapshot.colorKey,
                 options: snapshot.options,
               })),
             onRetirer: (mealId, slotId) =>

@@ -237,6 +237,45 @@ export default function NutritionPlanDetailPage() {
                 onAjouterManuel: consommation.ajouterManuel,
                 onCorriger: consommation.corrigerQuantité,
                 onSupprimerAliment: consommation.supprimerAliment,
+                // ── N1.6B — LE BOUTON « ENREGISTRER LE REPAS » ────────────
+                // ⚠️ L'ÉTAT VIENT DE LA BASE. `repasStructuresEnregistres` est
+                // relu par le hook à chaque chargement, depuis
+                // `planned_meals.consumed_meal_id` : un rafraîchissement, un
+                // autre appareil ou une reconnexion rendent le même verdict.
+                repasStructuresEnregistres: consommation.repasStructuresEnregistres,
+                // ⚠️ C'EST ICI QUE L'OPTION REDEVIENT UNE IDENTITÉ. L'écran des
+                // choix ne connaît que `optionId` ; le snapshot des occurrences
+                // vit dans la semaine chargée, et c'est cette page qui la
+                // détient. Résoudre ailleurs demanderait de faire voyager les
+                // identités jusqu'à un composant qui n'en a pas besoin.
+                onEnregistrerRepasStructure: async (mealId, date, items) => {
+                  const repas = v2.week?.days
+                    .flatMap((jour) => jour.meals)
+                    .find((m) => m.id === mealId);
+                  if (!repas) return null;
+                  const parOption = new Map(
+                    repas.choiceSlots.flatMap((occurrence) =>
+                      occurrence.options
+                        .filter((o) => typeof o.optionId === "string")
+                        .map((o) => [o.optionId as string, o] as const),
+                    ),
+                  );
+                  const resolus = items.map((item) => {
+                    const option = parOption.get(item.optionId);
+                    return {
+                      slotId: item.slotId,
+                      // ⚠️ AUCUN REPLI SILENCIEUX. Une option introuvable
+                      // laisse les deux identités nulles, et la RPC refuse
+                      // avec IDENTITE_INVALIDE — un refus lisible plutôt
+                      // qu'une entrée fantôme.
+                      catalogFoodId: option?.type === "aliment" ? option.id : null,
+                      productId: option?.type === "produit" ? option.id : null,
+                      quantity: item.quantity,
+                      unit: item.unit,
+                    };
+                  });
+                  return consommation.enregistrerRepasStructure(mealId, date, resolus);
+                },
               }}
             />
           ) : (

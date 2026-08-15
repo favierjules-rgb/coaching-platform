@@ -703,6 +703,12 @@ await test("HIST17. l'élève A ne voit jamais l'élève B", () => {
       "20260907090000_n1_3_occurrences_de_listes_dans_les_repas.sql",
       "20260908090000_n1_5_1_portions_preferees.sql",
       "20260909090000_n1_5_2_quantite_minimale.sql",
+      // ⚠️ N1.6 — TROIS MIGRATIONS DE PLUS, ET LA LISTE EST NOMINATIVE EXPRÈS.
+      // Un compteur seul dirait « 79 » sans dire lesquelles : c'est le nom qui
+      // rend visible qu'aucune migration étrangère ne s'est glissée dans le lot.
+      "20260910090000_n1_6_a_couleurs_de_listes.sql",
+      "20260911090000_contract_preferred_unit.sql",
+      "20260912090000_n1_6_b_enregistrer_repas_structure.sql",
     ], `migrations postérieures inattendues : ${tardives.join(", ")}`);
 
   // Et c'est EXÉCUTÉ, pas relu : la checklist crée deux élèves du même coach,
@@ -1070,11 +1076,11 @@ await test("HIST-SUP. le dépouillement des commentaires n'a rien vidé", () => 
   // vit aussi dans `supabase/baseline/manifest.json` : les deux doivent
   // s'accorder, sinon l'un des deux ment.
   const migrations = lireMigrations();
-  assert.equal(migrations.length, 76, "76 fichiers : A5.7 n'en a créé aucun, N1.1 en a créé un, N1.3 un second");
+  assert.equal(migrations.length, 79, "79 fichiers : A5.7 n'en a créé aucun, N1.1 en a créé un, N1.3 un second");
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json")) as {
     migrations_post_baseline_attendues: readonly string[];
   };
-  assert.equal(manifeste.migrations_post_baseline_attendues.length, 49);
+  assert.equal(manifeste.migrations_post_baseline_attendues.length, 52);
 
   // Et rien qui ressemble à une table, une vue ou un agrégat d'historique.
   //

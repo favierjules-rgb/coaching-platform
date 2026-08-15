@@ -110,7 +110,7 @@ function semaineAvecRepas(): { state: WeekFormState; mealId: string } {
 
 const occurrenceDe = (label: string, ...ids: string[]): Omit<MealChoiceSlot, "id"> => ({
   label,
-  sourceListId: null,
+  sourceListId: null, colorKey: null,
   options: ids.map((id) => ({ type: "aliment" as const, id })),
 });
 
@@ -168,7 +168,13 @@ await test("N1.3-04/05/06. les options n'ont QUE des identités : ni nom, ni mac
 
   const occurrences = repas.choice_slots as readonly Record<string, unknown>[];
   assert.equal(occurrences.length, 1);
-  assert.deepEqual(Object.keys(occurrences[0]).sort(), ["id", "label", "options", "source_list_id"]);
+  // ⚠️ CINQ CLÉS DEPUIS N1.6A, ET PAS UNE DE PLUS. L'identifiant, le libellé,
+  // la liste source, les options — et la COULEUR, qui est du SNAPSHOT au même
+  // titre que la portion préférée : sans elle, un ré-enregistrement effacerait
+  // la couleur du repas. Elle ne porte AUCUN sens nutritionnel ; le contrôle
+  // `COLOR-06` vérifie que le solveur ne la reçoit jamais.
+  assert.deepEqual(Object.keys(occurrences[0]).sort(),
+    ["color_key", "id", "label", "options", "source_list_id"]);
 
   const options = occurrences[0].options as readonly Record<string, unknown>[];
   for (const option of options) {

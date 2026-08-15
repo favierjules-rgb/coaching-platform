@@ -438,7 +438,7 @@ const optionHydratée = (
 const occurrence = (id: string, label: string, options: readonly ChoiceOption[]): MealChoiceSlot => ({
   id,
   label,
-  sourceListId: null,
+  sourceListId: null, colorKey: null,
   options,
 });
 
@@ -678,9 +678,21 @@ await test("N1.5-10/11/12. AUCUNE écriture : ni repas consommé, ni entrée, ni
     assert.ok(!code.includes(".insert("), `${nom} écrit`);
     assert.ok(!code.includes(".update("), `${nom} écrit`);
   }
-  // ⚠️ ET PAS DE BOUTON « ENREGISTRER » : il n'y a rien à enregistrer, et un
-  // bouton qui ne fait rien est un mensonge d'interface.
-  assert.ok(!/Enregistrer/i.test(CODE_CHOIX));
+  // ⚠️ N1.6B — LE BOUTON « ENREGISTRER LE REPAS » EXISTE MAINTENANT, ET CE
+  // CONTRÔLE DISAIT L'INVERSE. Il gardait une vérité de N1.5 : « rien à
+  // enregistrer, donc pas de bouton ». Depuis N1.6B il y a quelque chose à
+  // enregistrer — mais la garantie qui compte, elle, est INTACTE et vérifiée
+  // ci-dessus : cet écran n'écrit toujours RIEN lui-même. Il reçoit un rappel
+  // et l'appelle ; toute la persistance vit chez le parent.
+  assert.ok(CODE_CHOIX.includes("Enregistrer le repas"), "le bouton N1.6B a disparu");
+  assert.ok(CODE_CHOIX.includes("enregistrement.onEnregistrer("),
+    "l'écran doit DÉLÉGUER l'enregistrement, jamais l'exécuter");
+  // ⚠️ ET IL ENVOIE LA QUANTITÉ AFFICHÉE, PAS LA QUANTITÉ INTERNE. `quantity`
+  // est la valeur flottante d'avant l'arrondi borné : l'envoyer enregistrerait
+  // 162,6 sous un écran qui dit 163.
+  assert.ok(CODE_CHOIX.includes("quantity: item.displayQuantity"),
+    "la quantité envoyée doit être celle qui est AFFICHÉE");
+  assert.ok(!/quantity: item\.quantity\b/.test(CODE_CHOIX));
 });
 
 await test("N1.5-13. un repas SANS occurrence est inchangé à l'octet près", () => {
@@ -1939,7 +1951,19 @@ await test("A5-MIN-08/09. les deux modèles ne se touchent pas", () => {
   const posConso = CODE_SEMAINE.indexOf("<ConsumedMealSection");
   assert.ok(posChoix > 0 && posConso > posChoix, "l'ordre des deux sections a changé");
   const propsChoix = CODE_SEMAINE.slice(posChoix, CODE_SEMAINE.indexOf("/>", posChoix));
-  assert.ok(!propsChoix.includes("suivi"), "les choix reçoivent le suivi de consommation");
+  // ⚠️ N1.6B — CE CONTRÔLE INTERDISAIT TOUT `suivi` DANS LES PROPS DES CHOIX.
+  // C'était la bonne garantie tant qu'aucun pont n'existait. Le bouton
+  // « Enregistrer le repas » en crée un — mais ÉTROIT et NOMMÉ : deux valeurs
+  // et un rappel, rien de la consommation elle-même. Ce qui reste interdit,
+  // et c'est ce que le contrôle gardait vraiment, c'est que l'écran des choix
+  // voie les REPAS CONSOMMÉS, leurs ENTRÉES ou les gestes d'A5.
+  for (const interdit of ["suivi.meals", "suivi.onAjouter", "suivi.onCorriger",
+                          "suivi.onSupprimerAliment", "suivi.raccourcis", "suivi.onOuvrirPrescrit"]) {
+    assert.ok(!propsChoix.includes(interdit), `les choix reçoivent « ${interdit} »`);
+  }
+  // Le pont autorisé, et lui seul.
+  assert.ok(propsChoix.includes("repasStructuresEnregistres") && propsChoix.includes("onEnregistrerRepasStructure"),
+    "le pont N1.6B a disparu des props");
   const propsConso = CODE_SEMAINE.slice(posConso, CODE_SEMAINE.indexOf("/>", posConso));
   for (const notion of ["choiceSlots", "solution", "quantit"]) {
     assert.ok(!propsConso.includes(notion), `la consommation reçoit « ${notion} »`);

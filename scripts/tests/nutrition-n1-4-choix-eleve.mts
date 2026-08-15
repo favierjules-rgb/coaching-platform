@@ -68,7 +68,7 @@ const option = (optionId: string, id: string, displayName: string | null, type: 
 const occurrence = (id: string, label: string, options: readonly ChoiceOption[]): MealChoiceSlot => ({
   id,
   label,
-  sourceListId: null,
+  sourceListId: null, colorKey: null,
   options,
 });
 
@@ -312,11 +312,15 @@ await test("N1.4-21/22/23. choisir n'écrit RIEN, nulle part", () => {
     assert.ok(!CODE_CHOIX.includes(rpc), `l'écran des choix appelle ${rpc}`);
   }
 
-  // ⚠️ ET PAS DE FAUX BOUTON. Rien ne prétend enregistrer un repas qui n'a
-  // encore ni quantité, ni consommation.
-  for (const mensonge of ["Enregistrer", "Valider mon repas", "Terminer", "Sauvegarder"]) {
+  // ⚠️ N1.6B — « ENREGISTRER LE REPAS » N'EST PLUS UN FAUX BOUTON. Ce contrôle
+  // interdisait toute promesse d'enregistrement, à raison : en N1.4 il n'y
+  // avait ni quantité ni consommation à enregistrer. Il y a désormais les
+  // deux. La garantie gardée est ailleurs, et elle tient toujours : l'écran
+  // DÉLÈGUE, il n'écrit pas — les assertions ci-dessus le prouvent.
+  for (const mensonge of ["Valider mon repas", "Terminer", "Sauvegarder"]) {
     assert.ok(!CODE_CHOIX.includes(mensonge), `l'écran promet « ${mensonge} »`);
   }
+  assert.ok(CODE_CHOIX.includes("Enregistrer le repas"));
   // `ouvrir_repas_prescrit` reste déclenchée par le SEUL « Ajouter un aliment ».
   assert.ok(CODE_SEMAINE.includes("onOuvrirConteneur={() => suivi.onOuvrirPrescrit(repas.id, date)}"));
 });
