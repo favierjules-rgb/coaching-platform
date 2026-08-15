@@ -228,6 +228,8 @@ interface OptionRowShape {
   position: number;
   catalog_food_id: string | null;
   product_id: string | null;
+  preferred_quantity: number | string | null;
+  preferred_unit: string | null;
 }
 
 /**
@@ -261,7 +263,7 @@ async function lireOccurrences(
     // désigner la ligne snapshotée elle-même, pas l'aliment. Deux occurrences
     // peuvent contenir le même aliment ; l'identifiant de l'aliment ne suffirait
     // donc pas à dire lequel des deux choix a été fait.
-    .select("id, slot_id, position, catalog_food_id, product_id")
+    .select("id, slot_id, position, catalog_food_id, product_id, preferred_quantity, preferred_unit")
     .in("slot_id", slots.map((s) => s.id))
     .order("position", { ascending: true });
   devWarn("readNutritionPlanV2Week (meal_choice_options)", optionError);
@@ -277,6 +279,26 @@ async function lireOccurrences(
     [...new Set(options.map((o) => o.product_id).filter((x): x is string => x !== null))],
   );
 
+  /**
+   * N1.5.1 — la portion SNAPSHOTÉE, relue telle qu'elle a été figée.
+   *
+   * ⚠️ AUCUNE RÉSOLUTION ICI. On ne va pas chercher le standard ni l'override :
+   * ce serait faire suivre la bibliothèque à un repas déjà construit, ce que
+   * tout ce chantier interdit. Ce qui est en base EST la préférence.
+   *
+   * ⚠️ ET LA PAIRE EST EXIGÉE. Une quantité sans unité — impossible en base,
+   * mais pas impossible dans une base non migrée — redevient « pas de
+   * préférence » plutôt qu'une portion dont on ignore l'échelle.
+   */
+  const portionDe = (o: OptionRowShape): { quantite: number | null; unite: "g" | "ml" | null } => {
+    const n = o.preferred_quantity === null || o.preferred_quantity === ""
+      ? Number.NaN
+      : Number(o.preferred_quantity);
+    const unite = o.preferred_unit === "g" || o.preferred_unit === "ml" ? o.preferred_unit : null;
+    if (!Number.isFinite(n) || n <= 0 || unite === null) return { quantite: null, unite: null };
+    return { quantite: n, unite };
+  };
+
   const parSlot = new Map<string, ChoiceOption[]>();
   for (const o of options) {
     const hydratée =
@@ -285,23 +307,19 @@ async function lireOccurrences(
         : o.product_id !== null
           ? noms.produits.get(o.product_id)
           : undefined;
+    const portion = portionDe(o);
+    const socle = {
+      optionId: o.id,
+      displayName: hydratée?.displayName ?? null,
+      nutrition: hydratée?.nutrition ?? null,
+      preferredQuantity: portion.quantite,
+      preferredUnit: portion.unite,
+    } as const;
     const cible: ChoiceOption | null =
       o.catalog_food_id !== null
-        ? {
-            type: "aliment",
-            id: o.catalog_food_id,
-            optionId: o.id,
-            displayName: hydratée?.displayName ?? null,
-            nutrition: hydratée?.nutrition ?? null,
-          }
+        ? { ...socle, type: "aliment", id: o.catalog_food_id }
         : o.product_id !== null
-          ? {
-              type: "produit",
-              id: o.product_id,
-              optionId: o.id,
-              displayName: hydratée?.displayName ?? null,
-              nutrition: hydratée?.nutrition ?? null,
-            }
+          ? { ...socle, type: "produit", id: o.product_id }
           : null;
     if (!cible) continue;
     const liste = parSlot.get(o.slot_id) ?? [];

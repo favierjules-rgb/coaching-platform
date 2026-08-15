@@ -40,6 +40,7 @@ import {
   optionExploitable,
 } from "../../lib/nutrition/meal-choice-selection";
 import {
+  ECHELLE_NEUTRE,
   MAX_LIQUIDE_ML,
   MAX_SOLIDE_G,
   solveMealChoices,
@@ -49,6 +50,7 @@ import {
 } from "../../lib/nutrition/meal-choice-solver";
 import { slotMacrosForDay } from "../../lib/nutrition/plan-v2-week";
 import type { ChoiceOption, MealChoiceSlot, PlanV2Week } from "../../lib/nutrition/plan-v2-week";
+import { lireSnapshotDeListe } from "../../lib/supabase/food-lists";
 import { readNutritionPlanV2Week } from "../../lib/supabase/nutrition-week";
 
 function lire(chemin: string): string {
@@ -1013,4 +1015,387 @@ await test("N1.5-BOUND-15. le plafond d'un LIQUIDE est bien 500 ml, pas 300", ()
   assert.ok(lait.displayQuantity > MAX_SOLIDE_G,
     `le lait vaut ${lait.displayQuantity} ml : le test ne discriminerait pas un plafond à 300`);
   assert.ok(lait.displayQuantity <= MAX_LIQUIDE_ML);
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+   N1.5.1-PREF-01..16 — LES PORTIONS PRÉFÉRÉES
+   ──────────────────────────────────────────────────────────────────────────
+   ⚠️ UNE PRÉFÉRENCE N'EST PAS UNE CONTRAINTE. Elle dit « à macros égales,
+   approche plutôt cette quantité » — et rien d'autre. Les macros restent
+   prioritaires, les plafonds restent durs, et le statut ne dépend QUE des
+   macros finales.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+const CODE_LISTES = sansProse(lire("../../lib/supabase/food-lists.ts"));
+const CODE_FORM = sansProse(lire("../../lib/nutrition/plan-v2-week-form.ts"));
+const CODE_EDITEUR = sansProse(lire("../../components/admin/FoodListEditor.tsx"));
+
+/** Le petit déjeuner TERRAIN, en valeurs Ciqual réelles (whey = produit). */
+const PDJ = [
+  { ...aliment("pain", "Pain de mie complet, préemballé", 8, 41.8, 4.1), preferredQuantity: 80 },
+  { ...aliment("huile", "Huile d'olive vierge extra", 0.25, 0, 99.9), preferredQuantity: 10 },
+  { ...aliment("fb", "Fromage blanc nature 0 % MG", 7.19, 4.22, 0), preferredQuantity: 200 },
+  { ...aliment("whey", "Whey", 80, 5, 2), preferredQuantity: 30 },
+  { ...aliment("agave", "Sirop d'agave", 0.25, 78, 0.5), preferredQuantity: 20 },
+];
+const CIBLE_PDJ: MealMacroTarget = { proteinGrams: 55, carbGrams: 93, fatGrams: 32 };
+
+/**
+ * Écart relatif moyen aux portions de RÉFÉRENCE.
+ *
+ * ⚠️ LA RÉFÉRENCE EST PASSÉE EN PARAMÈTRE, PAS LUE DANS LA SOLUTION. Mesurer
+ * la solution NON GUIDÉE contre ses propres préférences (absentes) rendrait
+ * 0 % — un « parfait » qui ne voudrait rien dire. Les deux solutions doivent
+ * être jugées à la même aune.
+ */
+function distanceAuxPortions(
+  s: MealChoiceSolution,
+  reference: readonly SelectedFoodForMealSolver[],
+): number {
+  const paires = s.items
+    .map((i) => ({ i, p: reference.find((f) => f.optionId === i.optionId)?.preferredQuantity ?? null }))
+    .filter((x): x is { i: (typeof s.items)[number]; p: number } => typeof x.p === "number" && x.p > 0);
+  if (paires.length === 0) return 0;
+  return paires.reduce((t, { i, p }) => t + Math.abs(i.displayQuantity - p) / p, 0) / paires.length;
+}
+
+await test("N1.5.1-PREF-01. le cas TERRAIN : la répartition devient humaine, les macros restent exactes", () => {
+  const sans = solveMealChoices(PDJ.map((f) => ({ ...f, preferredQuantity: null })), CIBLE_PDJ);
+  const avec = solveMealChoices(PDJ, CIBLE_PDJ);
+
+  console.log(`    sans portions : ${sans.items.map((i) => `${i.name.split(",")[0]} ${i.displayQuantity}`).join(", ")}`);
+  console.log(`    avec portions : ${avec.items.map((i) => `${i.name.split(",")[0]} ${i.displayQuantity}`).join(", ")}`);
+  console.log(`    distance aux portions : ${(distanceAuxPortions(sans, PDJ) * 100).toFixed(0)} % → ${(distanceAuxPortions(avec, PDJ) * 100).toFixed(0)} %`);
+
+  // ⚠️ LE DÉFAUT MESURÉ EN PRODUCTION : 10 g de fromage blanc et 62 g de whey.
+  const fbSans = sans.items.find((i) => i.optionId === "opt-fb")?.displayQuantity ?? 0;
+  const fbAvec = avec.items.find((i) => i.optionId === "opt-fb")?.displayQuantity ?? 0;
+  assert.ok(fbSans < 50, `le décor doit reproduire le défaut : fromage blanc ${fbSans} g`);
+  assert.ok(fbAvec > 150, `le fromage blanc doit remonter vers sa portion : ${fbAvec} g`);
+
+  // ⚠️ ET LES MACROS N'ONT RIEN PERDU. Les deux statuts sont identiques, et la
+  // distance aux portions, elle, s'effondre.
+  assert.equal(avec.status, sans.status);
+  assert.ok(distanceAuxPortions(avec, PDJ) < distanceAuxPortions(sans, PDJ) / 2);
+});
+
+await test("N1.5.1-PREF-02. les MACROS ne paient pas la préférence — invariance mesurée", () => {
+  // ⚠️ C'EST LE RÉSULTAT QUI FONDE TOUTE LA FORMULATION. Guider par les
+  // portions choisit LAQUELLE des solutions optimales on retient ; ça ne
+  // change pas la qualité macro de l'ensemble. On le vérifie AVANT arrondi,
+  // parce qu'après, ±0,5 g d'arrondi brouillent la lecture.
+  const residuBrut = (s: MealChoiceSolution) => {
+    const total = s.items.reduce(
+      (t, i) => {
+        const src = PDJ.find((f) => f.optionId === i.optionId);
+        if (!src) return t;
+        return {
+          p: t.p + (src.proteinPer100 * i.quantity) / 100,
+          c: t.c + (src.carbPer100 * i.quantity) / 100,
+          l: t.l + (src.fatPer100 * i.quantity) / 100,
+        };
+      },
+      { p: 0, c: 0, l: 0 },
+    );
+    return Math.max(
+      Math.abs(total.p - CIBLE_PDJ.proteinGrams),
+      Math.abs(total.c - CIBLE_PDJ.carbGrams),
+      Math.abs(total.l - CIBLE_PDJ.fatGrams),
+    );
+  };
+  assert.ok(residuBrut(solveMealChoices(PDJ.map((f) => ({ ...f, preferredQuantity: null })), CIBLE_PDJ)) < 1e-9);
+  assert.ok(residuBrut(solveMealChoices(PDJ, CIBLE_PDJ)) < 1e-9);
+});
+
+await test("N1.5.1-PREF-03. SANS aucune préférence, le résultat est celui de N1.5 au bit près", () => {
+  // ⚠️ LA RÉTROCOMPATIBILITÉ N'EST PAS UN CAS À GÉRER : c'est le cas dégénéré
+  // de la même formule. cᵢ = 0 et sᵢ = ECHELLE_NEUTRE pour tout le monde, donc
+  // un facteur commun, qui ne change pas la direction de la solution.
+  for (const jeu of [BANC_A, BANC_B, BANC_C, [POULET, RIZ, HUILE]]) {
+    const sans = solveMealChoices(jeu, CIBLE_BANC);
+    const nul = solveMealChoices(jeu.map((f) => ({ ...f, preferredQuantity: null })), CIBLE_BANC);
+    const indéfini = solveMealChoices(jeu.map((f) => ({ ...f, preferredQuantity: undefined })), CIBLE_BANC);
+    assert.deepEqual(nul.items.map((i) => i.quantity), sans.items.map((i) => i.quantity));
+    assert.deepEqual(indéfini.items.map((i) => i.quantity), sans.items.map((i) => i.quantity));
+    assert.equal(nul.status, sans.status);
+  }
+});
+
+await test("N1.5.1-PREF-04. un aliment SANS préférence reste parfaitement calculable", () => {
+  // ⚠️ C'EST LA MESURE QUI A DISQUALIFIÉ LA FORMULATION « écart relatif pour
+  // les uns, grammes absolus pour les autres » : elle rendait 0 g au sirop,
+  // c'est-à-dire qu'elle faisait disparaître du repas un aliment que l'élève
+  // avait choisi.
+  const mixte = PDJ.map((f) => (f.optionId === "opt-agave" ? { ...f, preferredQuantity: null } : f));
+  const s = solveMealChoices(mixte, CIBLE_PDJ);
+  const agave = s.items.find((i) => i.optionId === "opt-agave");
+  assert.ok(agave);
+  assert.equal(agave.preferredQuantity, null, "l'aliment sans préférence ne doit pas s'en voir inventer une");
+  assert.ok(agave.displayQuantity > 0, `le sirop doit rester utilisable, il vaut ${agave.displayQuantity} g`);
+  assert.equal(s.items.length, mixte.length);
+});
+
+await test("N1.5.1-PREF-05. l'échelle neutre n'est NI une portion, NI persistée, NI affichée", () => {
+  const s = solveMealChoices(PDJ.map((f) => ({ ...f, preferredQuantity: null })), CIBLE_PDJ);
+
+  // ⚠️ AUCUN ALIMENT NE SE VOIT ATTRIBUER 100 COMME PRÉFÉRENCE.
+  assert.ok(s.items.every((i) => i.preferredQuantity === null));
+  assert.equal(ECHELLE_NEUTRE, 100);
+
+  // Elle n'existe qu'en mémoire : ni colonne, ni charge utile, ni écran.
+  assert.ok(!CODE_LISTES.includes("ECHELLE_NEUTRE"), "l'échelle neutre ne doit pas atteindre la couche Supabase");
+  assert.ok(!CODE_FORM.includes("ECHELLE_NEUTRE"), "l'échelle neutre ne doit pas partir vers la RPC");
+  assert.ok(!CODE_CHOIX.includes("ECHELLE_NEUTRE"), "l'échelle neutre ne doit pas atteindre l'écran élève");
+  assert.ok(!CODE_EDITEUR.includes("ECHELLE_NEUTRE"), "l'échelle neutre ne doit pas atteindre l'écran coach");
+  const migration = lire("../../supabase/migrations/20260908090000_n1_5_1_portions_preferees.sql");
+  assert.ok(!/default\s+100/i.test(migration), "aucune colonne ne doit valoir 100 par défaut");
+
+  // Et le rendu ne l'écrit nulle part.
+  const calcul = calculDuRepas(repasComplet(), { s1: "o1", s2: "o2", s3: "o3" }, CIBLE_EXACTE);
+  if (calcul.etat !== "calcule") throw new Error(calcul.etat);
+  const html = renderToString(createElement(QuantitesDuRepas, { solution: calcul.solution })).replace(/<!-- -->/g, "");
+  assert.ok(!html.includes("Portion"), "aucune portion n'est affichée dans la section quantités");
+});
+
+await test("N1.5.1-PREF-06. une préférence n'est NI un minimum, NI un maximum", () => {
+  // Minimum : une portion de 200 g n'empêche pas le solveur de descendre.
+  const bas = solveMealChoices(
+    [{ ...POULET, preferredQuantity: 200 }, { ...RIZ, preferredQuantity: 200 }, { ...HUILE, preferredQuantity: 200 }],
+    { proteinGrams: 10, carbGrams: 10, fatGrams: 3 },
+  );
+  assert.ok(bas.items.every((i) => i.displayQuantity < 200), "la préférence agit comme un plancher");
+
+  // Maximum : une portion de 20 g n'empêche pas le solveur de monter.
+  const haut = solveMealChoices(
+    [{ ...POULET, preferredQuantity: 20 }, { ...RIZ, preferredQuantity: 20 }, { ...HUILE, preferredQuantity: 20 }],
+    CIBLE_EXACTE,
+  );
+  assert.ok(haut.items.some((i) => i.displayQuantity > 20), "la préférence agit comme un plafond");
+
+  // ⚠️ ET ZÉRO RESTE ATTEIGNABLE malgré une préférence. Un aliment dont les
+  // autres rendent la présence inutile tombe à 0, portion ou pas.
+  const zero = solveMealChoices(
+    [{ ...SAUMON, preferredQuantity: 130 }, { ...RIZ, preferredQuantity: 80 }, { ...HUILE, preferredQuantity: 10 }],
+    { proteinGrams: 50, carbGrams: 40, fatGrams: 30 },
+  );
+  assert.equal(zero.items.find((i) => i.optionId === "opt-huile")?.displayQuantity, 0);
+});
+
+await test("N1.5.1-PREF-07. les PLAFONDS gagnent toujours sur la préférence", () => {
+  // ⚠️ UNE PRÉFÉRENCE DE 400 g NE CONTOURNE PAS LA BORNE DE 300 g. La base
+  // accepte 400 — c'est une intention, pas une erreur métier — et le solveur
+  // arbitre. C'est exactement le partage soft / hard.
+  const s = solveMealChoices(
+    [
+      { ...BROCOLI, preferredQuantity: 400 },
+      { ...POULET, preferredQuantity: 400 },
+      { ...HUILE, preferredQuantity: 400 },
+    ],
+    { proteinGrams: 120, carbGrams: 100, fatGrams: 90 },
+  );
+  assert.ok(s.items.every((i) => i.displayQuantity <= MAX_SOLIDE_G));
+  assert.ok(s.items.some((i) => i.boundedToMax), "aucun plafonnement n'a eu lieu : le test ne discrimine pas");
+
+  // Et la préférence RESTE dite, même quand elle n'a pas pu être suivie.
+  assert.ok(s.items.every((i) => i.preferredQuantity === 400));
+
+  // Liquide : 600 ml préférés, 500 ml rendus.
+  const liquide = solveMealChoices(
+    [{ ...LAIT, preferredQuantity: 600 }, { ...POULET, preferredQuantity: 150 }],
+    { proteinGrams: 70, carbGrams: 40, fatGrams: 20 },
+  );
+  assert.ok((liquide.items.find((i) => i.optionId === "opt-lait")?.displayQuantity ?? 0) <= MAX_LIQUIDE_ML);
+});
+
+await test("N1.5.1-PREF-08. des portions inatteignables ne font pas rater la cible", () => {
+  // ⚠️ LES MACROS PASSENT AVANT. Portions divisées par cinq : le solveur s'en
+  // éloigne franchement, et atteint quand même la cible.
+  const minuscules = PDJ.map((f) => ({ ...f, preferredQuantity: Math.round((f.preferredQuantity ?? 0) / 5) }));
+  const s = solveMealChoices(minuscules, CIBLE_PDJ);
+  console.log(`    portions ÷5 → distance ${(distanceAuxPortions(s, minuscules) * 100).toFixed(0)} %, statut ${s.status}`);
+  assert.equal(s.status, "exact");
+  assert.ok(distanceAuxPortions(s, minuscules) > 2, "le solveur devrait s'éloigner franchement des portions");
+});
+
+await test("N1.5.1-PREF-09. une préférence ne rend jamais EXACT un repas impossible", () => {
+  // Le banc B, avec des portions parfaitement raisonnables : il reste
+  // impossible, et pour les mêmes raisons — plafond du brocoli, excès de
+  // lipides du saumon.
+  const avecPortions = BANC_B.map((f) => ({
+    ...f,
+    preferredQuantity: { "opt-saumon": 130, "opt-oeuf": 100, "opt-riz": 80, "opt-brocoli": 150, "opt-huile": 10 }[f.optionId] ?? null,
+  }));
+  const s = solveMealChoices(avecPortions, CIBLE_BANC);
+  assert.equal(s.status, "impossible");
+  assert.ok(s.items.some((i) => i.boundedToMax));
+
+  // ⚠️ ET LE STATUT NE DÉPEND QUE DES MACROS FINALES. Aucun code du solveur ne
+  // fait entrer la distance aux portions dans le verdict.
+  assert.ok(CODE_SOLVEUR.includes("determineStatus(delta, target)"));
+  assert.ok(!/determineStatus\([^)]*preferred/i.test(CODE_SOLVEUR));
+});
+
+await test("N1.5.1-PREF-10. déterminisme : 100 exécutions identiques, avec portions", () => {
+  for (const jeu of [PDJ, PDJ.map((f) => (f.optionId === "opt-agave" ? { ...f, preferredQuantity: null } : f))]) {
+    const référence = JSON.stringify(solveMealChoices(jeu, CIBLE_PDJ));
+    for (let i = 0; i < 100; i += 1) {
+      assert.equal(JSON.stringify(solveMealChoices(jeu, CIBLE_PDJ)), référence, `divergence au tour ${i}`);
+    }
+  }
+});
+
+await test("N1.5.1-PREF-11. aucun rôle, aucun referenceGrams, aucune catégorie", () => {
+  for (const [nom, code] of [["solveur", CODE_SOLVEUR], ["sélection", CODE_SELECTION], ["listes", CODE_LISTES]] as const) {
+    assert.ok(!/\brole\b/.test(code), `${nom} manipule un rôle`);
+    assert.ok(!/referenceGrams/.test(code), `${nom} manipule un referenceGrams`);
+  }
+  // ⚠️ ET LA PRÉFÉRENCE NE CLASSE RIEN. Deux aliments de portions identiques
+  // sont traités pareil quelles que soient leurs macros — aucune notion de
+  // « protéine », « féculent » ou « légume » n'existe.
+  assert.ok(!/proteine|feculent|legume|glucidique|lipidique/i.test(CODE_SOLVEUR));
+
+  // La portion n'est jamais une base de ratio : elle est un CENTRE, additionné.
+  assert.ok(CODE_SOLVEUR.includes("centres[position] + echelles[position]"));
+});
+
+await test("N1.5.1-PREF-12. override > standard > rien — résolu à UN seul endroit", () => {
+  // La résolution vit dans la couche qui lit la bibliothèque, et nulle part
+  // ailleurs : ni la RPC, ni l'écran élève ne la refont.
+  assert.ok(CODE_LISTES.includes("item.portionOverride ?? item.portionStandard ?? null"));
+  assert.ok(!CODE_CHOIX.includes("portionStandard"), "l'écran élève ne doit pas connaître le standard");
+  assert.ok(!CODE_SELECTION.includes("portionStandard"));
+  const migration = lire("../../supabase/migrations/20260908090000_n1_5_1_portions_preferees.sql");
+  const sansCommentaires = migration.replace(/--[^\n]*/g, " ");
+  for (const table of ["food_list_items", "public.food_catalog", "public.food_products"]) {
+    assert.ok(
+      !new RegExp(`from\\s+${table.replace(".", "\\.")}`).test(sansCommentaires),
+      `la RPC ne doit pas lire ${table} pour résoudre une portion`,
+    );
+  }
+});
+
+await test("N1.5.1-PREF-13. la portion PART vers la RPC, le libellé et les macros NON", () => {
+  // ⚠️ C'EST LA LIGNE DE PARTAGE ENTRE SNAPSHOT ET HYDRATATION.
+  assert.ok(CODE_FORM.includes("preferred_quantity: option.preferredQuantity ?? null"));
+  assert.ok(CODE_FORM.includes("preferred_unit:"));
+  assert.ok(!CODE_FORM.includes("displayName"), "le libellé ne doit jamais repartir vers la RPC");
+  assert.ok(!CODE_FORM.includes("nutrition:"), "les macros ne doivent jamais repartir vers la RPC");
+
+  // Les deux clés voyagent ENSEMBLE ou pas du tout.
+  assert.ok(CODE_FORM.includes("option.preferredQuantity == null ? null :"));
+});
+
+await test("N1.5.1-PREF-14. une unité de portion incohérente est IGNORÉE, pas devinée", () => {
+  // ⚠️ UN SNAPSHOT FIGÉ EN `g` SUR UN ALIMENT DEVENU `ml` décrit une échelle
+  // qui n'est plus la sienne. On préfère calculer sans préférence plutôt
+  // qu'avec une préférence fausse.
+  const occurrences = [
+    occurrence("s1", "Ta boisson", [
+      {
+        type: "aliment", id: F_POULET, optionId: "o1", displayName: "Lait",
+        nutrition: { unit: "ml", proteinPer100: 3.3, carbPer100: 4.8, fatPer100: 1.6 },
+        preferredQuantity: 250, preferredUnit: "g",
+      } as ChoiceOption,
+    ]),
+  ];
+  const aliments = alimentsPourLeSolveur(choixResolus(occurrences, { s1: "o1" }));
+  assert.ok(aliments);
+  assert.equal(aliments[0].preferredQuantity, null, "une unité incohérente doit annuler la préférence");
+
+  // Et la même option, unité cohérente : la préférence passe.
+  const bonnes = alimentsPourLeSolveur(
+    choixResolus(
+      [occurrence("s1", "Ta boisson", [{ ...occurrences[0].options[0], preferredUnit: "ml" } as ChoiceOption])],
+      { s1: "o1" },
+    ),
+  );
+  assert.equal(bonnes?.[0].preferredQuantity, 250);
+});
+
+await test("N1.5.1-PREF-15. l'écran coach parle de PORTION, jamais de solveur", () => {
+  assert.ok(CODE_EDITEUR.includes("Portion standard"));
+  assert.ok(CODE_EDITEUR.includes("Personnaliser"));
+  assert.ok(CODE_EDITEUR.includes("Portion personnalisée"));
+  assert.ok(CODE_EDITEUR.includes("Revenir au standard"));
+  assert.ok(CODE_EDITEUR.includes("Définir une portion"));
+
+  // ⚠️ AUCUN JARGON N'ATTEINT LE COACH.
+  for (const mot of ["referenceGrams", "coefficient", "solveur", "norme minimale", "pseudo-inverse"]) {
+    assert.ok(!CODE_EDITEUR.includes(mot), `« ${mot} » ne doit pas apparaître dans l'écran coach`);
+  }
+  // Et rien n'est obligatoire : aucun `required` sur le champ.
+  assert.ok(!CODE_EDITEUR.includes("required"), "la portion ne doit jamais être obligatoire");
+});
+
+await test("N1.5.1-PREF-16. le champ portion n'écrit pas à chaque frappe", () => {
+  // ⚠️ TAPER « 250 » ENVERRAIT « 2 », PUIS « 25 », PUIS « 250 » : trois
+  // portions, dont deux fausses. La validation est explicite, comme le nom.
+  assert.ok(CODE_EDITEUR.includes("onChange={(e) => setSaisie(e.target.value)}"));
+  const bloc = CODE_EDITEUR.slice(CODE_EDITEUR.indexOf("function PortionPreferee"));
+  assert.ok(!/onChange=\{[^}]*onDefinir/.test(bloc), "la saisie ne doit pas écrire directement");
+  assert.ok(bloc.includes("onClick={() => onDefinir(valeur)}"));
+  // Et le writer refuse une valeur non positive sans aller jusqu'au réseau.
+  assert.ok(CODE_LISTES.includes("if (valeur !== null && (!Number.isFinite(valeur) || valeur <= 0)) return false;"));
+});
+
+await test("N1.5.1-PREF-17. le SNAPSHOT fige la portion effective, liste par liste", async () => {
+  // ⚠️ CE TEST EXISTE PARCE QU'UN CONTRÔLE NÉGATIF L'A RÉCLAMÉ. Saboter
+  // `lireSnapshotDeListe` pour qu'il ne fige plus AUCUNE portion ne faisait
+  // rougir personne : rien n'exerçait le pont bibliothèque → repas. C'était
+  // un trou, pas une souplesse.
+  const WHEY = "cc000000-0000-4000-8000-000000000001";
+  const FB = "cc000000-0000-4000-8000-000000000002";
+
+  const client = (listId: string, override: number | null) => {
+    const tables: Record<string, Record<string, unknown>[]> = {
+      food_lists: [{ id: listId, name: "Liste", archived_at: null, updated_at: "2026-08-15" }],
+      food_list_items: [
+        { id: "it-1", list_id: listId, position: 1, catalog_food_id: WHEY, product_id: null,
+          preferred_quantity_override: override },
+        { id: "it-2", list_id: listId, position: 2, catalog_food_id: FB, product_id: null,
+          preferred_quantity_override: null },
+      ],
+      // ⚠️ `numeric` EN CHAÎNE, comme PostgREST le rend vraiment.
+      food_catalog: [
+        { id: WHEY, name: "Whey", nutrition_unit: "g", protein_per_100: "80", carb_per_100: "5",
+          fat_per_100: "2", piece_weight_g: null, preferred_quantity: "30" },
+        { id: FB, name: "Fromage blanc", nutrition_unit: "g", protein_per_100: "7", carb_per_100: "4",
+          fat_per_100: "0", piece_weight_g: null, preferred_quantity: null },
+      ],
+      food_products: [],
+    };
+    return {
+      from(nom: string) {
+        const chaine: Record<string, unknown> = {
+          select: () => chaine, eq: () => chaine, in: () => chaine, order: () => chaine,
+          maybeSingle: () => Promise.resolve({ data: (tables[nom] ?? [])[0] ?? null, error: null }),
+          then: (r: (v: { data: unknown; error: null }) => void) => r({ data: tables[nom] ?? [], error: null }),
+        };
+        return chaine;
+      },
+    } as never;
+  };
+
+  // Liste A : override 25 g sur la whey.
+  const a = await lireSnapshotDeListe(client("liste-a", 25), "liste-a");
+  assert.ok(a);
+  assert.equal(a.options[0].preferredQuantity, 25, "l'override doit primer sur le standard");
+  assert.equal(a.options[0].preferredUnit, "g");
+
+  // ⚠️ L'ALIMENT SANS AUCUNE PORTION N'EN REÇOIT PAS UNE INVENTÉE, et son
+  // unité reste nulle avec elle — la contrainte de paire dit la même chose.
+  assert.equal(a.options[1].preferredQuantity, null);
+  assert.equal(a.options[1].preferredUnit, null);
+
+  // Liste B : override 35 g sur LA MÊME whey. Deux listes, deux portions.
+  const b = await lireSnapshotDeListe(client("liste-b", 35), "liste-b");
+  assert.equal(b?.options[0].preferredQuantity, 35);
+
+  // Liste C : aucun override → c'est le STANDARD de l'identité qui est figé.
+  const c = await lireSnapshotDeListe(client("liste-c", null), "liste-c");
+  assert.equal(c?.options[0].preferredQuantity, 30, "sans override, le standard doit être figé");
+
+  // ⚠️ ET LE LIBELLÉ N'EST PAS DU SNAPSHOT, LUI. Il est hydraté, et il ne
+  // repart jamais vers la RPC — la ligne de partage tient dans les deux sens.
+  assert.equal(a.options[0].displayName, "Whey");
 });

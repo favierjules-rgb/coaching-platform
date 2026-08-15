@@ -156,6 +156,43 @@ export function borneMaximale(unit: MealSolverUnit): number {
   return unit === "ml" ? MAX_LIQUIDE_ML : MAX_SOLIDE_G;
 }
 
+/* ───────────────────── Portions préférées (N1.5.1) ───────────────────── */
+
+/**
+ * ÉCHELLE NEUTRE d'un aliment SANS portion préférée, dans son unité.
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * CE QUE CE NOMBRE EST, ET CE QU'IL N'EST SURTOUT PAS
+ * ────────────────────────────────────────────────────────────────────────────
+ * ⚠️ CE N'EST PAS UNE PORTION. Il n'est jamais affiché, jamais enregistré,
+ * jamais snapshoté, et il ne dit pas « mange 100 g ». C'est l'UNITÉ DE MESURE
+ * de l'écart pour un aliment dont personne n'a exprimé de préférence : sans
+ * elle, on comparerait des grammes absolus à des écarts relatifs, ce qui n'a
+ * pas de sens dimensionnel.
+ *
+ * ⚠️ ET CE N'EST PAS UN DÉTAIL. Mesuré le 15/08/2026 : pénaliser un aliment
+ * sans préférence en grammes ABSOLUS (σ = 1) le rend si cher à déplacer que le
+ * solveur lui donne **0 g** — l'aliment choisi par l'élève disparaît de son
+ * repas. C'est exactement ce que le § « aliment sans préférence » interdit.
+ * Avec σ = 100, le même aliment reçoit 34 g.
+ *
+ * SENSIBILITÉ MESURÉE, sur le petit déjeuner terrain (quantité rendue au
+ * sirop d'agave, seul aliment sans préférence) :
+ *
+ *     σ =   1 →  0 g      σ = 100 → 34 g
+ *     σ =  20 →  8 g      σ = 150 → 37 g
+ *     σ =  50 → 24 g      σ = 300 → 39 g
+ *
+ * Le choix n'est donc pas sur un fil : au-delà de 100, le résultat bouge de
+ * 5 g. On retient 100, constant, dans l'unité de l'aliment.
+ *
+ * ⚠️ CONSTANT, ET PAS « MÉDIANE DES PORTIONS DU REPAS ». La médiane donnait
+ * un résultat quasi identique (32 g contre 34 g), mais elle couple les
+ * aliments entre eux : ajouter une préférence à l'aliment X changerait la
+ * quantité de l'aliment Y. Déterministe, mais inexplicable à un coach.
+ */
+export const ECHELLE_NEUTRE = 100;
+
 /* ─────────────────────────── Types ─────────────────────────── */
 
 /**
@@ -193,6 +230,23 @@ export interface SelectedFoodForMealSolver {
   readonly proteinPer100: number;
   readonly carbPer100: number;
   readonly fatPer100: number;
+  /**
+   * N1.5.1 — LA PORTION PRÉFÉRÉE EFFECTIVE, SNAPSHOTÉE, dans `unit`.
+   *
+   * ⚠️ PRÉFÉRENCE, PAS CONTRAINTE. Le solveur vise ce nombre à macros égales,
+   * et s'en écarte sans hésiter dès que la cible l'exige — mesuré : portions
+   * divisées par cinq, il s'en éloigne de 635 % et atteint quand même la
+   * cible exactement. Rien ne l'oblige à rendre 30 g de whey.
+   *
+   * ⚠️ NI MINIMUM, NI MAXIMUM, NI RÔLE, NI `referenceGrams`. Les plafonds de
+   * faisabilité (300 g / 500 ml) restent des contraintes DURES, indépendantes,
+   * et gagnent toujours : une préférence de 400 g ne contourne pas la borne.
+   *
+   * `null` ou absente = aucun avis. Le solveur retombe alors EXACTEMENT sur le
+   * comportement N1.5 historique — ce n'est pas un cas à gérer, c'est le cas
+   * dégénéré de la même formule.
+   */
+  readonly preferredQuantity?: number | null;
 }
 
 /**
@@ -258,6 +312,14 @@ export interface MealSolvedItem {
   readonly boundedToMax: boolean;
   /** Le plafond applicable à cet aliment, dans SON unité. */
   readonly maxQuantity: number;
+  /**
+   * La portion préférée qui a GUIDÉ le calcul, ou `null`.
+   *
+   * ⚠️ C'EST LA PRÉFÉRENCE MÉTIER, JAMAIS L'ÉCHELLE NEUTRE. Un aliment sans
+   * préférence rend `null` ici, et surtout pas 100 : `ECHELLE_NEUTRE` est une
+   * unité de mesure interne, et l'exposer la ferait passer pour une portion.
+   */
+  readonly preferredQuantity: number | null;
 }
 
 /** Traces de déterminisme — pour les tests et le diagnostic, pas pour l'écran. */
@@ -421,6 +483,44 @@ function estFini(...valeurs: readonly number[]): boolean {
   return valeurs.every((v) => typeof v === "number" && Number.isFinite(v));
 }
 
+/**
+ * La portion préférée EXPLOITABLE d'un aliment, ou `null`.
+ *
+ * ⚠️ ON NE FABRIQUE JAMAIS DE PRÉFÉRENCE. Une valeur absente, nulle, négative
+ * ou non finie n'en est pas une : on rend `null`, et l'aliment est traité
+ * comme un aliment sans avis. Y substituer une valeur de repli reviendrait à
+ * inventer une portion que personne n'a écrite.
+ */
+function portionPreferee(food: SelectedFoodForMealSolver): number | null {
+  const p = food.preferredQuantity;
+  if (typeof p !== "number" || !Number.isFinite(p) || p <= 0) return null;
+  return p;
+}
+
+/** Le CENTRE de la préférence : la portion, ou zéro faute de préférence. */
+function centreDe(food: SelectedFoodForMealSolver): number {
+  return portionPreferee(food) ?? 0;
+}
+
+/**
+ * L'ÉCHELLE de l'écart : la portion elle-même, ou l'échelle neutre.
+ *
+ * ⚠️ L'ÉCHELLE NEUTRE N'EST PAS UN CENTRE. Un aliment sans préférence est
+ * centré sur 0 — on ne lui souhaite aucune quantité particulière — et
+ * seulement MESURÉ à l'échelle de 100. Confondre les deux reviendrait à lui
+ * inventer une portion de 100.
+ */
+function echelleDe(food: SelectedFoodForMealSolver): number {
+  return portionPreferee(food) ?? ECHELLE_NEUTRE;
+}
+
+/** La macro n° m d'un aliment, pour 100. Ordre : protéines, glucides, lipides. */
+function macroDe(food: SelectedFoodForMealSolver, m: number): number {
+  if (m === 0) return food.proteinPer100;
+  if (m === 1) return food.carbPer100;
+  return food.fatPer100;
+}
+
 function unitéValide(unit: unknown): MealSolverUnit {
   // Repli sur le gramme plutôt que blocage : `nutrition_unit` est contraint en
   // base, une valeur hors vocabulaire ne peut venir que d'une base non migrée.
@@ -533,16 +633,60 @@ export function solveMealChoices(
       break;
     }
 
+    // ── N1.5.1 — LE RECENTRAGE, ET C'EST TOUTE LA FORMULATION ────────────
+    //
+    // On ne cherche plus « les plus petites quantités », mais « les quantités
+    // les plus proches des portions préférées ». Substitution :
+    //
+    //     qᵢ = cᵢ + sᵢ · xᵢ        cᵢ = portion préférée (0 sans préférence)
+    //                              sᵢ = portion préférée (ECHELLE_NEUTRE sinon)
+    //
+    // Minimiser ‖x‖ revient alors à minimiser Σ ((qᵢ − cᵢ) / sᵢ)², c'est-à-dire
+    // l'écart RELATIF à la portion — 10 g d'écart sur 30 g de whey pèsent
+    // autant que 66 g d'écart sur 200 g de fromage blanc, ce qui est bien la
+    // façon dont on juge une portion.
+    //
+    // ⚠️ C'EST EXACTEMENT LE MÊME SOLVEUR, APPLIQUÉ À UNE MATRICE DONT LES
+    // COLONNES SONT MISES À L'ÉCHELLE. Aucune algèbre nouvelle, aucune
+    // bibliothèque, aucun λ à régler.
+    //
+    // ⚠️ ET LES MACROS N'EN PAIENT PAS LE PRIX. Changer de norme change
+    // LAQUELLE des solutions optimales on retient, jamais la qualité macro de
+    // l'ensemble : mesuré, le résidu avant arrondi est nul dans les deux cas.
+    // C'est pourquoi il n'y a pas de compromis à arbitrer ici — et pourquoi
+    // une pénalité pondérée (λ) serait un recul : mesurée aussi, elle
+    // DÉGRADE les macros dès qu'elle pèse assez pour changer quelque chose.
+    //
+    // ⚠️ SANS AUCUNE PORTION, cᵢ = 0 et sᵢ = ECHELLE_NEUTRE pour tout le
+    // monde : la mise à l'échelle devient un facteur commun, qui ne change
+    // pas la direction de la solution de norme minimale. On retrouve donc
+    // N1.5 au bit près — vérifié par test.
+    const centres = indices.map((i) => centreDe(foods[i]));
+    const echelles = indices.map((i) => echelleDe(foods[i]));
+
     const lignes = [
-      indices.map((i) => foods[i].proteinPer100 / 100),
-      indices.map((i) => foods[i].carbPer100 / 100),
-      indices.map((i) => foods[i].fatPer100 / 100),
+      indices.map((i, k) => (foods[i].proteinPer100 / 100) * echelles[k]),
+      indices.map((i, k) => (foods[i].carbPer100 / 100) * echelles[k]),
+      indices.map((i, k) => (foods[i].fatPer100 / 100) * echelles[k]),
     ];
-    const { q: partiel, rang: rangCourant } = solutionNormeMinimale(lignes, résidu());
+
+    // Le résidu que les variables libres doivent couvrir, MOINS ce que les
+    // centres apportent déjà : c'est le second membre du système recentré.
+    const b = résidu();
+    const bRecentré = [0, 1, 2].map((m) =>
+      b[m] -
+      indices.reduce(
+        (total, i, k) =>
+          total + (macroDe(foods[i], m) / 100) * centres[k],
+        0,
+      ),
+    );
+
+    const { q: partiel, rang: rangCourant } = solutionNormeMinimale(lignes, bRecentré);
     rang = rangCourant;
 
     indices.forEach((indexAliment, position) => {
-      q[indexAliment] = partiel[position] ?? 0;
+      q[indexAliment] = centres[position] + echelles[position] * (partiel[position] ?? 0);
     });
 
     // ── 1. Le plancher d'abord ────────────────────────────────────────────
@@ -689,6 +833,9 @@ function composer(
         fatGrams * KCAL_PER_GRAM.fat,
       boundedToZero: figés.get(i) === "zero",
       boundedToMax: figés.get(i) === "max",
+      // ⚠️ LA PRÉFÉRENCE MÉTIER, PAS L'ÉCHELLE NEUTRE. `null` quand il n'y en
+      // a pas — jamais 100.
+      preferredQuantity: portionPreferee(food),
     };
   });
 

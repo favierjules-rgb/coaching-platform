@@ -64,6 +64,25 @@ export interface OptionNutrition {
 
 export type ChoiceOption = {
   /**
+   * N1.5.1 — LA PORTION PRÉFÉRÉE EFFECTIVE, ET ELLE, C'EST DU SNAPSHOT.
+   *
+   * ⚠️ NE PAS LA CONFONDRE AVEC `displayName` NI AVEC `nutrition`. Ces deux-là
+   * sont de l'HYDRATATION : relus à la source à chaque affichage, jamais
+   * renvoyés à la RPC. La portion, elle, est une DONNÉE MÉTIER FIGÉE : elle
+   * part vers la base avec l'identité, et un repas déjà construit la garde
+   * même si le coach change d'avis dans sa bibliothèque ensuite.
+   *
+   * `null` = aucune préférence. Le solveur retombe alors exactement sur le
+   * comportement N1.5 — c'est le cas de l'immense majorité des options.
+   */
+  readonly preferredQuantity?: number | null;
+  /**
+   * L'unité de `preferredQuantity`, figée avec elle. `g` ou `ml`, jamais
+   * autre chose : c'est le vocabulaire de ce qui est CALCULABLE.
+   * Absente dès que `preferredQuantity` l'est — les deux vont ensemble.
+   */
+  readonly preferredUnit?: "g" | "ml" | null;
+  /**
    * N1.5 — les macros de l'aliment désigné, ou `null` si la source a disparu.
    * Une option sans macros est affichable mais PAS calculable : voir
    * `optionCalculable` dans `meal-choice-selection.ts`.

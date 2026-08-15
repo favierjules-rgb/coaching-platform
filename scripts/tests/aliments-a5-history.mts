@@ -701,6 +701,7 @@ await test("HIST17. l'élève A ne voit jamais l'élève B", () => {
   assert.deepEqual(tardives, [
       "20260906090000_nutrition_listes_et_repas_planifies.sql",
       "20260907090000_n1_3_occurrences_de_listes_dans_les_repas.sql",
+      "20260908090000_n1_5_1_portions_preferees.sql",
     ], `migrations postérieures inattendues : ${tardives.join(", ")}`);
 
   // Et c'est EXÉCUTÉ, pas relu : la checklist crée deux élèves du même coach,
@@ -1068,11 +1069,11 @@ await test("HIST-SUP. le dépouillement des commentaires n'a rien vidé", () => 
   // vit aussi dans `supabase/baseline/manifest.json` : les deux doivent
   // s'accorder, sinon l'un des deux ment.
   const migrations = lireMigrations();
-  assert.equal(migrations.length, 74, "74 fichiers : A5.7 n'en a créé aucun, N1.1 en a créé un, N1.3 un second");
+  assert.equal(migrations.length, 75, "75 fichiers : A5.7 n'en a créé aucun, N1.1 en a créé un, N1.3 un second");
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json")) as {
     migrations_post_baseline_attendues: readonly string[];
   };
-  assert.equal(manifeste.migrations_post_baseline_attendues.length, 47);
+  assert.equal(manifeste.migrations_post_baseline_attendues.length, 48);
 
   // Et rien qui ressemble à une table, une vue ou un agrégat d'historique.
   //

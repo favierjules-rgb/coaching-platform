@@ -802,6 +802,17 @@ export function toWeekSavePayload(state: WeekFormState): {
             options: occurrence.options.map((option) => ({
               catalog_food_id: option.type === "aliment" ? option.id : null,
               product_id: option.type === "produit" ? option.id : null,
+              // ⚠️ LA PORTION EST ÉMISE, CONTRAIREMENT AU LIBELLÉ ET AUX
+              // MACROS. C'est la ligne de partage : `displayName` et
+              // `nutrition` sont de l'hydratation et ne repartent JAMAIS ;
+              // la portion préférée est du snapshot, et elle doit repartir,
+              // sinon un simple ré-enregistrement l'effacerait.
+              //
+              // Les deux clés sont émises ENSEMBLE ou pas du tout — la RPC
+              // refuse une quantité sans unité (PORTION_SANS_UNITE), et la
+              // base porte la même règle en contrainte de paire.
+              preferred_quantity: option.preferredQuantity ?? null,
+              preferred_unit: option.preferredQuantity == null ? null : (option.preferredUnit ?? null),
             })),
           })),
         })),

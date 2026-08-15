@@ -501,9 +501,22 @@ await test("N1.2-21. une liste ne porte ni macro, ni quantité, ni rôle", async
   const relue = await lireFoodList(base.client, id);
   assert.equal(relue?.items[0].source === "aliment" ? relue.items[0].aliment.proteinPer100 : 0, 31);
 
-  // Et aucun écran ne demande une quantité.
+  // ⚠️ AUCUN ÉCRAN NE DEMANDE UNE QUANTITÉ À MANGER, ET C'EST TOUJOURS VRAI.
+  // N1.5.1 a ajouté UNE saisie numérique, et une seule : la PORTION PRÉFÉRÉE,
+  // qui n'est pas une quantité à manger mais une indication pour le calcul —
+  // le solveur s'en écarte librement, et les plafonds la dominent. La règle
+  // reste donc entière ailleurs, et l'exception est nommée plutôt que
+  // silencieusement tolérée.
   for (const [nom, code] of ECRANS) {
-    assert.ok(!code.includes('type="number"'), `saisie numérique dans ${nom}`);
+    if (nom === "éditeur") {
+      const champs = code.match(/type="number"/g) ?? [];
+      assert.equal(champs.length, 1, "l'éditeur ne doit porter QU'UNE saisie numérique");
+      assert.ok(code.includes("Portion"), "et cette saisie doit être la portion préférée");
+      assert.ok(!code.includes("grammes à manger") && !code.includes("Quantité"),
+        "aucune quantité à manger n'est demandée au coach");
+    } else {
+      assert.ok(!code.includes('type="number"'), `saisie numérique dans ${nom}`);
+    }
     assert.ok(!/solver_role|solverRole/.test(code), `un rôle apparaît dans ${nom}`);
   }
 });

@@ -172,15 +172,29 @@ await test("N1.3-04/05/06. les options n'ont QUE des identités : ni nom, ni mac
 
   const options = occurrences[0].options as readonly Record<string, unknown>[];
   for (const option of options) {
-    assert.deepEqual(Object.keys(option).sort(), ["catalog_food_id", "product_id"]);
-    // Exactement UNE des deux, et c'est un identifiant de base.
+    // ⚠️ QUATRE CLÉS DEPUIS N1.5.1, ET PAS UNE DE PLUS. L'identité, et la
+    // portion préférée figée — qui est bien du SNAPSHOT, pas de l'hydratation :
+    // un repas doit garder la portion du jour où le coach l'a construit, même
+    // si la bibliothèque change ensuite. Le libellé et les macros, eux,
+    // continuent de ne JAMAIS partir.
+    assert.deepEqual(Object.keys(option).sort(),
+      ["catalog_food_id", "preferred_quantity", "preferred_unit", "product_id"]);
+    // Exactement UNE des deux identités, et c'est un identifiant de base.
     assert.equal((option.catalog_food_id === null) !== (option.product_id === null), true);
+    // Et la portion voyage en PAIRE, ou pas du tout.
+    assert.equal((option.preferred_quantity === null) === (option.preferred_unit === null), true);
   }
 
   const texte = JSON.stringify(occurrences);
-  for (const interdit of ["protein", "carb", "fat", "calories", "grams", "quantity", "role", "solver_role", "name\":"]) {
+  // ⚠️ `quantity` RESTE INTERDIT : la clé autorisée est `preferred_quantity`,
+  // et la distinction n'est pas cosmétique. Une « quantité » serait un gramme
+  // à manger, décidé par le coach ; une « portion préférée » est une
+  // indication pour le calcul, dont le solveur s'écarte librement.
+  for (const interdit of ["protein", "carb", "fat", "calories", "grams", "role", "solver_role", "name\":"]) {
     assert.ok(!texte.includes(interdit), `« ${interdit} » ne doit pas voyager avec une option`);
   }
+  assert.ok(!/[^_]quantity/.test(texte.replace(/preferred_quantity/g, "")),
+    "aucune quantité autre que la portion préférée ne doit voyager");
   // ⚠️ `label` est le SEUL texte, et c'est le libellé de l'occurrence — pas
   // un nom d'aliment. Aucun nom d'aliment n'est recopié nulle part.
   assert.ok(!texte.includes("Poulet") && !texte.includes("Saumon"));
@@ -682,11 +696,13 @@ await test("N1.3-NAME-7. aucun nom hydraté ne part vers la RPC", async () => {
   const [repas] = repasEnvoyes(addChoiceSlot(state, "monday", mealId, snapshot));
   const options = (repas.choice_slots as readonly { options: readonly Record<string, unknown>[] }[])[0].options;
 
-  // ⚠️ LA CHARGE UTILE NE PORTE QUE L'IDENTITÉ. Un `displayName` qui partirait
-  // vers la base ferait du nom une donnée métier, et le premier renommage du
-  // catalogue rendrait le snapshot menteur.
+  // ⚠️ LA CHARGE UTILE NE PORTE QUE DU SNAPSHOT. Un `displayName` qui
+  // partirait vers la base ferait du nom une donnée métier, et le premier
+  // renommage du catalogue rendrait le snapshot menteur. La portion préférée,
+  // elle, EST du snapshot — c'est précisément la différence entre les deux.
   for (const option of options) {
-    assert.deepEqual(Object.keys(option).sort(), ["catalog_food_id", "product_id"]);
+    assert.deepEqual(Object.keys(option).sort(),
+      ["catalog_food_id", "preferred_quantity", "preferred_unit", "product_id"]);
   }
   const texte = JSON.stringify(repas.choice_slots);
   assert.ok(!texte.includes("displayName"));

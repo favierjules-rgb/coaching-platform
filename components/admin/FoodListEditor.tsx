@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, Loader2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, Loader2, X } from "lucide-react";
 
 import { Field } from "@/components/admin/AdminFormFields";
 import { FoodSearchPicker, cleIdentite } from "@/components/admin/FoodSearchPicker";
@@ -12,10 +12,13 @@ import {
   type FoodListItem,
   ajouterAlimentAListe,
   archiverFoodList,
+  definirPortionOverride,
   nomPropre,
+  portionEffective,
   renommerFoodList,
   reordonnerFoodList,
   retirerAlimentDeListe,
+  uniteDePortion,
 } from "@/lib/supabase/food-lists";
 
 /**
@@ -31,8 +34,24 @@ import {
  * Le NOM, lui, a un bouton : c'est une frappe continue, et écrire à chaque
  * lettre enverrait vingt requêtes pour un mot.
  *
- * ⚠️ AUCUNE MACRO, AUCUNE QUANTITÉ, AUCUN RÔLE n'est demandé au coach. Les
- * valeurs affichées sous chaque aliment sont LUES à la source, jamais saisies.
+ * ⚠️ AUCUNE MACRO, AUCUN RÔLE n'est demandé au coach. Les valeurs affichées
+ * sous chaque aliment sont LUES à la source, jamais saisies.
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * N1.5.1 — LA SEULE QUANTITÉ QUE LE COACH SAISIT, ET CE QU'ELLE VEUT DIRE
+ * ────────────────────────────────────────────────────────────────────────────
+ * La PORTION PRÉFÉRÉE n'est pas une quantité à manger : c'est une indication
+ * pour le calcul. « À macros égales, approche plutôt 25 g de whey. » Le
+ * solveur s'en écarte dès que la cible du repas l'exige, et les plafonds de
+ * faisabilité restent prioritaires.
+ *
+ * ⚠️ ELLE N'EST JAMAIS OBLIGATOIRE. Une liste sans aucune portion fonctionne
+ * exactement comme avant N1.5.1 — c'est le cas de toutes les listes
+ * existantes, et aucun écran ne réclame de la remplir.
+ *
+ * ⚠️ ET LE VOCABULAIRE EST CELUI DU COACH. « Portion standard », « portion
+ * personnalisée » — jamais « quantité de référence », « coefficient » ni
+ * « solveur ».
  */
 export function FoodListEditor({
   liste,
@@ -93,6 +112,14 @@ export function FoodListEditor({
   const retirer = useCallback(
     (itemId: string) => avec((c) => retirerAlimentDeListe(c, liste.id, itemId)),
     [avec, liste.id],
+  );
+
+  // ⚠️ PAS D'ÉCRITURE À CHAQUE FRAPPE. Le champ portion est un nombre qu'on
+  // tape chiffre par chiffre : écrire à chaque touche enverrait « 2 », puis
+  // « 25 », puis « 250 ». On valide explicitement, comme le nom de la liste.
+  const definirPortion = useCallback(
+    (itemId: string, valeur: number | null) => avec((c) => definirPortionOverride(c, itemId, valeur)),
+    [avec],
   );
 
   const deplacer = useCallback(
@@ -177,6 +204,7 @@ export function FoodListEditor({
                 onMonter={() => void deplacer(index, -1)}
                 onDescendre={() => void deplacer(index, 1)}
                 onRetirer={() => void retirer(item.id)}
+                onDefinirPortion={(valeur) => void definirPortion(item.id, valeur)}
               />
             ))}
           </ol>
@@ -198,6 +226,7 @@ function LigneAliment({
   onMonter,
   onDescendre,
   onRetirer,
+  onDefinirPortion,
 }: {
   readonly item: FoodListItem;
   readonly index: number;
@@ -206,6 +235,7 @@ function LigneAliment({
   readonly onMonter: () => void;
   readonly onDescendre: () => void;
   readonly onRetirer: () => void;
+  readonly onDefinirPortion: (valeur: number | null) => void;
 }) {
   const nom =
     item.source === "aliment"
@@ -217,12 +247,13 @@ function LigneAliment({
   const detail = `${source.proteinPer100} P · ${source.carbPer100} G · ${source.fatPer100} L pour 100 ${source.nutritionUnit}`;
 
   return (
-    <li className="flex min-w-0 items-center gap-2 rounded-control border border-border px-3 py-2">
+    <li className="flex min-w-0 flex-wrap items-center gap-2 rounded-control border border-border px-3 py-2">
       <span className="w-6 flex-shrink-0 text-xs tabular-nums text-muted-foreground">{index + 1}.</span>
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate text-sm text-foreground">{nom}</span>
         {/* Lues à la source, jamais stockées dans la liste. */}
         <span className="truncate text-[11px] text-muted-foreground">{detail}</span>
+        <PortionPreferee item={item} occupe={occupe} onDefinir={onDefinirPortion} />
       </span>
       <span className="flex flex-shrink-0 items-center gap-1">
         <BoutonIcone
@@ -274,5 +305,130 @@ function BoutonIcone({
     >
       {children}
     </button>
+  );
+}
+
+
+/**
+ * N1.5.1 — LA PORTION PRÉFÉRÉE D'UNE LIGNE DE LISTE.
+ *
+ * Trois états, et un seul visible à la fois :
+ *
+ *   STANDARD        — l'identité porte une portion, le coach ne l'a pas
+ *                     touchée. On l'affiche, et on propose de personnaliser.
+ *   PERSONNALISÉE   — le coach a posé sa valeur pour CETTE liste. On l'affiche
+ *                     en champ, avec le standard rappelé dessous, et de quoi
+ *                     revenir au standard.
+ *   AUCUNE          — ni standard ni override. Un champ vide, sans reproche :
+ *                     la portion n'est pas obligatoire, et l'immense majorité
+ *                     des aliments n'en aura jamais.
+ *
+ * ⚠️ ON N'ÉCRIT PAS UN STANDARD DEPUIS CET ÉCRAN, ET C'EST STRUCTUREL, pas un
+ * oubli : sur un aliment global, seule l'administration peut l'écrire ; sur un
+ * produit, la table est en lecture seule côté application. Ce que le coach
+ * pose ici est TOUJOURS un override, propre à sa liste.
+ */
+function PortionPreferee({
+  item,
+  occupe,
+  onDefinir,
+}: {
+  readonly item: FoodListItem;
+  readonly occupe: boolean;
+  readonly onDefinir: (valeur: number | null) => void;
+}) {
+  const unite = uniteDePortion(item);
+  const personnalisee = item.portionOverride !== null;
+  const [ouvert, setOuvert] = useState(personnalisee);
+  const [saisie, setSaisie] = useState(
+    item.portionOverride === null ? "" : String(item.portionOverride),
+  );
+
+  const valeur = Number(saisie.replace(",", "."));
+  const valide = saisie.trim() !== "" && Number.isFinite(valeur) && valeur > 0;
+  const modifiee = valide && valeur !== item.portionOverride;
+
+  // État REPLIÉ : on montre ce qui s'applique, et on propose de le changer.
+  if (!ouvert) {
+    const effective = portionEffective(item);
+    return (
+      <span className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+        {effective === null ? (
+          <span>Aucune portion préférée</span>
+        ) : (
+          <span>
+            Portion standard{" "}
+            <span className="font-bold tabular-nums text-foreground">
+              {effective} {unite}
+            </span>
+          </span>
+        )}
+        <button
+          type="button"
+          disabled={occupe}
+          onClick={() => setOuvert(true)}
+          className="pressable rounded-control border border-border px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        >
+          {effective === null ? "Définir une portion" : "Personnaliser"}
+        </button>
+      </span>
+    );
+  }
+
+  // État OUVERT : le champ, sa validation, et le retour au standard.
+  return (
+    <span className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+      <label className="flex items-center gap-1">
+        <span>{personnalisee ? "Portion personnalisée" : "Portion préférée"}</span>
+        <input
+          type="number"
+          inputMode="decimal"
+          min={0}
+          step="any"
+          value={saisie}
+          disabled={occupe}
+          onChange={(e) => setSaisie(e.target.value)}
+          aria-label={`Portion préférée pour ${
+            item.source === "aliment" ? item.aliment.name : item.produit.name
+          }`}
+          className="w-20 rounded-control border border-border bg-card px-2 py-1 text-right text-xs tabular-nums text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        />
+        <span>{unite}</span>
+      </label>
+
+      {/* ⚠️ VALIDATION EXPLICITE. Écrire à chaque frappe enverrait « 2 » puis
+          « 25 » puis « 250 » : trois portions, dont deux fausses. */}
+      <button
+        type="button"
+        disabled={occupe || !modifiee}
+        onClick={() => onDefinir(valeur)}
+        className="pressable flex items-center gap-1 rounded-control border border-primary px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+      >
+        <Check size={12} aria-hidden="true" />
+        Enregistrer
+      </button>
+
+      {/* Revenir au standard, sans avoir à retirer puis remettre l'aliment. */}
+      {personnalisee && (
+        <button
+          type="button"
+          disabled={occupe}
+          onClick={() => {
+            setSaisie("");
+            setOuvert(false);
+            onDefinir(null);
+          }}
+          className="pressable rounded-control border border-border px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        >
+          Revenir au standard
+        </button>
+      )}
+
+      {item.portionStandard !== null && (
+        <span className="tabular-nums">
+          Standard : {item.portionStandard} {unite}
+        </span>
+      )}
+    </span>
   );
 }

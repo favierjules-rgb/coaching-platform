@@ -210,6 +210,14 @@ export function alimentsPourLeSolveur(
       proteinPer100: n.proteinPer100,
       carbPer100: n.carbPer100,
       fatPer100: n.fatPer100,
+      // ⚠️ N1.5.1 — LA PORTION N'EST RETENUE QUE SI SON UNITÉ EST CELLE DU
+      // CALCUL. Un snapshot figé en `g` sur un aliment devenu `ml` décrirait
+      // une échelle qui n'est plus la sienne : on préfère calculer sans
+      // préférence plutôt qu'avec une préférence fausse. Le cas est théorique
+      // — l'unité d'un aliment ne change pas — mais le silence, lui, ne
+      // serait pas rattrapable.
+      preferredQuantity:
+        resolu.option.preferredUnit === n.unit ? (resolu.option.preferredQuantity ?? null) : null,
     });
   }
   return aliments;

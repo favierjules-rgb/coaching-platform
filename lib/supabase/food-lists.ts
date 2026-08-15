@@ -99,6 +99,23 @@ export interface FoodListSummary {
 export type FoodListItem = {
   readonly id: string;
   readonly position: number;
+  /**
+   * N1.5.1 — LA PORTION STANDARD DE L'IDENTITÉ, lue à la source.
+   *
+   * ⚠️ LECTURE SEULE DANS CE LOT. Sur un aliment GLOBAL, seule
+   * `food_catalog_manage_admin` autorise l'écriture ; sur un produit, la table
+   * est en lecture seule pour `authenticated` (revoke all puis grant select).
+   * L'écran de liste l'AFFICHE donc, et ne l'écrit jamais.
+   */
+  readonly portionStandard: number | null;
+  /**
+   * N1.5.1 — LA PORTION CHOISIE PAR LE COACH POUR CETTE LISTE-CI.
+   *
+   * ⚠️ ELLE APPARTIENT À LA LIGNE DE LISTE, PAS À L'ALIMENT. La même whey peut
+   * valoir 25 g ici et 35 g dans une autre liste, sans que le standard bouge.
+   * `null` = pas d'override, on retombe sur le standard.
+   */
+  readonly portionOverride: number | null;
 } & (
   | { readonly source: "aliment"; readonly aliment: CatalogFood }
   | { readonly source: "produit"; readonly produit: ProduitLocal }
@@ -127,6 +144,7 @@ interface LigneItem {
   position: number;
   catalog_food_id: string | null;
   product_id: string | null;
+  preferred_quantity_override: number | string | null;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -207,7 +225,7 @@ export async function lireFoodList(
 
   const { data: brutes, error: erreurItems } = await supabase
     .from("food_list_items")
-    .select("id, list_id, position, catalog_food_id, product_id")
+    .select("id, list_id, position, catalog_food_id, product_id, preferred_quantity_override")
     .eq("list_id", listId)
     .order("position", { ascending: true });
   // ⚠️ UNE LISTE AFFICHÉE VIDE EST UNE INVITATION À LA RE-REMPLIR — puis à
@@ -226,34 +244,79 @@ export async function lireFoodList(
 
   const resolus: FoodListItem[] = [];
   for (const item of items) {
+    // ⚠️ `numeric` ARRIVE EN CHAÎNE VIA POSTGREST. La conversion se fait ici,
+    // une fois, et une valeur non exploitable redevient « pas de portion »
+    // plutôt qu'un `NaN` qui contaminerait le solveur.
+    const override = nombrePositif(item.preferred_quantity_override);
     if (item.catalog_food_id !== null) {
-      const aliment = aliments.get(item.catalog_food_id);
-      if (aliment) resolus.push({ id: item.id, position: item.position, source: "aliment", aliment });
+      const aliment = aliments.map.get(item.catalog_food_id);
+      if (aliment) {
+        resolus.push({
+          id: item.id,
+          position: item.position,
+          portionStandard: aliments.standards.get(item.catalog_food_id) ?? null,
+          portionOverride: override,
+          source: "aliment",
+          aliment,
+        });
+      }
       continue;
     }
     if (item.product_id !== null) {
-      const produit = produits.get(item.product_id);
-      if (produit) resolus.push({ id: item.id, position: item.position, source: "produit", produit });
+      const produit = produits.map.get(item.product_id);
+      if (produit) {
+        resolus.push({
+          id: item.id,
+          position: item.position,
+          portionStandard: produits.standards.get(item.product_id) ?? null,
+          portionOverride: override,
+          source: "produit",
+          produit,
+        });
+      }
     }
   }
 
   return { id: l.id, name: l.name, archivedAt: l.archived_at, items: resolus };
 }
 
+/**
+ * N1.5.1 — un nombre STRICTEMENT POSITIF, ou `null`.
+ *
+ * ⚠️ ON NE FABRIQUE JAMAIS UNE PORTION. `null`, `''`, `0`, un négatif ou un
+ * texte illisible ne sont pas des portions : ils redeviennent « pas d'avis ».
+ * Les contraintes de base disent déjà `> 0` ; ceci protège de ce qui n'est pas
+ * passé par elles.
+ */
+function nombrePositif(valeur: number | string | null | undefined): number | null {
+  if (valeur === null || valeur === undefined || valeur === "") return null;
+  const n = Number(valeur);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+interface IdentitesResolues<T> {
+  readonly map: Map<string, T>;
+  /** id → portion STANDARD de l'identité, `null` quand elle n'en a pas. */
+  readonly standards: Map<string, number | null>;
+}
+
 async function lireAliments(
   supabase: TypedSupabaseClient,
   ids: readonly string[],
-): Promise<Map<string, CatalogFood>> {
-  if (ids.length === 0) return new Map();
+): Promise<IdentitesResolues<CatalogFood>> {
+  if (ids.length === 0) return { map: new Map(), standards: new Map() };
   const { data, error } = await supabase
     .from("food_catalog")
-    .select("id, name, nutrition_unit, protein_per_100, carb_per_100, fat_per_100, piece_weight_g")
+    .select(
+      "id, name, nutrition_unit, protein_per_100, carb_per_100, fat_per_100, piece_weight_g, preferred_quantity",
+    )
     .in("id", [...ids]);
   // Même règle : un aliment non résolu est SILENCIEUSEMENT OMIS de la liste
   // (source disparue). Confondre cette omission-là avec un échec de requête
   // ferait disparaître des aliments bien présents.
   exigerLecture("lireAliments", error);
   const map = new Map<string, CatalogFood>();
+  const standards = new Map<string, number | null>();
   for (const f of (data ?? []) as unknown as {
     id: string;
     name: string;
@@ -262,6 +325,7 @@ async function lireAliments(
     carb_per_100: number;
     fat_per_100: number;
     piece_weight_g: number | null;
+    preferred_quantity: number | string | null;
   }[]) {
     if (f.nutrition_unit !== "g" && f.nutrition_unit !== "ml") continue;
     map.set(f.id, {
@@ -273,23 +337,25 @@ async function lireAliments(
       fatPer100: Number(f.fat_per_100),
       pieceWeightG: f.piece_weight_g === null ? null : Number(f.piece_weight_g),
     });
+    standards.set(f.id, nombrePositif(f.preferred_quantity));
   }
-  return map;
+  return { map, standards };
 }
 
 async function lireProduits(
   supabase: TypedSupabaseClient,
   ids: readonly string[],
-): Promise<Map<string, ProduitLocal>> {
-  if (ids.length === 0) return new Map();
+): Promise<IdentitesResolues<ProduitLocal>> {
+  if (ids.length === 0) return { map: new Map(), standards: new Map() };
   const { data, error } = await supabase
     .from("food_products")
     .select(
-      "id, gtin, product_name, brand, nutrition_unit, protein_per_100, carb_per_100, fat_per_100, image_url, detail_fetched_at",
+      "id, gtin, product_name, brand, nutrition_unit, protein_per_100, carb_per_100, fat_per_100, image_url, detail_fetched_at, preferred_quantity",
     )
     .in("id", [...ids]);
   exigerLecture("lireProduits", error);
   const map = new Map<string, ProduitLocal>();
+  const standards = new Map<string, number | null>();
   for (const p of (data ?? []) as unknown as {
     id: string;
     gtin: string;
@@ -301,6 +367,7 @@ async function lireProduits(
     fat_per_100: number;
     image_url: string | null;
     detail_fetched_at: string | null;
+    preferred_quantity: number | string | null;
   }[]) {
     if (p.nutrition_unit !== "g" && p.nutrition_unit !== "ml") continue;
     map.set(p.id, {
@@ -315,8 +382,66 @@ async function lireProduits(
       imageUrl: p.image_url,
       hydratee: p.detail_fetched_at !== null,
     });
+    // ⚠️ TOUJOURS NULL AUJOURD'HUI, ET C'EST NORMAL. `food_products` est en
+    // lecture seule pour `authenticated` : la colonne existe pour la capacité,
+    // aucun chemin ne l'écrit encore. La lire coûte zéro requête de plus et
+    // évite d'avoir un jour deux résolutions différentes.
+    standards.set(p.id, nombrePositif(p.preferred_quantity));
   }
-  return map;
+  return { map, standards };
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   N1.5.1 — LA PORTION PRÉFÉRÉE
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * LA HIÉRARCHIE, EN UNE LIGNE ET UN SEUL ENDROIT.
+ *
+ *     override du coach  ??  standard de l'identité  ??  aucune préférence
+ *
+ * ⚠️ ELLE EST RÉSOLUE ICI, ET NULLE PART AILLEURS. Ni la RPC ni l'écran élève
+ * ne la recalculent : la RPC reçoit une valeur DÉJÀ résolue et se contente de
+ * la figer, exactement comme pour l'identité. Deux résolutions divergeraient
+ * au premier ajustement.
+ *
+ * ⚠️ ET `null` EST UNE RÉPONSE, PAS UN TROU. « Personne n'a d'avis sur cet
+ * aliment » est le cas de la quasi-totalité du catalogue, et le solveur sait
+ * parfaitement le traiter — il retombe sur son comportement N1.5.
+ */
+export function portionEffective(item: FoodListItem): number | null {
+  return item.portionOverride ?? item.portionStandard ?? null;
+}
+
+/** L'unité dans laquelle la portion d'un item s'exprime : celle de l'identité. */
+export function uniteDePortion(item: FoodListItem): "g" | "ml" {
+  return item.source === "aliment" ? item.aliment.nutritionUnit : item.produit.nutritionUnit;
+}
+
+/**
+ * Pose — ou RETIRE — l'override de portion d'une ligne de liste.
+ *
+ * ⚠️ `null` N'EST PAS UNE ERREUR : c'est « reviens au standard ». Le coach doit
+ * pouvoir défaire sa personnalisation sans retirer puis remettre l'aliment.
+ *
+ * ⚠️ ZÉRO ET NÉGATIF SONT REFUSÉS ICI AUSSI. La contrainte de base le dirait,
+ * mais un aller-retour réseau pour apprendre qu'on a tapé « 0 » est une
+ * mauvaise réponse à une faute de frappe.
+ *
+ * Convention du dépôt : un writer rend un booléen et ne lève jamais.
+ */
+export async function definirPortionOverride(
+  supabase: TypedSupabaseClient,
+  itemId: string,
+  valeur: number | null,
+): Promise<boolean> {
+  if (valeur !== null && (!Number.isFinite(valeur) || valeur <= 0)) return false;
+  const { error } = await supabase
+    .from("food_list_items")
+    .update({ preferred_quantity_override: valeur } as never)
+    .eq("id", itemId);
+  devWarn("definirPortionOverride", error);
+  return !error;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -710,17 +835,29 @@ export async function lireSnapshotDeListe(
     // ⚠️ `displayName` EST POSÉ ICI SANS UNE REQUÊTE DE PLUS : `lireFoodList` a
     // déjà résolu chaque item contre sa source. C'est de l'HYDRATATION, pas du
     // snapshot — l'identité reste seule à voyager vers la base.
-    options: liste.items.map((item) =>
-      item.source === "aliment"
-        ? ({ type: "aliment", id: item.aliment.id, displayName: item.aliment.name } as const)
+    // ⚠️ LA PORTION EST FIGÉE ICI, AU MÊME INSTANT QUE L'IDENTITÉ, et c'est
+    // ce qui rend l'instantané complet : après ce point, modifier l'override
+    // ou le standard ne touche plus ce repas. `displayName`, lui, reste de
+    // l'HYDRATATION — il n'est jamais renvoyé à la RPC.
+    options: liste.items.map((item) => {
+      const portion = portionEffective(item);
+      const socle = {
+        preferredQuantity: portion,
+        // Pas de portion, pas d'unité : la contrainte de paire de la base dit
+        // la même chose, et inventer une unité seule n'aurait aucun sens.
+        preferredUnit: portion === null ? null : uniteDePortion(item),
+      } as const;
+      return item.source === "aliment"
+        ? ({ ...socle, type: "aliment", id: item.aliment.id, displayName: item.aliment.name } as const)
         : ({
+            ...socle,
             type: "produit",
             id: item.produit.id,
             displayName: item.produit.brand
               ? `${item.produit.brand} — ${item.produit.name}`
               : item.produit.name,
-          } as const),
-    ),
+          } as const);
+    }),
   };
 }
 

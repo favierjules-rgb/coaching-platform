@@ -230,10 +230,27 @@ begin
                       values ('f1000000-0000-4000-8000-000000000001', 9,
                               'aaaaaaaa-0000-4000-8000-000000000000')$q$));
 
+  -- ⚠️ CE QUE CE CONTRÔLE GARDE : AUCUNE COLONNE TEXTE NE PEUT TENIR LIEU
+  -- D'IDENTITÉ. « Un aliment libre ne peut pas être une option structurée »
+  -- reste une propriété du schéma.
+  --
+  -- N1.5.1 ajoute `meal_choice_options.preferred_unit`, du texte — mais c'est
+  -- une UNITÉ ('g' ou 'ml'), contrainte à deux valeurs par un check, et rien
+  -- ne permet d'y loger un nom d'aliment. Elle est donc nommée en exception,
+  -- avec sa raison, plutôt que la règle affaiblie en « colonnes texte
+  -- tolérées ».
   perform pg_temp.noter('N1-B', 'aucune colonne texte ne peut tenir lieu d''identité',
     (select count(*) from information_schema.columns
       where table_schema = 'public' and table_name in ('food_list_items','meal_choice_options')
-        and data_type in ('text','character varying')) = 0);
+        and data_type in ('text','character varying')
+        and column_name <> 'preferred_unit') = 0);
+
+  perform pg_temp.noter('N1-B', 'la seule colonne texte tolérée est une unité, contrainte à (g, ml)',
+    (select count(*) = 1 from pg_constraint
+      where conrelid = 'public.meal_choice_options'::regclass
+        and pg_get_constraintdef(oid) like '%preferred_unit%'
+        and pg_get_constraintdef(oid) like '%''g''%'
+        and pg_get_constraintdef(oid) like '%''ml''%'));
 
   perform pg_temp.noter('N1-B', 'le même aliment ne peut pas figurer deux fois dans une liste',
     pg_temp.refuse($q$insert into public.food_list_items (list_id, position, catalog_food_id)

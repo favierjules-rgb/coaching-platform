@@ -199,7 +199,17 @@ await test("N1.4-06/07/16. ouverte, l'occurrence montre les vrais noms, dans l'o
   assert.equal(avecProduit.options[1].displayName, "Arla — Skyr nature");
   // L'ordre du tableau EST l'ordre snapshoté : le lecteur trie par position.
   assert.deepEqual(avecProduit.options.map((o) => o.optionId), ["o1", "o2"]);
-  assert.ok(CODE_LECTURE.includes('.select("id, slot_id, position, catalog_food_id, product_id")'));
+  // ⚠️ CE QUE CETTE ASSERTION GARDE, C'EST LA LECTURE DE `id` ET DE L'IDENTITÉ,
+  // pas la chaîne exacte du `select`. N1.5.1 y a ajouté les deux colonnes de
+  // portion snapshotée ; épingler la chaîne entière ferait rougir ce test à
+  // chaque enrichissement du snapshot, sans rien prouver de plus.
+  const selectOptions = CODE_LECTURE.slice(
+    CODE_LECTURE.indexOf('from("meal_choice_options")'),
+    CODE_LECTURE.indexOf('.in("slot_id"'),
+  );
+  for (const colonne of ["id", "slot_id", "position", "catalog_food_id", "product_id"]) {
+    assert.ok(selectOptions.includes(colonne), `le lecteur doit sélectionner ${colonne}`);
+  }
 });
 
 await test("N1.4-08/09/12. un choix remplace le précédent, et referme la liste", () => {

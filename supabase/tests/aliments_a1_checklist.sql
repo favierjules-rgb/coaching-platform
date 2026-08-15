@@ -1322,7 +1322,13 @@ begin
     join pg_namespace n on n.oid = p.pronamespace
    where n.nspname = 'public'
      and p.prokind = 'f'
-     and coalesce(p.prosrc, '') ~ 'food_catalog'
+     -- ⚠️ ON CHERCHE DU CODE, PAS DE LA PROSE. `prosrc` contient aussi les
+     -- COMMENTAIRES de la fonction : depuis N1.5.1, `save_nutrition_plan_v2`
+     -- EXPLIQUE qu'elle ne lit ni `food_catalog` ni `food_products` pour
+     -- résoudre une portion — et cette phrase-là faisait rougir le contrôle.
+     -- Retirer les commentaires rend l'assertion plus forte, pas plus large :
+     -- elle mesure désormais de vraies lectures.
+     and regexp_replace(coalesce(p.prosrc, ''), '--[^\n]*', ' ', 'g') ~ 'food_catalog'
      -- ⚠️ LISTE BLANCHE, ET ELLE S'ÉTEND PAR DÉCISION, JAMAIS PAR COMMODITÉ.
      --
      -- `enregistrer_repas_planifie` (N1.1) y entre pour la MÊME raison
