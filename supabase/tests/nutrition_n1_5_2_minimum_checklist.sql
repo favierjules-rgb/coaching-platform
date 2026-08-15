@@ -103,7 +103,7 @@ begin
   -- Il exigeait d'abord que l'ancien nom ait DISPARU (stratégie rename) ;
   -- N1.5.2 l'a inversé, parce que la production lisait encore
   -- `preferred_unit` et qu'un rename n'a pas d'ordre sûr. Le CONTRACT du
-  -- 2026-09-11 a terminé le chemin : le code neuf est déployé et validé, la
+  -- 2026-09-13 a terminé le chemin : le code neuf est déployé et validé, la
   -- colonne est supprimée. On revient donc à la forme d'origine — non pas
   -- parce qu'on s'était trompé, mais parce que l'expand est ARRIVÉ À SON
   -- TERME. C'est la trace de trois états successifs, tous corrects à leur date.
@@ -259,7 +259,7 @@ end $$;
 -- ROLL → CONTRACT — LA TRANSITION EST TERMINÉE
 --
 -- ⚠️ CETTE SECTION GARDAIT L'EXPAND : copie 1:1, double écriture, cohérence
--- des deux unités. Le CONTRACT du 2026-09-11 a supprimé la colonne legacy ;
+-- des deux unités. Le CONTRACT du 2026-09-13 a supprimé la colonne legacy ;
 -- ces contrôles n'ont plus d'objet, et les GARDER VERTS artificiellement
 -- (« la contrainte de cohérence existe ») affirmerait une transition encore en
 -- cours. On garde donc ce qui reste vrai, et une seule chose reste vraie :

@@ -707,8 +707,8 @@ await test("HIST17. l'élève A ne voit jamais l'élève B", () => {
       // Un compteur seul dirait « 79 » sans dire lesquelles : c'est le nom qui
       // rend visible qu'aucune migration étrangère ne s'est glissée dans le lot.
       "20260910090000_n1_6_a_couleurs_de_listes.sql",
-      "20260911090000_contract_preferred_unit.sql",
       "20260912090000_n1_6_b_enregistrer_repas_structure.sql",
+      "20260913090000_contract_preferred_unit.sql",
     ], `migrations postérieures inattendues : ${tardives.join(", ")}`);
 
   // Et c'est EXÉCUTÉ, pas relu : la checklist crée deux élèves du même coach,

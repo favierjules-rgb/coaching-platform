@@ -349,7 +349,7 @@ Aucun test n'a été modifié pour obtenir du vert.
 
 **Nouveaux (10)**
 `supabase/migrations/20260910090000_n1_6_a_couleurs_de_listes.sql` ·
-`supabase/migrations/20260911090000_contract_preferred_unit.sql` ·
+`supabase/migrations/20260913090000_contract_preferred_unit.sql` ·
 `supabase/migrations/20260912090000_n1_6_b_enregistrer_repas_structure.sql` ·
 `supabase/tests/nutrition_n1_6_a_couleurs_checklist.sql` ·
 `supabase/tests/nutrition_contract_preferred_unit_checklist.sql` ·
@@ -377,19 +377,74 @@ modifiée, aucune supprimée** — et les deux entrées `courses-c1` du conteneu
 
 ---
 
-## 23. Ordre de déploiement
+## 23. Ordre de déploiement — CORRIGÉ
+
+Une version précédente de ce livrable plaçait le CONTRACT en **deuxième** position, sur
+l'affirmation que « le code N1.5.3 déployé lit déjà `quantity_unit` ». C'était une **déduction,
+pas une mesure** : une migration ne peut pas constater quel code tourne en production, et rien
+n'établissait que le runtime lisant `quantity_unit` fût réellement en ligne. Appliqué dans cet
+ordre, le CONTRACT aurait supprimé une colonne que la production pouvait encore lire.
+
+Les trois migrations n'étant **pas encore appliquées à distance**, l'ordre a été corrigé dans les
+noms de fichiers — le seul endroit où `supabase db push` le lit.
 
 ```
-1. N1.6A COLOR   → db push, puis déploiement. Purement additif : deux colonnes
-                   nullables et une clé de charge utile de plus.
-2. CONTRACT      → db push APRÈS que le code N1.5.3 soit déployé et validé —
-                   il l'est. Irréversible : les 63 valeurs de preferred_unit
-                   disparaissent, mais elles sont strictement égales à
-                   quantity_unit, garanti par la contrainte de cohérence.
-3. N1.6B SAVE    → db push, puis déploiement. La RPC neuve n'est appelée par
-                   personne tant que le bouton n'est pas déployé : l'ordre
-                   base-puis-code est sûr.
+PHASE 1 — base seule, AVANT tout déploiement
+  20260910090000  N1.6A COLOR    purement additif : deux colonnes nullables,
+                                 une clé de charge utile de plus
+  20260912090000  N1.6B SAVE     une RPC neuve que personne n'appelle encore,
+                                 et un filtre RELÂCHÉ sur une RPC existante
+
+PHASE 2 — déployer le runtime N1.6, qui ne lit plus preferred_unit
+
+PHASE 3 — base seule, APRÈS le déploiement
+  20260913090000  CONTRACT       irréversible : les 63 valeurs de preferred_unit
+                                 disparaissent. Elles sont strictement égales à
+                                 quantity_unit, garanti par la contrainte de
+                                 cohérence de N1.5.2.
 ```
 
-**Aucune contrainte d'ordre base/code pour 1 et 3.** Pour 2, l'ordre est imposé — et il est déjà
-satisfait.
+**Pourquoi la phase 1 ne casse rien.** COLOR et SAVE n'enlèvent rien à l'ancien runtime :
+
+- COLOR **conserve la double écriture** de `preferred_unit` dans les DEUX chemins de la RPC
+  (`update` puis `insert`). Un plan enregistré pendant la phase 1 reste donc lisible par le code
+  encore en ligne.
+- COLOR n'ajoute que des colonnes **nullables** : une charge utile sans `color_key` passe, et la
+  couleur reste `NULL`.
+- SAVE ne nomme **jamais** `preferred_unit`, ne reproduit pas `save_nutrition_plan_v2`, et ne
+  touche `meal_choice_options` que par `slot_id` / `catalog_food_id` / `product_id`. Il est donc
+  strictement indépendant du CONTRACT — c'est ce qui rend l'inversion possible.
+- SAVE reproduit `enregistrer_repas_planifie` en **retirant** un filtre (`status = 'active'`) :
+  une relaxation ne peut pas casser un appelant existant. Signature et droits inchangés.
+
+**Où c'est prouvé.** Un banc dédié (`supabase/tests/nutrition_n1_6_phase1_rollout_checklist.sql`) s'exécute sur une base arrêtée
+**avant** le CONTRACT — 51 migrations au lieu de 52 — et mesure **25 contrôles, 0 échec** :
+`preferred_unit` présente avec ses trois contraintes legacy, les deux `color_key` posées et
+contraintes, la RPC d'enregistrement structuré exécutable par `authenticated` et interdite à
+`anon`, et surtout le trajet réel d'un **ancien client** : une charge utile portant la clé
+`preferred_unit` et aucune couleur traverse la RPC, remplit les deux unités, et un
+ré-enregistrement — chemin `update` — les remplit encore.
+
+Sur cette même base intermédiaire, les checklists du lot sont **vertes sans modification** :
+N1.6A **22/22**, N1.6B **35/35**. La checklist CONTRACT y est **9/15 rouge**, comme elle doit
+l'être : elle décrit l'état d'après.
+
+⚠️ **Les checklists `nutrition_n1_listes`, `nutrition_n1_5_1_portions` et
+`nutrition_n1_5_2_minimum` décrivent l'état POST-CONTRACT.** Elles sont rouges en phase 1 (2, 1 et
+5 échecs), et c'est normal : elles affirment que `preferred_unit` a disparu. À exécuter en phase 3.
+
+**Contrôles négatifs du banc.** Annuler la double écriture de COLOR — sur le chemin `update`, puis
+sur le chemin `insert` — fait rougir le banc les deux fois. Et il rougit de la meilleure façon
+possible : la RPC **lève**, sur `meal_choice_options_preferred_paire`. En phase 1, la contrainte
+legacy de N1.5.1 rend la perte de la double écriture **impossible en silence** — un snapshot à
+moitié cassé serait refusé par la base avant d'exister.
+
+Le premier sabotage, dans sa forme initiale, n'a **rien fait rougir** : le banc ne réenregistrait
+pas, donc le chemin `update` n'était jamais emprunté. Le banc a été corrigé — il enregistre puis
+ré-enregistre sur la même occurrence — avant que le contrôle négatif ne devienne concluant.
+
+**Le garde permanent.** `CONTRACT-07` (`npm run test:nutrition-contract`) lit les noms de fichiers
+sur le disque et exige que le CONTRACT soit postérieur à COLOR et à SAVE, et qu'il soit la
+**dernière** migration du dépôt. Le remettre à `20260911` fait rougir ce contrôle avec le message
+exact ; ajouter une migration après lui le fait rougir aussi — délibérément, pour que l'ordre du
+rollout se décide, et ne se découvre pas en production.

@@ -1,6 +1,19 @@
 -- ============================================================================
--- Migration 20260911090000 — CONTRACT : `preferred_unit` DISPARAÎT.
+-- Migration 20260913090000 — CONTRACT : `preferred_unit` DISPARAÎT.
 -- (chantier feat/nutrition-structured-meals)
+--
+-- ⚠️⚠️ CETTE MIGRATION EST LA PHASE 3. NE PAS L'APPLIQUER AVANT LA PHASE 2.
+--
+--   PHASE 1 · appliquer 20260910090000 (COLOR) et 20260912090000 (SAVE).
+--             Elles n'exigent AUCUN déploiement préalable : elles ajoutent, et
+--             ne retirent rien que l'ancien runtime lise.
+--   PHASE 2 · DÉPLOYER le runtime N1.6, qui ne lit plus `preferred_unit`.
+--   PHASE 3 · appliquer CE fichier.
+--
+-- Appliquée avant la phase 2, elle CASSE la production : le code encore en
+-- ligne peut lire `preferred_unit`, et la colonne n'existerait plus. C'est
+-- précisément pour rendre cet ordre lisible que ce fichier porte le timestamp
+-- LE PLUS TARDIF des trois — il ne peut pas s'appliquer au milieu du lot.
 --
 -- ────────────────────────────────────────────────────────────────────────────
 -- CE QUE CE FICHIER TERMINE
@@ -11,11 +24,20 @@
 -- `quantity_unit` à côté, recopié l'unité 1:1, et gardé l'ancienne colonne
 -- écrite le temps du rollout.
 --
--- Le rollout a eu lieu. Vérifié le 15/08/2026 sur la base distante :
--- `20260909090000_n1_5_2_quantite_minimale` est appliquée, les 63 options à
--- portion portent `quantity_unit`, et le code déployé lit `quantity_unit`.
--- Le CONTRACT est donc dû — c'est la troisième et dernière étape, pas une
--- opération de nettoyage optionnelle.
+-- Où en est le rollout, mesuré et pas supposé. Vérifié le 15/08/2026 sur la
+-- base distante : `20260909090000_n1_5_2_quantite_minimale` EST appliquée, et
+-- les 63 options à portion portent bien `quantity_unit` — l'EXPAND côté base
+-- est donc fait, et la donnée est prête.
+--
+-- ⚠️ CE QUI N'EST PAS MESURÉ ICI, ET QUI CONDITIONNE TOUT : le DÉPLOIEMENT.
+-- Une migration ne peut pas constater quel code tourne en production. Une
+-- version précédente de cet en-tête affirmait « le code déployé lit
+-- quantity_unit » : c'était une déduction, pas une mesure, et elle ne vaut
+-- que si le runtime N1.6 a réellement été mis en ligne. Tant que ce n'est pas
+-- le cas, la production peut encore lire `preferred_unit`.
+--
+-- Le CONTRACT est donc DÛ mais PAS ENCORE APPLICABLE : c'est la troisième
+-- étape, et elle attend que la deuxième ait eu lieu.
 --
 -- ────────────────────────────────────────────────────────────────────────────
 -- LA PREUVE EXIGÉE AVANT D'ÉCRIRE CETTE MIGRATION
@@ -936,4 +958,4 @@ alter table public.meal_choice_options
   drop column if exists preferred_unit;
 
 comment on column public.meal_choice_options.quantity_unit is
-  'N1.5.2 — unité COMMUNE à preferred_quantity et minimum_quantity, figée avec elles. SEULE source métier de l''unité depuis le CONTRACT du 2026-09-11 : preferred_unit (N1.5.1) a été supprimée après déploiement et validation terrain du code lisant quantity_unit. Restreinte à (g, ml) : le vocabulaire de ce qui est CALCULABLE. Il n''existe volontairement PAS de minimum_unit — les deux quantités sont figées dans l''unité de la même identité, au même instant.';
+  'N1.5.2 — unité COMMUNE à preferred_quantity et minimum_quantity, figée avec elles. SEULE source métier de l''unité depuis le CONTRACT du 2026-09-13 : preferred_unit (N1.5.1) a été supprimée après déploiement et validation terrain du code lisant quantity_unit. Restreinte à (g, ml) : le vocabulaire de ce qui est CALCULABLE. Il n''existe volontairement PAS de minimum_unit — les deux quantités sont figées dans l''unité de la même identité, au même instant.';

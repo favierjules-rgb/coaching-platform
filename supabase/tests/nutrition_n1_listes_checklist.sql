@@ -235,7 +235,7 @@ begin
   -- reste une propriété du schéma.
   --
   -- N1.5.1 avait ajouté `meal_choice_options.preferred_unit` ; N1.5.2 a ajouté
-  -- `quantity_unit` à côté (expand), et le CONTRACT du 2026-09-11 a SUPPRIMÉ
+  -- `quantity_unit` à côté (expand), et le CONTRACT du 2026-09-13 a SUPPRIMÉ
   -- l'ancienne. Il n'y a donc de nouveau qu'UNE seule colonne texte tolérée —
   -- ce contrôle est revenu à sa forme d'origine, et c'est la preuve que le
   -- chantier expand → deploy → contract est allé jusqu'au bout.

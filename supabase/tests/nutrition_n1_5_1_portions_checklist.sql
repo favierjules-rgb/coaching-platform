@@ -164,7 +164,7 @@ begin
   -- `meal_choice_options_preferred_paire` (« unité ⟺ portion ») ; N1.5.2 a
   -- ajouté `meal_choice_options_quantites_unite` (« unité ⟺ portion OU
   -- minimum ») à côté, en gardant l'ancienne pour le rollout ; le CONTRACT du
-  -- 2026-09-11 a supprimé l'ancienne. La GARANTIE de N1.5.1 — une quantité
+  -- 2026-09-13 a supprimé l'ancienne. La GARANTIE de N1.5.1 — une quantité
   -- sans unité ne veut rien dire — est intacte, portée par la contrainte
   -- généralisée.
   perform pg_temp.noter('P-C', 'la contrainte de PAIRE quantité/unité existe', (

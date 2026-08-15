@@ -24,7 +24,26 @@ function lire(chemin: string): string {
   return readFileSync(new URL(chemin, import.meta.url), "utf8");
 }
 
-const MIGRATION = lire("../../supabase/migrations/20260911090000_contract_preferred_unit.sql");
+/** Les migrations présentes sur le disque, triées — l'ordre d'application. */
+const MIGRATIONS = readdirSync(new URL("../../supabase/migrations/", import.meta.url))
+  .filter((f) => f.endsWith(".sql"))
+  .sort();
+
+/**
+ * ⚠️ LA MIGRATION EST TROUVÉE PAR CE QU'ELLE EST, PAS PAR SA DATE. Coder son
+ * horodatage ici rendrait TOUT ce harnais illisible en cas de réordonnancement
+ * du rollout : le fichier ne se chargerait plus, et l'échec serait un `ENOENT`
+ * au lieu du contrôle d'ordre qui doit parler (`CONTRACT-07`). C'est
+ * exactement ce qui s'est produit quand le CONTRACT est passé de 20260911 à
+ * 20260913.
+ */
+const NOM_CONTRAT = (() => {
+  const trouves = MIGRATIONS.filter((f) => f.includes("contract_preferred_unit"));
+  assert.equal(trouves.length, 1, `une seule migration CONTRACT attendue, trouvé : ${trouves.join(", ")}`);
+  return trouves[0];
+})();
+
+const MIGRATION = lire(`../../supabase/migrations/${NOM_CONTRAT}`);
 const DDL = MIGRATION.replace(/--[^\n]*/g, " ").replace(/comment on [^;]*;/gi, " ");
 
 /** Tous les fichiers de RUNTIME — ni tests, ni migrations, ni docs. */
@@ -137,4 +156,48 @@ await test("CONTRACT-06. le lot N1.6A reste intact dans la fonction reproduite",
   assert.ok(DDL.includes("minimum_quantity"), "le minimum N1.5.2 a disparu");
   assert.ok(DDL.includes("preferred_quantity"), "la portion N1.5.1 a disparu");
   assert.ok(DDL.includes("quantity_unit"));
+});
+
+await test("CONTRACT-07. le CONTRACT s'applique en DERNIER — l'ordre de rollout est dans les noms", () => {
+  // ⚠️ CE CONTRÔLE EXISTE PARCE QUE L'ORDRE A ÉTÉ FAUX UNE FOIS. Le CONTRACT
+  // portait 20260911, donc il tombait ENTRE N1.6A et N1.6B : `supabase db
+  // push` l'aurait appliqué avant que le runtime N1.6 ne soit déployé, et la
+  // production — qui peut encore lire `preferred_unit` — se serait retrouvée
+  // devant une colonne disparue.
+  //
+  // EXPAND → DEPLOY → CONTRACT n'est pas une intention, c'est un ORDRE. Et le
+  // seul endroit où PostgreSQL le lit, c'est le timestamp du nom de fichier.
+  // On l'y vérifie donc, sur le disque, pas dans un commentaire.
+  const migrations = MIGRATIONS;
+
+  const horodatage = (f: string) => f.slice(0, 14);
+  const contrat = migrations.find((f) => f.includes("contract_preferred_unit"));
+  const couleur = migrations.find((f) => f.includes("n1_6_a_couleurs"));
+  const enregistrement = migrations.find((f) => f.includes("n1_6_b_enregistrer"));
+
+  assert.ok(contrat && couleur && enregistrement, "une des trois migrations N1.6 a disparu");
+
+  // PHASE 1 — les deux migrations applicables AVANT tout déploiement.
+  assert.ok(horodatage(couleur) < horodatage(contrat),
+    `N1.6A COLOR (${couleur}) doit précéder le CONTRACT (${contrat})`);
+  assert.ok(horodatage(enregistrement) < horodatage(contrat),
+    `N1.6B SAVE (${enregistrement}) doit précéder le CONTRACT (${contrat})`);
+
+  // ⚠️ ET IL EST LE DERNIER DE TOUT LE DÉPÔT, pas seulement du lot. Une
+  // migration future glissée après lui redeviendrait un piège d'ordre : elle
+  // s'appliquerait sur un schéma dont `preferred_unit` a déjà disparu, sans
+  // que rien ne l'ait annoncé. Ce contrôle rougira alors — c'est voulu, il
+  // faudra décider explicitement, pas découvrir en production.
+  assert.equal(migrations[migrations.length - 1], contrat,
+    "le CONTRACT n'est plus la dernière migration du dépôt");
+
+  // ⚠️ ET N1.6B NE DÉPEND PAS DU CONTRACT — c'est ce qui rend l'ordre
+  // possible. Mesuré sur le fichier : SAVE ne nomme jamais la colonne legacy,
+  // ne reproduit pas `save_nutrition_plan_v2`, et ne touche `meal_choice_options`
+  // que par `slot_id` / `catalog_food_id` / `product_id`.
+  const save = lire(`../../supabase/migrations/${enregistrement}`);
+  assert.ok(!save.includes("preferred_unit"),
+    "N1.6B nomme preferred_unit : il dépendrait alors de l'ordre du CONTRACT");
+  assert.ok(!save.includes("save_nutrition_plan_v2"),
+    "N1.6B reproduit la RPC de plan : COLOR et CONTRACT s'écraseraient entre eux");
 });

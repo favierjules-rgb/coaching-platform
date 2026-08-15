@@ -628,8 +628,8 @@ await test("COACH-SUP. l'écran est branché, réutilise A5.7, et n'a coûté au
       // Un compteur seul dirait « 79 » sans dire lesquelles : c'est le nom qui
       // rend visible qu'aucune migration étrangère ne s'est glissée dans le lot.
       "20260910090000_n1_6_a_couleurs_de_listes.sql",
-      "20260911090000_contract_preferred_unit.sql",
       "20260912090000_n1_6_b_enregistrer_repas_structure.sql",
+      "20260913090000_contract_preferred_unit.sql",
     ],
   );
 
