@@ -23,7 +23,7 @@ import {
   type NutritionPlanV2,
   type NutritionPlanV2Profile,
 } from "@/lib/nutrition/plan-v2-validation";
-import type { PlanV2Week, PrescribedMeal } from "@/lib/nutrition/plan-v2-week";
+import type { MealChoiceSlot, PlanV2Week, PrescribedMeal } from "@/lib/nutrition/plan-v2-week";
 import { WEEKDAY_KEYS, type WeekdayKey } from "@/lib/nutrition/weekdays";
 
 /**
@@ -146,6 +146,11 @@ function avecEtatMacros<T extends DayTargetsForm>(jour: T, etat: PlanV2FormState
 let compteur = 0;
 
 /** Identifiant local d'un repas. Le client les génère, comme pour les recettes. */
+/** Un identifiant LOCAL (« meal-local-… ») n'est pas un UUID : la base en génère un. */
+export function estUuid(valeur: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(valeur);
+}
+
 export function newMealId(): string {
   if (typeof globalThis.crypto?.randomUUID === "function") {
     return globalThis.crypto.randomUUID();
@@ -373,6 +378,9 @@ export function addMeal(
     carbs: 0,
     fat: 0,
     coachNotes: "",
+    // ⚠️ UN REPAS NEUF EST LIBRE. Les listes sont une aide facultative : rien
+    // n'en pose une d'office, et un repas à zéro occurrence est le cas normal.
+    choiceSlots: [],
   };
   return remplacerJour(state, day, (jour) => ({ ...jour, meals: [...jour.meals, repas] }));
 }
@@ -436,11 +444,129 @@ export function duplicateDay(
               carb: [...jourSource.locked.carb],
               fat: [...jourSource.locked.fat],
             },
-            meals: jourSource.meals.map((m) => ({ ...m, id: newMealId() })),
+            // ⚠️ LES OCCURRENCES SUIVENT, AVEC DE NOUVEAUX IDENTIFIANTS.
+            // Réutiliser ceux de la source les DÉPLACERAIT vers le repas
+            // copié — la RPC refuserait d'ailleurs (OCCURRENCE_HORS_REPAS).
+            // Le snapshot, lui, est recopié tel quel : la copie porte les
+            // aliments figés au moment où la source les avait, pas ceux de la
+            // bibliothèque d'aujourd'hui.
+            meals: jourSource.meals.map((m) => ({
+              ...m,
+              id: newMealId(),
+              choiceSlots: m.choiceSlots.map((occurrence) => ({
+                ...occurrence,
+                id: newMealId(),
+                options: occurrence.options.map((option) => ({ ...option })),
+              })),
+            })),
           }
         : jour,
     ),
   };
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   N1.3 — LES GESTES SUR LES OCCURRENCES D'UN REPAS
+
+   ⚠️ TOUT EST PUR, ET RIEN N'ÉCRIT. Ces fonctions transforment l'état du
+   formulaire ; la base n'est touchée qu'au « Enregistrer », en UNE
+   transaction. C'est ce qui rend « ajouter une liste » annulable, et ce qui
+   permet à une duplication de jour d'emporter les occurrences avec elle.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/** Un identifiant d'occurrence, choisi par le navigateur. Même fabrique que les repas. */
+export function newChoiceSlotId(): string {
+  return newMealId();
+}
+
+function remplacerRepas(
+  state: WeekFormState,
+  day: WeekdayKey,
+  mealId: string,
+  transformer: (repas: PrescribedMeal) => PrescribedMeal,
+): WeekFormState {
+  return remplacerJour(state, day, (jour) => ({
+    ...jour,
+    meals: jour.meals.map((m) => (m.id === mealId ? transformer(m) : m)),
+  }));
+}
+
+/**
+ * Ajoute une occurrence À LA FIN du repas.
+ *
+ * ⚠️ `label` et `options` SONT DÉJÀ L'INSTANTANÉ. L'appelant les a lus dans la
+ * bibliothèque au moment du clic ; à partir d'ici, plus rien ne les relie au
+ * modèle. La même liste peut être ajoutée deux fois : aucune vérification
+ * d'unicité, c'est le cas d'usage central.
+ */
+export function addChoiceSlot(
+  state: WeekFormState,
+  day: WeekdayKey,
+  mealId: string,
+  occurrence: Omit<MealChoiceSlot, "id">,
+): WeekFormState {
+  return remplacerRepas(state, day, mealId, (repas) => ({
+    ...repas,
+    choiceSlots: [...repas.choiceSlots, { ...occurrence, id: newChoiceSlotId() }],
+  }));
+}
+
+/** Retire UNE occurrence de CE repas. Rien d'autre n'est touché. */
+export function removeChoiceSlot(
+  state: WeekFormState,
+  day: WeekdayKey,
+  mealId: string,
+  slotId: string,
+): WeekFormState {
+  return remplacerRepas(state, day, mealId, (repas) => ({
+    ...repas,
+    choiceSlots: repas.choiceSlots.filter((o) => o.id !== slotId),
+  }));
+}
+
+/**
+ * Monte ou descend une occurrence d'un cran.
+ *
+ * L'ordre du tableau EST la position : la base la dérive de cet ordre, donc
+ * 1..N est garanti sans qu'aucun code n'ait à renuméroter quoi que ce soit.
+ */
+export function moveChoiceSlot(
+  state: WeekFormState,
+  day: WeekdayKey,
+  mealId: string,
+  slotId: string,
+  direction: -1 | 1,
+): WeekFormState {
+  return remplacerRepas(state, day, mealId, (repas) => {
+    const index = repas.choiceSlots.findIndex((o) => o.id === slotId);
+    const cible = index + direction;
+    if (index === -1 || cible < 0 || cible >= repas.choiceSlots.length) return repas;
+    const ordre = [...repas.choiceSlots];
+    [ordre[index], ordre[cible]] = [ordre[cible], ordre[index]];
+    return { ...repas, choiceSlots: ordre };
+  });
+}
+
+/**
+ * REMPLACE le contenu d'une occurrence par un nouvel instantané.
+ *
+ * ⚠️ L'IDENTIFIANT EST CONSERVÉ, ET LA PLACE AUSSI. C'est la même occurrence
+ * qui change de liste, pas une suppression suivie d'un ajout : elle garde son
+ * rang, et l'élève qui avait déjà planifié dessus voit son créneau changer de
+ * contenu plutôt que disparaître.
+ */
+export function replaceChoiceSlot(
+  state: WeekFormState,
+  day: WeekdayKey,
+  mealId: string,
+  slotId: string,
+  occurrence: Omit<MealChoiceSlot, "id">,
+): WeekFormState {
+  return remplacerRepas(state, day, mealId, (repas) => ({
+    ...repas,
+    choiceSlots: repas.choiceSlots.map((o) => (o.id === slotId ? { ...occurrence, id: o.id } : o)),
+  }));
 }
 
 /** « Appliquer à toute la semaine » — le jour ouvert vers les six autres. */
@@ -655,7 +781,7 @@ export function toWeekSavePayload(state: WeekFormState): {
           // Un identifiant LOCAL (« meal-local-… ») n'est pas un UUID : on le
           // laisse à la base, qui en génère un. Un UUID existant est renvoyé
           // tel quel, donc le repas est MIS À JOUR, jamais dupliqué.
-          id: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(m.id) ? m.id : null,
+          id: estUuid(m.id) ? m.id : null,
           slot: m.slot,
           name: m.name.trim(),
           items: m.items.filter((i) => i.name.trim() !== ""),
@@ -664,6 +790,20 @@ export function toWeekSavePayload(state: WeekFormState): {
           carbs: m.carbs,
           fat: m.fat,
           coach_notes: m.coachNotes.trim(),
+          // ⚠️ TOUJOURS ÉMISE, MÊME VIDE, ET C'EST VOULU. L'écran connaît
+          // l'état COMPLET des occurrences du repas qu'il édite : omettre la
+          // clé demanderait à la base de ne rien toucher, et un retrait ne
+          // serait jamais enregistré. La rétrocompatibilité vit dans la RPC,
+          // pour les charges utiles qui, elles, ne savent rien des listes.
+          choice_slots: m.choiceSlots.map((occurrence) => ({
+            id: estUuid(occurrence.id) ? occurrence.id : null,
+            label: occurrence.label.trim(),
+            source_list_id: occurrence.sourceListId,
+            options: occurrence.options.map((option) => ({
+              catalog_food_id: option.type === "aliment" ? option.id : null,
+              product_id: option.type === "produit" ? option.id : null,
+            })),
+          })),
         })),
     })),
   };
@@ -694,7 +834,16 @@ export function toDuplicateWeekPayload(state: WeekFormState): {
       const j = jour as { meals?: readonly Record<string, unknown>[] };
       return {
         ...(jour as Record<string, unknown>),
-        meals: (j.meals ?? []).map((repas) => ({ ...repas, id: null })),
+        meals: (j.meals ?? []).map((repas) => ({
+          ...repas,
+          id: null,
+          // ⚠️ MÊME RAISON, UN CRAN PLUS BAS. Les identifiants d'occurrence
+          // appartiennent aux repas du plan d'ORIGINE : les réutiliser
+          // essaierait de les déplacer vers la copie, et la RPC lèverait
+          // OCCURRENCE_HORS_REPAS. `null` demande à la base d'en générer.
+          choice_slots: ((repas as { choice_slots?: readonly Record<string, unknown>[] }).choice_slots ?? [])
+            .map((occurrence) => ({ ...occurrence, id: null })),
+        })),
       };
     }),
   };

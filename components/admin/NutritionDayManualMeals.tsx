@@ -3,6 +3,9 @@
 import { useId, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 
+import { MealChoiceListsPanel } from "@/components/admin/MealChoiceListsPanel";
+import type { SnapshotDeListe } from "@/lib/supabase/food-lists";
+
 import { Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
 import { MEAL_SLOT_KEYS, MEAL_SLOT_LABELS_FR, type MealSlotKey } from "@/lib/nutrition/meal-distribution";
 import type { PrescribedMeal } from "@/lib/nutrition/plan-v2-week";
@@ -40,10 +43,12 @@ function MealEditor({
   meal,
   onChange,
   onRemove,
+  occurrences,
 }: {
   meal: PrescribedMeal;
   onChange: (patch: Partial<Omit<PrescribedMeal, "id">>) => void;
   onRemove: () => void;
+  occurrences: GestesOccurrences;
 }) {
   // Le texte brut des aliments est tenu en état local, distinct de
   // `meal.items` : reparser puis reformater à chaque frappe casserait la
@@ -52,7 +57,7 @@ function MealEditor({
   const [texteAliments, setTexteAliments] = useState(() => itemsToText(meal.items));
 
   return (
-    <div className="rounded-panel border border-border bg-surface-soft/40 p-4">
+    <div className="min-w-0 rounded-panel border border-border bg-surface-soft/40 p-4">
       <div className="mb-3 flex items-center justify-between gap-2">
         <span className="text-xs uppercase tracking-wide text-muted-foreground">Repas</span>
         <button
@@ -64,7 +69,7 @@ function MealEditor({
           <Trash2 size={14} />
         </button>
       </div>
-      <div className="flex flex-col gap-3">
+      <div className="flex min-w-0 flex-col gap-3">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <SelectField
             label="Moment"
@@ -88,9 +93,30 @@ function MealEditor({
           onChange={(v) => onChange({ coachNotes: v })}
           rows={2}
         />
+        {/* N1.3 — les listes viennent APRÈS les réglages du repas, et elles
+            sont facultatives : un repas à zéro occurrence reste le cas
+            normal, et rien ici n'en impose une. */}
+        <MealChoiceListsPanel
+          occurrences={meal.choiceSlots}
+          onAjouter={(snapshot) => occurrences.onAjouter(meal.id, snapshot)}
+          onRemplacer={(slotId, snapshot) => occurrences.onRemplacer(meal.id, slotId, snapshot)}
+          onRetirer={(slotId) => occurrences.onRetirer(meal.id, slotId)}
+          onDeplacer={(slotId, direction) => occurrences.onDeplacer(meal.id, slotId, direction)}
+        />
       </div>
     </div>
   );
+}
+
+/**
+ * N1.3 — les quatre gestes sur les occurrences, remontés au panneau semaine
+ * qui détient l'état. Ce composant n'écrit rien lui-même : il transmet.
+ */
+export interface GestesOccurrences {
+  readonly onAjouter: (mealId: string, snapshot: SnapshotDeListe) => void;
+  readonly onRemplacer: (mealId: string, slotId: string, snapshot: SnapshotDeListe) => void;
+  readonly onRetirer: (mealId: string, slotId: string) => void;
+  readonly onDeplacer: (mealId: string, slotId: string, direction: -1 | 1) => void;
 }
 
 export function NutritionDayManualMeals({
@@ -98,11 +124,13 @@ export function NutritionDayManualMeals({
   onAdd,
   onUpdate,
   onRemove,
+  occurrences,
 }: {
   readonly meals: readonly PrescribedMeal[];
   readonly onAdd: () => void;
   readonly onUpdate: (mealId: string, patch: Partial<Omit<PrescribedMeal, "id">>) => void;
   readonly onRemove: (mealId: string) => void;
+  readonly occurrences: GestesOccurrences;
 }) {
   const titreId = useId();
 
@@ -119,6 +147,7 @@ export function NutritionDayManualMeals({
             meal={repas}
             onChange={(patch) => onUpdate(repas.id, patch)}
             onRemove={() => onRemove(repas.id)}
+            occurrences={occurrences}
           />
         ))}
 

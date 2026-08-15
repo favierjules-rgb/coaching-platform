@@ -963,11 +963,43 @@ begin
   perform pg_temp.noter('N1-M', 'l''écriture staff sur meals est bien globale (is_coach_or_admin)',
     v_meals = 'is_coach_or_admin()');
 
-  perform pg_temp.noter('N1-M', 'les occurrences ont EXACTEMENT la même règle d''écriture que meals',
+  -- ── N1.3 A FAIT DIVERGER `meal_choice_slots`, ET C'EST VOULU ────────────
+  -- La lecture/écriture staff reste globale sur les deux tables : c'est
+  -- l'équivalence avec `meals` que ce contrôle épingle, et elle tient
+  -- toujours côté `using`. Le `with check` de `meal_choice_slots`, lui, a
+  -- reçu en N1.3 une condition supplémentaire : un coach ne déclare comme
+  -- provenance que SES listes. Le contrôle est donc scindé, sans rien
+  -- relâcher — si `meals` était restreint un jour, `v_meals` changerait et
+  -- les trois assertions ci-dessous rougiraient ensemble.
+  perform pg_temp.noter('N1-M', 'les occurrences gardent la règle de LECTURE de meals',
     (select count(*) from pg_policies
       where schemaname = 'public'
         and tablename in ('meal_choice_slots', 'meal_choice_options')
-        and cmd = 'ALL' and qual = v_meals and with_check = v_meals) = 2);
+        and cmd = 'ALL' and qual = v_meals) = 2);
+
+  perform pg_temp.noter('N1-M', 'les options gardent AUSSI la règle d''écriture de meals',
+    (select count(*) from pg_policies
+      where schemaname = 'public' and tablename = 'meal_choice_options'
+        and cmd = 'ALL' and with_check = v_meals) = 1);
+
+  -- N1.3 : le `with check` des occurrences part de `is_coach_or_admin()` et
+  -- n'y AJOUTE que la propriété de la provenance. On vérifie les deux — la
+  -- base conservée, et la restriction ajoutée — plutôt qu'une chaîne exacte
+  -- qu'un simple reformatage de PostgreSQL ferait rougir pour rien.
+  perform pg_temp.noter('N1-M', 'N1.3 · le with check des occurrences garde la garde de rôle',
+    (select with_check from pg_policies where schemaname = 'public'
+      and tablename = 'meal_choice_slots' and policyname = 'meal_choice_slots_manage_staff')
+    like '%is_coach_or_admin()%');
+
+  perform pg_temp.noter('N1-M', 'N1.3 · et n''accepte une provenance que si le coach la possède',
+    (select with_check from pg_policies where schemaname = 'public'
+      and tablename = 'meal_choice_slots' and policyname = 'meal_choice_slots_manage_staff')
+    like '%food_lists%current_coach_id()%');
+
+  perform pg_temp.noter('N1-M', 'N1.3 · sans jamais mettre l''administrateur dehors',
+    (select with_check from pg_policies where schemaname = 'public'
+      and tablename = 'meal_choice_slots' and policyname = 'meal_choice_slots_manage_staff')
+    like '%is_admin()%');
 
   -- Et la bibliothèque, elle, suit l'AUTRE convention du dépôt : celle des
   -- catalogues possédés, comme nutrition_recipes.

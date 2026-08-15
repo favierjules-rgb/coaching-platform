@@ -534,7 +534,18 @@ await test("24. la couche de lecture de la semaine n'écrit RIEN non plus", () =
   const code = sansCommentairesTs(LECTURE_SEMAINE);
   assert.ok(!/\.insert\(|\.update\(|\.delete\(|\.upsert\(/.test(code));
   const froms = [...code.matchAll(/\.from\("([a-z_]+)"\)/g)].map((m) => m[1]);
-  assert.deepEqual([...new Set(froms)].sort(), ["meals", "nutrition_days"]);
+  // N1.3 ajoute DEUX lectures, et la liste reste close : les occurrences et
+  // leurs options sont lues ici, la bibliothèque ne l'est JAMAIS. C'est cette
+  // absence — `food_lists` et `food_list_items` hors de cette liste — qui fait
+  // l'instantané, et ce contrôle la garde.
+  assert.deepEqual([...new Set(froms)].sort(), [
+    "meal_choice_options",
+    "meal_choice_slots",
+    "meals",
+    "nutrition_days",
+  ]);
+  assert.ok(!froms.includes("food_lists"), "la lecture d'un repas ne passe JAMAIS par la bibliothèque");
+  assert.ok(!froms.includes("food_list_items"));
 });
 
 await test("25. la charge utile de sauvegarde ne contient AUCUNE quantité calculée", () => {
@@ -810,9 +821,9 @@ await test("34. la charge utile RPC transporte la semaine sans la déformer", ()
 
 await test("35. les repas sont rendus dans un ordre stable", () => {
   const repas = [
-    { id: "c", slot: "dinner" as const, name: "B", items: [], calories: 0, protein: 0, carbs: 0, fat: 0, coachNotes: "" },
-    { id: "a", slot: "breakfast" as const, name: "Z", items: [], calories: 0, protein: 0, carbs: 0, fat: 0, coachNotes: "" },
-    { id: "b", slot: "dinner" as const, name: "A", items: [], calories: 0, protein: 0, carbs: 0, fat: 0, coachNotes: "" },
+    { id: "c", slot: "dinner" as const, name: "B", items: [], calories: 0, protein: 0, carbs: 0, fat: 0, coachNotes: "", choiceSlots: [] },
+    { id: "a", slot: "breakfast" as const, name: "Z", items: [], calories: 0, protein: 0, carbs: 0, fat: 0, coachNotes: "", choiceSlots: [] },
+    { id: "b", slot: "dinner" as const, name: "A", items: [], calories: 0, protein: 0, carbs: 0, fat: 0, coachNotes: "", choiceSlots: [] },
   ];
   assert.deepEqual(orderedMeals(repas).map((m) => m.id), ["a", "b", "c"]);
 });
@@ -1118,7 +1129,7 @@ await test("51. les quatre migrations sont déclarées au manifeste et comptées
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
   // 35 depuis 20260828090000_web_push_notifications.sql (socle Web Push).
-  assert.equal(attendues.length, 46);
+  assert.equal(attendues.length, 47);
   for (const nom of [
     "20260810090000_harden_nutrition_privileges.sql",
     "20260811090000_nutrition_v2_unification.sql",
@@ -1128,8 +1139,8 @@ await test("51. les quatre migrations sont déclarées au manifeste et comptées
     assert.ok(attendues.includes(nom), nom);
   }
   const secu = lire("../../scripts/tests/security-hardening.mts");
-  assert.ok(secu.includes(".length, 73,"), "le compteur de migrations suit les migrations réelles");
-  assert.ok(secu.includes("assert.equal(attendues.length, 46);"));
+  assert.ok(secu.includes(".length, 74,"), "le compteur de migrations suit les migrations réelles");
+  assert.ok(secu.includes("assert.equal(attendues.length, 47);"));
 });
 
 /* ─── 52-53. Outils 1 et 3 après la PR C.1 ─────────────────────────────── */
@@ -1284,6 +1295,7 @@ await test("56. la reprise d'un plan existant rend les jours indépendants sans 
     carbs: 70,
     fat: 12,
     coachNotes: "Peser cru.",
+    choiceSlots: [],
   };
   const profil = {
     profileKey: "default",
@@ -1482,7 +1494,7 @@ await test("61. aucun nouveau chemin d'écriture, aucune migration ajoutée", ()
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
   // 35 depuis 20260828090000_web_push_notifications.sql (socle Web Push).
-  assert.equal(attendues.length, 46);
+  assert.equal(attendues.length, 47);
   assert.ok(attendues.includes("20260814090000_nutrition_plan_v2_blocking_issue_week.sql"));
 });
 

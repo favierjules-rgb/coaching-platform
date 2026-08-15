@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/types/supabase";
 import type { CatalogFood, ProduitLocal } from "@/lib/supabase/consumed-meals";
+import type { ChoiceOption } from "@/lib/nutrition/plan-v2-week";
 
 /**
  * N1.2 — LA BIBLIOTHÈQUE DE LISTES D'ALIMENTS DU COACH.
@@ -677,6 +678,41 @@ export async function dupliquerFoodList(
     await archiverFoodList(supabase, nouvelId, true);
   }
   return null;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   N1.3 — L'INSTANTANÉ D'UNE LISTE, AU MOMENT OÙ ON L'AJOUTE À UN REPAS
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Ce qu'une liste devient quand elle entre dans un repas : un LIBELLÉ et des
+ * IDENTITÉS, tous deux figés ici et jamais relus ensuite.
+ *
+ * ⚠️ C'EST LA SEULE FONCTION QUI FAIT LE PONT bibliothèque → repas, et elle ne
+ * le fait qu'une fois, à l'instant du clic. Après elle, plus aucun chemin ne
+ * relie l'occurrence au modèle : c'est ce qui rend l'instantané structurel.
+ */
+export interface SnapshotDeListe {
+  readonly label: string;
+  readonly sourceListId: string;
+  readonly options: readonly ChoiceOption[];
+}
+
+export async function lireSnapshotDeListe(
+  supabase: TypedSupabaseClient,
+  listId: string,
+): Promise<SnapshotDeListe | null> {
+  const liste = await lireFoodList(supabase, listId);
+  if (!liste) return null;
+  return {
+    label: liste.name,
+    sourceListId: liste.id,
+    options: liste.items.map((item) =>
+      item.source === "aliment"
+        ? ({ type: "aliment", id: item.aliment.id } as const)
+        : ({ type: "produit", id: item.produit.id } as const),
+    ),
+  };
 }
 
 /** « Protéines » → « Protéines — copie ». Même convention que les plans. */

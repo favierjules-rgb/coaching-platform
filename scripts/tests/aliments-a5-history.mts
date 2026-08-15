@@ -195,6 +195,7 @@ const SEMAINE_PRESCRITE: PlanV2Week = {
         carbs: 50,
         fat: 15,
         coachNotes: "",
+        choiceSlots: [],
       },
     ],
   })),
@@ -697,7 +698,10 @@ await test("HIST17. l'élève A ne voit jamais l'élève B", () => {
   // continuer de prouver, c'est que CE LOT-CI n'en a créé aucune — donc la
   // liste des migrations postérieures est EXACTEMENT celle de N1, nommée.
   const tardives = lireMigrations().filter((f) => horodatage(f) > "20260905090100");
-  assert.deepEqual(tardives, ["20260906090000_nutrition_listes_et_repas_planifies.sql"], `migrations postérieures inattendues : ${tardives.join(", ")}`);
+  assert.deepEqual(tardives, [
+      "20260906090000_nutrition_listes_et_repas_planifies.sql",
+      "20260907090000_n1_3_occurrences_de_listes_dans_les_repas.sql",
+    ], `migrations postérieures inattendues : ${tardives.join(", ")}`);
 
   // Et c'est EXÉCUTÉ, pas relu : la checklist crée deux élèves du même coach,
   // se connecte comme B, et compte ce qu'il voit.
@@ -1064,11 +1068,11 @@ await test("HIST-SUP. le dépouillement des commentaires n'a rien vidé", () => 
   // vit aussi dans `supabase/baseline/manifest.json` : les deux doivent
   // s'accorder, sinon l'un des deux ment.
   const migrations = lireMigrations();
-  assert.equal(migrations.length, 73, "73 fichiers : A5.7 n'en a créé aucun, N1.1 en a créé un");
+  assert.equal(migrations.length, 74, "74 fichiers : A5.7 n'en a créé aucun, N1.1 en a créé un, N1.3 un second");
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json")) as {
     migrations_post_baseline_attendues: readonly string[];
   };
-  assert.equal(manifeste.migrations_post_baseline_attendues.length, 46);
+  assert.equal(manifeste.migrations_post_baseline_attendues.length, 47);
 
   // Et rien qui ressemble à une table, une vue ou un agrégat d'historique.
   //

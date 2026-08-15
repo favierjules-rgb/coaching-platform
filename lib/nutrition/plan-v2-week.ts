@@ -29,6 +29,38 @@ export interface PrescribedFoodItem {
 }
 
 /** Un repas prescrit à la main par le coach — l'outil 3. */
+/**
+ * N1.3 — UNE OPTION SNAPSHOTÉE.
+ *
+ * ⚠️ UNE IDENTITÉ, RIEN D'AUTRE. Pas de nom, pas de macro, pas de quantité,
+ * pas de rôle : l'option DÉSIGNE un aliment vivant de `food_catalog` ou de
+ * `food_products`, et tout le reste est lu à la source au moment de
+ * l'affichage. Recopier un nom ici ferait vieillir le repas en silence.
+ */
+export type ChoiceOption =
+  | { readonly type: "aliment"; readonly id: string }
+  | { readonly type: "produit"; readonly id: string };
+
+/**
+ * N1.3 — UNE OCCURRENCE DE LISTE DANS UN REPAS.
+ *
+ * « À cet endroit du repas, l'élève choisit UN aliment parmi ceux-ci. »
+ *
+ * ⚠️ `label` ET `options` SONT UN INSTANTANÉ, pas une vue de la bibliothèque.
+ * Ils sont figés au moment où le coach ajoute la liste ; renommer ou modifier
+ * le modèle ensuite ne les touche pas. `sourceListId` n'est QUE de la
+ * provenance — aucune lecture d'un repas ne passe par elle.
+ *
+ * ⚠️ AUCUN RÔLE NUTRITIONNEL. « Protéines » est un mot que le coach écrit pour
+ * être compris ; ce n'est pas une catégorie que le moteur lira.
+ */
+export interface MealChoiceSlot {
+  readonly id: string;
+  readonly label: string;
+  readonly sourceListId: string | null;
+  readonly options: readonly ChoiceOption[];
+}
+
 export interface PrescribedMeal {
   readonly id: string;
   readonly slot: MealSlotKey;
@@ -39,6 +71,12 @@ export interface PrescribedMeal {
   readonly carbs: number;
   readonly fat: number;
   readonly coachNotes: string;
+  /**
+   * Les occurrences de listes, dans l'ordre d'affichage. Un repas « libre »
+   * garde ce tableau VIDE — c'est le cas de tous les repas existants, et il
+   * reste parfaitement valide.
+   */
+  readonly choiceSlots: readonly MealChoiceSlot[];
 }
 
 /** Un jour du plan : son profil, et ses repas prescrits. */

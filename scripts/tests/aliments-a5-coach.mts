@@ -611,7 +611,7 @@ await test("COACH-SUP. l'écran est branché, réutilise A5.7, et n'a coûté au
   const migrations = readdirSync(new URL("../../supabase/migrations/", import.meta.url)).filter(
     (f) => f.endsWith(".sql"),
   );
-  assert.equal(migrations.length, 73, "73 fichiers : A5.8 n'en a créé aucun, N1.1 en a créé un");
+  assert.equal(migrations.length, 74, "74 fichiers : A5.8 n'en a créé aucun, N1.1 en a créé un, N1.3 un second");
   // ⚠️ SIXIÈME OCCURRENCE DU MÊME MOTIF DANS CE PROJET, et la leçon est la
   // même qu'en A5 : « aucune migration postérieure » n'est vrai que tant
   // qu'aucun chantier ne suit. N1.1 en a créé une. Ce que ce contrôle doit
@@ -619,7 +619,10 @@ await test("COACH-SUP. l'écran est branché, réutilise A5.7, et n'a coûté au
   // liste des migrations postérieures est EXACTEMENT celle de N1, nommée.
   assert.deepEqual(
     migrations.filter((f) => f.slice(0, 14) > "20260905090100"),
-    ["20260906090000_nutrition_listes_et_repas_planifies.sql"],
+    [
+      "20260906090000_nutrition_listes_et_repas_planifies.sql",
+      "20260907090000_n1_3_occurrences_de_listes_dans_les_repas.sql",
+    ],
   );
 
   // Le paramètre de ciblage est OBLIGATOIRE : aucune valeur par défaut, donc

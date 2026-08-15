@@ -5,6 +5,8 @@ import type {
   PlanV2Day,
   PlanV2Week,
   PrescribedFoodItem,
+  ChoiceOption,
+  MealChoiceSlot,
   PrescribedMeal,
 } from "@/lib/nutrition/plan-v2-week";
 import { compareWeekdays, toWeekdayKey } from "@/lib/nutrition/weekdays";
@@ -69,7 +71,15 @@ function mapItems(brut: unknown): readonly PrescribedFoodItem[] {
   });
 }
 
-function mapMeal(row: MealRowShape): PrescribedMeal | null {
+/**
+ * N1.3 — les occurrences d'un repas, reconstruites depuis les deux tables du
+ * snapshot. `parRepas` est bâtie UNE fois pour tous les jours : une requête
+ * par repas ferait des dizaines d'allers-retours sur une semaine chargée.
+ */
+function mapMeal(
+  row: MealRowShape,
+  parRepas: ReadonlyMap<string, readonly MealChoiceSlot[]>,
+): PrescribedMeal | null {
   // Le créneau est contraint en base depuis 20260811090000. Une valeur hors
   // vocabulaire ne peut venir que d'une base non migrée : on l'écarte plutôt
   // que de la rendre telle quelle, ce qui casserait le tri et l'affichage.
@@ -85,7 +95,82 @@ function mapMeal(row: MealRowShape): PrescribedMeal | null {
     carbs: Number(macros.carbs ?? 0),
     fat: Number(macros.fat ?? 0),
     coachNotes: row.coach_notes ?? "",
+    choiceSlots: parRepas.get(row.id) ?? [],
   };
+}
+
+interface SlotRowShape {
+  id: string;
+  meal_id: string;
+  position: number;
+  label: string;
+  source_list_id: string | null;
+}
+
+interface OptionRowShape {
+  slot_id: string;
+  position: number;
+  catalog_food_id: string | null;
+  product_id: string | null;
+}
+
+/**
+ * Les occurrences de TOUS les repas d'une semaine, en DEUX requêtes.
+ *
+ * ⚠️ AUCUNE LECTURE DE `food_lists` NI DE `food_list_items` ICI, et c'est la
+ * garantie d'instantané elle-même : après l'ajout, un repas ne connaît plus
+ * la bibliothèque dont il est issu. `source_list_id` est rendu pour l'afficher
+ * au coach, jamais pour aller y chercher quoi que ce soit.
+ */
+async function lireOccurrences(
+  supabase: TypedSupabaseClient,
+  mealIds: readonly string[],
+): Promise<ReadonlyMap<string, readonly MealChoiceSlot[]>> {
+  const parRepas = new Map<string, MealChoiceSlot[]>();
+  if (mealIds.length === 0) return parRepas;
+
+  const { data: slotRows, error: slotError } = await supabase
+    .from("meal_choice_slots")
+    .select("id, meal_id, position, label, source_list_id")
+    .in("meal_id", [...mealIds])
+    .order("position", { ascending: true });
+  devWarn("readNutritionPlanV2Week (meal_choice_slots)", slotError);
+  const slots = (slotRows ?? []) as unknown as SlotRowShape[];
+  if (slots.length === 0) return parRepas;
+
+  const { data: optionRows, error: optionError } = await supabase
+    .from("meal_choice_options")
+    .select("slot_id, position, catalog_food_id, product_id")
+    .in("slot_id", slots.map((s) => s.id))
+    .order("position", { ascending: true });
+  devWarn("readNutritionPlanV2Week (meal_choice_options)", optionError);
+  const options = (optionRows ?? []) as unknown as OptionRowShape[];
+
+  const parSlot = new Map<string, ChoiceOption[]>();
+  for (const o of options) {
+    const cible: ChoiceOption | null =
+      o.catalog_food_id !== null
+        ? { type: "aliment", id: o.catalog_food_id }
+        : o.product_id !== null
+          ? { type: "produit", id: o.product_id }
+          : null;
+    if (!cible) continue;
+    const liste = parSlot.get(o.slot_id) ?? [];
+    liste.push(cible);
+    parSlot.set(o.slot_id, liste);
+  }
+
+  for (const s of slots) {
+    const liste = parRepas.get(s.meal_id) ?? [];
+    liste.push({
+      id: s.id,
+      label: s.label,
+      sourceListId: s.source_list_id,
+      options: parSlot.get(s.id) ?? [],
+    });
+    parRepas.set(s.meal_id, liste);
+  }
+  return parRepas;
 }
 
 /**
@@ -122,6 +207,8 @@ export async function readNutritionPlanV2Week(
     repas = (mealRows ?? []) as unknown as MealRowShape[];
   }
 
+  const occurrences = await lireOccurrences(supabase, repas.map((m) => m.id));
+
   const days: readonly PlanV2Day[] = jours
     .map((jour): PlanV2Day | null => {
       const cle = toWeekdayKey(jour.day);
@@ -133,7 +220,7 @@ export async function readNutritionPlanV2Week(
         status: jour.status,
         meals: repas
           .filter((m) => m.nutrition_day_id === jour.id)
-          .map(mapMeal)
+          .map((m) => mapMeal(m, occurrences))
           .filter((m): m is PrescribedMeal => m !== null)
           .sort(
             (a, b) =>
