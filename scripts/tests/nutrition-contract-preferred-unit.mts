@@ -195,9 +195,21 @@ await test("CONTRACT-07. le CONTRACT s'applique en DERNIER — l'ordre de rollou
   // CONTRACT sans l'inscrire fait toujours rougir — c'est ce qu'on voulait —
   // mais l'inscrire demande maintenant de MONTRER pourquoi c'est sûr, pas
   // seulement de déplacer un compteur.
+  //
+  // ⚠️ C2 EST INSCRITE ICI, ET C'EST LE MÉCANISME QUI JOUE — pas un contournement.
+  // La liste de courses persistante ne connaît que `planned_meal_items.unit`,
+  // qui est la colonne d'APRÈS le CONTRACT ; elle ne lit ni n'écrit
+  // `preferred_unit`, et la boucle ci-dessous le PROUVE sur le fichier, code
+  // dépouillé de sa prose. L'inscrire sans cette preuve ne suffirait pas.
   const posterieures = migrations.filter((f) => horodatage(f) > horodatage(contrat));
-  assert.deepEqual(posterieures, ["20260914090000_c0_1_verrou_repas_consomme.sql"],
-    "une migration postérieure au CONTRACT n'a pas été déclarée sûre");
+  assert.deepEqual(
+    posterieures,
+    [
+      "20260914090000_c0_1_verrou_repas_consomme.sql",
+      "20260915090000_c2_liste_de_courses_persistante.sql",
+    ],
+    "une migration postérieure au CONTRACT n'a pas été déclarée sûre",
+  );
 
   for (const nom of posterieures) {
     const source = lire(`../../supabase/migrations/${nom}`);

@@ -19,6 +19,8 @@
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
+
+import { verifierContratDesMigrations } from "./contrat-migrations.mjs";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 
@@ -493,23 +495,85 @@ await test("UX-17. une proposition n'écrit RIEN avant validation", () => {
   assert.ok(CODE_CHOIX.includes("composition !== null &&"), "« à jour » aussi");
 });
 
-await test("UX-18. la validation passe par C0, et par rien d'autre", () => {
+await test("UX-18. la validation passe par C0, et C2 n'en est PAS un chemin alternatif", () => {
   assert.ok(CODE_HOOK.includes("validerChoixRepas("), "la fonction C0");
   assert.equal(
     (CODE_HOOK.match(/await validerChoixRepas\(/g) ?? []).length,
     2,
     "deux appels : le geste unitaire et celui de semaine — aucun autre chemin",
   );
-  // Aucune écriture directe des tables, aucune RPC nouvelle.
+  // Aucune écriture directe des tables, aucune RPC nouvelle DANS CE HOOK.
   assert.ok(!CODE_HOOK.includes('.from("planned_meals").insert'), "aucune écriture directe");
   assert.ok(!CODE_HOOK.includes('.from("planned_meal_items")'), "aucune écriture directe");
   assert.ok(!/rpc\(\s*["'](?!enregistrer_repas_planifie)/.test(CODE_HOOK), "aucune RPC nouvelle");
-  // Aucune migration n'accompagne C1.1.
-  const migrations = readdirSync(new URL("../../supabase/migrations/", import.meta.url)).filter((f) =>
-    f.endsWith(".sql"),
+
+  // ⚠️ LE CONTRAT ÉLARGI PAR C2 : LA LISTE PERSISTANTE NE VALIDE RIEN.
+  //
+  // Avant C2, il suffisait de dire « le hook de C1.1 ne connaît qu'une RPC ».
+  // Maintenant qu'une seconde couche d'écriture existe, il faut prouver que
+  // ce n'est pas un SECOND CHEMIN de validation nutritionnelle : C2 arrive
+  // APRÈS C0, il ne le remplace pas et ne l'esquive pas.
+  const C2_HOOK = sansProse(lire("../../hooks/useListePersistante.ts"));
+  const C2_BASE = sansProse(lire("../../lib/supabase/liste-de-courses.ts"));
+  const C2_SQL = lire("../../supabase/migrations/20260915090000_c2_liste_de_courses_persistante.sql");
+
+  for (const [nom, code] of [["hook C2", C2_HOOK], ["couche base C2", C2_BASE]] as const) {
+    // (a) C2 n'écrit JAMAIS la planification : ni table, ni RPC de C0.
+    for (const interdit of [
+      'from("planned_meals")',
+      'from("planned_meal_items")',
+      "enregistrer_repas_planifie",
+      "validerChoixRepas",
+      "supprimer_repas_planifie",
+    ]) {
+      assert.ok(!code.includes(interdit), `${nom} ne touche pas à la validation (${interdit})`);
+    }
+    // (b) et n'appelle que SES deux RPC, nommément.
+    for (const appel of [...code.matchAll(/rpc\(\s*["'`]?([a-z_]+)/g)].map((m) => m[1])) {
+      assert.ok(
+        ["regenerer_liste_de_courses", "modifier_article_manuel", "nom"].includes(appel),
+        `${nom} appelle une RPC inattendue : ${appel}`,
+      );
+    }
+  }
+
+  // (c) LE SERVEUR NE PLANIFIE RIEN NON PLUS. La RPC de régénération LIT
+  //     `planned_meal_items` pour vérifier l'appartenance, et ne l'écrit pas.
+  //     Une seule occurrence, et c'est un `select`.
+  const sqlNu = C2_SQL.replace(/^\s*--.*$/gm, " ");
+  for (const ecriture of [
+    "insert into public.planned_meals",
+    "insert into public.planned_meal_items",
+    "update public.planned_meals",
+    "update public.planned_meal_items",
+    "delete from public.planned_meals",
+    "delete from public.planned_meal_items",
+  ]) {
+    assert.ok(!sqlNu.includes(ecriture), `la RPC C2 n'écrit pas la planification (${ecriture})`);
+  }
+  assert.ok(
+    /from public\.planned_meal_items i\s+join public\.planned_meals m/.test(sqlNu),
+    "la RPC C2 LIT la planification pour vérifier l'appartenance",
   );
-  assert.equal(migrations.length, 80);
-  assert.equal(migrations.sort().at(-1), "20260914090000_c0_1_verrou_repas_consomme.sql");
+
+  // (d) ET AUCUNE ÉCRITURE DE `shopping_lists` NE REMPLACE `planned_meals` :
+  //     l'écran de la liste ne valide aucun repas, il n'a pas le vocabulaire
+  //     pour le faire.
+  const C2_ECRAN = sansProse(lire("../../components/student/ListeDeCoursesPersistante.tsx"));
+  for (const interdit of ["validerSemaine", "validerRepas", "StudentMealChoices", "planned_meal"]) {
+    assert.ok(!C2_ECRAN.includes(interdit), `l'écran C2 ne valide pas de repas (${interdit})`);
+  }
+
+  // (e) L'ORDRE EST INSCRIT DANS LE PARCOURS : l'étape « liste » vient APRÈS
+  //     l'étape « repas », dans les deux modes.
+  for (const chemin of [
+    '["duree", "mode", "preferences", "proposition", "repas", "liste"]',
+    '["duree", "mode", "repas", "liste"]',
+  ]) {
+    assert.ok(CODE_PARCOURS.includes(chemin), `l'ordre du parcours est figé : ${chemin}`);
+  }
+
+  verifierContratDesMigrations(assert);
 });
 
 await test("UX-19. une erreur partielle ne produit JAMAIS un faux succès", () => {
@@ -533,33 +597,81 @@ await test("UX-19. une erreur partielle ne produit JAMAIS un faux succès", () =
   assert.ok(!CODE_HOOK.includes("rollback") && !CODE_HOOK.includes("annuler"));
 });
 
-await test("UX-20. les deux modes convergent vers la MÊME liste finale", () => {
-  // Un seul écran de repas, un seul écran de liste, quel que soit le mode.
+await test("UX-20. les deux modes convergent vers LA MÊME liste persistante C2", () => {
+  // Un seul écran de repas, et — depuis C2 — un seul écran de liste : la
+  // liste PERSISTANTE. L'ancien `EcranListe` (liste locale, cochage en
+  // mémoire) reste exporté et mesuré ailleurs, mais n'est plus monté.
   assert.equal((CODE_PARCOURS.match(/<EcranRepasParJour/g) ?? []).length, 1);
-  assert.equal((CODE_PARCOURS.match(/<EcranListe/g) ?? []).length, 1);
+
+  // ⚠️ EXACTEMENT UNE IMPLÉMENTATION DE LISTE FINALE, ET PAS DEUX.
+  // Deux composants C2 distincts selon le mode feraient diverger deux écrans
+  // qui doivent dire la même chose — c'est précisément ce que ce test
+  // interdit depuis C1.1, et le contrat est simplement transposé à C2.
+  assert.equal(
+    (CODE_PARCOURS.match(/<ListeDeCoursesPersistante/g) ?? []).length,
+    1,
+    "une seule liste finale, quel que soit le mode",
+  );
+  assert.equal(
+    (CODE_PARCOURS.match(/<EcranListe[\s/>]/g) ?? []).length,
+    0,
+    "l'ancienne liste locale n'est plus montée",
+  );
+  // ⚠️ ON COMPTE LE POINT DE MONTAGE, PAS LES OCCURRENCES DU MOT. Le titre de
+  // l'en-tête teste lui aussi `etape === "liste"` : compter la comparaison
+  // ferait rougir ce test pour une raison qui n'a rien à voir avec la
+  // convergence des deux modes.
+  assert.equal(
+    (CODE_PARCOURS.match(/\{etape === "liste" && \(/g) ?? []).length,
+    1,
+    "un seul point de montage de l'étape liste",
+  );
+
+  // ⚠️ ET CE POINT DE MONTAGE NE REGARDE PAS LE MODE. Un `mode ===` dans le
+  // bloc de l'étape « liste » serait le début de deux listes divergentes.
+  const bloc = SRC_PARCOURS.slice(
+    SRC_PARCOURS.indexOf('{etape === "liste" && ('),
+    SRC_PARCOURS.indexOf("</div>", SRC_PARCOURS.indexOf('{etape === "liste" && (')),
+  );
+  assert.ok(bloc.includes("<ListeDeCoursesPersistante"), "l'étape liste monte bien C2");
+  assert.ok(!bloc.includes("mode"), "l'étape liste ignore le mode");
+  assert.ok(!bloc.includes("rapide") && !bloc.includes("personnalise"), "aucun aiguillage par mode");
+
   // Les deux chemins finissent par les mêmes deux étapes.
   assert.ok(
     CODE_PARCOURS.includes('["duree", "mode", "preferences", "proposition", "repas", "liste"]'),
   );
   assert.ok(CODE_PARCOURS.includes('["duree", "mode", "repas", "liste"]'));
-  // La génération reste celle de C1 : la liste vient de `courses.lignes`.
-  assert.ok(CODE_PARCOURS.includes("lignes={courses.lignes}"));
-  assert.ok(CODE_PARCOURS.includes("GÉNÉRER MA LISTE"));
+
+  // La source reste celle de C1 : la liste vient de `courses.lignes`, agrégées
+  // une seule fois, quel que soit le mode.
+  assert.ok(CODE_PARCOURS.includes("lignesDuPlan={courses.lignes}"));
+  // Et le libellé du geste de génération est porté par le composant unique.
+  const C2_ECRAN = lire("../../components/student/ListeDeCoursesPersistante.tsx");
+  assert.ok(C2_ECRAN.includes("GÉNÉRER MA LISTE"));
+  assert.ok(C2_ECRAN.includes("METTRE À JOUR MA LISTE"));
+
   // Et l'écran des repas ne sait pas d'où l'on vient : aucun `mode` en prop.
-  const bloc = SRC_PARCOURS.slice(
+  const blocRepas = SRC_PARCOURS.slice(
     SRC_PARCOURS.indexOf("export function EcranRepasParJour("),
     SRC_PARCOURS.indexOf("/* ═", SRC_PARCOURS.indexOf("export function EcranRepasParJour(")),
   );
-  assert.ok(!bloc.includes("mode"), "l'écran final ignore le mode");
+  assert.ok(!blocRepas.includes("mode"), "l'écran final ignore le mode");
 });
 
 /* ══════════════════════════════════════════════════════════════════════════
    UX-21 → UX-24 — CE QUI N'EXISTE PAS
    ══════════════════════════════════════════════════════════════════════════ */
 
-await test("UX-21. aucune migration, aucun schéma touché", () => {
-  const migrations = readdirSync(new URL("../../supabase/migrations/", import.meta.url));
-  assert.equal(migrations.filter((f) => f.endsWith(".sql")).length, 80);
+await test("UX-21. C1.1 n'a touché aucun schéma, et la seule migration autorisée est celle de C2", () => {
+  // ⚠️ RENFORCÉE, PAS SUPPRIMÉE. Le compte « 80 » est devenu faux avec C2 ; le
+  // remonter à 81 aurait accepté n'importe quelle 81ᵉ migration. Le contrat
+  // partagé vérifie l'identité exacte, l'ordre, l'unicité et l'historique.
+  verifierContratDesMigrations(assert);
+
+  // ⚠️ ET LA GARANTIE PROPRE À C1.1 EST INTACTE : aucun de SES fichiers ne
+  // connaît la persistance. C2 l'a ajoutée dans des fichiers à lui, ce que
+  // `CHEMINS_C11` ne contient pas — et ne doit pas contenir.
   for (const [chemin, code] of CODE_C11) {
     for (const table of ["shopping_lists", "shopping_list_items", "shopping_list_state"]) {
       assert.ok(!code.includes(table), `${chemin} ne connaît pas ${table}`);

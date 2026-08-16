@@ -23,6 +23,8 @@
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
+
+import { MIGRATION_C2, verifierContratDesMigrations } from "./contrat-migrations.mjs";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 
@@ -780,28 +782,65 @@ await test("C1-20 / NC-01. aucun fichier neuf n'importe l'ancien chantier Course
   }
 });
 
-await test("C1-21. aucune migration n'accompagne ce lot", () => {
-  const migrations = readdirSync(new URL("../../supabase/migrations/", import.meta.url)).filter((f) =>
-    f.endsWith(".sql"),
-  );
-  // La dernière migration du dépôt reste celle de C0.1.
-  assert.equal(
-    migrations.sort().at(-1),
-    "20260914090000_c0_1_verrou_repas_consomme.sql",
-    "aucune migration postérieure à C0.1",
-  );
-  assert.equal(migrations.length, 80, "le compte de migrations est inchangé");
+await test("C1-21. le contrat des migrations : C0.1 puis C2, et rien d'autre", () => {
+  // ⚠️ CETTE ASSERTION A ÉTÉ RENFORCÉE, PAS ASSOUPLIE. Elle disait « la
+  // dernière migration reste C0.1, et il y en a 80 ». C2 en ajoute une : le
+  // compte devient faux. Le remonter à 81 aurait DÉTRUIT la garantie — « 81 »
+  // est satisfait par n'importe quelle 81ᵉ migration, y compris une migration
+  // étrangère glissée au passage.
+  //
+  // Le contrat partagé vérifie désormais l'IDENTITÉ EXACTE de la migration
+  // autorisée, l'ORDRE du couple final, l'horodatage, l'unicité de la
+  // migration de courses, et une EMPREINTE de tout l'historique antérieur.
+  // Il rougit sur une seconde migration C2, sur une migration étrangère, et
+  // sur un antidatage — trois cas que l'ancien compte laissait passer.
+  verifierContratDesMigrations(assert);
+
+  // ⚠️ ET C1 LUI-MÊME N'EN A TOUJOURS ÉCRIT AUCUNE. C'est la garantie propre à
+  // ce lot-ci : la migration autorisée appartient à C2, pas à C1.
+  for (const [chemin, code] of CODE_NEUF) {
+    assert.ok(!code.includes("supabase/migrations"), `${chemin} ne touche pas aux migrations`);
+  }
 });
 
-await test("C1-22. aucun état de liste n'est persisté", () => {
-  const migrations = readdirSync(new URL("../../supabase/migrations/", import.meta.url));
+await test("C1-22. C1 lui-même ne persiste AUCUN état de liste", () => {
+  // ⚠️ CE TEST ÉTAIT UN FAUX VERT, ET C'EST C2 QUI L'A RÉVÉLÉ.
+  //
+  // Il cherchait `shopping_lists` dans les NOMS DE FICHIERS de migration. La
+  // migration C2 s'appelle `…_c2_liste_de_courses_persistante.sql` : elle CRÉE
+  // `shopping_lists`, et le test restait vert parce que le mot n'est pas dans
+  // son nom. Il aurait continué à affirmer « aucun état n'est persisté » alors
+  // que c'était devenu faux.
+  //
+  // On cherche donc dans le CONTENU, et on dit la vérité : la persistance
+  // existe, elle appartient à C2, et elle n'appartient qu'à C2.
+  const dossier = new URL("../../supabase/migrations/", import.meta.url);
+  const creatrices = readdirSync(dossier)
+    .filter((f) => f.endsWith(".sql"))
+    .filter((f) =>
+      /create table[^;]*public\.(shopping_lists|shopping_list_items|shopping_list_state)/i.test(
+        readFileSync(new URL(f, dossier), "utf8"),
+      ),
+    )
+    .sort();
+  assert.deepEqual(
+    creatrices,
+    [MIGRATION_C2],
+    "les tables de liste persistante n'appartiennent qu'à la migration C2",
+  );
+
+  // ⚠️ ET AUCUN FICHIER DE C1 NE LES CONNAÎT. C'est la garantie propre à ce
+  // lot : le parcours C1 ne lit ni n'écrit la persistance de C2.
   for (const table of ["shopping_lists", "shopping_list_items", "shopping_list_state"]) {
-    assert.ok(!migrations.some((f) => f.includes(table)), `aucune migration ${table}`);
     for (const [chemin, code] of CODE_NEUF) {
       assert.ok(!code.includes(table), `${chemin} ne connaît pas ${table}`);
     }
   }
-  // Le cochage est LOCAL, et l'écran le dit.
+
+  // `EcranListe` — l'écran LOCAL de C1 — existe toujours, et coche toujours en
+  // mémoire. Il n'est plus monté par le parcours depuis C2 (voir UX-20), mais
+  // il reste exporté et mesuré : le supprimer obligerait à réécrire des tests
+  // hors périmètre pour retrouver du vert.
   assert.ok(CODE_PARCOURS.includes("useState<ReadonlySet<string>>(new Set())"));
   assert.ok(lire("../../components/student/ListeDeCoursesParcours.tsx").includes("n&apos;est pas enregistré"));
 

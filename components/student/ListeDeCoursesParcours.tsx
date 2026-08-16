@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowLeft, Check, ChevronDown, ChevronRight, ShoppingBasket, Sparkles, Star } from "lucide-react";
 
 import { ColorKeyDot } from "@/components/ui/ColorKeyDot";
+import { ListeDeCoursesPersistante } from "@/components/student/ListeDeCoursesPersistante";
 import { StudentMealChoices, type ItemPourEnregistrement } from "@/components/student/StudentMealChoices";
 import {
   useListeDeCourses,
@@ -179,8 +180,22 @@ export function ListeDeCoursesParcours({
         />
       )}
 
+      {/*
+        COURSES C2 — LA LISTE EST DÉSORMAIS PERSISTÉE.
+
+        ⚠️ `EcranListe` (C1) EST CONSERVÉ, ET RESTE EXPORTÉ. Il porte
+        l'affichage local de la liste agrégée, et la suite `liste-de-courses-ux`
+        le mesure directement. Le supprimer obligerait à réécrire des tests hors
+        périmètre pour retrouver du vert — ce qui est précisément interdit.
+        C'est C2 qui prend la place à l'écran, pas C2 qui efface C1.
+      */}
       {etape === "liste" && (
-        <EcranListe lignes={courses.lignes} periode={periode} restants={courses.aComposer.length} />
+        <ListeDeCoursesPersistante
+          periode={periode}
+          lignesDuPlan={courses.lignes}
+          studentId={studentId}
+          restants={courses.aComposer.length}
+        />
       )}
     </div>
   );
