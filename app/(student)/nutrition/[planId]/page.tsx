@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -11,6 +11,7 @@ import { NutritionPlanWorkspace } from "@/components/student/NutritionPlanWorksp
 import { RecipesHighlightLink } from "@/components/student/RecipesHighlightLink";
 import { StatusBadge } from "@/components/student/StatusBadge";
 import { StudentPrescribedWeek } from "@/components/student/StudentPrescribedWeek";
+import type { ItemPourEnregistrement } from "@/components/student/StudentMealChoices";
 import { WeeklyNutritionTracker } from "@/components/student/WeeklyNutritionTracker";
 import { StatCard } from "@/components/shared/StatCard";
 import { nutritionGoalLabels } from "@/lib/nutrition";
@@ -72,6 +73,40 @@ export default function NutritionPlanDetailPage() {
   const raccourcis = useRaccourcisAliments(
     supabaseNutrition.studentId ?? null,
     supabaseNutrition.active,
+  );
+
+  // ⚠️ C'EST ICI QUE L'OPTION REDEVIENT UNE IDENTITÉ, ET NULLE PART AILLEURS.
+  // L'écran des choix ne connaît que `optionId` ; les `catalog_food_id` /
+  // `product_id` vivent dans le snapshot des occurrences, et c'est cette page
+  // qui détient la semaine chargée. Les DEUX gestes — valider et enregistrer —
+  // passent par cette fonction : deux résolutions séparées finiraient par
+  // diverger, et l'une des deux écrirait une identité fausse.
+  const resoudreIdentites = useCallback(
+    (mealId: string, items: readonly ItemPourEnregistrement[]) => {
+      const repas = v2.week?.days.flatMap((jour) => jour.meals).find((m) => m.id === mealId);
+      if (!repas) return null;
+      const parOption = new Map(
+        repas.choiceSlots.flatMap((occurrence) =>
+          occurrence.options
+            .filter((o) => typeof o.optionId === "string")
+            .map((o) => [o.optionId as string, o] as const),
+        ),
+      );
+      return items.map((item) => {
+        const option = parOption.get(item.optionId);
+        return {
+          slotId: item.slotId,
+          // ⚠️ AUCUN REPLI SILENCIEUX. Une option introuvable laisse les deux
+          // identités nulles, et la RPC refuse avec IDENTITE_INVALIDE — un
+          // refus lisible plutôt qu'une entrée fantôme.
+          catalogFoodId: option?.type === "aliment" ? option.id : null,
+          productId: option?.type === "produit" ? option.id : null,
+          quantity: item.quantity,
+          unit: item.unit,
+        };
+      });
+    },
+    [v2.week],
   );
 
   if (!supabaseNutrition.ready) {
@@ -249,32 +284,21 @@ export default function NutritionPlanDetailPage() {
                 // détient. Résoudre ailleurs demanderait de faire voyager les
                 // identités jusqu'à un composant qui n'en a pas besoin.
                 onEnregistrerRepasStructure: async (mealId, date, items) => {
-                  const repas = v2.week?.days
-                    .flatMap((jour) => jour.meals)
-                    .find((m) => m.id === mealId);
-                  if (!repas) return null;
-                  const parOption = new Map(
-                    repas.choiceSlots.flatMap((occurrence) =>
-                      occurrence.options
-                        .filter((o) => typeof o.optionId === "string")
-                        .map((o) => [o.optionId as string, o] as const),
-                    ),
-                  );
-                  const resolus = items.map((item) => {
-                    const option = parOption.get(item.optionId);
-                    return {
-                      slotId: item.slotId,
-                      // ⚠️ AUCUN REPLI SILENCIEUX. Une option introuvable
-                      // laisse les deux identités nulles, et la RPC refuse
-                      // avec IDENTITE_INVALIDE — un refus lisible plutôt
-                      // qu'une entrée fantôme.
-                      catalogFoodId: option?.type === "aliment" ? option.id : null,
-                      productId: option?.type === "produit" ? option.id : null,
-                      quantity: item.quantity,
-                      unit: item.unit,
-                    };
-                  });
+                  const resolus = resoudreIdentites(mealId, items);
+                  if (resolus === null) return null;
                   return consommation.enregistrerRepasStructure(mealId, date, resolus);
+                },
+                // ── COURSES C0 — LE BOUTON « VALIDER MES CHOIX » ──────────
+                // ⚠️ MÊME RÉSOLUTION D'IDENTITÉS, MÊME CHARGE UTILE, AUTRE
+                // DESTINATION. Les deux gestes envoient exactement la même
+                // chose ; c'est la RPC appelée qui décide si l'on écrit du
+                // PRÉVU ou du CONSOMMÉ. Réécrire la résolution ici ouvrirait
+                // la porte à deux règles d'identité qui divergent.
+                compositionsValidees: consommation.compositionsValidees,
+                onValiderChoixRepas: async (mealId, date, items) => {
+                  const resolus = resoudreIdentites(mealId, items);
+                  if (resolus === null) return null;
+                  return consommation.validerChoixRepas(mealId, date, resolus);
                 },
               }}
             />

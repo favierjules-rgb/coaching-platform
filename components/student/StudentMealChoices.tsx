@@ -6,6 +6,9 @@ import { Check, ChevronRight } from "lucide-react";
 import { NBSP, formatIntegerFr } from "@/lib/nutrition/basis-points";
 import {
   AUCUNE_SELECTION,
+  compositionIdentique,
+  selectionDepuisComposition,
+  type ChoixPersiste,
   calculDuRepas,
   choisirOption,
   optionChoisie,
@@ -68,6 +71,7 @@ export function StudentMealChoices({
   occurrences,
   cible = null,
   enregistrement = null,
+  validation = null,
 }: {
   readonly occurrences: readonly MealChoiceSlot[];
   /**
@@ -82,6 +86,19 @@ export function StudentMealChoices({
     readonly dejaEnregistre: boolean;
     readonly enCours: boolean;
     readonly onEnregistrer: (items: readonly ItemPourEnregistrement[]) => void;
+  } | null;
+  /**
+   * COURSES C0 — DE QUOI VALIDER UNE COMPOSITION PRÉVUE, SANS LA MANGER.
+   *
+   * ⚠️ `null` LAISSE L'ÉCRAN EXACTEMENT DANS SON ÉTAT N1.6. Comme pour
+   * `enregistrement`, c'est le parent qui branche la persistance ; ce
+   * composant reste pur et rendu hors navigateur par les tests.
+   */
+  readonly validation?: {
+    /** La composition DÉJÀ en base, ou `null` si ce repas n'est pas validé. */
+    readonly compositionValidee: readonly ChoixPersiste[] | null;
+    readonly enCours: boolean;
+    readonly onValider: (items: readonly ItemPourEnregistrement[]) => void;
   } | null;
   /**
    * ⚠️ LA CIBLE DU REPAS VIENT DU PLAN DU COACH, PAS D'ICI. C'est la valeur
@@ -99,16 +116,41 @@ export function StudentMealChoices({
   // ⚠️ L'ÉTAT VIT ICI, ET LE COMPOSANT EST MONTÉ AVEC UNE CLÉ repas+date.
   // Changer de repas ou de jour démonte donc ce composant et son brouillon
   // avec lui : une composition ne peut pas fuir d'un repas vers un autre.
-  const [selection, setSelection] = useState<SelectionDeChoix>(AUCUNE_SELECTION);
+  // ── COURSES C0 — LA SÉLECTION EST DÉRIVÉE, PAS SYNCHRONISÉE ─────────────
+  // ⚠️ `null` NE VEUT PAS DIRE « VIDE », MAIS « L'ÉLÈVE N'A RIEN TOUCHÉ ». La
+  // sélection effective est alors celle RESTAURÉE depuis la base. Dès le
+  // premier clic, le brouillon local prend la main et ne la rend plus.
+  //
+  // ⚠️ AUCUN `useEffect` DE SYNCHRONISATION, ET C'EST VOLONTAIRE. La
+  // composition validée arrive de façon asynchrone ; la recopier dans un état
+  // par effet créerait une fenêtre où l'écran montre « aucun choix » sur un
+  // repas validé, puis se corrige tout seul — et écraserait un brouillon en
+  // cours si la relecture arrivait entre deux clics. Une dérivation pure n'a
+  // ni fenêtre ni course.
+  const [brouillon, setBrouillon] = useState<SelectionDeChoix | null>(null);
   const [ouverte, setOuverte] = useState<string | null>(null);
   const titreId = useId();
 
-  const choisir = useCallback((slotId: string, optionId: string) => {
-    setSelection((precedente) => choisirOption(precedente, slotId, optionId));
-    // Le choix fait, la liste se referme : l'élève voit sa composition, pas
-    // dix listes ouvertes les unes sous les autres.
-    setOuverte(null);
-  }, []);
+  const composition = validation?.compositionValidee ?? null;
+  const selectionValidee = useMemo(
+    () => (composition === null ? null : selectionDepuisComposition(occurrences, composition)),
+    [occurrences, composition],
+  );
+  const selection = brouillon ?? selectionValidee ?? AUCUNE_SELECTION;
+
+  const choisir = useCallback(
+    (slotId: string, optionId: string) => {
+      // ⚠️ LE PREMIER CLIC PART DE LA SÉLECTION RESTAURÉE, pas d'un objet vide :
+      // changer sa protéine ne doit pas effacer son féculent déjà validé.
+      setBrouillon((precedente) =>
+        choisirOption(precedente ?? selectionValidee ?? AUCUNE_SELECTION, slotId, optionId),
+      );
+      // Le choix fait, la liste se referme : l'élève voit sa composition, pas
+      // dix listes ouvertes les unes sous les autres.
+      setOuverte(null);
+    },
+    [selectionValidee],
+  );
 
   const progression = progressionDesChoix(occurrences, selection);
 
@@ -173,7 +215,26 @@ export function StudentMealChoices({
       )}
 
       {calcul.etat === "calcule" && (
-        <QuantitesDuRepas solution={calcul.solution} enregistrement={enregistrement} />
+        <QuantitesDuRepas
+          solution={calcul.solution}
+          enregistrement={enregistrement}
+          validation={
+            validation === null
+              ? null
+              : {
+                  // ⚠️ « DÉJÀ VALIDÉ » NE SUFFIT PAS : il faut savoir si ce qui
+                  // est À L'ÉCRAN est ce qui est EN BASE. C'est cette
+                  // comparaison — identités ET quantités — qui distingue
+                  // « choix validés » de « modifications non validées ».
+                  aJour:
+                    composition !== null &&
+                    compositionIdentique(occurrences, calcul.solution.items, composition),
+                  dejaValide: composition !== null,
+                  enCours: validation.enCours,
+                  onValider: validation.onValider,
+                }
+          }
+        />
       )}
     </section>
   );
@@ -214,12 +275,22 @@ export function StudentMealChoices({
 export function QuantitesDuRepas({
   solution,
   enregistrement = null,
+  validation = null,
 }: {
   readonly solution: MealChoiceSolution;
   readonly enregistrement?: {
     readonly dejaEnregistre: boolean;
     readonly enCours: boolean;
     readonly onEnregistrer: (items: readonly ItemPourEnregistrement[]) => void;
+  } | null;
+  /** COURSES C0 — l'état de la composition PRÉVUE, face à ce qui est affiché. */
+  readonly validation?: {
+    /** La base contient DÉJÀ une composition pour ce repas et cette date. */
+    readonly dejaValide: boolean;
+    /** …et elle est EXACTEMENT celle qui est affichée. */
+    readonly aJour: boolean;
+    readonly enCours: boolean;
+    readonly onValider: (items: readonly ItemPourEnregistrement[]) => void;
   } | null;
 }) {
   const titreId = useId();
@@ -315,6 +386,76 @@ export function QuantitesDuRepas({
           `displayQuantity`, l'entier d'après l'arrondi borné — jamais
           `quantity`, la valeur flottante interne. L'écran dit 163 g, la base
           doit dire 163. */}
+      {/* ── COURSES C0 — VALIDER MES CHOIX ──────────────────────────────
+          ⚠️ DEUX GESTES, DEUX SENS, ET AUCUN N'EST L'AUTRE.
+            · VALIDER  = « je PRÉVOIS de manger ça » → planned_meals /
+              planned_meal_items. C'est la source de la liste de courses.
+            · ENREGISTRER = « j'AI mangé ça » → consumed_meals / meal_entries.
+              C'est A5, et c'est inchangé.
+          Le libellé « Repas enregistré » est donc RÉSERVÉ au second : l'écrire
+          après une validation ferait croire à l'élève qu'il a déclaré un repas
+          qu'il n'a pas encore mangé.
+
+          ⚠️ VALIDER N'EST JAMAIS UN PASSAGE OBLIGÉ. « Enregistrer le repas »
+          reste disponible sans validation préalable — la RPC de consommation
+          appelle elle-même `enregistrer_repas_planifie`. Le parcours de N1.6
+          est intact.
+
+          ⚠️ ET APRÈS CONSOMMATION, ON NE PROPOSE PLUS DE VALIDER. Mesuré dans
+          `courses_c0_validation_checklist.sql` (V-I) : la RPC accepterait de
+          réécrire le planifié d'un repas déjà consommé, et le planifié et le
+          consommé DIVERGERAIENT en silence. Le garde-fou est ici, faute d'en
+          avoir un en base — et le rapport le signale comme à arbitrer. */}
+      {validation !== null && enregistrement?.dejaEnregistre !== true && (
+        <div className="flex min-w-0 flex-col gap-2 border-t border-border pt-2">
+          {validation.aJour ? (
+            <>
+              <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-foreground">
+                <Check size={14} aria-hidden="true" />
+                Choix validés
+              </p>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                Cette composition sera prise en compte pour ta liste de courses.
+              </p>
+            </>
+          ) : (
+            <>
+              {validation.dejaValide && (
+                <p className="text-xs font-bold uppercase tracking-widest text-foreground">
+                  Modifications non validées
+                </p>
+              )}
+              {validation.dejaValide && (
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Ta liste de courses utilise encore la composition précédente.
+                </p>
+              )}
+              <button
+                type="button"
+                disabled={validation.enCours}
+                onClick={() =>
+                  validation.onValider(
+                    solution.items.map((item) => ({
+                      slotId: item.slotId,
+                      optionId: item.optionId,
+                      quantity: item.displayQuantity,
+                      unit: item.unit,
+                    })),
+                  )
+                }
+                className="pressable flex min-h-[44px] w-full items-center justify-center gap-2 rounded-control border border-border bg-card px-4 py-2 text-xs font-bold uppercase tracking-widest text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+              >
+                {validation.enCours
+                  ? "Validation\u2026"
+                  : validation.dejaValide
+                    ? "Mettre \u00e0 jour mes choix"
+                    : "Valider mes choix"}
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       {enregistrement !== null && (
         <div className="flex min-w-0 flex-col gap-1 border-t border-border pt-2">
           {enregistrement.dejaEnregistre ? (

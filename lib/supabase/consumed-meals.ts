@@ -735,6 +735,179 @@ export async function lireRepasStructuresEnregistres(
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
+   COURSES C0 — VALIDER MES CHOIX (le PLANIFIÉ, pas le CONSOMMÉ)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Un aliment de la composition PRÉVUE, tel qu'il est affiché.
+ *
+ * ⚠️ C'EST LA MÊME FORME QUE `ItemStructureAEnregistrer`, ET CE N'EST PAS UNE
+ * COÏNCIDENCE : les deux gestes envoient exactement la même chose — identité,
+ * quantité entière, unité. Ce qui les distingue n'est pas la charge utile,
+ * c'est la RPC appelée, donc ce qui est écrit en base. Les fusionner en un
+ * seul type ferait croire à un seul geste.
+ */
+export interface ItemChoixAValider {
+  readonly slotId: string;
+  readonly catalogFoodId: string | null;
+  readonly productId: string | null;
+  /** ⚠️ LA QUANTITÉ ENTIÈRE AFFICHÉE, jamais le flottant du solveur. */
+  readonly quantity: number;
+  readonly unit: "g" | "ml";
+}
+
+/** Un aliment retrouvé dans une composition DÉJÀ validée. */
+export interface ItemValide {
+  readonly slotId: string;
+  readonly catalogFoodId: string | null;
+  readonly productId: string | null;
+  readonly quantity: number;
+  readonly unit: string;
+}
+
+/** La composition validée d'un repas, à une date. */
+export interface CompositionValidee {
+  readonly plannedMealId: string;
+  readonly mealId: string;
+  readonly date: string;
+  /** `true` si ce repas a AUSSI été déclaré consommé (N1.6B). */
+  readonly consomme: boolean;
+  readonly items: readonly ItemValide[];
+}
+
+/**
+ * COURSES C0 — « JE PRÉVOIS CETTE COMPOSITION POUR CE REPAS ».
+ *
+ * ⚠️ VALIDER N'EST PAS MANGER, ET C'EST TOUT L'INTÉRÊT. Cette fonction appelle
+ * `enregistrer_repas_planifie` — la RPC de N1.1, jusqu'ici invoquée uniquement
+ * DEPUIS `enregistrer_repas_structure_consomme`. Elle écrit `planned_meals` et
+ * `planned_meal_items`, et RIEN d'autre : ni `consumed_meals`, ni
+ * `meal_entries`, ni `consumed_meal_id`. La checklist
+ * `courses_c0_validation_checklist.sql` le mesure sur la source de la fonction
+ * ET sur les données.
+ *
+ * ⚠️ AUCUNE MACRO NE PART D'ICI NON PLUS. Même invariant qu'en A5 : la
+ * signature de la RPC n'a aucun paramètre pour en recevoir.
+ *
+ * ⚠️ AUCUNE MIGRATION N'A ÉTÉ ÉCRITE POUR CE LOT. La RPC existe, elle est
+ * `security definer`, accordée à `authenticated` et révoquée pour `anon`.
+ *
+ * Rend l'identifiant du `planned_meal` — le même à chaque revalidation, parce
+ * que l'unicité porte sur `(student_id, planned_on, meal_id)`.
+ */
+export async function validerChoixRepas(
+  supabase: TypedSupabaseClient,
+  mealId: string,
+  date: string,
+  items: readonly ItemChoixAValider[],
+): Promise<string> {
+  return appeler<string>(supabase, "enregistrer_repas_planifie", {
+    p_meal_id: mealId,
+    p_planned_on: date,
+    p_items: items.map((item) => ({
+      slot_id: item.slotId,
+      catalog_food_id: item.catalogFoodId,
+      product_id: item.productId,
+      quantity: item.quantity,
+      unit: item.unit,
+    })),
+  });
+}
+
+/**
+ * COURSES C0 — LES COMPOSITIONS DÉJÀ VALIDÉES, RELUES DEPUIS LA BASE.
+ *
+ * ⚠️ DEUX REQUÊTES, JAMAIS UNE PAR REPAS. `planned_meals` sur l'intervalle de
+ * dates, puis `planned_meal_items` sur les identifiants trouvés. Un `select`
+ * par jour, ou pire par repas, ferait un N+1 sur un écran qui affiche sept
+ * jours.
+ *
+ * ⚠️ ET C'EST BIEN UNE SECONDE LECTURE DE `planned_meals`, à côté de
+ * `lireRepasStructuresEnregistres`. Les fusionner économiserait une requête
+ * batchée — et casserait un contrôle de N1.6B qui vérifie nommément que le
+ * hook appelle ce lecteur-là. On préfère une requête de plus à un test
+ * réécrit pour arranger le code.
+ *
+ * ⚠️ LA RESTAURATION SE FERA PAR IDENTITÉ, JAMAIS PAR NOM. Chaque item porte
+ * son `choice_slot_id` et son `catalog_food_id` / `product_id` : c'est ce
+ * couple qui permettra de retrouver l'option du snapshot. Chercher par libellé
+ * rattacherait « Poulet » à n'importe lequel des 51 bœufs du catalogue.
+ *
+ * Rend une carte `mealId|date` → composition.
+ */
+export async function lireCompositionsValidees(
+  supabase: TypedSupabaseClient,
+  dates: readonly string[],
+): Promise<ReadonlyMap<string, CompositionValidee>> {
+  const vide = new Map<string, CompositionValidee>();
+  if (dates.length === 0) return vide;
+
+  const { data: repas, error: erreurRepas } = await supabase
+    .from("planned_meals")
+    .select("id, meal_id, planned_on, consumed_meal_id")
+    .in("planned_on", [...dates]);
+  // ⚠️ UNE LECTURE RATÉE N'EST PAS « AUCUNE COMPOSITION VALIDÉE ». Le dire
+  // afficherait « à valider » sur un repas déjà validé, et un second clic
+  // écraserait la composition en base par celle de l'écran.
+  devWarn("lireCompositionsValidees:planned_meals", erreurRepas);
+  if (erreurRepas) return vide;
+
+  const lignes = (repas ?? []) as unknown as {
+    id: string;
+    meal_id: string;
+    planned_on: string;
+    consumed_meal_id: string | null;
+  }[];
+  if (lignes.length === 0) return vide;
+
+  const { data: items, error: erreurItems } = await supabase
+    .from("planned_meal_items")
+    .select("planned_meal_id, choice_slot_id, catalog_food_id, product_id, quantity, unit")
+    .in("planned_meal_id", lignes.map((l) => l.id))
+    .order("position");
+  devWarn("lireCompositionsValidees:planned_meal_items", erreurItems);
+  if (erreurItems) return vide;
+
+  const parRepas = new Map<string, ItemValide[]>();
+  for (const brut of (items ?? []) as unknown as {
+    planned_meal_id: string;
+    choice_slot_id: string;
+    catalog_food_id: string | null;
+    product_id: string | null;
+    quantity: number | string;
+    unit: string;
+  }[]) {
+    const quantite = Number(brut.quantity);
+    if (!Number.isFinite(quantite)) continue;
+    const liste = parRepas.get(brut.planned_meal_id) ?? [];
+    liste.push({
+      slotId: brut.choice_slot_id,
+      catalogFoodId: brut.catalog_food_id,
+      productId: brut.product_id,
+      quantity: quantite,
+      unit: brut.unit,
+    });
+    parRepas.set(brut.planned_meal_id, liste);
+  }
+
+  const carte = new Map<string, CompositionValidee>();
+  for (const ligne of lignes) {
+    const items = parRepas.get(ligne.id) ?? [];
+    // Un `planned_meal` sans item ne décrit aucune composition : l'ignorer
+    // évite d'afficher « choix validés » sur un repas vide.
+    if (items.length === 0) continue;
+    carte.set(`${ligne.meal_id}|${ligne.planned_on}`, {
+      plannedMealId: ligne.id,
+      mealId: ligne.meal_id,
+      date: ligne.planned_on,
+      consomme: ligne.consumed_meal_id !== null,
+      items,
+    });
+  }
+  return carte;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
    A5 — LES ALIMENTS RÉCEMMENT CONSOMMÉS
    ══════════════════════════════════════════════════════════════════════════ */
 

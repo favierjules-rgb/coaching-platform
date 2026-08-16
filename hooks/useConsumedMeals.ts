@@ -12,8 +12,12 @@ import {
   modifierQuantiteEntree,
   ouvrirRepasPrescrit,
   enregistrerRepasStructure,
+  lireCompositionsValidees,
   lireRepasStructuresEnregistres,
   readConsumedMeals,
+  validerChoixRepas,
+  type CompositionValidee,
+  type ItemChoixAValider,
   type ItemStructureAEnregistrer,
   type ResultatEnregistrementStructure,
   renommerRepasEleve,
@@ -77,6 +81,25 @@ export interface ConsumedMealsState {
     date: string,
     items: readonly ItemStructureAEnregistrer[],
   ) => Promise<ResultatEnregistrementStructure | null>;
+  /**
+   * COURSES C0 — les compositions DÉJÀ validées, clés `mealId|date`.
+   *
+   * ⚠️ VIENT DE `planned_meal_items`, relue à chaque chargement. C'est ce qui
+   * permet de restaurer la sélection après un rafraîchissement, et de dire si
+   * l'écran diverge de ce qui est en base.
+   */
+  readonly compositionsValidees: ReadonlyMap<string, CompositionValidee>;
+  /**
+   * COURSES C0 — « je prévois cette composition ».
+   *
+   * ⚠️ N'ÉCRIT QUE LE PLANIFIÉ. Aucun `consumed_meal`, aucune `meal_entry`,
+   * aucun `consumed_meal_id` : valider n'est pas manger.
+   */
+  readonly validerChoixRepas: (
+    mealId: string,
+    date: string,
+    items: readonly ItemChoixAValider[],
+  ) => Promise<string | null>;
   readonly creerRepas: (date: string, libellé: string) => Promise<string | null>;
   readonly renommerRepas: (consumedMealId: string, libellé: string) => Promise<boolean>;
   readonly supprimerRepas: (consumedMealId: string) => Promise<boolean>;
@@ -150,6 +173,7 @@ export function useConsumedMeals(dates: readonly string[], actif: boolean): Cons
   const [enCours, setEnCours] = useState(false);
   const [meals, setMeals] = useState<readonly ConsumedMeal[]>([]);
   const [enregistres, setEnregistres] = useState<ReadonlySet<string>>(() => new Set());
+  const [validees, setValidees] = useState<ReadonlyMap<string, CompositionValidee>>(() => new Map());
 
   const requête = useRef(0);
   const enCoursRef = useRef(false);
@@ -161,6 +185,7 @@ export function useConsumedMeals(dates: readonly string[], actif: boolean): Cons
     if (!actif || clé === "") {
       setMeals([]);
       setEnregistres(new Set());
+      setValidees(new Map());
       setLoading(false);
       return;
     }
@@ -180,13 +205,19 @@ export function useConsumedMeals(dates: readonly string[], actif: boolean): Cons
       // ⚠️ LES DEUX LECTURES ENSEMBLE. L'état « déjà enregistré » et la
       // consommation décrivent le même écran : les charger séparément
       // laisserait une fenêtre où le bouton ment.
-      const [lus, marques] = await Promise.all([
+      //
+      // ⚠️ C0 — LA COMPOSITION VALIDÉE REJOINT LE MÊME LOT. Elle décrit le même
+      // écran que les deux autres : la charger à part laisserait une fenêtre
+      // où le bouton dirait « valider » sur un repas déjà validé.
+      const [lus, marques, compositions] = await Promise.all([
         readConsumedMeals(supabase, clé.split(","), { portee: "eleve-connecte" }),
         lireRepasStructuresEnregistres(supabase, clé.split(",")),
+        lireCompositionsValidees(supabase, clé.split(",")),
       ]);
       if (requête.current !== numéro) return;
       setMeals(lus);
       setEnregistres(marques);
+      setValidees(compositions);
       setError(null);
     } catch (erreur) {
       if (requête.current !== numéro) return;
@@ -249,12 +280,15 @@ export function useConsumedMeals(dates: readonly string[], actif: boolean): Cons
     enCours,
     meals,
     repasStructuresEnregistres: enregistres,
+    compositionsValidees: validees,
     refetch: charger,
     effacerErreur: () => setError(null),
 
     ouvrirPrescrit: (mealId, date) => écrire((c) => ouvrirRepasPrescrit(c, mealId, date)),
     enregistrerRepasStructure: (mealId, date, items) =>
       écrire((c) => enregistrerRepasStructure(c, mealId, date, items)),
+    validerChoixRepas: (mealId, date, items) =>
+      écrire((c) => validerChoixRepas(c, mealId, date, items)),
     creerRepas: (date, libellé) => écrire((c) => creerRepasEleve(c, date, libellé)),
     renommerRepas: async (id, libellé) =>
       (await écrire((c) => renommerRepasEleve(c, id, libellé).then(() => true))) === true,

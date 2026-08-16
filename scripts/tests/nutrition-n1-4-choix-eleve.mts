@@ -235,7 +235,12 @@ await test("N1.4-08/09/12. un choix remplace le précédent, et referme la liste
   // La fermeture après choix est dans le geste lui-même.
   const choisir = CODE_CHOIX.slice(CODE_CHOIX.indexOf("const choisir = useCallback"), CODE_CHOIX.indexOf("if (occurrences.length"));
   assert.ok(choisir.includes("setOuverte(null)"), "la liste doit se refermer après le choix");
-  assert.ok(choisir.includes("choisirOption(precedente, slotId, optionId)"));
+  // ⚠️ LE GESTE DÉLÈGUE À LA FONCTION PURE, il ne réécrit pas la règle. Depuis
+  // COURSES C0, le point de départ n'est plus forcément l'état local : c'est
+  // le brouillon S'IL EXISTE, sinon la sélection restaurée depuis la base.
+  // Changer sa protéine ne doit pas effacer son féculent déjà validé.
+  assert.ok(choisir.includes("choisirOption(precedente ?? selectionValidee ?? AUCUNE_SELECTION"));
+  assert.ok(!/setBrouillon\([^)]*\{/.test(choisir), "le geste recalcule la sélection à la main");
 });
 
 await test("N1.4-10/11. la ligne fermée montre le choix, et propose de le modifier", () => {
@@ -342,9 +347,18 @@ await test("N1.4-24/25/26. la composition ne fuit ni d'un repas à l'autre, ni d
   assert.ok(CODE_SEMAINE.includes("key={cleDeComposition(repas.id, date)}"));
   assert.ok(CODE_SEMAINE.includes("occurrences={repas.choiceSlots}"));
 
-  // N1.4-26 : l'état est local et non persisté — un rafraîchissement le remet
-  // à zéro, et c'est le comportement documenté pour ce lot.
-  assert.ok(CODE_CHOIX.includes("useState<SelectionDeChoix>(AUCUNE_SELECTION)"));
+  // N1.4-26 : l'état local reste local, et AUCUNE persistance navigateur n'a
+  // été inventée.
+  //
+  // ⚠️ CE CONTRÔLE A CHANGÉ AVEC COURSES C0. Il exigeait
+  // `useState<SelectionDeChoix>(AUCUNE_SELECTION)` — donc qu'un
+  // rafraîchissement reparte à vide. Depuis C0, une composition VALIDÉE est
+  // relue depuis `planned_meal_items` : c'est le but du lot, pas une fuite.
+  // Ce qui ne change pas : le brouillon démarre à `null` (« rien touché »), et
+  // la garantie d'isolation reste la CLÉ de montage vérifiée juste au-dessus —
+  // c'est elle qui rend la fuite impossible, pas la valeur initiale.
+  assert.ok(CODE_CHOIX.includes("useState<SelectionDeChoix | null>(null)"));
+  assert.ok(CODE_CHOIX.includes("brouillon ?? selectionValidee ?? AUCUNE_SELECTION"));
   for (const persistance of ["localStorage", "sessionStorage", "indexedDB", "idb"]) {
     assert.ok(!CODE_CHOIX.includes(persistance), `une persistance ${persistance} a été inventée`);
   }
