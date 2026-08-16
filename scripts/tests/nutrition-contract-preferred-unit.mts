@@ -183,13 +183,31 @@ await test("CONTRACT-07. le CONTRACT s'applique en DERNIER — l'ordre de rollou
   assert.ok(horodatage(enregistrement) < horodatage(contrat),
     `N1.6B SAVE (${enregistrement}) doit précéder le CONTRACT (${contrat})`);
 
-  // ⚠️ ET IL EST LE DERNIER DE TOUT LE DÉPÔT, pas seulement du lot. Une
-  // migration future glissée après lui redeviendrait un piège d'ordre : elle
-  // s'appliquerait sur un schéma dont `preferred_unit` a déjà disparu, sans
-  // que rien ne l'ait annoncé. Ce contrôle rougira alors — c'est voulu, il
-  // faudra décider explicitement, pas découvrir en production.
-  assert.equal(migrations[migrations.length - 1], contrat,
-    "le CONTRACT n'est plus la dernière migration du dépôt");
+  // ⚠️ CE CONTRÔLE A CHANGÉ AVEC C0.1, ET LA RAISON COMPTE. Il exigeait que le
+  // CONTRACT soit la DERNIÈRE migration du dépôt — une façon simple de garantir
+  // qu'aucune migration ne s'applique sur un schéma dont `preferred_unit` a
+  // disparu sans qu'on l'ait décidé. Mais « le CONTRACT est éternellement le
+  // dernier » n'est pas tenable : le projet continue.
+  //
+  // La règle est donc devenue explicite plutôt que positionnelle : toute
+  // migration POSTÉRIEURE au CONTRACT doit être NOMMÉE ici, et prouver qu'elle
+  // ne dépend pas de la colonne supprimée. Ajouter une migration après le
+  // CONTRACT sans l'inscrire fait toujours rougir — c'est ce qu'on voulait —
+  // mais l'inscrire demande maintenant de MONTRER pourquoi c'est sûr, pas
+  // seulement de déplacer un compteur.
+  const posterieures = migrations.filter((f) => horodatage(f) > horodatage(contrat));
+  assert.deepEqual(posterieures, ["20260914090000_c0_1_verrou_repas_consomme.sql"],
+    "une migration postérieure au CONTRACT n'a pas été déclarée sûre");
+
+  for (const nom of posterieures) {
+    const source = lire(`../../supabase/migrations/${nom}`);
+    // ⚠️ ON CHERCHE DU CODE, PAS DE LA PROSE. Une migration a le droit
+    // d'EXPLIQUER le CONTRACT en commentaire ; elle n'a pas le droit d'en
+    // dépendre. Sans ce dépouillement, l'en-tête de C0.1 suffirait à rougir.
+    const code = source.replace(/--[^\n]*/g, " ").replace(/comment on [^;]*;/gi, " ");
+    assert.ok(!code.includes("preferred_unit"),
+      `${nom} nomme preferred_unit : elle dépend d'une colonne supprimée`);
+  }
 
   // ⚠️ ET N1.6B NE DÉPEND PAS DU CONTRACT — c'est ce qui rend l'ordre
   // possible. Mesuré sur le fichier : SAVE ne nomme jamais la colonne legacy,

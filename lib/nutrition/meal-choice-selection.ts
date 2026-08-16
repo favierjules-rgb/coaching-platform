@@ -298,3 +298,123 @@ export function calculDuRepas(
 
   return { etat: "calcule", solution };
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   COURSES C0 — RESTAURER UNE COMPOSITION VALIDÉE, ET LA COMPARER
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Un choix tel qu'il est PERSISTÉ dans `planned_meal_items`.
+ *
+ * ⚠️ TYPE STRUCTUREL, VOLONTAIREMENT. Il décrit la forme d'une ligne, pas son
+ * origine : ce module est pur et n'importe rien de `lib/supabase`. Un
+ * `ItemValide` lu en base y est assignable sans conversion.
+ */
+export interface ChoixPersiste {
+  readonly slotId: string;
+  readonly catalogFoodId: string | null;
+  readonly productId: string | null;
+  readonly quantity: number;
+  readonly unit: string;
+}
+
+/** L'identité d'une option du snapshot, sous la forme des colonnes de la base. */
+function identiteDeLOption(option: ChoiceOption): {
+  catalogFoodId: string | null;
+  productId: string | null;
+} {
+  return {
+    catalogFoodId: option.type === "aliment" ? option.id : null,
+    productId: option.type === "produit" ? option.id : null,
+  };
+}
+
+/**
+ * COURSES C0 — RECONSTRUIT LA SÉLECTION À PARTIR DE LA COMPOSITION VALIDÉE.
+ *
+ * ⚠️ LA CORRESPONDANCE SE FAIT PAR `choice_slot_id` + IDENTITÉ, JAMAIS PAR NOM.
+ * Chercher « Poulet » dans les options rattacherait la ligne à n'importe lequel
+ * des homonymes du catalogue — l'audit N1 a mesuré que « bœuf » recouvre 51
+ * aliments dont les protéines vont de 17,2 à 39,2 g/100 g. Une identité est un
+ * UUID ou n'est rien.
+ *
+ * ⚠️ UNE LIGNE ORPHELINE EST IGNORÉE, PAS DEVINÉE. Si le coach a retiré
+ * l'aliment de l'occurrence depuis la validation, la ligne ne correspond plus à
+ * aucune option : on ne la restaure pas, et l'occurrence redevient « à
+ * choisir ». Approcher au plus proche inventerait un choix que l'élève n'a pas
+ * fait.
+ */
+export function selectionDepuisComposition(
+  occurrences: readonly MealChoiceSlot[],
+  items: readonly ChoixPersiste[],
+): SelectionDeChoix {
+  const parOccurrence = new Map(occurrences.map((o) => [o.id, o] as const));
+  const selection: Record<string, string> = {};
+
+  for (const item of items) {
+    const occurrence = parOccurrence.get(item.slotId);
+    if (!occurrence) continue;
+    const option = occurrence.options.find((candidate) => {
+      const identite = identiteDeLOption(candidate);
+      return (
+        identite.catalogFoodId === item.catalogFoodId && identite.productId === item.productId
+      );
+    });
+    if (!option || typeof option.optionId !== "string") continue;
+    selection[item.slotId] = option.optionId;
+  }
+
+  return Object.freeze(selection);
+}
+
+/**
+ * COURSES C0 — LA COMPOSITION AFFICHÉE EST-ELLE CELLE QUI EST EN BASE ?
+ *
+ * Compare occurrence par occurrence : même ensemble d'occurrences, même
+ * identité, même quantité ENTIÈRE, même unité.
+ *
+ * ⚠️ LA QUANTITÉ FAIT PARTIE DE LA COMPARAISON, ET C'EST DÉLIBÉRÉ. Deux
+ * causes peuvent faire diverger l'écran de la base : l'élève a changé un choix,
+ * ou le calcul a changé sous lui — portion préférée modifiée par le coach,
+ * minimum ajouté, solveur amélioré. Les deux méritent le même signal :
+ * « modifications non validées », et une décision explicite de l'élève. Ne
+ * comparer que les identités laisserait une quantité périmée partir en courses
+ * sans que personne ne l'ait vu.
+ *
+ * ⚠️ ET C'EST CE QUI PROTÈGE LA COMPOSITION VALIDÉE. Elle n'est JAMAIS
+ * réécrite par un simple rechargement : il faut un clic.
+ */
+export function compositionIdentique(
+  occurrences: readonly MealChoiceSlot[],
+  affichee: readonly {
+    readonly slotId: string;
+    readonly optionId: string;
+    readonly displayQuantity: number;
+    readonly unit: string;
+  }[],
+  persistee: readonly ChoixPersiste[],
+): boolean {
+  if (affichee.length !== persistee.length) return false;
+
+  const identiteParOption = new Map<string, { catalogFoodId: string | null; productId: string | null }>();
+  for (const occurrence of occurrences) {
+    for (const option of occurrence.options) {
+      if (typeof option.optionId === "string") {
+        identiteParOption.set(option.optionId, identiteDeLOption(option));
+      }
+    }
+  }
+
+  const parSlot = new Map(persistee.map((item) => [item.slotId, item] as const));
+  for (const item of affichee) {
+    const attendu = parSlot.get(item.slotId);
+    if (!attendu) return false;
+    const identite = identiteParOption.get(item.optionId);
+    if (!identite) return false;
+    if (identite.catalogFoodId !== attendu.catalogFoodId) return false;
+    if (identite.productId !== attendu.productId) return false;
+    if (item.displayQuantity !== attendu.quantity) return false;
+    if (item.unit !== attendu.unit) return false;
+  }
+  return true;
+}

@@ -732,10 +732,19 @@ await test("N1.5-14. deux occurrences identiques sont calculées SÉPARÉMENT", 
   assert.equal((html.match(/Poulet/g) ?? []).length, 2, "les deux lignes doivent rester visibles");
 });
 
-await test("N1.5-15. un rafraîchissement repart sans sélection, donc sans quantité", () => {
-  // L'état initial du composant EST `AUCUNE_SELECTION` — aucune persistance,
-  // aucun stockage navigateur, rien à restaurer.
-  assert.ok(CODE_CHOIX.includes("useState<SelectionDeChoix>(AUCUNE_SELECTION)"));
+await test("N1.5-15. un BROUILLON non validé ne survit pas au rafraîchissement", () => {
+  // ⚠️ CE CONTRÔLE A CHANGÉ AVEC COURSES C0, ET LA RÈGLE AUSSI. Il exigeait
+  // qu'un rafraîchissement reparte SANS AUCUNE sélection. Depuis C0, une
+  // composition VALIDÉE est relue depuis `planned_meal_items` et restaurée :
+  // c'est le but même du lot. Ce qui reste vrai — et que ce contrôle garde —
+  // c'est qu'un brouillon NON validé, lui, ne survit à rien.
+  //
+  //   · l'état LOCAL démarre à `null` = « l'élève n'a rien touché »
+  //   · aucune persistance navigateur n'a été inventée
+  //   · sans composition validée, la sélection effective retombe sur
+  //     `AUCUNE_SELECTION`, donc sur « incomplet », donc sur aucune quantité
+  assert.ok(CODE_CHOIX.includes("useState<SelectionDeChoix | null>(null)"));
+  assert.ok(CODE_CHOIX.includes("brouillon ?? selectionValidee ?? AUCUNE_SELECTION"));
   assert.ok(!/localStorage|sessionStorage|indexedDB/i.test(CODE_CHOIX));
   assert.equal(calculDuRepas(repasComplet(), AUCUNE_SELECTION, CIBLE_EXACTE).etat, "incomplet");
 });

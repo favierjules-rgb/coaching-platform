@@ -611,7 +611,7 @@ await test("COACH-SUP. l'écran est branché, réutilise A5.7, et n'a coûté au
   const migrations = readdirSync(new URL("../../supabase/migrations/", import.meta.url)).filter(
     (f) => f.endsWith(".sql"),
   );
-  assert.equal(migrations.length, 79, "79 fichiers : A5.8 n'en a créé aucun, N1.1 en a créé un, N1.3 un second");
+  assert.equal(migrations.length, 80, "80 fichiers : A5.8 n'en a créé aucun, N1.1 en a créé un, N1.3 un second");
   // ⚠️ SIXIÈME OCCURRENCE DU MÊME MOTIF DANS CE PROJET, et la leçon est la
   // même qu'en A5 : « aucune migration postérieure » n'est vrai que tant
   // qu'aucun chantier ne suit. N1.1 en a créé une. Ce que ce contrôle doit
@@ -630,6 +630,11 @@ await test("COACH-SUP. l'écran est branché, réutilise A5.7, et n'a coûté au
       "20260910090000_n1_6_a_couleurs_de_listes.sql",
       "20260912090000_n1_6_b_enregistrer_repas_structure.sql",
       "20260913090000_contract_preferred_unit.sql",
+      // ⚠️ C0.1 — LE VERROU SERVEUR, et rien d'autre. Courses C0 n'a créé
+      // AUCUNE migration ; C0.1 en a créé UNE, qui interdit de réécrire un
+      // repas déjà consommé. La nommer ici rend visible qu'aucun chantier
+      // « liste de courses » n'a glissé de table au passage.
+      "20260914090000_c0_1_verrou_repas_consomme.sql",
     ],
   );
 

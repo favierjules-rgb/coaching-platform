@@ -1134,7 +1134,7 @@ await test("51. les quatre migrations sont déclarées au manifeste et comptées
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
   // 35 depuis 20260828090000_web_push_notifications.sql (socle Web Push).
-  assert.equal(attendues.length, 52);
+  assert.equal(attendues.length, 53);
   for (const nom of [
     "20260810090000_harden_nutrition_privileges.sql",
     "20260811090000_nutrition_v2_unification.sql",
@@ -1144,8 +1144,8 @@ await test("51. les quatre migrations sont déclarées au manifeste et comptées
     assert.ok(attendues.includes(nom), nom);
   }
   const secu = lire("../../scripts/tests/security-hardening.mts");
-  assert.ok(secu.includes(".length, 79,"), "le compteur de migrations suit les migrations réelles");
-  assert.ok(secu.includes("assert.equal(attendues.length, 52);"));
+  assert.ok(secu.includes(".length, 80,"), "le compteur de migrations suit les migrations réelles");
+  assert.ok(secu.includes("assert.equal(attendues.length, 53);"));
 });
 
 /* ─── 52-53. Outils 1 et 3 après la PR C.1 ─────────────────────────────── */
@@ -1499,7 +1499,7 @@ await test("61. aucun nouveau chemin d'écriture, aucune migration ajoutée", ()
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
   // 35 depuis 20260828090000_web_push_notifications.sql (socle Web Push).
-  assert.equal(attendues.length, 52);
+  assert.equal(attendues.length, 53);
   assert.ok(attendues.includes("20260814090000_nutrition_plan_v2_blocking_issue_week.sql"));
 });
 

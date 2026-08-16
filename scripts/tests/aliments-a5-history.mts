@@ -709,6 +709,11 @@ await test("HIST17. l'élève A ne voit jamais l'élève B", () => {
       "20260910090000_n1_6_a_couleurs_de_listes.sql",
       "20260912090000_n1_6_b_enregistrer_repas_structure.sql",
       "20260913090000_contract_preferred_unit.sql",
+      // ⚠️ C0.1 — LE VERROU SERVEUR, et rien d'autre. Courses C0 n'a créé
+      // AUCUNE migration ; C0.1 en a créé UNE, qui interdit de réécrire un
+      // repas déjà consommé. La nommer ici rend visible qu'aucun chantier
+      // « liste de courses » n'a glissé de table au passage.
+      "20260914090000_c0_1_verrou_repas_consomme.sql",
     ], `migrations postérieures inattendues : ${tardives.join(", ")}`);
 
   // Et c'est EXÉCUTÉ, pas relu : la checklist crée deux élèves du même coach,
@@ -1076,11 +1081,11 @@ await test("HIST-SUP. le dépouillement des commentaires n'a rien vidé", () => 
   // vit aussi dans `supabase/baseline/manifest.json` : les deux doivent
   // s'accorder, sinon l'un des deux ment.
   const migrations = lireMigrations();
-  assert.equal(migrations.length, 79, "79 fichiers : A5.7 n'en a créé aucun, N1.1 en a créé un, N1.3 un second");
+  assert.equal(migrations.length, 80, "80 fichiers : A5.7 n'en a créé aucun, N1.1 en a créé un, N1.3 un second");
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json")) as {
     migrations_post_baseline_attendues: readonly string[];
   };
-  assert.equal(manifeste.migrations_post_baseline_attendues.length, 52);
+  assert.equal(manifeste.migrations_post_baseline_attendues.length, 53);
 
   // Et rien qui ressemble à une table, une vue ou un agrégat d'historique.
   //

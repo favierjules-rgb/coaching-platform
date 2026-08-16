@@ -9,6 +9,7 @@ import {
 } from "@/components/student/ConsumedMealSection";
 import { DailyIntakeSummary } from "@/components/student/DailyIntakeSummary";
 import { StudentMealChoices, type ItemPourEnregistrement } from "@/components/student/StudentMealChoices";
+import type { ChoixPersiste } from "@/lib/nutrition/meal-choice-selection";
 import { DailyNutritionProgress } from "@/components/student/DailyNutritionProgress";
 import { NutritionDayCarousel } from "@/components/student/NutritionDayCarousel";
 import { NutritionWeekNav } from "@/components/student/NutritionWeekNav";
@@ -113,6 +114,25 @@ export interface SuiviConsommation {
    * Les quantités reçues sont ENTIÈRES, telles qu'affichées.
    */
   readonly onEnregistrerRepasStructure?: (
+    mealId: string,
+    date: string,
+    items: readonly ItemPourEnregistrement[],
+  ) => Promise<unknown>;
+  /**
+   * COURSES C0 — les compositions DÉJÀ validées, clés `mealId|date`.
+   *
+   * ⚠️ ELLES VIENNENT DE `planned_meal_items`, pas d'un état React. C'est ce
+   * qui permet de retrouver ses choix après un rafraîchissement, et de dire
+   * que l'écran diverge de ce qui partira en courses.
+   *
+   * Optionnel : sans elles, l'écran est strictement celui de N1.6.
+   */
+  readonly compositionsValidees?: ReadonlyMap<string, { readonly items: readonly ChoixPersiste[] }>;
+  /**
+   * COURSES C0 — « je prévois cette composition ».
+   * Les quantités reçues sont ENTIÈRES, telles qu'affichées. Aucune macro.
+   */
+  readonly onValiderChoixRepas?: (
     mealId: string,
     date: string,
     items: readonly ItemPourEnregistrement[],
@@ -390,6 +410,22 @@ export function StudentPrescribedWeek({
                               enCours: suivi.enCours,
                               onEnregistrer: (items) =>
                                 void suivi.onEnregistrerRepasStructure?.(repas.id, date, items),
+                            }
+                          : null
+                      }
+                      /* ── COURSES C0 — LE PONT VERS LE PLANIFIÉ ────────────
+                         ⚠️ MÊME CLÉ `repas.id|date` QUE LA CONSOMMATION, et
+                         pour la même raison : deux jours du même repas sont
+                         deux compositions, pas une. */
+                      validation={
+                        suivi && date && suivi.onValiderChoixRepas
+                          ? {
+                              compositionValidee:
+                                suivi.compositionsValidees?.get(`${repas.id}|${date}`)?.items ??
+                                null,
+                              enCours: suivi.enCours,
+                              onValider: (items) =>
+                                void suivi.onValiderChoixRepas?.(repas.id, date, items),
                             }
                           : null
                       }
