@@ -36,8 +36,20 @@ export const MIGRATION_C0_1 = "20260914090000_c0_1_verrou_repas_consomme.sql";
 /** La SEULE migration que C2 a le droit d'ajouter. */
 export const MIGRATION_C2 = "20260915090000_c2_liste_de_courses_persistante.sql";
 
+/** La SEULE migration que C3 a le droit d'ajouter. */
+export const MIGRATION_C3 = "20260916090000_c3_budget_et_prix_estimatifs.sql";
+
+/**
+ * Les migrations du chantier COURSES, dans l'ordre d'application.
+ *
+ * ⚠️ CETTE LISTE EST LE CONTRAT, ET ELLE S'ALLONGE EXPLICITEMENT. Chaque lot
+ * qui ajoute une migration doit venir l'inscrire ici — c'est précisément ce que
+ * le compte seul ne demandait pas, et c'est pour ça qu'il a été remplacé.
+ */
+export const MIGRATIONS_COURSES: readonly string[] = [MIGRATION_C2, MIGRATION_C3];
+
 /** Le compte attendu — nécessaire, jamais suffisant. */
-export const NOMBRE_DE_MIGRATIONS = 81;
+export const NOMBRE_DE_MIGRATIONS = 82;
 
 /**
  * L'empreinte des 79 migrations ANTÉRIEURES à C0.1, dans l'ordre.
@@ -81,32 +93,37 @@ export function verifierContratDesMigrations(assert: typeof import("node:assert/
     `${migrations.length} migrations au lieu de ${NOMBRE_DE_MIGRATIONS} : une migration a été ajoutée ou retirée`,
   );
 
-  // 2. L'ORDRE ET L'IDENTITÉ DES DEUX DERNIÈRES. C0.1, puis C2 — et rien après.
-  //    Antidater C2 avant C0.1 inverse ce couple, et rougit ici.
+  // 2. L'ORDRE ET L'IDENTITÉ DES DERNIÈRES. C0.1, puis C2, puis C3 — et rien
+  //    après. Antidater l'une d'elles casse l'ordre, et rougit ici.
   assert.deepEqual(
-    migrations.slice(-2),
-    [MIGRATION_C0_1, MIGRATION_C2],
-    "les deux dernières migrations doivent être C0.1 puis C2, dans cet ordre",
+    migrations.slice(-(1 + MIGRATIONS_COURSES.length)),
+    [MIGRATION_C0_1, ...MIGRATIONS_COURSES],
+    "les dernières migrations doivent être C0.1 puis les migrations COURSES, dans l'ordre",
   );
 
   // 3. L'HORODATAGE, pas seulement l'ordre alphabétique. Un nom qui trie bien
   //    mais dont l'estampille est antérieure serait accepté par le point 2 sur
   //    un dépôt renommé ; il ne l'est pas ici.
   const tC01 = estampille(MIGRATION_C0_1);
-  const tC2 = estampille(MIGRATION_C2);
-  assert.ok(tC01 !== null && tC2 !== null, "les migrations C0.1 et C2 doivent être horodatées");
-  assert.ok(tC2 > tC01, `C2 (${tC2}) doit être POSTÉRIEURE à C0.1 (${tC01})`);
+  assert.ok(tC01 !== null, "la migration C0.1 doit être horodatée");
+  let precedente = tC01;
+  for (const nom of MIGRATIONS_COURSES) {
+    const t = estampille(nom);
+    assert.ok(t !== null, `${nom} doit être horodatée`);
+    assert.ok(t > precedente, `${nom} (${t}) doit être POSTÉRIEURE à ${precedente}`);
+    precedente = t;
+  }
 
   // 4. EXACTEMENT UNE MIGRATION DE LISTE DE COURSES, et c'est celle de C2.
   //    Une seconde migration C2 — un correctif « vite fait » qui redéfinirait
   //    la RPC — rougit ici, là où un simple compte l'aurait absorbée.
   const deCourses = migrations.filter((f) =>
-    /shopping|grocer|liste_de_courses|courses|panier|checklist|_c2_/i.test(f),
+    /shopping|grocer|liste_de_courses|courses|panier|checklist|budget|prix|_c2_|_c3_/i.test(f),
   );
   assert.deepEqual(
     deCourses,
-    [MIGRATION_C2],
-    `une seule migration de liste de courses est autorisée : ${deCourses.join(", ") || "aucune"}`,
+    [...MIGRATIONS_COURSES],
+    `migrations COURSES inattendues : ${deCourses.join(", ") || "aucune"}`,
   );
 
   // 5. RIEN APRÈS C2. Une migration étrangère postérieure serait invisible au
@@ -116,10 +133,11 @@ export function verifierContratDesMigrations(assert: typeof import("node:assert/
     const t = estampille(f);
     return t !== null && t >= tC01;
   });
+  const autorisees = new Set([MIGRATION_C0_1, ...MIGRATIONS_COURSES]);
   assert.deepEqual(
     apresC01,
-    [MIGRATION_C0_1, MIGRATION_C2],
-    `migrations inattendues depuis C0.1 : ${apresC01.filter((f) => f !== MIGRATION_C0_1 && f !== MIGRATION_C2).join(", ")}`,
+    [MIGRATION_C0_1, ...MIGRATIONS_COURSES],
+    `migrations inattendues depuis C0.1 : ${apresC01.filter((f) => !autorisees.has(f)).join(", ")}`,
   );
 
   // 6. L'HISTORIQUE ANTÉRIEUR EST FIGÉ. C1 et C0 n'ont pas gagné de migration
@@ -128,7 +146,11 @@ export function verifierContratDesMigrations(assert: typeof import("node:assert/
     const t = estampille(f);
     return t !== null && t < tC01;
   });
-  assert.equal(historique.length, NOMBRE_DE_MIGRATIONS - 2, "l'historique antérieur a changé de taille");
+  assert.equal(
+    historique.length,
+    NOMBRE_DE_MIGRATIONS - 1 - MIGRATIONS_COURSES.length,
+    "l'historique antérieur a changé de taille",
+  );
   assert.equal(
     empreinte(historique),
     EMPREINTE_HISTORIQUE,

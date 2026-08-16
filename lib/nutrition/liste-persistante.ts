@@ -44,6 +44,15 @@ export interface LignePersistee {
   readonly unit: string | null;
   readonly checked: boolean;
   readonly creeLe: string;
+  /**
+   * COURSES C3 — le prix forfaitaire d'un article MANUEL, en centimes entiers.
+   *
+   * ⚠️ TOUJOURS `null` SUR UNE LIGNE PLAN, et la base l'impose
+   * (`shopping_list_items_prix_manuel_check`) : une ligne PLAN tire son prix de
+   * son IDENTITÉ, et une surcharge locale créerait deux vérités pour le même
+   * aliment.
+   */
+  readonly estimatedPriceCents: number | null;
 }
 
 export interface ListePersistee {
@@ -51,6 +60,13 @@ export interface ListePersistee {
   readonly debut: string;
   readonly fin: string;
   readonly majLe: string;
+  /**
+   * COURSES C3 — le budget de CETTE liste, en centimes entiers.
+   *
+   * ⚠️ `null` = AUCUN BUDGET, ce qui n'est pas un budget de zéro. « Il te reste
+   * 0 € » et « tu n'as pas fixé de budget » sont deux écrans différents.
+   */
+  readonly budgetCents: number | null;
   readonly lignes: readonly LignePersistee[];
 }
 

@@ -6,6 +6,8 @@ import type { LigneDeCourses } from "@/lib/nutrition/liste-de-courses";
 import { libelleDerniereModification, type LigneAffichee } from "@/lib/nutrition/liste-persistante";
 import { libellePeriode, type PeriodeCourses } from "@/lib/nutrition/periode-courses";
 import { useListePersistante } from "@/hooks/useListePersistante";
+import { useBudgetCourses } from "@/hooks/useBudgetCourses";
+import { BlocBudget } from "@/components/student/BlocBudget";
 import { COLOR_STYLES } from "@/lib/ui/color-keys";
 
 /**
@@ -32,6 +34,10 @@ export function ListeDeCoursesPersistante({
   readonly restants: number;
 }) {
   const etat = useListePersistante(periode, lignesDuPlan, studentId);
+  // COURSES C3 — les prix et le budget, dans un hook séparé : la liste et les
+  // prix n'ont pas la même cadence, et une panne de prix ne doit pas faire
+  // disparaître la liste.
+  const argent = useBudgetCourses(etat.liste, etat.lignes, etat.recharger);
   const [ouvertAjout, setOuvertAjout] = useState(false);
 
   const libelleBouton = useMemo(() => {
@@ -72,6 +78,20 @@ export function ListeDeCoursesPersistante({
           Tes repas ont changé depuis la dernière génération. Mettre à jour corrigera les
           quantités&nbsp;— tes articles ajoutés à la main et tes cases cochées sont conservés.
         </p>
+      )}
+
+      {/*
+        COURSES C3 — LE BLOC BUDGET EST EN HAUT, avant la liste elle-même :
+        c'est l'information qu'on regarde en entrant dans le magasin.
+        ⚠️ Il ne s'affiche pas si les prix n'ont pas pu être lus : une
+        estimation à zéro serait un mensonge, pas une absence.
+      */}
+      {etat.liste !== null && argent.ok && (
+        <BlocBudget
+          budget={argent.budget}
+          enCours={argent.enCours}
+          onDefinirBudget={argent.definirBudget}
+        />
       )}
 
       {etat.liste !== null && (

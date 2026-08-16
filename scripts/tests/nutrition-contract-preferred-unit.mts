@@ -207,6 +207,11 @@ await test("CONTRACT-07. le CONTRACT s'applique en DERNIER — l'ordre de rollou
     [
       "20260914090000_c0_1_verrou_repas_consomme.sql",
       "20260915090000_c2_liste_de_courses_persistante.sql",
+      // ⚠️ C3 INSCRITE ICI, ET LA BOUCLE CI-DESSOUS LE PROUVE. Le budget et les
+      // prix ne connaissent que `shopping_list_items.unit` et leur propre
+      // colonne `unit` — la colonne d'APRÈS le CONTRACT. `preferred_unit`
+      // n'apparaît nulle part dans la migration C3.
+      "20260916090000_c3_budget_et_prix_estimatifs.sql",
     ],
     "une migration postérieure au CONTRACT n'a pas été déclarée sûre",
   );

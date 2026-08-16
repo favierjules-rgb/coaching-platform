@@ -113,7 +113,8 @@
     "test:courses-c0": "npx tsx scripts/tests/courses-c0-validation.mts",
     "test:liste-de-courses": "npx tsx scripts/tests/liste-de-courses-c1.mts",
     "test:liste-de-courses-ux": "npx tsx scripts/tests/liste-de-courses-ux.mts",
-    "test:liste-de-courses-c2": "npx tsx scripts/tests/liste-de-courses-c2.mts"
+    "test:liste-de-courses-c2": "npx tsx scripts/tests/liste-de-courses-c2.mts",
+    "test:liste-de-courses-c3": "npx tsx scripts/tests/liste-de-courses-c3.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

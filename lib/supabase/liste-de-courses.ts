@@ -63,6 +63,7 @@ interface LigneBrute {
   unit: string | null;
   checked: boolean;
   created_at: string;
+  estimated_price_cents: number | null;
 }
 
 /**
@@ -89,6 +90,7 @@ function versLigne(l: LigneBrute): LignePersistee | null {
     unit: l.unit,
     checked: l.checked,
     creeLe: l.created_at,
+    estimatedPriceCents: l.estimated_price_cents,
   };
 }
 
@@ -115,19 +117,19 @@ export async function lireListeDeCourses(
 ): Promise<LectureDeLaListe> {
   const { data: listes, error: erreurListe } = await supabase
     .from("shopping_lists")
-    .select("id, starts_on, ends_on, updated_at")
+    .select("id, starts_on, ends_on, updated_at, budget_cents")
     .eq("starts_on", debut)
     .eq("ends_on", fin)
     .limit(1);
   if (erreurListe) return { ok: false, liste: null };
   const tete = (listes ?? [])[0] as
-    | { id: string; starts_on: string; ends_on: string; updated_at: string }
+    | { id: string; starts_on: string; ends_on: string; updated_at: string; budget_cents: number | null }
     | undefined;
   if (!tete) return { ok: true, liste: null };
 
   const { data: lignes, error: erreurLignes } = await supabase
     .from("shopping_list_items")
-    .select("id, source, catalog_food_id, product_id, label, quantity, unit, checked, created_at")
+    .select("id, source, catalog_food_id, product_id, label, quantity, unit, checked, created_at, estimated_price_cents")
     .eq("list_id", tete.id)
     .order("created_at", { ascending: true });
   if (erreurLignes) return { ok: false, liste: null };
@@ -139,6 +141,7 @@ export async function lireListeDeCourses(
       debut: tete.starts_on,
       fin: tete.ends_on,
       majLe: tete.updated_at,
+      budgetCents: tete.budget_cents,
       lignes: ((lignes ?? []) as unknown as LigneBrute[])
         .map(versLigne)
         .filter((l): l is LignePersistee => l !== null),

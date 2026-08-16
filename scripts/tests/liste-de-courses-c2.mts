@@ -91,6 +91,8 @@ function lignePlan(over: Partial<LignePersistee> = {}): LignePersistee {
     unit: "g",
     checked: false,
     creeLe: "2026-03-02T10:00:00Z",
+    // COURSES C3 — le contrat persisté a gagné ce champ ; le double le suit.
+    estimatedPriceCents: null,
     ...over,
   };
 }
@@ -106,12 +108,20 @@ function ligneManuelle(over: Partial<LignePersistee> = {}): LignePersistee {
     unit: null,
     checked: false,
     creeLe: "2026-03-02T11:00:00Z",
+    estimatedPriceCents: null,
     ...over,
   };
 }
 
 function liste(lignes: readonly LignePersistee[]): ListePersistee {
-  return { id: "L", debut: "2026-03-02", fin: "2026-03-04", majLe: "2026-03-02T12:00:00Z", lignes };
+  return {
+    id: "L",
+    debut: "2026-03-02",
+    fin: "2026-03-04",
+    majLe: "2026-03-02T12:00:00Z",
+    budgetCents: null,
+    lignes,
+  };
 }
 
 function duPlan(over: Partial<LigneDeCourses> = {}): LigneDeCourses {
