@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useId, useMemo, useState } from "react";
-import { Check, ChevronRight } from "lucide-react";
+import { Check, ChevronRight, Star } from "lucide-react";
 
 import { NBSP, formatIntegerFr } from "@/lib/nutrition/basis-points";
 import {
@@ -67,12 +67,26 @@ import { colorKeyBorderClass } from "@/components/ui/ColorKeyDot";
  * voit que `meal_choice_options` de CETTE occurrence. Pas de catalogue, pas de
  * scan, pas d'Open Food Facts.
  */
+/**
+ * COURSES C1 — « CET ALIMENT EST L'UN DE MES PRÉFÉRÉS ».
+ *
+ * ⚠️ UNE AIDE AU CHOIX, JAMAIS UNE SOURCE D'ALIMENTS. La fonction est
+ * INTERROGÉE avec une option qui vient déjà du snapshot du coach ; elle rend
+ * un booléen, et ne peut donc, par construction, ni ajouter, ni retirer, ni
+ * remplacer une option. Elle est facultative : sans elle, cet écran est celui
+ * de N1.4 au caractère près.
+ */
+export type MiseEnAvantDOption = (cible: { readonly type: "aliment" | "produit"; readonly id: string }) => boolean;
+
 export function StudentMealChoices({
   occurrences,
   cible = null,
   enregistrement = null,
   validation = null,
+  misEnAvant = null,
 }: {
+  /** COURSES C1 — voir `MiseEnAvantDOption`. `null` = aucun repère affiché. */
+  readonly misEnAvant?: MiseEnAvantDOption | null;
   readonly occurrences: readonly MealChoiceSlot[];
   /**
    * N1.6B — DE QUOI ENREGISTRER LA PROPOSITION DANS « CE QUE J'AI MANGÉ ».
@@ -203,6 +217,7 @@ export function StudentMealChoices({
             ouverte={ouverte === occurrence.id}
             onBasculer={() => setOuverte(ouverte === occurrence.id ? null : occurrence.id)}
             onChoisir={(optionId) => choisir(occurrence.id, optionId)}
+            misEnAvant={misEnAvant}
           />
         ))}
       </ol>
@@ -590,12 +605,14 @@ function LigneChoix({
   ouverte,
   onBasculer,
   onChoisir,
+  misEnAvant = null,
 }: {
   readonly occurrence: MealChoiceSlot;
   readonly choisie: ReturnType<typeof optionChoisie>;
   readonly ouverte: boolean;
   readonly onBasculer: () => void;
   readonly onChoisir: (optionId: string) => void;
+  readonly misEnAvant?: MiseEnAvantDOption | null;
 }) {
   const groupeId = useId();
 
@@ -666,6 +683,18 @@ function LigneChoix({
                       macros : elles n'existent pas encore à cette étape. */}
                   {option.displayName ?? "Aliment indisponible"}
                 </span>
+                {/* ⚠️ COURSES C1 — LA PRÉFÉRENCE MET EN AVANT, ELLE NE FILTRE
+                    PAS. L'étoile se pose SUR une option déjà présente dans
+                    `occurrence.options` : elle n'en ajoute aucune, n'en retire
+                    aucune, ne réordonne pas la liste du coach, et n'empêche
+                    aucun choix. Sans `misEnAvant`, rien n'est rendu et l'écran
+                    est exactement celui de N1.4. */}
+                {misEnAvant?.({ type: option.type, id: option.id }) === true && (
+                  <span className="flex flex-shrink-0 items-center">
+                    <Star size={13} aria-hidden="true" className="fill-info text-info" />
+                    <span className="sr-only">Aliment préféré</span>
+                  </span>
+                )}
               </button>
             );
           })}
