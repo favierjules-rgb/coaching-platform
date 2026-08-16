@@ -611,10 +611,26 @@ await test("COACH-SUP. l'écran est branché, réutilise A5.7, et n'a coûté au
   const migrations = readdirSync(new URL("../../supabase/migrations/", import.meta.url)).filter(
     (f) => f.endsWith(".sql"),
   );
-  assert.equal(migrations.length, 72, "72 fichiers, comme avant A5.8");
+  assert.equal(migrations.length, 79, "79 fichiers : A5.8 n'en a créé aucun, N1.1 en a créé un, N1.3 un second");
+  // ⚠️ SIXIÈME OCCURRENCE DU MÊME MOTIF DANS CE PROJET, et la leçon est la
+  // même qu'en A5 : « aucune migration postérieure » n'est vrai que tant
+  // qu'aucun chantier ne suit. N1.1 en a créé une. Ce que ce contrôle doit
+  // continuer de prouver, c'est que CE LOT-CI n'en a créé aucune — donc la
+  // liste des migrations postérieures est EXACTEMENT celle de N1, nommée.
   assert.deepEqual(
     migrations.filter((f) => f.slice(0, 14) > "20260905090100"),
-    [],
+    [
+      "20260906090000_nutrition_listes_et_repas_planifies.sql",
+      "20260907090000_n1_3_occurrences_de_listes_dans_les_repas.sql",
+      "20260908090000_n1_5_1_portions_preferees.sql",
+      "20260909090000_n1_5_2_quantite_minimale.sql",
+      // ⚠️ N1.6 — TROIS MIGRATIONS DE PLUS, ET LA LISTE EST NOMINATIVE EXPRÈS.
+      // Un compteur seul dirait « 79 » sans dire lesquelles : c'est le nom qui
+      // rend visible qu'aucune migration étrangère ne s'est glissée dans le lot.
+      "20260910090000_n1_6_a_couleurs_de_listes.sql",
+      "20260912090000_n1_6_b_enregistrer_repas_structure.sql",
+      "20260913090000_contract_preferred_unit.sql",
+    ],
   );
 
   // Le paramètre de ciblage est OBLIGATOIRE : aucune valeur par défaut, donc

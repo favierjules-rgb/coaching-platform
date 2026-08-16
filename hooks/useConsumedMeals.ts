@@ -11,7 +11,11 @@ import {
   creerRepasEleve,
   modifierQuantiteEntree,
   ouvrirRepasPrescrit,
+  enregistrerRepasStructure,
+  lireRepasStructuresEnregistres,
   readConsumedMeals,
+  type ItemStructureAEnregistrer,
+  type ResultatEnregistrementStructure,
   renommerRepasEleve,
   supprimerEntree,
   supprimerRepasEleve,
@@ -50,11 +54,29 @@ export interface ConsumedMealsState {
   /** Vrai pendant une écriture : ajout, correction, suppression, création. */
   readonly enCours: boolean;
   readonly meals: readonly ConsumedMeal[];
+  /**
+   * N1.6B — les repas structurés DÉJÀ enregistrés, clés `mealId|date`.
+   *
+   * ⚠️ VIENT DE LA PERSISTANCE (`planned_meals.consumed_meal_id`), jamais d'un
+   * état local : après un rafraîchissement, le bouton doit dire la vérité.
+   */
+  readonly repasStructuresEnregistres: ReadonlySet<string>;
   readonly refetch: () => Promise<void>;
   /** Efface le message d'erreur d'écriture, sans recharger. */
   readonly effacerErreur: () => void;
 
   readonly ouvrirPrescrit: (mealId: string, date: string) => Promise<string | null>;
+  /**
+   * N1.6B — copie la proposition AFFICHÉE dans « Ce que j'ai mangé ».
+   *
+   * ⚠️ LES QUANTITÉS SONT CELLES DE L'ÉCRAN, entières, après arrondi borné.
+   * Aucune macro ne part : le serveur recharge la source et calcule.
+   */
+  readonly enregistrerRepasStructure: (
+    mealId: string,
+    date: string,
+    items: readonly ItemStructureAEnregistrer[],
+  ) => Promise<ResultatEnregistrementStructure | null>;
   readonly creerRepas: (date: string, libellé: string) => Promise<string | null>;
   readonly renommerRepas: (consumedMealId: string, libellé: string) => Promise<boolean>;
   readonly supprimerRepas: (consumedMealId: string) => Promise<boolean>;
@@ -127,6 +149,7 @@ export function useConsumedMeals(dates: readonly string[], actif: boolean): Cons
   const [error, setError] = useState<string | null>(null);
   const [enCours, setEnCours] = useState(false);
   const [meals, setMeals] = useState<readonly ConsumedMeal[]>([]);
+  const [enregistres, setEnregistres] = useState<ReadonlySet<string>>(() => new Set());
 
   const requête = useRef(0);
   const enCoursRef = useRef(false);
@@ -137,6 +160,7 @@ export function useConsumedMeals(dates: readonly string[], actif: boolean): Cons
   const charger = useCallback(async (): Promise<void> => {
     if (!actif || clé === "") {
       setMeals([]);
+      setEnregistres(new Set());
       setLoading(false);
       return;
     }
@@ -153,9 +177,16 @@ export function useConsumedMeals(dates: readonly string[], actif: boolean): Cons
       // L'ÉLÈVE CONNECTÉ, explicitement. Ce hook sert l'écran de l'élève : la
       // RLS ne laisse passer que lui, et le nommer ici demanderait de connaître
       // son `students.id` — que cet écran n'a pas, et n'a pas besoin d'avoir.
-      const lus = await readConsumedMeals(supabase, clé.split(","), { portee: "eleve-connecte" });
+      // ⚠️ LES DEUX LECTURES ENSEMBLE. L'état « déjà enregistré » et la
+      // consommation décrivent le même écran : les charger séparément
+      // laisserait une fenêtre où le bouton ment.
+      const [lus, marques] = await Promise.all([
+        readConsumedMeals(supabase, clé.split(","), { portee: "eleve-connecte" }),
+        lireRepasStructuresEnregistres(supabase, clé.split(",")),
+      ]);
       if (requête.current !== numéro) return;
       setMeals(lus);
+      setEnregistres(marques);
       setError(null);
     } catch (erreur) {
       if (requête.current !== numéro) return;
@@ -217,10 +248,13 @@ export function useConsumedMeals(dates: readonly string[], actif: boolean): Cons
     error,
     enCours,
     meals,
+    repasStructuresEnregistres: enregistres,
     refetch: charger,
     effacerErreur: () => setError(null),
 
     ouvrirPrescrit: (mealId, date) => écrire((c) => ouvrirRepasPrescrit(c, mealId, date)),
+    enregistrerRepasStructure: (mealId, date, items) =>
+      écrire((c) => enregistrerRepasStructure(c, mealId, date, items)),
     creerRepas: (date, libellé) => écrire((c) => creerRepasEleve(c, date, libellé)),
     renommerRepas: async (id, libellé) =>
       (await écrire((c) => renommerRepasEleve(c, id, libellé).then(() => true))) === true,

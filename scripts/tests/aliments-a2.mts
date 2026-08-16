@@ -484,6 +484,7 @@ const SEMAINE: PlanV2Week = {
           carbs: 50,
           fat: 15,
           coachNotes: "Bien mastiquer, et boire un grand verre d'eau avant.",
+          choiceSlots: [],
         },
       ],
     },

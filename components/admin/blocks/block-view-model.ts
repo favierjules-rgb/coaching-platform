@@ -1,5 +1,6 @@
 import type { BlockColorKey } from "@/lib/training-block-editing";
 import { BLOCK_COLOR_KEYS } from "@/lib/training-block-editing";
+import { COLOR_STYLES } from "@/lib/ui/color-keys";
 import type { TrainingBlock, TrainingBlockCategory } from "@/types";
 
 /**
@@ -16,15 +17,7 @@ import type { TrainingBlock, TrainingBlockCategory } from "@/types";
  * léger) — jamais de remplissage fortement coloré, cohérent avec l'identité
  * monochrome du projet.
  */
-export const BLOCK_COLOR_STYLES: Record<BlockColorKey, { dot: string; borderLeft: string; softBg: string; label: string }> = {
-  gray: { dot: "bg-neutral-400", borderLeft: "border-l-neutral-400/70", softBg: "bg-neutral-400/5", label: "Gris" },
-  red: { dot: "bg-red-500", borderLeft: "border-l-red-500/70", softBg: "bg-red-500/5", label: "Rouge" },
-  orange: { dot: "bg-orange-500", borderLeft: "border-l-orange-500/70", softBg: "bg-orange-500/5", label: "Orange" },
-  yellow: { dot: "bg-yellow-500", borderLeft: "border-l-yellow-500/70", softBg: "bg-yellow-500/5", label: "Jaune" },
-  green: { dot: "bg-green-500", borderLeft: "border-l-green-500/70", softBg: "bg-green-500/5", label: "Vert" },
-  blue: { dot: "bg-blue-500", borderLeft: "border-l-blue-500/70", softBg: "bg-blue-500/5", label: "Bleu" },
-  purple: { dot: "bg-purple-500", borderLeft: "border-l-purple-500/70", softBg: "bg-purple-500/5", label: "Violet" },
-};
+export const BLOCK_COLOR_STYLES: Record<BlockColorKey, { dot: string; borderLeft: string; softBg: string; label: string }> = COLOR_STYLES;
 
 /** Libellé humain d'une couleur (pour le sélecteur accessible). */
 export function blockColorLabel(colorKey: BlockColorKey): string {

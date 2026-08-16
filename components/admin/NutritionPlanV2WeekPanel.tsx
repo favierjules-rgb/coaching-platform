@@ -12,9 +12,13 @@ import type { MealSlotKey } from "@/lib/nutrition/meal-distribution";
 import {
   addMeal,
   applyDayToWholeWeek,
+  addChoiceSlot,
   duplicateDay,
   findDay,
+  moveChoiceSlot,
+  removeChoiceSlot,
   removeMeal,
+  replaceChoiceSlot,
   resetDay,
   setDayCalories,
   setDayMacroBp,
@@ -119,6 +123,29 @@ export function NutritionPlanV2WeekPanel({
           onAdd={() => onChange(addMeal(state, jourOuvert))}
           onUpdate={(mealId, patch) => onChange(updateMeal(state, jourOuvert, mealId, patch))}
           onRemove={(mealId) => onChange(removeMeal(state, jourOuvert, mealId))}
+          /* N1.3 — les quatre gestes sur les occurrences. Tout reste PUR :
+             l'état de la semaine est transformé, la base n'est touchée qu'au
+             « Enregistrer », dans la même transaction que les repas. */
+          occurrences={{
+            onAjouter: (mealId, snapshot) =>
+              onChange(addChoiceSlot(state, jourOuvert, mealId, {
+                label: snapshot.label,
+                sourceListId: snapshot.sourceListId,
+                colorKey: snapshot.colorKey,
+                options: snapshot.options,
+              })),
+            onRemplacer: (mealId, slotId, snapshot) =>
+              onChange(replaceChoiceSlot(state, jourOuvert, mealId, slotId, {
+                label: snapshot.label,
+                sourceListId: snapshot.sourceListId,
+                colorKey: snapshot.colorKey,
+                options: snapshot.options,
+              })),
+            onRetirer: (mealId, slotId) =>
+              onChange(removeChoiceSlot(state, jourOuvert, mealId, slotId)),
+            onDeplacer: (mealId, slotId, direction) =>
+              onChange(moveChoiceSlot(state, jourOuvert, mealId, slotId, direction)),
+          }}
         />
 
         {/* ── ZONE 4 ────────────────────────────────────────────────── */}

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Archive, ChefHat, Plus, RotateCcw, SlidersHorizontal, UtensilsCrossed } from "lucide-react";
+import { Archive, ChefHat, ListChecks, Plus, RotateCcw, SlidersHorizontal, UtensilsCrossed } from "lucide-react";
 
 import { AssignStudentsModal } from "@/components/admin/AssignStudentsModal";
 import {
@@ -155,8 +155,18 @@ export default function AdminNutritionPlansPage() {
           <p className="mt-1 text-sm text-muted-foreground">{nutritionPlans.length} plans alimentaires créés.</p>
         </div>
         {/* Accès au catalogue de recettes. Ajout PR B : aucune page de plan
-            n'est modifiée, seul ce lien apparaît. */}
+            n'est modifiée, seul ce lien apparaît.
+            N1.2 ajoute « Listes » au même endroit et de la même façon : la
+            bibliothèque entre dans la nutrition existante, elle ne fonde pas
+            une seconde navigation. */}
         <div className="flex flex-wrap items-center gap-3">
+          <Link
+            href="/admin/nutrition/listes"
+            className="pressable flex min-h-[44px] items-center gap-2 rounded-control border border-border px-4 py-2 text-xs font-bold uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          >
+            <ListChecks size={14} />
+            Listes d&apos;aliments
+          </Link>
           <Link
             href="/admin/nutrition/recettes"
             className="pressable flex min-h-[44px] items-center gap-2 rounded-control border border-border px-4 py-2 text-xs font-bold uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"

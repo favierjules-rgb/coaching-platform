@@ -14,6 +14,7 @@ import type {
   TrainingBlock,
   TrainingBlockCategory,
 } from "@/types";
+import { COLOR_KEYS, type ColorKey } from "@/lib/ui/color-keys";
 
 /**
  * Opérations d'état PURES du builder multi-blocs (chantier
@@ -50,9 +51,15 @@ import type {
  * La couleur est une propriété INDÉPENDANTE du bloc, jamais de la catégorie :
  * deux blocs strength peuvent différer, un bloc cardio peut être gris, etc.
  * Toute valeur hors de cet ensemble est rejetée/normalisée AVANT l'appel RPC.
+ *
+ * ⚠️ N1.6A — LA LISTE A DÉMÉNAGÉ, PAS CHANGÉ. Elle vit désormais dans
+ * `lib/ui/color-keys.ts`, parce que les listes d'aliments réutilisent le MÊME
+ * vocabulaire : recopier la table aurait produit deux vérités qui divergent au
+ * premier ajout de teinte. Les noms historiques sont conservés tels quels — le
+ * code des blocs n'a pas bougé d'une ligne.
  */
-export const BLOCK_COLOR_KEYS = ["gray", "red", "orange", "yellow", "green", "blue", "purple"] as const;
-export type BlockColorKey = (typeof BLOCK_COLOR_KEYS)[number];
+export const BLOCK_COLOR_KEYS = COLOR_KEYS;
+export type BlockColorKey = ColorKey;
 
 /** Couleur par défaut d'un nouveau bloc strength (miroir du défaut SQL `color_key = 'gray'`). */
 export const DEFAULT_STRENGTH_COLOR_KEY: BlockColorKey = "gray";

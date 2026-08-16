@@ -4,6 +4,7 @@ import { buildRecipeTargetForMealSlot } from "@/lib/nutrition/recipe-matching";
 import type { NutritionPlanV2Profile } from "@/lib/nutrition/plan-v2-validation";
 import type { RecipeWithTags } from "@/lib/nutrition/recipe-rows";
 import { WEEKDAY_KEYS, compareWeekdays, type WeekdayKey } from "@/lib/nutrition/weekdays";
+import type { ColorKey } from "@/lib/ui/color-keys";
 
 /**
  * LA SEMAINE D'UN PLAN V2 — assemblage pur, sans Supabase et sans React.
@@ -29,6 +30,143 @@ export interface PrescribedFoodItem {
 }
 
 /** Un repas prescrit à la main par le coach — l'outil 3. */
+/**
+ * N1.3 — UNE OPTION SNAPSHOTÉE.
+ *
+ * ⚠️ UNE IDENTITÉ, RIEN D'AUTRE. Pas de nom, pas de macro, pas de quantité,
+ * pas de rôle : l'option DÉSIGNE un aliment vivant de `food_catalog` ou de
+ * `food_products`, et tout le reste est lu à la source au moment de
+ * l'affichage. Recopier un nom ici ferait vieillir le repas en silence.
+ */
+/**
+ * N1.5 — LES FAITS NUTRITIONNELS D'UNE OPTION, HYDRATÉS.
+ *
+ * ⚠️ MÊME STATUT QUE `displayName` : ce n'est PAS dans le snapshot. Les macros
+ * sont lues à la source (`food_catalog` / `food_products`) au moment de
+ * l'affichage, par identité, jamais par libellé. Les recopier dans
+ * `meal_choice_options` ferait vieillir le repas en silence le jour où une
+ * table Ciqual est corrigée — et l'unique garantie d'instantané de ce chantier
+ * est précisément qu'un repas ne relit pas la bibliothèque, pas qu'il ne relit
+ * plus le catalogue.
+ *
+ * ⚠️ JAMAIS RENVOYÉ À LA RPC. `toWeekSavePayload` n'émet que `catalog_food_id`
+ * et `product_id` ; un test l'épingle, pour ce champ comme pour le libellé.
+ *
+ * `unit` est l'unité NUTRITIONNELLE de l'aliment — celle dans laquelle ses
+ * macros sont données « pour 100 ». Aucune conversion g ↔ ml n'existe dans ce
+ * schéma, et aucune n'est inventée ici.
+ */
+export interface OptionNutrition {
+  readonly unit: "g" | "ml";
+  readonly proteinPer100: number;
+  readonly carbPer100: number;
+  readonly fatPer100: number;
+}
+
+export type ChoiceOption = {
+  /**
+   * N1.5.1 — LA PORTION PRÉFÉRÉE EFFECTIVE, ET ELLE, C'EST DU SNAPSHOT.
+   *
+   * ⚠️ NE PAS LA CONFONDRE AVEC `displayName` NI AVEC `nutrition`. Ces deux-là
+   * sont de l'HYDRATATION : relus à la source à chaque affichage, jamais
+   * renvoyés à la RPC. La portion, elle, est une DONNÉE MÉTIER FIGÉE : elle
+   * part vers la base avec l'identité, et un repas déjà construit la garde
+   * même si le coach change d'avis dans sa bibliothèque ensuite.
+   *
+   * `null` = aucune préférence. Le solveur retombe alors exactement sur le
+   * comportement N1.5 — c'est le cas de l'immense majorité des options.
+   */
+  readonly preferredQuantity?: number | null;
+  /**
+   * N1.5.2 — LA QUANTITÉ MINIMALE GARANTIE, snapshotée elle aussi.
+   *
+   * ⚠️ CONTRAINTE DURE, là où la portion préférée est une simple préférence.
+   * Elle empêche un aliment choisi par l'élève de disparaître à 0 g.
+   * `null` = aucun minimum, et le comportement redevient celui de N1.5.
+   */
+  readonly minimumQuantity?: number | null;
+  /**
+   * L'unité COMMUNE aux deux quantités ci-dessus, figée avec elles. `g` ou
+   * `ml`, jamais autre chose : le vocabulaire de ce qui est CALCULABLE.
+   *
+   * ⚠️ RENOMMÉE EN N1.5.2 (`preferredUnit` → `quantityUnit`). Elle porte
+   * l'unité d'un minimum SANS portion préférée aussi souvent que l'inverse :
+   * l'ancien nom mentait. Il n'existe volontairement pas de `minimumUnit` —
+   * les deux quantités sont figées dans l'unité de la MÊME identité, au MÊME
+   * instant, et une seconde colonne ne pourrait que diverger.
+   *
+   * Absente dès que les DEUX quantités le sont.
+   */
+  readonly quantityUnit?: "g" | "ml" | null;
+  /**
+   * N1.5 — les macros de l'aliment désigné, ou `null` si la source a disparu.
+   * Une option sans macros est affichable mais PAS calculable : voir
+   * `optionCalculable` dans `meal-choice-selection.ts`.
+   */
+  readonly nutrition?: OptionNutrition | null;
+  /**
+   * ⚠️ HYDRATATION, PAS DONNÉE MÉTIER. Le libellé n'est PAS dans le snapshot :
+   * il est retrouvé à la lecture, à partir de l'identité, et sert uniquement à
+   * l'affichage. Il n'est jamais renvoyé à la RPC — `toWeekSavePayload`
+   * n'émet que `catalog_food_id` / `product_id`, et un test l'épingle.
+   *
+   * `null` ou absent = source introuvable. Un aliment supprimé du catalogue ne
+   * doit pas casser le plan : on affiche « Aliment indisponible » plutôt qu'un
+   * nom inventé.
+   */
+  readonly displayName?: string | null;
+  /**
+   * N1.4 — L'IDENTIFIANT DE LA LIGNE SNAPSHOTÉE (`meal_choice_options.id`).
+   *
+   * ⚠️ C'EST LUI QUE L'ÉLÈVE CHOISIT, PAS L'ALIMENT. Deux occurrences d'un même
+   * repas peuvent contenir le même aliment — « Poulet » dans la protéine
+   * principale ET dans la secondaire. Une sélection qui ne retiendrait que
+   * `id` (l'aliment) ne saurait pas dire laquelle des deux a été choisie.
+   *
+   * Absent côté coach : au moment où le constructeur fige une liste, la ligne
+   * n'existe pas encore en base — c'est la RPC qui la crée. Il n'est donc
+   * jamais envoyé, seulement lu.
+   */
+  readonly optionId?: string;
+} & (
+  | { readonly type: "aliment"; readonly id: string }
+  | { readonly type: "produit"; readonly id: string }
+);
+
+/**
+ * N1.3 — UNE OCCURRENCE DE LISTE DANS UN REPAS.
+ *
+ * « À cet endroit du repas, l'élève choisit UN aliment parmi ceux-ci. »
+ *
+ * ⚠️ `label` ET `options` SONT UN INSTANTANÉ, pas une vue de la bibliothèque.
+ * Ils sont figés au moment où le coach ajoute la liste ; renommer ou modifier
+ * le modèle ensuite ne les touche pas. `sourceListId` n'est QUE de la
+ * provenance — aucune lecture d'un repas ne passe par elle.
+ *
+ * ⚠️ AUCUN RÔLE NUTRITIONNEL. « Protéines » est un mot que le coach écrit pour
+ * être compris ; ce n'est pas une catégorie que le moteur lira.
+ */
+export interface MealChoiceSlot {
+  readonly id: string;
+  readonly label: string;
+  readonly sourceListId: string | null;
+  /**
+   * N1.6A — LA COULEUR FIGÉE DE LA LISTE, ET C'EST DU SNAPSHOT.
+   *
+   * ⚠️ NE PAS LA CONFONDRE AVEC `sourceListId`. Celui-ci pointe vers la
+   * bibliothèque VIVANTE ; celle-ci est une valeur COPIÉE au moment de l'ajout.
+   * Repeindre la liste ensuite ne touche pas ce repas — même règle que
+   * `preferredQuantity` et `minimumQuantity`.
+   *
+   * ⚠️ ET C'EST LA SEULE SOURCE CÔTÉ ÉLÈVE. Aucune policy `select` n'existe sur
+   * `food_lists` pour un élève : sans ce snapshot, la couleur serait invisible.
+   *
+   * ⚠️ AUCUN SENS NUTRITIONNEL. Le solveur ne la reçoit pas.
+   */
+  readonly colorKey: ColorKey | null;
+  readonly options: readonly ChoiceOption[];
+}
+
 export interface PrescribedMeal {
   readonly id: string;
   readonly slot: MealSlotKey;
@@ -39,6 +177,12 @@ export interface PrescribedMeal {
   readonly carbs: number;
   readonly fat: number;
   readonly coachNotes: string;
+  /**
+   * Les occurrences de listes, dans l'ordre d'affichage. Un repas « libre »
+   * garde ce tableau VIDE — c'est le cas de tous les repas existants, et il
+   * reste parfaitement valide.
+   */
+  readonly choiceSlots: readonly MealChoiceSlot[];
 }
 
 /** Un jour du plan : son profil, et ses repas prescrits. */
