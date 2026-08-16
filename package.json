@@ -111,7 +111,8 @@
     "test:nutrition-contract": "npx tsx scripts/tests/nutrition-contract-preferred-unit.mts",
     "test:nutrition-n1-6-enregistrement": "npx tsx scripts/tests/nutrition-n1-6-enregistrement.mts",
     "test:courses-c0": "npx tsx scripts/tests/courses-c0-validation.mts",
-    "test:liste-de-courses": "npx tsx scripts/tests/liste-de-courses-c1.mts"
+    "test:liste-de-courses": "npx tsx scripts/tests/liste-de-courses-c1.mts",
+    "test:liste-de-courses-ux": "npx tsx scripts/tests/liste-de-courses-ux.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

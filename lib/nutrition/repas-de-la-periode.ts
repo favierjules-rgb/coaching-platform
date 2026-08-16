@@ -1,4 +1,8 @@
-import type { ChoixPersiste } from "@/lib/nutrition/meal-choice-selection";
+import {
+  progressionDesChoix,
+  selectionDepuisComposition,
+  type ChoixPersiste,
+} from "@/lib/nutrition/meal-choice-selection";
 import type { MealMacroTarget } from "@/lib/nutrition/meal-choice-solver";
 import type { MealSlotKey } from "@/lib/nutrition/meal-distribution";
 import type { PeriodeCourses } from "@/lib/nutrition/periode-courses";
@@ -46,8 +50,22 @@ export interface RepasDeLaPeriode {
   readonly occurrences: readonly MealChoiceSlot[];
   /** La cible du repas, calculée EXACTEMENT comme sur l'écran du plan. */
   readonly cible: MealMacroTarget | null;
-  /** `true` si une composition validée existe pour ce repas à cette date. */
+  /**
+   * `true` si une composition validée existe **ET qu'elle est encore valide**
+   * au regard du snapshot ACTUEL du coach.
+   *
+   * ⚠️ CORRECTIF D-3 — « UNE COMPOSITION EXISTE » NE SUFFIT PAS. Une
+   * composition dont une option a quitté `meal_choice_options` depuis la
+   * validation n'est plus reconstituable : la traiter comme prête la faisait
+   * disparaître en silence de la semaine proposée. `pret` et `aRecomposer`
+   * sont désormais mutuellement exclusifs.
+   */
   readonly pret: boolean;
+  /**
+   * `true` si une composition existe mais qu'au moins un de ses choix n'est
+   * PLUS autorisé. Le repas doit être recomposé — jamais complété d'office.
+   */
+  readonly aRecomposer: boolean;
   /** La composition en base, ou `null`. Sert à ré-afficher les choix faits. */
   readonly composition: readonly ChoixPersiste[] | null;
   /** `true` si ce repas a AUSSI été déclaré consommé — il est alors verrouillé. */
@@ -98,6 +116,17 @@ export function repasDeLaPeriode(
 
       const cle = `${repas.id}|${jour.date}`;
       const connue = compositions.get(cle) ?? null;
+      // ⚠️ LA VALIDITÉ SE RECALCULE CONTRE LE SNAPSHOT ACTUEL, pas contre celui
+      // qui existait à la validation. `selectionDepuisComposition` apparie par
+      // `choice_slot_id` + IDENTITÉ : une option retirée par le coach ne se
+      // retrouve tout simplement pas, et l'occurrence redevient sans choix.
+      const existe = connue !== null && connue.items.length > 0;
+      const encoreValide =
+        existe &&
+        progressionDesChoix(
+          repas.choiceSlots,
+          selectionDepuisComposition(repas.choiceSlots, connue!.items),
+        ).complet;
       resultat.push({
         cle,
         date: jour.date,
@@ -106,7 +135,8 @@ export function repasDeLaPeriode(
         nom: repas.name,
         occurrences: repas.choiceSlots,
         cible,
-        pret: connue !== null && connue.items.length > 0,
+        pret: encoreValide,
+        aRecomposer: existe && !encoreValide,
         composition: connue?.items ?? null,
         consomme: connue?.consomme ?? false,
       });
@@ -115,7 +145,14 @@ export function repasDeLaPeriode(
   return resultat;
 }
 
-/** Le nombre de repas de la période qu'il reste à composer. */
+/**
+ * Les repas de la période qu'il reste à composer.
+ *
+ * ⚠️ UN REPAS « À RECOMPOSER » EN FAIT PARTIE : sa composition existe mais
+ * n'est plus valide, donc elle ne produira aucune ligne de courses fiable.
+ * `pret` étant désormais « prêt ET encore valide », le filtre les inclut
+ * naturellement.
+ */
 export function repasAComposer(repas: readonly RepasDeLaPeriode[]): readonly RepasDeLaPeriode[] {
   return repas.filter((r) => !r.pret);
 }

@@ -533,7 +533,12 @@ await test("C1-09 / C1-10. un repas non validé est SIGNALÉ, et n'invente aucun
 
   // L'écran le dit en toutes lettres, et il compte.
   assert.ok(CODE_PARCOURS.includes("restent à composer") || CODE_PARCOURS.includes("rest{restants > 1"));
-  assert.ok(CODE_PARCOURS.includes("À composer"), "l'état est ÉCRIT, pas seulement coloré");
+  // ⚠️ MIS À JOUR PAR C1.1 : le statut de la carte s'écrit désormais en
+  // capitales (« À COMPOSER » / « PRÊT »), comme le demande le nouveau
+  // gabarit. L'intention est INCHANGÉE — l'état est ÉCRIT, pas seulement
+  // coloré — et le test reste falsifiable : retirer le libellé le rougit.
+  assert.ok(CODE_PARCOURS.includes("À COMPOSER"), "l'état est ÉCRIT, pas seulement coloré");
+  assert.ok(CODE_PARCOURS.includes("PRÊT"), "et son opposé aussi");
   // Le bouton de génération est bloqué tant qu'il reste des repas.
   assert.ok(CODE_PARCOURS.includes("desactive={restants > 0"));
 });
@@ -846,9 +851,21 @@ await test("C1-24. accessibilité : cibles, sémantique, clavier, jamais la coul
   assert.ok(source.includes('type="radio"'), "sémantique radio native");
   assert.ok(source.includes("<fieldset") && source.includes("<legend"), "le groupe est nommé");
   // Les bascules disent leur état.
-  assert.ok(source.includes("aria-pressed={favori}"));
-  assert.ok(source.includes("aria-pressed={coche}"));
-  assert.ok(source.includes("aria-expanded={estOuvert}"));
+  // ⚠️ MIS À JOUR PAR C1.1. L'écran « marque chaque aliment en favori » a été
+  // retiré (il était le défaut UX corrigé) ; la bascule qui reste est celle
+  // des préférences courtes. Le contrat d'accessibilité est identique : toute
+  // bascule dit son état par `aria-pressed`, tout dépliant par `aria-expanded`.
+  assert.ok(source.includes("aria-pressed={choisie}"), "la préférence dit son état");
+  assert.ok(source.includes("aria-pressed={coche}"), "le cochage de la liste aussi");
+  assert.ok(source.includes("aria-expanded={ouverte}"), "la carte repas dit si elle est dépliée");
+  // Aucune bascule ne peut être muette : les TROIS contrôles à état du
+  // parcours sont annotés, et ce sont les seuls. En ajouter un quatrième sans
+  // `aria-*` fera diverger ce compte.
+  assert.equal((source.match(/aria-pressed=/g) ?? []).length, 2, "deux bascules à deux états");
+  assert.equal((source.match(/aria-expanded=/g) ?? []).length, 1, "un dépliant");
+  // Et les groupes de choix exclusifs passent par des radios natifs, donc
+  // n'ont besoin d'aucun ARIA : le navigateur s'en charge.
+  assert.equal((source.match(/type="radio"/g) ?? []).length, 2, "durée et mode : radios natifs");
   // Focus visible partout.
   assert.equal(
     boutons.filter((b) => !b.includes("focus-visible:ring")).length,
@@ -856,7 +873,11 @@ await test("C1-24. accessibilité : cibles, sémantique, clavier, jamais la coul
     "chaque cible porte un anneau de focus",
   );
   // L'état ne tient jamais qu'à la couleur : il est écrit ou porte une icône.
-  assert.ok(source.includes('{r.pret ? "Prêt" : "À composer"}'));
+  // ⚠️ MIS À JOUR PAR C1.1 : le statut est calculé en amont (« PRÊT »,
+  // « À COMPOSER », « À RECOMPOSER ») puis ÉCRIT dans la carte. Ce qui compte
+  // n'a pas bougé : il est lisible en niveaux de gris.
+  assert.ok(source.includes('carte.aRecomposer ? "À RECOMPOSER" : carte.pret ? "PRÊT" : "À COMPOSER"'));
+  assert.ok(source.includes("{statut}"), "et il est bien rendu");
   assert.ok(source.includes("Aliment préféré") || source.includes("sr-only"));
 });
 
@@ -954,11 +975,21 @@ await test("C1-FUTUR. « Reprendre ma semaine passée » est DOCUMENTÉ, pas imp
     }
   }
   // Aucun écran supplémentaire : le parcours a toujours QUATRE étapes.
-  assert.ok(CODE_PARCOURS.includes('["duree", "preferences", "repas", "liste"]'));
+  // ⚠️ MIS À JOUR PAR C1.1 : le parcours compte désormais six étapes (le choix
+  // de mode et les deux écrans du mode Rapide). Ce qui ne change pas — et qui
+  // est le SEUL objet de ce test — c'est qu'aucune d'elles ne concerne la
+  // semaine passée.
   assert.ok(
-    CODE_PARCOURS.includes('type Etape = "duree" | "preferences" | "repas" | "liste";'),
-    "le type Etape a EXACTEMENT quatre membres — aucune cinquième étape",
+    CODE_PARCOURS.includes(
+      'type Etape = "duree" | "mode" | "preferences" | "proposition" | "repas" | "liste";',
+    ),
+    "le type Etape est exhaustif, et ne porte aucune étape de semaine passée",
   );
+  assert.ok(!/["']semaine-passee["']|["']semainePassee["']/.test(CODE_PARCOURS));
+  // Le vocabulaire des modes ne porte que les deux modes réels.
+  const CODE_MODES = sansProse(lire("../../lib/nutrition/mode-courses.ts"));
+  assert.ok(CODE_MODES.includes('export type ModeCoursesChoisi = "rapide" | "personnalise";'));
+  assert.equal((CODE_MODES.match(/cle: "/g) ?? []).length, 2, "deux modes, pas trois");
 
   // La documentation, elle, existe et porte les interdits ET la règle du
   // snapshot actuel : c'est ce que le lot C1 devait livrer.

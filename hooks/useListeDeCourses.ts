@@ -36,6 +36,47 @@ import { lireRepasPlanifiesSurPeriode, type RepasPlanifie } from "@/lib/supabase
  * rien, pas même une estimation.
  */
 
+/** Le sort d'UN repas dans une validation de semaine. */
+export interface EchecDeRepas {
+  readonly cle: string;
+  /** « Lundi 17 août · Petit déjeuner » — de quoi retrouver le repas. */
+  readonly libelle: string;
+  readonly message: string;
+}
+
+/**
+ * COURSES C1.1 — LE RÉSULTAT D'UNE VALIDATION DE SEMAINE.
+ *
+ * ⚠️ IL N'EXISTE AUCUNE TRANSACTION ENTRE REPAS, ET ON NE FAIT PAS SEMBLANT.
+ * Chaque repas est validé par SON appel à `enregistrer_repas_planifie`, qui
+ * est atomique POUR CE REPAS et pour lui seul. Vingt et un repas, ce sont
+ * vingt et un allers-retours indépendants : si le douzième échoue, les onze
+ * premiers restent écrits. Inventer une transaction côté client — annuler les
+ * onze premiers, par exemple — serait une fausse atomicité qui échouerait à
+ * son tour au premier réseau coupé.
+ *
+ * On ne la simule donc pas : on RAPPORTE exactement ce qui s'est passé.
+ */
+export interface ResultatValidationSemaine {
+  readonly valides: number;
+  readonly echecs: readonly EchecDeRepas[];
+  /** `true` si et seulement si TOUT est passé. Jamais un faux succès. */
+  readonly complet: boolean;
+}
+
+export interface RepasAValider {
+  readonly repas: RepasDeLaPeriode;
+  readonly libelle: string;
+  readonly items: readonly ItemDeValidation[];
+}
+
+interface ItemDeValidation {
+  readonly slotId: string;
+  readonly optionId: string;
+  readonly quantity: number;
+  readonly unit: "g" | "ml";
+}
+
 export interface EtatListeDeCourses {
   readonly chargement: boolean;
   /** `false` si une lecture a échoué. « Rien lu » n'est PAS « rien de prévu ». */
@@ -48,8 +89,10 @@ export interface EtatListeDeCourses {
   readonly recharger: () => void;
   readonly validerRepas: (
     repas: RepasDeLaPeriode,
-    items: readonly { readonly slotId: string; readonly optionId: string; readonly quantity: number; readonly unit: "g" | "ml" }[],
+    items: readonly ItemDeValidation[],
   ) => Promise<boolean>;
+  /** COURSES C1.1 — valide plusieurs repas, un par un, et dit ce qui a marché. */
+  readonly validerSemaine: (entrees: readonly RepasAValider[]) => Promise<ResultatValidationSemaine>;
 }
 
 export function useListeDeCourses(
@@ -191,7 +234,74 @@ export function useListeDeCourses(
     [],
   );
 
-  return { chargement, ok, repas, aComposer, lignes, enCours, erreur, recharger, validerRepas };
+  /**
+   * Valide une semaine entière — repas par repas, SANS transaction globale.
+   *
+   * ⚠️ AUCUN REPAS N'EST LAISSÉ « NON TENTÉ ». Un échec au douzième n'arrête
+   * pas les neuf suivants : l'élève doit savoir en UNE fois ce qui reste à
+   * corriger, plutôt que de relancer et de découvrir un nouvel échec à chaque
+   * tour.
+   *
+   * ⚠️ UNE SEULE RELECTURE, À LA FIN. Recharger après chaque repas ferait
+   * vingt et une lectures inutiles et ferait clignoter l'écran.
+   */
+  const validerSemaine = useCallback<EtatListeDeCourses["validerSemaine"]>(
+    async (entrees) => {
+      const supabase = createSupabaseBrowserClient();
+      if (!supabase) {
+        return {
+          valides: 0,
+          complet: false,
+          echecs: entrees.map((e) => ({
+            cle: e.repas.cle,
+            libelle: e.libelle,
+            message: "Connexion indisponible.",
+          })),
+        };
+      }
+      setEnCours(true);
+      setErreur(null);
+      const echecs: EchecDeRepas[] = [];
+      let valides = 0;
+      try {
+        for (const entree of entrees) {
+          try {
+            await validerChoixRepas(
+              supabase,
+              entree.repas.mealId,
+              entree.repas.date,
+              identitesDeChoix(entree.repas.occurrences, entree.items),
+            );
+            valides += 1;
+          } catch (e) {
+            echecs.push({
+              cle: entree.repas.cle,
+              libelle: entree.libelle,
+              message: messageDeRefus(e),
+            });
+          }
+        }
+      } finally {
+        setEnCours(false);
+        setRafraichissement((n) => n + 1);
+      }
+      return { valides, echecs, complet: echecs.length === 0 && entrees.length > 0 };
+    },
+    [],
+  );
+
+  return {
+    chargement,
+    ok,
+    repas,
+    aComposer,
+    lignes,
+    enCours,
+    erreur,
+    recharger,
+    validerRepas,
+    validerSemaine,
+  };
 }
 
 /** Traduit les refus connus de la RPC. Fonction PURE, testable sans Supabase. */

@@ -78,15 +78,40 @@ import { colorKeyBorderClass } from "@/components/ui/ColorKeyDot";
  */
 export type MiseEnAvantDOption = (cible: { readonly type: "aliment" | "produit"; readonly id: string }) => boolean;
 
+/**
+ * COURSES C1.1 — CORRECTIF D-2.
+ *   `"validation"` = le clic ÉCRIT en base (C0). Libellé « Valider mes choix ».
+ *   `"brouillon"`  = le clic ne fait qu'appliquer la retouche à une proposition
+ *                    non encore écrite. Libellé « Appliquer mes choix ».
+ */
+export type ModeDeValidation = "validation" | "brouillon";
+
 export function StudentMealChoices({
   occurrences,
   cible = null,
   enregistrement = null,
   validation = null,
   misEnAvant = null,
+  propositionInitiale = null,
 }: {
   /** COURSES C1 — voir `MiseEnAvantDOption`. `null` = aucun repère affiché. */
   readonly misEnAvant?: MiseEnAvantDOption | null;
+  /**
+   * COURSES C1.1 — LE POINT DE DÉPART PROPOSÉ PAR LE MODE RAPIDE.
+   *
+   * ⚠️ CE N'EST PAS UNE COMPOSITION VALIDÉE, et l'écran ne le dit jamais. Rien
+   * n'est écrit en base : `dejaValide` et `aJour` restent gouvernés par la
+   * SEULE `compositionValidee`, donc le bouton affiche bien « Valider mes
+   * choix » et non « Choix validés ». C'est un brouillon pré-rempli, que
+   * l'élève peut modifier occurrence par occurrence comme s'il l'avait fait
+   * lui-même.
+   *
+   * ⚠️ LA COMPOSITION VALIDÉE L'EMPORTE TOUJOURS. Une proposition ne recouvre
+   * jamais un repas que l'élève a déjà composé — ce serait effacer son travail.
+   *
+   * `null` (le défaut) laisse l'écran exactement dans son état N1.4/N1.5/C0.
+   */
+  readonly propositionInitiale?: SelectionDeChoix | null;
   readonly occurrences: readonly MealChoiceSlot[];
   /**
    * N1.6B — DE QUOI ENREGISTRER LA PROPOSITION DANS « CE QUE J'AI MANGÉ ».
@@ -113,6 +138,23 @@ export function StudentMealChoices({
     readonly compositionValidee: readonly ChoixPersiste[] | null;
     readonly enCours: boolean;
     readonly onValider: (items: readonly ItemPourEnregistrement[]) => void;
+    /**
+     * COURSES C1.1 — CORRECTIF D-2 : CE QUE LE BOUTON PROMET RÉELLEMENT.
+     *
+     * ⚠️ UN LIBELLÉ NE DOIT JAMAIS PROMETTRE UNE ÉCRITURE QUI N'A PAS LIEU.
+     * Dans le parcours C0, `onValider` appelle `enregistrer_repas_planifie` :
+     * le bouton dit « Valider mes choix », et c'est vrai. Dans la semaine
+     * PROPOSÉE du mode Rapide, il ne fait que retenir une retouche en
+     * mémoire — l'écriture n'arrive qu'au « VALIDER MA SEMAINE » final. Le
+     * bouton dit alors « Appliquer mes choix ».
+     *
+     * ⚠️ EXPLICITE, JAMAIS DEVINÉ. On ne renifle pas le callback pour savoir
+     * s'il écrit : c'est l'appelant qui le déclare. Une détection fragile se
+     * tromperait le jour où le parent changerait d'implémentation.
+     *
+     * Défaut `"validation"` : le parcours C0 est inchangé au caractère près.
+     */
+    readonly mode?: ModeDeValidation;
   } | null;
   /**
    * ⚠️ LA CIBLE DU REPAS VIENT DU PLAN DU COACH, PAS D'ICI. C'est la valeur
@@ -146,9 +188,13 @@ export function StudentMealChoices({
   const titreId = useId();
 
   const composition = validation?.compositionValidee ?? null;
+  // ⚠️ LA SÉLECTION DE DÉPART. Elle vient de la composition VALIDÉE quand elle
+  // existe — et, à défaut seulement, de la proposition du mode Rapide (C1.1),
+  // qui n'est écrite nulle part. L'ordre n'est pas négociable : le validé
+  // l'emporte toujours sur le proposé.
   const selectionValidee = useMemo(
-    () => (composition === null ? null : selectionDepuisComposition(occurrences, composition)),
-    [occurrences, composition],
+    () => (composition === null ? propositionInitiale : selectionDepuisComposition(occurrences, composition)),
+    [occurrences, composition, propositionInitiale],
   );
   const selection = brouillon ?? selectionValidee ?? AUCUNE_SELECTION;
 
@@ -247,6 +293,7 @@ export function StudentMealChoices({
                   dejaValide: composition !== null,
                   enCours: validation.enCours,
                   onValider: validation.onValider,
+                  mode: validation.mode ?? "validation",
                 }
           }
         />
@@ -306,6 +353,8 @@ export function QuantitesDuRepas({
     readonly aJour: boolean;
     readonly enCours: boolean;
     readonly onValider: (items: readonly ItemPourEnregistrement[]) => void;
+    /** COURSES C1.1 — voir `ModeDeValidation`. Défaut : `"validation"`. */
+    readonly mode?: ModeDeValidation;
   } | null;
 }) {
   const titreId = useId();
@@ -460,11 +509,17 @@ export function QuantitesDuRepas({
                 }
                 className="pressable flex min-h-[44px] w-full items-center justify-center gap-2 rounded-control border border-border bg-card px-4 py-2 text-xs font-bold uppercase tracking-widest text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
               >
-                {validation.enCours
-                  ? "Validation\u2026"
-                  : validation.dejaValide
-                    ? "Mettre \u00e0 jour mes choix"
-                    : "Valider mes choix"}
+                {/* ⚠️ CORRECTIF D-2 — LE LIBELLÉ SUIT CE QUI SE PASSE VRAIMENT.
+                    En mode brouillon, aucune RPC n'est appelée : promettre une
+                    validation ferait croire à l'élève que son repas est
+                    enregistré alors que rien ne l'est encore. */}
+                {(validation.mode ?? "validation") === "brouillon"
+                  ? "Appliquer mes choix"
+                  : validation.enCours
+                    ? "Validation\u2026"
+                    : validation.dejaValide
+                      ? "Mettre \u00e0 jour mes choix"
+                      : "Valider mes choix"}
               </button>
             </>
           )}
