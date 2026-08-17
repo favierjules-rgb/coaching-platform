@@ -212,6 +212,26 @@ await test("CONTRACT-07. le CONTRACT s'applique en DERNIER — l'ordre de rollou
       // colonne `unit` — la colonne d'APRÈS le CONTRACT. `preferred_unit`
       // n'apparaît nulle part dans la migration C3.
       "20260916090000_c3_budget_et_prix_estimatifs.sql",
+      // ⚠️ C4.1 INSCRITE ICI, ET C'EST LE MÉCANISME QUI JOUE — pas un
+      // contournement. Le pont aliment → produit crée UNE table,
+      // `food_catalog_retail_review`, dont les cinq colonnes sont
+      // `catalog_food_id`, `status`, `note`, `reviewed_by`, `reviewed_at`.
+      //
+      // Elle ne porte AUCUNE unité, et c'est ce qui la met hors de portée du
+      // CONTRACT : le pont dit « quel produit réel correspond à cet aliment »,
+      // jamais « en quelle unité ». Mesuré sur le fichier, code dépouillé :
+      //   · `preferred_unit` : ZÉRO occurrence — pas même en commentaire ;
+      //   · seule table créée ou altérée : `food_catalog_retail_review` ;
+      //   · aucun `rename`, aucun `alter column`, aucune contrainte ajoutée
+      //     ou retirée en dehors de cette table neuve ;
+      //   · `meal_choice_options`, `planned_meal_items`, `quantity_unit` et
+      //     même le mot `unit` : ABSENTS ;
+      //   · les seules références externes sont la clé étrangère vers
+      //     `public.food_catalog(id)` et l'appel à `public.is_admin()`.
+      //
+      // La boucle ci-dessous rejoue la dernière de ces preuves à chaque
+      // exécution : l'inscrire ne suffit pas, il faut que le fichier tienne.
+      "20260917090000_c4_1_pont_retail.sql",
     ],
     "une migration postérieure au CONTRACT n'a pas été déclarée sûre",
   );

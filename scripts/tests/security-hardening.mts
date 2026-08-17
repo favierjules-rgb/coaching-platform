@@ -17,6 +17,10 @@ import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 
 import {
+  verifierContratDesMigrations,
+  verifierManifesteDesMigrations,
+} from "./contrat-migrations.mjs";
+import {
   consumeRateLimit,
   getTrustedClientIp,
   isDistributedRateLimitConfigured,
@@ -352,7 +356,29 @@ await test("15. les guards refusent en production sans configuration Supabase", 
     !/if \(!isSupabaseConfigured\(\)\) \{\s*return;/.test(guards),
     "un guard court-circuite encore sans passer par shouldSkipGuards",
   );
-  assert.equal((guards.match(/if \(shouldSkipGuards\(\)\)/g) ?? []).length, 7, "les 7 guards sont couverts");
+  // ⚠️ RÉÉCRIT EN C4.1 — LE NOMBRE ÉTAIT LE DÉFAUT, PAS LA VALEUR.
+  // Cette ligne disait `assert.equal(…, 7)`. Elle est devenue rouge quand C3 a
+  // ajouté un huitième guard (`requireAdmin`), et le réflexe aurait été
+  // d'écrire 8 — jusqu'au neuvième. Or « il y a sept guards » n'est pas une
+  // garantie de sécurité : « CHAQUE guard passe par la garde centralisée » en
+  // est une, et c'est elle qu'on mesure désormais.
+  //
+  // On énumère les fonctions exportées du fichier, et on exige que le corps de
+  // chacune appelle `shouldSkipGuards()`. Un guard neuf qui l'oublierait
+  // rougirait ici EN ÉTANT NOMMÉ — ce que le compte ne faisait pas.
+  const nomsDesGuards = [...guards.matchAll(/export async function (\w+)\s*\(/g)].map((m) => m[1]!);
+  assert.ok(nomsDesGuards.length >= 7, `balayage trop pauvre : ${nomsDesGuards.length} guard(s)`);
+  const sansGardeCentralisee = nomsDesGuards.filter((nom) => {
+    const debut = guards.indexOf(`export async function ${nom}(`);
+    const suivant = guards.indexOf("\nexport ", debut + 1);
+    const corps = guards.slice(debut, suivant === -1 ? guards.length : suivant);
+    return !corps.includes("if (shouldSkipGuards())");
+  });
+  assert.deepEqual(
+    sansGardeCentralisee,
+    [],
+    `guard(s) sans passage par shouldSkipGuards : ${sansGardeCentralisee.join(", ")}`,
+  );
 });
 
 await test("16. migration C-1/H-3 : is_admin(), trigger, WITH CHECK, policy large supprimée", () => {
@@ -458,12 +484,18 @@ await test("18. le baseline est HORS de supabase/migrations — impossible à po
   for (const fichier of migrations) {
     assert.ok(!/baseline/i.test(fichier), `un fichier de baseline traîne dans migrations/ : ${fichier}`);
   }
-  // 72 depuis ALIMENTS A5 (20260905090000 index des récents, 20260905090100
-  // table des favoris, toutes deux déclarées au manifeste comme le veut la
-  // procédure). Ce compte ne bouge QUE par ce chemin : une migration qui
+  // ⚠️ RÉÉCRIT EN C4.1 — LA RAISON D'ÊTRE EST CONSERVÉE, LE MOYEN CHANGE.
+  // Le commentaire d'origine disait la bonne chose : « une migration qui
   // apparaît sans passer par le manifeste doit faire échouer ce test, c'est sa
-  // seule raison d'être — et elle l'a fait quand A5 les a ajoutées.
-  assert.equal(migrations.filter((f) => f.endsWith(".sql")).length, 80, "les 80 migrations doivent rester intactes");
+  // seule raison d'être ». Mais le moyen était un COMPTE (80), qui ne dit pas
+  // laquelle, et qui a fini par mentir : le dossier en portait 82 quand cette
+  // ligne en annonçait 80 — et pendant ce temps C2 et C3 n'étaient PAS
+  // déclarées au manifeste, ce que le compte n'a jamais signalé.
+  //
+  // On mesure donc directement la propriété : le manifeste et le dossier
+  // coïncident, nom par nom, dans les deux sens. Aucun nombre en dur.
+  verifierManifesteDesMigrations(assert);
+  verifierContratDesMigrations(assert);
 });
 
 await test("19. manifeste : empreintes exactes et borne cohérente", () => {
@@ -486,12 +518,16 @@ await test("19. manifeste : empreintes exactes et borne cohérente", () => {
   // Les migrations annoncées existent réellement, et ce sont bien celles
   // qui suivent la borne.
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  // 45 depuis ALIMENTS A5 (+2 : index des récents, table des favoris).
-  assert.equal(attendues.length, 53);
   const presentes = readdirSync(new URL("../../supabase/migrations", import.meta.url).pathname)
     .filter((f) => f.endsWith(".sql"))
     .filter((f) => f >= "20260724214500")
     .sort();
+  // ⚠️ LA LONGUEUR SE DÉDUIT, ELLE NE SE RÉCITE PLUS. `assert.equal(attendues
+  // .length, 53)` était redondant avec le `deepEqual` qui suit, et c'est
+  // pourtant LUI qui rougissait en premier — donc lui qu'on aurait « corrigé »
+  // en écrivant 56, en croyant avoir réglé quelque chose.
+  assert.equal(attendues.length, presentes.length, "le manifeste et le dossier n'ont pas la même taille");
+  assert.ok(presentes.length > 40, `balayage trop pauvre : ${presentes.length} migration(s)`);
   assert.deepEqual(attendues.slice().sort(), presentes, "la liste post-baseline ne correspond pas au dossier");
 
   // Le correctif de sécurité fait partie des migrations rejouées.

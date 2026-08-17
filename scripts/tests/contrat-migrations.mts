@@ -28,7 +28,7 @@
  * fonction que les suites appellent avec leur propre `assert`.
  */
 import { createHash } from "node:crypto";
-import { readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 
 /** La dernière migration d'avant C2 : le verrou serveur du repas consommé. */
 export const MIGRATION_C0_1 = "20260914090000_c0_1_verrou_repas_consomme.sql";
@@ -40,16 +40,28 @@ export const MIGRATION_C2 = "20260915090000_c2_liste_de_courses_persistante.sql"
 export const MIGRATION_C3 = "20260916090000_c3_budget_et_prix_estimatifs.sql";
 
 /**
+ * La SEULE migration que C4.1 a le droit d'ajouter — le pont aliment → produit.
+ *
+ * ⚠️ Elle est ADDITIVE et n'ajoute qu'UNE table (`food_catalog_retail_review`).
+ * Elle ne touche ni `food_products`, ni `food_catalog`, ni aucune structure de
+ * C2/C3. C'est le point 4 ci-dessous qui interdit qu'une seconde migration C4
+ * se glisse pour « corriger » celle-ci : une migration déjà appliquée en
+ * distant ne se réécrit pas, mais une migration du même lot ne se dédouble pas
+ * non plus.
+ */
+export const MIGRATION_C4_1 = "20260917090000_c4_1_pont_retail.sql";
+
+/**
  * Les migrations du chantier COURSES, dans l'ordre d'application.
  *
  * ⚠️ CETTE LISTE EST LE CONTRAT, ET ELLE S'ALLONGE EXPLICITEMENT. Chaque lot
  * qui ajoute une migration doit venir l'inscrire ici — c'est précisément ce que
  * le compte seul ne demandait pas, et c'est pour ça qu'il a été remplacé.
  */
-export const MIGRATIONS_COURSES: readonly string[] = [MIGRATION_C2, MIGRATION_C3];
+export const MIGRATIONS_COURSES: readonly string[] = [MIGRATION_C2, MIGRATION_C3, MIGRATION_C4_1];
 
 /** Le compte attendu — nécessaire, jamais suffisant. */
-export const NOMBRE_DE_MIGRATIONS = 82;
+export const NOMBRE_DE_MIGRATIONS = 83;
 
 /**
  * L'empreinte des 79 migrations ANTÉRIEURES à C0.1, dans l'ordre.
@@ -118,15 +130,21 @@ export function verifierContratDesMigrations(assert: typeof import("node:assert/
   //    Une seconde migration C2 — un correctif « vite fait » qui redéfinirait
   //    la RPC — rougit ici, là où un simple compte l'aurait absorbée.
   const deCourses = migrations.filter((f) =>
-    /shopping|grocer|liste_de_courses|courses|panier|checklist|budget|prix|_c2_|_c3_/i.test(f),
+    /shopping|grocer|liste_de_courses|courses|panier|checklist|budget|prix|pont_retail|_c0_|_c1_|_c2_|_c3_|_c4_/i.test(f),
   );
+  // ⚠️ C0.1 EST DANS LA COMPARAISON — élargi en C4.1 avec le motif `_c0_|_c1_`.
+  // Le verrou du repas consommé appartient au chantier COURSES ; il est
+  // simplement nommé à part parce qu'il précède la première liste. L'inclure
+  // ici ferme le dernier trou du balayage : une migration nommée `_c1_` ou
+  // `_c0_` — un lot qui aurait « juste ajouté une petite table » — n'a plus
+  // aucun moyen de passer inaperçue.
   assert.deepEqual(
     deCourses,
-    [...MIGRATIONS_COURSES],
+    [MIGRATION_C0_1, ...MIGRATIONS_COURSES],
     `migrations COURSES inattendues : ${deCourses.join(", ") || "aucune"}`,
   );
 
-  // 5. RIEN APRÈS C2. Une migration étrangère postérieure serait invisible au
+  // 5. RIEN APRÈS LA DERNIÈRE MIGRATION COURSES. Une migration étrangère postérieure serait invisible au
   //    point 2 seulement si elle triait avant — le point 2 la voit ; ici on
   //    nomme précisément les intruses, pour que l'échec soit lisible.
   const apresC01 = migrations.filter((f) => {
@@ -161,4 +179,71 @@ export function verifierContratDesMigrations(assert: typeof import("node:assert/
   //    points 3, 5 et 6 d'un seul coup.
   const sansEstampille = migrations.filter((f) => estampille(f) === null);
   assert.deepEqual(sansEstampille, [], `migrations sans horodatage : ${sansEstampille.join(", ")}`);
+}
+
+/**
+ * LE MANIFESTE — la propriété RÉELLE que dix compteurs figés essayaient
+ * d'exprimer.
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * POURQUOI CE SECOND CONTRÔLE
+ * ────────────────────────────────────────────────────────────────────────────
+ * Six suites du dépôt portaient un `assert.equal(migrations.length, N)`. Leur
+ * intention, écrite noir sur blanc dans `aliments-a1`, était bonne :
+ *
+ *     « ajouter un fichier au dossier est un acte délibéré, et ce rouge en est
+ *       l'accusé de réception »
+ *
+ * Mais le MOYEN était faux, et il s'est cassé exactement comme prévu : un
+ * compte ne dit pas CE QUI a été ajouté, il doit être recopié dans dix
+ * fichiers, et le jour où l'un n'est pas mis à jour on remonte le nombre sans
+ * regarder. Mesuré le 17/08/2026 : les compteurs disaient 76 et 80 pendant que
+ * le dossier en portait 82 — et surtout, **C2 et C3 n'avaient jamais été
+ * déclarées au manifeste**, ce que personne n'avait vu.
+ *
+ * L'accusé de réception existe pourtant déjà, et il est meilleur : le
+ * MANIFESTE (`supabase/baseline/manifest.json`) énumère NOMMÉMENT les
+ * migrations à rejouer par-dessus le baseline. Ajouter une migration sans l'y
+ * déclarer casse le bootstrap d'une base neuve — c'est une conséquence réelle,
+ * pas une convention de test.
+ *
+ * Ce contrôle vérifie donc l'égalité EXACTE des deux ensembles, dans les deux
+ * sens. Aucun nombre n'y est écrit en dur.
+ */
+export const BORNE_POST_BASELINE = "20260724214500";
+
+export function migrationsPostBaseline(): readonly string[] {
+  return listerMigrations()
+    .filter((f) => f >= BORNE_POST_BASELINE)
+    .sort();
+}
+
+export function verifierManifesteDesMigrations(assert: typeof import("node:assert/strict")): void {
+  const manifeste = JSON.parse(
+    readFileSync(new URL("../../supabase/baseline/manifest.json", import.meta.url), "utf8"),
+  ) as { migrations_post_baseline_attendues?: unknown };
+
+  const declarees = manifeste.migrations_post_baseline_attendues;
+  assert.ok(Array.isArray(declarees), "le manifeste doit énumérer les migrations post-baseline");
+
+  const surDisque = migrationsPostBaseline();
+  const declareesTriees = [...(declarees as string[])].sort();
+
+  // Les deux sens, nommés séparément : « oubliée au manifeste » et « déclarée
+  // mais absente » sont deux fautes différentes, et le message doit le dire.
+  const oubliees = surDisque.filter((f) => !declareesTriees.includes(f));
+  assert.deepEqual(
+    oubliees,
+    [],
+    `migration(s) présentes sur le disque mais NON déclarées au manifeste : ${oubliees.join(", ")}`,
+  );
+
+  const fantomes = declareesTriees.filter((f) => !surDisque.includes(f));
+  assert.deepEqual(
+    fantomes,
+    [],
+    `migration(s) déclarées au manifeste mais absentes du disque : ${fantomes.join(", ")}`,
+  );
+
+  assert.deepEqual(declareesTriees, surDisque, "le manifeste et le dossier doivent coïncider");
 }

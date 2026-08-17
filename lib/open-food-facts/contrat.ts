@@ -46,6 +46,18 @@ export const OFF_API_VERSION = "v3.4";
 export const OFF_BASE_URL = "https://world.openfoodfacts.org";
 
 /**
+ * La sous-version de l'API utilisée pour la RECHERCHE STRUCTURÉE
+ * (`/api/v2/search`, COURSES C4.1) — distincte de `OFF_API_VERSION`, qui pilote
+ * le lookup par code-barres.
+ *
+ * ⚠️ ELLE VIT ICI, ET PAS DANS `recherche-ciqual.ts`, pour la raison exacte que
+ * A3-OFF1 mesure : deux endroits, c'est deux versions le jour où l'une change.
+ * Le lookup et la recherche visent le MÊME hôte et le MÊME service ; leurs
+ * versions appartiennent donc au même contrat, même quand elles diffèrent.
+ */
+export const OFF_SEARCH_API_VERSION = "v2";
+
+/**
  * Les champs demandés — et rien d'autre. Une fiche OFF complète pèse plusieurs
  * centaines de kilo-octets ; restreindre allège le transfert, mais surtout
  * BORNE ce que nous acceptons de connaître : un champ qui n'est pas demandé ne

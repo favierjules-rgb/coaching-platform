@@ -156,3 +156,23 @@ export const FOOD_PRODUCT_SEARCH_LOCAL: RateLimitRule = {
   limit: 60,
   windowMs: MINUTE,
 };
+
+/**
+ * COURSES C4.1 — recherche de candidats par code Ciqual (administration du
+ * pont produit).
+ *
+ * Un appel de curation déclenche DEUX sorties : une vers Open Food Facts
+ * (`/api/v2/search`) et une ou plusieurs vers Open Prices. Le quota est donc
+ * plus serré que celui de la recherche texte, alors même que l'appelant est
+ * administrateur : le quota d'Open Food Facts est celui du SERVEUR, partagé par
+ * tous les élèves, et une session de curation un peu vive ne doit pas faire
+ * bannir l'application pendant qu'un élève scanne son petit-déjeuner.
+ *
+ * `failClosed` reste faux, comme pour les autres recherches : refuser une
+ * curation ne protège rien, et l'administrateur réessaiera.
+ */
+export const FOOD_BRIDGE_SEARCH: RateLimitRule = {
+  name: "food_bridge_search",
+  limit: 12,
+  windowMs: MINUTE,
+};

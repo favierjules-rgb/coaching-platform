@@ -23,10 +23,16 @@
  * Lancement : npm run test:aliments-a5-coach
  */
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import test from "node:test";
+
+import {
+  listerMigrations,
+  verifierContratDesMigrations,
+  verifierManifesteDesMigrations,
+} from "./contrat-migrations.mjs";
 
 import {
   AlimentConsomme,
@@ -607,36 +613,33 @@ await test("COACH-SUP. l'écran est branché, réutilise A5.7, et n'a coûté au
     assert.ok(!CODE_ECRAN.includes(interdit), `« ${interdit} » recalculé dans l'écran coach`);
   }
 
-  // AUCUNE MIGRATION : le compte est inchangé depuis A5.
-  const migrations = readdirSync(new URL("../../supabase/migrations/", import.meta.url)).filter(
-    (f) => f.endsWith(".sql"),
-  );
-  assert.equal(migrations.length, 80, "80 fichiers : A5.8 n'en a créé aucun, N1.1 en a créé un, N1.3 un second");
-  // ⚠️ SIXIÈME OCCURRENCE DU MÊME MOTIF DANS CE PROJET, et la leçon est la
-  // même qu'en A5 : « aucune migration postérieure » n'est vrai que tant
-  // qu'aucun chantier ne suit. N1.1 en a créé une. Ce que ce contrôle doit
-  // continuer de prouver, c'est que CE LOT-CI n'en a créé aucune — donc la
-  // liste des migrations postérieures est EXACTEMENT celle de N1, nommée.
+  // AUCUNE MIGRATION : A5.8 n'en a créé aucune.
+  // ⚠️ COMPTEUR FIGÉ REMPLACÉ EN C4.1 — LA CONCLUSION EST GARDÉE, LA PREUVE
+  // EST CHANGÉE.
+  //
+  // « Ce lot n'a créé aucune migration » se démontrait par un compte (76 ou
+  // 80) et par une liste nominative des migrations postérieures, recopiée à la
+  // main. Les deux vieillissent au premier chantier suivant, et c'est arrivé :
+  // mesuré le 17/08/2026, ces lignes annonçaient 76 et 80 quand le dossier en
+  // portait 82.
+  //
+  // Trois contrôles remplacent le compte, et prouvent STRICTEMENT PLUS :
+  //   · le contrat partagé — identité, ordre, horodatage, unicité des
+  //     migrations COURSES, et EMPREINTE de tout l'historique antérieur, qui
+  //     rougit si une migration étrangère est antidatée pour s'y glisser ;
+  //   · le manifeste — toute migration présente y est déclarée, et
+  //     réciproquement ;
+  //   · et, ci-dessous, la propriété PROPRE À CE LOT : aucune migration du
+  //     dépôt ne porte son nom.
+  verifierContratDesMigrations(assert);
+  verifierManifesteDesMigrations(assert);
+  const migrationsDuLot = listerMigrations().filter((f) => /_a5|coach_nutrition|nutrition_history|historique/i.test(f));
   assert.deepEqual(
-    migrations.filter((f) => f.slice(0, 14) > "20260905090100"),
-    [
-      "20260906090000_nutrition_listes_et_repas_planifies.sql",
-      "20260907090000_n1_3_occurrences_de_listes_dans_les_repas.sql",
-      "20260908090000_n1_5_1_portions_preferees.sql",
-      "20260909090000_n1_5_2_quantite_minimale.sql",
-      // ⚠️ N1.6 — TROIS MIGRATIONS DE PLUS, ET LA LISTE EST NOMINATIVE EXPRÈS.
-      // Un compteur seul dirait « 79 » sans dire lesquelles : c'est le nom qui
-      // rend visible qu'aucune migration étrangère ne s'est glissée dans le lot.
-      "20260910090000_n1_6_a_couleurs_de_listes.sql",
-      "20260912090000_n1_6_b_enregistrer_repas_structure.sql",
-      "20260913090000_contract_preferred_unit.sql",
-      // ⚠️ C0.1 — LE VERROU SERVEUR, et rien d'autre. Courses C0 n'a créé
-      // AUCUNE migration ; C0.1 en a créé UNE, qui interdit de réécrire un
-      // repas déjà consommé. La nommer ici rend visible qu'aucun chantier
-      // « liste de courses » n'a glissé de table au passage.
-      "20260914090000_c0_1_verrou_repas_consomme.sql",
-    ],
+    migrationsDuLot,
+    [],
+    `A5.8 ne doit avoir créé aucune migration : ${migrationsDuLot.join(", ")}`,
   );
+
 
   // Le paramètre de ciblage est OBLIGATOIRE : aucune valeur par défaut, donc
   // aucune lecture globale possible par omission.

@@ -24,6 +24,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 
+import { verifierContratDesMigrations } from "./contrat-migrations.mjs";
 import {
   OffErreur,
   cacheEstFrais,
@@ -888,17 +889,42 @@ test("A3-SEARCH20 · mode externe : au plus UN appel externe", async () => {
    ══════════════════════════════════════════════════════════════════════════ */
 
 test("A3-SEARCH-SUP · Search-a-licious est confiné à un seul module", () => {
+  // ⚠️ AFFINÉ EN C4.1, ET **PAS** ASSOUPLI — LIRE AVANT DE TOUCHER.
+  //
+  // Le balayage cherchait quatre jetons, dont `page_size`. Trois sont des
+  // SIGNATURES de Search-a-licious : son hôte, son nom, son parseur Lucene. Le
+  // quatrième n'en est pas une — `page_size` est un nom de paramètre HTTP que
+  // l'API v2 d'Open Food Facts utilise aussi, sur un autre hôte, pour un autre
+  // besoin (COURSES C4.1, recherche par code Ciqual).
+  //
+  // Garder `page_size` comme preuve reviendrait à interdire un mot du
+  // vocabulaire HTTP, et pousserait le prochain développeur à le contourner en
+  // renommant une variable — donc à masquer un vrai débordement le jour où il
+  // arriverait. Le jeton est donc levé POUR CE SEUL FICHIER, et les TROIS
+  // signatures réelles continuent de s'y appliquer : `recherche-ciqual.ts` n'a
+  // toujours pas le droit de nommer Search-a-licious dans son code.
+  const SIGNATURES = /search\.openfoodfacts|search-a-licious|lucene/i;
+  const JETON_PARTAGE = /page_size/i;
+
   const fautifs: string[] = [];
   for (const dossier of ["../../lib", "../../app", "../../components", "../../hooks"]) {
     for (const chemin of fichiersTs(new URL(dossier + "/", import.meta.url))) {
       if (chemin.endsWith("lib/open-food-facts/recherche.ts")) continue;
       const source = sansProse(readFileSync(chemin, "utf8"));
-      if (/search\.openfoodfacts|search-a-licious|page_size|lucene/i.test(source)) {
+      const paramPartage =
+        chemin.endsWith("lib/open-food-facts/recherche-ciqual.ts") ? false : JETON_PARTAGE.test(source);
+      if (SIGNATURES.test(source) || paramPartage) {
         fautifs.push(chemin);
       }
     }
   }
   assert.deepEqual(fautifs, [], `Search-a-licious déborde de son module : ${fautifs.join(", ")}`);
+
+  // CONTRÔLE NÉGATIF DE L'AFFINAGE : le fichier exempté reste soumis aux trois
+  // signatures. Si `recherche-ciqual.ts` nommait Search-a-licious dans son
+  // CODE, il serait fautif — l'exemption ne porte que sur `page_size`.
+  assert.ok(SIGNATURES.test('const u = "https://search.openfoodfacts.org/search";'));
+  assert.ok(!SIGNATURES.test('page_size: String(25),'));
 
   // CONTRÔLE NÉGATIF du balayage : il voit bien les fichiers qu'il prétend lire.
   const balayés = fichiersTs(new URL("../../lib/", import.meta.url));
@@ -938,7 +964,20 @@ test("A3-SEARCH-SUP · le module de recherche est server-only, et la phase 4 n'a
   // NEUF fichiers : les oublier rend rouges des suites qui n'ont rien à voir
   // avec le chantier en cours — c'est arrivé, et c'est pour cela qu'ils sont
   // croisés.
-  assert.equal(migrations.length, 80, "80 migrations : 72 avant N1, +1 en N1.1, +1 en N1.3, +1 en N1.5.1");
+  // ⚠️ LE COMPTE FIGÉ A ÉTÉ REMPLACÉ, PAS REMONTÉ — C4.1, ET C'EST UNE
+  // CORRECTION DE DETTE, PAS UNE ADAPTATION DE CONFORT.
+  //
+  // Cette ligne disait `assert.equal(migrations.length, 80)`. Elle était ROUGE
+  // AVANT C4.1 : C2 puis C3 avaient porté le dossier à 82 sans que ce compteur
+  // ne suive, et le commentaire d'origine l'avouait déjà — « ce compteur vit
+  // dans NEUF fichiers ». C'est exactement le motif que C2 a remplacé par
+  // `verifierContratDesMigrations` : un COMPTE est satisfait par n'importe
+  // quelle migration, y compris une migration étrangère glissée au même moment.
+  //
+  // Le remonter à 83 aurait rendu ce fichier vert et l'aurait laissé aussi
+  // faible ; on délègue donc au contrat partagé, qui vérifie l'identité,
+  // l'ordre, l'horodatage, l'unicité et l'empreinte de l'historique.
+  verifierContratDesMigrations(assert);
   // ⚠️ RÉÉCRIT EN A5 — CINQUIÈME OCCURRENCE DU MÊME MOTIF DANS CE PROJET.
   //
   // Ce contrôle exigeait qu'AUCUNE migration ne soit postérieure à la phase 4.1.

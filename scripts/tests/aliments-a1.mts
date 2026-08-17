@@ -21,6 +21,11 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 
+import {
+  verifierContratDesMigrations,
+  verifierManifesteDesMigrations,
+} from "./contrat-migrations.mjs";
+
 function lire(chemin: string): string {
   return readFileSync(new URL(chemin, import.meta.url), "utf8");
 }
@@ -298,34 +303,55 @@ await test("14. la checklist PostgreSQL couvre les identifiants exigés", () => 
 await test("15. la migration est déclarée au manifeste et comptée partout", () => {
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
-  // 37 depuis 20260830090000 (RPE par demi-point). 36 après ALIMENTS A1.
-  // 45 depuis ALIMENTS A5 (+2 : index des récents, table des favoris).
-  assert.equal(attendues.length, 53);
+
+  // LA PROPRIÉTÉ PROPRE À A1, ET ELLE NE BOUGE PAS : sa migration est déclarée.
   assert.ok(attendues.includes(NOM_MIGRATION), "A1 est déclarée au manifeste");
 
-  const presentes = readdirSync(new URL("../../supabase/migrations", import.meta.url).pathname)
-    .filter((f) => f.endsWith(".sql"));
-  // ⚠️ COMPTEUR VOLONTAIREMENT EXPLICITE. Il doit être mis à jour à CHAQUE
-  // nouvelle migration — c'est le but : ajouter un fichier au dossier est un
-  // acte délibéré, et ce rouge en est l'accusé de réception.
-  //   70 après A4 · +2 en A5 (index des récents, table des favoris) = 72.
-  assert.equal(presentes.length, 80, "80 migrations sur le disque");
+  // ⚠️ RÉÉCRIT EN C4.1. L'INTENTION D'ORIGINE ÉTAIT JUSTE, LE MOYEN NON.
+  //
+  // Ce test disait : « ajouter un fichier au dossier est un acte délibéré, et
+  // ce rouge en est l'accusé de réception ». C'est vrai, et c'est précieux.
+  // Mais il l'exprimait par DEUX compteurs (53 et 80) recopiés — de son propre
+  // aveu — dans NEUF fichiers, et il allait jusqu'à vérifier le TEXTE de
+  // `security-hardening.mts` pour s'assurer que les copies suivaient.
+  //
+  // Ce montage s'est cassé exactement comme il devait : mesuré le 17/08/2026,
+  // les compteurs annonçaient 53 et 80 pendant que le dépôt en portait 56 et
+  // 82 — et surtout **C2 et C3 n'avaient jamais été déclarées au manifeste**,
+  // ce qu'aucun des neuf compteurs n'a signalé.
+  //
+  // L'accusé de réception est donc rendu au MANIFESTE, qui nomme les
+  // migrations au lieu de les compter, et dont l'oubli casse réellement le
+  // bootstrap d'une base neuve.
+  verifierManifesteDesMigrations(assert);
+  verifierContratDesMigrations(assert);
 
-  // Les compteurs vivent dans NEUF fichiers, dont six qui vérifient le TEXTE
-  // de security-hardening.mts. Les oublier rendrait rouges des suites vertes
-  // qui n'ont rien à voir avec ce chantier — c'est arrivé au lot précédent.
-  const secu = lire("../../scripts/tests/security-hardening.mts");
-  assert.ok(secu.includes(".length, 80,"), "security-hardening compte les migrations du dépôt");
-  assert.ok(secu.includes("assert.equal(attendues.length, 53);"));
-  for (const fichier of [
-    "nutrition-plan-v2-builder", "nutrition-recipes-admin", "nutrition-recipes",
-    "nutrition-single-assigned-plan", "nutrition-v2-unified", "training-movement-patterns",
-    "nutrition-recipe-images", "student-feedback-video",
-  ]) {
-    const source = lire(`../../scripts/tests/${fichier}.mts`);
-    assert.ok(!/attendues\.length, 3[56]\b/.test(source), `${fichier} : compteur non mis à jour`);
-    assert.ok(!/\.length, 6[23],/.test(source), `${fichier} : compteur non mis à jour`);
+  // ⚠️ ET ON FERME LA PORTE DERRIÈRE SOI : plus AUCUNE suite du dépôt n'a le
+  // droit de figer un compte de migrations. Ce balayage remplace la liste de
+  // neuf fichiers écrite à la main — il couvre les suites futures, que la
+  // liste ne pouvait pas connaître.
+  const suites = readdirSync(new URL("../../scripts/tests", import.meta.url).pathname)
+    .filter((f) => f.endsWith(".mts"))
+    .filter((f) => f !== "aliments-a1.mts");
+  const compteursFiges: string[] = [];
+  // ⚠️ ON DÉPOUILLE LA PROSE AVANT DE BALAYER — sinon ce contrôle accuse les
+  // fichiers qui EXPLIQUENT, en commentaire, le compteur qu'ils ont supprimé.
+  // C'est le piège habituel du projet, et il s'est déclenché sur ce balayage
+  // même, au premier essai.
+  const sansCommentaires = (source: string) =>
+    source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/.*$/gm, "$1 ");
+  for (const fichier of suites) {
+    const source = sansCommentaires(lire(`../../scripts/tests/${fichier}`));
+    // `migrations.length, 80` · `attendues.length, 53` · `presentes.length, 76`
+    if (/\b(migrations|attendues|presentes|présentes)\.length,\s*\d+/.test(source)) {
+      compteursFiges.push(fichier);
+    }
   }
+  assert.deepEqual(
+    compteursFiges,
+    [],
+    `compteur de migrations figé (utiliser le contrat partagé) : ${compteursFiges.join(", ")}`,
+  );
 });
 
 await test("16. l'en-tête déclare le périmètre exclu, et le code le respecte", () => {

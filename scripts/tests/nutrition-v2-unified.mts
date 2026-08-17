@@ -17,6 +17,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
+import { verifierManifesteDesMigrations } from "./contrat-migrations.mjs";
+
 import { KCAL_PER_GRAM, computeDailyMacroTargets } from "../../lib/nutrition/macro-targets";
 import { MEAL_SLOT_KEYS, type MealSlotAllocation } from "../../lib/nutrition/meal-distribution";
 import {
@@ -1134,7 +1136,20 @@ await test("51. les quatre migrations sont déclarées au manifeste et comptées
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
   // 35 depuis 20260828090000_web_push_notifications.sql (socle Web Push).
-  assert.equal(attendues.length, 53);
+  // ⚠️ COMPTEUR FIGÉ REMPLACÉ EN C4.1 — LIRE AVANT DE RÉÉCRIRE UN NOMBRE ICI.
+  //
+  // Cette ligne disait `assert.equal(attendues.length, 53)`. Le même nombre
+  // était recopié dans DOUZE fichiers de tests, et chacun vérifiait en plus le
+  // TEXTE de `security-hardening.mts` pour s'assurer que les copies suivaient.
+  //
+  // Le montage a fini par cacher ce qu'il devait montrer : mesuré le
+  // 17/08/2026, **C2 et C3 n'étaient pas déclarées au manifeste** et aucun des
+  // douze compteurs ne l'a signalé — ils comptaient 53, ce qui était juste,
+  // pour une liste incomplète.
+  //
+  // On vérifie donc la PROPRIÉTÉ, pas le nombre : le manifeste et le dossier
+  // `supabase/migrations` coïncident nom par nom, dans les deux sens.
+  verifierManifesteDesMigrations(assert);
   for (const nom of [
     "20260810090000_harden_nutrition_privileges.sql",
     "20260811090000_nutrition_v2_unification.sql",
@@ -1143,9 +1158,6 @@ await test("51. les quatre migrations sont déclarées au manifeste et comptées
   ]) {
     assert.ok(attendues.includes(nom), nom);
   }
-  const secu = lire("../../scripts/tests/security-hardening.mts");
-  assert.ok(secu.includes(".length, 80,"), "le compteur de migrations suit les migrations réelles");
-  assert.ok(secu.includes("assert.equal(attendues.length, 53);"));
 });
 
 /* ─── 52-53. Outils 1 et 3 après la PR C.1 ─────────────────────────────── */
@@ -1499,7 +1511,8 @@ await test("61. aucun nouveau chemin d'écriture, aucune migration ajoutée", ()
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
   // 35 depuis 20260828090000_web_push_notifications.sql (socle Web Push).
-  assert.equal(attendues.length, 53);
+  // Même remplacement qu'au contrôle précédent : la propriété, pas le nombre.
+  verifierManifesteDesMigrations(assert);
   assert.ok(attendues.includes("20260814090000_nutrition_plan_v2_blocking_issue_week.sql"));
 });
 
