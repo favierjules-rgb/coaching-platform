@@ -610,11 +610,28 @@ begin
       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
      where n.nspname = 'public' and p.proname = 'definir_prix_article_manuel'));
 
-  -- ⚠️ AUCUNE TABLE DE MAGASIN N'EST CRÉÉE. C'est le périmètre de C4.
-  perform pg_temp.noter('G-07', 'aucune table store / retailer / promotion n''existe', (
-    select count(*) = 0 from pg_tables where schemaname = 'public'
+  -- ⚠️ AUCUNE TABLE DE MAGASIN N'EST CRÉÉE PAR C3. C'était le périmètre de C4,
+  -- et C4.2 l'a ouvert : `stores` et `student_selected_store` existent
+  -- désormais. Ce contrôle n'est PAS relâché pour autant — il passe d'un
+  -- « aucune » à une LISTE NOMMÉE, exactement la doctrine de CONTRACT-07 :
+  -- jamais un joker, jamais « tout ce qui ressemble à un magasin est permis ».
+  -- Toute troisième table de magasin le fera rougir, et G-07b ci-dessous
+  -- rejoue sur ces deux tables la garantie réelle de C3 : le prix reste chez
+  -- C3, il n'a pas fui vers le lot des magasins.
+  perform pg_temp.noter('G-07',
+    'aucune table de magasin hors les deux tables NOMMÉES de C4.2', (
+    select coalesce(array_agg(tablename::text order by tablename::text), array[]::text[])
+           <@ array['stores', 'student_selected_store']
+      from pg_tables where schemaname = 'public'
        and (tablename ilike '%store%' or tablename ilike '%retailer%'
          or tablename ilike '%merchant%' or tablename ilike '%promotion%')));
+
+  perform pg_temp.noter('G-07b',
+    'les tables de magasin ne portent AUCUNE colonne de prix ni de promotion', (
+    select count(*) = 0 from information_schema.columns
+     where table_schema = 'public'
+       and table_name in ('stores', 'student_selected_store')
+       and column_name ~* 'price|prix|cent|milli|currency|euro|discount|promo'));
 
   perform pg_temp.noter('G-08', 'food_price_estimates ne pointe que food_catalog et food_products', (
     select array_agg(distinct confrelid order by confrelid)

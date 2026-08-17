@@ -52,16 +52,36 @@ export const MIGRATION_C3 = "20260916090000_c3_budget_et_prix_estimatifs.sql";
 export const MIGRATION_C4_1 = "20260917090000_c4_1_pont_retail.sql";
 
 /**
+ * La SEULE migration que C4.2 a le droit d'ajouter — le modèle du magasin.
+ *
+ * ⚠️ ADDITIVE, et elle ne crée que DEUX tables : `stores` (référentiel canonique
+ * minimal, fermé à l'écriture cliente) et `student_selected_store` (un magasin
+ * actif par élève, garanti par la clé primaire). Elle ne touche à AUCUNE
+ * structure de C2, C3 ou C4.1, n'introduit aucun prix, aucune disponibilité et
+ * aucun appel réseau — c'est C4.3a qui fera entrer un magasin dans la table.
+ *
+ * ⚠️ SON HORODATAGE EST UN COMPTEUR D'ORDRE, PAS UNE DATE. `20260918…` suit
+ * `20260917…` parce que `supabase db push` applique les fichiers dans l'ordre
+ * lexicographique de leur nom, et pour aucune autre raison.
+ */
+export const MIGRATION_C4_2 = "20260918090000_c4_2_magasins.sql";
+
+/**
  * Les migrations du chantier COURSES, dans l'ordre d'application.
  *
  * ⚠️ CETTE LISTE EST LE CONTRAT, ET ELLE S'ALLONGE EXPLICITEMENT. Chaque lot
  * qui ajoute une migration doit venir l'inscrire ici — c'est précisément ce que
  * le compte seul ne demandait pas, et c'est pour ça qu'il a été remplacé.
  */
-export const MIGRATIONS_COURSES: readonly string[] = [MIGRATION_C2, MIGRATION_C3, MIGRATION_C4_1];
+export const MIGRATIONS_COURSES: readonly string[] = [
+  MIGRATION_C2,
+  MIGRATION_C3,
+  MIGRATION_C4_1,
+  MIGRATION_C4_2,
+];
 
 /** Le compte attendu — nécessaire, jamais suffisant. */
-export const NOMBRE_DE_MIGRATIONS = 83;
+export const NOMBRE_DE_MIGRATIONS = 84;
 
 /**
  * L'empreinte des 79 migrations ANTÉRIEURES à C0.1, dans l'ordre.

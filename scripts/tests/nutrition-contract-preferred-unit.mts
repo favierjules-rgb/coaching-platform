@@ -232,6 +232,30 @@ await test("CONTRACT-07. le CONTRACT s'applique en DERNIER — l'ordre de rollou
       // La boucle ci-dessous rejoue la dernière de ces preuves à chaque
       // exécution : l'inscrire ne suffit pas, il faut que le fichier tienne.
       "20260917090000_c4_1_pont_retail.sql",
+      // ⚠️ C4.2 INSCRITE ICI, PAR LE MÊME MÉCANISME — une entrée NOMMÉE, jamais
+      // une règle du genre « tout ce qui suit cette date est sûr ».
+      //
+      // Le modèle du magasin crée DEUX tables : `stores` (id, op_location_id,
+      // osm_type, osm_id, name, brand, city, postcode, country_code, lat, lon,
+      // created_at) et `student_selected_store` (student_id, store_id,
+      // updated_at). Aucune des quinze colonnes n'est une unité, et c'est ce
+      // qui met ce lot hors de portée du CONTRACT : il dit « OÙ l'élève fait
+      // ses courses », jamais « en quelle unité ». Mesuré sur le fichier, code
+      // dépouillé de sa prose :
+      //   · `preferred_unit` : ZÉRO occurrence — pas même en commentaire ;
+      //   · seules tables créées ou altérées : les deux ci-dessus ;
+      //   · aucun `rename`, aucun `alter column`, aucun `drop` autre que les
+      //     `drop policy if exists` du gabarit, immédiatement suivis de leur
+      //     recréation ;
+      //   · `meal_choice_options`, `planned_meal_items`, `quantity_unit` et
+      //     même le mot `unit` : ABSENTS ;
+      //   · les seules références externes sont les clés étrangères vers
+      //     `public.students(id)` et `public.stores(id)`, et les appels à
+      //     `public.current_student_id()` et `public.is_admin()`.
+      //
+      // La boucle ci-dessous rejoue cette dernière preuve à chaque exécution :
+      // l'inscrire ne suffit pas, il faut que le fichier tienne.
+      "20260918090000_c4_2_magasins.sql",
     ],
     "une migration postérieure au CONTRACT n'a pas été déclarée sûre",
   );

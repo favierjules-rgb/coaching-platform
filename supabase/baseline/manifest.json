@@ -89,7 +89,8 @@
     "20260914090000_c0_1_verrou_repas_consomme.sql",
     "20260915090000_c2_liste_de_courses_persistante.sql",
     "20260916090000_c3_budget_et_prix_estimatifs.sql",
-    "20260917090000_c4_1_pont_retail.sql"
+    "20260917090000_c4_1_pont_retail.sql",
+    "20260918090000_c4_2_magasins.sql"
   ],
   "garanties_de_contenu": {
     "insert_de_donnees_metier": 0,

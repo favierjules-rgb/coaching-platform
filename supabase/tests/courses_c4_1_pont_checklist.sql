@@ -469,12 +469,29 @@ begin
     select count(*) = 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
      where n.nspname = 'public' and p.proname = 'regenerer_liste_de_courses'));
 
-  -- ⚠️ C4.1 N'A CRÉÉ AUCUNE TABLE DE MAGASIN. C'est le périmètre de C4.2.
-  perform pg_temp.noter('G-06', 'aucune table store / retailer / location / promotion', (
-    select count(*) = 0 from pg_tables where schemaname = 'public'
+  -- ⚠️ C4.1 N'A CRÉÉ AUCUNE TABLE DE MAGASIN — et cette phrase reste vraie.
+  -- C'était « le périmètre de C4.2 », et C4.2 est arrivé : `stores` et
+  -- `student_selected_store` existent. Le contrôle n'est pas retiré, il est
+  -- RESSERRÉ : d'un « aucune » il passe à une LISTE NOMMÉE. `%retailer%`,
+  -- `%merchant%`, `%promotion%` et `%location%` restent interdits sans
+  -- exception, et une troisième table de magasin ferait rougir.
+  -- G-06b ci-dessous garde la vraie garantie de C4.1 : le pont dit QUEL
+  -- PRODUIT, jamais À QUEL PRIX — et les tables de magasin non plus.
+  perform pg_temp.noter('G-06',
+    'aucune table de magasin hors les deux tables NOMMÉES de C4.2', (
+    select coalesce(array_agg(tablename::text order by tablename::text), array[]::text[])
+           <@ array['stores', 'student_selected_store']
+      from pg_tables where schemaname = 'public'
        and (tablename ilike '%store%' or tablename ilike '%retailer%'
          or tablename ilike '%merchant%' or tablename ilike '%promotion%'
          or tablename ilike '%location%')));
+
+  perform pg_temp.noter('G-06b',
+    'les tables de magasin ne portent NI prix NI code produit', (
+    select count(*) = 0 from information_schema.columns
+     where table_schema = 'public'
+       and table_name in ('stores', 'student_selected_store')
+       and column_name ~* 'price|prix|cent|milli|currency|discount|promo|gtin|product_code'));
 
   -- ⚠️ NI FACTEUR CRU/CUIT, NI CODE CIQUAL D'ACHAT. Aucune colonne du schéma
   -- ne les porte : ils arriveront ENSEMBLE, quand une source existera.

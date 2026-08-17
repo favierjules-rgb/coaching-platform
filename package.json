@@ -115,7 +115,8 @@
     "test:liste-de-courses-ux": "npx tsx scripts/tests/liste-de-courses-ux.mts",
     "test:liste-de-courses-c2": "npx tsx scripts/tests/liste-de-courses-c2.mts",
     "test:liste-de-courses-c3": "npx tsx scripts/tests/liste-de-courses-c3.mts",
-    "test:pont-retail-c4-1": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/pont-retail-c4-1.mts"
+    "test:pont-retail-c4-1": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/pont-retail-c4-1.mts",
+    "test:courses-stores-c4-2": "npx tsx scripts/tests/courses-stores-c4-2.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

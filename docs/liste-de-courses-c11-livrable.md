@@ -337,7 +337,25 @@ Aucun code (UX-24). Prévu : budget utilisateur, estimation du panier, reste/dé
 **Bloqueur connu** : aucune donnée de prix n'existe dans le modèle, et `planned_meal_items.unit` accepte `piece` sans poids unitaire fiable (`food_catalog.piece_weight_g` est nullable).
 
 ### C4 — magasins
-Aucun code, aucun appel API (UX-24 vérifie l'absence de `fetch`). Prévu : localisation, magasins proches, prix, disponibilité, promotions, comparaison prix/distance/complétude.
+Prévu : localisation, magasins proches, prix, ~~disponibilité~~, promotions, comparaison prix/distance/complétude.
+
+> **Correction du 17/08/2026 — « disponibilité » est RETIRÉE du périmètre C4.**
+> Open Prices fournit des **observations de prix datées** — un fait au passé, « le 09/08, quelqu'un
+> a relevé cette étiquette ici » — et **pas un stock ni une disponibilité commerciale au présent**.
+> Vérifié sur les quatre modèles du backend (Location 23 champs, Price 28, Proof 26, Product 26) et
+> sur son `API.md` : zéro occurrence de `stock`, `availability`, `available`, `in_stock`,
+> `out_of_stock`, `inventory`. Le seul champ qui pourrait tromper, `Price.receipt_quantity`, est une
+> quantité **achetée** sur un ticket de caisse, jamais une quantité en rayon.
+>
+> ⚠️ **Aucune implémentation de remplacement.** En particulier, on ne dérive PAS une pseudo-
+> disponibilité de la présence d'un prix récent : ce serait inventer une donnée et l'afficher avec
+> l'aplomb d'un fait. 10,9 % seulement des relevés ont moins de trois mois — la fraîcheur d'un prix
+> ne dit rien de la présence en rayon.
+
+**État au 17/08/2026** — C4.1 (pont aliment → produit réel) est livré. C4.2 (modèle magasin +
+magasin choisi) introduit `stores` et `student_selected_store` : aucun appel API, aucune
+géolocalisation, aucun prix. La découverte des magasins proches — `GET /api/v1/locations/nearby`,
+disponible en amont depuis le 15/05/2026 — est le sujet de C4.3a.
 
 ### Dette technique reconnue
 1. **`resoudreIdentites` en double** — l'écran du plan et `identitesDeChoix`. Non unifié parce que `courses-c0-validation.mts:140-142` lit le code littéral de la page.
