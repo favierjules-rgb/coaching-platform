@@ -122,7 +122,8 @@
     "test:off-ciqual-c4-1b": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/off-ciqual-instrumentation-c4-1b.mts",
     "test:pont-retail-robustesse-c4-1b": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/pont-retail-robustesse-c4-1b.mts",
     "test:pont-retail-n-gtin": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/pont-retail-n-gtin.mts",
-    "test:prix-observes-c4-4": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/prix-observes-c4-4.mts"
+    "test:prix-observes-c4-4": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/prix-observes-c4-4.mts",
+    "test:conditionnements-c4-5": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/conditionnements-c4-5.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",
