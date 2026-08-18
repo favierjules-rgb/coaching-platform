@@ -470,6 +470,13 @@ await test("C4.2-PERIMETRE — aucun code applicatif, aucun réseau, aucune géo
   const MODULES_OPEN_PRICES: ReadonlyArray<readonly [string, string]> = [
     ["apercu.ts", "C4.1 — aperçu de prix pour la curation"],
     ["locations.ts", "C4.3a — découverte des magasins proches"],
+    // ⚠️ DÉCLARÉ LE 18/08/2026 PAR C4.4, ET C'EST LE GARDE-FOU QUI L'A EXIGÉ.
+    // Ce contrôle est passé au ROUGE dès l'apparition du fichier, exactement
+    // comme son commentaire l'annonçait. On l'INSCRIT, on ne l'assouplit pas :
+    // la liste reste nommée, aucun joker n'est introduit, et un QUATRIÈME
+    // module Open Prices fera rougir ce test demain comme il l'a fait
+    // aujourd'hui.
+    ["observations.ts", "C4.4 — relevés de prix d'un magasin, en lecture seule"],
   ];
   const modulesOpenPrices = readdirSync(new URL("../../lib/open-prices/", import.meta.url)).sort();
   assert.deepEqual(
