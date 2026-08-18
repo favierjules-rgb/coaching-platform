@@ -20,6 +20,74 @@
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
+ * ════════════════════════════════════════════════════════════════════════════
+ * ⚠️ LE CONTRAT DE CARDINALITÉ : UN ALIMENT GÉNÉRIQUE → N RÉFÉRENCES RÉELLES
+ * ════════════════════════════════════════════════════════════════════════════
+ * DÉCISION PRODUIT DU 18/08/2026. Elle gouverne tout ce module, et elle est
+ * écrite ici parce que c'est le seul fichier que la base, le réseau et React
+ * ont tous les trois en commun.
+ *
+ * Un aliment du `food_catalog` — « Flocons d'avoine » — PEUT et DOIT pouvoir
+ * porter PLUSIEURS références commerciales réelles : le paquet Carrefour, le
+ * paquet Lidl, le paquet Auchan, la marque nationale. Ce sont des produits
+ * DIFFÉRENTS, avec des codes-barres différents et des prix différents, et ils
+ * désignent pourtant le même aliment au sens nutritionnel.
+ *
+ * L'élève, lui, ne choisit jamais un code-barres. Il choisit « Flocons
+ * d'avoine ». La résolution commerciale est POSTÉRIEURE, et elle appartient au
+ * moment des courses :
+ *
+ *     aliment générique
+ *       → TOUS ses GTIN validés
+ *         → le magasin choisi par l'élève
+ *           → les relevés Open Prices de ce magasin
+ *             → le conditionnement
+ *               → le ou les produits qui conviennent
+ *
+ * ⚠️ N GTIN LIÉS À UN ALIMENT N'EST PAS UNE AMBIGUÏTÉ C4.1. C'est le
+ * comportement ATTENDU. Ce paragraphe retire explicitement l'hypothèse inverse
+ * — « N > 1 ⇒ plusieurs candidats ⇒ aucun prix » — qui figurait dans le cadrage
+ * C4.4 et n'a jamais été codée. Elle est ABANDONNÉE.
+ *
+ * LES HUIT RÈGLES, ET RIEN D'AUTRE :
+ *
+ *   A. 1 aliment → N produits est la cardinalité NORMALE, pas un cas dégradé.
+ *      Le schéma la porte DÉJÀ : `food_products_gtin_unique` est un index
+ *      unique TOTAL — un code-barres, une ligne — tandis que
+ *      `food_products_food_id_idx` est PARTIEL et NON UNIQUE : rien ne borne le
+ *      nombre de produits par aliment. Aucune migration n'est requise ici, et
+ *      aucune n'est faite.
+ *
+ *   B. C4.1 valide une RELATION SÉMANTIQUE — « ce produit réel EST cet aliment
+ *      générique » — et strictement rien d'autre.
+ *
+ *   C. C4.1 NE CHOISIT NI MAGASIN, NI PRIX, NI CONDITIONNEMENT. Ces trois
+ *      décisions ont chacune leur lot, et aucune ne se prend pendant la
+ *      curation.
+ *
+ *   D. IL N'EXISTE PAS DE « PRODUIT REPRÉSENTATIF ». Élire un produit parmi N
+ *      reviendrait à choisir une enseigne et un conditionnement à la place de
+ *      l'élève, sans le lui dire. Le dépôt n'en contient aucune trace ; ce
+ *      commentaire existe pour qu'il n'en contienne jamais.
+ *
+ *   E. 0, 1 et N sont TROIS ÉTATS VALIDES. 0 = pas encore de pont, et ce n'est
+ *      pas une erreur. 1 = un pont. N = N ponts, et c'est mieux que 1.
+ *
+ *   F. LA RÉSOLUTION D'ACHAT EST POSTÉRIEURE au choix de l'élève, et se fait en
+ *      LECTURE, au moment des courses. Rien n'en est figé à la curation.
+ *
+ *   G. LE STOCK N'EST JAMAIS INFÉRÉ. Un GTIN relié ne dit pas que le produit
+ *      est en rayon aujourd'hui, et un relevé Open Prices dit qu'un prix a été
+ *      VU un jour — pas qu'il y en a un ce matin.
+ *
+ *   H. ⚠️ ON NE FORCE JAMAIS N = 1 POUR AMÉLIORER UNE MÉTRIQUE. La couverture
+ *      se mesure « AU MOINS un produit retail valide relié », jamais
+ *      « exactement un ». Un aliment à cinq ponts compte pour UN aliment
+ *      couvert, et en retirer quatre pour faire joli détruirait quatre chemins
+ *      de prix réels.
+ */
+
+/**
  * Les trois statuts que la table de curation sait porter.
  *
  * ⚠️ `matched` N'EN FAIT PAS PARTIE, ET N'EN FERA JAMAIS PARTIE. Le
@@ -94,6 +162,14 @@ export function estRapproche(produit: ProduitRapproche): boolean {
  * volontairement : la priorité est l'INVARIANT, qui reste vrai même si le
  * nettoyage échoue ; le nettoyage est l'HYGIÈNE, qui évite d'accumuler des
  * notes mortes. On ne dépend jamais du second pour que le premier soit vrai.
+ *
+ * ⚠️ « MATCHED » SIGNIFIE « AU MOINS UN », JAMAIS « EXACTEMENT UN ». Le `some`
+ * ci-dessous EST la métrique de couverture, et c'est la règle H du contrat de
+ * cardinalité : un aliment relié à cinq produits est couvert une fois, comme un
+ * aliment relié à un seul. Remplacer ce `some` par un test d'égalité sur le
+ * nombre de produits transformerait un bon aliment — cinq enseignes, cinq
+ * chemins de prix — en aliment non couvert, et pousserait à supprimer des ponts
+ * réels pour redresser un chiffre.
  */
 export function etatRapprochement(
   catalogFoodId: string,

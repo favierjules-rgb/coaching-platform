@@ -30,6 +30,15 @@ const gtinSchema = z
  * Plafond de lot volontairement bas : une décision de curation porte sur
  * quelques produits, pas sur une page entière. Il borne aussi le nombre de
  * lignes qu'un seul appel peut écrire dans le cache global.
+ *
+ * ⚠️ C'EST UN PLAFOND PAR APPEL, PAS PAR ALIMENT — et la nuance est le contrat
+ * de cardinalité de `lib/nutrition/pont-retail.ts` (règles A et E). Un aliment
+ * générique peut porter autant de références commerciales réelles qu'il en
+ * existe : Carrefour, Lidl, Auchan, marque nationale. `rapprocherProduits` ne
+ * touche QUE les codes-barres qu'on lui nomme, donc deux appels successifs
+ * ADDITIONNENT leurs liens, ils ne se remplacent pas. Lire ce 10 comme « dix
+ * produits au maximum par aliment » ferait inventer une limite qui n'existe ni
+ * en base, ni ici.
  */
 export const MATCH_GTINS_MAX = 10;
 

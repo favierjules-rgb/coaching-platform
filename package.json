@@ -120,7 +120,8 @@
     "test:magasins-c4-3a": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/magasins-c4-3a.mts",
     "test:magasins-c4-3b": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/magasins-c4-3b.mts",
     "test:off-ciqual-c4-1b": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/off-ciqual-instrumentation-c4-1b.mts",
-    "test:pont-retail-robustesse-c4-1b": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/pont-retail-robustesse-c4-1b.mts"
+    "test:pont-retail-robustesse-c4-1b": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/pont-retail-robustesse-c4-1b.mts",
+    "test:pont-retail-n-gtin": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/pont-retail-n-gtin.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

@@ -244,10 +244,22 @@ export function PontRetailAdmin() {
             </span>
           </div>
 
+          {/*
+            ⚠️ « DÉJÀ RELIÉ » N'EST PAS « TERMINÉ », ET LA PHRASE DOIT LE DIRE.
+            Contrat de cardinalité (`lib/nutrition/pont-retail.ts`, règle E) :
+            un aliment générique porte AUTANT de références commerciales
+            réelles qu'il en existe — Carrefour, Lidl, Auchan, marque
+            nationale. Un premier produit relié n'achève rien ; il ouvre le
+            premier chemin de prix, et chaque enseigne de plus en ouvre un
+            autre. Une phrase qui sonne comme un point final ferait s'arrêter
+            l'administrateur à N = 1, et c'est exactement l'inverse de ce
+            qu'on veut.
+          */}
           {donnees.produitsLies.length > 0 && (
             <p className="text-sm text-success">
-              Déjà rapproché à {donnees.produitsLies.length} produit(s)&nbsp;:{" "}
-              {donnees.produitsLies.map((p) => p.name).join(" · ")}
+              {donnees.produitsLies.length} produit(s) déjà relié(s)&nbsp;:{" "}
+              {donnees.produitsLies.map((p) => p.name).join(" · ")} — d&apos;autres
+              enseignes peuvent être ajoutées.
             </p>
           )}
 
