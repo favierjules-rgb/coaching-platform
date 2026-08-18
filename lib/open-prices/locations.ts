@@ -6,9 +6,15 @@ import {
   NEARBY_PAGES_MAX,
   NEARBY_RESULTATS_CIBLE,
   NEARBY_TAILLE_PAGE,
+  PAYS_CODE,
+  PAYS_NOM_AMONT,
+  VILLE_PAGES_MAX,
+  VILLE_RESULTATS_CIBLE,
+  VILLE_TAILLE_PAGE,
   type LieuBrut,
   type MagasinProche,
   magasinsCoherents,
+  magasinsParPertinenceVille,
   normaliserLieu,
   retenirCandidats,
 } from "@/lib/nutrition/magasin-proche";
@@ -271,10 +277,10 @@ export async function lireMagasinCanonique(
   }
 
   // ⚠️ `distance_km` N'EXISTE PAS SUR LA FICHE : elle est une propriété de la
-  // RECHERCHE, pas du lieu. On en pose une neutre pour réutiliser la même
-  // normalisation — et elle n'est jamais persistée (C4.2 n'a pas de colonne
-  // pour ça, délibérément).
-  const magasin = normaliserLieu({ ...(lecture.corps as LieuBrut), distance_km: 0 });
+  // RECHERCHE, pas du lieu. `normaliserLieu` le sait — elle rend `null` — et
+  // aucune distance n'est donc fabriquée ici. Elle n'est de toute façon jamais
+  // persistée : C4.2 n'a pas de colonne pour ça, délibérément.
+  const magasin = normaliserLieu(lecture.corps as LieuBrut);
   // Une fiche présente mais inexploitable — librairie, lieu sans nom, identité
   // hors bornes sûres — n'est pas une absence : elle n'est pas SÉLECTIONNABLE.
   if (magasin === null) return { statut: "non_exploitable" };
@@ -282,4 +288,115 @@ export async function lireMagasinCanonique(
   // une page d'erreur déguisée, ou un lieu fusionné — et on ne devine pas.
   if (magasin.opLocationId !== opLocationId) return { statut: "non_exploitable" };
   return { statut: "trouve", magasin };
+}
+
+
+/* ── COURSES C4.3b — LA RECHERCHE MANUELLE PAR VILLE ────────────────────── */
+
+/** `GET /api/v1/locations` — la liste filtrable. Pas `/nearby`. */
+export const OPEN_PRICES_LOCATIONS_URL = OPEN_PRICES_LOCATION_URL;
+
+export interface RechercheVille {
+  /** La saisie de l'élève, déjà validée. Envoyée TELLE QUELLE à l'amont. */
+  readonly ville: string;
+}
+
+function urlVille(recherche: RechercheVille, page: number): string {
+  // ⚠️ QUATRE PARAMÈTRES, ET PAS UN DE PLUS.
+  //
+  // ⚠️ LE PAYS BORNE LA REQUÊTE **AVANT** LA PAGINATION — ET C'ÉTAIT UN VRAI
+  // DÉFAUT DE LA PREMIÈRE VERSION.
+  //
+  // Filtrer le pays chez nous, après coup, arrive trop tard : la pagination
+  // amont a déjà choisi ce que nous voyons. Une ville homonyme dans plusieurs
+  // pays remplissait alors nos trois pages de résultats étrangers, tous
+  // rejetés, et l'écran annonçait « aucun magasin » alors que le magasin
+  // français attendait en page 4. Le domaine doit être réduit à la SOURCE.
+  //
+  // ⚠️ ET LE NOM DU PAYS EST UNE CONSTANTE SERVEUR. `PAYS_NOM_AMONT` ne vient
+  // jamais du navigateur : le client envoie une ville, rien d'autre. Un client
+  // qui pourrait dicter ce paramètre choisirait le pays de recherche d'un lot
+  // qui n'en connaît qu'un.
+  //
+  // ⚠️ LA VILLE PART NON NORMALISÉE. Le filtre amont est un `icontains`, donc
+  // déjà insensible à la casse ; lui envoyer une chaîne dépouillée de ses
+  // accents ferait manquer les villes que la source orthographie correctement.
+  const params = new URLSearchParams({
+    osm_address_city__like: recherche.ville,
+    osm_address_country__like: PAYS_NOM_AMONT,
+    page: String(page),
+    size: String(VILLE_TAILLE_PAGE),
+  });
+  return `${OPEN_PRICES_LOCATIONS_URL}?${params.toString()}`;
+}
+
+/**
+ * Les magasins alimentaires d'une ville, pour l'élève qui ne veut — ou ne peut
+ * — pas être géolocalisé.
+ *
+ * ⚠️ MÊMES RÈGLES QUE `chercherMagasinsProches`, ET LITTÉRALEMENT LES MÊMES
+ * FONCTIONS : `retenirCandidats` pour l'accumulation et la déduplication,
+ * `identitesCoherentes` pour l'ambiguïté, `estCommerceAlimentaire` via
+ * `normaliserLieu` pour le périmètre commercial. Deux copies auraient divergé,
+ * et l'élève aurait vu un magasin par un chemin mais pas par l'autre.
+ *
+ * Seul le TRI diffère, et pour une raison de fond : une recherche par ville n'a
+ * aucun point de départ, donc aucune distance à ordonner.
+ */
+export async function chercherMagasinsParVille(
+  recherche: RechercheVille,
+  options: OptionsRecherche = {},
+): Promise<ResultatRecherche> {
+  const transport = options.transport ?? ((url, init) => fetch(url, init));
+  const timeoutMs = options.timeoutMs ?? OFF_TIMEOUT_MS;
+  const entete = userAgentOff();
+
+  let candidats: readonly MagasinProche[] = [];
+  let magasins: readonly MagasinProche[] = [];
+  let pagesLues = 0;
+  let pagesAmont = 1;
+  let ok = true;
+
+  for (let page = 1; page <= VILLE_PAGES_MAX; page += 1) {
+    const lecture = await lireJson(urlVille(recherche, page), transport, timeoutMs, entete);
+    if (lecture.statut !== "corps") {
+      ok = false;
+      break;
+    }
+    pagesLues = page;
+
+    const enveloppe = (lecture.corps ?? {}) as Enveloppe;
+    const items = Array.isArray(enveloppe.items) ? (enveloppe.items as LieuBrut[]) : null;
+    if (items === null) {
+      ok = false;
+      break;
+    }
+    pagesAmont = typeof enveloppe.pages === "number" ? enveloppe.pages : page;
+
+    // ⚠️ DÉFENSE EN PROFONDEUR, PAS DOUBLON. Le filtre amont a réduit le
+    // domaine ; celui-ci CONFIRME que la réponse respecte bien le pays attendu.
+    // Les deux ne portent d'ailleurs pas sur la même donnée : l'amont filtre le
+    // NOM en toutes lettres par sous-chaîne, nous vérifions le CODE ISO. Si la
+    // source venait à rendre un commerce hors de France malgré le filtre — nom
+    // de pays mal renseigné, homonymie de graphie — il ne passe pas ici.
+    const duPays = items.filter(
+      (i) =>
+        typeof i.osm_address_country_code === "string" &&
+        i.osm_address_country_code.toUpperCase() === PAYS_CODE,
+    );
+
+    candidats = retenirCandidats(duPays, candidats);
+    magasins = magasinsParPertinenceVille(candidats, recherche.ville);
+    if (magasins.length >= VILLE_RESULTATS_CIBLE) break;
+    if (page >= pagesAmont) break;
+  }
+
+  const tronque = ok && (magasins.length > VILLE_RESULTATS_CIBLE || pagesAmont > pagesLues);
+
+  return {
+    ok,
+    magasins: ok ? magasins.slice(0, VILLE_RESULTATS_CIBLE) : [],
+    tronque,
+    pagesLues,
+  };
 }

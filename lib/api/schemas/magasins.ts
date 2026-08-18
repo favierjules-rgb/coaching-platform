@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-import { RAYON_KM_MAX, RAYON_KM_MIN } from "@/lib/nutrition/magasin-proche";
+import {
+  RAYON_KM_MAX,
+  RAYON_KM_MIN,
+  VILLE_LONGUEUR_MAX,
+  VILLE_LONGUEUR_MIN,
+} from "@/lib/nutrition/magasin-proche";
 
 /**
  * COURSES C4.3a — les corps de requête de la découverte des magasins.
@@ -58,3 +63,37 @@ export const choixMagasinBodySchema = z
   .strict();
 
 export type ChoixMagasinBody = z.infer<typeof choixMagasinBodySchema>;
+
+/**
+ * COURSES C4.3b — la recherche manuelle par ville.
+ *
+ * ⚠️ UN POST, COMME LA RECHERCHE GÉOGRAPHIQUE. Une ville n'est pas une
+ * coordonnée GPS, mais c'est tout de même une indication d'endroit : elle n'a
+ * rien à faire dans une chaîne de requête, donc dans les journaux d'accès et
+ * l'historique du navigateur.
+ *
+ * ⚠️ ET IL N'Y A PAS DE CHAMP « CODE POSTAL ». Vérifié le 18/08/2026 sur
+ * `LocationFilter` : l'amont n'expose AUCUN filtre postal. Accepter un tel
+ * champ obligerait soit à mentir, soit à parcourir tout le référentiel — les
+ * deux sont exclus. Le code postal reste AFFICHÉ dans les résultats, il n'est
+ * simplement pas cherchable.
+ *
+ * ⚠️ ET IL N'Y A PLUS DE CHAMP « PAYS » NON PLUS.
+ *
+ * Une première version acceptait `pays?: string` en alpha-2. C'était un faux
+ * support : accepter `BE` laissait croire que ce lot sait chercher en
+ * Belgique, alors qu'il n'a AUCUNE table « code ISO → nom amont » pour le
+ * garantir — et qu'une telle table serait fausse (la Belgique s'écrit
+ * `"België / Belgique / Belgien"` chez la source).
+ *
+ * Le pays est donc une constante SERVEUR, `France` / `FR`. Un corps qui porte
+ * `pays` est un 400, pas un champ ignoré en silence : le `.strict()` s'en
+ * charge. Le multi-pays sera un lot explicite, avec un vrai contrat.
+ */
+export const magasinsParVilleBodySchema = z
+  .object({
+    ville: z.string().trim().min(VILLE_LONGUEUR_MIN).max(VILLE_LONGUEUR_MAX),
+  })
+  .strict();
+
+export type MagasinsParVilleBody = z.infer<typeof magasinsParVilleBodySchema>;

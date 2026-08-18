@@ -204,3 +204,17 @@ export const STORES_SELECT: RateLimitRule = {
   limit: 6,
   windowMs: MINUTE,
 };
+
+/**
+ * COURSES C4.3b — recherche manuelle par ville.
+ *
+ * Même coût amont que la recherche géographique — jusqu'à trois requêtes chez
+ * un service bénévole — mais un geste plus répétable : on corrige une faute de
+ * frappe, on essaie la commune voisine. Quota un peu plus large, même ordre de
+ * grandeur.
+ */
+export const STORES_SEARCH: RateLimitRule = {
+  name: "stores_search",
+  limit: 15,
+  windowMs: MINUTE,
+};

@@ -2,7 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { MagasinProche } from "@/lib/nutrition/magasin-proche";
+import {
+  VILLE_LONGUEUR_MAX,
+  VILLE_LONGUEUR_MIN,
+  villeValide,
+  type MagasinProche,
+} from "@/lib/nutrition/magasin-proche";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { lireMagasinChoisi, type MagasinChoisi } from "@/lib/supabase/magasins";
 
@@ -42,7 +47,13 @@ type Etat =
   | "expire"
   | "aucun_resultat"
   | "erreur"
-  | "succes";
+  | "succes"
+  // ── COURSES C4.3b — la recherche manuelle, ses états à elle ────────────
+  | "ville_saisie"
+  | "ville_chargement"
+  | "ville_aucun_resultat"
+  | "ville_invalide"
+  | "ville_erreur";
 
 /** Le délai laissé au navigateur pour produire une position, avant d'abandonner. */
 const DELAI_POSITION_MS = 10_000;
@@ -60,6 +71,13 @@ export function ChoixMagasinProche({
   const [tronqué, setTronqué] = useState(false);
   const [choixEnCours, setChoixEnCours] = useState<number | null>(null);
   const [choisi, setChoisi] = useState<MagasinChoisi | null>(null);
+  /**
+   * ⚠️ LA VILLE VIT ICI, ET NULLE PART AILLEURS. Aucun `localStorage`, aucun
+   * cookie, aucune colonne : elle disparaît avec le composant. Ce n'est pas une
+   * coordonnée GPS, mais c'est tout de même une indication d'endroit, et rien
+   * dans ce lot n'a besoin de s'en souvenir.
+   */
+  const [ville, setVille] = useState("");
   /** Garde de double tap : deux appuis rapprochés partiraient tous les deux. */
   const rechercheRef = useRef(false);
 
@@ -142,6 +160,46 @@ export function ChoixMagasinProche({
     }
   }, []);
 
+  /**
+   * ⚠️ AUCUNE PERMISSION N'EST DEMANDÉE ICI, et c'est toute la raison d'être de
+   * ce chemin : l'élève qui a refusé la géolocalisation — ou dont l'appareil ne
+   * sait pas le situer — doit pouvoir choisir son magasin quand même.
+   */
+  const chercherParVille = useCallback(async () => {
+    if (rechercheRef.current) return;
+    const saisie = ville.trim();
+    if (!villeValide(saisie)) {
+      setÉtat("ville_invalide");
+      return;
+    }
+    rechercheRef.current = true;
+    setMagasins([]);
+    setTronqué(false);
+    setÉtat("ville_chargement");
+    try {
+      // POST : la ville n'a rien à faire dans une chaîne de requête, donc dans
+      // les journaux d'accès et l'historique du navigateur.
+      const réponse = await fetch("/api/student/stores/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ville: saisie }),
+      });
+      if (!réponse.ok) {
+        setÉtat("ville_erreur");
+        return;
+      }
+      const données = (await réponse.json()) as { magasins?: MagasinProche[]; tronque?: boolean };
+      const trouvés = Array.isArray(données.magasins) ? données.magasins : [];
+      setMagasins(trouvés);
+      setTronqué(données.tronque === true);
+      setÉtat(trouvés.length === 0 ? "ville_aucun_resultat" : "succes");
+    } catch {
+      setÉtat("ville_erreur");
+    } finally {
+      rechercheRef.current = false;
+    }
+  }, [ville]);
+
   const choisir = useCallback(
     async (magasin: MagasinProche) => {
       setChoixEnCours(magasin.opLocationId);
@@ -174,7 +232,8 @@ export function ChoixMagasinProche({
     [onMagasinChoisi],
   );
 
-  const enCours = état === "demande_permission" || état === "chargement";
+  const enCours =
+    état === "demande_permission" || état === "chargement" || état === "ville_chargement";
 
   return (
     <section aria-label="Magasin">
@@ -191,28 +250,89 @@ export function ChoixMagasinProche({
         {enCours ? "Recherche en cours…" : "Trouver un magasin près de moi"}
       </button>
 
+      {/* ── COURSES C4.3b — LE REPLI MANUEL, TOUJOURS DISPONIBLE ──────────
+          ⚠️ IL N'EST PAS CONDITIONNÉ À UN REFUS DE GÉOLOCALISATION. Un élève
+          peut préférer taper sa ville d'emblée — parce qu'il prépare ses
+          courses depuis son bureau, par exemple. Le cacher derrière un échec
+          ferait de la géolocalisation un passage obligé. */}
+      <div>
+        <p>ou</p>
+        <label htmlFor="magasin-ville">Ville</label>
+        <input
+          id="magasin-ville"
+          type="text"
+          value={ville}
+          minLength={VILLE_LONGUEUR_MIN}
+          maxLength={VILLE_LONGUEUR_MAX}
+          autoComplete="off"
+          onChange={(e) => {
+            setVille(e.target.value);
+            if (état === "ville_invalide") setÉtat("ville_saisie");
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void chercherParVille();
+          }}
+        />
+        <button type="button" onClick={() => void chercherParVille()} disabled={enCours}>
+          Rechercher
+        </button>
+      </div>
+
+      {état === "ville_invalide" && (
+        <p role="alert">Entre un nom de ville d’au moins {VILLE_LONGUEUR_MIN} caractères.</p>
+      )}
+      {état === "ville_chargement" && <p role="status">Recherche des magasins…</p>}
+      {/* ⚠️ ZÉRO RÉSULTAT NE VEUT PAS DIRE « IL N'EN EXISTE AUCUN ».
+          Quand `tronque` est vrai, nous n'avons consulté qu'une PORTION du
+          référentiel : la source annonce encore des pages, et notre pagination
+          est bornée. Affirmer l'absence serait affirmer ce que nous n'avons
+          pas mesuré — et l'élève renoncerait à un magasin qui existe. */}
+      {état === "ville_aucun_resultat" && !tronqué && (
+        <p role="status">
+          Aucun magasin connu dans cette ville. Ce n’est pas une erreur : la base de magasins est
+          collaborative et reste incomplète par endroits.
+        </p>
+      )}
+      {état === "ville_aucun_resultat" && tronqué && (
+        <p role="status">
+          Aucun magasin n’a été trouvé dans les premiers résultats consultés. La recherche a été
+          limitée : il en existe peut-être d’autres. Précise le nom de la ville et réessaie.
+        </p>
+      )}
+      {état === "ville_erreur" && (
+        <p role="alert">La recherche n’a pas abouti. Réessaie dans un instant.</p>
+      )}
+
       {état === "demande_permission" && <p role="status">Autorise la localisation pour continuer.</p>}
 
       {état === "permission_refusee" && (
         <p role="status">
-          Localisation refusée. La recherche par ville arrivera dans une prochaine étape ; en
-          attendant, rien n’est enregistré et tu peux réessayer quand tu veux.
+          Localisation refusée — rien n’est enregistré. Tu peux chercher ta ville juste en dessous.
         </p>
       )}
 
       {état === "indisponible" && (
         <p role="status">
-          Ton appareil n’a pas pu donner ta position. La recherche par ville arrivera dans une
-          prochaine étape.
+          Ton appareil n’a pas pu donner ta position. Cherche ta ville juste en dessous.
         </p>
       )}
 
       {état === "expire" && <p role="status">La localisation a mis trop de temps. Réessaie.</p>}
 
-      {état === "aucun_resultat" && (
+      {/* ⚠️ MÊME VÉRITÉ POUR LA RECHERCHE GÉOGRAPHIQUE. C4.3a calculait DÉJÀ
+          `tronque` correctement ; l'écran, lui, l'ignorait dès que la liste
+          était vide. Ce n'est pas un nouveau comportement réseau — c'est le
+          booléen existant enfin dit à l'élève. */}
+      {état === "aucun_resultat" && !tronqué && (
         <p role="status">
           Aucun magasin connu autour de toi. Ce n’est pas une erreur : la base de magasins est
           collaborative et reste incomplète par endroits.
+        </p>
+      )}
+      {état === "aucun_resultat" && tronqué && (
+        <p role="status">
+          Aucun magasin n’a été trouvé dans les premiers résultats consultés. La recherche a été
+          limitée : il en existe peut-être d’autres.
         </p>
       )}
 
@@ -232,8 +352,13 @@ export function ChoixMagasinProche({
                 >
                   <span>{magasin.name}</span>
                   {magasin.brand ? <span>{magasin.brand}</span> : null}
+                  {/* ⚠️ LA DISTANCE N'EST AFFICHÉE QUE SI ELLE EXISTE. Une
+                      recherche par ville n'a aucun point de départ : en
+                      fabriquer une afficherait un nombre que rien ne fonde. Le
+                      code postal, lui, vient de la source. */}
                   <span>
-                    {magasin.city ?? ""} · {magasin.distanceKm.toFixed(1)} km
+                    {[magasin.postcode, magasin.city].filter(Boolean).join(" ")}
+                    {magasin.distanceKm !== null ? ` · ${magasin.distanceKm.toFixed(1)} km` : ""}
                   </span>
                 </button>
               </li>

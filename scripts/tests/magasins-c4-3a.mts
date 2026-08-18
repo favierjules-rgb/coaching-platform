@@ -1213,14 +1213,78 @@ await test("C4.3a-PERIMETRE — ni prix, ni disponibilité, ni conditionnement, 
       .replace(/open[-_]prices/gi, "«source»")
       .replace(/OPEN_PRICES/g, "«SOURCE»");
 
+  /**
+   * ⚠️ UNE SEULE EXEMPTION, NOMMÉE, DATÉE, ET ADOSSÉE À UN CONTRÔLE PLUS FIN.
+   *
+   * `osm_address_city__like` figurait ici comme interdit ABSOLU tant que C4.3a
+   * était seul : le filtre ville n'existait nulle part, et l'interdire prouvait
+   * que la découverte géographique ne s'en servait pas.
+   *
+   * C4.3b introduit la recherche manuelle par ville — et par consigne explicite
+   * il l'introduit DANS CE MÊME adaptateur, pour ne pas créer un second
+   * adaptateur parallèle qui divergerait. Le mot devient donc légitime à UN
+   * endroit précis, et à un seul.
+   *
+   * Retirer purement et simplement la ligne aurait perdu la garantie. On la
+   * remplace par quelque chose de PLUS strict : le mot reste interdit dans les
+   * sept autres fichiers du lot, et le contrôle suivant vérifie qu'à
+   * l'intérieur de l'adaptateur il n'apparaît QUE dans le constructeur d'URL de
+   * la recherche par ville — jamais dans celui de la recherche géographique.
+   */
+  const EXEMPTIONS: ReadonlyArray<readonly [string, string, string]> = [
+    ["osm_address_city__like", "lib/open-prices/locations.ts", "C4.3b — recherche manuelle par ville"],
+  ];
+  const exempte = (fichier: string, mot: string) =>
+    EXEMPTIONS.some(([m, f]) => m === mot && f === fichier);
+
   const coupables: string[] = [];
   for (const [i, source] of LOT_C4_3A.entries()) {
     const code = sansNomDeService(sansProseAffichee(source));
     for (const [mot, lot] of INTERDITS) {
+      if (exempte(NOMS_LOT[i], mot)) continue;
       if (new RegExp(mot.replace("(", "\\("), "i").test(code)) coupables.push(`${NOMS_LOT[i]} : ${mot} (→ ${lot})`);
     }
   }
   assert.deepEqual(coupables, [], `C4.3a a débordé : ${coupables.join(" | ")}`);
+});
+
+await test("C4.3a-PERIMETRE — le filtre ville de C4.3b ne contamine pas la recherche géographique", () => {
+  // ⚠️ CE CONTRÔLE REMPLACE — EN PLUS STRICT — L'INTERDICTION DE FICHIER.
+  // Il ne demande plus « le mot est-il absent du fichier ? » mais « le mot
+  // est-il exactement là où C4.3b avait le droit de le mettre ? ». Une
+  // interdiction de fichier ne dit rien de l'endroit ; celle-ci, si.
+  const corpsDeFonction = (source: string, nom: string): string => {
+    const debut = source.indexOf(`function ${nom}(`);
+    assert.ok(debut >= 0, `${nom} introuvable dans l'adaptateur`);
+    const ouvrante = source.indexOf("{", debut);
+    let profondeur = 0;
+    for (let i = ouvrante; i < source.length; i += 1) {
+      if (source[i] === "{") profondeur += 1;
+      else if (source[i] === "}") {
+        profondeur -= 1;
+        if (profondeur === 0) return source.slice(ouvrante, i + 1);
+      }
+    }
+    assert.fail(`accolade fermante de ${nom} introuvable`);
+  };
+
+  const code = sansCommentaires(ADAPTATEUR);
+
+  // 1. Le constructeur d'URL de C4.3a n'a AUCUN filtre ville.
+  const nearby = corpsDeFonction(code, "urlPage");
+  assert.ok(!nearby.includes("osm_address_city"), "urlPage ne doit porter aucun filtre ville");
+  assert.match(nearby, /radius_km/, "urlPage reste bien le constructeur géographique");
+
+  // 2. Le constructeur d'URL de C4.3b n'a AUCUNE position.
+  const ville = corpsDeFonction(code, "urlVille");
+  assert.match(ville, /osm_address_city__like/, "urlVille est bien le constructeur par ville");
+  assert.ok(!/radius_km/.test(ville), "urlVille ne doit transporter aucun rayon");
+  assert.ok(!/\blat\b|\blon\b/.test(ville), "urlVille ne doit transporter aucune coordonnée");
+
+  // 3. Et le mot n'apparaît nulle part ailleurs dans l'adaptateur : une seule
+  //    occurrence de code, celle de `urlVille`.
+  const occurrences = code.match(/osm_address_city__like/g) ?? [];
+  assert.equal(occurrences.length, 1, "le filtre ville ne doit être construit qu'à un seul endroit");
 });
 
 await test("C4.3a-PERIMETRE — budget-courses.ts et le lot C4.2 sont intacts", () => {

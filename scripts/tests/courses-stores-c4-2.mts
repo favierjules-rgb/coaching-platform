@@ -477,14 +477,35 @@ await test("C4.2-PERIMETRE — aucun code applicatif, aucun réseau, aucune géo
     MODULES_OPEN_PRICES.map(([f]) => f).sort(),
     `module Open Prices non déclaré : ${modulesOpenPrices.join(", ")}`,
   );
-  const ROUTES_MAGASIN: readonly string[] = ["nearby", "select"];
+  // ⚠️ MÊME DOCTRINE POUR LES ROUTES, ET CHAQUE ENTRÉE PORTE SON LOT. Une
+  // route de magasin qui apparaîtrait sans être rattachée à un lot ferait
+  // rougir ce contrôle — c'est sa seule raison d'être. `search` a été ajoutée
+  // le 18/08/2026 par C4.3b (recherche manuelle par ville) ; elle est déclarée
+  // ici, pas tolérée par un joker.
+  const ROUTES_MAGASIN: ReadonlyArray<readonly [string, string]> = [
+    ["nearby", "C4.3a — découverte des magasins proches"],
+    ["search", "C4.3b — recherche manuelle par ville"],
+    ["select", "C4.3a — sélection du magasin"],
+  ];
   const dossierRoutes = new URL("../../app/api/student/stores/", import.meta.url);
   if (existsSync(dossierRoutes)) {
+    const routes = readdirSync(dossierRoutes).sort();
     assert.deepEqual(
-      readdirSync(dossierRoutes).sort(),
-      [...ROUTES_MAGASIN].sort(),
-      "route de magasin non déclarée",
+      routes,
+      ROUTES_MAGASIN.map(([r]) => r).sort(),
+      `route de magasin non déclarée : ${routes.join(", ")}`,
     );
+    // ⚠️ CONTRÔLE SUPPLÉMENTAIRE, AJOUTÉ AVEC L'ENTRÉE : chaque route déclarée
+    // est bien un handler, et rien d'autre. Un dossier de magasin qui
+    // contiendrait un module applicatif au lieu d'un `route.ts` passerait la
+    // vérification de noms ci-dessus sans être une route.
+    for (const [route] of ROUTES_MAGASIN) {
+      assert.deepEqual(
+        readdirSync(new URL(`${route}/`, dossierRoutes)).sort(),
+        ["route.ts"],
+        `${route}/ doit ne contenir que son handler`,
+      );
+    }
   }
 
   // ⚠️ ET LA GARANTIE PROPRE À C4.2 EST INTACTE : rien de tout cela n'est à

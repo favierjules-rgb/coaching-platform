@@ -56,7 +56,13 @@ export interface MagasinProche {
   readonly countryCode: string | null;
   readonly lat: number;
   readonly lon: number;
-  readonly distanceKm: number;
+  /**
+   * ⚠️ `null` QUAND IL N'Y A PAS DE POINT DE DÉPART. `/nearby` calcule et rend
+   * une distance ; la recherche par ville n'en a AUCUNE — il n'existe pas de
+   * position de référence. Fabriquer un nombre depuis « le centre de la ville »
+   * afficherait une précision que rien ne fonde, et l'élève la croirait.
+   */
+  readonly distanceKm: number | null;
 }
 
 /* ── 1. LES BORNES D'ENTRÉE ────────────────────────────────────────────── */
@@ -254,13 +260,18 @@ export function normaliserLieu(lieu: LieuBrut): MagasinProche | null {
   // coordonnée absente.
   const lat = typeof lieu.osm_lat === "number" ? lieu.osm_lat : Number.NaN;
   const lon = typeof lieu.osm_lon === "number" ? lieu.osm_lon : Number.NaN;
-  const distanceKm = typeof lieu.distance_km === "number" ? lieu.distance_km : Number.NaN;
+  // ⚠️ ABSENTE N'EST PAS INVALIDE. `/locations` ne rend pas ce champ : un lieu
+  // sans distance reste parfaitement exploitable, il n'a simplement pas de
+  // distance à afficher.
+  const distanceKm =
+    typeof lieu.distance_km === "number" && Number.isFinite(lieu.distance_km) && lieu.distance_km >= 0
+      ? lieu.distance_km
+      : null;
 
   if (opLocationId === null || osmId === null) return null;
   if (!OSM_TYPES.has(osmType)) return null;
   if (name === null) return null;
   if (!latitudeValide(lat) || !longitudeValide(lon)) return null;
-  if (!Number.isFinite(distanceKm) || distanceKm < 0) return null;
 
   const pays = texteOuNull(lieu.osm_address_country_code);
   return {
@@ -340,7 +351,40 @@ export function retenirCandidats(
  * ⚠️ NI LE NOM NI L'ENSEIGNE N'ENTRENT JAMAIS DANS CE CALCUL : deux commerces
  * d'une même enseigne, avec des identités distinctes, restent deux magasins.
  */
-export function magasinsCoherents(
+/**
+ * Les candidats dont l'identité est SANS AMBIGUÏTÉ — sans tri.
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * ⚠️ LA DÉCOUVERTE DOIT PARLER LE MÊME MODÈLE D'IDENTITÉ QUE LA PERSISTANCE
+ * ────────────────────────────────────────────────────────────────────────────
+ * C4.2 pose DEUX unicités indépendantes : `op_location_id`, et le couple
+ * `(osm_type, osm_id)`. Une déduplication sur le seul `op_location_id`
+ * laisserait passer ceci :
+ *
+ *     lieu A : op 42, WAY/999
+ *     lieu B : op 77, WAY/999
+ *
+ * Les deux seraient proposés à l'élève. Il choisirait A — enregistré. Puis il
+ * changerait d'avis pour B, et la sélection échouerait sur le conflit
+ * d'identité que `upserterMagasin` sait justement détecter. L'élève verrait
+ * une erreur incompréhensible sur un magasin que NOUS lui avons montré.
+ *
+ * ⚠️ ET ON NE TRANCHE PAS À SA PLACE. Devant deux `op_location_id` pour un même
+ * objet OpenStreetMap, rien ne dit lequel est le bon : c'est une incohérence de
+ * la source, et choisir « le premier » ou « le mieux fourni » fabriquerait une
+ * réponse là où il n'y en a pas. Les DEUX variantes sortent des résultats. Le
+ * cas symétrique — un `op_location_id` portant deux identités OSM — est traité
+ * de la même façon, pour la même raison.
+ *
+ * ⚠️ NI LE NOM NI L'ENSEIGNE N'ENTRENT JAMAIS DANS CE CALCUL : deux commerces
+ * d'une même enseigne, avec des identités distinctes, restent deux magasins.
+ *
+ * ⚠️ EXTRAITE DU TRI, PARCE QUE LES DEUX CHEMINS DE DÉCOUVERTE N'ORDONNENT PAS
+ * PAREIL — la géolocalisation par distance, la ville par pertinence — mais
+ * doivent appliquer EXACTEMENT la même règle d'identité. Deux copies auraient
+ * divergé au premier correctif.
+ */
+export function identitesCoherentes(
   candidats: readonly MagasinProche[],
 ): readonly MagasinProche[] {
   const osmParOp = new Map<number, Set<string>>();
@@ -352,10 +396,114 @@ export function magasinsCoherents(
     if (!opParOsm.has(osm)) opParOsm.set(osm, new Set());
     opParOsm.get(osm)!.add(m.opLocationId);
   }
+  return candidats.filter(
+    (m) => osmParOp.get(m.opLocationId)!.size === 1 && opParOsm.get(cleOsm(m))!.size === 1,
+  );
+}
 
-  return candidats
-    .filter((m) => osmParOp.get(m.opLocationId)!.size === 1 && opParOsm.get(cleOsm(m))!.size === 1)
-    .sort((a, b) =>
-      a.distanceKm === b.distanceKm ? a.opLocationId - b.opLocationId : a.distanceKm - b.distanceKm,
-    );
+/** Les magasins cohérents, triés par distance croissante — chemin `/nearby`. */
+export function magasinsCoherents(
+  candidats: readonly MagasinProche[],
+): readonly MagasinProche[] {
+  return [...identitesCoherentes(candidats)].sort((a, b) => {
+    const da = a.distanceKm ?? Number.POSITIVE_INFINITY;
+    const db = b.distanceKm ?? Number.POSITIVE_INFINITY;
+    return da === db ? a.opLocationId - b.opLocationId : da - db;
+  });
+}
+
+/* ── 5. LA RECHERCHE MANUELLE PAR VILLE ────────────────────────────────── */
+
+/**
+ * ⚠️ C4.3b EST UNE RECHERCHE MANUELLE **FRANCE**, ET LE DIT.
+ *
+ * Le projet est francophone et son référentiel nutritionnel est Ciqual : la
+ * première version de la recherche manuelle vise la France. Ce choix est ÉCRIT
+ * ICI, testé, et il n'est PAS négociable par le navigateur — le déduire de la
+ * locale aurait été invisible, intestable, et faux pour un Français en
+ * vacances.
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * DEUX CONSTANTES, DEUX RÔLES, ET SURTOUT PAS UNE TABLE ISO → NOM
+ * ────────────────────────────────────────────────────────────────────────────
+ * `PAYS_NOM_AMONT` est ce qu'on ENVOIE : `osm_address_country__like` filtre sur
+ * le NOM du pays en toutes lettres, pas sur un code. `PAYS_CODE` est ce qu'on
+ * VÉRIFIE au retour, sur le `osm_address_country_code` que la réponse porte.
+ *
+ * Généraliser cela à d'autres pays exigerait une table « code ISO → nom amont »
+ * — et cette table serait FAUSSE. Mesuré le 18/08/2026 : les commerces belges
+ * portent `osm_address_country = "België / Belgique / Belgien"`. « Belgium »
+ * n'y trouve rien, « Belgique » oui, et rien dans un code ISO ne permet de
+ * deviner laquelle des trois graphies la source emploie. Le multi-pays sera un
+ * lot explicite, avec un vrai contrat de correspondance. Pas une devinette
+ * glissée ici.
+ */
+export const PAYS_CODE = "FR";
+export const PAYS_NOM_AMONT = "France";
+
+/** Assez pour « Ax », trop peu pour un caractère isolé qui ramènerait tout. */
+export const VILLE_LONGUEUR_MIN = 2;
+/** Le plus long nom de commune de France en fait 45 ; 80 laisse de la marge. */
+export const VILLE_LONGUEUR_MAX = 80;
+
+/** Mêmes bornes de pagination que la découverte géographique, mêmes raisons. */
+export const VILLE_TAILLE_PAGE = 100;
+export const VILLE_PAGES_MAX = 3;
+export const VILLE_RESULTATS_CIBLE = 20;
+
+export function villeValide(valeur: unknown): boolean {
+  if (typeof valeur !== "string") return false;
+  const nette = valeur.trim();
+  return nette.length >= VILLE_LONGUEUR_MIN && nette.length <= VILLE_LONGUEUR_MAX;
+}
+
+/**
+ * La forme comparable d'un nom de ville : minuscules, sans accents, espaces
+ * réduits.
+ *
+ * ⚠️ ELLE NE SERT QU'À COMPARER, JAMAIS À INTERROGER. Ce qui part chez l'amont
+ * est la saisie de l'élève telle quelle — le filtre y est déjà insensible à la
+ * casse (`icontains`), et lui envoyer une chaîne dépouillée de ses accents
+ * ferait manquer les villes que la source orthographie correctement.
+ */
+export function normaliserVille(valeur: string): string {
+  return valeur
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+/**
+ * Les magasins cohérents d'une recherche par ville, ordonnés.
+ *
+ * ⚠️ AUCUN SCORE DE PERTINENCE FABRIQUÉ. Deux rangs seulement, et le critère du
+ * premier est vérifiable à l'œil : la ville du magasin est-elle EXACTEMENT
+ * celle qui a été saisie ?
+ *
+ * Le second rang existe parce que l'amont fait un `icontains` : chercher
+ * « Valence » ramène aussi « Bourg-lès-Valence » — mesuré le 18/08/2026, 6
+ * résultats dont 2. Les jeter serait présomptueux : ce sont de vrais commerces,
+ * et l'élève cherche peut-être celui-là. On les range après, sans prétendre
+ * savoir lequel il veut.
+ *
+ * À rang égal, l'ordre est déterministe — nom puis identifiant — pour que deux
+ * recherches identiques donnent deux listes identiques.
+ */
+export function magasinsParPertinenceVille(
+  candidats: readonly MagasinProche[],
+  villeCherchee: string,
+): readonly MagasinProche[] {
+  const cible = normaliserVille(villeCherchee);
+  const rang = (m: MagasinProche) => (m.city !== null && normaliserVille(m.city) === cible ? 0 : 1);
+  return [...identitesCoherentes(candidats)].sort((a, b) => {
+    const ra = rang(a);
+    const rb = rang(b);
+    if (ra !== rb) return ra - rb;
+    const na = normaliserVille(a.name);
+    const nb = normaliserVille(b.name);
+    if (na !== nb) return na < nb ? -1 : 1;
+    return a.opLocationId - b.opLocationId;
+  });
 }
