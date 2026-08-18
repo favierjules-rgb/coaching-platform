@@ -176,3 +176,31 @@ export const FOOD_BRIDGE_SEARCH: RateLimitRule = {
   limit: 12,
   windowMs: MINUTE,
 };
+
+/**
+ * COURSES C4.3a — recherche de magasins proches.
+ *
+ * ⚠️ CHAQUE APPEL DÉCLENCHE JUSQU'À TROIS REQUÊTES chez un service bénévole,
+ * et le geste produit est rare : on choisit son magasin une fois, puis on en
+ * change de temps en temps. Un quota serré est donc sans effet sur l'usage
+ * normal, et il empêche qu'un composant en boucle — ou un compte détourné —
+ * fasse de SETH un robot d'aspiration d'Open Prices.
+ */
+export const STORES_NEARBY: RateLimitRule = {
+  name: "stores_nearby",
+  limit: 10,
+  windowMs: MINUTE,
+};
+
+/**
+ * COURSES C4.3a — enregistrement du magasin choisi.
+ *
+ * Plus serré encore : le choix relit la fiche chez l'amont PUIS écrit dans le
+ * référentiel partagé. C'est la seule route par laquelle un élève fait entrer
+ * une ligne dans `stores`.
+ */
+export const STORES_SELECT: RateLimitRule = {
+  name: "stores_select",
+  limit: 6,
+  windowMs: MINUTE,
+};

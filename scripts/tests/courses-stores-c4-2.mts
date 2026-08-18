@@ -456,24 +456,44 @@ await test("C4.2-PERIMETRE — la migration n'introduit rien qui appartienne à 
 });
 
 await test("C4.2-PERIMETRE — aucun code applicatif, aucun réseau, aucune géolocalisation", () => {
-  // C4.2 est un lot de SCHÉMA. Il n'a ni route, ni composant, ni adaptateur :
-  // c'est C4.3a qui fera entrer un magasin dans la table, et lui seul parlera
-  // à Open Prices. Ces chemins ne doivent pas exister encore.
-  const chemins = [
-    "../../lib/open-prices/locations.ts",
-    "../../lib/open-prices/nearby.ts",
-    "../../app/api/student/stores",
-    "../../app/api/student/store",
+  // ⚠️ CE CONTRÔLE A CHANGÉ DE FORME, PAS DE FORCE — et le motif est le même
+  // que pour `G-07` de C3 et `G-06` de C4.1 quand `stores` est apparue.
+  //
+  // Il disait : « ces chemins n'existent pas encore ». C'était vrai le jour où
+  // C4.2 a été écrit, et c'est devenu faux quand C4.3a a livré la découverte.
+  // La propriété RÉELLE que C4.2 garantit n'a pas bougé pour autant : SON lot à
+  // lui n'a introduit aucun code applicatif. On passe donc d'un « rien
+  // n'existe » à une LISTE NOMMÉE, doctrine de CONTRACT-07 — jamais un joker.
+  //
+  // Un troisième module Open Prices, ou une route de magasin non déclarée, fera
+  // toujours rougir : c'est exactement ce qu'on veut de ce garde-fou.
+  const MODULES_OPEN_PRICES: ReadonlyArray<readonly [string, string]> = [
+    ["apercu.ts", "C4.1 — aperçu de prix pour la curation"],
+    ["locations.ts", "C4.3a — découverte des magasins proches"],
   ];
-  for (const chemin of chemins) {
-    assert.ok(!existsSync(new URL(chemin, import.meta.url)), `${chemin} appartient à C4.3a, pas à C4.2`);
+  const modulesOpenPrices = readdirSync(new URL("../../lib/open-prices/", import.meta.url)).sort();
+  assert.deepEqual(
+    modulesOpenPrices,
+    MODULES_OPEN_PRICES.map(([f]) => f).sort(),
+    `module Open Prices non déclaré : ${modulesOpenPrices.join(", ")}`,
+  );
+  const ROUTES_MAGASIN: readonly string[] = ["nearby", "select"];
+  const dossierRoutes = new URL("../../app/api/student/stores/", import.meta.url);
+  if (existsSync(dossierRoutes)) {
+    assert.deepEqual(
+      readdirSync(dossierRoutes).sort(),
+      [...ROUTES_MAGASIN].sort(),
+      "route de magasin non déclarée",
+    );
   }
-  // Et aucun fichier du dépôt n'a gagné un appel vers Open Prices dans ce lot :
-  // le seul module qui connaît ce domaine reste celui de C4.1.
+
+  // ⚠️ ET LA GARANTIE PROPRE À C4.2 EST INTACTE : rien de tout cela n'est à
+  // lui. Sa migration ne nomme aucun module, aucune route, aucun composant.
   const APERCU = lire("../../lib/open-prices/apercu.ts");
   assert.ok(APERCU.includes("prices.openfoodfacts.org"), "le module C4.1 doit rester intact");
-  const modulesOpenPrices = readdirSync(new URL("../../lib/open-prices/", import.meta.url)).sort();
-  assert.deepEqual(modulesOpenPrices, ["apercu.ts"], "C4.2 ne doit ajouter aucun module Open Prices");
+  for (const etranger of ["open-prices", "locations", "nearby", "route.ts", "fetch("]) {
+    assert.ok(!MIGRATION.includes(etranger), `la migration C4.2 nomme ${etranger}`);
+  }
 });
 
 await test("C4.2-PERIMETRE — budget-courses.ts est SCELLÉ, à l'octet près", () => {
