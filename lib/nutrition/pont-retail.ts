@@ -309,3 +309,72 @@ export function apercuAbsent(gtin: string, reponseComplete: boolean): ApercuPrix
     nombreCommunity: 0,
   };
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// 5. COURSES C4.1b — DIRE UNE PANNE AMONT SANS LA CONFONDRE AVEC UNE ABSENCE
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * COURSES C4.1b — CE QUE L'ÉCRAN DIT QUAND OPEN FOOD FACTS NE RÉPOND PAS.
+ *
+ * ════════════════════════════════════════════════════════════════════════════
+ * LE DÉFAUT MESURÉ, ET POURQUOI IL COÛTAIT CHER
+ * ════════════════════════════════════════════════════════════════════════════
+ * Le 18/08/2026, deux fois de suite depuis la Preview :
+ *
+ *   [OFF_CIQUAL] upstream_non_ok code=32140 status=503 durationMs=607
+ *
+ * …à la minute où le même code Ciqual répondait 200 en 0,389 s depuis un poste
+ * de travail. L'écran affichait « La recherche de candidats a échoué. » — une
+ * phrase qui ne dit ni ce qui s'est passé, ni quoi faire, ni surtout que RIEN
+ * n'a été enregistré.
+ *
+ * ⚠️ LE RISQUE N'EST PAS COSMÉTIQUE. Un administrateur qui voit un écran vide
+ * et un message flou conclut « il n'y a pas de candidat » et pose une décision
+ * de curation — `unsupported`, `needs_review`. Cette décision serait FAUSSE,
+ * écrite en base, et indiscernable d'une vraie six mois plus tard. Une panne
+ * de l'amont ne doit jamais pouvoir se transformer en fait durable.
+ *
+ * ⚠️ AUCUN NOUVEAU CODE D'ERREUR N'EST INVENTÉ. `OFF_UNAVAILABLE`,
+ * `OFF_RATE_LIMITED` et `OFF_INVALID_RESPONSE` existent déjà et suffisent : ce
+ * qui manquait n'était pas un code, c'était une PHRASE par code.
+ *
+ * ⚠️ ET CHAQUE PHRASE PORTE LES TROIS MÊMES INFORMATIONS : ce qui se passe,
+ * qu'aucune NOUVELLE décision n'a été enregistrée, et quoi faire. La
+ * deuxième est la plus importante — c'est elle qui empêche la décision
+ * hâtive.
+ *
+ * ⚠️ « NOUVELLE » N'EST PAS UN ADOUCISSEMENT, C'EST UNE PRÉCISION. Un
+ * aliment peut porter une décision de curation ANTÉRIEURE, parfaitement
+ * valide, dans `food_catalog_retail_review`. Écrire « aucune décision n'a
+ * été enregistrée » laisserait croire que cet échec a effacé quelque chose,
+ * ou qu'aucune décision n'existe pour cet aliment. Ce que nous savons est
+ * plus étroit, et c'est tout ce que nous devons dire : CETTE tentative n'a
+ * rien écrit.
+ */
+export const MESSAGE_PANNE_OFF: Record<
+  "OFF_UNAVAILABLE" | "OFF_RATE_LIMITED" | "OFF_INVALID_RESPONSE",
+  string
+> = {
+  OFF_UNAVAILABLE:
+    "Open Food Facts est temporairement indisponible. Aucune nouvelle décision n’a été enregistrée. Réessaie plus tard.",
+  OFF_RATE_LIMITED:
+    "Open Food Facts limite temporairement nos recherches. Aucune nouvelle décision n’a été enregistrée. Réessaie dans une minute.",
+  OFF_INVALID_RESPONSE:
+    "Open Food Facts a renvoyé une réponse inexploitable. Aucune nouvelle décision n’a été enregistrée. Réessaie plus tard.",
+};
+
+/**
+ * La phrase à afficher pour un code d'erreur amont — ou `null` si le code
+ * n'est pas une panne de service.
+ *
+ * ⚠️ `null` PLUTÔT QU'UNE PHRASE PAR DÉFAUT. Un code inconnu doit retomber sur
+ * le message générique de l'écran, pas hériter d'une explication rassurante
+ * qui pourrait être fausse.
+ */
+export function messagePanneOff(code: string | undefined | null): string | null {
+  if (typeof code !== "string") return null;
+  return code in MESSAGE_PANNE_OFF
+    ? MESSAGE_PANNE_OFF[code as keyof typeof MESSAGE_PANNE_OFF]
+    : null;
+}

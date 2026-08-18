@@ -4,7 +4,7 @@ import { useCallback, useState } from "react";
 
 import { FoodSearchPicker } from "@/components/admin/FoodSearchPicker";
 import { NBSP } from "@/lib/nutrition/basis-points";
-import type { EtatRapprochement, StatutRevue } from "@/lib/nutrition/pont-retail";
+import { type EtatRapprochement, type StatutRevue, messagePanneOff } from "@/lib/nutrition/pont-retail";
 import type { CibleAliment } from "@/lib/supabase/food-lists";
 
 /**
@@ -102,10 +102,27 @@ export function PontRetailAdmin() {
         `/api/admin/food-bridge/candidates?catalogFoodId=${encodeURIComponent(catalogFoodId)}`,
         { cache: "no-store" },
       );
-      const corps = (await reponse.json()) as ReponseCandidats & { error?: string };
+      const corps = (await reponse.json()) as ReponseCandidats & {
+        error?: string;
+        code?: string;
+      };
       if (!reponse.ok) {
         setDonnees(null);
-        setMessage({ ton: "ko", texte: corps.error ?? "Recherche impossible." });
+        // ⚠️ LE MESSAGE SE CHOISIT SUR LE CODE, PAS SUR LA PHRASE DU SERVEUR.
+        //
+        // La route rend déjà `code: "OFF_UNAVAILABLE" | "OFF_RATE_LIMITED" |
+        // "OFF_INVALID_RESPONSE"` — l'information existait, l'écran ne la
+        // lisait pas et affichait « La recherche de candidats a échoué. » pour
+        // les trois. Mesuré le 18/08/2026 : un 503 amont ressemblait alors,
+        // à l'écran, à une absence de candidats. Un administrateur pouvait en
+        // conclure « hors périmètre » et l'écrire en base.
+        //
+        // Le repli générique reste pour tout code inattendu : mieux vaut une
+        // phrase vague qu'une explication rassurante et fausse.
+        setMessage({
+          ton: "ko",
+          texte: messagePanneOff(corps.code) ?? corps.error ?? "Recherche impossible.",
+        });
         return;
       }
       setDonnees(corps);
@@ -258,6 +275,25 @@ export function PontRetailAdmin() {
                   </>
                 )}
               </p>
+
+              {/*
+                ⚠️ ZÉRO CANDIDAT SE DIT, IL NE SE DEVINE PAS.
+                Sans cette phrase, une réponse parfaitement valide — la source
+                ne connaît rien pour ce code, cas mesuré sur le 22000 « Oeuf
+                cru », count 0 — se manifestait par une liste vide et un
+                discret « 0 affiché(s) ». À l'œil, indiscernable d'un écran qui
+                n'a pas fini de charger, ou d'une panne. Or c'est le contraire
+                d'une panne : c'est une réponse, et elle est exacte.
+                ⚠️ ET LE VOCABULAIRE EST DÉLIBÉRÉMENT CELUI DE L'ABSENCE, jamais
+                celui de l'incident : pas « indisponible », pas « réessaie ».
+              */}
+              {donnees.candidats.length === 0 && (
+                <p className="text-sm text-muted-foreground" role="status">
+                  {donnees.totalOff === 0
+                    ? "Aucun candidat : la source ne publie aucun produit pour ce code Ciqual en France."
+                    : "Aucun candidat retenu : les produits trouvés pour ce code ne sont pas importables (voir ci-dessous)."}
+                </p>
+              )}
 
               <ul className="flex flex-col gap-2">
                 {donnees.candidats.map((candidat) => (

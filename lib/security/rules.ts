@@ -159,21 +159,62 @@ export const FOOD_PRODUCT_SEARCH_LOCAL: RateLimitRule = {
 
 /**
  * COURSES C4.1 — recherche de candidats par code Ciqual (administration du
- * pont produit).
+ * pont produit). Quota RESSERRÉ par C4.1b, de 12 à 6 par minute.
  *
  * Un appel de curation déclenche DEUX sorties : une vers Open Food Facts
  * (`/api/v2/search`) et une ou plusieurs vers Open Prices. Le quota est donc
  * plus serré que celui de la recherche texte, alors même que l'appelant est
- * administrateur : le quota d'Open Food Facts est celui du SERVEUR, partagé par
- * tous les élèves, et une session de curation un peu vive ne doit pas faire
- * bannir l'application pendant qu'un élève scanne son petit-déjeuner.
+ * administrateur : les recherches de plusieurs utilisateurs de l'application
+ * contribuent à NOTRE trafic vers Open Food Facts, et une session de curation
+ * un peu vive ne doit pas ajouter inutilement de pression sur une source
+ * bénévole pendant qu'un élève scanne son petit-déjeuner.
+ *
+ * ⚠️ FORMULÉ AINSI À DESSEIN. Décrire un compteur amont unique, ou une adresse
+ * unique côté sortie, supposerait des faits que nous n'avons pas mesurés et
+ * que l'egress dynamique de Vercel rend douteux. Ce que nous savons est plus
+ * simple : notre trafic s'additionne, et le modérer est de notre ressort.
+ *
+ * ════════════════════════════════════════════════════════════════════════════
+ * ⚠️ CE QUE CE GARDE-FOU PROTÈGE — ET CE QU'IL NE PROTÈGE PAS
+ * ════════════════════════════════════════════════════════════════════════════
+ * Il serait confortable de présenter ce quota comme une protection de l'amont.
+ * Ce serait FAUX, et le croire ferait chercher ailleurs le jour où l'amont
+ * refusera quand même. Trois limites, mesurées dans `consumeRateLimit` :
+ *
+ *   1. LA PORTÉE EST PAR ADMINISTRATEUR, PAS GLOBALE. La clé est
+ *      `rl:food_bridge_search:<user.id>` : deux comptes d'administration
+ *      consomment deux compteurs distincts, et l'amont voit la somme.
+ *
+ *   2. SANS UPSTASH, LE COMPTEUR EST EN MÉMOIRE — DONC PAR INSTANCE.
+ *      `consumeRateLimit` n'utilise le magasin partagé que si
+ *      `UPSTASH_REDIS_REST_URL` / `_TOKEN` sont configurées ; sinon il retombe
+ *      sur `consumeFromMemory`. En serverless, chaque instance froide repart
+ *      de zéro : le quota réel peut être un multiple de 6 par minute.
+ *
+ *   3. LE QUOTA LOCAL NE BORNE PAS TOUTES LES PROTECTIONS AMONT. Open Food
+ *      Facts applique des limites par IP et peut également appliquer des
+ *      protections globales, indépendantes de l'appelant. Par ailleurs
+ *      l'egress de Vercel est dynamique. Un quota par administrateur, chez
+ *      nous, ne garantit donc pas qu'une requête sera acceptée en face.
+ *
+ *      Fait mesuré le 18/08/2026 : un 503 HTML a été observé sur le chemin
+ *      Vercel → Open Food Facts pour le code Ciqual 32140, à la minute où un
+ *      poste de travail obtenait 200 sur la même requête. ⚠️ LA RAISON DE CE
+ *      503 RESTE INCONNUE — lui attribuer une cause précise serait une
+ *      hypothèse, pas une mesure, et une hypothèse écrite en commentaire finit
+ *      toujours par être relue comme un fait.
+ *
+ * Ce quota est donc un frein à NOTRE emballement, pas un contrat avec l'amont.
+ * C'est utile — c'est ce qui empêche une session de curation de marteler une
+ * source bénévole — et c'est tout ce que c'est.
  *
  * `failClosed` reste faux, comme pour les autres recherches : refuser une
- * curation ne protège rien, et l'administrateur réessaiera.
+ * curation quand le compteur est injoignable ne protège rien, ça empêche
+ * seulement de travailler, et l'administrateur réessaiera.
  */
 export const FOOD_BRIDGE_SEARCH: RateLimitRule = {
   name: "food_bridge_search",
-  limit: 12,
+  limit: 6,
   windowMs: MINUTE,
 };
 
