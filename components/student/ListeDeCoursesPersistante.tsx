@@ -8,6 +8,8 @@ import { libellePeriode, type PeriodeCourses } from "@/lib/nutrition/periode-cou
 import { useListePersistante } from "@/hooks/useListePersistante";
 import { useBudgetCourses } from "@/hooks/useBudgetCourses";
 import { BlocBudget } from "@/components/student/BlocBudget";
+import { BlocMinimumObserve } from "@/components/student/BlocMinimumObserve";
+import { useBudgetObserve } from "@/hooks/useBudgetObserve";
 import { COLOR_STYLES } from "@/lib/ui/color-keys";
 
 /**
@@ -38,6 +40,18 @@ export function ListeDeCoursesPersistante({
   // prix n'ont pas la même cadence, et une panne de prix ne doit pas faire
   // disparaître la liste.
   const argent = useBudgetCourses(etat.liste, etat.lignes, etat.recharger);
+  // COURSES C4.6 — le MINIMUM OBSERVÉ, dans un troisième hook, et pour la même
+  // raison qui avait séparé le second du premier : une cadence différente. Les
+  // relevés Open Prices se lisent une fois par ouverture de liste, pas à chaque
+  // case cochée — et une panne de l'amont ne doit faire disparaître ni la
+  // liste, ni l'estimation C3.
+  //
+  // ⚠️ LES DEUX BLOCS COEXISTENT, ET NE SE REMPLACENT PAS. « Estimation » (C3,
+  // saisie à la main, proportionnelle) et « minimum observé » (C4, relevés
+  // réels, conditionnement réel) répondent à deux questions différentes. Faire
+  // retomber l'un sur l'autre quand il manque produirait un nombre dont
+  // personne ne saurait dire ce qu'il vaut.
+  const observe = useBudgetObserve(etat.liste?.id ?? null);
   const [ouvertAjout, setOuvertAjout] = useState(false);
 
   const libelleBouton = useMemo(() => {
@@ -91,6 +105,22 @@ export function ListeDeCoursesPersistante({
           budget={argent.budget}
           enCours={argent.enCours}
           onDefinirBudget={argent.definirBudget}
+        />
+      )}
+
+      {/*
+        COURSES C4.6 — LE MINIMUM OBSERVÉ, SOUS L'ESTIMATION ET JAMAIS À SA
+        PLACE. Le bloc s'affiche même en panne : il dit alors qu'il ne sait
+        pas, ce qui vaut mieux qu'une absence silencieuse dont l'élève
+        conclurait qu'aucun prix n'existe.
+      */}
+      {etat.liste !== null && (
+        <BlocMinimumObserve
+          budget={observe.budget}
+          comparaison={observe.comparaison}
+          magasinChoisi={observe.magasinChoisi}
+          chargement={observe.chargement}
+          ok={observe.ok}
         />
       )}
 

@@ -259,3 +259,22 @@ export const STORES_SEARCH: RateLimitRule = {
   limit: 15,
   windowMs: MINUTE,
 };
+
+/**
+ * COURSES C4.6 — le minimum observé d'une liste de courses.
+ *
+ * L'appel le plus COÛTEUX du lot Courses côté amont : une liste de vingt
+ * articles bien curés peut porter cinquante code-barres, donc plusieurs lots de
+ * sept, chacun jusqu'à trois pages. Un écran qui se rechargerait à chaque coche
+ * inonderait un service bénévole pour une information qui bouge de quelques
+ * centimes par mois.
+ *
+ * ⚠️ MÊME PORTÉE QUE LES AUTRES RÈGLES DE CE FICHIER : par utilisateur, et en
+ * mémoire par instance sans Upstash. Ce compteur borne NOTRE politesse, pas les
+ * protections amont.
+ */
+export const OBSERVED_PRICES: RateLimitRule = {
+  name: "observed_prices",
+  limit: 6,
+  windowMs: MINUTE,
+};
