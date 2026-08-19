@@ -1,3 +1,5 @@
+import type { CouvertureMagasin } from "@/lib/nutrition/couverture-magasin";
+
 /**
  * COURSES C4.4 — LES PRIX OBSERVÉS, EN LOGIQUE PURE.
  *
@@ -433,9 +435,36 @@ export function trierObservations(
  * C'est exactement la distinction `aucun` / `indetermine` de `StatutApercu` en
  * C4.1, appliquée ici à l'échelle de la ligne de courses. Trois phrases
  * différentes, trois états.
+ *
+ * ════════════════════════════════════════════════════════════════════════════
+ * ⚠️ ET UN SEPTIÈME, EN C4.3c : `magasin_sans_couverture_prix`.
+ * ════════════════════════════════════════════════════════════════════════════
+ * L'élève A choisi un magasin. Ce magasin EXISTE — il vient d'OpenStreetMap,
+ * il a un nom, une adresse, des coordonnées. Simplement, Open Prices ne le
+ * connaît pas : personne n'y a encore relevé un prix.
+ *
+ * Il ne se confond avec AUCUN des six autres, et chacune des confusions
+ * possibles produit une phrase fausse à l'écran :
+ *
+ *   - `aucun_magasin` dirait « choisissez un magasin » à quelqu'un qui vient
+ *     d'en choisir un. Il chercherait ce qu'il a mal fait, et ne trouverait
+ *     rien — parce qu'il n'a rien fait de mal ;
+ *   - `aucun_releve` dirait « ce magasin n'a pas de prix pour VOS articles »,
+ *     ce qui laisse croire qu'un autre article en aurait. Non : ce magasin n'a
+ *     de prix pour RIEN, et jamais un seul article n'a été interrogé ;
+ *   - `indisponible` dirait « réessayez plus tard ». Rien n'est en panne, et
+ *     réessayer dans une heure donnera exactement le même résultat ;
+ *   - `indetermine` dirait « nous n'avons pas tout vu ». Nous avons tout vu :
+ *     il n'y a pas de pont, c'est un fait établi, pas une borne de lecture.
+ *
+ * ⚠️ ET CE N'EST PAS UN CAS RARE — C'EST LE CAS ORDINAIRE. Mesuré à Toulon :
+ * DEUX lieux Open Prices pour ~180 000 habitants. Traiter ce cas comme une
+ * anomalie reviendrait à traiter la quasi-totalité des magasins français comme
+ * des anomalies.
  */
 export type EtatPrixObserves =
   | "aucun_magasin"
+  | "magasin_sans_couverture_prix"
   | "aucun_produit_relie"
   | "aucun_releve"
   | "indetermine"
@@ -479,6 +508,8 @@ export const MAX_OBSERVATIONS_PAGES = 3;
  * L'état à afficher, dérivé dans un ORDRE QUI EST LA RÈGLE.
  *
  *   1. pas de magasin → on n'a rien demandé à personne, et c'est normal ;
+ *   1bis. magasin choisi mais SANS PONT Open Prices → il n'y a rien à
+ *      interroger, et ce n'est ni une panne ni une absence de prix ;
  *   2. aucun code-barres relié → l'aliment n'a pas encore de pont. Ce n'est
  *      PAS une erreur, et surtout pas une invitation à en fabriquer un ;
  *   3. lecture en panne → `indisponible`, et JAMAIS `aucun_releve` ;
@@ -494,7 +525,12 @@ export const MAX_OBSERVATIONS_PAGES = 3;
  * range l'article dans sa tête comme introuvable.
  */
 export function etatPrixObserves(params: {
-  readonly opLocationId: number | null;
+  /**
+   * ⚠️ UNE COUVERTURE, PLUS UN `number | null`. C4.3c a supprimé l'ambiguïté à
+   * la source : « pas de magasin » et « magasin sans pont » ne partagent plus
+   * une valeur. Cette fonction ne DEVINE donc plus rien — elle traduit.
+   */
+  readonly couverture: CouvertureMagasin;
   readonly gtins: readonly string[];
   readonly lecture: LectureObservations | null;
 }): ResultatPrixObserves {
@@ -505,7 +541,17 @@ export function etatPrixObserves(params: {
     raison: null,
   };
 
-  if (params.opLocationId === null) return { etat: "aucun_magasin", ...vide };
+  if (params.couverture.etat === "aucun_magasin") return { etat: "aucun_magasin", ...vide };
+
+  // ⚠️ AVANT `aucun_produit_relie`, ET CET ORDRE EST LA RÈGLE. Sans pont, la
+  // question « cet aliment a-t-il des codes-barres reliés ? » n'a pas encore
+  // lieu d'être posée : même parfaitement curé, il n'y aurait personne à
+  // interroger. Inverser les deux accuserait la curation d'un manque qui vient
+  // du magasin.
+  if (params.couverture.etat === "magasin_sans_couverture_prix") {
+    return { etat: "magasin_sans_couverture_prix", ...vide };
+  }
+
   if (params.gtins.length === 0) return { etat: "aucun_produit_relie", ...vide };
 
   const lecture = params.lecture;

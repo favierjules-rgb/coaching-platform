@@ -1,3 +1,5 @@
+import { AUCUN_MAGASIN, type CouvertureMagasin } from "@/lib/nutrition/couverture-magasin";
+import { typeOsmDepuis } from "@/lib/nutrition/magasins-osm";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { ProduitDirect, ProduitRelie } from "@/lib/nutrition/prix-observes";
@@ -132,40 +134,82 @@ export async function lireGtinsDeLaListe(
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
- * `stores.op_location_id` du magasin actuellement choisi par l'élève — ou
- * `null` s'il n'en a pas choisi.
+ * La COUVERTURE PRIX du magasin choisi par l'élève — trois cas nommés.
  *
- * ⚠️ UNE FONCTION NEUVE PLUTÔT QU'UN CHAMP AJOUTÉ À `MagasinChoisi`. Ce type
- * sert l'écran de C4.3, éprouvé ; y greffer une colonne ferait porter à un
- * lot terminé le risque d'un lot en cours. La requête supplémentaire est le
- * prix d'une frontière nette.
+ * ════════════════════════════════════════════════════════════════════════════
+ * ⚠️ CETTE FONCTION REMPLACE `lireOpLocationIdDuMagasinChoisi(): number | null`
+ * ════════════════════════════════════════════════════════════════════════════
+ * L'ancienne rendait un `null` qui portait DEUX faits : « aucun magasin choisi »
+ * et « magasin choisi, mais inconnu d'Open Prices ». Tant que
+ * `stores.op_location_id` était NOT NULL, le second cas était impossible et
+ * l'ambiguïté restait théorique. C4.3c rend la colonne nullable, et le second
+ * cas devient la SITUATION ORDINAIRE — mesuré à Toulon : deux lieux Open Prices
+ * pour toute la ville.
  *
- * ⚠️ `null` ICI VEUT DIRE « PAS DE MAGASIN », ET RIEN D'AUTRE. Il ne veut pas
- * dire « pas de prix » : c'est `etatPrixObserves` qui en tire `aucun_magasin`,
- * un état qui invite à choisir un magasin plutôt qu'à conclure à une absence.
+ * À partir de là, un `number | null` obligerait C4.4, puis C4.6, puis l'écran,
+ * à redeviner chacun de son côté lequel des deux faits s'applique. Le type
+ * discriminé rend cette erreur impossible à écrire.
  *
- * ⚠️ `op_location_id` EST UN `bigint`. Il arrive en `number` par PostgREST et
- * les identifiants observés sont de l'ordre du millier ; on refuse tout ce qui
- * n'est pas un entier sûr plutôt que de laisser filer une valeur tronquée dans
- * une URL.
+ * ⚠️ UNE LECTURE QUI ÉCHOUE REND `aucun_magasin`, ET C'EST UNE LIMITE CONNUE,
+ * PAS UN CHOIX CONFORTABLE. Le contrat de `student_selected_store` est « zéro
+ * ou une ligne » : une erreur PostgREST ici ne se distingue pas, à ce niveau,
+ * d'une absence de sélection. Ce qui compte, et qui est garanti, c'est qu'elle
+ * ne rende JAMAIS `magasin_ponte` — donc qu'aucune panne ne puisse se traduire
+ * par une interrogation d'Open Prices sur un identifiant inventé.
+ *
+ * ⚠️ `op_location_id` EST UN `bigint`. Il arrive en `number` ou en `string`
+ * selon PostgREST ; tout ce qui n'est pas un entier sûr STRICTEMENT POSITIF est
+ * traité comme une absence de pont — jamais laissé filer, tronqué, dans une URL.
  */
-export async function lireOpLocationIdDuMagasinChoisi(
+export async function lireCouvertureDuMagasinChoisi(
   supabase: TypedSupabaseClient,
   studentId: string,
-): Promise<number | null> {
+): Promise<CouvertureMagasin> {
   const { data, error } = await supabase
     .from("student_selected_store")
-    .select("stores (op_location_id)")
+    .select("store_id, stores (op_location_id, osm_type, osm_id)")
     .eq("student_id", studentId)
     .maybeSingle();
 
-  if (error || !data) return null;
-  const ligne = data as unknown as { stores: { op_location_id: unknown } | null };
-  const brut = ligne.stores?.op_location_id;
-  if (typeof brut === "number" && Number.isSafeInteger(brut)) return brut;
+  if (error || !data) return AUCUN_MAGASIN;
+
+  const ligne = data as unknown as {
+    store_id: unknown;
+    stores: { op_location_id: unknown; osm_type: unknown; osm_id: unknown } | null;
+  };
+
+  const storeId = typeof ligne.store_id === "string" ? ligne.store_id : "";
+  const magasin = ligne.stores;
+  if (storeId === "" || magasin === null) return AUCUN_MAGASIN;
+
+  // ⚠️ L'IDENTITÉ OSM EST OBLIGATOIRE, MÊME SANS PONT. C'est elle qui permettra
+  // de retenter le pont plus tard sans redemander à l'élève de choisir. Une
+  // ligne de `stores` sans identité OSM valide n'est pas exploitable par C4.3c :
+  // on la traite comme une absence de magasin plutôt que d'en fabriquer une.
+  const osmType = typeOsmDepuis(magasin.osm_type);
+  const osmId = entierSurPositif(magasin.osm_id);
+  if (osmType === null || osmId === null) return AUCUN_MAGASIN;
+
+  const opLocationId = entierSurPositif(magasin.op_location_id);
+  if (opLocationId === null) {
+    return { etat: "magasin_sans_couverture_prix", storeId, osmType, osmId };
+  }
+
+  return { etat: "magasin_ponte", storeId, osmType, osmId, opLocationId };
+}
+
+/**
+ * Un `bigint` PostgREST → un entier sûr strictement positif, ou `null`.
+ *
+ * ⚠️ `Number.isSafeInteger`, ET LE REFUS PLUTÔT QUE LA TRONCATURE. Au-delà de
+ * 2⁵³−1, `Number(...)` arrondit en silence ; l'identifiant arrondi désignerait
+ * un autre lieu, et rien à l'écran ne le dirait.
+ */
+function entierSurPositif(brut: unknown): number | null {
+  if (typeof brut === "number") return Number.isSafeInteger(brut) && brut > 0 ? brut : null;
   if (typeof brut === "string" && /^\d+$/.test(brut)) {
     const n = Number(brut);
-    return Number.isSafeInteger(n) ? n : null;
+    return Number.isSafeInteger(n) && n > 0 ? n : null;
   }
   return null;
 }

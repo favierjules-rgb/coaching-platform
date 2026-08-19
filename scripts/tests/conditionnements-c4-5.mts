@@ -671,9 +671,20 @@ await test("PERIMETRE-C4.5 — lecture seule, aucun réseau, aucun budget", () =
   const migrations = readdirSync(new URL("../../supabase/migrations/", import.meta.url))
     .filter((f) => f.endsWith(".sql"))
     .sort();
+  // ⚠️ C4.3c A DEPUIS AJOUTÉ UNE MIGRATION, ET CE CONTRÔLE NE SE RELÂCHE PAS
+  // POUR AUTANT. Ce qu'il prouve n'a jamais été « le dossier n'a pas bougé » —
+  // il bougera à chaque lot — mais « C4.5 n'y a rien déposé ». La dernière
+  // migration connue est donc nommée, ET une seconde assertion interdit
+  // SÉPARÉMENT toute migration portant le sujet de C4.5 : c'est celle-là qui
+  // porte l'intention, et elle ne dépend d'aucun lot futur.
   assert.equal(
     migrations[migrations.length - 1],
-    "20260918090000_c4_2_magasins.sql",
+    "20260919090000_c4_3c_magasins_osm.sql",
+    "la dernière migration connue est celle de C4.3c",
+  );
+  assert.deepEqual(
+    migrations.filter((f) => /_c4_5|conditionnement|packaging|net_quantity|quantite_nette/i.test(f)),
+    [],
     "C4.5 n'ajoute aucune migration",
   );
 });

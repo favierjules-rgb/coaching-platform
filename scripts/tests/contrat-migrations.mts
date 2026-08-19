@@ -67,6 +67,29 @@ export const MIGRATION_C4_1 = "20260917090000_c4_1_pont_retail.sql";
 export const MIGRATION_C4_2 = "20260918090000_c4_2_magasins.sql";
 
 /**
+ * La SEULE migration que C4.3c a le droit d'ajouter — OpenStreetMap devient
+ * l'annuaire des magasins.
+ *
+ * ⚠️ ADDITIVE, ET ELLE NE CRÉE AUCUNE TABLE. Elle fait trois choses et pas une
+ * de plus : elle rend `stores.op_location_id` NULLABLE — un magasin réel peut
+ * exister sans que Open Prices le connaisse, et c'est le fait mesuré à Toulon
+ * qui l'impose ; elle ajoute `brand_wikidata` et `operator_wikidata`, tous deux
+ * nullables, pour identifier une enseigne autrement que par son nom ; et elle
+ * pose la FORME de ces deux identifiants (`^Q[1-9][0-9]*$`).
+ *
+ * ⚠️ ELLE NE TOUCHE NI À `stores_op_location_id_key` NI À
+ * `stores_op_location_id_positif`. Vérifié sur un PostgreSQL 16 réel : un
+ * UNIQUE simple traite les NULL comme DISTINCTS, et un CHECK ne rougit que sur
+ * FALSE — `NULL > 0` vaut UNKNOWN et passe. Les deux contraintes existantes
+ * couvraient donc déjà le cas nullable, et une migration qui les aurait
+ * réécrites « pour être sûre » aurait été du bruit dangereux.
+ *
+ * ⚠️ SON RETOUR EN ARRIÈRE N'EST PLUS ANODIN une fois qu'un magasin sans pont
+ * a été sélectionné : réimposer NOT NULL échouerait sur les lignes existantes.
+ */
+export const MIGRATION_C4_3C = "20260919090000_c4_3c_magasins_osm.sql";
+
+/**
  * Les migrations du chantier COURSES, dans l'ordre d'application.
  *
  * ⚠️ CETTE LISTE EST LE CONTRAT, ET ELLE S'ALLONGE EXPLICITEMENT. Chaque lot
@@ -78,10 +101,11 @@ export const MIGRATIONS_COURSES: readonly string[] = [
   MIGRATION_C3,
   MIGRATION_C4_1,
   MIGRATION_C4_2,
+  MIGRATION_C4_3C,
 ];
 
 /** Le compte attendu — nécessaire, jamais suffisant. */
-export const NOMBRE_DE_MIGRATIONS = 84;
+export const NOMBRE_DE_MIGRATIONS = 85;
 
 /**
  * L'empreinte des 79 migrations ANTÉRIEURES à C0.1, dans l'ordre.

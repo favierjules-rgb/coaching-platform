@@ -1,6 +1,7 @@
 "use client";
 
 import { NBSP } from "@/lib/nutrition/basis-points";
+import type { EtatCouverture } from "@/lib/nutrition/couverture-magasin";
 import {
   type BudgetObserve,
   type ComparaisonBudget,
@@ -36,13 +37,13 @@ import {
 export function BlocMinimumObserve({
   budget,
   comparaison,
-  magasinChoisi,
+  couvertureMagasin,
   chargement,
   ok,
 }: {
   readonly budget: BudgetObserve | null;
   readonly comparaison: ComparaisonBudget | null;
-  readonly magasinChoisi: boolean;
+  readonly couvertureMagasin: EtatCouverture;
   readonly chargement: boolean;
   readonly ok: boolean;
 }) {
@@ -80,11 +81,39 @@ export function BlocMinimumObserve({
     );
   }
 
-  if (!magasinChoisi) {
+  if (couvertureMagasin === "aucun_magasin") {
     return cadre(
       <p className="text-sm text-muted-foreground" role="status">
         Choisis un magasin pour voir le minimum observé de ta liste.
       </p>,
+    );
+  }
+
+  // ⚠️ C4.3c — LE MAGASIN EXISTE, SES PRIX N'EXISTENT PAS ENCORE. Une phrase à
+  // elle seule, et c'est tout l'objet de ce lot.
+  //
+  // Les quatre phrases qu'elle remplace disaient toutes quelque chose de faux :
+  //   · « Choisis un magasin » — il vient d'en choisir un, et son choix est bon ;
+  //   · « 0,00 € » — nous n'avons pas établi que ces courses sont gratuites ;
+  //   · « indisponible pour l'instant » — rien n'est en panne, et réessayer
+  //     dans une heure donnera exactement le même résultat ;
+  //   · « aucun article n'a pu être chiffré dans ce magasin » — vrai à la
+  //     lettre, mais il fait chercher la faute du côté des articles.
+  //
+  // ⚠️ ET CE N'EST PAS UN CAS RARE. Mesuré à Toulon : deux lieux Open Prices
+  // pour ~180 000 habitants. C'est l'état ORDINAIRE d'un magasin français, et
+  // il mérite une phrase qui n'accuse personne.
+  if (couvertureMagasin === "magasin_sans_couverture_prix") {
+    return cadre(
+      <>
+        <p className="text-sm text-muted-foreground" role="status">
+          Ce magasin n&apos;a pas encore de prix observés.
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Les relevés Open Prices sont contribués par des bénévoles, magasin par magasin. Personne
+          n&apos;en a encore déposé ici — tu peux choisir un autre magasin en attendant.
+        </p>
+      </>,
     );
   }
 

@@ -627,19 +627,28 @@ await test("C4.3a-18b — absence et panne amont sont DEUX issues différentes",
 
 await test("C4.3a-18c — la route traduit chaque issue en un code HTTP distinct", () => {
   const code = sansCommentaires(ROUTE_SELECT);
+  // ⚠️ C4.3c A CHANGÉ LA SOURCE, PAS L'EXIGENCE. La relecture canonique se fait
+  // désormais chez OpenStreetMap ; les issues portent d'autres noms, et le
+  // contrôle porte sur les nouveaux — il ne se relâche pas, il suit.
+  //
   // ⚠️ ON VÉRIFIE L'AIGUILLAGE, PAS SEULEMENT LA PRÉSENCE DES NOMBRES : chaque
   // statut doit précéder le code qu'il commande.
   for (const [statut, http] of [
     ["absent", "404"],
     ["non_exploitable", "404"],
-    ["indisponible", "503"],
   ] as const) {
-    const bloc = new RegExp(`issue\\.statut === "${statut}"[\\s\\S]{0,400}status:\\s*${http}`);
+    const bloc = new RegExp(`canonique\\.statut === "${statut}"[\\s\\S]{0,400}status:\\s*${http}`);
     assert.match(code, bloc, `l'issue « ${statut} » doit répondre ${http}`);
   }
-  // Et « indisponible » ne doit JAMAIS retomber sur un 404.
-  const blocIndispo = /issue\.statut === "indisponible"[\s\S]{0,400}?\}/.exec(code)?.[0] ?? "";
-  assert.ok(!/status:\s*404/.test(blocIndispo), "une panne amont ne doit pas se dire « introuvable »");
+  // ⚠️ ET UNE PANNE NE DOIT JAMAIS RETOMBER SUR UN 404. C'est la correction
+  // d'origine de C4.3a, et elle vaut mot pour mot sur la nouvelle source : un
+  // élève dont l'appel a expiré ne doit pas conclure que son magasin n'existe
+  // pas. Le code HTTP vient désormais de `httpDecouverte`, qui rend 429, 503 ou
+  // 504 selon la cause — et jamais 404, ce que sa suite prouve séparément.
+  const blocEchec = /canonique\.statut === "echec"[\s\S]{0,400}?\n  \}/.exec(code)?.[0] ?? "";
+  assert.ok(blocEchec.length > 0, "l'issue « echec » doit être traitée");
+  assert.ok(!/status:\s*404/.test(blocEchec), "une panne amont ne doit pas se dire « introuvable »");
+  assert.ok(/httpDecouverte/.test(blocEchec), "chaque panne garde son code propre");
 });
 
 await test("C4.3a-19 — la route de sélection n'écrit AUCUNE donnée venue du corps", () => {
@@ -649,7 +658,15 @@ await test("C4.3a-19 — la route de sélection n'écrit AUCUNE donnée venue du
   for (const champ of ["body.name", "body.brand", "body.lat", "body.lon", "body.osmId", "body.city"]) {
     assert.ok(!code.includes(champ), `la route lit ${champ} dans le corps : le client deviendrait la source`);
   }
-  assert.match(code, /lireMagasinCanonique/, "la route doit relire le magasin chez l'amont");
+  // ⚠️ LA RELECTURE CANONIQUE EST TOUJOURS LÀ — CHEZ OPENSTREETMAP DEPUIS
+  // C4.3c. C'est la même règle : le navigateur DÉSIGNE, le serveur DÉCRIT.
+  assert.match(code, /lireElementCanonique/, "la route doit relire le magasin chez l'amont");
+  // ⚠️ ET LE CONTRÔLE EST RESSERRÉ : `opLocationId` ne doit plus entrer du tout
+  // par le corps. En C4.3a il était le SEUL champ accepté ; en C4.3c il est
+  // interdit, parce que le laisser passer permettrait de rattacher son magasin
+  // aux prix d'un autre.
+  assert.ok(!/parsed\.data\.opLocationId/.test(code), "le client ne fournit plus d'identifiant amont");
+  assert.match(code, /parsed\.data/, "l'identité choisie vient bien du corps validé");
   assert.match(code, /createSupabaseAdminClient/, "l'écriture du catalogue passe par le rôle serveur");
 });
 

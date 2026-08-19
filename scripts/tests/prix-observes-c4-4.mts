@@ -38,6 +38,7 @@ import {
   urlObservations,
 } from "../../lib/open-prices/observations";
 import { gtinsParIdentite } from "../../lib/nutrition/prix-observes";
+import type { CouvertureMagasin } from "../../lib/nutrition/couverture-magasin";
 
 const lire = (chemin: string) => readFileSync(new URL(chemin, import.meta.url), "utf8");
 
@@ -64,6 +65,22 @@ function sansCommentaires(source: string): string {
 process.env.OPENFOODFACTS_USER_AGENT ??= "CoachingPlatformTests/0.0 (tests@local)";
 
 const MAGASIN = 12345;
+
+/**
+ * La couverture d'un magasin RÉELLEMENT PONTÉ — le cas nominal de C4.4.
+ *
+ * ⚠️ DEPUIS C4.3c, `etatPrixObserves` NE REÇOIT PLUS UN `number | null`. Le
+ * `null` d'hier portait deux faits — « pas de magasin » et « magasin sans pont
+ * Open Prices » — que rien ne distinguait. Ces fixtures nomment donc le cas
+ * qu'elles testent, ce qui rend impossible d'en tester un autre par accident.
+ */
+const PONTE: CouvertureMagasin = {
+  etat: "magasin_ponte",
+  storeId: "11111111-1111-4111-8111-111111111111",
+  osmType: "NODE",
+  osmId: 9928912836,
+  opLocationId: MAGASIN,
+};
 
 /** Un relevé Open Prices bien formé — le point de départ de chaque variante. */
 function prixBrut(surcharge: Record<string, unknown> = {}): Record<string, unknown> {
@@ -130,7 +147,7 @@ await test("C4.4-17 — ligne GÉNÉRIQUE catalog_food_id → TOUS les food_prod
 
 await test("C4.4-02 — aliment générique SANS GTIN relié → aucun_produit_relie", () => {
   const r = etatPrixObserves({
-    opLocationId: MAGASIN,
+    couverture: PONTE,
     gtins: [],
     lecture: null,
   });
@@ -140,7 +157,7 @@ await test("C4.4-02 — aliment générique SANS GTIN relié → aucun_produit_r
 
 await test("C4.4-01 — aucun magasin sélectionné → aucun_magasin, AVANT toute lecture", () => {
   const r = etatPrixObserves({
-    opLocationId: null,
+    couverture: { etat: "aucun_magasin" },
     gtins: ["3017620422003", "20087090"],
     lecture: null,
   });
@@ -173,7 +190,7 @@ function obs(
 
 await test("C4.4-03 — 1 seul GTIN relié : ses relevés, sans traitement particulier", () => {
   const r = etatPrixObserves({
-    opLocationId: MAGASIN,
+    couverture: PONTE,
     gtins: ["3017620422003"],
     lecture: { ok: true, observations: [obs("3017620422003", "2026-08-01")], tronque: false, ignores: 0 },
   });
@@ -188,7 +205,7 @@ await test("C4.4-04/05/07/18 — N GTIN : A et C ont des relevés, B non → A +
   const B = "20087090";
   const C = "3596710352104";
   const r = etatPrixObserves({
-    opLocationId: MAGASIN,
+    couverture: PONTE,
     gtins: [A, B, C],
     lecture: {
       ok: true,
@@ -221,7 +238,7 @@ await test("C4.4-04/05/07/18 — N GTIN : A et C ont des relevés, B non → A +
 
 await test("C4.4-06 — AUCUN GTIN n'a de prix dans ce magasin → aucun_releve, et il est DÉFINITIF", () => {
   const r = etatPrixObserves({
-    opLocationId: MAGASIN,
+    couverture: PONTE,
     gtins: ["a", "b", "c"],
     lecture: { ok: true, observations: [], tronque: false, ignores: 0 },
   });
@@ -235,7 +252,7 @@ await test("C4.4-13 — 0 relevé + réponse TRONQUÉE → indetermine, jamais a
   // ne se confondent jamais : un élève qui lit « aucun prix » sur une réponse
   // tronquée range l'article dans sa tête comme introuvable.
   const r = etatPrixObserves({
-    opLocationId: MAGASIN,
+    couverture: PONTE,
     gtins: ["a"],
     lecture: { ok: true, observations: [], tronque: true, ignores: 0 },
   });
@@ -250,7 +267,7 @@ await test("C4.4-13b — 0 relevé + lignes ÉCARTÉES → indetermine", () => {
   // Toutes les lignes reçues étaient des remises, des devises étrangères ou
   // des lignes sans date. Elles auraient PU être des relevés valides.
   const r = etatPrixObserves({
-    opLocationId: MAGASIN,
+    couverture: PONTE,
     gtins: ["a"],
     lecture: { ok: true, observations: [], tronque: false, ignores: 3 },
   });
@@ -260,7 +277,7 @@ await test("C4.4-13b — 0 relevé + lignes ÉCARTÉES → indetermine", () => {
 
 await test("C4.4-13c — 0 relevé, AUCUN doute → aucun_releve, et c'est un FAIT", () => {
   const r = etatPrixObserves({
-    opLocationId: MAGASIN,
+    couverture: PONTE,
     gtins: ["a"],
     lecture: { ok: true, observations: [], tronque: false, ignores: 0 },
   });
@@ -279,7 +296,7 @@ await test("C4.4-13d — la frontière est EXACTEMENT (tronque || ignores > 0)",
   ];
   for (const [tronque, ignores, attendu] of cas) {
     const r = etatPrixObserves({
-      opLocationId: MAGASIN,
+      couverture: PONTE,
       gtins: ["a"],
       lecture: { ok: true, observations: [], tronque, ignores },
     });
@@ -296,7 +313,7 @@ await test("C4.4-13e — indetermine ne devient JAMAIS aucun_releve, ni indispon
     { ok: true, observations: [] as ObservationPrix[], tronque: true, ignores: 9 },
   ];
   for (const lecture of douteux) {
-    const r = etatPrixObserves({ opLocationId: MAGASIN, gtins: ["a"], lecture });
+    const r = etatPrixObserves({ couverture: PONTE, gtins: ["a"], lecture });
     assert.equal(r.etat, "indetermine");
     assert.notEqual(r.etat, "aucun_releve");
     assert.notEqual(r.etat, "indisponible");
@@ -305,7 +322,7 @@ await test("C4.4-13e — indetermine ne devient JAMAIS aucun_releve, ni indispon
   // Et réciproquement : une VRAIE panne ne devient jamais `indetermine`.
   for (const raison of ["rate_limited", "unavailable"] as const) {
     const r = etatPrixObserves({
-      opLocationId: MAGASIN,
+      couverture: PONTE,
       gtins: ["a"],
       lecture: { ok: false, raison, observations: [], tronque: false, ignores: 0 },
     });
@@ -318,7 +335,7 @@ await test("C4.4-13e — indetermine ne devient JAMAIS aucun_releve, ni indispon
 await test("C4.4-13f — `releves` CONSERVE tronque et ignores", () => {
   // Trois relevés issus d'une réponse tronquée restent une liste INCOMPLÈTE.
   const r = etatPrixObserves({
-    opLocationId: MAGASIN,
+    couverture: PONTE,
     gtins: ["a"],
     lecture: {
       ok: true,
@@ -636,7 +653,7 @@ await test("C4.4-14 — 429 Open Prices → indisponible, JAMAIS « aucun relev�
   assert.equal(lecture.ok, false);
   assert.equal(lecture.raison, "rate_limited");
 
-  const r = etatPrixObserves({ opLocationId: MAGASIN, gtins: ["3017620422003"], lecture });
+  const r = etatPrixObserves({ couverture: PONTE, gtins: ["3017620422003"], lecture });
   assert.equal(r.etat, "indisponible");
   assert.notEqual(r.etat, "aucun_releve");
 });
@@ -651,7 +668,7 @@ await test("C4.4-15 — 503 Open Prices → indisponible, et le motif est distin
   assert.equal(lecture.ok, false);
   assert.equal(lecture.raison, "unavailable");
   assert.equal(
-    etatPrixObserves({ opLocationId: MAGASIN, gtins: ["a"], lecture }).etat,
+    etatPrixObserves({ couverture: PONTE, gtins: ["a"], lecture }).etat,
     "indisponible",
   );
 });
@@ -710,7 +727,7 @@ await test("C4.4-I — les lignes écartées sont COMPTÉES, jamais effacées en
   // Et ce compteur bascule l'état vers `indetermine` quand il ne reste rien :
   // quatre lignes écartées auraient pu être quatre relevés valides.
   const rienDeValide = etatPrixObserves({
-    opLocationId: MAGASIN,
+    couverture: PONTE,
     gtins: ["3017620422003"],
     lecture: { ok: true, observations: [], tronque: false, ignores: 4 },
   });
@@ -752,9 +769,20 @@ await test("PERIMETRE-C4.4 — aucune écriture, aucun budget, aucun conditionne
   const migrations = readdirSync(new URL("../../supabase/migrations/", import.meta.url))
     .filter((f) => f.endsWith(".sql"))
     .sort();
+  // ⚠️ C4.3c A DEPUIS AJOUTÉ UNE MIGRATION, ET CE CONTRÔLE NE SE RELÂCHE PAS
+  // POUR AUTANT. Ce qu'il prouve n'a jamais été « le dossier n'a pas bougé » —
+  // il bougera à chaque lot — mais « C4.4 n'y a rien déposé ». La dernière
+  // migration connue est donc nommée, ET une seconde assertion interdit
+  // SÉPARÉMENT toute migration portant le sujet de C4.4 : c'est celle-là qui
+  // porte l'intention, et elle ne dépend d'aucun lot futur.
   assert.equal(
     migrations[migrations.length - 1],
-    "20260918090000_c4_2_magasins.sql",
+    "20260919090000_c4_3c_magasins_osm.sql",
+    "la dernière migration connue est celle de C4.3c",
+  );
+  assert.deepEqual(
+    migrations.filter((f) => /_c4_4|prix_observ|observed_price|open_prices|observation/i.test(f)),
+    [],
     "C4.4 n'ajoute aucune migration",
   );
 });

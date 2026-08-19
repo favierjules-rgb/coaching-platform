@@ -18,7 +18,7 @@ import { OBSERVED_PRICES } from "@/lib/security/rules";
 import { lireConditionnements } from "@/lib/supabase/conditionnements";
 import {
   lireGtinsDeLaListe,
-  lireOpLocationIdDuMagasinChoisi,
+  lireCouvertureDuMagasinChoisi,
 } from "@/lib/supabase/prix-observes";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -134,8 +134,11 @@ export async function POST(request: Request) {
   });
   const duPlan = visibles.filter((l) => l.source === "plan");
 
-  // ── 2. LE MAGASIN ─────────────────────────────────────────────────────────
-  const opLocationId = await lireOpLocationIdDuMagasinChoisi(supabase, studentId);
+  // ── 2. LE MAGASIN, ET SA COUVERTURE PRIX ─────────────────────────────────
+  // ⚠️ TROIS CAS NOMMÉS, PLUS UN `number | null`. Depuis C4.3c, « aucun
+  // magasin » et « magasin sans pont Open Prices » ne partagent plus une
+  // valeur : cette route ne devine plus, elle transmet.
+  const couverture = await lireCouvertureDuMagasinChoisi(supabase, studentId);
 
   // ── 3. LES CODE-BARRES DE CHAQUE IDENTITÉ ─────────────────────────────────
   const catalogFoodIds = [
@@ -169,8 +172,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Service indisponible." }, { status: 503 });
   }
 
+  // ⚠️ AUCUNE LECTURE SANS PONT — ET C'EST LE COMPILATEUR QUI L'IMPOSE.
+  // `opLocationId` n'existe que dans la branche `magasin_ponte` : il est
+  // devenu impossible d'appeler Open Prices sur un magasin qu'il ne connaît
+  // pas, y compris par distraction.
   let lecture: Awaited<ReturnType<typeof lireObservationsPrix>> | null = null;
-  if (opLocationId !== null && tousLesGtins.length > 0) {
+  if (couverture.etat === "magasin_ponte" && tousLesGtins.length > 0) {
+    const opLocationId = couverture.opLocationId;
     try {
       lecture = await lireObservationsPrix({ gtins: tousLesGtins, opLocationId });
     } catch (erreur) {
@@ -205,7 +213,7 @@ export async function POST(request: Request) {
       gtins.includes(o.gtin),
     );
     const resultat = etatPrixObserves({
-      opLocationId,
+      couverture,
       gtins,
       lecture:
         lecture === null
@@ -244,6 +252,9 @@ export async function POST(request: Request) {
   return NextResponse.json({
     budget,
     comparaison: comparerAuBudget(budget, budgetCents),
-    magasinChoisi: opLocationId !== null,
+    // ⚠️ L'ÉTAT, PAS UN BOOLÉEN. `magasinChoisi: true/false` réintroduirait
+    // exactement l'ambiguïté que C4.3c supprime : « magasin sans pont » y
+    // vaudrait `true` et l'écran n'aurait plus aucun moyen de le dire.
+    couvertureMagasin: couverture.etat,
   });
 }

@@ -456,10 +456,26 @@ await test("PERIMETRE-N — aucune table, aucun cache, aucun scoring, aucune pr�
   const migrations = readdirSync(new URL("../../supabase/migrations/", import.meta.url))
     .filter((f) => f.endsWith(".sql"))
     .sort();
+  // ⚠️ C4.3c A DEPUIS AJOUTÉ UNE MIGRATION, ET CE CONTRÔLE NE SE RELÂCHE PAS
+  // POUR AUTANT. Ce qu'il prouve n'a jamais été « le dossier n'a pas bougé » —
+  // il bougera à chaque lot — mais « le lot N-GTIN n'y a rien déposé ». La dernière
+  // migration connue est donc nommée, ET une seconde assertion interdit
+  // SÉPARÉMENT toute migration portant le sujet de le lot N-GTIN : c'est celle-là qui
+  // porte l'intention, et elle ne dépend d'aucun lot futur.
   assert.equal(
     migrations[migrations.length - 1],
-    "20260918090000_c4_2_magasins.sql",
-    "la dernière migration doit rester celle de C4.2 — ce lot n'en ajoute aucune",
+    "20260919090000_c4_3c_magasins_osm.sql",
+    "la dernière migration connue est celle de C4.3c",
+  );
+  // ⚠️ ET C'EST UNE ÉGALITÉ, PAS UN ENSEMBLE VIDE. Le sujet du lot N-GTIN est
+  // le pont retail — dont C4.1 a légitimement posé la migration. Exiger « aucune
+  // migration portant ce sujet » effacerait C4.1 ; exiger « EXACTEMENT celle de
+  // C4.1 » prouve la même chose en plus fort : une SECONDE migration pont-retail,
+  // qu'un lot N-GTIN aurait glissée pour « juste ajouter une colonne », rougit ici.
+  assert.deepEqual(
+    migrations.filter((f) => /_c4_1|pont_retail|gtin|barcode|code_barre/i.test(f)),
+    ["20260917090000_c4_1_pont_retail.sql"],
+    "le lot N-GTIN n'ajoute aucune migration : celle de C4.1 est la seule du sujet",
   );
 });
 

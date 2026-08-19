@@ -118,7 +118,7 @@ export function ListeDeCoursesPersistante({
         <BlocMinimumObserve
           budget={observe.budget}
           comparaison={observe.comparaison}
-          magasinChoisi={observe.magasinChoisi}
+          couvertureMagasin={observe.couvertureMagasin}
           chargement={observe.chargement}
           ok={observe.ok}
         />

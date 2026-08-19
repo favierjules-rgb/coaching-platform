@@ -6,8 +6,8 @@ import {
   VILLE_LONGUEUR_MAX,
   VILLE_LONGUEUR_MIN,
   villeValide,
-  type MagasinProche,
 } from "@/lib/nutrition/magasin-proche";
+import { cleIdentiteOsm, type MagasinOsm } from "@/lib/nutrition/magasins-osm";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { lireMagasinChoisi, type MagasinChoisi } from "@/lib/supabase/magasins";
 
@@ -67,9 +67,9 @@ export function ChoixMagasinProche({
   onMagasinChoisi?: (magasin: { storeId: string; name: string }) => void;
 }) {
   const [état, setÉtat] = useState<Etat>("inactif");
-  const [magasins, setMagasins] = useState<readonly MagasinProche[]>([]);
+  const [magasins, setMagasins] = useState<readonly MagasinOsm[]>([]);
   const [tronqué, setTronqué] = useState(false);
-  const [choixEnCours, setChoixEnCours] = useState<number | null>(null);
+  const [choixEnCours, setChoixEnCours] = useState<string | null>(null);
   const [choisi, setChoisi] = useState<MagasinChoisi | null>(null);
   /**
    * ⚠️ LA VILLE VIT ICI, ET NULLE PART AILLEURS. Aucun `localStorage`, aucun
@@ -139,7 +139,7 @@ export function ChoixMagasinProche({
         return;
       }
       const données = (await réponse.json()) as {
-        magasins?: MagasinProche[];
+        magasins?: MagasinOsm[];
         tronque?: boolean;
       };
       const trouvés = Array.isArray(données.magasins) ? données.magasins : [];
@@ -188,7 +188,7 @@ export function ChoixMagasinProche({
         setÉtat("ville_erreur");
         return;
       }
-      const données = (await réponse.json()) as { magasins?: MagasinProche[]; tronque?: boolean };
+      const données = (await réponse.json()) as { magasins?: MagasinOsm[]; tronque?: boolean };
       const trouvés = Array.isArray(données.magasins) ? données.magasins : [];
       setMagasins(trouvés);
       setTronqué(données.tronque === true);
@@ -201,16 +201,20 @@ export function ChoixMagasinProche({
   }, [ville]);
 
   const choisir = useCallback(
-    async (magasin: MagasinProche) => {
-      setChoixEnCours(magasin.opLocationId);
+    async (magasin: MagasinOsm) => {
+      setChoixEnCours(cleIdentiteOsm(magasin));
       try {
-        // ⚠️ UN ENTIER, ET RIEN D'AUTRE. Envoyer le nom ou l'adresse ferait du
-        // navigateur la source de vérité d'un catalogue partagé : le serveur
-        // relit la fiche lui-même.
+        // ⚠️ UNE IDENTITÉ, ET RIEN D'AUTRE. Envoyer le nom, la marque ou les
+        // coordonnées ferait du navigateur la source de vérité d'un catalogue
+        // partagé : le serveur relit la fiche chez OpenStreetMap lui-même.
+        //
+        // ⚠️ ET SURTOUT PAS `opLocationId`. Le pont Open Prices est établi côté
+        // serveur, par un appel exact ; le laisser partir d'ici permettrait de
+        // rattacher son magasin aux prix d'un autre.
         const réponse = await fetch("/api/student/stores/select", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ opLocationId: magasin.opLocationId }),
+          body: JSON.stringify({ osmType: magasin.osmType, osmId: magasin.osmId }),
         });
         if (!réponse.ok) {
           setÉtat("erreur");
@@ -344,7 +348,7 @@ export function ChoixMagasinProche({
         <>
           <ul>
             {magasins.map((magasin) => (
-              <li key={magasin.opLocationId}>
+              <li key={cleIdentiteOsm(magasin)}>
                 <button
                   type="button"
                   onClick={() => void choisir(magasin)}

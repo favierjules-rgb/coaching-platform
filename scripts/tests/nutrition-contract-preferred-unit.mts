@@ -256,6 +256,31 @@ await test("CONTRACT-07. le CONTRACT s'applique en DERNIER — l'ordre de rollou
       // La boucle ci-dessous rejoue cette dernière preuve à chaque exécution :
       // l'inscrire ne suffit pas, il faut que le fichier tienne.
       "20260918090000_c4_2_magasins.sql",
+      // ⚠️ C4.3c INSCRITE ICI, PAR LE MÊME MÉCANISME — et c'est la migration la
+      // plus étroite du chantier COURSES : elle ne crée AUCUNE table.
+      //
+      // Elle fait trois choses. Elle rend `stores.op_location_id` NULLABLE, ce
+      // qui est le seul `alter column` de tout le lot : OpenStreetMap devient
+      // l'annuaire des magasins, et un magasin réel peut donc exister sans que
+      // Open Prices le connaisse. Elle ajoute deux colonnes `text null`,
+      // `brand_wikidata` et `operator_wikidata`, qui identifient une ENSEIGNE.
+      // Elle pose la forme de ces deux identifiants (`^Q[1-9][0-9]*$`).
+      //
+      // Rien de tout cela n'est une unité, et c'est ce qui la met hors de
+      // portée du CONTRACT : elle dit « QUEL magasin, et de quelle enseigne »,
+      // jamais « en quelle quantité ». Mesuré sur le fichier, code dépouillé
+      // de sa prose :
+      //   · `preferred_unit` : ZÉRO occurrence — pas même en commentaire ;
+      //   · aucune table créée : seule `public.stores` est altérée ;
+      //   · le seul `alter column` est le `drop not null` ci-dessus ; aucun
+      //     `rename`, aucun `drop column`, aucun `drop constraint` ;
+      //   · `meal_choice_options`, `planned_meal_items`, `quantity_unit` et
+      //     même le mot `unit` : ABSENTS ;
+      //   · aucune référence externe, aucune policy, aucune fonction.
+      //
+      // La boucle ci-dessous rejoue cette dernière preuve à chaque exécution :
+      // l'inscrire ne suffit pas, il faut que le fichier tienne.
+      "20260919090000_c4_3c_magasins_osm.sql",
     ],
     "une migration postérieure au CONTRACT n'a pas été déclarée sûre",
   );

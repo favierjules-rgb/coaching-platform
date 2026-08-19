@@ -746,10 +746,22 @@ await test("C4.6-30/31 — aucun stock, aucun seuil de fraîcheur inventé", () 
 });
 
 await test("C4.6-37/38/39 — C4.4, C4.5 et le budget C3 sont SCELLÉS", () => {
-  // ⚠️ TROIS SCEAUX, ET C4.6 N'A AUCUNE RAISON DE LES REMONTER. Le lot
-  // consomme ces modules ; il ne les réécrit pas.
+  // ⚠️ CINQ SCEAUX, ET C4.6 N'A AUCUNE RAISON DE LES REMONTER. Le lot consomme
+  // ces modules ; il ne les réécrit pas.
+  //
+  // ⚠️ UN SEUL A ÉTÉ REMONTÉ, ET PAR C4.3c, PAS PAR C4.6. `prix-observes.ts`
+  // passe de `270353a621aa645b` à `9d60bec4c140ef75` parce que C4.3c y a ajouté
+  // l'état `magasin_sans_couverture_prix` et remplacé le paramètre
+  // `opLocationId: number | null` par une `CouvertureMagasin` discriminée. Le
+  // sceau a rougi exactement quand il devait rougir ; on le REDÉCLARE, on ne
+  // le retire pas.
+  //
+  // ⚠️ ET LES QUATRE AUTRES N'ONT PAS BOUGÉ D'UN OCTET. C'est ce qui prouve que
+  // C4.3c s'est arrêté là où il devait : ni le budget C3, ni les
+  // conditionnements C4.5, ni l'adaptateur réseau de C4.4 n'ont été touchés
+  // pour faire passer ce lot.
   assert.equal(sceau("../../lib/nutrition/budget-courses.ts"), "becd06ded213d14a", "C3 modifié");
-  assert.equal(sceau("../../lib/nutrition/prix-observes.ts"), "270353a621aa645b", "C4.4 modifié");
+  assert.equal(sceau("../../lib/nutrition/prix-observes.ts"), "9d60bec4c140ef75", "C4.4 modifié hors C4.3c");
   assert.equal(sceau("../../lib/nutrition/conditionnements.ts"), "99b7f5a9cd91c332", "C4.5 modifié");
   assert.equal(sceau("../../lib/open-prices/observations.ts"), "6269628e0e994f9d", "C4.4 adaptateur modifié");
   assert.equal(sceau("../../lib/supabase/conditionnements.ts"), "3ff60b0e286cb940", "C4.5 lecture modifiée");
@@ -766,7 +778,22 @@ await test("C4.6-40/41 — aucune écriture, aucune migration, aucun nouvel appe
   const migrations = readdirSync(new URL("../../supabase/migrations/", import.meta.url))
     .filter((f) => f.endsWith(".sql"))
     .sort();
-  assert.equal(migrations[migrations.length - 1], "20260918090000_c4_2_magasins.sql");
+  // ⚠️ C4.3c A DEPUIS AJOUTÉ UNE MIGRATION, ET CE CONTRÔLE NE SE RELÂCHE PAS
+  // POUR AUTANT. Ce qu'il prouve n'a jamais été « le dossier n'a pas bougé » —
+  // il bougera à chaque lot — mais « C4.6 n'y a rien déposé ». La dernière
+  // migration connue est donc nommée, ET une seconde assertion interdit
+  // SÉPARÉMENT toute migration portant le sujet de C4.6 : c'est celle-là qui
+  // porte l'intention, et elle ne dépend d'aucun lot futur.
+  assert.equal(
+    migrations[migrations.length - 1],
+    "20260919090000_c4_3c_magasins_osm.sql",
+    "la dernière migration connue est celle de C4.3c",
+  );
+  assert.deepEqual(
+    migrations.filter((f) => /_c4_6|budget_observ|observed_budget|minimum_observ/i.test(f)),
+    [],
+    "C4.6 n'ajoute aucune migration",
+  );
 });
 
 await test("C4.6-42 — le module de calcul est PUR : ni React, ni base, ni réseau", () => {

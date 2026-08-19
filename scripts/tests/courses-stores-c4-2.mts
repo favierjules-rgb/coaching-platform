@@ -477,6 +477,13 @@ await test("C4.2-PERIMETRE — aucun code applicatif, aucun réseau, aucune géo
     // module Open Prices fera rougir ce test demain comme il l'a fait
     // aujourd'hui.
     ["observations.ts", "C4.4 — relevés de prix d'un magasin, en lecture seule"],
+    // ⚠️ DÉCLARÉ LE 19/08/2026 PAR C4.3c, ET LE GARDE-FOU A REJOUÉ SON RÔLE À
+    // L'IDENTIQUE. Il est passé au ROUGE dès l'apparition du fichier ; on
+    // l'INSCRIT, on ne l'assouplit pas. C'est le module du PONT EXACT
+    // `/locations/osm/{TYPE}/{ID}` — la seule façon de relier une identité
+    // OpenStreetMap à un lieu Open Prices sans rapprocher deux magasins par
+    // leur nom. Un CINQUIÈME module fera rougir ce test demain.
+    ["pont-osm.ts", "C4.3c — pont exact identité OSM → lieu Open Prices"],
   ];
   const modulesOpenPrices = readdirSync(new URL("../../lib/open-prices/", import.meta.url)).sort();
   assert.deepEqual(

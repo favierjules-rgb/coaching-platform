@@ -4,7 +4,7 @@ import { magasinsParVilleBodySchema } from "@/lib/api/schemas/magasins";
 import { parseJsonBody } from "@/lib/api/validate";
 import { PAYS_CODE, villeValide } from "@/lib/nutrition/magasin-proche";
 import { estOffNonConfigure } from "@/lib/open-food-facts/client";
-import { chercherMagasinsParVille } from "@/lib/open-prices/locations";
+import { decouvrirParVille, httpDecouverte } from "@/lib/openstreetmap/decouverte";
 import { consumeRateLimit, rateLimitKey, refusDeLimite } from "@/lib/security/rate-limit";
 import { STORES_SEARCH } from "@/lib/security/rules";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -12,7 +12,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 export const dynamic = "force-dynamic";
 
 /**
- * COURSES C4.3b — POST /api/student/stores/search
+ * COURSES C4.3c — POST /api/student/stores/search
  *
  * Les magasins alimentaires d'une VILLE — le chemin de repli de l'élève qui a
  * refusé la géolocalisation, dont l'appareil ne sait pas le situer, ou qui
@@ -32,9 +32,21 @@ export const dynamic = "force-dynamic";
  * la fiche canonique chez la source. C4.3b n'ouvre AUCUN second chemin
  * d'écriture.
  *
- * ET PAS DE CODE POSTAL. LocationFilter n'en expose aucun — vérifié le
- * 18/08/2026. Cette route n'accepte donc pas de champ postal, plutôt que d'en
- * simuler un en parcourant tout le référentiel.
+ * ────────────────────────────────────────────────────────────────────────────
+ * ⚠️ C4.3c — LA SOURCE A CHANGÉ : OPENSTREETMAP, PLUS OPEN PRICES
+ * ────────────────────────────────────────────────────────────────────────────
+ * Mesuré le 19/08/2026 : Open Prices connaît DEUX lieux dans tout Toulon, dont
+ * un marchand de journaux. Ce n'est pas un annuaire de magasins, et l'utiliser
+ * comme tel enfermait l'élève toulonnais dans un choix unique.
+ *
+ * ⚠️ ET CHERCHER N'INTERROGE PAS OPEN PRICES, PAS MÊME UNE FOIS PAR RÉSULTAT.
+ * Trente magasins trouvés feraient trente appels au pont — trente allers-retours
+ * pour afficher une liste, et vingt-neuf réponses « inconnu » à interpréter. Le
+ * pont se fait à la SÉLECTION, sur UN magasin.
+ *
+ * ET PAS DE CODE POSTAL : la zone administrative résout la commune, et c'est
+ * elle qui décide — jamais l'étiquette `addr:city` du commerçant, qu'un
+ * contributeur peut avoir oubliée.
  *
  * ────────────────────────────────────────────────────────────────────────────
  * ET PAS DE PAYS NON PLUS : C4.3b EST UNE RECHERCHE MANUELLE **FRANCE**
@@ -86,15 +98,16 @@ export async function POST(request: Request) {
   // navigateur ne choisit donc pas le pays de recherche d'un lot qui n'en
   // connaît qu'un.
   try {
-    const resultat = await chercherMagasinsParVille({ ville });
+    const resultat = await decouvrirParVille(ville);
 
-    // « Aucun magasin dans cette ville » et « je n'ai pas pu chercher » sont
-    // deux réponses différentes, et l'écran ne les dit pas pareil.
-    if (!resultat.ok) {
-      return NextResponse.json(
-        { error: "La recherche de magasins a échoué.", code: "OPEN_PRICES_INDISPONIBLE" },
-        { status: 503 },
-      );
+    // ⚠️ SEPT ISSUES, SEPT RÉPONSES — ET AUCUNE PANNE NE DIT « INTROUVABLE ».
+    // C'est la correction faite en C4.3a sur la sélection, appliquée ici : un
+    // élève dont l'appel a expiré ne doit pas conclure que sa ville n'existe
+    // pas. « Cette ville n'existe pas », « il y en a plusieurs », « je n'ai pas
+    // pu chercher » et « aucun magasin cartographié » sont quatre phrases.
+    if (resultat.statut === "echec") {
+      const { status, code } = httpDecouverte(resultat.raison);
+      return NextResponse.json({ error: messageDe(resultat.raison), code }, { status });
     }
 
     return NextResponse.json({
@@ -110,7 +123,31 @@ export async function POST(request: Request) {
       console.error(`[Magasins] ${erreur.message}`);
       return NextResponse.json({ error: "Service indisponible." }, { status: 503 });
     }
+    // ⚠️ AUCUNE VILLE DANS LES JOURNAUX. Ce n'est pas une coordonnée, mais
+    // c'est tout de même une indication d'endroit.
     console.error("[Magasins] échec inattendu de la recherche par ville");
     return NextResponse.json({ error: "Service indisponible." }, { status: 503 });
+  }
+}
+
+/**
+ * Un message pour l'élève — et rien qui décrive notre plomberie.
+ *
+ * ⚠️ « PRÉCISE TA RECHERCHE » EST UNE PHRASE UTILE ; « zone administrative
+ * ambiguë » n'en est pas une. Le code technique voyage à part, pour les
+ * journaux et les tests ; le texte, lui, dit quoi faire.
+ */
+function messageDe(raison: Parameters<typeof httpDecouverte>[0]): string {
+  switch (raison) {
+    case "ville_introuvable":
+      return "Aucune commune française de ce nom.";
+    case "ville_ambigue":
+      return "Plusieurs communes portent ce nom. Précise ta recherche.";
+    case "rate_limited":
+      return "Trop de recherches en cours. Réessaie dans une minute.";
+    case "timeout":
+      return "La recherche a été trop longue. Réessaie.";
+    default:
+      return "La recherche de magasins a échoué.";
   }
 }

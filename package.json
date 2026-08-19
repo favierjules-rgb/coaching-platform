@@ -124,7 +124,12 @@
     "test:pont-retail-n-gtin": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/pont-retail-n-gtin.mts",
     "test:prix-observes-c4-4": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/prix-observes-c4-4.mts",
     "test:conditionnements-c4-5": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/conditionnements-c4-5.mts",
-    "test:budget-observe-c4-6": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/budget-observe-c4-6.mts"
+    "test:budget-observe-c4-6": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/budget-observe-c4-6.mts",
+    "test:magasins-osm-c4-3c": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/magasins-osm-c4-3c.mts",
+    "test:overpass-c4-3c": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/overpass-c4-3c.mts",
+    "test:decouverte-osm-c4-3c": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/decouverte-osm-c4-3c.mts",
+    "test:select-osm-c4-3c": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/select-osm-c4-3c.mts",
+    "test:upsert-osm-c4-3c": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/upsert-osm-c4-3c.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

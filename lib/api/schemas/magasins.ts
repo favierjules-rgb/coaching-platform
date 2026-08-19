@@ -97,3 +97,44 @@ export const magasinsParVilleBodySchema = z
   .strict();
 
 export type MagasinsParVilleBody = z.infer<typeof magasinsParVilleBodySchema>;
+
+/**
+ * COURSES C4.3c — L'IDENTITÉ OSM D'UN MAGASIN CHOISI.
+ *
+ * ════════════════════════════════════════════════════════════════════════════
+ * ⚠️ IL REMPLACE `choixMagasinBodySchema`, ET LE CHANGEMENT EST DE FOND
+ * ════════════════════════════════════════════════════════════════════════════
+ * L'ancien corps portait `opLocationId` — l'identifiant d'un lieu OPEN PRICES.
+ * Depuis C4.3c, OpenStreetMap est l'annuaire : l'élève choisit un magasin
+ * qu'Open Prices ne connaît peut-être pas, et il n'existe alors AUCUN
+ * `opLocationId` à envoyer.
+ *
+ * ⚠️ ET SURTOUT : `opLocationId` NE DOIT PLUS VENIR DU NAVIGATEUR, JAMAIS. Le
+ * pont est établi côté serveur, par un appel exact. Le laisser voyager dans le
+ * corps permettrait de rattacher son magasin aux prix d'un autre — un magasin
+ * cher affiché aux prix d'un discounter, dans un référentiel partagé.
+ *
+ * ⚠️ ET RIEN D'AUTRE N'EST ACCEPTÉ. Pas de `name`, pas de `lat`, pas de
+ * `brand`, pas de `brandWikidata` : le `.strict()` transforme toute tentative
+ * de DÉCRIRE le magasin en 400. Le serveur relit la fiche chez OSM et n'écrit
+ * que ce qu'il a relu.
+ */
+export const choixMagasinOsmBodySchema = z
+  .object({
+    /** Overpass écrit en minuscules, `stores` exige des majuscules. */
+    osmType: z
+      .string()
+      .trim()
+      .transform((v) => v.toUpperCase())
+      .pipe(z.enum(["NODE", "WAY", "RELATION"])),
+    /**
+     * ⚠️ `.safe()` EN PLUS DE `.int()` — même règle que le module pur. Un entier
+     * au-delà de 2⁵³−1 a DÉJÀ été arrondi par `JSON.parse` quand ce schéma le
+     * voit : le refuser est le seul moyen de ne pas écrire dans le référentiel
+     * partagé une identité qui n'est celle d'aucun magasin.
+     */
+    osmId: z.number().int().safe().positive(),
+  })
+  .strict();
+
+export type ChoixMagasinOsmBody = z.infer<typeof choixMagasinOsmBodySchema>;

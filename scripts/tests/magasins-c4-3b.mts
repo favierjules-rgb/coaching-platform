@@ -694,7 +694,27 @@ await test("C4.3b-18 — un résultat manuel se choisit par la route /select de 
     1,
     "une seule route de sélection, appelée depuis un seul endroit",
   );
-  assert.match(ui, /body: JSON\.stringify\(\{ opLocationId/, "le corps reste un entier seul");
+  // ⚠️ LE CORPS RESTE MINIMAL — C'EST UNE IDENTITÉ OSM DEPUIS C4.3c, ET C'EST
+  // PLUS STRICT QU'AVANT : `opLocationId` n'est plus accepté du tout.
+  assert.match(
+    ui,
+    /body: JSON\.stringify\(\{ osmType: magasin\.osmType, osmId: magasin\.osmId \}\)/,
+    "le corps reste une désignation, jamais une description",
+  );
+  assert.ok(!/opLocationId/.test(ui), "l'écran ne manipule aucun identifiant Open Prices");
+  // ⚠️ ON ISOLE LE CORPS DE `/select`, ON NE BALAIE PAS LE FICHIER. Le corps de
+  // `/nearby` porte légitimement `lat` et `lon` : c'est la POSITION DE L'ÉLÈVE,
+  // pas une description de magasin. Un balayage global accuserait la
+  // géolocalisation d'être une falsification — et pousserait, pour obtenir du
+  // vert, à casser la recherche.
+  const appelSelect = /\/api\/student\/stores\/select[\s\S]{0,400}?\}\);/.exec(ui)?.[0] ?? "";
+  assert.ok(appelSelect.length > 0, "l'appel de sélection doit être trouvable");
+  for (const decrit of ["name:", "brand:", "lat:", "lon:", "city:", "postcode:", "Wikidata"]) {
+    assert.ok(
+      !appelSelect.includes(decrit),
+      `l'écran ne doit pas décrire le magasin qu'il choisit : ${decrit}`,
+    );
+  }
   // ⚠️ AUCUNE SECONDE ÉCRITURE. Ni upsert, ni insert, ni table nommée.
   for (const ecriture of ["upserterMagasin", "enregistrerMagasinChoisi", "student_selected_store", "stores"]) {
     assert.ok(
@@ -827,7 +847,13 @@ await test("C4.3b-PERIMETRE — C4.3a est intact dans ses invariants essentiels"
   assert.match(adaptateur, /statut: "indisponible"/, "les issues discriminées de C4.3a");
 
   const select = sansCommentaires(ROUTE_SELECT);
-  assert.match(select, /lireMagasinCanonique/, "la relecture canonique au choix");
+  // ⚠️ C4.3c A CHANGÉ L'AMONT DE LA RELECTURE, PAS SON PRINCIPE. Le serveur
+  // relit toujours la fiche canonique avant d'écrire ; il la relit chez
+  // OpenStreetMap au lieu d'Open Prices. L'invariant de C4.3a est donc suivi,
+  // pas abandonné — et il est RESSERRÉ : le corps ne porte plus d'identifiant
+  // amont du tout.
+  assert.match(select, /lireElementCanonique/, "la relecture canonique au choix");
+  assert.ok(!/parsed\.data\.opLocationId/.test(select), "aucun identifiant amont venu du client");
   assert.match(select, /createSupabaseAdminClient/, "l'écriture serveur du catalogue");
 
   // budget-courses.ts scellé, comme dans les deux lots précédents.

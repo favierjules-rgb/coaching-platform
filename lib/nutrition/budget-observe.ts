@@ -242,6 +242,20 @@ export type RaisonSansPrix =
  */
 export type RaisonIndeterminee =
   | "aucun_magasin"
+  /**
+   * ⚠️ C4.3c — LE MAGASIN EXISTE, SON PONT OPEN PRICES N'EXISTE PAS.
+   *
+   * Elle est rangée ici, avec les doutes, et NON sous `RaisonSansPrix` — c'est
+   * la décision qui compte dans ce lot. `sans_prix` affirmerait « ce magasin
+   * n'a pas ce produit », ce que nous n'avons jamais établi : nous n'avons
+   * interrogé personne, faute d'interlocuteur. Ce n'est pas une absence
+   * constatée, c'est une question qui n'a pas pu être posée.
+   *
+   * ⚠️ ET ELLE NE SE CONFOND PAS AVEC `aucun_magasin`, qui la précède. Là,
+   * l'élève n'a rien choisi et il faut l'inviter à choisir ; ici, il a choisi,
+   * son choix est valide, et lui redemander de choisir serait absurde.
+   */
+  | "magasin_sans_couverture_prix"
   | "lecture_partielle"
   | "lecture_tronquee"
   | "observations_ecartees"
@@ -336,6 +350,26 @@ export function resoudreLigne(entree: EntreeLigne): ResolutionLigne {
       minimumConnuMilli: null,
       scenarioMinimumConnu: null,
       raisons: ["aucun_magasin"],
+      alternatives: [],
+    };
+  }
+
+  // ⚠️ C4.3c — MAGASIN CHOISI, MAIS SANS PONT OPEN PRICES. `indeterminee`, avec
+  // sa raison propre. Le ranger sous `sans_prix` — la tentation, puisque le
+  // résultat affiché est le même « pas de montant » — dirait à l'élève que son
+  // magasin ne vend pas cet article. Il n'en sait rien, et nous non plus.
+  //
+  // ⚠️ ET SURTOUT : AUCUN REPLI SUR C3. La tentation symétrique serait
+  // d'afficher ici le budget estimatif de C3 « pour ne pas laisser un vide ».
+  // Ce serait mélanger un prix estimé et un prix observé dans un même total,
+  // sans que rien à l'écran ne dise lequel est lequel.
+  if (entree.etat === "magasin_sans_couverture_prix") {
+    return {
+      ligneId,
+      statut: "indeterminee",
+      minimumConnuMilli: null,
+      scenarioMinimumConnu: null,
+      raisons: ["magasin_sans_couverture_prix"],
       alternatives: [],
     };
   }

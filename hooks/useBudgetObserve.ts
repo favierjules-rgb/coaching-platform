@@ -1,5 +1,6 @@
 "use client";
 
+import type { EtatCouverture } from "@/lib/nutrition/couverture-magasin";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { BudgetObserve, ComparaisonBudget } from "@/lib/nutrition/budget-observe";
@@ -27,20 +28,20 @@ export interface EtatBudgetObserve {
   readonly ok: boolean;
   readonly budget: BudgetObserve | null;
   readonly comparaison: ComparaisonBudget | null;
-  readonly magasinChoisi: boolean;
+  readonly couvertureMagasin: EtatCouverture;
   readonly recharger: () => void;
 }
 
 interface Reponse {
   readonly budget?: BudgetObserve;
   readonly comparaison?: ComparaisonBudget;
-  readonly magasinChoisi?: boolean;
+  readonly couvertureMagasin?: unknown;
 }
 
 export function useBudgetObserve(listId: string | null): EtatBudgetObserve {
   const [budget, setBudget] = useState<BudgetObserve | null>(null);
   const [comparaison, setComparaison] = useState<ComparaisonBudget | null>(null);
-  const [magasinChoisi, setMagasinChoisi] = useState(false);
+  const [couvertureMagasin, setCouvertureMagasin] = useState<EtatCouverture>("aucun_magasin");
   const [ok, setOk] = useState(true);
   const [chargement, setChargement] = useState(false);
   const [rafraichissement, setRafraichissement] = useState(0);
@@ -74,7 +75,15 @@ export function useBudgetObserve(listId: string | null): EtatBudgetObserve {
       setOk(true);
       setBudget(corps.budget ?? null);
       setComparaison(corps.comparaison ?? null);
-      setMagasinChoisi(corps.magasinChoisi === true);
+      // ⚠️ TROIS VALEURS ATTENDUES, ET RIEN D'AUTRE N'EST ACCEPTÉ. Un corps
+      // inattendu retombe sur `aucun_magasin` — le seul état qui n'affirme
+      // rien sur le magasin ni sur les prix.
+      const etat = corps.couvertureMagasin;
+      setCouvertureMagasin(
+        etat === "magasin_ponte" || etat === "magasin_sans_couverture_prix"
+          ? etat
+          : "aucun_magasin",
+      );
     } catch {
       if (numero !== requete.current) return;
       setOk(false);
@@ -110,7 +119,7 @@ export function useBudgetObserve(listId: string | null): EtatBudgetObserve {
     ok,
     budget,
     comparaison,
-    magasinChoisi,
+    couvertureMagasin,
     recharger: () => setRafraichissement((n) => n + 1),
   };
 }

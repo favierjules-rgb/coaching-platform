@@ -4,7 +4,7 @@ import { magasinsProchesBodySchema } from "@/lib/api/schemas/magasins";
 import { parseJsonBody } from "@/lib/api/validate";
 import { bornerRayon } from "@/lib/nutrition/magasin-proche";
 import { estOffNonConfigure } from "@/lib/open-food-facts/client";
-import { chercherMagasinsProches } from "@/lib/open-prices/locations";
+import { decouvrirAutour, httpDecouverte } from "@/lib/openstreetmap/decouverte";
 import { consumeRateLimit, rateLimitKey, refusDeLimite } from "@/lib/security/rate-limit";
 import { STORES_NEARBY } from "@/lib/security/rules";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -12,7 +12,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 export const dynamic = "force-dynamic";
 
 /**
- * COURSES C4.3a — POST /api/student/stores/nearby
+ * COURSES C4.3c — POST /api/student/stores/nearby
  *
  * Les magasins alimentaires autour d'une position, pour que l'élève en
  * choisisse un.
@@ -36,7 +36,19 @@ export const dynamic = "force-dynamic";
  * ⚠️ ELLE N'EST PAS UN PROXY. Le client envoie une position et, au plus, un
  * rayon — validé contre NOTRE borne. Ni la taille de page, ni le numéro de
  * page, ni un champ libre ne traversent : sans quoi n'importe qui pourrait
- * interroger Open Prices à sa guise à travers SETH, avec notre débit.
+ * interroger l'amont à sa guise à travers SETH, avec notre débit.
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * ⚠️ C4.3c — L'ANNUAIRE EST DÉSORMAIS OPENSTREETMAP
+ * ────────────────────────────────────────────────────────────────────────────
+ * Rien d'autre ne change : même écran, même position, même confidentialité,
+ * mêmes trois barrières sur le rayon. Seule la source des magasins est
+ * remplacée, parce qu'Open Prices est une source de PRIX et n'a jamais été un
+ * annuaire — mesuré à Toulon : deux lieux pour ~180 000 habitants.
+ *
+ * ⚠️ ET AUCUN PONT OPEN PRICES N'EST TENTÉ ICI. Vingt magasins autour de soi
+ * feraient vingt appels sortants pour afficher une liste. Le pont se fait à la
+ * SÉLECTION, sur UN magasin.
  */
 
 export async function POST(request: Request) {
@@ -80,7 +92,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const resultat = await chercherMagasinsProches({
+    const resultat = await decouvrirAutour({
       lat: parsed.data.lat,
       lon: parsed.data.lon,
       rayonKm,
@@ -89,13 +101,16 @@ export async function POST(request: Request) {
     // ⚠️ « AUCUN MAGASIN » ET « LECTURE ÉCHOUÉE » SONT DEUX RÉPONSES
     // DIFFÉRENTES. Les confondre ferait dire « aucun magasin près de vous » à
     // quelqu'un dont le réseau a lâché — et il chercherait ailleurs pour rien.
-    if (!resultat.ok) {
-      return NextResponse.json(
-        { error: "La recherche de magasins a échoué.", code: "OPEN_PRICES_INDISPONIBLE" },
-        { status: 503 },
-      );
+    // Chaque panne garde ici son code propre : attendre, réessayer, ou signaler.
+    if (resultat.statut === "echec") {
+      const { status, code } = httpDecouverte(resultat.raison);
+      return NextResponse.json({ error: "La recherche de magasins a échoué.", code }, { status });
     }
 
+    // ⚠️ LA POSITION REÇUE NE REVIENT PAS DANS LA RÉPONSE. La renvoyer la
+    // ferait entrer dans le cache du navigateur et dans tout intermédiaire du
+    // chemin. Le rayon, lui, est CELUI QUE NOUS AVONS RETENU — pas celui qui a
+    // été demandé : l'écran doit pouvoir dire ce qui a réellement été cherché.
     return NextResponse.json({
       magasins: resultat.magasins,
       tronque: resultat.tronque,
