@@ -318,6 +318,46 @@ export function strengthExercisesFromBlocks(blocks: readonly TrainingBlock[]): A
   return blocks.flatMap((block) => (block.category === "strength" ? block.exercises : []));
 }
 
+/**
+ * Échange le JOUR de deux séances — le déplacement dans la grille du builder.
+ *
+ * ════════════════════════════════════════════════════════════════════════════
+ * ⚠️ ON DÉPLACE LA SÉANCE, PAS SON CONTENU
+ * ════════════════════════════════════════════════════════════════════════════
+ * La version précédente échangeait le contenu (nom, blocs, notes…) en laissant
+ * `id` et `day` ancrés à la case. Elle ne pouvait pas faire autrement :
+ * l'appariement de sauvegarde se faisait par (semaine, jour), donc la ligne ne
+ * pouvait pas bouger. Mais les blocs échangés emportaient leurs UUID
+ * persistés, et la séance d'arrivée partait à la RPC avec des blocs
+ * appartenant en base à celle de départ. La RPC refusait — `FOREIGN_BLOCK_ID`
+ * — et RIEN ne s'enregistrait.
+ *
+ * Ici, seule la PLACE change. La séance garde son identité, ses blocs, ses
+ * exercices, ses prescriptions, et le rattachement des retours élèves déjà
+ * soumis. C'est aussi ce que le coach croit faire quand il fait glisser une
+ * carte : décaler sa séance du mercredi au jeudi.
+ *
+ * ⚠️ FONCTION PURE, ET AUCUNE MUTATION EN PLACE. Les séances non concernées
+ * sont rendues telles quelles ; les deux autres sont des copies.
+ */
+export function echangerJoursDeSeance<T extends { id: string; day: string }>(
+  sessions: readonly T[],
+  sourceId: string,
+  targetId: string,
+): T[] {
+  if (sourceId === targetId) return sessions.slice();
+  const source = sessions.find((s) => s.id === sourceId);
+  const cible = sessions.find((s) => s.id === targetId);
+  // Un identifiant inconnu n'échange rien : mieux vaut ne rien faire que
+  // déplacer une séance vers un jour qu'on aurait deviné.
+  if (source === undefined || cible === undefined) return sessions.slice();
+  return sessions.map((s) => {
+    if (s.id === sourceId) return { ...s, day: cible.day };
+    if (s.id === targetId) return { ...s, day: source.day };
+    return s;
+  });
+}
+
 /* ─────────────────── Sérialisation canonique de sauvegarde (Lot 4.4) ────── */
 
 /**

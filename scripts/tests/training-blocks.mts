@@ -412,6 +412,39 @@ function makeProgramsFake(opts?: { store?: Record<string, Record<string, unknown
       const blocksMap: Record<string, string> = {};
       const exMap: Record<string, string> = {};
       const sid = payload.session_id as string;
+
+      // ── LES DEUX GARDE-FOUS DE LA VRAIE RPC, REJOUÉS ICI ──────────────────
+      // ⚠️ CE FAUX LES IGNORAIT, ET C'EST CE QUI A LAISSÉ PASSER LE DÉFAUT DU
+      // DÉPLACEMENT DE SÉANCE. En production, déplacer une séance envoyait des
+      // UUID de blocs appartenant à une AUTRE séance ; l'étape 5 de
+      // `save_training_session_blocks` levait `FOREIGN_BLOCK_ID` et
+      // l'enregistrement échouait. Aucun test ne pouvait le voir : le faux
+      // acceptait n'importe quel identifiant. Un faux plus permissif que la
+      // vraie base ne prouve rien — il rassure.
+      const srowGarde = (store.workout_sessions ?? []).find((s) => s.id === sid);
+      if (!srowGarde) {
+        return Promise.resolve({ data: null, error: { message: "SESSION_NOT_FOUND_OR_FORBIDDEN" } });
+      }
+      if (srowGarde.updated_at !== payload.expected_updated_at) {
+        return Promise.resolve({ data: null, error: { message: "STALE_TRAINING_SESSION" } });
+      }
+      const blocsDeLaSeance = new Set(
+        (store.training_blocks ?? []).filter((b) => b.session_id === sid).map((b) => b.id as string),
+      );
+      const exosDeLaSeance = new Set(
+        (store.workout_exercises ?? []).filter((e) => e.session_id === sid).map((e) => e.id as string),
+      );
+      for (const b of (payload.blocks as { id: string; exercises?: { id: string }[] }[]) ?? []) {
+        if (isUuid(b.id) && !blocsDeLaSeance.has(b.id)) {
+          return Promise.resolve({ data: null, error: { message: "FOREIGN_BLOCK_ID" } });
+        }
+        for (const e of b.exercises ?? []) {
+          if (isUuid(e.id) && !exosDeLaSeance.has(e.id)) {
+            return Promise.resolve({ data: null, error: { message: "FOREIGN_EXERCISE_ID" } });
+          }
+        }
+      }
+
       store.training_blocks = (store.training_blocks ?? []).filter((b) => b.session_id !== sid);
       store.workout_exercises = (store.workout_exercises ?? []).filter((e) => e.session_id !== sid);
       const payloadBlocks =
@@ -426,7 +459,14 @@ function makeProgramsFake(opts?: { store?: Record<string, Record<string, unknown
       }
       const ts = nextTs();
       const srow = (store.workout_sessions ?? []).find((s) => s.id === sid);
-      if (srow) srow.updated_at = ts;
+      if (srow) {
+        // ⚠️ LE PATCH EST APPLIQUÉ, LUI AUSSI. Le faux l'ignorait : `day` ne
+        // bougeait donc jamais dans le magasin, et aucun test ne pouvait
+        // constater qu'une séance avait changé de jour.
+        const patch = payload.session_patch as Record<string, unknown> | undefined;
+        if (patch) for (const [k, v] of Object.entries(patch)) srow[k] = v;
+        srow.updated_at = ts;
+      }
       return Promise.resolve({
         data: {
           session_id: sid,
@@ -574,6 +614,22 @@ async function runAsync() {
   const SESS1 = "55555555-5555-4555-8555-555555555501";
   const SESS2 = "55555555-5555-4555-8555-555555555502";
   const B_STRENGTH = "55555555-5555-4555-8555-5555555555b1";
+  /**
+   * Les lignes DÉJÀ PERSISTÉES d'une séance existante.
+   *
+   * ⚠️ SANS ELLES, LE FIXTURE MENT. Un test qui affirme « UUID de bloc
+   * conservé » sur une séance dont aucun bloc n'existe en base décrit une
+   * situation impossible — et c'est exactement ce trou qui a laissé passer le
+   * défaut du déplacement : la vraie RPC refuse tout UUID qui n'appartient pas
+   * à la séance visée (`FOREIGN_BLOCK_ID`), le faux l'acceptait.
+   */
+  const dejaPersiste = (sessionId: string, blocs: { id: string; exercices?: string[] }[]) => ({
+    training_blocks: blocs.map((b) => ({ id: b.id, session_id: sessionId, block_type: "strength" })),
+    workout_exercises: blocs.flatMap((b) =>
+      (b.exercices ?? []).map((e) => ({ id: e, session_id: sessionId, block_id: b.id })),
+    ),
+  });
+
   const strengthWith = (id: string, position: number, exerciseId: string, colorKey = "gray") => ({
     ...strengthBlock(id, position),
     colorKey,
@@ -584,6 +640,7 @@ async function runAsync() {
     const store = {
       program_weeks: [{ id: "week-1", program_id: "prog", week_number: 1 }],
       workout_sessions: [{ id: SESS1, program_week_id: "week-1", day: "lundi", updated_at: "u0-snapshot" }],
+      ...dejaPersiste(SESS1, [{ id: B_STRENGTH, exercices: [OTHER_UUID] }]),
     };
     const { db, writes, rpcPayloads } = makeProgramsFake({ store });
     const session = adminSession({
@@ -615,6 +672,12 @@ async function runAsync() {
     const store = {
       program_weeks: [{ id: "week-1", program_id: "prog", week_number: 1 }],
       workout_sessions: [{ id: SESS1, program_week_id: "week-1", day: "lundi", updated_at: "u0" }],
+      ...dejaPersiste(SESS1, [
+        { id: "55555555-5555-4555-8555-5555555555c1" },
+        { id: "55555555-5555-4555-8555-5555555555s1", exercices: ["55555555-5555-4555-8555-5555555555e1"] },
+        { id: "55555555-5555-4555-8555-5555555555c2" },
+        { id: "55555555-5555-4555-8555-5555555555s2" },
+      ]),
     };
     const { db, writes, rpcPayloads } = makeProgramsFake({ store });
     const blocks = [
@@ -638,6 +701,7 @@ async function runAsync() {
     const store = {
       program_weeks: [{ id: "week-1", program_id: "prog", week_number: 1 }],
       workout_sessions: [{ id: SESS1, program_week_id: "week-1", day: "lundi", updated_at: "u0" }],
+      ...dejaPersiste(SESS1, [{ id: "55555555-5555-4555-8555-5555555555c1" }]),
     };
     const { db, rpcPayloads } = makeProgramsFake({ store });
     await updateProgram(
@@ -675,6 +739,159 @@ async function runAsync() {
     assert.equal(rpcPayloads.length, 1, "RPC canonique appelée");
     assert.equal(rpcPayloads[0].session_patch, undefined, "pas de session_patch (champs posés par l'INSERT)");
     assert.equal((rpcPayloads[0].blocks[0].id as string).startsWith("new-block:"), true);
+  });
+
+
+  // ── LE DÉPLACEMENT D'UNE SÉANCE (défaut Preview du 21/08) ────────────────
+  //
+  // ⚠️ SYMPTÔME : éditer une séance s'enregistrait ; la DÉPLACER d'un jour à
+  // l'autre, ou en ÉCHANGER deux, échouait systématiquement.
+  //
+  // ⚠️ CAUSE : l'identité d'une séance était sa CASE dans la grille —
+  // `diffProgramStructure` appariait par (semaine, jour). Déplacer une séance
+  // ne pouvait donc pas déplacer sa LIGNE : le builder recopiait le CONTENU
+  // d'une case à l'autre, UUID de blocs compris. La séance d'arrivée partait
+  // alors à la RPC avec des blocs appartenant en base à la séance de départ,
+  // et l'étape 5 de `save_training_session_blocks` levait `FOREIGN_BLOCK_ID`.
+  //
+  // ⚠️ CORRECTIF : l'identité d'une séance est son `id`. `day` devient une
+  // donnée PATCHÉE comme les autres. Une séance déplacée reste la même ligne,
+  // avec ses blocs, ses exercices, ses prescriptions et le rattachement des
+  // retours élèves déjà soumis.
+
+  const B_S2 = "55555555-5555-4555-8555-5555555555b2";
+  const EX_S1 = "55555555-5555-4555-8555-5555555555e9";
+  const EX_S2 = "55555555-5555-4555-8555-5555555555ea";
+
+  /** Deux séances persistées d'une même semaine, chacune avec SON bloc. */
+  const deuxSeances = () => ({
+    programs: [{ id: "prog", name: "Programme", status: "actif" }],
+    program_weeks: [{ id: "week-1", program_id: "prog", week_number: 1 }],
+    workout_sessions: [
+      { id: SESS1, program_week_id: "week-1", day: "mercredi", updated_at: "u-mer" },
+      { id: SESS2, program_week_id: "week-1", day: "jeudi", updated_at: "u-jeu" },
+    ],
+    training_blocks: [
+      { id: B_STRENGTH, session_id: SESS1, block_type: "strength" },
+      { id: B_S2, session_id: SESS2, block_type: "strength" },
+    ],
+    workout_exercises: [
+      { id: EX_S1, session_id: SESS1, block_id: B_STRENGTH },
+      { id: EX_S2, session_id: SESS2, block_id: B_S2 },
+    ],
+  });
+
+  await atest("MOVE-01 — décaler une séance d'un jour : MÊME ligne, `day` patché, UUID intacts", async () => {
+    const store = deuxSeances();
+    const { db, writes, rpcPayloads } = makeProgramsFake({ store });
+
+    // Le mercredi part au jeudi, le jeudi au mercredi : la séance emporte son
+    // identité et son contenu, seule sa PLACE change.
+    const ok = await updateProgram(
+      db,
+      "prog",
+      baseProgramData([
+        adminSession({ id: SESS1, weekNumber: 1, day: "jeudi", updatedAt: "u-mer", name: "Lower", blocks: [strengthWith(B_STRENGTH, 0, EX_S1)] }),
+        adminSession({ id: SESS2, weekNumber: 1, day: "mercredi", updatedAt: "u-jeu", name: "Upper", blocks: [strengthWith(B_S2, 0, EX_S2)] }),
+      ]),
+    );
+    assert.equal(ok, true, "l'enregistrement doit RÉUSSIR (c'est tout le défaut)");
+
+    const parSession = new Map(rpcPayloads.map((p) => [p.session_id as string, p]));
+    assert.equal(parSession.size, 2, "une RPC par séance, et deux séances distinctes");
+
+    // ⚠️ CHAQUE SÉANCE EST ÉCRITE SUR SA PROPRE LIGNE, avec SON verrou et SES
+    // blocs. C'est l'assertion qui rougissait : l'ancien appariement par
+    // (semaine, jour) envoyait les blocs de SESS1 sur la ligne de SESS2.
+    assert.equal(parSession.get(SESS1)!.expected_updated_at, "u-mer");
+    assert.equal(parSession.get(SESS1)!.blocks[0].id, B_STRENGTH);
+    assert.equal(parSession.get(SESS1)!.blocks[0].exercises[0].id, EX_S1);
+    assert.equal(parSession.get(SESS1)!.session_patch.day, "jeudi", "le jour est PATCHÉ, pas déduit");
+    assert.equal(parSession.get(SESS1)!.session_patch.name, "Lower");
+
+    assert.equal(parSession.get(SESS2)!.expected_updated_at, "u-jeu");
+    assert.equal(parSession.get(SESS2)!.blocks[0].id, B_S2);
+    assert.equal(parSession.get(SESS2)!.session_patch.day, "mercredi");
+
+    // ⚠️ AUCUNE LIGNE N'EST CRÉÉE NI SUPPRIMÉE. Un déplacement qui passerait
+    // par delete + insert perdrait le rattachement des retours élèves déjà
+    // soumis (`exercise_feedback.exercise_id`, ON DELETE SET NULL) — le
+    // dommage exact que le diff fin existe pour éviter.
+    assert.equal(writes.some((w) => w.table === "workout_sessions" && w.op === "insert"), false, "aucune séance créée");
+    assert.equal(writes.some((w) => w.table === "workout_sessions" && w.op === "delete"), false, "aucune séance supprimée");
+    assert.equal(contentWrites(writes).length, 0, "aucune écriture directe des tables de contenu");
+
+    // Et le magasin le reflète : les deux lignes ont échangé leur jour.
+    const lignes = new Map((store.workout_sessions as Record<string, unknown>[]).map((r) => [r.id, r.day]));
+    assert.equal(lignes.get(SESS1), "jeudi");
+    assert.equal(lignes.get(SESS2), "mercredi");
+  });
+
+  await atest("MOVE-02 — déplacer vers un jour de REPOS : la case libérée devient le repos", async () => {
+    const store = deuxSeances();
+    // Le jeudi est un jour de repos : ligne existante, aucun bloc.
+    store.training_blocks = store.training_blocks.filter((b) => b.session_id !== SESS2);
+    store.workout_exercises = store.workout_exercises.filter((e) => e.session_id !== SESS2);
+    const { db, rpcPayloads } = makeProgramsFake({ store });
+
+    const ok = await updateProgram(
+      db,
+      "prog",
+      baseProgramData([
+        adminSession({ id: SESS1, weekNumber: 1, day: "jeudi", updatedAt: "u-mer", blocks: [strengthWith(B_STRENGTH, 0, EX_S1)] }),
+        adminSession({ id: SESS2, weekNumber: 1, day: "mercredi", updatedAt: "u-jeu", isRestDay: true, blocks: [] }),
+      ]),
+    );
+    assert.equal(ok, true);
+    const parSession = new Map(rpcPayloads.map((p) => [p.session_id as string, p]));
+    assert.equal(parSession.get(SESS1)!.session_patch.day, "jeudi");
+    // ⚠️ LE REPOS PASSE AUSSI PAR LA RPC : sans elle, son `day` ne bougerait
+    // pas et deux séances se retrouveraient le même jour.
+    assert.equal(parSession.get(SESS2)!.session_patch.day, "mercredi");
+    assert.deepEqual(parSession.get(SESS2)!.blocks, [], "un jour de repos n'a aucun bloc");
+  });
+
+  await atest("MOVE-03 — le garde-fou de la RPC tient : un bloc étranger est REFUSÉ", async () => {
+    // ⚠️ CE CAS PROTÈGE LE CORRECTIF LUI-MÊME. Il serait facile de « faire
+    // marcher » le déplacement en relâchant la vérification d'appartenance —
+    // c'est elle qui empêche un payload de s'approprier les blocs d'une autre
+    // séance. Elle doit rester, et échouer.
+    const store = deuxSeances();
+    const { db } = makeProgramsFake({ store });
+    await assert.rejects(
+      () =>
+        updateProgram(
+          db,
+          "prog",
+          baseProgramData([
+            // SESS1 réclame le bloc de SESS2 : refus attendu.
+            adminSession({ id: SESS1, weekNumber: 1, day: "mercredi", updatedAt: "u-mer", blocks: [strengthWith(B_S2, 0, EX_S1)] }),
+          ]),
+        ),
+      /FOREIGN_BLOCK_ID/,
+    );
+  });
+
+  await atest("MOVE-04 — deux séances au même jour ne se confondent pas", async () => {
+    // ⚠️ ÉTAT TRANSITOIRE LÉGITIME. Rien en base n'impose l'unicité de
+    // (program_week_id, day) — vérifié dans le schéma. Pendant un échange, deux
+    // lignes peuvent partager un jour ; l'appariement par `id` s'en moque,
+    // l'appariement par (semaine, jour) en prenait une au hasard.
+    const store = deuxSeances();
+    (store.workout_sessions as Record<string, unknown>[])[1]!.day = "mercredi";
+    const { db, rpcPayloads } = makeProgramsFake({ store });
+    const ok = await updateProgram(
+      db,
+      "prog",
+      baseProgramData([
+        adminSession({ id: SESS1, weekNumber: 1, day: "mercredi", updatedAt: "u-mer", blocks: [strengthWith(B_STRENGTH, 0, EX_S1)] }),
+        adminSession({ id: SESS2, weekNumber: 1, day: "jeudi", updatedAt: "u-jeu", blocks: [strengthWith(B_S2, 0, EX_S2)] }),
+      ]),
+    );
+    assert.equal(ok, true);
+    const parSession = new Map(rpcPayloads.map((p) => [p.session_id as string, p]));
+    assert.equal(parSession.get(SESS1)!.blocks[0].id, B_STRENGTH, "chaque séance garde SES blocs");
+    assert.equal(parSession.get(SESS2)!.blocks[0].id, B_S2);
   });
 
   await atest("updateProgram (canonique) — STALE propagé, écritures des séances suivantes stoppées", async () => {

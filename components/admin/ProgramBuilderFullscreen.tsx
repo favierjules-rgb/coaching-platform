@@ -28,6 +28,7 @@ import { Modal, PrimaryButton } from "@/components/admin/Modal";
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
 import { contentStatusLabels, generateId, weekDays } from "@/lib/admin";
 import {
+  echangerJoursDeSeance,
   normalizeBuilderSession,
   normalizeColorKey,
   regenerateBlockIdsForDuplication,
@@ -94,10 +95,9 @@ function DayGridCell({
   isSelected: boolean;
   onSelect: () => void;
   // Glisser-déposer entre jours de la semaine affichée (voir
-  // swapSessionContent plus bas) — échange le contenu éditable des deux
-  // séances tout en gardant id/day/weekNumber ancrés à leur case de la
-  // grille, pour rester compatible avec le diff par (semaine, jour) sans
-  // aucun changement côté lib/supabase/programs.ts.
+  // deplacerSeance plus bas) — échange le JOUR des deux séances. Chacune
+  // garde son id, ses blocs et ses UUID : c'est la ligne qui se déplace, pas
+  // son contenu.
   onDragStart: () => void;
   onDragOver: (event: DragEvent<HTMLButtonElement>) => void;
   onDrop: () => void;
@@ -316,6 +316,14 @@ export function ProgramBuilderFullscreen({
               ...session,
               id: target.id,
               weekNumber: target.weekNumber,
+              day: target.day,
+              // ⚠️ LE VERROU EST CELUI DE LA LIGNE ÉCRITE, JAMAIS CELUI DE LA
+              // SOURCE. `...session` apportait l'`updatedAt` de la séance
+              // copiée sur la ligne de la cible : la RPC comparait deux
+              // versions étrangères et levait `STALE_TRAINING_SESSION`. Même
+              // famille de faute que le déplacement — une donnée de LIGNE qui
+              // voyageait avec le CONTENU.
+              updatedAt: target.updatedAt,
               // Duplication canonique : nouveaux ids temporaires stricts, source intacte.
               blocks: regenerateBlockIdsForDuplication(session.blocks),
               exercises: [],
@@ -336,44 +344,19 @@ export function ProgramBuilderFullscreen({
   const dragSessionId = useRef<string | null>(null);
   const [dragOverSessionId, setDragOverSessionId] = useState<string | null>(null);
 
-  function swapSessionContent(sourceId: string, targetId: string) {
+  /**
+   * ⚠️ CE QUI SE DÉPLACE, C'EST LA SÉANCE — PAS SON CONTENU.
+   *
+   * La version précédente recopiait nom/blocs/notes d'une case à l'autre en
+   * laissant `id` et `day` ancrés à la grille. Les blocs déplacés emportaient
+   * leurs UUID persistés, et la séance d'arrivée partait à la RPC avec des
+   * blocs appartenant en base à celle de départ : `FOREIGN_BLOCK_ID`, et
+   * ÉCHEC DE L'ENREGISTREMENT à chaque déplacement. La règle vit désormais
+   * dans `echangerJoursDeSeance`, pure et testée directement.
+   */
+  function deplacerSeance(sourceId: string, targetId: string) {
     if (sourceId === targetId) return;
-    setSessions((prev) => {
-      const source = prev.find((s) => s.id === sourceId);
-      const target = prev.find((s) => s.id === targetId);
-      if (!source || !target) return prev;
-      return prev.map((s) => {
-        if (s.id === sourceId) {
-          return {
-            ...s,
-            isRestDay: target.isRestDay,
-            name: target.name,
-            muscleGroup: target.muscleGroup,
-            durationMinutes: target.durationMinutes,
-            warmup: target.warmup,
-            coachNotes: target.coachNotes,
-            // Modèle canonique : on échange les blocs (source de vérité). Les
-            // tableaux hérités ne sont plus lus par le builder.
-            blocks: target.blocks,
-            bannerUrl: target.bannerUrl,
-          };
-        }
-        if (s.id === targetId) {
-          return {
-            ...s,
-            isRestDay: source.isRestDay,
-            name: source.name,
-            muscleGroup: source.muscleGroup,
-            durationMinutes: source.durationMinutes,
-            warmup: source.warmup,
-            coachNotes: source.coachNotes,
-            blocks: source.blocks,
-            bannerUrl: source.bannerUrl,
-          };
-        }
-        return s;
-      });
-    });
+    setSessions((prev) => echangerJoursDeSeance(prev, sourceId, targetId));
     markDirty();
   }
 
@@ -574,7 +557,7 @@ export function ProgramBuilderFullscreen({
                   }}
                   onDrop={() => {
                     if (dragSessionId.current && dragSessionId.current !== session.id) {
-                      swapSessionContent(dragSessionId.current, session.id);
+                      deplacerSeance(dragSessionId.current, session.id);
                     }
                     dragSessionId.current = null;
                     setDragOverSessionId(null);
