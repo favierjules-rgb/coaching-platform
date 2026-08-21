@@ -267,5 +267,34 @@ await (async () => {
   });
 })();
 
+
+/* ══════════════════════════════════════════════════════════════════════════
+   LE BUILDER DÉPLACE LA SÉANCE, IL NE RECOPIE PLUS SON CONTENU
+   ══════════════════════════════════════════════════════════════════════════ */
+
+await test("MOVE-UI — le glisser-déposer appelle la règle pure, et ne copie plus de blocs", () => {
+  const src = readFileSync(
+    new URL("../../components/admin/ProgramBuilderFullscreen.tsx", import.meta.url),
+    "utf8",
+  ).replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/.*$/gm, "$1 ");
+
+  assert.match(src, /echangerJoursDeSeance\(prev, sourceId, targetId\)/, "la règle pure est appelée");
+
+  // ⚠️ ET LE CONTENU NE VOYAGE PLUS. C'est la copie des blocs d'une séance
+  // vers l'autre qui envoyait à la RPC des UUID appartenant à une autre
+  // séance — `FOREIGN_BLOCK_ID`, et ÉCHEC DE L'ENREGISTREMENT à chaque
+  // déplacement. Réécrire cette copie dans le composant réintroduirait le
+  // défaut sans toucher à la règle pure.
+  assert.equal(/blocks:\s*target\.blocks/.test(src), false, "aucun bloc recopié depuis la cible");
+  assert.equal(/blocks:\s*source\.blocks/.test(src), false, "aucun bloc recopié depuis la source");
+  assert.equal(/swapSessionContent/.test(src), false, "l'ancien échange de contenu a disparu");
+
+  // ⚠️ ET LE VERROU RESTE CELUI DE LA LIGNE ÉCRITE. Dupliquer une séance vers
+  // la semaine suivante écrivait sur la ligne CIBLE avec l'`updatedAt` de la
+  // SOURCE : la RPC comparait deux versions étrangères et levait
+  // `STALE_TRAINING_SESSION`. Même famille de faute que le déplacement.
+  assert.match(src, /updatedAt:\s*target\.updatedAt/, "la duplication garde le verrou de la cible");
+});
+
 console.log(`\n${réussis} test(s) réussi(s), ${échecs} échec(s).`);
 if (échecs > 0) process.exit(1);

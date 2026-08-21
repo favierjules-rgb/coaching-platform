@@ -810,29 +810,53 @@ async function diffProgramStructure(
   devWarn("diffProgramStructure (workout_sessions lecture)", existingSessionsError);
   const existingSessions = existingSessionsRaw ?? [];
 
-  // Clé stable "weekId::day" -> session id existante.
-  const existingSessionIdByKey = new Map<string, string>(
-    existingSessions.map((s) => [`${s.program_week_id}::${s.day}`, s.id]),
-  );
+  // ════════════════════════════════════════════════════════════════════════
+  // ⚠️ L'IDENTITÉ D'UNE SÉANCE EST SON `id`, PLUS SA CASE DANS LA GRILLE
+  // ════════════════════════════════════════════════════════════════════════
+  // L'appariement se faisait par (semaine, jour). Une séance ne pouvait donc
+  // pas CHANGER de jour : le builder recopiait son contenu dans la case
+  // voisine, UUID de blocs compris, et la RPC refusait — à juste titre — des
+  // blocs appartenant à une autre séance (`FOREIGN_BLOCK_ID`, étape 5 de
+  // `save_training_session_blocks`). Résultat mesuré en production : éditer
+  // une séance s'enregistrait, la déplacer échouait toujours.
+  //
+  // Avec l'`id` pour identité, déplacer une séance déplace sa LIGNE : elle
+  // garde ses blocs, ses exercices, ses prescriptions cardio et le
+  // rattachement des retours élèves déjà soumis. `day` devient une donnée
+  // patchée comme le nom ou les notes — `session_patch` l'autorise déjà, et
+  // aucun index unique ne pèse sur (program_week_id, day), donc deux lignes
+  // peuvent transitoirement partager un jour pendant un échange.
+  const existingRowById = new Map(existingSessions.map((s) => [s.id, s]));
 
-  const incomingSessionKeys = new Set<string>();
+  const idsConserves = new Set<string>();
   const sessionsToInsert: AdminWorkoutSession[] = [];
 
   for (const session of sessions) {
     const weekId = weekIdByNumber.get(session.weekNumber);
     if (!weekId) continue;
-    const key = `${weekId}::${session.day}`;
-    incomingSessionKeys.add(key);
-    // Séance existante : gérée plus bas via son SNAPSHOT (session.updatedAt) +
-    // session_patch, SANS UPDATE préalable de la ligne. Séance nouvelle : INSERT.
-    if (!existingSessionIdByKey.has(key)) sessionsToInsert.push(session);
+    const ligne = existingRowById.get(session.id);
+    // ⚠️ UNE SÉANCE NE CHANGE PAS DE SEMAINE — et si elle le faisait un jour,
+    // on ne le maquillerait pas. `session_patch` n'accepte pas
+    // `program_week_id` : la ligne serait patchée dans la mauvaise semaine, en
+    // silence. Ce cas est donc traité comme une séance NEUVE dans la semaine
+    // cible, et l'ancienne ligne est supprimée avec le reste.
+    if (ligne !== undefined && ligne.program_week_id === weekId) {
+      idsConserves.add(session.id);
+      // Séance existante : gérée plus bas via son SNAPSHOT (session.updatedAt) +
+      // session_patch, SANS UPDATE préalable de la ligne.
+      continue;
+    }
+    if (ligne !== undefined) {
+      devWarn("diffProgramStructure (séance changée de semaine)", {
+        message: `séance ${session.id} recréée dans la semaine ${session.weekNumber}`,
+      });
+    }
+    sessionsToInsert.push(session);
   }
 
-  // Séances en base qui n'apparaissent plus du tout dans le nouveau jeu de
-  // données (cas défensif : ne devrait pas arriver via ProgramBuilder, qui
-  // conserve toujours les 7 jours par semaine, mais on ne laisse pas de
-  // séance orpheline si ça change un jour).
-  const sessionsToDelete = existingSessions.filter((s) => !incomingSessionKeys.has(`${s.program_week_id}::${s.day}`));
+  // Séances en base qui n'apparaissent plus dans le nouveau jeu de données :
+  // le coach a supprimé une semaine, ou une séance a changé de semaine.
+  const sessionsToDelete = existingSessions.filter((s) => !idsConserves.has(s.id));
   if (sessionsToDelete.length > 0) {
     const { error } = await supabase
       .from("workout_sessions")
@@ -870,10 +894,15 @@ async function diffProgramStructure(
     if (sessionRow) insertedByKey.set(session, { id: sessionRow.id, updatedAt: sessionRow.updated_at });
   }
 
+  /**
+   * La ligne à écrire pour cette séance — son `id`, jamais sa case.
+   *
+   * ⚠️ ET SEULEMENT SI ELLE A ÉTÉ RETENUE. Une séance dont la ligne vient
+   * d'être supprimée (changement de semaine) doit passer par l'INSERT, pas
+   * viser un identifiant qui n'existe plus.
+   */
   function resolveExistingId(session: AdminWorkoutSession): string | undefined {
-    const weekId = weekIdByNumber.get(session.weekNumber);
-    if (!weekId) return undefined;
-    return existingSessionIdByKey.get(`${weekId}::${session.day}`);
+    return idsConserves.has(session.id) ? session.id : undefined;
   }
 
   // Id du bloc musculation déjà persisté par séance EXISTANTE : le fournir à
