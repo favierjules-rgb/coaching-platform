@@ -16,6 +16,7 @@ import {
   deriveBuilderSessionState,
   duplicateStrengthExercise,
   duplicateTrainingBlock,
+  echangerJoursDeSeance,
   getBlockDropPlacement,
   isBlockColorKey,
   moveExerciseBetweenStrengthBlocks,
@@ -498,6 +499,57 @@ test("analyse — aplati les exercices des blocs strength dans l'ordre, ignore l
   const ex = strengthExercisesFromBlocks(s.blocks);
   assert.deepEqual(ex.map((e) => e.name), ["Squat", "Bench"], "ordre des blocs, cardio ignoré, jamais session.exercises");
   assert.equal(strengthExercisesFromBlocks(builder([cardioBlock(P_BLOCK_A, 0)]).blocks).length, 0, "aucun bloc strength → vide");
+});
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   LE DÉPLACEMENT D'UNE SÉANCE DANS LA GRILLE
+   ══════════════════════════════════════════════════════════════════════════ */
+
+test("MOVE-PUR — déplacer une séance échange les JOURS, jamais le contenu", () => {
+  // ⚠️ LE DÉFAUT QUE CETTE RÈGLE REMPLACE. L'ancienne version recopiait
+  // nom/blocs/notes d'une case à l'autre en laissant `id` et `day` ancrés.
+  // Les blocs déplacés emportaient leurs UUID persistés, et la séance
+  // d'arrivée partait à la RPC avec des blocs appartenant à celle de départ :
+  // `FOREIGN_BLOCK_ID`, et rien ne s'enregistrait.
+  const seances = [
+    { id: "a", day: "mercredi", name: "Lower", blocs: ["b1"] },
+    { id: "b", day: "jeudi", name: "Repos", blocs: [] as string[] },
+    { id: "c", day: "vendredi", name: "Upper", blocs: ["b3"] },
+  ];
+  const apres = echangerJoursDeSeance(seances, "a", "b");
+
+  assert.equal(apres.find((x) => x.id === "a")!.day, "jeudi");
+  assert.equal(apres.find((x) => x.id === "b")!.day, "mercredi");
+
+  // ⚠️ LE CONTENU N'A PAS BOUGÉ D'UN POUCE — c'est toute la correction.
+  assert.equal(apres.find((x) => x.id === "a")!.name, "Lower");
+  assert.deepEqual(apres.find((x) => x.id === "a")!.blocs, ["b1"], "les blocs restent avec LEUR séance");
+  assert.equal(apres.find((x) => x.id === "b")!.name, "Repos");
+  assert.deepEqual(apres.find((x) => x.id === "b")!.blocs, []);
+
+  // Les séances non concernées sont rendues telles quelles.
+  assert.equal(apres.find((x) => x.id === "c"), seances[2], "aucune copie inutile");
+});
+
+test("MOVE-PUR — pure, totale, et sans devinette", () => {
+  const seances = [
+    { id: "a", day: "lundi" },
+    { id: "b", day: "mardi" },
+  ];
+  const copie = JSON.parse(JSON.stringify(seances)) as typeof seances;
+
+  assert.deepEqual(echangerJoursDeSeance(seances, "a", "a"), seances, "même séance : rien à échanger");
+  // ⚠️ UN IDENTIFIANT INCONNU N'ÉCHANGE RIEN. Deviner un jour déplacerait une
+  // séance vers une case que personne n'a désignée.
+  assert.deepEqual(echangerJoursDeSeance(seances, "a", "zzz"), seances);
+  assert.deepEqual(echangerJoursDeSeance(seances, "zzz", "b"), seances);
+  assert.deepEqual(echangerJoursDeSeance([], "a", "b"), []);
+
+  assert.deepEqual(seances, copie, "aucune mutation en place");
+  const apres = echangerJoursDeSeance(seances, "a", "b");
+  assert.notEqual(apres[0], seances[0], "les séances touchées sont des copies");
+  assert.deepEqual(seances, copie, "la source reste intacte");
 });
 
 console.log(`\n${passed} test(s) réussi(s), ${failed} échec(s).`);
