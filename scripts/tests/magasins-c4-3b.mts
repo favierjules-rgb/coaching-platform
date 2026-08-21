@@ -991,6 +991,27 @@ await test("C4.3b-22 — tous les états de la recherche manuelle existent", () 
   );
 });
 
-await test("C4.3b-23 — l'écran Courses monte toujours le composant", () => {
-  assert.match(sansCommentaires(ECRAN), /<ChoixMagasinProche\b/, "le composant reste monté");
+await test("C4.3b-23 — le composant reste monté, et le repli manuel reste offert", () => {
+  // ⚠️ LE PROPRIÉTAIRE A CHANGÉ — voir C4.3a-24. Le sélecteur vit désormais
+  // dans la zone PRIX OBSERVÉS et non plus en tête de `courses/page.tsx`.
+  const proprietaire = sansCommentaires(
+    lireOuVide("../../components/student/ListeDeCoursesPersistante.tsx"),
+  );
+  assert.match(proprietaire, /<ChoixMagasinProche\b/, "le composant reste monté");
+  assert.ok(
+    !/<ChoixMagasinProche\b/.test(sansCommentaires(ECRAN)),
+    "et il n'est pas monté deux fois",
+  );
+
+  // ⚠️ ET LE CHAMP VILLE N'EST PAS DEVENU UN SECOURS. Le panneau se replie,
+  // mais quand il est ouvert la saisie manuelle est là D'EMBLÉE, à côté du
+  // bouton de géolocalisation : la cacher derrière un échec ferait de la
+  // géolocalisation un passage obligé. C'est la doctrine de C4.3b, et le
+  // repliement ne la change pas.
+  const code = sansCommentaires(UI);
+  const ouverture = code.indexOf("panneauOuvert && (");
+  assert.ok(ouverture > 0, "le panneau doit être conditionné à un geste");
+  const panneau = code.slice(ouverture);
+  assert.match(panneau, /getCurrentPosition|void chercher\(\)/, "le panneau porte la géolocalisation");
+  assert.match(panneau, /chercherParVille/, "et la recherche par ville, dans le MÊME panneau");
 });

@@ -45,6 +45,7 @@ import {
   estCommerceAlimentaireOsm,
   identifiantWikidataValide,
   normaliserElementOsm,
+  marqueAAfficher,
   typeOsmDepuis,
 } from "../../lib/nutrition/magasins-osm";
 
@@ -718,6 +719,66 @@ await test("PERIMETRE-C4.3c — le module OSM ne parle à personne", () => {
   ]) {
     assert.equal(motif.test(nu), false, `la couche pure C4.3c ne doit pas porter ${motif}`);
   }
+});
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   LA MARQUE AFFICHÉE — LE DÉFAUT « LidlLidl »
+   ══════════════════════════════════════════════════════════════════════════ */
+
+await test("OSM-MARQUE — une marque qui répète le nom ne s'affiche pas deux fois", () => {
+  // ⚠️ LE DÉFAUT MESURÉ EN PREVIEW. L'écran rendait `name` puis `brand`, sans
+  // séparateur, et OpenStreetMap porte très souvent les DEUX avec la même
+  // valeur : un Lidl s'appelle Lidl, et sa marque est Lidl. L'élève lisait
+  // « LidlLidl ». Ce n'est pas un problème de mise en page — c'est une
+  // information affichée deux fois.
+  assert.equal(marqueAAfficher("Lidl", "Lidl"), null);
+  assert.equal(marqueAAfficher("E.Leclerc", "E.Leclerc"), null);
+  assert.equal(marqueAAfficher("Carrefour", "Carrefour"), null);
+
+  // ⚠️ ET LA MARQUE N'EST PAS SUPPRIMÉE POUR AUTANT. « Carrefour Market » de
+  // marque « Carrefour » dit deux choses différentes : l'enseigne du groupe et
+  // le format du magasin. Effacer la seconde parce qu'elle RESSEMBLE à la
+  // première ferait disparaître une information vraie — c'est exactement ce
+  // qu'une règle « plus maligne » (préfixe, distance d'édition) produirait.
+  assert.equal(marqueAAfficher("Carrefour Market", "Carrefour"), "Carrefour");
+  assert.equal(marqueAAfficher("Carrefour City", "Carrefour"), "Carrefour");
+  assert.equal(marqueAAfficher("Naturalia", "Monoprix"), "Monoprix");
+
+  // Casse et espaces de bord : la source est saisie à la main, elle varie.
+  assert.equal(marqueAAfficher("Lidl", "lidl"), null);
+  assert.equal(marqueAAfficher("LIDL", "Lidl"), null);
+  assert.equal(marqueAAfficher(" Lidl ", "Lidl"), null);
+  assert.equal(marqueAAfficher("Lidl", "  Lidl  "), null);
+  assert.equal(marqueAAfficher("Casino Shop", "  Casino  "), "Casino", "la valeur rendue est nettoyée");
+
+  // Rien à afficher quand il n'y a rien.
+  for (const vide of [null, undefined, "", "   ", "\t\n"]) {
+    assert.equal(marqueAAfficher("Lidl", vide as string | null), null, JSON.stringify(vide));
+  }
+
+  // ⚠️ ET AUCUN DÉPOUILLEMENT DES ACCENTS. « Casino » et « Cásino » ne sont pas
+  // le même mot ; les rapprocher masquerait une vraie différence de saisie chez
+  // la source, et nous n'avons aucune raison de trancher à sa place.
+  assert.equal(marqueAAfficher("Casino", "Cásino"), "Cásino");
+});
+
+await test("OSM-MARQUE-UI — l'écran APPELLE la règle, il ne la réécrit pas", () => {
+  // ⚠️ UNE RÈGLE RECOPIÉE DANS LE JSX SERAIT UNE SECONDE RÈGLE. Elle
+  // divergerait de celle-ci au premier ajustement, et c'est précisément ce que
+  // la fonction pure existe pour empêcher.
+  const ui = lire("../../components/student/ChoixMagasinProche.tsx").replace(/\/\*[\s\S]*?\*\//g, " ");
+  assert.match(ui, /marqueAAfficher\(magasin\.name, magasin\.brand\)/, "l'écran appelle la règle pure");
+  assert.equal(
+    /\{magasin\.brand \?/.test(ui),
+    false,
+    "l'ancien rendu direct de la marque ne doit plus exister",
+  );
+  assert.equal(
+    /toLowerCase\(\)/.test(ui),
+    false,
+    "aucune comparaison de marque réécrite dans le composant",
+  );
 });
 
 console.log("\n✅ C4.3c — couche pure OpenStreetMap : suite verte.");

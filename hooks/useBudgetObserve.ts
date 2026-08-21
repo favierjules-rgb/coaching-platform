@@ -114,12 +114,13 @@ export function useBudgetObserve(listId: string | null): EtatBudgetObserve {
     };
   }, [charger, rafraichissement]);
 
-  return {
-    chargement,
-    ok,
-    budget,
-    comparaison,
-    couvertureMagasin,
-    recharger: () => setRafraichissement((n) => n + 1),
-  };
+  /**
+   * ⚠️ STABLE ENTRE DEUX RENDUS, ET CE N'EST PAS COSMÉTIQUE. Cette fonction est
+   * passée en propriété au sélecteur de magasin : recréée à chaque rendu, elle
+   * invaliderait ses `useCallback` en cascade à chaque frappe au clavier dans
+   * le champ ville.
+   */
+  const recharger = useCallback(() => setRafraichissement((n) => n + 1), []);
+
+  return { chargement, ok, budget, comparaison, couvertureMagasin, recharger };
 }

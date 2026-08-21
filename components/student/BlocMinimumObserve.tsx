@@ -40,12 +40,41 @@ export function BlocMinimumObserve({
   couvertureMagasin,
   chargement,
   ok,
+  listeAbsente = false,
+  enTete,
 }: {
   readonly budget: BudgetObserve | null;
   readonly comparaison: ComparaisonBudget | null;
   readonly couvertureMagasin: EtatCouverture;
   readonly chargement: boolean;
   readonly ok: boolean;
+  /**
+   * Aucune liste n'existe encore pour cette période.
+   *
+   * ⚠️ C'EST UN ÉTAT D'ÉCRAN, PAS UN ÉTAT DE COUVERTURE — et la distinction
+   * est tout l'enjeu. `EtatCouverture` répond à « que sait-on des prix DANS ce
+   * magasin ». Ici, la question ne se pose même pas : il n'y a rien à chiffrer.
+   * En faire une septième valeur de couverture aurait mêlé une absence de
+   * liste à une absence de relevés, et les six états existants auraient cessé
+   * de dire ce qu'ils disent.
+   *
+   * ⚠️ ET DANS CE CAS, RIEN N'EST LU. Aucune requête `/observed-prices` ne
+   * part : `useBudgetObserve` ne charge pas sans identifiant de liste.
+   * L'affichage suit ce silence au lieu de le déguiser en « aucun prix ».
+   */
+  readonly listeAbsente?: boolean;
+  /**
+   * Le sélecteur de magasin, rendu DANS cette carte, sous le titre.
+   *
+   * ⚠️ UNE SEULE CARTE, ET C'EST LE POINT. Le magasin et les prix observés
+   * sont la même question — « combien coûte ma liste, et où ». Les enfermer
+   * dans deux cadres empilés donnerait deux objets visuels pour un seul sujet.
+   *
+   * ⚠️ ET CE BLOC N'EN SAIT RIEN. Il reçoit un nœud et le pose ; il n'importe
+   * ni le sélecteur, ni Supabase, ni la géolocalisation. C'est ce qui le laisse
+   * pur, et testable sur ses six états sans monter quoi que ce soit d'autre.
+   */
+  readonly enTete?: React.ReactNode;
 }) {
   const titre = (
     <h3 className="text-sm font-semibold tracking-wide text-muted-foreground">
@@ -59,9 +88,21 @@ export function BlocMinimumObserve({
       aria-label="Minimum observé de la liste"
     >
       {titre}
+      {enTete}
       {contenu}
     </section>
   );
+
+  // ⚠️ AVANT TOUT LE RESTE. Sans liste, il n'y a ni chargement, ni panne, ni
+  // couverture à commenter — mais il y a un magasin à choisir, et c'est le bon
+  // moment pour le faire : l'élève prépare ses courses.
+  if (listeAbsente) {
+    return cadre(
+      <p className="text-sm text-muted-foreground" role="status">
+        Génère ta liste pour voir les prix observés.
+      </p>,
+    );
+  }
 
   if (chargement) {
     return cadre(

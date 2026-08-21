@@ -3,12 +3,19 @@
 import { useCallback, useMemo, useState } from "react";
 
 import type { LigneDeCourses } from "@/lib/nutrition/liste-de-courses";
-import { libelleDerniereModification, type LigneAffichee } from "@/lib/nutrition/liste-persistante";
-import { libellePeriode, type PeriodeCourses } from "@/lib/nutrition/periode-courses";
+import {
+  libelleDerniereModification,
+  type LigneAffichee,
+} from "@/lib/nutrition/liste-persistante";
+import {
+  libellePeriode,
+  type PeriodeCourses,
+} from "@/lib/nutrition/periode-courses";
 import { useListePersistante } from "@/hooks/useListePersistante";
 import { useBudgetCourses } from "@/hooks/useBudgetCourses";
 import { BlocBudget } from "@/components/student/BlocBudget";
 import { BlocMinimumObserve } from "@/components/student/BlocMinimumObserve";
+import { ChoixMagasinProche } from "@/components/student/ChoixMagasinProche";
 import { useBudgetObserve } from "@/hooks/useBudgetObserve";
 import { COLOR_STYLES } from "@/lib/ui/color-keys";
 
@@ -70,8 +77,12 @@ export function ListeDeCoursesPersistante({
   return (
     <div className="flex flex-col gap-5">
       <header className="flex flex-col gap-1">
-        <h2 className="text-lg font-semibold tracking-tight">MA LISTE DE COURSES</h2>
-        <p className="text-sm text-muted-foreground">{libellePeriode(periode)}</p>
+        <h2 className="text-lg font-semibold tracking-tight">
+          MA LISTE DE COURSES
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          {libellePeriode(periode)}
+        </p>
       </header>
 
       {restants > 0 && (
@@ -79,8 +90,8 @@ export function ListeDeCoursesPersistante({
           className="rounded-panel border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning"
           role="status"
         >
-          {restants} repas rest{restants > 1 ? "ent" : "e"} à composer&nbsp;: ils ne figurent pas
-          dans cette liste.
+          {restants} repas rest{restants > 1 ? "ent" : "e"} à composer&nbsp;:
+          ils ne figurent pas dans cette liste.
         </p>
       )}
 
@@ -89,8 +100,9 @@ export function ListeDeCoursesPersistante({
           className="rounded-panel border border-info/40 bg-info/10 px-4 py-3 text-sm text-info"
           role="status"
         >
-          Tes repas ont changé depuis la dernière génération. Mettre à jour corrigera les
-          quantités&nbsp;— tes articles ajoutés à la main et tes cases cochées sont conservés.
+          Tes repas ont changé depuis la dernière génération. Mettre à jour
+          corrigera les quantités&nbsp;— tes articles ajoutés à la main et tes
+          cases cochées sont conservés.
         </p>
       )}
 
@@ -114,19 +126,58 @@ export function ListeDeCoursesPersistante({
         pas, ce qui vaut mieux qu'une absence silencieuse dont l'élève
         conclurait qu'aucun prix n'existe.
       */}
-      {etat.liste !== null && (
-        <BlocMinimumObserve
-          budget={observe.budget}
-          comparaison={observe.comparaison}
-          couvertureMagasin={observe.couvertureMagasin}
-          chargement={observe.chargement}
-          ok={observe.ok}
-        />
-      )}
+      {/*
+        ⚠️ CE BLOC S'AFFICHE MÊME SANS LISTE, ET C'EST DÉLIBÉRÉ. Il portait la
+        garde `etat.liste !== null` ; le sélecteur de magasin, monté dedans,
+        disparaissait donc tant qu'aucune liste n'existait — et l'élève ne
+        pouvait plus choisir son magasin au moment précis où il prépare ses
+        courses. Sans liste, le bloc ne prétend rien sur les prix : il le dit,
+        et ne lit rien.
+      */}
+      <BlocMinimumObserve
+        budget={observe.budget}
+        comparaison={observe.comparaison}
+        couvertureMagasin={observe.couvertureMagasin}
+        chargement={observe.chargement}
+        ok={observe.ok}
+        // ⚠️ UN ÉTAT D'ÉCRAN, PAS UN SEPTIÈME ÉTAT DE COUVERTURE. Les six
+        // valeurs d'`EtatCouverture` continuent de dire exactement ce
+        // qu'elles disaient ; « pas encore de liste » est une autre question.
+        listeAbsente={etat.liste === null}
+        /*
+            COURSES C4.3c — LE CHOIX DU MAGASIN VIT ICI, ET NULLE PART AILLEURS.
+
+            ⚠️ IL ÉTAIT MONTÉ EN HAUT DE `courses/page.tsx`, AVANT « RETOUR » ET
+            « MA LISTE DE COURSES » : trois commandes permanentes — géolocaliser,
+            saisir une ville, rechercher — pour un geste qu'on fait une fois par
+            mois. C'est le défaut Preview corrigé ici.
+
+            ⚠️ ET SÛREMENT PAS DANS `ListeDeCoursesParcours`, qui reste sous
+            contrat UX-24 : ce dernier ne doit connaître ni magasin, ni prix, ni
+            géolocalisation. Ce composant-ci n'est pas sous ce contrat — il
+            PORTE déjà les prix observés, et le magasin est ce qui les commande.
+
+            ⚠️ `onMagasinChoisi` EST LE CORRECTIF LE PLUS IMPORTANT DU LOT.
+            Après un `POST /stores/select` réussi, les relevés affichés sont
+            ceux de l'ANCIEN magasin ; sans cette relecture, l'élève changerait
+            de magasin et lirait des prix qui ne sont plus les siens. On relit
+            la zone des prix, et elle SEULE : remonter le parcours entier
+            réinitialiserait la composition de la liste.
+          */
+        enTete={
+          <ChoixMagasinProche
+            studentId={studentId}
+            onMagasinChoisi={observe.recharger}
+          />
+        }
+      />
 
       {etat.liste !== null && (
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <p className="text-sm font-medium text-muted-foreground" aria-live="polite">
+          <p
+            className="text-sm font-medium text-muted-foreground"
+            aria-live="polite"
+          >
             {etat.progression.libelle}
           </p>
           {/*
@@ -145,12 +196,13 @@ export function ListeDeCoursesPersistante({
 
       {etat.liste === null ? (
         <p className="text-sm text-muted-foreground">
-          Aucune liste pour cette période. Génère-la à partir des repas que tu as validés.
+          Aucune liste pour cette période. Génère-la à partir des repas que tu
+          as validés.
         </p>
       ) : etat.lignes.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          Ta liste est vide&nbsp;: aucun repas validé sur cette période, et aucun article ajouté à
-          la main.
+          Ta liste est vide&nbsp;: aucun repas validé sur cette période, et
+          aucun article ajouté à la main.
         </p>
       ) : (
         <ul className="flex flex-col divide-y divide-border rounded-card border border-border bg-card">
@@ -160,7 +212,9 @@ export function ListeDeCoursesPersistante({
               ligne={ligne}
               onBasculer={(coche) => void etat.basculer(ligne.id, coche)}
               onSupprimer={
-                ligne.source === "manual" ? () => void etat.supprimer(ligne.id) : null
+                ligne.source === "manual"
+                  ? () => void etat.supprimer(ligne.id)
+                  : null
               }
             />
           ))}
@@ -243,13 +297,18 @@ export function LigneDeListe({
         <span
           aria-hidden
           className={`flex size-5 shrink-0 items-center justify-center rounded-md border ${
-            ligne.checked ? "border-primary bg-primary text-primary-foreground" : "border-border"
+            ligne.checked
+              ? "border-primary bg-primary text-primary-foreground"
+              : "border-border"
           }`}
         >
           {ligne.checked ? "✓" : ""}
         </span>
         {ligne.colorKey !== null && (
-          <span aria-hidden className={`size-2 shrink-0 rounded-full ${COLOR_STYLES[ligne.colorKey].dot}`} />
+          <span
+            aria-hidden
+            className={`size-2 shrink-0 rounded-full ${COLOR_STYLES[ligne.colorKey].dot}`}
+          />
         )}
         <span
           // ⚠️ ATTÉNUÉE, PAS SUPPRIMÉE. La ligne cochée reste lisible : c'est
@@ -259,7 +318,9 @@ export function LigneDeListe({
           {ligne.libelle}
         </span>
         {ligne.quantite !== null && (
-          <span className={`text-sm tabular-nums ${ligne.checked ? "text-muted-foreground" : "text-muted-foreground"}`}>
+          <span
+            className={`text-sm tabular-nums ${ligne.checked ? "text-muted-foreground" : "text-muted-foreground"}`}
+          >
             {ligne.quantite}
           </span>
         )}
@@ -315,7 +376,8 @@ export function FormulaireArticle({
     return Number.isFinite(n) && n > 0 ? n : null;
   }, [quantite]);
 
-  const valide = libelle.trim() !== "" && (quantite.trim() === "" || nombre !== null);
+  const valide =
+    libelle.trim() !== "" && (quantite.trim() === "" || nombre !== null);
 
   const soumettre = useCallback(async () => {
     if (!valide) return;
@@ -346,7 +408,9 @@ export function FormulaireArticle({
 
       <div className="flex gap-3">
         <label className="flex flex-1 flex-col gap-1 text-sm">
-          <span className="font-medium text-muted-foreground">Quantité (facultative)</span>
+          <span className="font-medium text-muted-foreground">
+            Quantité (facultative)
+          </span>
           <input
             type="text"
             inputMode="decimal"
@@ -359,7 +423,9 @@ export function FormulaireArticle({
           <span className="font-medium text-muted-foreground">Unité</span>
           <select
             value={unite}
-            onChange={(e) => setUnite(e.target.value as "" | "g" | "ml" | "piece")}
+            onChange={(e) =>
+              setUnite(e.target.value as "" | "g" | "ml" | "piece")
+            }
             className="min-h-11 rounded-panel border border-border bg-background px-3 py-2 text-sm"
           >
             <option value="">aucune</option>
@@ -391,7 +457,11 @@ export function FormulaireArticle({
   );
 }
 
-function LectureImpossible({ onReessayer }: { readonly onReessayer: () => void }) {
+function LectureImpossible({
+  onReessayer,
+}: {
+  readonly onReessayer: () => void;
+}) {
   return (
     <div className="flex flex-col gap-3 rounded-panel border border-destructive/40 bg-destructive/10 px-4 py-3">
       <p className="text-sm text-destructive" role="alert">

@@ -289,6 +289,39 @@ export function cleIdentiteOsm(magasin: { osmType: TypeOsm; osmId: number }): st
   return `${magasin.osmType}/${magasin.osmId}`;
 }
 
+/**
+ * La marque à AFFICHER à côté d'un nom de magasin — ou rien.
+ *
+ * ════════════════════════════════════════════════════════════════════════════
+ * ⚠️ LE DÉFAUT QU'ELLE CORRIGE : « LidlLidl », « CarrefourCarrefour »
+ * ════════════════════════════════════════════════════════════════════════════
+ * OpenStreetMap porte très souvent `name` ET `brand` avec la MÊME valeur — un
+ * Lidl s'appelle Lidl, et sa marque est Lidl. L'écran affichait les deux à la
+ * suite, sans séparateur, et l'élève lisait « LidlLidl ». Ce n'est pas un
+ * problème de mise en page : c'est une information redondante qu'il ne fallait
+ * pas afficher deux fois.
+ *
+ * ⚠️ ET LA MARQUE N'EST PAS SUPPRIMÉE POUR AUTANT. « Carrefour Market » de
+ * marque « Carrefour » dit deux choses différentes — l'enseigne du groupe, et
+ * le format du magasin. Effacer la seconde parce qu'elle ressemble à la
+ * première ferait disparaître une information vraie.
+ *
+ * La règle tient donc en trois lignes, et elle est PURE : comparaison sur les
+ * valeurs nettoyées, insensible à la casse. Pas de comparaison approchante, pas
+ * de préfixe, pas de distance d'édition — « Carrefour » et « Carrefour Market »
+ * doivent rester distincts, et une règle plus maligne les confondrait.
+ */
+export function marqueAAfficher(name: string, brand: string | null | undefined): string | null {
+  if (typeof brand !== "string") return null;
+  const marque = brand.trim();
+  if (marque === "") return null;
+  // ⚠️ `toLowerCase()` SEUL, SANS DÉPOUILLEMENT DES ACCENTS. « Casino » et
+  // « Cásino » ne sont pas le même mot, et les rapprocher masquerait une vraie
+  // différence de saisie chez la source.
+  if (marque.toLowerCase() === name.trim().toLowerCase()) return null;
+  return marque;
+}
+
 /* ── 4. LA DISTANCE, CALCULÉE CHEZ NOUS ──────────────────────────────────── */
 
 /**

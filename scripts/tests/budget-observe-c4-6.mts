@@ -17,8 +17,13 @@
  */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
+import { createServer } from "node:http";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
+
+import esbuild from "esbuild";
 
 import {
   type EntreeLigne,
@@ -890,5 +895,248 @@ await test("C4.6-UI2 — le bloc C4 et le bloc C3 restent deux notions séparée
     "les deux blocs ont des conditions d'affichage indépendantes",
   );
 });
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   LE CÂBLAGE : CHANGER DE MAGASIN RELIT LES PRIX — DANS UN VRAI NAVIGATEUR
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * L'ATELIER NAVIGATEUR — construit UNE fois, partagé par les deux preuves.
+ *
+ * ⚠️ CES CAS NE PEUVENT PAS SE PROUVER SUR DU TEXTE SOURCE. `ChoixMagasinProche`
+ * appelait déjà `onMagasinChoisi` ; ce qui manquait, c'est que quelqu'un le
+ * BRANCHE. Un rappel vide — `onMagasinChoisi={() => {}}` — passerait n'importe
+ * quelle vérification d'existence, et l'élève continuerait de lire les relevés
+ * de son ancien magasin.
+ *
+ * On monte donc le VRAI `ListeDeCoursesPersistante`, on CLIQUE, et on compte
+ * les lectures de `/observed-prices`. Seules la source de la liste et le client
+ * Supabase sont substitués : le câblage testé est celui de production.
+ */
+async function ouvrirAtelier() {
+  const RACINE = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const DOSSIER = join(RACINE, "scripts", "tests", "magasin-prix-render");
+  const executable = [
+    process.env.CHROMIUM_PATH,
+    "/opt/pw-browsers/chromium",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/google-chrome",
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+  ].find((c): c is string => Boolean(c) && existsSync(c as string));
+  assert.ok(executable, "aucun navigateur trouvé — pose CHROMIUM_PATH");
+
+  // ⚠️ DEUX SUBSTITUTIONS, ET PAS UNE DE PLUS. La source de la liste et le
+  // client Supabase du navigateur : tout le reste du graphe — les trois
+  // composants, les trois hooks, et LE CÂBLAGE ENTRE EUX — est le code de
+  // production. Substituer davantage reviendrait à tester le harnais.
+  const substitutions: esbuild.Plugin = {
+    name: "substitutions-harnais",
+    setup(build) {
+      build.onResolve({ filter: /^@\/hooks\/useListePersistante$/ }, () => ({
+        path: join(DOSSIER, "liste-figee.ts"),
+      }));
+      build.onResolve({ filter: /^@\/lib\/supabase\/browser$/ }, () => ({
+        path: join(DOSSIER, "supabase-absent.ts"),
+      }));
+    },
+  };
+
+  const construction = await esbuild.build({
+    entryPoints: [join(DOSSIER, "entree.tsx")],
+    bundle: true,
+    write: false,
+    format: "esm",
+    platform: "browser",
+    target: "es2022",
+    jsx: "automatic",
+    tsconfig: join(RACINE, "tsconfig.json"),
+    plugins: [substitutions],
+    define: { "process.env.NODE_ENV": '"development"' },
+    banner: { js: "globalThis.process ??= { env: {} };" },
+    logLevel: "silent",
+  });
+  const paquet = construction.outputFiles![0]!.text;
+
+  const PAGE = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>prix</title></head>
+<body><div id="racine"></div><script type="module" src="/paquet.js"></script></body></html>`;
+  const serveur = createServer((requete, reponse) => {
+    if ((requete.url ?? "/").startsWith("/paquet.js")) {
+      reponse.writeHead(200, { "content-type": "text/javascript; charset=utf-8" }).end(paquet);
+      return;
+    }
+    reponse.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(PAGE);
+  });
+  await new Promise<void>((ok) => serveur.listen(0, "127.0.0.1", ok));
+  const adresse = serveur.address();
+  const origine = `http://127.0.0.1:${typeof adresse === "object" && adresse ? adresse.port : 0}`;
+
+  const { chromium } = await import("playwright-core");
+  const navigateur = await chromium.launch({
+    executablePath: executable,
+    args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  });
+
+  /**
+   * ⚠️ UN CONTEXTE NEUF PAR CAS. Les deux situations partagent le paquet, mais
+   * jamais l'état : chacune repart d'un compteur d'appels vide et d'un DOM
+   * neuf, sinon la seconde hériterait des lectures de la première.
+   */
+  async function ouvrir(chemin: string) {
+    const contexte = await navigateur.newContext();
+    const page = await contexte.newPage();
+    const erreurs: string[] = [];
+    page.on("pageerror", (e) => erreurs.push(e.message));
+    await page.goto(`${origine}${chemin}`);
+    await page.waitForFunction(() => "__harnais" in window);
+    const lectures = () =>
+      page.evaluate(() =>
+        (window as unknown as { __harnais: { lectures: (f: string) => number } }).__harnais.lectures(
+          "/observed-prices",
+        ),
+      );
+    return { page, erreurs, lectures, fermer: () => contexte.close() };
+  }
+
+  return {
+    ouvrir,
+    fermer: async () => {
+      await navigateur.close();
+      await new Promise<void>((ok) => serveur.close(() => ok()));
+    },
+  };
+}
+
+const atelier = await ouvrirAtelier();
+
+await test("C4.6-CABLAGE — après un changement de magasin, la zone des prix est RELUE", async () => {
+  const { page, erreurs, lectures, fermer } = await atelier.ouvrir("/");
+  try {
+
+    // 1. Une première lecture a lieu à l'ouverture, et l'écran dit qu'il manque
+    //    un magasin — l'état `aucun_magasin`, jamais confondu avec « 0,00 € ».
+    await page.waitForFunction(() => document.body.innerText.includes("PRIX OBSERVÉS"));
+    await page.waitForFunction(
+      () =>
+        (window as unknown as { __harnais: { lectures: (f: string) => number } }).__harnais.lectures(
+          "/observed-prices",
+        ) >= 1,
+    );
+    const avant = await lectures();
+    assert.equal(avant, 1, "une lecture à l'ouverture, pas davantage");
+    assert.match(await page.innerText("body"), /aucun magasin choisi/);
+    assert.match(await page.innerText("body"), /Choisis un magasin/);
+
+    // 2. Le panneau est REPLIÉ : les commandes complètes n'occupent pas l'écran.
+    assert.equal(
+      await page.getByText("Trouver un magasin près de moi").count(),
+      0,
+      "les commandes de recherche ne doivent pas être visibles au repos",
+    );
+
+    // 3. On ouvre, on cherche par ville — sans passer par la géolocalisation.
+    await page.getByRole("button", { name: "Choisir un magasin" }).click();
+    await page.getByLabel("Ville").fill("Toulon");
+    await page.getByRole("button", { name: "Rechercher" }).click();
+    await page.waitForFunction(() => document.body.innerText.includes("Lidl"));
+
+    // ⚠️ ET « LidlLidl » N'EXISTE PLUS. La marque qui répète le nom ne
+    // s'affiche pas deux fois — c'est `marqueAAfficher`, à l'écran.
+    const texteListe = await page.innerText("body");
+    assert.equal(/LidlLidl/.test(texteListe), false, "la marque ne doit pas doubler le nom");
+    assert.equal(/NaturaliaNaturalia/.test(texteListe), false);
+
+    // 4. LE GESTE. On choisit un magasin.
+    await page.getByRole("button", { name: /Lidl/ }).first().click();
+    await page.waitForFunction(
+      (n) =>
+        (window as unknown as { __harnais: { lectures: (f: string) => number } }).__harnais.lectures(
+          "/observed-prices",
+        ) > (n as number),
+      avant,
+      { timeout: 5_000 },
+    );
+
+    // ⚠️ LA PREUVE. Une seconde lecture a bien eu lieu APRÈS la sélection.
+    const apres = await lectures();
+    assert.ok(apres > avant, `la zone des prix doit être relue (${avant} → ${apres})`);
+
+    // 5. Et l'écran a suivi : le panneau s'est refermé, le magasin s'affiche,
+    //    les résultats ont disparu, et l'état de couverture a changé.
+    const final = await page.innerText("body");
+    assert.match(final, /Magasin\s*:\s*Lidl/, "le magasin choisi s'affiche");
+    assert.match(final, /Changer/, "et le bouton propose d'en changer");
+    assert.equal(/Trouver un magasin près de moi/.test(final), false, "le panneau s'est refermé");
+    assert.equal(/Naturalia/.test(final), false, "les résultats de recherche ont été vidés");
+    assert.match(
+      final,
+      /pas encore de prix observés|Minimum observé|—/,
+      "l'état de couverture affiché suit la relecture",
+    );
+    assert.equal(/aucun magasin choisi/.test(final), false);
+
+    assert.deepEqual(erreurs, [], "aucune erreur de page");
+  } finally {
+    await fermer();
+  }
+});
+
+await test("C4.6-SANS-LISTE — pas encore de liste : le sélecteur reste, et RIEN n'est lu", async () => {
+  // ⚠️ L'ARBITRAGE QUE CE CAS FIGE. Le bloc des prix portait la garde
+  // `etat.liste !== null` ; le sélecteur de magasin, monté dedans, disparaissait
+  // donc tant qu'aucune liste n'existait — c'est-à-dire au moment précis où
+  // l'élève prépare ses courses et veut désigner son magasin.
+  const { page, erreurs, lectures, fermer } = await atelier.ouvrir("/?sansListe");
+  try {
+    await page.waitForFunction(() => document.body.innerText.includes("PRIX OBSERVÉS"));
+
+    // 1. LE SÉLECTEUR EST LÀ, sans liste.
+    const depart = await page.innerText("body");
+    assert.match(depart, /Aucune liste pour cette période/, "on est bien sans liste");
+    assert.match(depart, /Magasin\s*:\s*aucun magasin choisi/, "le sélecteur reste visible");
+    assert.equal(await page.getByRole("button", { name: "Choisir un magasin" }).count(), 1);
+
+    // ⚠️ ET LE BLOC NE PRÉTEND RIEN SUR LES PRIX. Pas « choisis un magasin »
+    // (il peut le faire, mais ce n'est pas ce qui manque), pas « 0,00 € », pas
+    // « indisponible » : il n'y a simplement rien à chiffrer.
+    assert.match(depart, /Génère ta liste pour voir les prix observés\./);
+    assert.equal(/Minimum observé/.test(depart), false);
+    assert.equal(/Choisis un magasin pour voir le minimum/.test(depart), false);
+
+    // 2. AUCUNE LECTURE DES RELEVÉS. C'est la moitié silencieuse de
+    // l'arbitrage : afficher le sélecteur ne doit pas faire parler l'amont.
+    assert.equal(await lectures(), 0, "aucune requête /observed-prices sans liste");
+
+    // 3. LE PANNEAU S'OUVRE, avec ses deux chemins.
+    await page.getByRole("button", { name: "Choisir un magasin" }).click();
+    assert.equal(await page.getByRole("button", { name: "Trouver un magasin près de moi" }).count(), 1);
+    assert.equal(await page.getByLabel("Ville").count(), 1, "la saisie manuelle reste offerte");
+
+    // 4. ET LE MAGASIN EST RÉELLEMENT SÉLECTIONNABLE.
+    await page.getByLabel("Ville").fill("Toulon");
+    await page.getByRole("button", { name: "Rechercher" }).click();
+    await page.waitForFunction(() => document.body.innerText.includes("Lidl"));
+    await page.getByRole("button", { name: /Lidl/ }).first().click();
+    await page.waitForFunction(() => /Magasin\s*:\s*Lidl/.test(document.body.innerText));
+
+    const apres = await page.innerText("body");
+    assert.match(apres, /Magasin\s*:\s*Lidl/, "le choix est enregistré et affiché");
+    assert.match(apres, /Changer/, "et l'élève peut en changer");
+    assert.match(apres, /Génère ta liste pour voir les prix observés\./, "le message tient");
+
+    // ⚠️ 5. ET TOUJOURS AUCUNE LECTURE. `observe.recharger` est bien branché —
+    // il l'est aussi ici — mais sans identifiant de liste il n'y a rien à
+    // lire, et le hook ne part pas sur le réseau pour rien.
+    assert.equal(await lectures(), 0, "changer de magasin sans liste ne lit rien non plus");
+
+    assert.deepEqual(erreurs, [], "aucune erreur de page");
+  } finally {
+    await fermer();
+  }
+});
+
+await atelier.fermer();
 
 console.log("\n✅ C4.6 — minimum observé : suite verte.");

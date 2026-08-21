@@ -1365,23 +1365,40 @@ await test("C4.3a-22 — la route de recherche valide TOUT côté serveur", () =
    I — L'INTERFACE
    ══════════════════════════════════════════════════════════════════════════ */
 
-await test("C4.3a-24 — l'écran Courses MONTE réellement le composant", () => {
+await test("C4.3a-24 — le sélecteur est MONTÉ, et dans la zone des prix observés", () => {
   // ⚠️ CE TEST EXISTE PARCE QU'UN COMPOSANT ORPHELIN EST UN LOT NON LIVRÉ.
   // Tout le reste peut être vert — routes, filtrage, sécurité — sans qu'aucun
-  // élève ne puisse jamais choisir un magasin. Il rougit dès que le composant
-  // est décroché de l'écran.
-  assert.notEqual(ECRAN_COURSES, "", "l'écran Courses doit exister");
-  const code = sansCommentaires(ECRAN_COURSES);
+  // élève ne puisse jamais choisir un magasin.
+  //
+  // ⚠️ CE QU'IL VÉRIFIE A CHANGÉ DE LIEU, PAS DE NATURE. Le sélecteur était
+  // monté en tête de `courses/page.tsx`, avant « RETOUR » et « MA LISTE DE
+  // COURSES » : trois commandes permanentes — géolocaliser, saisir une ville,
+  // rechercher — pour un geste qu'on fait une fois par mois. Il vit désormais
+  // dans la zone PRIX OBSERVÉS, le seul endroit où le magasin a une
+  // conséquence. La garantie, elle, est INCHANGÉE : il doit être monté
+  // quelque part, et surtout pas dans le moteur de composition.
+  const proprietaire = sansCommentaires(lire("../../components/student/ListeDeCoursesPersistante.tsx"));
   assert.match(
-    code,
+    proprietaire,
     /import \{ ChoixMagasinProche \} from "@\/components\/student\/ChoixMagasinProche"/,
-    "l'écran doit importer le composant",
+    "la zone des prix observés doit importer le composant",
   );
-  assert.match(code, /<ChoixMagasinProche\b/, "l'écran doit RENDRE le composant, pas seulement l'importer");
-  assert.match(code, /studentId=\{/, "le composant doit recevoir l'identité de l'élève");
+  assert.match(proprietaire, /<ChoixMagasinProche\b/, "elle doit le RENDRE, pas seulement l'importer");
+  assert.match(proprietaire, /studentId=\{/, "le composant doit recevoir l'identité de l'élève");
 
-  // ⚠️ ET IL EST MONTÉ DANS LA PAGE, PAS DANS `ListeDeCoursesParcours` : ce
-  // dernier est sous UX-24, qui lui interdit littéralement le mot « magasin ».
+  // ⚠️ ET IL A QUITTÉ LE SOMMET DE LA PAGE. Sans ce refus, le déplacement
+  // pourrait n'être qu'un ajout : deux sélecteurs à l'écran, dont un que
+  // personne n'a demandé.
+  assert.notEqual(ECRAN_COURSES, "", "l'écran Courses doit exister");
+  assert.ok(
+    !/<ChoixMagasinProche\b/.test(sansCommentaires(ECRAN_COURSES)),
+    "le sélecteur ne doit plus occuper le haut de l'écran Courses",
+  );
+
+  // ⚠️ ET SÛREMENT PAS DANS `ListeDeCoursesParcours` : ce dernier est sous
+  // UX-24, qui lui interdit littéralement le mot « magasin ». C'est la seule
+  // partie de ce contrôle qui n'a pas bougé d'un mot — et c'est la plus
+  // importante.
   const parcours = lire("../../components/student/ListeDeCoursesParcours.tsx");
   for (const mot of ["magasin", "store", "ChoixMagasinProche"]) {
     assert.ok(!new RegExp(mot, "i").test(parcours), `ListeDeCoursesParcours nomme « ${mot} » : UX-24 rougirait`);

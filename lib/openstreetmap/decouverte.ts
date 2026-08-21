@@ -19,6 +19,7 @@ import {
   requeteMagasinsDansZone,
   requeteZoneCommune,
 } from "@/lib/openstreetmap/overpass";
+import { type ReponseElementOsm, lireNoeudOsm } from "@/lib/openstreetmap/osm-api";
 
 /**
  * COURSES C4.3c — LA DÉCOUVERTE DES MAGASINS, ORCHESTRÉE.
@@ -257,17 +258,52 @@ export type ResultatCanonique =
  * ⚠️ ET L'IDENTITÉ RENDUE EST VÉRIFIÉE. Un amont qui répondrait autre chose que
  * ce qu'on a demandé ferait enregistrer un magasin que personne n'a choisi.
  */
+
+/**
+ * Le chemin OVERPASS — celui des WAY et des RELATION, inchangé.
+ *
+ * ⚠️ `out center` EST LA RAISON POUR LAQUELLE IL RESTE. Un chemin ou une
+ * relation n'ont pas de coordonnée propre : l'API principale d'OpenStreetMap
+ * rend leur géométrie brute — une liste de nœuds, une liste de membres — et
+ * rien qui ressemble à une position. Overpass, lui, calcule ce centre CHEZ LA
+ * SOURCE. Le calculer nous-mêmes fabriquerait une position que personne n'a
+ * publiée, et l'écrirait dans un référentiel que tous les élèves lisent.
+ */
+async function lireParOverpass(
+  osmType: TypeOsm,
+  osmId: number,
+  options: OptionsOverpass,
+): Promise<ReponseElementOsm> {
+  const reponse = await interrogerOverpass(requeteElement(osmType, osmId), options);
+  if (reponse.statut === "echec") return { statut: "echec", raison: reponse.raison };
+  if (reponse.statut === "zero_results") return { statut: "absent" };
+  const premier = reponse.elements[0];
+  if (premier === undefined) return { statut: "absent" };
+  return { statut: "success", element: premier };
+}
+
 export async function lireElementCanonique(
   osmType: TypeOsm,
   osmId: number,
   options: OptionsOverpass = {},
 ): Promise<ResultatCanonique> {
-  const reponse = await interrogerOverpass(requeteElement(osmType, osmId), options);
-  if (reponse.statut === "echec") return { statut: "echec", raison: reponse.raison };
-  if (reponse.statut === "zero_results") return { statut: "absent" };
+  // ⚠️ DEUX SOURCES, UN SEUL CONTRAT — ET LE CHOIX SE FAIT SUR LE TYPE, PAS SUR
+  // L'HUMEUR DE L'AMONT. Un NODE se lit par clé primaire chez OpenStreetMap
+  // lui-même ; c'est ce qui a corrigé le `RECHERCHE_TROP_LONGUE` mesuré en
+  // Preview sur Naturalia. Un WAY ou une RELATION continuent de passer par
+  // Overpass, pour son `out center` — voir `lireParOverpass`.
+  //
+  // ⚠️ ET IL N'Y A AUCUN REPLI DE L'UNE VERS L'AUTRE. Deux sources essayées
+  // l'une après l'autre doubleraient le délai avant de dire « trop long », et
+  // feraient dépendre le résultat de l'ordre d'essai plutôt que de la donnée.
+  const reponse =
+    osmType === "NODE"
+      ? await lireNoeudOsm(osmId, options)
+      : await lireParOverpass(osmType, osmId, options);
 
-  const premier = reponse.elements[0];
-  if (premier === undefined) return { statut: "absent" };
+  if (reponse.statut === "echec") return { statut: "echec", raison: reponse.raison };
+  if (reponse.statut === "absent") return { statut: "absent" };
+  const premier = reponse.element;
 
   // ⚠️ « IL N'EXISTE PAS » ET « CE N'EST PAS UN MAGASIN » SONT DEUX REFUS
   // DIFFÉRENTS. Le premier invite à recommencer, le second à choisir autre

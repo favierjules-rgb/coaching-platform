@@ -21,6 +21,8 @@ import test from "node:test";
 
 import { OFF_USER_AGENT_ENV } from "../../lib/open-food-facts/contrat";
 import { lireElementCanonique } from "../../lib/openstreetmap/decouverte";
+import { OSM_API_ELEMENT_URL, OSM_API_TIMEOUT_MS, lireNoeudOsm } from "../../lib/openstreetmap/osm-api";
+import { OVERPASS_ENDPOINT } from "../../lib/openstreetmap/overpass";
 import { OPEN_PRICES_PONT_OSM_URL, lirePontOsm, pontPourEcriture } from "../../lib/open-prices/pont-osm";
 import { choixMagasinOsmBodySchema } from "../../lib/api/schemas/magasins";
 
@@ -57,6 +59,42 @@ async function avecUserAgent<T>(fn: () => T | Promise<T>): Promise<T> {
 }
 
 const ENV = (elements: unknown[]) => ({ version: 0.6, generator: "Overpass API", elements });
+
+/**
+ * ⚠️ UN ESPION QUI GARDE L'`init`, PAS SEULEMENT L'URL. La méthode, les
+ * en-têtes et le corps FONT PARTIE du contrat : un GET devenu POST, ou un
+ * `User-Agent` disparu, sont exactement les régressions que l'URL seule ne
+ * verrait pas.
+ */
+function transportEspion(reponse: Response | ((url: string) => Promise<Response>)) {
+  const appels: { url: string; init: RequestInit }[] = [];
+  const transport = async (url: string, init: RequestInit) => {
+    appels.push({ url, init });
+    return typeof reponse === "function" ? reponse(url) : reponse;
+  };
+  return { transport, appels };
+}
+
+/** Le nœud Naturalia de Toulon, tel que l'API OSM le rend. */
+const NOEUD_NATURALIA = {
+  version: "0.6",
+  generator: "CGImap",
+  elements: [
+    {
+      type: "node",
+      id: 9928912836,
+      lat: 43.1242,
+      lon: 5.928,
+      tags: {
+        shop: "supermarket",
+        name: "Naturalia",
+        brand: "Naturalia",
+        "brand:wikidata": "Q3336090",
+        "addr:city": "Toulon",
+      },
+    },
+  ],
+};
 
 // ════════════════════════════════════════════════════════════════════════════
 // A. LE CORPS DE LA REQUÊTE — DÉSIGNER, PAS DÉCRIRE
@@ -175,6 +213,203 @@ await test("SEL-canon — absent, non exploitable et panne sont trois issues", a
       { statut: "echec", raison },
     );
   }
+});
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// B bis. LE NŒUD SE LIT CHEZ OPENSTREETMAP, PAS CHEZ OVERPASS
+// ════════════════════════════════════════════════════════════════════════════
+
+await test("SEL-OSM-01 — un NODE est lu par identité exacte sur l'API OSM principale", async () => {
+  // ⚠️ CE TEST EXISTE POUR UN DÉFAUT MESURÉ EN PREVIEW. Choisir Naturalia
+  // (NODE 9928912836) échouait en `RECHERCHE_TROP_LONGUE` AVANT même que le
+  // pont Open Prices ne soit tenté : la relecture canonique passait par
+  // Overpass, un moteur de REQUÊTE mis en file d'attente derrière des requêtes
+  // lourdes, pour une question qui n'en est pas une — « donne-moi CET
+  // élément ». L'API principale répond par une lecture de clé primaire.
+  const { transport, appels } = transportEspion(json(NOEUD_NATURALIA));
+  const r = await avecUserAgent(() => lireElementCanonique("NODE", 9928912836, { transport }));
+
+  assert.equal(appels.length, 1, "UN seul appel, jamais deux sources essayées l'une après l'autre");
+  assert.equal(
+    appels[0]!.url,
+    `${OSM_API_ELEMENT_URL}/node/9928912836.json`,
+    `URL exacte attendue, reçue : ${appels[0]!.url}`,
+  );
+  assert.ok(appels[0]!.url.startsWith("https://api.openstreetmap.org/"), "la source est OSM elle-même");
+
+  // ⚠️ ET SURTOUT PAS OVERPASS. C'est le fond du correctif : si cette
+  // assertion tombait, le délai reviendrait avec.
+  assert.equal(appels[0]!.url.includes("overpass"), false, "un NODE ne passe plus par Overpass");
+  assert.notEqual(appels[0]!.url, OVERPASS_ENDPOINT);
+
+  // Le contrat de transport, en entier.
+  const init = appels[0]!.init as RequestInit & { headers: Record<string, string> };
+  assert.equal(init.method, "GET", "une lecture, pas une requête");
+  assert.equal(init.body, undefined, "aucun corps sur un GET");
+  assert.equal(init.headers["Accept"], "application/json");
+  assert.ok((init.headers["User-Agent"] ?? "").length > 0, "l'agent identifiant est obligatoire");
+  assert.equal(init.cache, "no-store", "aucune mise en cache d'une fiche qu'on relit pour l'écrire");
+  assert.ok(init.signal instanceof AbortSignal, "la sortie est bornée");
+
+  // ⚠️ ET LES DONNÉES RENDUES RESTENT CELLES QUE LE SERVEUR A NORMALISÉES.
+  // Changer de source ne change pas la doctrine : c'est `normaliserElementOsm`
+  // qui décide, pas l'amont.
+  assert.equal(r.statut, "ok");
+  if (r.statut !== "ok") throw new Error("statut inattendu");
+  assert.equal(r.magasin.name, "Naturalia");
+  assert.equal(r.magasin.brandWikidata, "Q3336090");
+  assert.equal(r.magasin.city, "Toulon");
+  assert.equal(r.magasin.lat, 43.1242);
+  assert.equal(r.magasin.osmType, "NODE");
+  assert.equal(r.magasin.osmId, 9928912836);
+  assert.equal(r.magasin.distanceKm, null, "aucune distance fabriquée sans point de départ");
+});
+
+await test("SEL-OSM-02 — 404 et 410 sont des ABSENCES ; tout le reste est une panne", async () => {
+  // ⚠️ DEUX PREUVES, ET DEUX SEULEMENT. « Jamais existé » (404) et « supprimé »
+  // (410) disent tous deux que cet élément n'est plus choisissable.
+  for (const status of [404, 410]) {
+    const { transport } = transportEspion(new Response("", { status }));
+    assert.deepEqual(
+      await avecUserAgent(() => lireElementCanonique("NODE", 1, { transport })),
+      { statut: "absent" },
+      `HTTP ${status}`,
+    );
+  }
+
+  // ⚠️ ET AUCUNE PANNE NE SE DÉGUISE EN ABSENCE. C'est la leçon répétée de tout
+  // ce chantier : une panne présentée comme une absence fait conclure à l'élève
+  // que le magasin n'existe pas, et il cesse de chercher.
+  for (const [status, raison] of [
+    [429, "rate_limited"],
+    [500, "unavailable"],
+    [502, "unavailable"],
+    [503, "unavailable"],
+    [504, "timeout"],
+  ] as const) {
+    const { transport } = transportEspion(new Response("", { status }));
+    assert.deepEqual(
+      await avecUserAgent(() => lireElementCanonique("NODE", 1, { transport })),
+      { statut: "echec", raison },
+      `HTTP ${status}`,
+    );
+  }
+
+  // 200 illisible, et 200 bien formé mais d'une autre forme.
+  const illisible = transportEspion(
+    new Response("<html>maintenance</html>", { status: 200, headers: { "content-type": "text/html" } }),
+  );
+  assert.deepEqual(
+    await avecUserAgent(() => lireElementCanonique("NODE", 1, { transport: illisible.transport })),
+    { statut: "echec", raison: "invalid_json" },
+  );
+  for (const corps of [{ error: "boom" }, [], { elements: "non" }, null]) {
+    const t = transportEspion(json(corps));
+    assert.deepEqual(
+      await avecUserAgent(() => lireElementCanonique("NODE", 1, { transport: t.transport })),
+      { statut: "echec", raison: "invalid_envelope" },
+      JSON.stringify(corps),
+    );
+  }
+  // ⚠️ UN ÉLÉMENT MAL FORMÉ N'EST PAS UNE ABSENCE NON PLUS.
+  const informe = transportEspion(json({ elements: [{ id: "pas un nombre" }] }));
+  assert.deepEqual(
+    await avecUserAgent(() => lireElementCanonique("NODE", 1, { transport: informe.transport })),
+    { statut: "echec", raison: "invalid_envelope" },
+  );
+
+  // Une enveloppe vide, elle, est bien une absence : l'élément n'est pas là.
+  const vide = transportEspion(json({ elements: [] }));
+  assert.deepEqual(
+    await avecUserAgent(() => lireElementCanonique("NODE", 1, { transport: vide.transport })),
+    { statut: "absent" },
+  );
+});
+
+await test("SEL-OSM-03 — la sortie est bornée, et le dépassement est un TIMEOUT", async () => {
+  // ⚠️ LA BORNE EST TROIS FOIS PLUS COURTE QUE CELLE D'OVERPASS, ET C'EST LE
+  // CORRECTIF. Une lecture par identifiant qui met dix secondes est en panne,
+  // pas lente : attendre trente secondes immobiliserait l'élève plus longtemps
+  // pour lui dire la même chose.
+  assert.ok(OSM_API_TIMEOUT_MS <= 15_000, `borne trop lâche : ${OSM_API_TIMEOUT_MS} ms`);
+
+  const jamais = async (_url: string, init: RequestInit) =>
+    new Promise<Response>((_ok, rejeter) => {
+      init.signal?.addEventListener("abort", () => {
+        const erreur = new Error("aborted");
+        erreur.name = "AbortError";
+        rejeter(erreur);
+      });
+    });
+  assert.deepEqual(
+    await avecUserAgent(() =>
+      lireElementCanonique("NODE", 1, { transport: jamais, timeoutMs: 20 }),
+    ),
+    { statut: "echec", raison: "timeout" },
+  );
+
+  // Une panne de transport qui n'est PAS une annulation reste `unavailable`.
+  const casse = async () => {
+    throw new TypeError("fetch failed");
+  };
+  assert.deepEqual(
+    await avecUserAgent(() => lireElementCanonique("NODE", 1, { transport: casse })),
+    { statut: "echec", raison: "unavailable" },
+  );
+
+  // Une identité impossible ne part pas sur le réseau : elle lève.
+  await assert.rejects(() => avecUserAgent(() => lireNoeudOsm(0)), RangeError);
+  await assert.rejects(() => avecUserAgent(() => lireNoeudOsm(2 ** 53)), RangeError);
+});
+
+await test("SEL-OSM-04 — WAY et RELATION restent chez Overpass, pour son `out center`", async () => {
+  // ⚠️ ET CE N'EST PAS UN OUBLI DE MIGRATION. Un chemin ou une relation n'ont
+  // pas de coordonnée propre : l'API principale rend leur géométrie brute —
+  // une liste de nœuds, une liste de membres — et rien qui ressemble à une
+  // position. `out center` fait ce calcul CHEZ LA SOURCE. Le refaire nous-mêmes
+  // fabriquerait une position que personne n'a publiée, dans un référentiel que
+  // TOUS les élèves lisent.
+  for (const type of ["WAY", "RELATION"] as const) {
+    const { transport, appels } = transportEspion(
+      json(
+        ENV([
+          {
+            type: type === "WAY" ? "way" : "relation",
+            id: 42,
+            center: { lat: 43.1, lon: 5.9 },
+            tags: { shop: "supermarket", name: "Grande Surface" },
+          },
+        ]),
+      ),
+    );
+    const r = await avecUserAgent(() => lireElementCanonique(type, 42, { transport }));
+
+    assert.equal(appels.length, 1, `${type} : un seul appel`);
+    assert.equal(appels[0]!.url, OVERPASS_ENDPOINT, `${type} doit passer par Overpass`);
+    assert.equal(appels[0]!.url.includes("api.openstreetmap.org"), false);
+    assert.equal((appels[0]!.init as RequestInit).method, "POST", "Overpass reçoit un POST");
+
+    // La requête elle-même doit demander le centre — sans lui, pas de position.
+    const corps = decodeURIComponent(String((appels[0]!.init as RequestInit).body));
+    assert.match(corps, /out center tags 1;/, `${type} doit demander « out center »`);
+    assert.match(corps, type === "WAY" ? /way\(42\);/ : /rel\(42\);/, "par identité exacte");
+
+    assert.equal(r.statut, "ok", `${type} doit rester exploitable`);
+    if (r.statut !== "ok") throw new Error("statut inattendu");
+    assert.equal(r.magasin.lat, 43.1, "la position vient du centre calculé par la SOURCE");
+    assert.equal(r.magasin.osmType, type);
+  }
+
+  // ⚠️ ET AUCUNE PSEUDO-COORDONNÉE LOCALE. Sans centre, l'élément n'est pas
+  // exploitable — on ne le remplace pas par une moyenne inventée.
+  const sansCentre = transportEspion(
+    json(ENV([{ type: "way", id: 42, tags: { shop: "supermarket", name: "X" } }])),
+  );
+  assert.deepEqual(
+    await avecUserAgent(() => lireElementCanonique("WAY", 42, { transport: sansCentre.transport })),
+    { statut: "non_exploitable" },
+  );
 });
 
 // ════════════════════════════════════════════════════════════════════════════

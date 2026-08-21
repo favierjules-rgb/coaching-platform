@@ -7,7 +7,7 @@ import {
   VILLE_LONGUEUR_MIN,
   villeValide,
 } from "@/lib/nutrition/magasin-proche";
-import { cleIdentiteOsm, type MagasinOsm } from "@/lib/nutrition/magasins-osm";
+import { cleIdentiteOsm, marqueAAfficher, type MagasinOsm } from "@/lib/nutrition/magasins-osm";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { lireMagasinChoisi, type MagasinChoisi } from "@/lib/supabase/magasins";
 
@@ -36,6 +36,23 @@ import { lireMagasinChoisi, type MagasinChoisi } from "@/lib/supabase/magasins";
  * Ouvrir cet écran ne demande RIEN. La permission de géolocalisation n'est
  * demandée qu'au tap sur le bouton — même doctrine, même raison : un écran qui
  * réclame une autorisation à l'ouverture est un écran qu'on refuse par réflexe.
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * ⚠️ REPLIÉ PAR DÉFAUT — LE DÉFAUT PREVIEW QUE CELA CORRIGE
+ * ────────────────────────────────────────────────────────────────────────────
+ * Ce composant occupait le HAUT de l'écran Courses, avant même « RETOUR » et
+ * « MA LISTE DE COURSES » : un bouton de géolocalisation, un champ ville et un
+ * bouton de recherche accueillaient l'élève venu consulter sa liste. Trois
+ * commandes permanentes pour un geste qu'on fait une fois par mois.
+ *
+ * Il est désormais monté DANS la zone PRIX OBSERVÉS — le seul endroit du
+ * produit où le magasin a une conséquence — et n'y montre qu'une ligne :
+ * le magasin choisi, et un bouton pour en changer. Les commandes complètes
+ * n'apparaissent qu'après ce geste.
+ *
+ * ⚠️ ET LE REPLI MANUEL RESTE OFFERT D'EMBLÉE DANS LE PANNEAU. Le cacher
+ * derrière un échec de géolocalisation ferait de celle-ci un passage obligé —
+ * c'est la doctrine de C4.3b, et le panneau ne la change pas.
  */
 
 type Etat =
@@ -67,6 +84,12 @@ export function ChoixMagasinProche({
   onMagasinChoisi?: (magasin: { storeId: string; name: string }) => void;
 }) {
   const [état, setÉtat] = useState<Etat>("inactif");
+  /**
+   * ⚠️ FERMÉ AU DÉPART, ET FERMÉ APRÈS UN CHOIX. Un panneau qui resterait
+   * ouvert après la sélection laisserait l'élève devant une liste de magasins
+   * qu'il vient justement de quitter.
+   */
+  const [panneauOuvert, setPanneauOuvert] = useState(false);
   const [magasins, setMagasins] = useState<readonly MagasinOsm[]>([]);
   const [tronqué, setTronqué] = useState(false);
   const [choixEnCours, setChoixEnCours] = useState<string | null>(null);
@@ -227,6 +250,10 @@ export function ChoixMagasinProche({
           setChoisi({ ...données.magasin, brand: données.magasin.brand ?? null });
           setMagasins([]);
           setÉtat("inactif");
+          setPanneauOuvert(false);
+          // ⚠️ LE CALLBACK EST APPELÉ EN DERNIER, ET IL COMPTE. C'est lui qui
+          // fait relire les prix observés du NOUVEAU magasin : sans lui,
+          // l'écran continuerait d'afficher les relevés de l'ancien.
           onMagasinChoisi?.({ storeId: données.magasin.storeId, name: données.magasin.name });
         }
       } finally {
@@ -240,16 +267,37 @@ export function ChoixMagasinProche({
     état === "demande_permission" || état === "chargement" || état === "ville_chargement";
 
   return (
-    <section aria-label="Magasin">
-      {choisi ? (
-        <p>
-          Magasin actuel : <strong>{choisi.name}</strong>
-          {choisi.city ? ` — ${choisi.city}` : ""}
+    <section aria-label="Magasin" className="flex flex-col gap-3">
+      {/* ── LA LIGNE REPLIÉE — CE QUE L'ÉLÈVE VOIT 99 FOIS SUR 100 ───────────
+          ⚠️ ELLE DIT TOUJOURS L'ÉTAT, MÊME QUAND IL EST VIDE. « aucun magasin
+          choisi » est une information ; ne rien afficher laisserait croire que
+          la question ne se pose pas, alors que c'est elle qui commande les
+          prix observés juste en dessous. */}
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <p className="text-sm text-muted-foreground">
+          Magasin&nbsp;:{" "}
+          {choisi ? (
+            <>
+              <strong className="font-semibold text-foreground">{choisi.name}</strong>
+              {choisi.city ? ` — ${choisi.city}` : ""}
+            </>
+          ) : (
+            <span>aucun magasin choisi</span>
+          )}
         </p>
-      ) : (
-        <p>Aucun magasin choisi pour l’instant.</p>
-      )}
+        <button
+          type="button"
+          onClick={() => setPanneauOuvert((ouvert) => !ouvert)}
+          aria-expanded={panneauOuvert}
+          className="pressable min-h-[44px] rounded-control border border-border px-3 py-1 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-info hover:text-info focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/50"
+        >
+          {panneauOuvert ? "Fermer" : choisi ? "Changer" : "Choisir un magasin"}
+        </button>
+      </div>
 
+      {/* ── LE PANNEAU — OUVERT SUR GESTE, ET SUR GESTE SEULEMENT ──────────── */}
+      {panneauOuvert && (
+        <div className="flex flex-col gap-3 border-t border-border pt-3">
       <button type="button" onClick={() => void chercher()} disabled={enCours}>
         {enCours ? "Recherche en cours…" : "Trouver un magasin près de moi"}
       </button>
@@ -355,7 +403,15 @@ export function ChoixMagasinProche({
                   disabled={choixEnCours !== null}
                 >
                   <span>{magasin.name}</span>
-                  {magasin.brand ? <span>{magasin.brand}</span> : null}
+                  {/* ⚠️ LA MARQUE N'EST RÉAFFICHÉE QUE SI ELLE AJOUTE QUELQUE
+                      CHOSE. `marqueAAfficher` est une fonction PURE, testée
+                      directement : elle rend `null` quand la marque répète le
+                      nom — c'est ce qui produisait « LidlLidl » — et la rend
+                      telle quelle quand elle dit autre chose, comme
+                      « Carrefour » pour un « Carrefour Market ». */}
+                  {marqueAAfficher(magasin.name, magasin.brand) !== null ? (
+                    <span> · {marqueAAfficher(magasin.name, magasin.brand)}</span>
+                  ) : null}
                   {/* ⚠️ LA DISTANCE N'EST AFFICHÉE QUE SI ELLE EXISTE. Une
                       recherche par ville n'a aucun point de départ : en
                       fabriquer une afficherait un nombre que rien ne fonde. Le
@@ -376,6 +432,8 @@ export function ChoixMagasinProche({
           {/* Licence de la source : obligatoire, et vérifiée par un test. */}
           <p>Données des magasins : Open Prices / OpenStreetMap (ODbL).</p>
         </>
+      )}
+        </div>
       )}
     </section>
   );

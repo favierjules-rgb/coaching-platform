@@ -3,7 +3,6 @@
 import { useMemo } from "react";
 import Link from "next/link";
 
-import { ChoixMagasinProche } from "@/components/student/ChoixMagasinProche";
 import { ListeDeCoursesParcours } from "@/components/student/ListeDeCoursesParcours";
 import { useStudentNutritionPlanV2 } from "@/hooks/useStudentNutritionPlanV2";
 import { useSupabaseNutritionForStudent } from "@/hooks/useSupabaseNutritionForStudent";
@@ -29,17 +28,21 @@ import { useSupabaseNutritionForStudent } from "@/hooks/useSupabaseNutritionForS
  * il est simplement lu, pas adressé.
  *
  * ────────────────────────────────────────────────────────────────────────────
- * COURSES C4.3a — LE CHOIX DU MAGASIN EST MONTÉ ICI, ET PAS DANS LE PARCOURS
+ * COURSES C4.3c — LE CHOIX DU MAGASIN N'EST PLUS MONTÉ ICI
  * ────────────────────────────────────────────────────────────────────────────
- * ⚠️ `ListeDeCoursesParcours` EST SOUS CONTRAT UX-24, qui lui interdit
- * littéralement les mots « magasin », « store », « prix » et « geoloc ». Ce
- * n'est pas une gêne à contourner : c'est le contrat de CONFINEMENT du moteur
- * de composition de la liste, qui n'a aucune raison de savoir OÙ l'élève fait
- * ses courses. Le choix du magasin vit donc à côté, dans la page — qui, elle,
- * assemble déjà les morceaux.
+ * ⚠️ IL L'ÉTAIT, EN PREMIER ÉLÉMENT DE LA PAGE, ET C'ÉTAIT LE DÉFAUT. L'élève
+ * qui ouvrait ses courses tombait sur un bouton de géolocalisation, un champ
+ * ville et un bouton « Rechercher » — avant « RETOUR », avant « MA LISTE DE
+ * COURSES ». Trois commandes permanentes pour un geste rare.
  *
- * ⚠️ ET RIEN N'EST DÉCLENCHÉ AU CHARGEMENT. Le composant lit le magasin déjà
- * choisi ; la géolocalisation n'est demandée qu'au tap sur son bouton.
+ * Le sélecteur vit désormais dans la zone PRIX OBSERVÉS de
+ * `ListeDeCoursesPersistante` : le seul endroit du produit où le magasin a une
+ * conséquence, et l'endroit où son changement doit faire relire les relevés.
+ *
+ * ⚠️ CE DÉPLACEMENT NE TOUCHE PAS À UX-24. `ListeDeCoursesParcours` — le moteur
+ * de composition — ne connaît toujours ni magasin, ni prix, ni géolocalisation :
+ * c'est `ListeDeCoursesPersistante`, qui portait déjà les prix observés, qui
+ * accueille le sélecteur.
  */
 export default function ListeDeCoursesPage() {
   const nutrition = useSupabaseNutritionForStudent();
@@ -82,7 +85,6 @@ export default function ListeDeCoursesPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <ChoixMagasinProche studentId={nutrition.studentId ?? null} />
       <ListeDeCoursesParcours
         week={v2.week}
         studentId={nutrition.studentId}
