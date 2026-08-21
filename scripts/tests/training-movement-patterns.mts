@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
+
+import {
+  verifierContratDesMigrations,
+  verifierManifesteDesMigrations,
+} from "./contrat-migrations.mjs";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 
@@ -465,11 +470,19 @@ await test("B7. aucune migration déjà appliquée n'est touchée", () => {
   const fichiers = readdirSync(new URL("../../supabase/migrations", import.meta.url).pathname)
     .filter((f) => f.endsWith(".sql"))
     .sort();
-  // ⚠️ COMPTEUR RATTRAPÉ EN N1.5.1, ET IL ÉTAIT DÉJÀ FAUX AVANT. Il disait 73
-  // alors que le dossier en portait 74 depuis N1.3 : ce test était rouge avant
-  // ce lot-ci. On le remet à la vérité (75 avec la migration des portions)
-  // plutôt que de laisser un rouge dormant.
-  assert.equal(fichiers.length, 80, "80 migrations attendues depuis N1.5.2");
+  // ⚠️ TROISIÈME RATTRAPAGE DE CE MÊME COMPTEUR, ET LE DERNIER : ON LE
+  // SUPPRIME. Le commentaire d'origine racontait déjà l'histoire — « il disait
+  // 73 alors que le dossier en portait 74 : ce test était rouge avant ce
+  // lot-ci » — puis on l'a remis à 75, puis à 80, et il annonçait 80 quand le
+  // dossier en portait 82. Un compteur qu'on rattrape trois fois n'est pas un
+  // contrôle, c'est une corvée qui finit par être faite sans regarder.
+  //
+  // Ce que B7 doit prouver — « aucune migration déjà appliquée n'est touchée »
+  // — est mesuré bien mieux par le contrat partagé : il fige l'EMPREINTE de
+  // tout l'historique, donc un fichier renommé, retiré ou antidaté rougit,
+  // alors qu'un compte reste vert dès que le total est conservé.
+  verifierContratDesMigrations(assert);
+  verifierManifesteDesMigrations(assert);
   // On ancre sur la migration qui PRÉCÈDE le chantier plutôt que sur la fin
   // du dossier : ce qui doit rester vrai, c'est que les six migrations F3 se
   // suivent sans rien d'intercalé — pas qu'elles soient les dernières. Un
@@ -493,7 +506,20 @@ await test("B7. aucune migration déjà appliquée n'est touchée", () => {
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json"));
   const attendues = manifeste.migrations_post_baseline_attendues as string[];
   // 35 depuis 20260828090000_web_push_notifications.sql (socle Web Push).
-  assert.equal(attendues.length, 53);
+  // ⚠️ COMPTEUR FIGÉ REMPLACÉ EN C4.1 — LIRE AVANT DE RÉÉCRIRE UN NOMBRE ICI.
+  //
+  // Cette ligne disait `assert.equal(attendues.length, 53)`. Le même nombre
+  // était recopié dans DOUZE fichiers de tests, et chacun vérifiait en plus le
+  // TEXTE de `security-hardening.mts` pour s'assurer que les copies suivaient.
+  //
+  // Le montage a fini par cacher ce qu'il devait montrer : mesuré le
+  // 17/08/2026, **C2 et C3 n'étaient pas déclarées au manifeste** et aucun des
+  // douze compteurs ne l'a signalé — ils comptaient 53, ce qui était juste,
+  // pour une liste incomplète.
+  //
+  // On vérifie donc la PROPRIÉTÉ, pas le nombre : le manifeste et le dossier
+  // `supabase/migrations` coïncident nom par nom, dans les deux sens.
+  verifierManifesteDesMigrations(assert);
   assert.ok(attendues.includes("20260820090000_training_movement_patterns.sql"), "manifeste non mis à jour");
   assert.ok(attendues.includes("20260821090000_workout_feedback_authoritative.sql"), "manifeste non mis à jour");
   assert.ok(attendues.includes("20260822090000_workout_feedback_session_metadata.sql"), "manifeste non mis à jour");

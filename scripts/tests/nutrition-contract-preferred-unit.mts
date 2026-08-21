@@ -195,9 +195,95 @@ await test("CONTRACT-07. le CONTRACT s'applique en DERNIER — l'ordre de rollou
   // CONTRACT sans l'inscrire fait toujours rougir — c'est ce qu'on voulait —
   // mais l'inscrire demande maintenant de MONTRER pourquoi c'est sûr, pas
   // seulement de déplacer un compteur.
+  //
+  // ⚠️ C2 EST INSCRITE ICI, ET C'EST LE MÉCANISME QUI JOUE — pas un contournement.
+  // La liste de courses persistante ne connaît que `planned_meal_items.unit`,
+  // qui est la colonne d'APRÈS le CONTRACT ; elle ne lit ni n'écrit
+  // `preferred_unit`, et la boucle ci-dessous le PROUVE sur le fichier, code
+  // dépouillé de sa prose. L'inscrire sans cette preuve ne suffirait pas.
   const posterieures = migrations.filter((f) => horodatage(f) > horodatage(contrat));
-  assert.deepEqual(posterieures, ["20260914090000_c0_1_verrou_repas_consomme.sql"],
-    "une migration postérieure au CONTRACT n'a pas été déclarée sûre");
+  assert.deepEqual(
+    posterieures,
+    [
+      "20260914090000_c0_1_verrou_repas_consomme.sql",
+      "20260915090000_c2_liste_de_courses_persistante.sql",
+      // ⚠️ C3 INSCRITE ICI, ET LA BOUCLE CI-DESSOUS LE PROUVE. Le budget et les
+      // prix ne connaissent que `shopping_list_items.unit` et leur propre
+      // colonne `unit` — la colonne d'APRÈS le CONTRACT. `preferred_unit`
+      // n'apparaît nulle part dans la migration C3.
+      "20260916090000_c3_budget_et_prix_estimatifs.sql",
+      // ⚠️ C4.1 INSCRITE ICI, ET C'EST LE MÉCANISME QUI JOUE — pas un
+      // contournement. Le pont aliment → produit crée UNE table,
+      // `food_catalog_retail_review`, dont les cinq colonnes sont
+      // `catalog_food_id`, `status`, `note`, `reviewed_by`, `reviewed_at`.
+      //
+      // Elle ne porte AUCUNE unité, et c'est ce qui la met hors de portée du
+      // CONTRACT : le pont dit « quel produit réel correspond à cet aliment »,
+      // jamais « en quelle unité ». Mesuré sur le fichier, code dépouillé :
+      //   · `preferred_unit` : ZÉRO occurrence — pas même en commentaire ;
+      //   · seule table créée ou altérée : `food_catalog_retail_review` ;
+      //   · aucun `rename`, aucun `alter column`, aucune contrainte ajoutée
+      //     ou retirée en dehors de cette table neuve ;
+      //   · `meal_choice_options`, `planned_meal_items`, `quantity_unit` et
+      //     même le mot `unit` : ABSENTS ;
+      //   · les seules références externes sont la clé étrangère vers
+      //     `public.food_catalog(id)` et l'appel à `public.is_admin()`.
+      //
+      // La boucle ci-dessous rejoue la dernière de ces preuves à chaque
+      // exécution : l'inscrire ne suffit pas, il faut que le fichier tienne.
+      "20260917090000_c4_1_pont_retail.sql",
+      // ⚠️ C4.2 INSCRITE ICI, PAR LE MÊME MÉCANISME — une entrée NOMMÉE, jamais
+      // une règle du genre « tout ce qui suit cette date est sûr ».
+      //
+      // Le modèle du magasin crée DEUX tables : `stores` (id, op_location_id,
+      // osm_type, osm_id, name, brand, city, postcode, country_code, lat, lon,
+      // created_at) et `student_selected_store` (student_id, store_id,
+      // updated_at). Aucune des quinze colonnes n'est une unité, et c'est ce
+      // qui met ce lot hors de portée du CONTRACT : il dit « OÙ l'élève fait
+      // ses courses », jamais « en quelle unité ». Mesuré sur le fichier, code
+      // dépouillé de sa prose :
+      //   · `preferred_unit` : ZÉRO occurrence — pas même en commentaire ;
+      //   · seules tables créées ou altérées : les deux ci-dessus ;
+      //   · aucun `rename`, aucun `alter column`, aucun `drop` autre que les
+      //     `drop policy if exists` du gabarit, immédiatement suivis de leur
+      //     recréation ;
+      //   · `meal_choice_options`, `planned_meal_items`, `quantity_unit` et
+      //     même le mot `unit` : ABSENTS ;
+      //   · les seules références externes sont les clés étrangères vers
+      //     `public.students(id)` et `public.stores(id)`, et les appels à
+      //     `public.current_student_id()` et `public.is_admin()`.
+      //
+      // La boucle ci-dessous rejoue cette dernière preuve à chaque exécution :
+      // l'inscrire ne suffit pas, il faut que le fichier tienne.
+      "20260918090000_c4_2_magasins.sql",
+      // ⚠️ C4.3c INSCRITE ICI, PAR LE MÊME MÉCANISME — et c'est la migration la
+      // plus étroite du chantier COURSES : elle ne crée AUCUNE table.
+      //
+      // Elle fait trois choses. Elle rend `stores.op_location_id` NULLABLE, ce
+      // qui est le seul `alter column` de tout le lot : OpenStreetMap devient
+      // l'annuaire des magasins, et un magasin réel peut donc exister sans que
+      // Open Prices le connaisse. Elle ajoute deux colonnes `text null`,
+      // `brand_wikidata` et `operator_wikidata`, qui identifient une ENSEIGNE.
+      // Elle pose la forme de ces deux identifiants (`^Q[1-9][0-9]*$`).
+      //
+      // Rien de tout cela n'est une unité, et c'est ce qui la met hors de
+      // portée du CONTRACT : elle dit « QUEL magasin, et de quelle enseigne »,
+      // jamais « en quelle quantité ». Mesuré sur le fichier, code dépouillé
+      // de sa prose :
+      //   · `preferred_unit` : ZÉRO occurrence — pas même en commentaire ;
+      //   · aucune table créée : seule `public.stores` est altérée ;
+      //   · le seul `alter column` est le `drop not null` ci-dessus ; aucun
+      //     `rename`, aucun `drop column`, aucun `drop constraint` ;
+      //   · `meal_choice_options`, `planned_meal_items`, `quantity_unit` et
+      //     même le mot `unit` : ABSENTS ;
+      //   · aucune référence externe, aucune policy, aucune fonction.
+      //
+      // La boucle ci-dessous rejoue cette dernière preuve à chaque exécution :
+      // l'inscrire ne suffit pas, il faut que le fichier tienne.
+      "20260919090000_c4_3c_magasins_osm.sql",
+    ],
+    "une migration postérieure au CONTRACT n'a pas été déclarée sûre",
+  );
 
   for (const nom of posterieures) {
     const source = lire(`../../supabase/migrations/${nom}`);

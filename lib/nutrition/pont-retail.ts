@@ -1,0 +1,456 @@
+/**
+ * COURSES C4.1 — LE PONT ALIMENT GÉNÉRIQUE → PRODUIT RÉEL, EN LOGIQUE PURE.
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * CE MODULE NE PARLE À PERSONNE
+ * ────────────────────────────────────────────────────────────────────────────
+ * Ni base, ni réseau, ni React. Il contient les trois règles que l'on veut
+ * pouvoir mesurer sans monter d'infrastructure :
+ *
+ *   1. QU'EST-CE QU'UN RAPPROCHEMENT RÉEL           (§ 1)
+ *   2. QUELS CANDIDATS SONT ACCEPTABLES             (§ 2)
+ *   3. COMMENT INTERROGER OPEN PRICES SANS DANGER   (§ 3)
+ *
+ * Une règle qu'on ne peut pas mesurer se contourne — c'est la raison d'être de
+ * `budget-courses.ts` en C3, et c'est la même ici.
+ */
+
+// ────────────────────────────────────────────────────────────────────────────
+// 1. L'ÉTAT DE RAPPROCHEMENT D'UN ALIMENT
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ════════════════════════════════════════════════════════════════════════════
+ * ⚠️ LE CONTRAT DE CARDINALITÉ : UN ALIMENT GÉNÉRIQUE → N RÉFÉRENCES RÉELLES
+ * ════════════════════════════════════════════════════════════════════════════
+ * DÉCISION PRODUIT DU 18/08/2026. Elle gouverne tout ce module, et elle est
+ * écrite ici parce que c'est le seul fichier que la base, le réseau et React
+ * ont tous les trois en commun.
+ *
+ * Un aliment du `food_catalog` — « Flocons d'avoine » — PEUT et DOIT pouvoir
+ * porter PLUSIEURS références commerciales réelles : le paquet Carrefour, le
+ * paquet Lidl, le paquet Auchan, la marque nationale. Ce sont des produits
+ * DIFFÉRENTS, avec des codes-barres différents et des prix différents, et ils
+ * désignent pourtant le même aliment au sens nutritionnel.
+ *
+ * L'élève, lui, ne choisit jamais un code-barres. Il choisit « Flocons
+ * d'avoine ». La résolution commerciale est POSTÉRIEURE, et elle appartient au
+ * moment des courses :
+ *
+ *     aliment générique
+ *       → TOUS ses GTIN validés
+ *         → le magasin choisi par l'élève
+ *           → les relevés Open Prices de ce magasin
+ *             → le conditionnement
+ *               → le ou les produits qui conviennent
+ *
+ * ⚠️ N GTIN LIÉS À UN ALIMENT N'EST PAS UNE AMBIGUÏTÉ C4.1. C'est le
+ * comportement ATTENDU. Ce paragraphe retire explicitement l'hypothèse inverse
+ * — « N > 1 ⇒ plusieurs candidats ⇒ aucun prix » — qui figurait dans le cadrage
+ * C4.4 et n'a jamais été codée. Elle est ABANDONNÉE.
+ *
+ * LES HUIT RÈGLES, ET RIEN D'AUTRE :
+ *
+ *   A. 1 aliment → N produits est la cardinalité NORMALE, pas un cas dégradé.
+ *      Le schéma la porte DÉJÀ : `food_products_gtin_unique` est un index
+ *      unique TOTAL — un code-barres, une ligne — tandis que
+ *      `food_products_food_id_idx` est PARTIEL et NON UNIQUE : rien ne borne le
+ *      nombre de produits par aliment. Aucune migration n'est requise ici, et
+ *      aucune n'est faite.
+ *
+ *   B. C4.1 valide une RELATION SÉMANTIQUE — « ce produit réel EST cet aliment
+ *      générique » — et strictement rien d'autre.
+ *
+ *   C. C4.1 NE CHOISIT NI MAGASIN, NI PRIX, NI CONDITIONNEMENT. Ces trois
+ *      décisions ont chacune leur lot, et aucune ne se prend pendant la
+ *      curation.
+ *
+ *   D. IL N'EXISTE PAS DE « PRODUIT REPRÉSENTATIF ». Élire un produit parmi N
+ *      reviendrait à choisir une enseigne et un conditionnement à la place de
+ *      l'élève, sans le lui dire. Le dépôt n'en contient aucune trace ; ce
+ *      commentaire existe pour qu'il n'en contienne jamais.
+ *
+ *   E. 0, 1 et N sont TROIS ÉTATS VALIDES. 0 = pas encore de pont, et ce n'est
+ *      pas une erreur. 1 = un pont. N = N ponts, et c'est mieux que 1.
+ *
+ *   F. LA RÉSOLUTION D'ACHAT EST POSTÉRIEURE au choix de l'élève, et se fait en
+ *      LECTURE, au moment des courses. Rien n'en est figé à la curation.
+ *
+ *   G. LE STOCK N'EST JAMAIS INFÉRÉ. Un GTIN relié ne dit pas que le produit
+ *      est en rayon aujourd'hui, et un relevé Open Prices dit qu'un prix a été
+ *      VU un jour — pas qu'il y en a un ce matin.
+ *
+ *   H. ⚠️ ON NE FORCE JAMAIS N = 1 POUR AMÉLIORER UNE MÉTRIQUE. La couverture
+ *      se mesure « AU MOINS un produit retail valide relié », jamais
+ *      « exactement un ». Un aliment à cinq ponts compte pour UN aliment
+ *      couvert, et en retirer quatre pour faire joli détruirait quatre chemins
+ *      de prix réels.
+ */
+
+/**
+ * Les trois statuts que la table de curation sait porter.
+ *
+ * ⚠️ `matched` N'EN FAIT PAS PARTIE, ET N'EN FERA JAMAIS PARTIE. Le
+ * rapprochement réel se dérive de `food_products.food_id`, seule source de
+ * vérité. Un second `matched` stocké ici serait une seconde vérité — et le jour
+ * où les deux divergeraient, on croirait la plus lisible plutôt que la vraie.
+ * Le CHECK de la migration 20260917090000 l'interdit en base ; ce type
+ * l'interdit à la compilation.
+ */
+export const STATUTS_REVUE = ["unsupported", "needs_raw_redirect", "needs_review"] as const;
+export type StatutRevue = (typeof STATUTS_REVUE)[number];
+
+export function estStatutRevue(valeur: unknown): valeur is StatutRevue {
+  return typeof valeur === "string" && (STATUTS_REVUE as readonly string[]).includes(valeur);
+}
+
+/**
+ * L'état d'un aliment, tel que l'écran de curation doit le montrer.
+ *
+ * `unreviewed` est l'état des 3 330 aliments du catalogue au premier jour. Il
+ * est NOMMÉ plutôt que confondu avec `needs_review` : « personne n'a regardé »
+ * et « quelqu'un a regardé, rien n'est décidé » sont deux situations
+ * différentes, et les mélanger ferait croire à un catalogue déjà traité.
+ */
+export type EtatRapprochement =
+  | "matched"
+  | "needs_raw_redirect"
+  | "unsupported"
+  | "needs_review"
+  | "unreviewed";
+
+/** Le strict nécessaire pour juger d'un rapprochement — pas la fiche entière. */
+export interface ProduitRapproche {
+  readonly gtin: string;
+  readonly foodId: string | null;
+  readonly matchStatus: string;
+}
+
+export interface LigneRevue {
+  readonly catalogFoodId: string;
+  readonly status: StatutRevue;
+}
+
+/**
+ * ⚠️ LA CONDITION CANONIQUE D'UN MATCH : `foodId !== null`. JAMAIS `matchStatus`.
+ *
+ * `food_products_match_coherent` n'est écrite que dans UN sens —
+ * `food_id is null or match_status <> 'unmatched'` — pour que le
+ * `on delete set null` de `food_catalog` puisse vider `food_id` sans violer la
+ * contrainte. L'état `match_status = 'manual'` AVEC `food_id = null` est donc
+ * LÉGAL en base : il veut dire « ce rapprochement a existé, l'aliment générique
+ * a disparu ».
+ *
+ * Lire `matchStatus` comme preuve ferait remonter un produit ORPHELIN dans les
+ * courses d'un élève, rattaché à un aliment qui n'existe plus.
+ */
+export function estRapproche(produit: ProduitRapproche): boolean {
+  return produit.foodId !== null && produit.foodId !== "";
+}
+
+/**
+ * L'état d'un aliment, dérivé de DEUX sources et d'aucune autre.
+ *
+ * ⚠️ L'ORDRE DES CAS EST LA RÈGLE DE RÉSOLUTION, et il n'est pas cosmétique :
+ * `matched` l'emporte sur toute ligne de revue. Un fait constaté prime sur une
+ * note d'intention. Sans cette priorité, une vieille ligne `needs_review`
+ * laissée en place après validation ferait croire que l'aliment n'est toujours
+ * pas rapproché — précisément le défaut qu'il fallait fermer.
+ *
+ * La route de rapprochement SUPPRIME en plus la ligne de revue devenue caduque
+ * (voir `lib/supabase/pont-retail.ts`). Les deux mécanismes coexistent
+ * volontairement : la priorité est l'INVARIANT, qui reste vrai même si le
+ * nettoyage échoue ; le nettoyage est l'HYGIÈNE, qui évite d'accumuler des
+ * notes mortes. On ne dépend jamais du second pour que le premier soit vrai.
+ *
+ * ⚠️ « MATCHED » SIGNIFIE « AU MOINS UN », JAMAIS « EXACTEMENT UN ». Le `some`
+ * ci-dessous EST la métrique de couverture, et c'est la règle H du contrat de
+ * cardinalité : un aliment relié à cinq produits est couvert une fois, comme un
+ * aliment relié à un seul. Remplacer ce `some` par un test d'égalité sur le
+ * nombre de produits transformerait un bon aliment — cinq enseignes, cinq
+ * chemins de prix — en aliment non couvert, et pousserait à supprimer des ponts
+ * réels pour redresser un chiffre.
+ */
+export function etatRapprochement(
+  catalogFoodId: string,
+  produits: readonly ProduitRapproche[],
+  revue: LigneRevue | null | undefined,
+): EtatRapprochement {
+  if (produits.some((p) => estRapproche(p) && p.foodId === catalogFoodId)) {
+    return "matched";
+  }
+  if (revue && revue.catalogFoodId === catalogFoodId) {
+    return revue.status;
+  }
+  return "unreviewed";
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// 2. LES FILTRES DURS SUR UN CANDIDAT
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Le code Ciqual tel que `food_catalog.source_ref` le porte : numérique, 4 à 6
+ * chiffres (mesuré en production : 4 ou 5, borne haute laissée pour la marge).
+ *
+ * ⚠️ VALIDÉ AVANT DE CONSTRUIRE UNE URL. Un `source_ref` inattendu ne doit pas
+ * partir tel quel dans un paramètre de requête : le tag `ciqual-food-code-<N>`
+ * est une clé exacte, pas un texte de recherche.
+ */
+export function codeCiqualEstValide(code: string): boolean {
+  return /^[0-9]{4,6}$/.test(code);
+}
+
+/**
+ * Pourquoi un candidat trouvé chez Open Food Facts n'entre pas dans
+ * `food_products`.
+ *
+ * ⚠️ « TROUVÉ » ET « IMPORTABLE » SONT DEUX CHOSES DIFFÉRENTES, et c'est le
+ * point le plus facile à rater de tout ce lot. `food_products` déclare
+ * `protein_per_100`, `carb_per_100` et `fat_per_100` en NOT NULL : une ligne de
+ * cette table est CONSOMMABLE par construction. Un produit dont Open Food Facts
+ * ne publie pas les trois macros ne peut donc pas y entrer.
+ *
+ * Les trois réponses interdites : fabriquer des zéros, importer quand même en
+ * faisant passer l'incomplet pour du complet, ou masquer le candidat. La
+ * quatrième — le montrer avec sa raison, et proposer le suivant — est la seule
+ * qui ne ment pas.
+ */
+export const REFUS_CANDIDAT = [
+  "gtin_absent",
+  "gtin_invalide",
+  "nutrition_incomplete",
+  "doublon",
+] as const;
+export type RefusCandidat = (typeof REFUS_CANDIDAT)[number];
+
+export const MESSAGE_REFUS: Record<RefusCandidat, string> = {
+  gtin_absent: "Aucun code-barres publié",
+  gtin_invalide: "Code-barres de forme invalide",
+  nutrition_incomplete: "Nutrition Open Food Facts incomplète — non importable",
+  doublon: "Code-barres déjà présent dans les candidats",
+};
+
+// ────────────────────────────────────────────────────────────────────────────
+// 3. OPEN PRICES — LE GARDE-FOU DES LOTS
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ⚠️ MESURÉ LE 17/08/2026 SUR L'API DE PRODUCTION, ET C'EST UN PIÈGE GRAVE.
+ *
+ * Au-delà d'environ 98 caractères de valeur jointe, `product_code__in` n'est pas
+ * REJETÉ : il est SILENCIEUSEMENT IGNORÉ, et l'API rend la table entière.
+ *
+ *   8 codes,  96 caractères  →  total = 31       ✅
+ *   7 codes,  97 caractères  →  total = 102      ✅
+ *   8 codes,  98 caractères  →  total = 102      ✅
+ *   8 codes, 100 caractères  →  total = 290 792  ❌  (tout Open Prices)
+ *   8 codes, 111 caractères  →  total = 292 967  ❌
+ *
+ * Pas de 400, pas de message. Un client qui prendrait `items[0].price`
+ * afficherait le prix d'un déodorant allemand comme prix du riz de l'élève.
+ *
+ * D'où DEUX bornes plutôt qu'une : 7 codes EAN-13 (97 caractères, marge d'un
+ * caractère sous la limite observée) ET la longueur jointe, parce qu'un GTIN-14
+ * change le compte. La borne la plus stricte des deux gagne.
+ */
+export const OPEN_PRICES_LOT_MAX_CODES = 7;
+export const OPEN_PRICES_LOT_MAX_CARACTERES = 97;
+
+/**
+ * Découpe une liste de codes-barres en lots sûrs.
+ *
+ * Les doublons sont retirés — demander deux fois le même code gaspille un
+ * emplacement du lot — et l'ordre d'origine est conservé : c'est celui du
+ * classement de la recherche, et nous ne savons pas mieux.
+ */
+export function decouperLotsCodesBarres(gtins: readonly string[]): readonly (readonly string[])[] {
+  const lots: string[][] = [];
+  const vus = new Set<string>();
+  let courant: string[] = [];
+  let longueur = 0;
+
+  for (const gtin of gtins) {
+    if (gtin === "" || vus.has(gtin)) continue;
+    vus.add(gtin);
+
+    // Un code si long qu'il ne tiendrait dans aucun lot n'est pas un
+    // code-barres. On ne le fait pas déborder sur le lot suivant : on le laisse
+    // de côté, et le filtre de forme l'aura de toute façon écarté plus tôt.
+    if (gtin.length > OPEN_PRICES_LOT_MAX_CARACTERES) continue;
+
+    const ajout = courant.length === 0 ? gtin.length : gtin.length + 1;
+    const tropLong = longueur + ajout > OPEN_PRICES_LOT_MAX_CARACTERES;
+    const tropNombreux = courant.length >= OPEN_PRICES_LOT_MAX_CODES;
+
+    if (courant.length > 0 && (tropLong || tropNombreux)) {
+      lots.push(courant);
+      courant = [];
+      longueur = 0;
+    }
+
+    longueur += courant.length === 0 ? gtin.length : gtin.length + 1;
+    courant.push(gtin);
+  }
+
+  if (courant.length > 0) lots.push(courant);
+  return lots;
+}
+
+/**
+ * Plafond de vraisemblance, par code demandé. Le produit le plus relevé
+ * d'Open Prices en compte quelques centaines ; 500 laisse une marge large tout
+ * en restant à trois ordres de grandeur sous les 290 000 lignes de la table.
+ *
+ * C'est un test de fumée, pas une borne exacte — la détection SÛRE est
+ * `codes_hors_lot` ci-dessous.
+ */
+export const OPEN_PRICES_MAX_PRIX_PAR_CODE = 500;
+
+export type IncoherenceOpenPrices = "codes_hors_lot" | "total_aberrant";
+
+/**
+ * Vérifie qu'une réponse Open Prices correspond bien au lot demandé.
+ *
+ * ⚠️ DEUX CONTRÔLES, ET LE PREMIER EST LE SEUL EXACT.
+ *
+ *   1. `codes_hors_lot` — un seul article dont le `product_code` n'était pas
+ *      demandé prouve que le filtre a sauté. C'est une CERTITUDE, pas une
+ *      heuristique, et elle se déclenche même sur une réponse de dix lignes ;
+ *   2. `total_aberrant` — le total dépasse toute vraisemblance. Filet de
+ *      sécurité pour le cas où la première page ne contiendrait, par hasard,
+ *      que des codes demandés.
+ *
+ * Rend `null` quand la réponse est cohérente. Une incohérence doit être traitée
+ * comme une PANNE — « prix indisponibles » — jamais comme un résultat.
+ */
+export function verifierReponseOpenPrices(params: {
+  readonly total: number;
+  readonly codesDemandes: readonly string[];
+  readonly codesRendus: readonly string[];
+}): IncoherenceOpenPrices | null {
+  const demandes = new Set(params.codesDemandes);
+  if (params.codesRendus.some((code) => !demandes.has(code))) return "codes_hors_lot";
+
+  const plafond = params.codesDemandes.length * OPEN_PRICES_MAX_PRIX_PAR_CODE;
+  if (!Number.isFinite(params.total) || params.total > plafond) return "total_aberrant";
+
+  return null;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// 4. CE QU'ON RETIENT D'OPEN PRICES POUR LA CURATION
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ⚠️ C4.1 NE CALCULE AUCUN PRIX. Ces champs INFORMENT la curation — « ce
+ * produit est-il relevé quelque part, et récemment ? » — et rien d'autre.
+ * Aucun montant n'entre en base, aucun total n'est affiché à un élève.
+ *
+ * `observeLe` est conservée SANS seuil de fraîcheur. Un seuil couperet
+ * masquerait la quasi-totalité des relevés : mesuré sur un magasin réel bien
+ * fourni, 64 prix sur 4 052 ont moins de six mois. Cacher un prix de sept mois
+ * donnerait « aucun prix » ; l'afficher sans sa date serait un mensonge. La
+ * date est la correction honnête.
+ *
+ * ⚠️ TROIS STATUTS, PAS DEUX, ET C'EST LA MÊME LEÇON QUE `LecturePrix.ok` EN C3.
+ *
+ *   `connu`        — des relevés existent, `nombre` et `observeLe` sont exacts ;
+ *   `aucun`        — la réponse était COMPLÈTE et ce code n'y figure pas :
+ *                    aucun prix, et c'est un fait ;
+ *   `indetermine`  — la réponse était TRONQUÉE (plus de résultats que la page
+ *                    n'en portait) et ce code n'y figurait pas. On ne sait pas.
+ *
+ * Confondre `indetermine` avec `aucun` afficherait « aucun prix connu » sur un
+ * produit qui en a peut-être vingt — et l'administrateur écarterait un bon
+ * candidat sur une information fausse.
+ */
+export type StatutApercu = "connu" | "aucun" | "indetermine";
+
+export interface ApercuPrix {
+  readonly gtin: string;
+  readonly statut: StatutApercu;
+  readonly nombre: number;
+  readonly observeLe: string | null;
+  /** Relevés de type COMMUNITY — le prix EN RAYON, pas un ticket de caisse. */
+  readonly nombreCommunity: number;
+}
+
+export function apercuAbsent(gtin: string, reponseComplete: boolean): ApercuPrix {
+  return {
+    gtin,
+    statut: reponseComplete ? "aucun" : "indetermine",
+    nombre: 0,
+    observeLe: null,
+    nombreCommunity: 0,
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// 5. COURSES C4.1b — DIRE UNE PANNE AMONT SANS LA CONFONDRE AVEC UNE ABSENCE
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * COURSES C4.1b — CE QUE L'ÉCRAN DIT QUAND OPEN FOOD FACTS NE RÉPOND PAS.
+ *
+ * ════════════════════════════════════════════════════════════════════════════
+ * LE DÉFAUT MESURÉ, ET POURQUOI IL COÛTAIT CHER
+ * ════════════════════════════════════════════════════════════════════════════
+ * Le 18/08/2026, deux fois de suite depuis la Preview :
+ *
+ *   [OFF_CIQUAL] upstream_non_ok code=32140 status=503 durationMs=607
+ *
+ * …à la minute où le même code Ciqual répondait 200 en 0,389 s depuis un poste
+ * de travail. L'écran affichait « La recherche de candidats a échoué. » — une
+ * phrase qui ne dit ni ce qui s'est passé, ni quoi faire, ni surtout que RIEN
+ * n'a été enregistré.
+ *
+ * ⚠️ LE RISQUE N'EST PAS COSMÉTIQUE. Un administrateur qui voit un écran vide
+ * et un message flou conclut « il n'y a pas de candidat » et pose une décision
+ * de curation — `unsupported`, `needs_review`. Cette décision serait FAUSSE,
+ * écrite en base, et indiscernable d'une vraie six mois plus tard. Une panne
+ * de l'amont ne doit jamais pouvoir se transformer en fait durable.
+ *
+ * ⚠️ AUCUN NOUVEAU CODE D'ERREUR N'EST INVENTÉ. `OFF_UNAVAILABLE`,
+ * `OFF_RATE_LIMITED` et `OFF_INVALID_RESPONSE` existent déjà et suffisent : ce
+ * qui manquait n'était pas un code, c'était une PHRASE par code.
+ *
+ * ⚠️ ET CHAQUE PHRASE PORTE LES TROIS MÊMES INFORMATIONS : ce qui se passe,
+ * qu'aucune NOUVELLE décision n'a été enregistrée, et quoi faire. La
+ * deuxième est la plus importante — c'est elle qui empêche la décision
+ * hâtive.
+ *
+ * ⚠️ « NOUVELLE » N'EST PAS UN ADOUCISSEMENT, C'EST UNE PRÉCISION. Un
+ * aliment peut porter une décision de curation ANTÉRIEURE, parfaitement
+ * valide, dans `food_catalog_retail_review`. Écrire « aucune décision n'a
+ * été enregistrée » laisserait croire que cet échec a effacé quelque chose,
+ * ou qu'aucune décision n'existe pour cet aliment. Ce que nous savons est
+ * plus étroit, et c'est tout ce que nous devons dire : CETTE tentative n'a
+ * rien écrit.
+ */
+export const MESSAGE_PANNE_OFF: Record<
+  "OFF_UNAVAILABLE" | "OFF_RATE_LIMITED" | "OFF_INVALID_RESPONSE",
+  string
+> = {
+  OFF_UNAVAILABLE:
+    "Open Food Facts est temporairement indisponible. Aucune nouvelle décision n’a été enregistrée. Réessaie plus tard.",
+  OFF_RATE_LIMITED:
+    "Open Food Facts limite temporairement nos recherches. Aucune nouvelle décision n’a été enregistrée. Réessaie dans une minute.",
+  OFF_INVALID_RESPONSE:
+    "Open Food Facts a renvoyé une réponse inexploitable. Aucune nouvelle décision n’a été enregistrée. Réessaie plus tard.",
+};
+
+/**
+ * La phrase à afficher pour un code d'erreur amont — ou `null` si le code
+ * n'est pas une panne de service.
+ *
+ * ⚠️ `null` PLUTÔT QU'UNE PHRASE PAR DÉFAUT. Un code inconnu doit retomber sur
+ * le message générique de l'écran, pas hériter d'une explication rassurante
+ * qui pourrait être fausse.
+ */
+export function messagePanneOff(code: string | undefined | null): string | null {
+  if (typeof code !== "string") return null;
+  return code in MESSAGE_PANNE_OFF
+    ? MESSAGE_PANNE_OFF[code as keyof typeof MESSAGE_PANNE_OFF]
+    : null;
+}

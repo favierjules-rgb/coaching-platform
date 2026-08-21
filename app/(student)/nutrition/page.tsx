@@ -6,6 +6,7 @@ import { Droplet, Lightbulb, Pill } from "lucide-react";
 import { SectionIndisponible } from "@/components/pwa/SectionIndisponible";
 import { StatusBadge } from "@/components/student/StatusBadge";
 import { NutritionPlansListClient } from "@/components/student/NutritionPlansListClient";
+import { ListeDeCoursesHighlightLink } from "@/components/student/ListeDeCoursesHighlightLink";
 import { RecipesHighlightLink } from "@/components/student/RecipesHighlightLink";
 import { NutritionWeekStatusClient } from "@/components/student/NutritionWeekStatusClient";
 import { WeeklyNutritionTracker } from "@/components/student/WeeklyNutritionTracker";
@@ -111,11 +112,20 @@ export default function NutritionPage() {
           </p>
         </div>
 
-        {/* L'ENTRÉE MISE EN AVANT VERS LES RECETTES.
-            Placée avant le suivi, donc visible sans défiler : c'est l'outil
-            qu'on ouvre le plus souvent. Elle mène à son propre écran. */}
-        <div className="mb-8">
-          <RecipesHighlightLink planId={activePlan.id} className="w-full sm:max-w-sm" />
+        {/* LES DEUX OUTILS DU HAUT DE L'ÉCRAN.
+            Placés avant le suivi, donc visibles sans défiler : ce sont ceux
+            qu'on ouvre le plus souvent, et chacun mène à son propre écran.
+
+            COURSES C1 — « GÉNÉRER MA LISTE DE COURSE » est le JUMEAU de
+            « Recettes », immédiatement en dessous : même carte, même filet
+            lumineux, même flèche, seule la teinte change. L'ancienne entrée
+            sobre « Mes courses », qui menait à /courses, a disparu avec le
+            parcours qu'elle ouvrait : la liste se génère désormais sous
+            /nutrition/courses, parce qu'elle appartient à l'ÉLÈVE et à des
+            dates réelles, pas à un plan. */}
+        <div className="mb-8 flex flex-col gap-3 sm:max-w-sm">
+          <RecipesHighlightLink planId={activePlan.id} className="w-full" />
+          <ListeDeCoursesHighlightLink className="w-full" />
         </div>
 
         {studentId && (

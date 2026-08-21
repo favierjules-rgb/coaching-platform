@@ -60,6 +60,14 @@
   --warning-foreground: #1a1200;
   --success: #4ade80;
   --success-foreground: #052e12;
+  /* COURSES C1 — le quatrième accent sémantique : « outil », ni succès, ni
+     alerte. Il n'invente pas une teinte : c'est le MÊME bleu que la clé
+     `blue` du vocabulaire partagé `lib/ui/color-keys.ts` (famille Tailwind
+     blue), déclinée comme --success l'est déjà, 400 en sombre / 600 en clair.
+     Le déclarer ici plutôt qu'en dur dans un composant est la seule façon de
+     le rendre disponible au conic-gradient ET aux utilitaires Tailwind. */
+  --info: #60a5fa;
+  --info-foreground: #06203f;
 }
 
 /* La palette claire sert deux maîtres : la classe .light (admin/élève,
@@ -91,6 +99,8 @@
   --warning-foreground: #1a1200;
   --success: #16a34a;
   --success-foreground: #ffffff;
+  --info: #2563eb;
+  --info-foreground: #ffffff;
 }
 
 @theme inline {
@@ -114,6 +124,8 @@
   --color-warning-foreground: var(--warning-foreground);
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
   --font-heading: var(--font-barlow);
   --font-body: var(--font-dm-sans);
 
@@ -1222,6 +1234,18 @@ body {
    UN SEUL élément de la page porte cette animation. Une mise en avant qui se
    répète n'en est plus une, et une boucle permanente multipliée par cinq
    deviendrait du bruit.
+
+   ── COURSES C1 — LA TEINTE DEVIENT UN PARAMÈTRE, L'ANIMATION RESTE UNIQUE ──
+   L'entrée « Générer ma liste de course » demandait le MÊME mouvement dans une
+   autre teinte. Recopier soixante lignes de conic-gradient aurait créé deux
+   animations à maintenir, qui auraient divergé au premier réglage. La règle
+   est donc paramétrée par `--halo-teinte`, dont la valeur par défaut reste
+   `var(--success)` : le bouton Recettes n'a pas changé d'un pixel, et
+   `.halo-info` ne fait que substituer la teinte.
+
+   ⚠️ « UN SEUL élément par écran » reste vrai au sens où il compte : ces deux
+   entrées sont les deux OUTILS du haut de l'écran nutrition, jamais répétées
+   ailleurs, et l'entrée sobre « Mes courses » qu'elles remplacent a disparu.
 */
 @property --recettes-halo-angle {
   syntax: "<angle>";
@@ -1239,11 +1263,11 @@ body {
   background: conic-gradient(
     from var(--recettes-halo-angle, 0deg),
     transparent 0deg,
-    color-mix(in srgb, var(--success) 22%, transparent) 26deg,
-    color-mix(in srgb, var(--success) 78%, transparent) 58deg,
-    var(--success) 72deg,
-    color-mix(in srgb, var(--success) 55%, transparent) 100deg,
-    color-mix(in srgb, var(--success) 12%, transparent) 168deg,
+    color-mix(in srgb, var(--halo-teinte, var(--success)) 22%, transparent) 26deg,
+    color-mix(in srgb, var(--halo-teinte, var(--success)) 78%, transparent) 58deg,
+    var(--halo-teinte, var(--success)) 72deg,
+    color-mix(in srgb, var(--halo-teinte, var(--success)) 55%, transparent) 100deg,
+    color-mix(in srgb, var(--halo-teinte, var(--success)) 12%, transparent) 168deg,
     transparent 236deg,
     transparent 360deg
   );
@@ -1261,7 +1285,13 @@ body {
 
 /* Halo diffus, immobile : il donne la surbrillance sans ajouter de mouvement. */
 .recettes-halo {
-  box-shadow: 0 0 24px -10px color-mix(in srgb, var(--success) 70%, transparent);
+  box-shadow: 0 0 24px -10px color-mix(in srgb, var(--halo-teinte, var(--success)) 70%, transparent);
+}
+
+/* La SEULE différence entre les deux entrées : la teinte. Même règle, même
+   durée, même courbe, même repli sous prefers-reduced-motion. */
+.recettes-halo.halo-info {
+  --halo-teinte: var(--info);
 }
 
 @keyframes recettes-halo-tour {

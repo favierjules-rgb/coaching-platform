@@ -31,6 +31,12 @@ import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import test from "node:test";
 
+import {
+  listerMigrations,
+  verifierContratDesMigrations,
+  verifierManifesteDesMigrations,
+} from "./contrat-migrations.mjs";
+
 import { NutritionWeekNav } from "../../components/student/NutritionWeekNav";
 import { StudentPrescribedWeek } from "../../components/student/StudentPrescribedWeek";
 import type { SuiviConsommation } from "../../components/student/StudentPrescribedWeek";
@@ -697,24 +703,20 @@ await test("HIST17. l'élève A ne voit jamais l'élève B", () => {
   // qu'aucun chantier ne suit. N1.1 en a créé une. Ce que ce contrôle doit
   // continuer de prouver, c'est que CE LOT-CI n'en a créé aucune — donc la
   // liste des migrations postérieures est EXACTEMENT celle de N1, nommée.
-  const tardives = lireMigrations().filter((f) => horodatage(f) > "20260905090100");
-  assert.deepEqual(tardives, [
-      "20260906090000_nutrition_listes_et_repas_planifies.sql",
-      "20260907090000_n1_3_occurrences_de_listes_dans_les_repas.sql",
-      "20260908090000_n1_5_1_portions_preferees.sql",
-      "20260909090000_n1_5_2_quantite_minimale.sql",
-      // ⚠️ N1.6 — TROIS MIGRATIONS DE PLUS, ET LA LISTE EST NOMINATIVE EXPRÈS.
-      // Un compteur seul dirait « 79 » sans dire lesquelles : c'est le nom qui
-      // rend visible qu'aucune migration étrangère ne s'est glissée dans le lot.
-      "20260910090000_n1_6_a_couleurs_de_listes.sql",
-      "20260912090000_n1_6_b_enregistrer_repas_structure.sql",
-      "20260913090000_contract_preferred_unit.sql",
-      // ⚠️ C0.1 — LE VERROU SERVEUR, et rien d'autre. Courses C0 n'a créé
-      // AUCUNE migration ; C0.1 en a créé UNE, qui interdit de réécrire un
-      // repas déjà consommé. La nommer ici rend visible qu'aucun chantier
-      // « liste de courses » n'a glissé de table au passage.
-      "20260914090000_c0_1_verrou_repas_consomme.sql",
-    ], `migrations postérieures inattendues : ${tardives.join(", ")}`);
+  // ⚠️ LISTE NOMINATIVE FIGÉE, REMPLACÉE EN C4.1 — ET LE COMMENTAIRE
+  // CI-DESSUS AVAIT DÉJÀ TOUT DIT : « aucune migration postérieure » n'est
+  // vrai que tant qu'aucun chantier ne suit. Sept chantiers ont suivi depuis
+  // (N1.6 a/b, contract_preferred_unit, C0.1, C2, C3, C4.1), et la liste a été
+  // rallongée à la main jusqu'à ce que quelqu'un cesse de le faire.
+  //
+  // La question à laquelle CE test doit répondre n'est pas « quelles sont
+  // toutes les migrations du dépôt » — c'est le rôle du contrat partagé — mais
+  // « A5.7 en a-t-il créé une ? ». On la pose directement, et elle ne vieillit
+  // pas : aucune migration du dépôt ne porte le nom du lot.
+  verifierContratDesMigrations(assert);
+  verifierManifesteDesMigrations(assert);
+  const tardives = listerMigrations().filter((f) => /_a5|nutrition_history|historique/i.test(f));
+  assert.deepEqual(tardives, [], `A5.7 ne doit avoir créé aucune migration : ${tardives.join(", ")}`);
 
   // Et c'est EXÉCUTÉ, pas relu : la checklist crée deux élèves du même coach,
   // se connecte comme B, et compte ce qu'il voit.
@@ -1081,11 +1083,31 @@ await test("HIST-SUP. le dépouillement des commentaires n'a rien vidé", () => 
   // vit aussi dans `supabase/baseline/manifest.json` : les deux doivent
   // s'accorder, sinon l'un des deux ment.
   const migrations = lireMigrations();
-  assert.equal(migrations.length, 80, "80 fichiers : A5.7 n'en a créé aucun, N1.1 en a créé un, N1.3 un second");
-  const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json")) as {
-    migrations_post_baseline_attendues: readonly string[];
-  };
-  assert.equal(manifeste.migrations_post_baseline_attendues.length, 53);
+  // ⚠️ COMPTEUR FIGÉ REMPLACÉ EN C4.1 — LA CONCLUSION EST GARDÉE, LA PREUVE
+  // EST CHANGÉE.
+  //
+  // « Ce lot n'a créé aucune migration » se démontrait par un compte (76 ou
+  // 80) et par une liste nominative des migrations postérieures, recopiée à la
+  // main. Les deux vieillissent au premier chantier suivant, et c'est arrivé :
+  // mesuré le 17/08/2026, ces lignes annonçaient 76 et 80 quand le dossier en
+  // portait 82.
+  //
+  // Trois contrôles remplacent le compte, et prouvent STRICTEMENT PLUS :
+  //   · le contrat partagé — identité, ordre, horodatage, unicité des
+  //     migrations COURSES, et EMPREINTE de tout l'historique antérieur, qui
+  //     rougit si une migration étrangère est antidatée pour s'y glisser ;
+  //   · le manifeste — toute migration présente y est déclarée, et
+  //     réciproquement ;
+  //   · et, ci-dessous, la propriété PROPRE À CE LOT : aucune migration du
+  //     dépôt ne porte son nom.
+  verifierContratDesMigrations(assert);
+  verifierManifesteDesMigrations(assert);
+  const migrationsDuLot = listerMigrations().filter((f) => /_a5|nutrition_history|historique/i.test(f));
+  assert.deepEqual(
+    migrationsDuLot,
+    [],
+    `A5.7 ne doit avoir créé aucune migration : ${migrationsDuLot.join(", ")}`,
+  );
 
   // Et rien qui ressemble à une table, une vue ou un agrégat d'historique.
   //

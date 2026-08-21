@@ -81,6 +81,31 @@ export async function requireAdminOrCoach(): Promise<void> {
 }
 
 /**
+ * Espace strictement ADMIN — plus étroit que `requireAdminOrCoach`.
+ *
+ * ⚠️ POURQUOI UNE SECONDE GARDE, ALORS QUE `/admin` EST DÉJÀ GARDÉ. Toute la
+ * section admin est ouverte aux coachs, et c'est voulu pour presque tout. Mais
+ * certaines données sont GLOBALES à l'application — partagées par tous les
+ * élèves de tous les coachs — et leur administration n'appartient qu'à l'admin.
+ * Les prix estimatifs (COURSES C3) en sont le premier cas.
+ *
+ * ⚠️ CETTE GARDE NE REMPLACE PAS LA POLICY, ELLE LA DOUBLE. La base refuse déjà
+ * l'écriture d'un prix à quiconque n'est pas admin. Cette redirection évite
+ * seulement de montrer à un coach un écran dont chaque bouton échouerait : une
+ * garde cliente est un confort d'affichage, jamais une protection.
+ */
+export async function requireAdmin(): Promise<void> {
+  if (shouldSkipGuards()) {
+    return;
+  }
+  await requireAuth();
+  const role = await getCurrentUserRole();
+  if (role !== "admin") {
+    redirect("/acces-refuse");
+  }
+}
+
+/**
  * Espace élève : authentification requise, mais pas de restriction stricte
  * au rôle "student" — un coach/admin doit pouvoir prévisualiser l'espace
  * élève (lien "Espace élève" du menu admin), donc seul l'accès anonyme est

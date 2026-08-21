@@ -27,6 +27,8 @@
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
+
+import { MIGRATION_C0_1, MIGRATION_C2, verifierContratDesMigrations } from "./contrat-migrations.mjs";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 
@@ -419,24 +421,36 @@ await test("C0-23/24. aucune macro, aucun rôle, aucun referenceGrams, aucune co
    C0-28 — AUCUNE MIGRATION, AUCUNE DÉPENDANCE À L'ANCIEN COURSES
    ══════════════════════════════════════════════════════════════════════════ */
 
-await test("C0-28. aucune migration, et aucune trace de l'ancien chantier Courses", () => {
-  // ⚠️ LE COMPTE NE BOUGE PAS. C0 n'écrit aucune migration : il appelle une
-  // RPC qui existe depuis N1.1. Ce contrôle rougirait si quelqu'un en ajoutait
-  // une « juste pour Courses ».
+await test("C0-28. le contrat des migrations, et aucune trace de l'ancien chantier Courses", () => {
+  // ⚠️ RENFORCÉE PAR C2, PAS ASSOUPLIE. Cette assertion disait « 80 migrations,
+  // et aucune table de courses ». C2 crée les siennes : la seconde moitié est
+  // devenue fausse, et la remonter à « 81 » aurait vidé la première de son sens
+  // — n'importe quelle 81ᵉ migration l'aurait satisfaite.
+  //
+  // Le contrat partagé fige désormais l'identité exacte de la migration
+  // autorisée, l'ordre C0.1 → C2, l'unicité de la migration de courses et une
+  // empreinte de l'historique antérieur. Il rougit sur une seconde migration
+  // C2, sur une migration étrangère et sur un antidatage.
+  verifierContratDesMigrations(assert);
+
+  // ⚠️ ET LA GARANTIE PROPRE À C0 EST INTACTE : C0 n'écrit AUCUNE migration —
+  // il appelle une RPC qui existe depuis N1.1 — et C0.1 en écrit exactement
+  // une, le verrou serveur du repas consommé.
   const migrations = readdirSync(new URL("../../supabase/migrations/", import.meta.url))
     .filter((f) => f.endsWith(".sql"));
-  // ⚠️ 80 DEPUIS C0.1, ET UNE SEULE MIGRATION DE COURSES. C0 lui-même n'en a
-  // écrit AUCUNE — il appelle une RPC de N1.1. C0.1 en a écrit UNE, et une
-  // seule : le verrou serveur qui interdit de réécrire un repas consommé.
-  // Ce contrôle rougirait si un lot « Courses » en ajoutait d'autres au
-  // passage.
-  assert.equal(migrations.length, 80, "80 migrations : C0 n'en crée aucune, C0.1 exactement une");
-  assert.ok(migrations.includes("20260914090000_c0_1_verrou_repas_consomme.sql"),
-    "la migration du verrou C0.1 a disparu");
-  // ⚠️ ET AUCUNE TABLE DE COURSES N'EST CRÉÉE À CE STADE. C0/C0.1 préparent la
-  // SOURCE ; le schéma de la liste elle-même appartient à C2.
-  assert.ok(!migrations.some((f) => /shopping|grocery|liste_de_courses/i.test(f)),
-    "une table de courses est créée trop tôt");
+  const deC0 = migrations.filter((f) => /_c0_/i.test(f)).sort();
+  assert.deepEqual(deC0, [MIGRATION_C0_1], "C0.1 écrit une migration, C0 aucune");
+
+  // ⚠️ ET LES TABLES DE COURSES N'ARRIVENT PAS TROP TÔT. Elles appartiennent à
+  // C2, et à lui seul : C0/C0.1 préparent la SOURCE, pas la liste.
+  const creatrices = migrations
+    .filter((f) =>
+      /create table[^;]*public\.shopping_/i.test(
+        readFileSync(new URL(f, new URL("../../supabase/migrations/", import.meta.url)), "utf8"),
+      ),
+    )
+    .sort();
+  assert.deepEqual(creatrices, [MIGRATION_C2], "les tables de courses n'appartiennent qu'à C2");
 
   // ⚠️ ET AUCUN FICHIER DE L'ANCIEN C1 N'EST IMPORTÉ. Le moteur abandonné
   // dérivait la liste de RECETTES choisies par la machine ; C0 part des choix

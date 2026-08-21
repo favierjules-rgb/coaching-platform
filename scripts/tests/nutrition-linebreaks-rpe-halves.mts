@@ -21,6 +21,8 @@ import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import test from "node:test";
 
+import { verifierManifesteDesMigrations } from "./contrat-migrations.mjs";
+
 import { PlannedMealCard } from "../../components/student/PlannedMealCard";
 import { workoutFeedbackPayloadSchema } from "../../lib/api/schemas/workout-feedback";
 import { itemsToText, textToItems } from "../../lib/nutrition/plan-v2-week-form";
@@ -349,16 +351,26 @@ await test("RPE-HALF3. la migration est déclarée, comptée, et sa checklist co
   // garde est devenue fausse. La retirer est le contraire d'un test affaibli
   // pour obtenir du vert : elle décrivait une situation temporaire qui n'a
   // plus lieu d'être.
-  assert.equal(attendues.length, 53);
+  // ⚠️ COMPTEUR FIGÉ REMPLACÉ EN C4.1 — LIRE AVANT DE RÉÉCRIRE UN NOMBRE ICI.
+  //
+  // Cette ligne disait `assert.equal(attendues.length, 53)`. Le même nombre
+  // était recopié dans DOUZE fichiers de tests, et chacun vérifiait en plus le
+  // TEXTE de `security-hardening.mts` pour s'assurer que les copies suivaient.
+  //
+  // Le montage a fini par cacher ce qu'il devait montrer : mesuré le
+  // 17/08/2026, **C2 et C3 n'étaient pas déclarées au manifeste** et aucun des
+  // douze compteurs ne l'a signalé — ils comptaient 53, ce qui était juste,
+  // pour une liste incomplète.
+  //
+  // On vérifie donc la PROPRIÉTÉ, pas le nombre : le manifeste et le dossier
+  // `supabase/migrations` coïncident nom par nom, dans les deux sens.
+  verifierManifesteDesMigrations(assert);
   // En revanche, l'ORDRE compte et reste vérifié : la migration RPE doit
   // précéder celle d'ALIMENTS A1, sinon un rejeu depuis le baseline verrait
   // A1 s'appliquer avant le RPE.
   const iRpe = attendues.indexOf("20260830090000_rpe_half_points.sql");
   const iA1 = attendues.findIndex((m) => /food_catalog/.test(m));
   assert.ok(iA1 === -1 || iRpe < iA1, "la migration RPE doit rester antérieure à ALIMENTS A1");
-  const secu = lire("../../scripts/tests/security-hardening.mts");
-  assert.ok(secu.includes(".length, 80,"));
-  assert.ok(secu.includes("assert.equal(attendues.length, 53);"));
 
   // La checklist SQL est ce qui prouve RPE-HALF3 pour de vrai : 7,5 écrit,
   // 7,5 relu, sur une base réelle. Ce fichier-ci ne peut que le déléguer.

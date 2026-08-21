@@ -63,6 +63,54 @@ function versDateLocale(iso: string): Date | null {
   return p === null ? null : new Date(p.a, p.m - 1, p.j);
 }
 
+/**
+ * COURSES C1 — DÉCALER UNE DATE DE N JOURS, DANS LA MÊME CONVENTION.
+ *
+ * ⚠️ AJOUT PUREMENT ADDITIF, ET IL VIT ICI POUR UNE RAISON. Une liste de
+ * courses couvre 1 à 7 jours à partir d'une date réelle : sans cette
+ * fonction, `lib/nutrition/periode-courses.ts` aurait dû refaire son propre
+ * `new Date(...)`, et le projet aurait eu DEUX conventions de fuseau. Ce
+ * fichier est celui qui possède la convention (voir l'avertissement
+ * ci-dessus sur `new Date("2026-08-13")`) : la fonction lui appartient.
+ *
+ * Aucune fonction existante n'est modifiée, aucune n'a changé de sortie.
+ *
+ * `null` si l'entrée n'est pas une date ISO — jamais de repli silencieux sur
+ * aujourd'hui, qui produirait une période fausse sans le dire.
+ */
+export function ajouterJours(iso: string, n: number): string | null {
+  const date = versDateLocale(iso);
+  if (date === null || !Number.isInteger(n)) return null;
+  return versIso(new Date(date.getFullYear(), date.getMonth(), date.getDate() + n));
+}
+
+/**
+ * Les mois en français, EXPORTÉS pour rester une seule vérité.
+ *
+ * `libelleSemaine` les utilisait déjà ; le libellé d'une période de courses en
+ * a besoin lui aussi. Les recopier ailleurs aurait créé deux tables à corriger
+ * le jour où l'une d'elles gagnerait une majuscule.
+ */
+export const MOIS_FR: readonly string[] = [
+  "janvier",
+  "février",
+  "mars",
+  "avril",
+  "mai",
+  "juin",
+  "juillet",
+  "août",
+  "septembre",
+  "octobre",
+  "novembre",
+  "décembre",
+];
+
+/** Découpe une date ISO en (année, mois, jour). `null` si la forme est invalide. */
+export function partiesDeDate(iso: string): { readonly a: number; readonly m: number; readonly j: number } | null {
+  return versParties(iso);
+}
+
 export interface Semaine {
   /** Le lundi, au format ISO. */
   readonly debut: string;
@@ -108,21 +156,6 @@ export function decalerSemaine(semaine: Semaine, n: number): Semaine {
   const déplacé = new Date(debut.getFullYear(), debut.getMonth(), debut.getDate() + n * 7);
   return semaineContenant(versIso(déplacé)) ?? semaine;
 }
-
-const MOIS_FR = [
-  "janvier",
-  "février",
-  "mars",
-  "avril",
-  "mai",
-  "juin",
-  "juillet",
-  "août",
-  "septembre",
-  "octobre",
-  "novembre",
-  "décembre",
-];
 
 /**
  * « Semaine du 10 au 16 août », « du 30 août au 5 septembre », « du 28 décembre
