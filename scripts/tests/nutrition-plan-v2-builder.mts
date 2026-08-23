@@ -644,7 +644,6 @@ await test("36. le suivi nutritionnel élève est inchangé", () => {
   assert.ok(!logs.includes("save_nutrition_plan_v2"));
   // Aucun composant élève ne connaît le modèle v2.
   for (const fichier of [
-    "../../components/student/WeeklyNutritionTracker.tsx",
     "../../components/student/NutritionPlanCard.tsx",
     "../../components/student/NutritionPlanWorkspace.tsx",
   ]) {

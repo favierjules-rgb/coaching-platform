@@ -9,7 +9,6 @@ import { NutritionPlansListClient } from "@/components/student/NutritionPlansLis
 import { ListeDeCoursesHighlightLink } from "@/components/student/ListeDeCoursesHighlightLink";
 import { RecipesHighlightLink } from "@/components/student/RecipesHighlightLink";
 import { NutritionWeekStatusClient } from "@/components/student/NutritionWeekStatusClient";
-import { WeeklyNutritionTracker } from "@/components/student/WeeklyNutritionTracker";
 import {
   activeNutritionPlan,
   hydrationAndSupplements,
@@ -79,7 +78,7 @@ export default function NutritionPage() {
   }
 
   if (supabaseNutrition.active) {
-    const { plans, activePlan, studentId } = supabaseNutrition;
+    const { plans, activePlan } = supabaseNutrition;
 
     if (!activePlan) {
       return (
@@ -113,8 +112,9 @@ export default function NutritionPage() {
         </div>
 
         {/* LES DEUX OUTILS DU HAUT DE L'ÉCRAN.
-            Placés avant le suivi, donc visibles sans défiler : ce sont ceux
-            qu'on ouvre le plus souvent, et chacun mène à son propre écran.
+            Placés avant la liste des plans, donc visibles sans défiler : ce
+            sont ceux qu'on ouvre le plus souvent, et chacun mène à son propre
+            écran.
 
             COURSES C1 — « GÉNÉRER MA LISTE DE COURSE » est le JUMEAU de
             « Recettes », immédiatement en dessous : même carte, même filet
@@ -127,21 +127,6 @@ export default function NutritionPage() {
           <RecipesHighlightLink planId={activePlan.id} className="w-full" />
           <ListeDeCoursesHighlightLink className="w-full" />
         </div>
-
-        {studentId && (
-          <WeeklyNutritionTracker
-            studentId={studentId}
-            planId={activePlan.id}
-            target={{
-              calories: activePlan.caloriesPerDay,
-              protein: activePlan.protein,
-              carbs: activePlan.carbs,
-              fat: activePlan.fat,
-              weeklyTargetCalories: v2.week ? weeklyCaloriesFromDays(v2.week) : activePlan.weeklyTargetCalories,
-              perDay: objectifsParJour,
-            }}
-          />
-        )}
 
         {(activePlan.hydrationTip || activePlan.supplements.length > 0) && (
           <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-2">

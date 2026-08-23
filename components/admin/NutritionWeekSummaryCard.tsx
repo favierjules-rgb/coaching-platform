@@ -19,9 +19,11 @@ function formatKcal(value: number): string {
 
 /**
  * Résumé lecture seule du suivi nutrition hebdomadaire pour
- * /admin/eleves/[studentId] — même calcul que WeeklyNutritionTracker côté
- * élève (useSupabaseNutritionWeek), sans formulaire de saisie. Pas
- * d'éditeur admin complet pour cette étape, comme demandé.
+ * /admin/eleves/[studentId], calculé par useSupabaseNutritionWeek, sans
+ * formulaire de saisie. C'est désormais le SEUL écran qui rend cet
+ * ajustement : l'ancien tableau hebdomadaire élève (sept cartes de saisie
+ * kcal/macros sur /nutrition) a été retiré du parcours élève. Le hook, le
+ * calcul pur et la table restent en place pour cette carte.
  */
 export function NutritionWeekSummaryCard({ studentId, planId, target }: NutritionWeekSummaryCardProps) {
   const { loading, adjustment } = useSupabaseNutritionWeek(studentId, planId, target);
