@@ -326,6 +326,38 @@ export function strengthExercisesFromBlocks(blocks: readonly TrainingBlock[]): A
 }
 
 /**
+ * Retire une semaine entière du programme en cours d'édition.
+ *
+ * ════════════════════════════════════════════════════════════════════════════
+ * ⚠️ AUCUNE RENUMÉROTATION — ET C'EST UNE DÉCISION, PAS UN OUBLI
+ * ════════════════════════════════════════════════════════════════════════════
+ * Supprimer la semaine 2 d'un programme de trois laisse les semaines 1 et 3.
+ * Décaler la 3 en 2 paraîtrait plus propre à l'écran, et détruirait des
+ * données : côté persistance, une semaine est identifiée par son NUMÉRO. Une
+ * semaine 3 renumérotée en 2 disparaîtrait du jeu entrant, `diffProgramStructure`
+ * supprimerait sa ligne `program_weeks`, et la cascade emporterait ses séances,
+ * ses blocs, ses prescriptions et le rattachement des retours élèves déjà
+ * soumis. Le trou dans la numérotation est le prix — visible, réversible, et
+ * sans perte.
+ *
+ * ⚠️ ET LA DERNIÈRE SEMAINE NE SE SUPPRIME PAS. Un programme sans aucune
+ * semaine n'est pas un programme vide : c'est un programme dont la grille n'a
+ * plus rien à afficher, et dont on ne sait plus quoi proposer au coach.
+ *
+ * Fonction PURE : rend un nouveau tableau, ne mute rien.
+ */
+export function supprimerSemaine<T extends { weekNumber: number }>(
+  sessions: readonly T[],
+  weekNumber: number,
+): T[] {
+  const restantes = sessions.filter((s) => s.weekNumber !== weekNumber);
+  // Rien supprimé (numéro inconnu), ou plus une seule semaine : on ne touche à rien.
+  if (restantes.length === sessions.length) return sessions.slice();
+  if (restantes.length === 0) return sessions.slice();
+  return restantes;
+}
+
+/**
  * Échange le JOUR de deux séances — le déplacement dans la grille du builder.
  *
  * ════════════════════════════════════════════════════════════════════════════

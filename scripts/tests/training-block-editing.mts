@@ -17,6 +17,7 @@ import {
   duplicateStrengthExercise,
   duplicateTrainingBlock,
   echangerJoursDeSeance,
+  supprimerSemaine,
   getBlockDropPlacement,
   isBlockColorKey,
   moveExerciseBetweenStrengthBlocks,
@@ -550,6 +551,57 @@ test("MOVE-PUR — pure, totale, et sans devinette", () => {
   const apres = echangerJoursDeSeance(seances, "a", "b");
   assert.notEqual(apres[0], seances[0], "les séances touchées sont des copies");
   assert.deepEqual(seances, copie, "la source reste intacte");
+});
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   LA SUPPRESSION D'UNE SEMAINE
+   ══════════════════════════════════════════════════════════════════════════ */
+
+test("SEM-SUPPR — la semaine part entière, les autres gardent leur numéro", () => {
+  const seances = [1, 2, 3].flatMap((weekNumber) =>
+    ["lundi", "mardi"].map((day) => ({ id: `s-${weekNumber}-${day}`, weekNumber, day })),
+  );
+  const apres = supprimerSemaine(seances, 2);
+
+  assert.deepEqual([...new Set(apres.map((s) => s.weekNumber))].sort(), [1, 3], "la 2 disparaît, la 3 reste la 3");
+  assert.equal(apres.length, 4, "les deux jours de la semaine 2 partent avec elle");
+  assert.equal(apres.some((s) => s.id.startsWith("s-2-")), false);
+
+  // ⚠️ AUCUNE RENUMÉROTATION, ET C'EST DÉLIBÉRÉ. Décaler la 3 en 2 paraîtrait
+  // plus propre et détruirait des données : une semaine est identifiée en base
+  // par son NUMÉRO. Renumérotée, elle sortirait du jeu entrant, sa ligne
+  // `program_weeks` serait supprimée, et la cascade emporterait ses séances,
+  // ses blocs et le rattachement des retours élèves déjà soumis.
+  assert.equal(apres.filter((s) => s.weekNumber === 3).length, 2, "la semaine 3 n'est pas devenue la 2");
+
+  // Les séances conservées sont les objets d'origine : rien n'est recopié.
+  assert.equal(apres[0], seances[0]);
+});
+
+test("SEM-SUPPR — la dernière semaine ne se supprime pas, et un numéro inconnu ne fait rien", () => {
+  const uneSeule = [
+    { id: "a", weekNumber: 1 },
+    { id: "b", weekNumber: 1 },
+  ];
+  // ⚠️ UN PROGRAMME SANS AUCUNE SEMAINE N'EST PAS UN PROGRAMME VIDE : c'est une
+  // grille qui n'a plus rien à afficher, et un écran dont on ne sait plus quoi
+  // proposer au coach.
+  assert.deepEqual(supprimerSemaine(uneSeule, 1), uneSeule, "la dernière semaine résiste");
+
+  const deux = [
+    { id: "a", weekNumber: 1 },
+    { id: "b", weekNumber: 2 },
+  ];
+  assert.deepEqual(supprimerSemaine(deux, 7), deux, "un numéro inconnu ne retire rien");
+  assert.deepEqual(supprimerSemaine([], 1), [], "aucune séance : rien à faire");
+
+  // Pure : la source n'est jamais mutée, et le retour est bien un autre tableau.
+  const copie = JSON.parse(JSON.stringify(deux)) as typeof deux;
+  const apres = supprimerSemaine(deux, 1);
+  assert.deepEqual(deux, copie);
+  assert.notEqual(apres, deux);
+  assert.deepEqual(apres.map((s) => s.weekNumber), [2]);
 });
 
 console.log(`\n${passed} test(s) réussi(s), ${failed} échec(s).`);
