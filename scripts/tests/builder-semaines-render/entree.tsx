@@ -92,7 +92,22 @@ const PROGRAMME = {
   updatedAt: "2026-08-01T10:00:00.000Z",
 } as unknown as AdminProgram;
 
-createRoot(document.getElementById("racine")!).render(
+/**
+ * ⚠️ LA CHAÎNE RÉELLE DES CONTENEURS, REPRODUITE À L'IDENTIQUE.
+ *
+ * Le défaut de défilement ne vit pas dans le builder seul : il naît de
+ * l'empilement `html` → `body` → `<main>` d'AdminShell → builder. Monter le
+ * composant nu dans un `<div>` vide aurait montré un écran parfait et prouvé
+ * exactement rien. Les classes ci-dessous sont copiées de :
+ *   · app/layout.tsx            <html class="h-full"> / <body class="flex min-h-full flex-col …">
+ *   · components/admin/AdminShell.tsx   branche builder : <main class="h-dvh w-full overflow-hidden">
+ */
+document.documentElement.className = "h-full";
+document.body.className = "flex min-h-full flex-col bg-background font-body text-foreground antialiased";
+const racine = document.getElementById("racine")!;
+racine.className = "h-dvh w-full overflow-hidden bg-background";
+
+createRoot(racine).render(
   createElement(ProgramBuilderFullscreen, {
     program: PROGRAMME,
     library: [],
@@ -104,6 +119,40 @@ createRoot(document.getElementById("racine")!).render(
 
 (globalThis as unknown as { __harnais: unknown }).__harnais = {
   texte: () => document.body.innerText,
+  /**
+   * ⚠️ ON MESURE LE DÉFILEMENT, ON NE LE DEVINE PAS. Un test de classe
+   * Tailwind aurait dit « la classe est là » ; seule la mesure dit s'il
+   * existe un SECOND défilement autour du builder.
+   */
+  mesures: () => {
+    const doc = document.documentElement;
+    // Le conteneur qui défile réellement : le plus profond dont le contenu
+    // dépasse la boîte et dont l'overflow-y n'est ni visible ni hidden.
+    const scrollables = [...document.querySelectorAll<HTMLElement>("div, main, section")].filter((el) => {
+      const st = getComputedStyle(el).overflowY;
+      return (st === "auto" || st === "scroll") && el.scrollHeight > el.clientHeight + 1;
+    });
+    const interne = scrollables[scrollables.length - 1] ?? null;
+    return {
+      docScrollHeight: doc.scrollHeight,
+      docClientHeight: doc.clientHeight,
+      bodyScrollHeight: document.body.scrollHeight,
+      viewport: window.innerHeight,
+      nbScrollables: scrollables.length,
+      interneScrollHeight: interne?.scrollHeight ?? 0,
+      interneClientHeight: interne?.clientHeight ?? 0,
+      interneClasses: interne?.className ?? "(aucun)",
+    };
+  },
+  defilerInterneEnBas: () => {
+    const scrollables = [...document.querySelectorAll<HTMLElement>("div, main, section")].filter((el) => {
+      const st = getComputedStyle(el).overflowY;
+      return (st === "auto" || st === "scroll") && el.scrollHeight > el.clientHeight + 1;
+    });
+    const interne = scrollables[scrollables.length - 1];
+    if (interne) interne.scrollTop = interne.scrollHeight;
+    return interne ? interne.scrollTop + interne.clientHeight : 0;
+  },
   // Les confirmations natives bloqueraient le navigateur : on les décide ici.
   confirmerToujours: () => {
     window.confirm = () => true;

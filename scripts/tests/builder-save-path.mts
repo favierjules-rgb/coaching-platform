@@ -466,7 +466,11 @@ await test("SEM-EDIT — l'édition est SOUS la grille, sur toute la largeur, ex
     false,
     "la grille et l'édition ne sont plus côte à côte",
   );
-  assert.match(shell, /flex min-h-0 flex-1 flex-col lg:overflow-y-auto/, "une seule colonne, qui défile");
+  assert.match(shell, /relative flex min-h-0 flex-1 flex-col overflow-y-auto/, "une seule colonne, qui défile");
+  // ⚠️ SANS PRÉFIXE `lg:`. Le défilement intérieur n'existait qu'à partir de
+  // 1024 px : en dessous, plus rien ne défilait à l'intérieur et le document
+  // s'allongeait. Voir SEM-SCROLL, qui le mesure.
+  assert.equal(/lg:overflow-y-auto/.test(composant), false, "le défilement intérieur vaut à toutes les largeurs");
 
   // Et les métadonnées de séance profitent bien de la largeur.
   const panneau = readFileSync(join(RACINE, "components/admin/blocks/SessionBlockPanel.tsx"), "utf8");
@@ -565,6 +569,153 @@ await test("SEM-EDIT — l'édition est SOUS la grille, sur toute la largeur, ex
     assert.ok((await page.getByRole("button", { name: /dupliquer l'exercice/i }).count()) >= 3, "duplication par exercice");
 
     assert.deepEqual(erreurs, [], "aucune erreur de page");
+  } finally {
+    await navigateur.close();
+    await new Promise<void>((ok) => serveur.close(() => ok()));
+  }
+});
+
+
+await test("SEM-SCROLL — un seul défilement : celui du builder, jamais celui du document", async () => {
+  // ⚠️ LE DÉFAUT MESURÉ EN PREVIEW. Arrivé en bas du builder, la page
+  // continuait de descendre sur une bande noire. Deux causes, toutes deux
+  // structurelles :
+  //
+  //   1. Un `<div class="sr-only">` (la zone `aria-live` de SessionBlockList)
+  //      est `position:absolute`. `overflow-hidden` ne rogne un tel élément
+  //      que si son bloc conteneur est DANS le sous-arbre rogné ; sans
+  //      ancêtre positionné il se cale sur le document et allonge
+  //      `documentElement.scrollHeight` — invisible, mais défilable.
+  //   2. Le builder posait `min-h-dvh` + `lg:h-dvh lg:overflow-hidden` alors
+  //      qu'`AdminShell` le monte déjà dans un `<main class="h-dvh
+  //      overflow-hidden">` : hauteur du viewport donnée deux fois, et sous
+  //      `lg` plus aucun conteneur intérieur ne défilait.
+  //
+  // ⚠️ CE TEST NE REGARDE AUCUNE CLASSE. Il MESURE, sur plusieurs tailles de
+  // fenêtre — dont celles qui reproduisaient le défaut. Une vérification de
+  // classe Tailwind aurait été verte avec le bogue en place.
+  const RACINE = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const executable = [
+    process.env.CHROMIUM_PATH,
+    "/opt/pw-browsers/chromium",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/google-chrome",
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+  ].find((c): c is string => Boolean(c) && existsSync(c as string));
+  assert.ok(executable, "aucun navigateur trouvé — pose CHROMIUM_PATH");
+
+  const construction = await esbuild.build({
+    entryPoints: [join(RACINE, "scripts", "tests", "builder-semaines-render", "entree.tsx")],
+    bundle: true,
+    write: false,
+    format: "esm",
+    platform: "browser",
+    target: "es2022",
+    jsx: "automatic",
+    tsconfig: join(RACINE, "tsconfig.json"),
+    define: { "process.env.NODE_ENV": '"development"' },
+    banner: { js: "globalThis.process ??= { env: {} };" },
+    logLevel: "silent",
+  });
+  const paquet = construction.outputFiles![0]!.text;
+
+  // ⚠️ LA FEUILLE DE STYLE EST INDISPENSABLE ICI. Sans elle, `h-full`,
+  // `overflow-hidden` et `min-h-0` n'existent pas : toutes les mesures
+  // seraient celles d'un document sans mise en page, et le test serait vert
+  // quoi qu'il arrive. On compile donc la CSS réelle du projet.
+  const postcss = (await import("postcss")).default;
+  const tailwind = (await import("@tailwindcss/postcss")).default;
+  const css = (
+    await postcss([tailwind({ base: RACINE })]).process(readFileSync(join(RACINE, "app/globals.css"), "utf8"), {
+      from: join(RACINE, "app/globals.css"),
+      to: join(RACINE, "app/globals.css"),
+    })
+  ).css;
+
+  const PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>scroll</title><style>${css}</style></head>
+<body><div id="racine"></div><script type="module" src="/paquet.js"></script></body></html>`;
+  const serveur = createServer((requete, reponse) => {
+    if ((requete.url ?? "/").startsWith("/paquet.js")) {
+      reponse.writeHead(200, { "content-type": "text/javascript; charset=utf-8" }).end(paquet);
+      return;
+    }
+    reponse.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(PAGE);
+  });
+  await new Promise<void>((ok) => serveur.listen(0, "127.0.0.1", ok));
+  const adresse = serveur.address();
+  const origine = `http://127.0.0.1:${typeof adresse === "object" && adresse ? adresse.port : 0}`;
+
+  const { chromium } = await import("playwright-core");
+  const navigateur = await chromium.launch({
+    executablePath: executable,
+    args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  });
+  try {
+    // ⚠️ TROIS FENÊTRES, DONT DEUX QUI REPRODUISAIENT LE DÉFAUT. 1600×900 ne
+    // le montrait pas : le contenu tenait presque. C'est en raccourcissant la
+    // fenêtre — et sous le point de rupture `lg` — qu'il apparaissait.
+    for (const vue of [
+      { width: 1600, height: 900 },
+      { width: 1600, height: 700 },
+      { width: 1000, height: 800 },
+    ]) {
+      const contexte = await navigateur.newContext({ viewport: vue });
+      const page = await contexte.newPage();
+      const erreurs: string[] = [];
+      page.on("pageerror", (e) => erreurs.push(e.message));
+      await page.goto(origine);
+      await page.waitForFunction(() => "__harnais" in window);
+      await page.waitForFunction(() => /semaine 1/i.test(document.body.innerText));
+      // Une séance CHARGÉE : c'est elle qui fait dépasser le contenu.
+      await page.getByText(/tirage n°1/i).first().click();
+      await page.waitForFunction(() => /exercice #3/i.test(document.body.innerText));
+
+      const m = await page.evaluate(() =>
+        (window as unknown as { __harnais: { mesures: () => Record<string, number | string> } }).__harnais.mesures(),
+      );
+      const cadre = `${vue.width}×${vue.height}`;
+
+      // 1. AUCUN SECOND DÉFILEMENT DU DOCUMENT. C'est l'assertion centrale :
+      //    la bande noire, c'était exactement cet écart.
+      assert.ok(
+        (m.docScrollHeight as number) <= (m.docClientHeight as number) + 2,
+        `${cadre} : le document ne doit pas défiler (${m.docScrollHeight} > ${m.docClientHeight})`,
+      );
+
+      // 2. ET UN SEUL CONTENEUR DÉFILANT — celui du builder, qui déborde.
+      assert.equal(m.nbScrollables, 1, `${cadre} : un seul conteneur défilant (vu : ${m.nbScrollables})`);
+      assert.ok(
+        (m.interneScrollHeight as number) > (m.interneClientHeight as number),
+        `${cadre} : le contenu du builder doit dépasser sa boîte (${m.interneScrollHeight} / ${m.interneClientHeight})`,
+      );
+      assert.ok(
+        (m.interneClientHeight as number) <= (m.docClientHeight as number),
+        `${cadre} : le conteneur défilant tient dans le viewport`,
+      );
+
+      // 3. LE BAS DU BUILDER EST ATTEIGNABLE, et le document n'a toujours pas
+      //    bougé une fois arrivé en bas.
+      const basAtteint = await page.evaluate(() =>
+        (window as unknown as { __harnais: { defilerInterneEnBas: () => number } }).__harnais.defilerInterneEnBas(),
+      );
+      assert.ok(basAtteint > 0, `${cadre} : le défilement interne fonctionne`);
+      const apres = await page.evaluate(() =>
+        (window as unknown as { __harnais: { mesures: () => Record<string, number> } }).__harnais.mesures(),
+      );
+      assert.ok(
+        apres.docScrollHeight <= apres.docClientHeight + 2,
+        `${cadre} : arrivé en bas, le document ne défile toujours pas`,
+      );
+      assert.equal(await page.evaluate(() => window.scrollY), 0, `${cadre} : la fenêtre n'a pas bougé`);
+      // Le dernier contenu du panneau est bien à l'écran.
+      const dernier = await page.getByText(/analyse de la séance/i).first().boundingBox();
+      assert.ok(dernier && dernier.y < vue.height, `${cadre} : le bas du panneau est atteignable`);
+
+      assert.deepEqual(erreurs, [], `${cadre} : aucune erreur de page`);
+      await contexte.close();
+    }
   } finally {
     await navigateur.close();
     await new Promise<void>((ok) => serveur.close(() => ok()));

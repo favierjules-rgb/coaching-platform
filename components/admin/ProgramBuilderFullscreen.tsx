@@ -414,7 +414,23 @@ export function ProgramBuilderFullscreen({
   }
 
   return (
-    <div className="flex min-h-dvh flex-col bg-background text-foreground lg:h-dvh lg:overflow-hidden">
+    // ══════════════════════════════════════════════════════════════════════
+    // ⚠️ LE BUILDER REMPLIT SON PARENT — IL NE SE REDONNE PAS UNE HAUTEUR
+    // ══════════════════════════════════════════════════════════════════════
+    // Il portait `min-h-dvh` (toutes tailles) plus `lg:h-dvh lg:overflow-hidden`.
+    // Or `AdminShell` le monte déjà dans `<main className="h-dvh w-full
+    // overflow-hidden">` : la hauteur du viewport était donc posée DEUX fois,
+    // et le `min-h-dvh` — sans préfixe — autorisait la croissance sous `lg`,
+    // là où plus rien ne défilait à l'intérieur. `h-full` suit simplement le
+    // parent, à toutes les largeurs.
+    //
+    // ⚠️ ET `relative` N'EST PAS DÉCORATIF. `overflow-hidden` ne rogne un
+    // descendant `position:absolute` que si le bloc conteneur de celui-ci est
+    // DANS le sous-arbre rogné. Sans ancrage positionné, un tel élément se
+    // cale sur le bloc conteneur initial — le document — et allonge
+    // `documentElement.scrollHeight` sans que rien ne soit visible : c'est
+    // exactement la bande noire sous le builder.
+    <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-background text-foreground">
       {/* Barre du haut — jamais de sidebar admin ni de menu tableau de bord ici (voir AdminShell). */}
       <div className="flex h-14 flex-shrink-0 items-center justify-between gap-3 border-b border-border bg-card px-4">
         <div className="flex min-w-0 items-center gap-3">
@@ -498,7 +514,7 @@ export function ProgramBuilderFullscreen({
           ⚠️ ET C'EST UN CHANGEMENT DE MISE EN PAGE, RIEN D'AUTRE. Le contenu
           du panneau est le même composant, avec les mêmes propriétés : aucune
           fonction du builder n'est touchée. */}
-      <div className="flex min-h-0 flex-1 flex-col lg:overflow-y-auto">
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
         {/* Zone centrale — grille 7 jours, jamais de scroll horizontal (voir spec V3). */}
         <div className="flex min-w-0 flex-col p-4">
           <div className="mb-3 flex items-center justify-between gap-2">
