@@ -44,6 +44,19 @@ export function StrengthBlockEditor({
     <div className="flex flex-col gap-3">
       <ExerciseSearchPicker library={library} onPick={(item) => onAddFromLibrary(exerciseFromLibrary(0, item))} />
 
+      {/* ════════════════════════════════════════════════════════════════════
+          LES EXERCICES CÔTE À CÔTE
+          ════════════════════════════════════════════════════════════════════
+          ⚠️ ILS ÉTAIENT EMPILÉS DANS UNE COLONNE DE 420 px. Un exercice
+          occupait tout l'écran, et comparer la deuxième série de deux
+          exercices du même bloc demandait de faire défiler entre les deux.
+          L'édition étant passée sous la grille, la largeur existe : on s'en
+          sert.
+
+          ⚠️ L'ORDRE RESTE CELUI DU MODÈLE, LU DE GAUCHE À DROITE. Une grille
+          CSS ne réordonne rien — `block.exercises` défile dans le même sens
+          qu'avant, et « Monter / Descendre » agit exactement pareil. */}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-3">
       {block.exercises.map((exercise, index) => (
         <div key={exercise.id} className="flex flex-col gap-1">
           <ExerciseRow
@@ -91,6 +104,7 @@ export function StrengthBlockEditor({
           </div>
         </div>
       ))}
+      </div>
 
       <button
         type="button"

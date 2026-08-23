@@ -105,15 +105,23 @@ export function SessionBlockPanel({
       </div>
 
       <div className="flex flex-col gap-4 p-4">
-        <BannerUploadField
-          label="Photo bannière de la séance"
-          kind="sessions"
-          entityId={session.id}
-          value={session.bannerUrl}
-          onChange={(bannerUrl) => onChange({ ...session, bannerUrl })}
-        />
-        <Field label="Nom de la séance" value={session.name} onChange={(v) => onChange({ ...session, name: v })} />
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {/* ══════════════════════════════════════════════════════════════════
+            LES MÉTADONNÉES DE LA SÉANCE, EN LARGEUR
+            ══════════════════════════════════════════════════════════════════
+            ⚠️ ELLES S'EMPILAIENT DANS UNE COLONNE DE 420 px : nom, groupe,
+            durée, échauffement et notes prenaient à eux seuls la hauteur d'un
+            écran, et les exercices commençaient hors champ. Le panneau étant
+            passé sous la grille, ces champs se rangent de front — c'est la
+            place ainsi gagnée qui rend les exercices visibles sans défiler.
+
+            ⚠️ MISE EN PAGE SEULE. Mêmes champs, mêmes valeurs, mêmes
+            rappels `onChange` : rien du modèle n'est touché. */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <Field
+            label="Nom de la séance"
+            value={session.name}
+            onChange={(v) => onChange({ ...session, name: v })}
+          />
           <Field label="Groupe musculaire" value={session.muscleGroup} onChange={(v) => onChange({ ...session, muscleGroup: v })} />
           <Field
             label="Durée (min)"
@@ -121,9 +129,23 @@ export function SessionBlockPanel({
             value={String(session.durationMinutes)}
             onChange={(v) => onChange({ ...session, durationMinutes: Number(v) || 0 })}
           />
+          {/* ⚠️ LA BANNIÈRE EST BORNÉE. Étalée sur toute la largeur, sa zone de
+              dépôt occupait à elle seule un tiers de l'écran pour une photo
+              facultative. */}
+          <div className="sm:col-span-2 xl:col-span-1">
+            <BannerUploadField
+              label="Photo bannière de la séance"
+              kind="sessions"
+              entityId={session.id}
+              value={session.bannerUrl}
+              onChange={(bannerUrl) => onChange({ ...session, bannerUrl })}
+            />
+          </div>
         </div>
-        <TextareaField label="Échauffement" value={session.warmup} onChange={(v) => onChange({ ...session, warmup: v })} rows={2} />
-        <TextareaField label="Notes coach" value={session.coachNotes} onChange={(v) => onChange({ ...session, coachNotes: v })} rows={2} />
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <TextareaField label="Échauffement" value={session.warmup} onChange={(v) => onChange({ ...session, warmup: v })} rows={2} />
+          <TextareaField label="Notes coach" value={session.coachNotes} onChange={(v) => onChange({ ...session, coachNotes: v })} rows={2} />
+        </div>
 
         {(templates || onSaveAsTemplate) && (
           <div className="flex flex-col gap-3 border-t border-border pt-3">

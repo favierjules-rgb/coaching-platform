@@ -11,12 +11,11 @@ import {
   Dumbbell,
   Eye,
   Loader2,
-  PanelLeftClose,
-  PanelLeftOpen,
-  PanelRightClose,
-  PanelRightOpen,
+  PanelBottomClose,
+  PanelBottomOpen,
   Plus,
   Settings,
+  Trash2,
 } from "lucide-react";
 
 import { restDaySession } from "@/components/admin/ProgramBuilder";
@@ -29,6 +28,7 @@ import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
 import { contentStatusLabels, generateId, weekDays } from "@/lib/admin";
 import {
   echangerJoursDeSeance,
+  supprimerSemaine,
   normalizeBuilderSession,
   normalizeColorKey,
   regenerateBlockIdsForDuplication,
@@ -198,8 +198,7 @@ export function ProgramBuilderFullscreen({
   );
   const [selectedWeek, setSelectedWeek] = useState<number>(weekNumbers[0] ?? 1);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const [leftOpen, setLeftOpen] = useState(true);
-  const [rightOpen, setRightOpen] = useState(true);
+  const [editionOuverte, setEditionOuverte] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
@@ -214,9 +213,10 @@ export function ProgramBuilderFullscreen({
         event.preventDefault();
         void handleSave();
       } else if (event.key === "[" && !["INPUT", "TEXTAREA", "SELECT"].includes((event.target as HTMLElement)?.tagName)) {
+        // Le panneau des semaines a disparu : « [ » ne replie plus que
+        // l'édition de la séance, désormais sous la grille.
         event.preventDefault();
-        setLeftOpen((v) => !v);
-        setRightOpen((v) => !v);
+        setEditionOuverte((v) => !v);
       }
     }
     window.addEventListener("keydown", handleKeyDown);
@@ -299,6 +299,42 @@ export function ProgramBuilderFullscreen({
     markDirty();
   }
 
+  /**
+   * ⚠️ LA SUPPRESSION EST DIFFÉRÉE, ET C'EST CE QUI LA REND SÛRE. Rien n'est
+   * écrit ici : la semaine quitte l'état local, et c'est l'ENREGISTREMENT qui
+   * fera disparaître la ligne `program_weeks` (et sa cascade). Tant que le
+   * coach n'a pas enregistré, un simple rechargement de page annule tout.
+   *
+   * ⚠️ MAIS ELLE EST IRRÉVERSIBLE UNE FOIS ENREGISTRÉE — séances, blocs,
+   * prescriptions cardio et retours élèves rattachés partent avec. D'où la
+   * confirmation, et d'où le refus de supprimer la dernière semaine, porté par
+   * la règle pure `supprimerSemaine`.
+   */
+  function retirerSemaine(weekNumber: number) {
+    if (weekNumbers.length <= 1) return;
+    const seances = sessions.filter((s) => s.weekNumber === weekNumber).length;
+    if (
+      !window.confirm(
+        `Supprimer la semaine ${weekNumber} et ses ${seances} jours ? ` +
+          "Les séances, blocs et prescriptions de cette semaine seront perdus au prochain enregistrement.",
+      )
+    ) {
+      return;
+    }
+    setSessions((prev) => {
+      const restantes = supprimerSemaine(prev, weekNumber);
+      // La semaine affichée vient peut-être de disparaître : on retombe sur la
+      // plus proche encore présente plutôt que sur une grille vide.
+      const numeros = Array.from(new Set(restantes.map((x) => x.weekNumber))).sort((a, b) => a - b);
+      if (!numeros.includes(selectedWeek)) {
+        setSelectedWeek(numeros.filter((n) => n < weekNumber).pop() ?? numeros[0] ?? 1);
+      }
+      return restantes;
+    });
+    setSelectedSessionId(null);
+    markDirty();
+  }
+
   function duplicateWeek(sourceWeek: number) {
     const nextWeek = Math.max(...weekNumbers) + 1;
     setSessions((prev) => [...prev, ...cloneWeekSessions(sourceWeek, nextWeek)]);
@@ -342,11 +378,9 @@ export function ProgramBuilderFullscreen({
   }
 
   // Glisser-déposer une séance entre deux jours de la semaine affichée :
-  // échange le contenu éditable des deux séances (nom, exercices, blocs
-  // cardio...) en gardant id/day/weekNumber/programId ancrés à leur case de
-  // la grille — un jour "repos" n'est pas draggable (voir DayGridCell,
-  // draggable={!session.isRestDay}) mais peut recevoir le contenu d'une
-  // séance glissée dessus, ce qui la transforme en séance normale.
+  // échange leur JOUR (voir `deplacerSeance`). Un jour « repos » n'est pas
+  // draggable (voir DayGridCell, draggable={!session.isRestDay}) mais peut
+  // recevoir une séance glissée dessus — les deux échangent alors leur place.
   const dragSessionId = useRef<string | null>(null);
   const [dragOverSessionId, setDragOverSessionId] = useState<string | null>(null);
 
@@ -380,7 +414,23 @@ export function ProgramBuilderFullscreen({
   }
 
   return (
-    <div className="flex min-h-dvh flex-col bg-background text-foreground lg:h-dvh lg:overflow-hidden">
+    // ══════════════════════════════════════════════════════════════════════
+    // ⚠️ LE BUILDER REMPLIT SON PARENT — IL NE SE REDONNE PAS UNE HAUTEUR
+    // ══════════════════════════════════════════════════════════════════════
+    // Il portait `min-h-dvh` (toutes tailles) plus `lg:h-dvh lg:overflow-hidden`.
+    // Or `AdminShell` le monte déjà dans `<main className="h-dvh w-full
+    // overflow-hidden">` : la hauteur du viewport était donc posée DEUX fois,
+    // et le `min-h-dvh` — sans préfixe — autorisait la croissance sous `lg`,
+    // là où plus rien ne défilait à l'intérieur. `h-full` suit simplement le
+    // parent, à toutes les largeurs.
+    //
+    // ⚠️ ET `relative` N'EST PAS DÉCORATIF. `overflow-hidden` ne rogne un
+    // descendant `position:absolute` que si le bloc conteneur de celui-ci est
+    // DANS le sous-arbre rogné. Sans ancrage positionné, un tel élément se
+    // cale sur le bloc conteneur initial — le document — et allonge
+    // `documentElement.scrollHeight` sans que rien ne soit visible : c'est
+    // exactement la bande noire sous le builder.
+    <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-background text-foreground">
       {/* Barre du haut — jamais de sidebar admin ni de menu tableau de bord ici (voir AdminShell). */}
       <div className="flex h-14 flex-shrink-0 items-center justify-between gap-3 border-b border-border bg-card px-4">
         <div className="flex min-w-0 items-center gap-3">
@@ -452,70 +502,23 @@ export function ProgramBuilderFullscreen({
         </div>
       </div>
 
-      {/* Shell responsive (Lot 4 dernière passe) : colonne unique sur mobile/
-          tablette (la page défile), disposition 3 panneaux à largeur fixe sur
-          desktop (lg+, chaque panneau défile indépendamment). */}
-      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        {/* Panneau gauche — navigation semaines (repliable). */}
-        {leftOpen && (
-          <div className="flex w-full flex-shrink-0 flex-col gap-3 border-b border-border bg-card p-3 lg:w-56 lg:border-b-0 lg:border-r lg:overflow-y-auto">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Semaines</span>
-              <button type="button" onClick={() => setLeftOpen(false)} aria-label="Masquer le panneau" className="text-muted-foreground hover:text-foreground">
-                <PanelLeftClose size={14} />
-              </button>
-            </div>
-            <div className="flex flex-col gap-1">
-              {weekNumbers.map((weekNumber) => (
-                <div key={weekNumber} className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedWeek(weekNumber)}
-                    className={`flex-1 border px-3 py-2 text-left text-xs uppercase tracking-widest transition-colors ${
-                      selectedWeek === weekNumber ? "border-primary text-primary" : "border-border text-muted-foreground hover:border-primary/50"
-                    }`}
-                  >
-                    Semaine {weekNumber}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => duplicateWeek(weekNumber)}
-                    title="Dupliquer cette semaine"
-                    aria-label={`Dupliquer la semaine ${weekNumber}`}
-                    className="text-muted-foreground hover:text-primary"
-                  >
-                    <Copy size={13} />
-                  </button>
-                </div>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={() => addWeek(true)}
-              className="flex items-center justify-center gap-1.5 border border-primary bg-primary px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
-            >
-              <Plus size={13} />
-              Semaine
-            </button>
-            <button
-              type="button"
-              onClick={() => addWeek(false)}
-              className="border border-border px-3 py-2 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
-            >
-              Semaine vide
-            </button>
-          </div>
-        )}
+      {/* ════════════════════════════════════════════════════════════════════
+          UNE SEULE COLONNE : LA GRILLE, PUIS L'ÉDITION SOUS ELLE
+          ════════════════════════════════════════════════════════════════════
+          ⚠️ L'ÉDITION OCCUPAIT UNE COLONNE DE 420 px SUR LE CÔTÉ. Un exercice
+          y tenait sur toute la hauteur, et il fallait faire défiler pour en
+          voir un second : impossible de comparer deux exercices d'un même bloc.
+          Passée sous la grille, elle dispose de toute la largeur — les
+          exercices s'y rangent côte à côte, plusieurs visibles d'un coup.
 
+          ⚠️ ET C'EST UN CHANGEMENT DE MISE EN PAGE, RIEN D'AUTRE. Le contenu
+          du panneau est le même composant, avec les mêmes propriétés : aucune
+          fonction du builder n'est touchée. */}
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
         {/* Zone centrale — grille 7 jours, jamais de scroll horizontal (voir spec V3). */}
-        <div className="flex min-w-0 flex-1 flex-col p-4 lg:overflow-y-auto">
+        <div className="flex min-w-0 flex-col p-4">
           <div className="mb-3 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              {!leftOpen && (
-                <button type="button" onClick={() => setLeftOpen(true)} aria-label="Afficher le panneau semaines" className="text-muted-foreground hover:text-foreground">
-                  <PanelLeftOpen size={16} />
-                </button>
-              )}
               <button
                 type="button"
                 onClick={() => setSelectedWeek((w) => Math.max(weekNumbers[0] ?? 1, w - 1))}
@@ -536,15 +539,80 @@ export function ProgramBuilderFullscreen({
                 <ChevronRight size={16} />
               </button>
             </div>
-            {!rightOpen && (
-              <button type="button" onClick={() => setRightOpen(true)} aria-label="Afficher le panneau d'édition" className="text-muted-foreground hover:text-foreground">
-                <PanelRightOpen size={16} />
+            {!editionOuverte && (
+              <button type="button" onClick={() => setEditionOuverte(true)} aria-label="Afficher le panneau d'édition" className="text-muted-foreground hover:text-foreground">
+                <PanelBottomOpen size={16} />
               </button>
             )}
           </div>
 
+          {/* ── BANDE DES SEMAINES — SOUS L'EN-TÊTE, PLUS SUR LE CÔTÉ ──────
+              ⚠️ ELLE OCCUPAIT UNE COLONNE DE 224 px SUR TOUTE LA HAUTEUR pour
+              afficher trois boutons. La grille des sept jours, elle, doit
+              tenir sans défilement horizontal : c'est elle qu'on lit, et
+              c'est elle qui manquait de place. La bande reprend exactement les
+              mêmes commandes, en une ligne qui se replie toute seule. */}
+          <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-border pb-3">
+            {weekNumbers.map((weekNumber) => (
+              <div
+                key={weekNumber}
+                className={`flex items-center gap-1 border pl-3 pr-1 transition-colors ${
+                  selectedWeek === weekNumber ? "border-primary text-primary" : "border-border text-muted-foreground"
+                }`}
+              >
+                <button
+                  type="button"
+                  onClick={() => setSelectedWeek(weekNumber)}
+                  className="py-2 text-xs uppercase tracking-widest transition-colors hover:text-primary"
+                >
+                  Semaine {weekNumber}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => duplicateWeek(weekNumber)}
+                  title="Dupliquer cette semaine"
+                  aria-label={`Dupliquer la semaine ${weekNumber}`}
+                  className="p-1 text-muted-foreground transition-colors hover:text-primary"
+                >
+                  <Copy size={13} />
+                </button>
+                {/* ⚠️ LA CORBEILLE DISPARAÎT QUAND IL NE RESTE QU'UNE SEMAINE.
+                    Un bouton qui ne fait rien est pire qu'un bouton absent :
+                    le coach clique, rien ne bouge, et il ne sait pas pourquoi. */}
+                {weekNumbers.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => retirerSemaine(weekNumber)}
+                    title="Supprimer cette semaine"
+                    aria-label={`Supprimer la semaine ${weekNumber}`}
+                    className="p-1 text-muted-foreground transition-colors hover:text-destructive"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                )}
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => addWeek(true)}
+              className="flex items-center gap-1.5 border border-primary bg-primary px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover"
+            >
+              <Plus size={13} />
+              Semaine
+            </button>
+            <button
+              type="button"
+              onClick={() => addWeek(false)}
+              className="border border-border px-3 py-2 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+            >
+              Semaine vide
+            </button>
+          </div>
+
           {weekNumbers.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Aucune semaine pour le moment. Ajoute une semaine dans le panneau de gauche.</p>
+            <p className="text-sm text-muted-foreground">
+              Aucune semaine pour le moment. Ajoute-en une avec le bouton ci-dessus.
+            </p>
           ) : (
             <div className="grid grid-cols-7 gap-2">
               {weekSessions.map((session) => (
@@ -578,13 +646,13 @@ export function ProgramBuilderFullscreen({
           )}
         </div>
 
-        {/* Panneau droit — édition détaillée de la séance sélectionnée (repliable). */}
-        {rightOpen && (
-          <div className="flex w-full flex-shrink-0 flex-col border-t border-border bg-card p-3 lg:w-[420px] lg:border-t-0 lg:border-l lg:overflow-y-auto">
+        {/* Panneau d'édition — SOUS la grille, sur toute la largeur (repliable). */}
+        {editionOuverte && (
+          <div className="flex w-full flex-col border-t border-border bg-card p-3">
             <div className="mb-2 flex items-center justify-between">
               <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Édition de la séance</span>
-              <button type="button" onClick={() => setRightOpen(false)} aria-label="Masquer le panneau" className="text-muted-foreground hover:text-foreground">
-                <PanelRightClose size={14} />
+              <button type="button" onClick={() => setEditionOuverte(false)} aria-label="Masquer le panneau" className="text-muted-foreground hover:text-foreground">
+                <PanelBottomClose size={14} />
               </button>
             </div>
             {selectedSession ? (
@@ -601,7 +669,7 @@ export function ProgramBuilderFullscreen({
                 onSaveAsTemplate={onSaveAsTemplate}
               />
             ) : (
-              <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center text-xs text-muted-foreground">
+              <div className="flex flex-col items-center justify-center gap-2 py-8 text-center text-xs text-muted-foreground">
                 <Dumbbell size={20} />
                 Sélectionne une séance dans la grille pour la modifier.
               </div>
