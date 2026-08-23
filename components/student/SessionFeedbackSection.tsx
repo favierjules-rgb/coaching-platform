@@ -24,7 +24,8 @@ import { formatRpeFr, grilleRpe } from "@/lib/rpe";
 
 import { ExerciseFeedbackCard } from "@/components/student/ExerciseFeedbackCard";
 import { SessionCompletionCard } from "@/components/student/SessionCompletionCard";
-import { StudentSessionBlockList } from "@/components/student/StudentSessionBlockList";
+import { SessionCarousel } from "@/components/student/SessionCarousel";
+import { StudentCardioBlockCard } from "@/components/student/StudentCardioBlockCard";
 import { TrainingStatCards } from "@/components/shared/TrainingMetricsSummary";
 import { useAdminData } from "@/hooks/useAdminData";
 import { useSupabaseWorkoutFeedback } from "@/hooks/useSupabaseWorkoutFeedback";
@@ -1272,10 +1273,20 @@ export function SessionFeedbackSection({
           Restauration de ta saisie…
         </p>
       )}
-      {/* SEULE source de rendu : la liste ordonnée de blocs. Chaque bloc
-          Strength affiche ses propres exercices (ordre canonique) ; chaque bloc
-          Cardio est rendu à sa position. Jamais de liste globale aplatie. */}
-      <StudentSessionBlockList
+      {/*
+        LE PARCOURS EST HORIZONTAL — ET IL NE CHANGE QUE LA DISPOSITION.
+
+        `blockViews` reste la SEULE source de rendu : même ordre de blocs,
+        même ordre interne d'exercices, même numérotation globale. Le
+        carrousel les aplatit en cartes (`aplatirEnCartes`) et les pose sur
+        un rail à défilement horizontal ; les composants montés à
+        l'intérieur, eux, sont exactement ceux d'avant, avec exactement les
+        mêmes props. Aucune saisie, aucune sauvegarde et aucune validation
+        ne passent par ce conteneur.
+
+        La validation GLOBALE de la séance reste dessous, hors du rail.
+      */}
+      <SessionCarousel
         blocks={blockViews}
         renderStrengthExercise={(exercise, index) => (
           <ExerciseFeedbackCard
@@ -1316,7 +1327,12 @@ export function SessionFeedbackSection({
               : {})}
           />
         )}
-        renderCardioFooter={(block) => {
+        renderCardioPrescription={(block) => <StudentCardioBlockCard block={block} />}
+        // La validation d'un bloc cardio est une CARTE DU PARCOURS, plus un
+        // pied de page sous la séance entière. Le formulaire est le même,
+        // identifié par le même UUID de bloc, alimenté par le même
+        // brouillon : seul l'endroit où on le rencontre a changé.
+        renderCardioValidation={(block) => {
           const item = cardioItems.find((candidate) => candidate.view.id === block.id);
           if (!item) return null;
           return (

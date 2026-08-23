@@ -6,6 +6,7 @@
 import assert from "node:assert/strict";
 
 import { orderedStrengthExercises, orderedStudentSessionBlocks } from "@/lib/student-session-blocks";
+import { aplatirEnCartes, categorieCarte, libelleCarte } from "@/lib/student-session-carousel";
 import type {
   AdminCardioBlock,
   AdminCardioSegment,
@@ -156,6 +157,146 @@ test("blocks[] a priorité absolue sur le legacy (jamais de mélange)", () => {
   assert.deepEqual(ids(views), ["canonical"]);
   assert.deepEqual(exIds(views[0]), ["c1"]);
 });
+
+/* ═══════════════ PARCOURS HORIZONTAL — aplatirEnCartes ═══════════════
+ *
+ * Ce que ces tests prouvent est STRUCTUREL : la suite de cartes, leur
+ * ordre, leur identité et leur numérotation. Ils ne prouvent RIEN du
+ * comportement tactile ni du rattrapage CSS — ces deux-là se mesurent
+ * dans un vrai navigateur (scripts/tests/seance-carousel-render.mts) et
+ * ne peuvent pas l'être ici.
+ */
+
+test("CAR-01 — un bloc musculation de n exercices donne exactement n cartes, dans l'ordre", () => {
+  const views = orderedStudentSessionBlocks({
+    blocks: [strength("b1", 0, [sx("e1", 0), sx("e2", 1), sx("e3", 2)])],
+  });
+  const cartes = aplatirEnCartes(views);
+  assert.equal(cartes.length, 3);
+  assert.deepEqual(cartes.map((c) => c.kind), ["exercice", "exercice", "exercice"]);
+  assert.deepEqual(
+    cartes.map((c) => (c.kind === "exercice" ? c.exercise.id : null)),
+    ["e1", "e2", "e3"],
+  );
+});
+
+test("CAR-02 — un bloc cardio donne DEUX cartes : prescription puis validation", () => {
+  const cartes = aplatirEnCartes(orderedStudentSessionBlocks({ blocks: [cardio("c1", 0)] }));
+  assert.deepEqual(cartes.map((c) => c.kind), ["cardio", "cardio-validation"]);
+  // Les deux cartes désignent le MÊME bloc : même UUID, même objet de vue.
+  assert.equal(cartes[0].blockId, "c1");
+  assert.equal(cartes[1].blockId, "c1");
+  assert.equal(
+    cartes[0].kind === "cardio" && cartes[1].kind === "cardio-validation"
+      ? cartes[0].view === cartes[1].view
+      : false,
+    true,
+    "la validation porte sur la vue du bloc, pas sur une copie",
+  );
+});
+
+test("CAR-03 — le parcours enchaîne les blocs sans jamais revenir en arrière", () => {
+  const views = orderedStudentSessionBlocks({
+    blocks: [
+      strength("b1", 0, [sx("e1", 0), sx("e2", 1)]),
+      cardio("c1", 1),
+      strength("b2", 2, [sx("e3", 0)]),
+    ],
+  });
+  const cartes = aplatirEnCartes(views);
+  assert.deepEqual(cartes.map((c) => c.kind), [
+    "exercice",
+    "exercice",
+    "cardio",
+    "cardio-validation",
+    "exercice",
+  ]);
+  assert.deepEqual(cartes.map((c) => c.blockId), ["b1", "b1", "c1", "c1", "b2"]);
+  assert.deepEqual(cartes.map((c) => c.blocNumero), [1, 1, 2, 2, 3]);
+});
+
+test("CAR-04 — la numérotation des exercices reste GLOBALE (01, 02, 03…)", () => {
+  const views = orderedStudentSessionBlocks({
+    blocks: [
+      strength("b1", 0, [sx("e1", 0), sx("e2", 1)]),
+      cardio("c1", 1),
+      strength("b2", 2, [sx("e3", 0), sx("e4", 1)]),
+    ],
+  });
+  const numeros = aplatirEnCartes(views)
+    .filter((c) => c.kind === "exercice")
+    .map((c) => (c.kind === "exercice" ? c.indexGlobal : -1));
+  // 0,1 puis 2,3 : le bloc cardio ne remet pas le compteur à zéro et ne le
+  // fait pas avancer non plus.
+  assert.deepEqual(numeros, [0, 1, 2, 3]);
+});
+
+test("CAR-05 — les clés de carte sont dérivées des UUID, jamais de la position", () => {
+  const views = orderedStudentSessionBlocks({
+    blocks: [strength("b1", 0, [sx("e1", 0)]), cardio("c1", 1)],
+  });
+  const cartes = aplatirEnCartes(views);
+  assert.deepEqual(cartes.map((c) => c.cleCarte), ["b1:e1", "c1:prescription", "c1:validation"]);
+  // Les mêmes blocs dans l'ordre inverse gardent les mêmes clés.
+  const inverse = aplatirEnCartes(
+    orderedStudentSessionBlocks({ blocks: [cardio("c1", 0), strength("b1", 1, [sx("e1", 0)])] }),
+  );
+  assert.deepEqual(inverse.map((c) => c.cleCarte), ["c1:prescription", "c1:validation", "b1:e1"]);
+});
+
+test("CAR-06 — deux blocs cardio homonymes restent DEUX parcours distincts", () => {
+  const cartes = aplatirEnCartes(
+    orderedStudentSessionBlocks({ blocks: [cardio("c1", 0), cardio("c2", 1)] }),
+  );
+  assert.equal(cartes.length, 4);
+  assert.deepEqual(cartes.map((c) => c.blockId), ["c1", "c1", "c2", "c2"]);
+  assert.deepEqual(new Set(cartes.map((c) => c.cleCarte)).size, 4, "aucune clé dupliquée");
+});
+
+test("CAR-07 — un bloc musculation VIDE ne produit aucune carte et ne décale rien", () => {
+  const views = orderedStudentSessionBlocks({
+    blocks: [strength("vide", 0, []), strength("b2", 1, [sx("e1", 0)])],
+  });
+  const cartes = aplatirEnCartes(views);
+  assert.equal(cartes.length, 1);
+  assert.equal(cartes[0].kind === "exercice" ? cartes[0].indexGlobal : -1, 0);
+});
+
+test("CAR-08 — l'indicateur nomme le bloc, son type et la position DANS le bloc", () => {
+  const views = orderedStudentSessionBlocks({
+    blocks: [strength("b1", 0, [sx("e1", 0), sx("e2", 1)]), cardio("c1", 1)],
+  });
+  const cartes = aplatirEnCartes(views);
+  assert.deepEqual(cartes.map((c) => libelleCarte(c).bloc), [
+    "Bloc 1 · MUSCULATION",
+    "Bloc 1 · MUSCULATION",
+    "Bloc 2 · CARDIO",
+    "Bloc 2 · VALIDATION",
+  ]);
+  assert.deepEqual(cartes.map((c) => libelleCarte(c).position), ["1 / 2", "2 / 2", "1 / 2", "2 / 2"]);
+  assert.equal(categorieCarte(cartes[3]), "VALIDATION");
+});
+
+test("CAR-09 — aucune mutation : les blocs entrants sortent intacts", () => {
+  const views = orderedStudentSessionBlocks({
+    blocks: [strength("b1", 0, [sx("e1", 0), sx("e2", 1)]), cardio("c1", 1)],
+  });
+  const avant = JSON.stringify(views);
+  aplatirEnCartes(views);
+  assert.equal(JSON.stringify(views), avant);
+});
+
+test("CAR-10 — colorKey et titre du bloc voyagent avec chaque carte", () => {
+  const views = orderedStudentSessionBlocks({
+    blocks: [strength("b1", 0, [sx("e1", 0), sx("e2", 1)], "violet")],
+  });
+  const cartes = aplatirEnCartes(views);
+  assert.deepEqual(cartes.map((c) => c.colorKey), ["violet", "violet"]);
+  // Sans lui, une carte atteinte au doigt au milieu d'un bloc ne dirait plus
+  // à quel bloc elle appartient.
+  assert.equal(cartes.every((c) => c.blockTitle === null), true);
+});
+
 
 console.log(`\n${passed} réussis, ${failed} échoués`);
 if (failed > 0) process.exit(1);
