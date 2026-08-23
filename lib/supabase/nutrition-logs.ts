@@ -6,8 +6,10 @@ import type { Database } from "@/types/supabase";
 
 /**
  * Couche d'accès à `nutrition_daily_logs` (saisie élève réelle
- * calories/macros par jour, voir supabase/schema.sql section 17ter) pour
- * l'outil "Suivi de la semaine" de /nutrition. `student_id` est toujours
+ * calories/macros par jour, voir supabase/schema.sql section 17ter). Les
+ * données historiques restent lues par le résumé admin et par
+ * lib/supabase/progress.ts ; seule l'ancienne interface de saisie élève a
+ * été retirée. `student_id` est toujours
  * `students.id` — jamais `profiles.id`/`auth.users.id`/`student_profiles.id`
  * — comme le reste de lib/supabase/.
  */

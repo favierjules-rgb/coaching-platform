@@ -82,7 +82,6 @@ const PAGE_LISTE = lire("../../app/admin/nutrition/recettes/page.tsx");
 const PAGE_NOUVELLE = lire("../../app/admin/nutrition/recettes/nouvelle/page.tsx");
 const PAGE_DETAIL = lire("../../app/admin/nutrition/recettes/[recipeId]/page.tsx");
 const PAGE_PLAN_ÉLÈVE = lire("../../app/(student)/nutrition/[planId]/page.tsx");
-const TRACKER = lire("../../components/student/WeeklyNutritionTracker.tsx");
 const RECETTES_ÉLÈVE = lire("../../components/student/StudentAdaptiveRecipes.tsx");
 const SERVICE_STORAGE = lire("../../lib/supabase/storage-recipe-images.ts");
 const SOLVEUR = lire("../../lib/nutrition/recipe-solver.ts");
@@ -703,34 +702,30 @@ await test("36. le service Storage ne prétend jamais à l'atomicité", () => {
 
 /* ═══════════ I. Nettoyage d'interface ═══════════ */
 
-await test("37. « Suivi de la semaine » n'apparaît qu'UNE fois sur la page du plan", () => {
-  // Le titre est rendu par le composant, une seule fois.
-  const titresComposant = [...TRACKER.matchAll(/Suivi de la semaine/g)];
-  const titresRendus = [...TRACKER.matchAll(/<h2[^>]*>\s*Suivi de la semaine/g)];
-  assert.equal(titresRendus.length, 1, "le composant rend son titre une fois");
-  assert.ok(titresComposant.length >= 1);
-
-  // Et la page ne le redouble pas.
+await test("37. l'ancien tableau hebdomadaire ne vit plus sur la page du plan", () => {
+  // REMPLACE l'ancienne garde de non-duplication du titre. Le tableau de
+  // saisie jour par jour a été retiré du parcours élève : ce n'est plus la
+  // duplication du titre qu'on surveille, c'est son absence totale.
   const page = sansCommentairesTs(PAGE_PLAN_ÉLÈVE);
   assert.equal(
     [...page.matchAll(/Suivi de la semaine/g)].length,
     0,
-    "la page ne doit plus rendre ce titre",
+    "la page ne rend plus ce titre",
   );
-  // Le doublon a été SUPPRIMÉ, pas masqué.
-  assert.ok(!/hidden|sr-only|display:\s*none/.test(
-    PAGE_PLAN_ÉLÈVE.slice(Math.max(0, PAGE_PLAN_ÉLÈVE.indexOf("WeeklyNutritionTracker") - 600),
-      PAGE_PLAN_ÉLÈVE.indexOf("WeeklyNutritionTracker")),
-  ), "aucun masquage CSS autour du tracker");
+  assert.ok(!page.includes("WeeklyNutritionTracker"), "le composant n'est plus monté ici");
+  // Retiré, pas masqué : aucun repli CSS ne doit avoir remplacé le démontage.
+  assert.ok(
+    !/WeeklyNutritionTracker/.test(PAGE_PLAN_ÉLÈVE),
+    "pas même en commentaire : le montage a disparu du fichier",
+  );
 });
 
-await test("38. l'autre écran qui monte le tracker garde bien son titre", () => {
-  // Retirer le titre du COMPOSANT aurait laissé /nutrition sans intitulé.
+await test("38. l'autre écran ne le monte plus non plus", () => {
   const pageNutrition = lire("../../app/(student)/nutrition/page.tsx");
-  assert.ok(pageNutrition.includes("<WeeklyNutritionTracker"), "le tracker est monté ici aussi");
+  assert.ok(!pageNutrition.includes("WeeklyNutritionTracker"), "plus aucun montage sur /nutrition");
   assert.ok(
     !/Suivi de la semaine/.test(sansCommentairesTs(pageNutrition)),
-    "cette page n'a jamais eu de titre à elle : c'est celui du composant qui sert",
+    "et aucun titre orphelin laissé derrière",
   );
 });
 

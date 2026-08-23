@@ -15,7 +15,7 @@
  * Lancement : npx tsx scripts/tests/nutrition-v2-unified.mts
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 
 import { verifierManifesteDesMigrations } from "./contrat-migrations.mjs";
 
@@ -948,10 +948,10 @@ await test("45. les TROIS outils restent séparés, les recettes ayant leur écr
   // adaptatives ont désormais leur PROPRE parcours,
   // /nutrition/[planId]/recettes, atteint depuis un bouton mis en avant. La
   // séparation des trois outils est donc plus nette qu'avant, pas moins.
-  for (const titre of ["Suivi de la semaine", "Semaine alimentaire"]) {
-    assert.ok(PAGE_ELEVE_DETAIL.includes(titre), `section « ${titre} »`);
-  }
-  assert.ok(PAGE_ELEVE_DETAIL.includes("WeeklyNutritionTracker"), "l'outil 1 est réutilisé tel quel");
+  assert.ok(PAGE_ELEVE_DETAIL.includes("Semaine alimentaire"), "section « Semaine alimentaire »");
+  // L'ancien « Suivi de la semaine » (tableau de saisie hebdomadaire) a été
+  // retiré du parcours élève : il n'est plus l'un des outils de cette fiche.
+  assert.ok(!PAGE_ELEVE_DETAIL.includes("Suivi de la semaine"), "l'ancien tableau a quitté la fiche");
   assert.ok(PAGE_ELEVE_DETAIL.includes("StudentPrescribedWeek"));
   // Les recettes ne sont plus montées sur la fiche…
   assert.ok(
@@ -975,10 +975,12 @@ await test("45 bis. l'entrée « Recettes » est mise en avant, en haut, une seu
       `${nom} : une seule mise en avant — répétée, elle n'en serait plus une`,
     );
   }
-  // Il est placé AVANT le suivi de la semaine : visible sans défiler.
+  // Il est placé AVANT la liste des plans : visible sans défiler. L'ancre
+  // était le suivi de la semaine ; ce tableau ayant été retiré, l'ancre
+  // devient la section qui le suivait — l'exigence, elle, ne change pas.
   assert.ok(
-    PAGE_ELEVE_LISTE.indexOf("<RecipesHighlightLink") < PAGE_ELEVE_LISTE.indexOf("<WeeklyNutritionTracker"),
-    "le bouton précède le suivi",
+    PAGE_ELEVE_LISTE.indexOf("<RecipesHighlightLink") < PAGE_ELEVE_LISTE.indexOf("Mes plans alimentaires"),
+    "le bouton précède la liste des plans",
   );
 
   // Surbrillance verte prise au thème, jamais codée en dur.
@@ -1988,6 +1990,85 @@ await test("74. les compteurs de l'interface tiennent en UN aller-retour", () =>
     "une lecture au montage, une au rechargement — jamais par ligne");
   assert.ok(!/\bmap\(|forEach\(/.test(hook.slice(hook.indexOf("useEffect"))),
     "aucune boucle de requêtes");
+});
+
+
+/* ═══════════ 11. Retrait de l'ancien tableau hebdomadaire ═══════════
+ *
+ * L'ANCIENNE INTERFACE, ET ELLE SEULE. Sept cartes de saisie (kcal,
+ * protéines, glucides, lipides, note du jour, bouton Enregistrer) que
+ * rendait `WeeklyNutritionTracker` sur /nutrition et /nutrition/[planId].
+ * Ce que ces deux tests prouvent tient en deux moitiés indissociables :
+ * l'interface a disparu du parcours élève, ET la couche de données qui la
+ * servait est toujours debout pour la carte admin et la progression. Un
+ * test qui ne prouverait que la première moitié laisserait passer une
+ * suppression trop large.
+ */
+
+/** Tous les fichiers .ts/.tsx sous une racine, récursivement. */
+function fichiersSources(racine: string): string[] {
+  const base = new URL(`../../${racine}/`, import.meta.url);
+  const sortie: string[] = [];
+  const parcourir = (relatif: string) => {
+    const dossier = new URL(relatif, base);
+    for (const entrée of readdirSync(dossier)) {
+      const chemin = `${relatif}${entrée}`;
+      if (statSync(new URL(chemin, base)).isDirectory()) {
+        parcourir(`${chemin}/`);
+      } else if (chemin.endsWith(".ts") || chemin.endsWith(".tsx")) {
+        sortie.push(`${racine}/${chemin}`);
+      }
+    }
+  };
+  parcourir("");
+  return sortie;
+}
+
+await test("75. l'ancien tableau hebdomadaire n'est plus rendu dans le parcours Nutrition", () => {
+  // 1. Le composant lui-même n'existe plus.
+  assert.equal(
+    existsSync(new URL("../../components/student/WeeklyNutritionTracker.tsx", import.meta.url)),
+    false,
+    "components/student/WeeklyNutritionTracker.tsx doit avoir disparu",
+  );
+
+  // 2. Aucun écran élève ne le monte, ni ne l'importe — pas même en commentaire.
+  for (const [nom, page] of [["/nutrition", PAGE_ELEVE_LISTE], ["/nutrition/[planId]", PAGE_ELEVE_DETAIL]] as const) {
+    assert.ok(!page.includes("WeeklyNutritionTracker"), `${nom} : plus aucune référence`);
+  }
+
+  // 3. Les libellés PROPRES à ce tableau ont disparu de tout le parcours
+  //    élève. « Objectif semaine » n'en fait pas partie : la carte admin et
+  //    l'outil de démonstration l'emploient légitimement.
+  const libellés = ["Note du jour", "Objectif ajusté", "Moyenne par jour restant", "Reste sur la semaine"];
+  const parcoursÉlève = [...fichiersSources("components/student"), ...fichiersSources("app/(student)")];
+  assert.ok(parcoursÉlève.length > 20, "le balayage doit vraiment couvrir le parcours élève");
+  for (const fichier of parcoursÉlève) {
+    const src = lire(`../../${fichier}`);
+    for (const libellé of libellés) {
+      assert.ok(!src.includes(libellé), `${fichier} rend encore « ${libellé} »`);
+    }
+  }
+});
+
+await test("76. la couche de données du suivi, elle, est intacte", () => {
+  // Le retrait est une AMPUTATION D'INTERFACE, pas de données : ces quatre
+  // briques servent encore la carte admin et /progression.
+  for (const fichier of [
+    "hooks/useSupabaseNutritionWeek.ts",
+    "lib/nutrition-weekly.ts",
+    "lib/supabase/nutrition-logs.ts",
+    "components/student/VarianceChip.tsx",
+  ]) {
+    assert.ok(
+      existsSync(new URL(`../../${fichier}`, import.meta.url)),
+      `${fichier} ne doit pas être supprimé : il est utilisé ailleurs`,
+    );
+  }
+  const carteAdmin = lire("../../components/admin/NutritionWeekSummaryCard.tsx");
+  assert.ok(carteAdmin.includes("useSupabaseNutritionWeek("), "la carte admin lit toujours le suivi");
+  const progression = lire("../../lib/supabase/progress.ts");
+  assert.ok(progression.includes("getNutritionLogsForDates"), "l'historique reste lu par la progression");
 });
 
 

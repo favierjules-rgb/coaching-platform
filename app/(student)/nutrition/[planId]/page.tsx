@@ -12,10 +12,9 @@ import { RecipesHighlightLink } from "@/components/student/RecipesHighlightLink"
 import { StatusBadge } from "@/components/student/StatusBadge";
 import { StudentPrescribedWeek } from "@/components/student/StudentPrescribedWeek";
 import type { ItemPourEnregistrement } from "@/components/student/StudentMealChoices";
-import { WeeklyNutritionTracker } from "@/components/student/WeeklyNutritionTracker";
 import { StatCard } from "@/components/shared/StatCard";
 import { nutritionGoalLabels } from "@/lib/nutrition";
-import { dailyTargetsByWeekday, weeklyCaloriesFromDays } from "@/lib/nutrition/plan-v2-week";
+import { weeklyCaloriesFromDays } from "@/lib/nutrition/plan-v2-week";
 import { WEEKDAY_KEYS, type WeekdayKey } from "@/lib/nutrition/weekdays";
 import { getCurrentWeekDates } from "@/lib/nutrition-weekly";
 import { getNutritionPlan, student } from "@/data/student";
@@ -137,23 +136,6 @@ export default function NutritionPlanDetailPage() {
     // stockée tant que la semaine n'est pas chargée.
     const caloriesSemaine = v2.week ? weeklyCaloriesFromDays(v2.week) : plan.weeklyTargetCalories;
 
-    // Les objectifs des SEPT jours, lundi → dimanche, tels que le coach les a
-    // prescrits. `undefined` tant que la semaine n'est pas chargée : le suivi
-    // retombe alors sur l'objectif unique, sans jamais afficher de valeur
-    // inventée.
-    const objectifsParJour = v2.week
-      ? dailyTargetsByWeekday(v2.week).map((cible) =>
-          cible
-            ? {
-                calories: cible.calories.totalCalories,
-                protein: cible.grams.proteinGrams,
-                carbs: cible.grams.carbGrams,
-                fat: cible.grams.fatGrams,
-              }
-            : null,
-        )
-      : undefined;
-
     return (
       <div>
         <Link
@@ -195,40 +177,7 @@ export default function NutritionPlanDetailPage() {
           </div>
         )}
 
-        {/* ──────────────── SECTION 1 — SUIVI DE LA SEMAINE ────────────────
-            Réutilisé tel quel : même composant, mêmes calculs, même rendu que
-            l'écran /nutrition. Aucune notion de repas ni de créneau ici — cet
-            outil reste strictement journalier.
-
-            LE TITRE APPARTIENT AU COMPOSANT. `WeeklyNutritionTracker` rend
-            déjà son propre `<h2>Suivi de la semaine</h2>` : celui qui vivait
-            ici le doublait à l'écran. C'est ce titre-ci qui a été retiré, et
-            pas l'autre — le composant est monté sur DEUX écrans (/nutrition
-            et cette page), et lui ôter son titre l'aurait laissé anonyme sur
-            le premier. Le doublon est donc supprimé à sa source, jamais
-            masqué en CSS. */}
-        {supabaseNutrition.studentId && (
-          <section className="mb-10">
-            <WeeklyNutritionTracker
-              studentId={supabaseNutrition.studentId}
-              planId={plan.id}
-              target={{
-                calories: plan.caloriesPerDay,
-                protein: plan.protein,
-                carbs: plan.carbs,
-                fat: plan.fat,
-                weeklyTargetCalories: caloriesSemaine,
-                // Les SEPT objectifs réellement prescrits. Sans eux, le suivi
-                // affichait la même moyenne hebdomadaire pour les sept jours,
-                // alors que le coach a pu prescrire 3 000 kcal le lundi et
-                // 2 000 le mardi.
-                perDay: objectifsParJour,
-              }}
-            />
-          </section>
-        )}
-
-        {/* ─────────────── SECTION 2 — SEMAINE ALIMENTAIRE ────────────────
+        {/* ─────────────── SECTION 1 — SEMAINE ALIMENTAIRE ────────────────
             Ce que le COACH a prescrit à la main. Lecture seule : aucun champ
             de modification n'est rendu côté élève. */}
         <section className="mb-10">
@@ -309,7 +258,7 @@ export default function NutritionPlanDetailPage() {
           )}
         </section>
 
-        {/* SECTION 3 — RECETTES ADAPTATIVES : déplacée sur son propre écran,
+        {/* SECTION 2 — RECETTES ADAPTATIVES : déplacée sur son propre écran,
             /nutrition/[planId]/recettes, atteint par le bouton mis en avant
             en haut de page. Rien n'a changé dans l'outil lui-même. */}
 

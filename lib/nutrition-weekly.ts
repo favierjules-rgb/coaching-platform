@@ -1,8 +1,9 @@
 /**
- * Calcul pur de l'ajustement hebdomadaire nutrition — voir composant
- * WeeklyNutritionTracker et lib/supabase/nutrition-logs.ts pour l'I/O
- * Supabase. Aucune dépendance à React/Supabase ici, pour rester testable et
- * réutilisable côté admin (résumé dans /admin/eleves/[studentId]).
+ * Calcul pur de l'ajustement hebdomadaire nutrition — voir
+ * lib/supabase/nutrition-logs.ts pour l'I/O Supabase. Aucune dépendance à
+ * React/Supabase ici, pour rester testable et réutilisable côté admin
+ * (résumé dans /admin/eleves/[studentId], son seul consommateur d'interface
+ * depuis le retrait de l'ancien tableau hebdomadaire élève).
  *
  * Règle : weeklyTarget - consommé sur les jours déjà remplis = calories
  * restantes, réparties sur les jours non remplis. Les jours déjà remplis
