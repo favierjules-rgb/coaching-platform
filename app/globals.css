@@ -1424,3 +1424,43 @@ body {
     display: none;
   }
 }
+
+/*
+ * ══════════════════════════════════════════════════════════════════════
+ * LE RAIL DE LA SÉANCE ÉLÈVE
+ * ══════════════════════════════════════════════════════════════════════
+ * Le parcours d'une séance est un carrousel NATIF : c'est le navigateur
+ * qui fait glisser, qui décélère et qui rattrape la carte. Tailwind pose
+ * déjà `overflow-x-auto`, `snap-x snap-mandatory` et `snap-start` ; il
+ * reste deux choses qu'aucun utilitaire ne couvre.
+ *
+ * 1. LA BARRE DE DÉFILEMENT. Elle est masquée parce qu'un rail de cartes
+ *    au doigt n'en a pas besoin, et qu'elle ajoute une bande grise sous
+ *    chaque carte. Masquée seulement : le rail reste défilable au doigt,
+ *    au trackpad, à la molette horizontale et au clavier.
+ *
+ * 2. LE COMPORTEMENT TACTILE. `touch-action: pan-x pan-y` autorise le
+ *    doigt à faire glisser le rail ET à faire défiler la page — sans lui,
+ *    un geste légèrement diagonal serait interprété par le seul rail, et
+ *    la page paraîtrait bloquée.
+ *
+ * `scroll-behavior` n'est PAS posé ici : le défilement doux est demandé au
+ * cas par cas par les boutons ‹ ›, ce qui laisse le doigt strictement
+ * natif. Sous `prefers-reduced-motion`, on le neutralise malgré tout — un
+ * défilement animé reste un mouvement.
+ */
+.rail-seance {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  touch-action: pan-x pan-y;
+}
+
+.rail-seance::-webkit-scrollbar {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail-seance {
+    scroll-behavior: auto;
+  }
+}
