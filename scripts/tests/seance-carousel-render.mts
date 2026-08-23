@@ -177,6 +177,21 @@ type Harnais = {
   } | null;
   defileursVerticaux: () => { balise: string; dansRail: boolean; estUneCarte: boolean; hauteur: number }[];
   largeurDocument: () => { scrollWidth: number; innerWidth: number };
+  carteEnButee: () => Promise<{
+    enButee: boolean;
+    overscrollY: string;
+    scrollYPage: number;
+    pageDefilable: boolean;
+    centre: { x: number; y: number };
+  }>;
+  scrollYPage: () => number;
+  lisere: () => {
+    largeurCarte: string;
+    couleurCarte: string;
+    largeurBandeau: string;
+    hauteurCarte: number;
+    hauteurBandeau: number;
+  }[];
   cliquerRail: (d: string) => Promise<number | null>;
   typesBoutonsRail: () => (string | null)[];
   espionnerSoumission: () => boolean;
@@ -228,6 +243,11 @@ console.log("\n── Mesuré dans Chromium (mobile 390 × 844) ──");
 
 {
   const { page, contexte } = await atelier({ width: 390, height: 844 }, true);
+
+  if (process.env.CAPTURE) {
+    await page.screenshot({ path: process.env.CAPTURE, fullPage: false });
+    console.log(`   capture → ${process.env.CAPTURE}`);
+  }
 
   await test("CARR-01 — le rail EXISTE et défile horizontalement", async () => {
     const m = await mesurer(page);
@@ -322,6 +342,52 @@ console.log("\n── Mesuré dans Chromium (mobile 390 × 844) ──");
     assert.ok((c5?.texte ?? "").toLowerCase().startsWith("bloc 3 · musculation"), `bandeau attendu, lu : « ${c5?.texte.slice(0, 40)} »`);
   });
 
+  await test("CARR-20 — le liseré du bloc descend sur TOUTE la hauteur de la carte", async () => {
+    /*
+     * Tant que la bordure colorée vivait sur le bandeau, le trait s'arrêtait
+     * sous l'en-tête et la carte paraissait coupée. On vérifie donc qu'elle
+     * est portée par la CARTE (donc pleine hauteur) et que le bandeau, lui,
+     * n'en porte plus.
+     */
+    const liseres = await page.evaluate((h) => (window as unknown as Record<string, Harnais>)[h].lisere(), H);
+    assert.equal(liseres.length, 7);
+    for (const [index, l] of liseres.entries()) {
+      assert.equal(l.largeurCarte, "4px", `carte ${index} : la bordure gauche doit être portée par la carte`);
+      assert.equal(l.largeurBandeau, "0px", `carte ${index} : le bandeau ne doit plus porter de bordure gauche`);
+      assert.ok(
+        l.hauteurCarte > l.hauteurBandeau * 2,
+        `carte ${index} : le liseré ne couvrirait que l'en-tête (${l.hauteurBandeau}px sur ${l.hauteurCarte}px)`,
+      );
+    }
+    // Deux blocs de couleurs différentes doivent donner deux liserés distincts.
+    assert.notEqual(liseres[0].couleurCarte, liseres[3].couleurCarte, "muscu et cardio ont deux couleurs");
+  });
+
+  await test("CARR-21 — chaque carte s'arrête à SON contenu, sans être étirée", async () => {
+    /*
+     * ARBITRAGE DU 23/08/2026. Les cartes ne sont pas alignées sur la
+     * hauteur de la plus haute (`items-start` sur le rail) : une carte
+     * courte — la prescription d'un bloc cardio, typiquement — étirait
+     * sinon son cadre et son liseré sur plusieurs centaines de pixels
+     * vides. Le vide subsiste dans le RAIL, mais il est transparent : plus
+     * aucun cadre ne l'entoure, et la ligne d'indicateur ne bouge pas d'une
+     * carte à l'autre puisqu'elle suit la hauteur du rail.
+     */
+    const liseres = await page.evaluate((h) => (window as unknown as Record<string, Harnais>)[h].lisere(), H);
+    const hauteurs = liseres.map((l) => l.hauteurCarte);
+    const min = Math.min(...hauteurs);
+    const max = Math.max(...hauteurs);
+    assert.ok(
+      max - min > 20,
+      `les cartes seraient toutes étirées à la même hauteur (${JSON.stringify(hauteurs)}) — « items-start » a disparu du rail`,
+    );
+    const m = await mesurer(page);
+    assert.ok(
+      min < m.hauteurRail - 20,
+      `la carte la plus courte (${min}px) doit rester plus courte que le rail (${m.hauteurRail}px)`,
+    );
+  });
+
   await test("CARR-09 — un SEUL défilement vertical : la page. Et aucun défilement horizontal de page", async () => {
     /*
      * CE QUE CE TEST N'EXIGE PAS. Il n'exige pas que toute la séance tienne
@@ -373,7 +439,11 @@ console.log("\n── Mesuré dans Chromium (mobile 390 × 844) ──");
   await test("CARR-10 — défiler d'une carte met l'indicateur à jour", async () => {
     const avant = await mesurer(page);
     assert.ok(contient(avant.indicateur, "Bloc 1 · MUSCULATION"), `lu : « ${avant.indicateur} »`);
-    assert.ok(contient(avant.indicateur, "Carte 1 / 7"), `lu : « ${avant.indicateur} »`);
+    // « Carte n / N » est masqué sous `sm` : sur 390 px, l'indicateur tiendrait
+    // sur deux lignes. Le bloc et la position dans le bloc, eux, restent
+    // toujours lisibles — c'est ce qui dit à l'élève où il en est.
+    assert.ok(contient(avant.indicateur, "1 / 3"), `position dans le bloc, lu : « ${avant.indicateur} »`);
+    assert.ok(!contient(avant.indicateur, "Carte"), `« Carte n / N » doit être masqué sur téléphone, lu : « ${avant.indicateur} »`);
     await page.evaluate(
       ([h, x]) => (window as unknown as Record<string, Harnais>)[h as string].defilerVers(x as number),
       [H, avant.offsets[3]],
@@ -428,6 +498,12 @@ console.log("\n── Mesuré dans Chromium (bureau 1440 × 900) ──");
       assert.ok(largeur < m.largeurRail - 40, `carte ${largeur}px / rail ${m.largeurRail}px — la suivante doit dépasser`);
       assert.ok(largeur > 320, `carte ${largeur}px : trop étroite pour être lisible`);
     }
+  });
+
+  await test("CARR-12 bis — sur grand écran, l'indicateur affiche AUSSI la position absolue", async () => {
+    const m = await mesurer(page);
+    assert.ok(contient(m.indicateur, "Carte 1 / 7"), `lu : « ${m.indicateur} »`);
+    assert.ok(contient(m.indicateur, "Bloc 1 · MUSCULATION"), `lu : « ${m.indicateur} »`);
   });
 
   await test("CARR-13 — la validation globale reste hors du rail sur grand écran aussi", async () => {
@@ -507,6 +583,103 @@ console.log("\n── Cas limite ──");
  * Chromium qui fait défiler, décélère et rattrape. Si le résultat n'est pas
  * reproductible sans affichage, on le DIT — on ne le maquille pas en vert.
  * ══════════════════════════════════════════════════════════════════════════ */
+
+console.log("\n── Le piège du double défilement (carte trop haute) ──");
+
+{
+  /*
+   * LE DÉFAUT SIGNALÉ EN SALLE, REPRODUIT.
+   *
+   * Une carte plus haute que l'écran défile dans elle-même. Arrivé en bas,
+   * l'élève veut continuer vers le bas de la PAGE — mais la carte occupe
+   * toute la largeur, il n'a aucun autre endroit où poser le doigt. Si le
+   * défilement ne passe pas la main à la page, il est coincé.
+   *
+   * `overscroll-behavior-y: contain` produit exactement ce blocage. Ces deux
+   * tests le vérifient de deux façons : par la déclaration calculée, et par
+   * un VRAI glissement du doigt.
+   */
+  const { page, contexte } = await atelier({ width: 390, height: 844 }, true, "long");
+  const cdp = await contexte.newCDPSession(page);
+
+  const etat = await page.evaluate((h) => (window as unknown as Record<string, Harnais>)[h].carteEnButee(), H);
+
+  await test("CARR-18 — arrivé en bas d'une carte, le défilement PEUT passer à la page", () => {
+    assert.equal(etat.enButee, true, "la fixture doit produire une carte réellement plus haute que l'écran");
+    assert.equal(etat.pageDefilable, true, "et une page qui a du contenu sous le rail");
+    assert.notEqual(
+      etat.overscrollY,
+      "contain",
+      "`overscroll-behavior-y: contain` coupe le relais vers la page : c'est le blocage signalé",
+    );
+    assert.notEqual(etat.overscrollY, "none", "`none` bloquerait tout autant");
+  });
+
+  /*
+   * LE RELAIS, MESURÉ À LA MOLETTE.
+   *
+   * Chromium applique `overscroll-behavior` aux événements de molette
+   * exactement comme au doigt, et sans dépendre du compositeur tactile — ce
+   * qui en fait la mesure FIABLE du chaînage, là où le glissement tactile
+   * reste capricieux sans affichage. On pose le pointeur au milieu de la
+   * carte déjà en butée, on tourne la molette vers le bas : si le relais
+   * existe, la page descend.
+   */
+  await test("CARR-19 — en butée de carte, le défilement PASSE réellement à la page", async () => {
+    const avant = await page.evaluate((h) => (window as unknown as Record<string, Harnais>)[h].scrollYPage(), H);
+    await page.mouse.move(etat.centre.x, etat.centre.y);
+    // Chromium « verrouille » une rafale de molette sur le premier défileur
+    // touché : arrivé en butée, il faut une NOUVELLE rafale pour que
+    // l'ancêtre prenne la main. On en envoie donc plusieurs, espacées — ce
+    // qui est aussi ce que fait une main sur un trackpad.
+    for (let rafale = 0; rafale < 4; rafale += 1) {
+      await page.mouse.wheel(0, 300);
+      await page.waitForTimeout(250);
+    }
+    await page.waitForTimeout(300);
+    const apres = await page.evaluate((h) => (window as unknown as Record<string, Harnais>)[h].scrollYPage(), H);
+    assert.ok(
+      apres > avant,
+      `la page doit prendre le relais : scrollY ${avant} → ${apres} (blocage si la valeur ne bouge pas)`,
+    );
+  });
+
+  const toucher = async (type: "touchStart" | "touchMove" | "touchEnd", x: number, y: number) =>
+    cdp.send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x, y, id: 1 }] });
+
+  try {
+    const { x, y } = etat.centre;
+    const avant = etat.scrollYPage;
+    // Un glissement VERS LE HAUT, doigt posé au milieu de la carte déjà en
+    // butée : c'est le geste exact de l'élève qui veut descendre.
+    await toucher("touchStart", x, y + 120);
+    for (const dy of [20, 45, 75, 110, 150, 190]) {
+      await toucher("touchMove", x, y + 120 - dy);
+      await page.waitForTimeout(16);
+    }
+    await toucher("touchEnd", x, y + 120 - 190);
+    await page.waitForTimeout(700);
+    const apres = await page.evaluate((h) => (window as unknown as Record<string, Harnais>)[h].scrollYPage(), H);
+
+    if (apres === avant) {
+      remarques.push(
+        "Relais carte → page AU DOIGT : le glissement tactile réel n'a pas fait descendre la page sous " +
+          "Chromium sans affichage. Le relais lui-même EST prouvé (CARR-19, à la molette, qui obéit à la " +
+          "même règle `overscroll-behavior`) ; c'est seulement la variante tactile qui n'est pas concluante ici.",
+      );
+      console.log("~  relais carte → page : non concluant sans affichage (voir remarques)");
+    } else {
+      await test("CARR-19 bis — et un vrai glissement du doigt le fait aussi", () => {
+        assert.ok(apres > avant, `la page doit descendre : scrollY ${avant} → ${apres}`);
+      });
+    }
+  } catch (erreur) {
+    remarques.push(`Relais carte → page : glissement non envoyé (${erreur instanceof Error ? erreur.message : erreur}).`);
+    console.log("~  relais carte → page : non envoyé (voir remarques)");
+  }
+
+  await contexte.close();
+}
 
 console.log("\n── Glissement tactile réel (CDP) ──");
 

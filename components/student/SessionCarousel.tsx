@@ -150,24 +150,54 @@ export function SessionCarousel({
         role="region"
         aria-label="Parcours de la séance"
         data-rail-seance="true"
-        className="rail-seance flex snap-x snap-mandatory gap-4 overflow-x-auto overflow-y-hidden overscroll-x-contain pb-1"
+        className="rail-seance flex items-start snap-x snap-mandatory gap-4 overflow-x-auto overflow-y-hidden overscroll-x-contain pb-1"
       >
         {cartes.map((carte) => (
           <div
             key={carte.cleCarte}
             data-carte-seance={carte.kind}
-            className="flex w-full flex-shrink-0 snap-start flex-col overflow-hidden sm:w-[85%] lg:w-[72%] lg:max-w-2xl"
+            className={`flex w-full flex-shrink-0 snap-start flex-col overflow-hidden rounded-card border-l-4 ${bordureGauche(carte)} sm:w-[85%] lg:w-[72%] lg:max-w-2xl`}
           >
             <BandeauBloc carte={carte} />
             {/*
-              LE SEUL DÉFILEMENT VERTICAL AUTORISÉ, ET IL EST BORNÉ.
-              Une carte plus haute que l'écran défile DANS elle-même, sans
-              jamais rallonger la page : `overscroll-contain` empêche le
-              défilement de se propager au document une fois arrivé en bout
-              de course. `min-h-0` est indispensable — sans lui, la règle
-              flex `min-height:auto` annulerait `overflow-y-auto`.
+              HAUTEUR NATURELLE — `items-start` sur le rail.
+
+              Les cartes ne sont PAS étirées à la hauteur de la plus haute :
+              chacune s'arrête à son propre contenu. Sans cela, une carte
+              courte — typiquement la prescription d'un bloc cardio — étalait
+              son cadre et son liseré sur plusieurs centaines de pixels vides.
+              La ligne d'indicateur, elle, ne bouge pas : elle suit la hauteur
+              du RAIL, qui reste celle de la carte la plus haute.
             */}
-            <div className="min-h-0 max-h-[76dvh] flex-1 overflow-y-auto overscroll-y-contain">
+            {/*
+              LE DÉFILEMENT VERTICAL DE LA CARTE — ET IL DOIT POUVOIR PASSER
+              LA MAIN.
+
+              ⚠️ CE QUI A ÉTÉ RETIRÉ ICI, ET POURQUOI. Cet élément portait
+              `overscroll-y-contain`. Cette déclaration fait exactement ce
+              qu'elle dit : elle EMPÊCHE le défilement de se propager à
+              l'ancêtre. Résultat en salle — arrivé en bas d'une carte,
+              l'élève continuait de glisser vers le haut et RIEN ne bougeait.
+              La page ne descendait plus, parce que la carte occupe toute la
+              largeur et qu'il n'y avait plus un pixel de page sous le doigt
+              pour la faire défiler. On restait coincé sur une carte.
+
+              Sans cette déclaration, le comportement redevient celui de
+              n'importe quel défileur imbriqué : la carte défile jusqu'au
+              bout, puis la page prend le relais. Le blocage disparaît.
+
+              `overscroll-x-contain` reste posé sur le RAIL, lui : là, le
+              chaînage horizontal est indésirable (il déclencherait le geste
+              de retour arrière du navigateur).
+
+              `svh` et non `dvh` : sur iOS, `dvh` change de valeur quand la
+              barre d'adresse se rétracte, ce qui faisait sauter la hauteur
+              de la carte en plein geste. `svh` est stable.
+
+              `min-h-0` est indispensable — sans lui, la règle flex
+              `min-height:auto` annulerait `overflow-y-auto`.
+            */}
+            <div className="min-h-0 max-h-[calc(100svh-12rem)] flex-1 overflow-y-auto">
               {carte.kind === "exercice"
                 ? renderStrengthExercise(carte.exercise, carte.indexGlobal)
                 : carte.kind === "cardio"
@@ -180,12 +210,12 @@ export function SessionCarousel({
 
       {/* ── OÙ SUIS-JE, ET COMMENT J'AVANCE ─────────────────────────────── */}
       <div className="flex items-center justify-between gap-3">
-        <div aria-live="polite" className="min-w-0 text-[11px] uppercase tracking-widest text-muted-foreground">
+        <div aria-live="polite" className="min-w-0 truncate text-[11px] uppercase tracking-widest text-muted-foreground">
           <span className="font-semibold text-foreground">{libelle.bloc}</span>
           <span className="mx-2 opacity-40">·</span>
           <span>{libelle.position}</span>
-          <span className="mx-2 opacity-40">·</span>
-          <span>
+          <span className="mx-2 hidden opacity-40 sm:inline">·</span>
+          <span className="hidden sm:inline">
             Carte {actif + 1} / {cartes.length}
           </span>
         </div>
@@ -208,6 +238,15 @@ export function SessionCarousel({
 }
 
 /**
+ * La couleur du liseré gauche d'une carte — même table et même valeur de repli
+ * que le bandeau, pour que le trait et l'en-tête ne puissent jamais diverger.
+ */
+function bordureGauche(carte: CarteSeance): string {
+  const estCardio = carte.kind !== "exercice";
+  return BLOCK_COLOR_STYLES[normalizeColorKey(carte.colorKey, estCardio ? "blue" : "gray")].borderLeft;
+}
+
+/**
  * LE BANDEAU DE BLOC, SUR CHAQUE CARTE.
  *
  * L'ancienne carte de bloc englobait ses exercices : la couleur et le titre
@@ -222,9 +261,7 @@ function BandeauBloc({ carte }: { carte: CarteSeance }) {
   const couleur = BLOCK_COLOR_STYLES[normalizeColorKey(carte.colorKey, estCardio ? "blue" : "gray")];
   const Icone = estCardio ? Activity : Dumbbell;
   return (
-    <div
-      className={`flex flex-wrap items-center gap-2 rounded-t-card border border-b-0 border-l-4 border-border ${couleur.borderLeft} ${couleur.softBg} px-4 py-2.5`}
-    >
+    <div className={`flex flex-wrap items-center gap-2 border-b border-border/60 ${couleur.softBg} px-4 py-2.5`}>
       <span className={`h-2.5 w-2.5 flex-shrink-0 rounded-full ${couleur.dot}`} aria-hidden="true" />
       <Icone size={14} className="flex-shrink-0 text-muted-foreground" aria-hidden="true" />
       <span className="text-[11px] uppercase tracking-widest text-muted-foreground">

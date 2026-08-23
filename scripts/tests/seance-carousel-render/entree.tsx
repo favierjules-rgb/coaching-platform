@@ -57,7 +57,7 @@ const BLOCKS: TrainingBlock[] = [
     category: "strength",
     position: 0,
     title: "Tirage",
-    colorKey: "violet",
+    colorKey: "purple",
     exercises: [
       exercice("ex-1", "Tirage horizontal coudes ouverts à la poulie", 0),
       exercice("ex-2", "Tirage vertical prise neutre", 1),
@@ -210,6 +210,56 @@ const harnais = {
         estUneCarte: Boolean((element.parentElement as HTMLElement | null)?.dataset.carteSeance),
         hauteur: Math.round(element.clientHeight),
       }));
+  },
+
+  /**
+   * Amène le contenu de la carte visible tout en BAS de son défilement, et
+   * rend l'état du piège : la carte est-elle en butée, et où en est la page ?
+   */
+  async carteEnButee() {
+    const rail = document.querySelector<HTMLElement>("[data-rail-seance]")!;
+    const carte = rail.children[0] as HTMLElement;
+    const interne = carte.querySelector<HTMLElement>(":scope > div:last-child")!;
+    interne.scrollTop = interne.scrollHeight;
+    await new Promise((ok) => setTimeout(ok, 120));
+    return {
+      enButee: interne.scrollTop >= interne.scrollHeight - interne.clientHeight - 1,
+      // `contain` est LA déclaration qui coupait le relais vers la page.
+      overscrollY: getComputedStyle(interne).overscrollBehaviorY,
+      scrollYPage: Math.round(window.scrollY),
+      pageDefilable: document.documentElement.scrollHeight > window.innerHeight,
+      // Coordonnées du centre de la carte, pour y poser un vrai doigt.
+      centre: (() => {
+        const r = interne.getBoundingClientRect();
+        return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+      })(),
+    };
+  },
+
+  scrollYPage() {
+    return Math.round(window.scrollY);
+  },
+
+  /**
+   * LE LISERÉ DE BLOC — porté par la CARTE, pas par le bandeau.
+   *
+   * Tant qu'il vivait sur le bandeau, le trait coloré s'arrêtait après
+   * l'en-tête. On lit donc où la bordure gauche est réellement posée, et
+   * qu'elle couvre bien toute la hauteur de la carte.
+   */
+  lisere() {
+    const rail = document.querySelector<HTMLElement>("[data-rail-seance]")!;
+    return (Array.from(rail.children) as HTMLElement[]).map((carte) => {
+      const bandeau = carte.firstElementChild as HTMLElement;
+      const styleCarte = getComputedStyle(carte);
+      return {
+        largeurCarte: styleCarte.borderLeftWidth,
+        couleurCarte: styleCarte.borderLeftColor,
+        largeurBandeau: getComputedStyle(bandeau).borderLeftWidth,
+        hauteurCarte: Math.round(carte.getBoundingClientRect().height),
+        hauteurBandeau: Math.round(bandeau.getBoundingClientRect().height),
+      };
+    });
   },
 
   /** Largeur du document : le rail ne doit JAMAIS élargir la page. */
