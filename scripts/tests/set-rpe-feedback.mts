@@ -31,6 +31,7 @@ import {
 import { getWorkoutFeedbackForStudent, saveWorkoutFeedback } from "../../lib/supabase/workout-feedback";
 import { ExerciseFeedbackCard } from "../../components/student/ExerciseFeedbackCard";
 import type { Exercise, ExerciseFeedback, WorkoutFeedbackPayload } from "../../types";
+import { verifierLeFiltreDeSaisieReelle } from "./helpers/filtre-saisie-reelle";
 
 let réussis = 0;
 let échecs = 0;
@@ -208,8 +209,7 @@ await (async () => {
     const carte = sansCommentaires(sourceCarte);
     assert.ok(!/value=\{[^}]*previous/.test(carte), "previous jamais dans value=");
     assert.ok(carte.includes("placeholder={placeholders.rpe}"), "le RPE passé ne vit que dans placeholder");
-    const section = sansCommentaires(sourceSection);
-    assert.equal(section.split(".filter(hasRealizedSetInput)").length - 1, 2, "les deux chemins d'envoi filtrent la saisie réelle");
+    verifierLeFiltreDeSaisieReelle();
   });
 
   await test("5. ancien retour : RPE global affiché UNE seule fois, libellé honnête", () => {

@@ -20,6 +20,7 @@ import { renderToString } from "react-dom/server";
 import { ExerciseFeedbackCard } from "../../components/student/ExerciseFeedbackCard";
 import type { Exercise, ExerciseFeedback } from "../../types";
 import type { PreviousExercisePerf as PerfType } from "../../lib/previous-performance";
+import { verifierLeFiltreDeSaisieReelle } from "./helpers/filtre-saisie-reelle";
 
 let réussis = 0;
 let échecs = 0;
@@ -230,7 +231,7 @@ await (async () => {
 
   await test("23. aucun changement du payload de sauvegarde", () => {
     const section = sansCommentaires(sourceSection);
-    assert.equal(section.split(".filter(hasRealizedSetInput)").length - 1, 2, "filtre de saisie réelle intact (2 chemins)");
+    verifierLeFiltreDeSaisieReelle();
     assert.ok(section.includes("rpe: rpeParSerie.get("), "RPE par série intact");
     assert.ok(section.includes("serializeCardioBlockResult"), "contrat cardio intact");
     assert.ok(!/value=\{[^}]*previous/.test(sansCommentaires(sourceCarte)), "placeholders jamais transformés en valeurs");

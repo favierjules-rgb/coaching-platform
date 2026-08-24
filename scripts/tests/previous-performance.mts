@@ -26,6 +26,7 @@ import {
 import { PRESCRIBED_SNAPSHOT_VERSION } from "../../lib/workout-history";
 import { ExerciseFeedbackCard } from "../../components/student/ExerciseFeedbackCard";
 import type { AdminStudentFeedback, Exercise, ExerciseFeedback } from "../../types";
+import { verifierLeFiltreDeSaisieReelle } from "./helpers/filtre-saisie-reelle";
 
 let réussis = 0;
 let échecs = 0;
@@ -300,9 +301,11 @@ await (async () => {
     assert.equal(hasRealizedSetInput({ loadUsed: "", repsDone: "" }), false, "série vide (placeholder seul) exclue");
     assert.equal(hasRealizedSetInput({ loadUsed: "  ", repsDone: "" }), false, "espaces ≠ saisie");
     assert.equal(hasRealizedSetInput({ loadUsed: "52 kg", repsDone: "" }), true);
-    const section = sansCommentaires(sourceSection);
-    assert.ok(section.includes(".filter(hasRealizedSetInput)"), "le payload Supabase filtre sur la saisie réelle");
-    assert.equal(section.split(".filter(hasRealizedSetInput)").length - 1, 2, "les DEUX chemins (Supabase et mock) filtrent");
+    // La garde vit dans `helpers/filtre-saisie-reelle` : depuis l'extraction
+    // du constructeur de payload (04e3b0b), les deux chemins d'envoi ne sont
+    // plus dans le même fichier. Le helper les compte là où ils sont, ET
+    // vérifie le payload réellement produit.
+    verifierLeFiltreDeSaisieReelle();
   });
 
   await test("15. un placeholder ne rend pas le formulaire « modifié » et ne satisfait aucune validation", () => {

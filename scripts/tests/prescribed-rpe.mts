@@ -27,6 +27,7 @@ import { buildPrescribedSnapshot, isPrescribedSnapshot, resolvePrescription } fr
 import { blankExercise, exerciseFromLibrary } from "../../components/admin/ProgramBuilder";
 import { ExerciseFeedbackCard } from "../../components/student/ExerciseFeedbackCard";
 import type { Exercise, ExerciseFeedback, ExerciseLibraryItem } from "../../types";
+import { verifierLeFiltreDeSaisieReelle } from "./helpers/filtre-saisie-reelle";
 
 let réussis = 0;
 let échecs = 0;
@@ -58,7 +59,6 @@ const sourcePayload = readFileSync(new URL("../../lib/supabase/training-session-
 const sourcePrograms = readFileSync(new URL("../../lib/supabase/programs.ts", import.meta.url), "utf8");
 const sourceSchedule = readFileSync(new URL("../../lib/training-schedule.ts", import.meta.url), "utf8");
 const sourceCardioLib = readFileSync(new URL("../../lib/cardio-feedback.ts", import.meta.url), "utf8");
-const sourceSection = readFileSync(new URL("../../components/student/SessionFeedbackSection.tsx", import.meta.url), "utf8");
 
 function carteHtml(options: { recommendedRpe?: string; rpeSaisi?: string; previousRpe?: number | null }): string {
   const exercice: Exercise = {
@@ -234,8 +234,7 @@ await (async () => {
 
   await test("16. les placeholders (prescription incluse) ne partent jamais dans le payload", () => {
     assert.equal(hasRealizedSetInput({ loadUsed: "", repsDone: "", rpe: "" }), false, "série vide malgré tous ses placeholders → exclue");
-    const section = sansCommentaires(sourceSection);
-    assert.equal(section.split(".filter(hasRealizedSetInput)").length - 1, 2, "les deux chemins d'envoi filtrent la saisie réelle");
+    verifierLeFiltreDeSaisieReelle();
     const carte = sansCommentaires(readFileSync(new URL("../../components/student/ExerciseFeedbackCard.tsx", import.meta.url), "utf8"));
     assert.ok(!/value=\{[^}]*placeholders/.test(carte), "un placeholder ne devient jamais une value");
   });
