@@ -54,11 +54,14 @@ export function NutritionDaySlotDistribution({
    * les boutons ne sont pas rendus et le panneau se comporte exactement
    * comme avant — les harnais de rendu existants n'ont rien à changer.
    *
-   * `etat` dit, pour chaque horaire, si le préset est applicable et sinon
-   * pourquoi. Le composant ne recalcule rien : il affiche.
+   * ⚠️ AUCUN ÉTAT DE DISPONIBILITÉ. Les quatre raccourcis sont TOUJOURS
+   * cliquables : la table est choisie par « horaire × nombre de repas », et
+   * ce nombre est toujours entre 3 et 6. Une version précédente recevait ici
+   * un `etat` par horaire et grisait les boutons quand la combinaison des
+   * repas cochés ne correspondait pas à la table — c'est exactement le bug
+   * qui a été corrigé. Ne pas réintroduire de `disabled` sur ces boutons.
    */
   readonly presets?: {
-    readonly etat: Readonly<Record<HoraireEntrainement, { readonly ok: boolean; readonly message?: string }>>;
     readonly onAppliquer: (horaire: HoraireEntrainement) => void;
     readonly actif: HoraireEntrainement | null;
   };
@@ -126,7 +129,6 @@ export function NutritionDaySlotDistribution({
               Entraînement
             </span>
             {HORAIRES_ENTRAINEMENT.map((horaire) => {
-              const etat = presets.etat[horaire];
               const choisi = presets.actif === horaire;
               const Icone = ICONE_HORAIRE[horaire];
               return (
@@ -134,11 +136,10 @@ export function NutritionDaySlotDistribution({
                   key={horaire}
                   type="button"
                   data-raccourci-horaire={horaire}
-                  disabled={!etat.ok}
                   aria-pressed={choisi}
-                  title={etat.ok ? `Placer les curseurs pour un entraînement du ${HORAIRE_LABELS_FR[horaire].toLowerCase()}` : etat.message}
+                  title={`Placer les curseurs pour un entraînement du ${HORAIRE_LABELS_FR[horaire].toLowerCase()}`}
                   onClick={() => presets.onAppliquer(horaire)}
-                  className={`inline-flex h-7 items-center gap-1 rounded-control border px-2 text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-35 ${
+                  className={`inline-flex h-7 items-center gap-1 rounded-control border px-2 text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
                     choisi
                       ? "border-primary/60 bg-primary/15 text-primary"
                       : "border-border/70 text-muted-foreground hover:border-primary/60 hover:text-primary"
@@ -156,9 +157,6 @@ export function NutritionDaySlotDistribution({
       <p className="mb-4 text-xs text-muted-foreground">
         Désactiver un repas remet ses trois parts à zéro. Rien n&apos;est enregistré avant Enregistrer.
       </p>
-      {presets && messagePresets(presets.etat) ? (
-        <p className="-mt-2 mb-4 text-xs text-muted-foreground/80">{messagePresets(presets.etat)}</p>
-      ) : null}
 
       {/* Les six créneaux — communs aux trois macros, donc au-dessus des onglets. */}
       <div className="mb-5 grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -229,21 +227,4 @@ export function NutritionDaySlotDistribution({
       </div>
     </section>
   );
-}
-
-/**
- * Une seule ligne d'explication quand AUCUN horaire n'est applicable —
- * inutile de répéter la même raison quatre fois sous quatre boutons gris.
- * Dès qu'un horaire au moins fonctionne, on se tait : l'info-bulle des
- * boutons désactivés suffit.
- */
-function messagePresets(
-  etat: Readonly<Record<HoraireEntrainement, { readonly ok: boolean; readonly message?: string }>>,
-): string | null {
-  const horaires = HORAIRES_ENTRAINEMENT;
-  if (horaires.some((h) => etat[h].ok)) return null;
-  const messages = new Set(horaires.map((h) => etat[h].message).filter((m): m is string => Boolean(m)));
-  // Toutes identiques (cas « nombre de repas non couvert ») : on la donne.
-  if (messages.size === 1) return [...messages][0];
-  return "Les répartitions de référence couvrent 3 à 5 repas, et attendent des créneaux précis.";
 }

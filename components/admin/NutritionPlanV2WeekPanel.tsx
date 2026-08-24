@@ -9,7 +9,7 @@ import { NutritionDayTabs } from "@/components/admin/NutritionDayTabs";
 import { NutritionDayTargets } from "@/components/admin/NutritionDayTargets";
 import { NBSP, formatIntegerFr } from "@/lib/nutrition/basis-points";
 import type { MealSlotKey } from "@/lib/nutrition/meal-distribution";
-import { HORAIRES_ENTRAINEMENT, type HoraireEntrainement } from "@/lib/nutrition/macro-presets";
+import { type HoraireEntrainement } from "@/lib/nutrition/macro-presets";
 import {
   addMeal,
   applyDayMacroPreset,
@@ -18,7 +18,6 @@ import {
   duplicateDay,
   findDay,
   moveChoiceSlot,
-  presetApplicable,
   removeChoiceSlot,
   removeMeal,
   replaceChoiceSlot,
@@ -128,14 +127,15 @@ export function NutritionPlanV2WeekPanel({
           onToggleLock={(macro, slot) => onChange(toggleDaySlotLock(state, jourOuvert, macro, slot))}
           /* PRÉSETS — ils ne font que déplacer les curseurs dans l'état
              local, par le même `onChange` que n'importe quel geste manuel.
-             Aucune écriture : « Enregistrer » reste l'unique persistance. */
+             Aucune écriture : « Enregistrer » reste l'unique persistance.
+
+             AUCUN ÉTAT DE DISPONIBILITÉ N'EST CALCULÉ ICI, et c'est le
+             cœur de la règle : la table est choisie par « horaire ×
+             nombre de repas », jamais par la combinaison des créneaux
+             cochés. Les quatre raccourcis sont donc toujours cliquables.
+             Rétablir un calcul de disponibilité à cet endroit ramènerait
+             le bug des boutons grisés à 6 repas. */
           presets={{
-            etat: Object.fromEntries(
-              HORAIRES_ENTRAINEMENT.map((horaire) => {
-                const verdict = presetApplicable(jour, horaire);
-                return [horaire, verdict.ok ? { ok: true } : { ok: false, message: verdict.message }];
-              }),
-            ) as Record<HoraireEntrainement, { ok: boolean; message?: string }>,
             actif: horaireParJour[jourOuvert] ?? null,
             onAppliquer: (horaire) => {
               const résultat = applyDayMacroPreset(state, jourOuvert, horaire);

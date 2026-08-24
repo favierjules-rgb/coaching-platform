@@ -1,7 +1,7 @@
 import { BASIS_POINTS_TOTAL } from "@/lib/nutrition/basis-points";
 import { internalProfileKeyForDay, MAIN_DAY_PROFILE_KEY } from "@/lib/nutrition/day-profile-keys";
 import { rebalanceDailyMacros, rebalanceSlotMacro } from "@/lib/nutrition/macro-rebalance";
-import { presetPour, type HoraireEntrainement, type ResultatPreset } from "@/lib/nutrition/macro-presets";
+import { presetPour, type HoraireEntrainement } from "@/lib/nutrition/macro-presets";
 import {
   MEAL_SLOT_KEYS,
   createEmptyAllocations,
@@ -372,13 +372,36 @@ export type ApplyPresetOutcome =
  * APPLIQUE UN PRÉSET DE RÉPARTITION À UN JOUR.
  *
  * ════════════════════════════════════════════════════════════════════════
+ * DEUX PARAMÈTRES INDÉPENDANTS
+ * ════════════════════════════════════════════════════════════════════════
+ * La table est choisie par « horaire × NOMBRE de repas cochés ». La
+ * COMBINAISON des repas n'entre jamais dans ce choix : aucun horaire ne
+ * peut donc être refusé à cause d'un créneau coché ou décoché. Les quatre
+ * raccourcis restent applicables à 3, 4, 5 et 6 repas.
+ *
+ * ════════════════════════════════════════════════════════════════════════
+ * LE JEU DE CRÉNEAUX SUIT LA TABLE, LE NOMBRE NE BOUGE JAMAIS
+ * ════════════════════════════════════════════════════════════════════════
+ * Le document de référence prescrit AUSSI quels repas sont retenus, « en
+ * priorisant ceux qui encadrent la séance ». À 4 repas, MATIN retient la
+ * collation du matin (son repas post) là où les trois autres horaires
+ * retiennent celle de l'après-midi ; à 5 repas, SOIR retient la collation
+ * du soir là où les autres retiennent celle du matin.
+ *
+ * Appliquer un préset aligne donc les cases sur le jeu prescrit. Comme la
+ * table a exactement autant de lignes que de repas cochés, LE NOMBRE DE
+ * REPAS EST INVARIANT : au plus, un créneau est échangé contre un autre.
+ * À 3 et à 6 repas, les quatre horaires retiennent le même jeu — rien ne
+ * bouge jamais.
+ *
+ * ════════════════════════════════════════════════════════════════════════
  * POURQUOI CE N'EST PAS UNE BOUCLE SUR `setDaySlotMacroBp`
  * ════════════════════════════════════════════════════════════════════════
  * Les curseurs sont SOLIDAIRES : `setDaySlotMacroBp` déplace un créneau et
  * fait absorber le reste par les autres, pour que la macro somme toujours à
- * 10 000. Appeler cette fonction cinq fois de suite écraserait donc les
- * quatre valeurs précédentes à chaque appel — le préset n'arriverait jamais
- * intact à l'écran.
+ * 10 000. Appeler cette fonction six fois de suite écraserait donc les
+ * valeurs précédentes à chaque appel — le préset n'arriverait jamais intact
+ * à l'écran.
  *
  * Ici, les trois macros de tous les créneaux sont posées EN UNE FOIS, à
  * partir d'une table dont chaque colonne somme déjà à 10 000 (garde de
@@ -388,11 +411,11 @@ export type ApplyPresetOutcome =
  * ════════════════════════════════════════════════════════════════════════
  * CE QUE LA FONCTION NE FAIT PAS
  * ════════════════════════════════════════════════════════════════════════
- * Elle ne coche ni ne décoche aucun repas : les créneaux actifs sont une
- * décision du coach, et le préset s'y conforme ou refuse. Elle ne touche ni
- * aux calories du jour, ni à la répartition P/G/L journalière (zone 1), ni
- * aux repas prescrits (zone 3). Elle n'écrit rien : elle rend un nouvel
- * état, que l'appelant passe à `onChange`.
+ * Elle ne change ni le NOMBRE de repas, ni `displayOrder`, ni les calories
+ * du jour, ni la répartition P/G/L journalière (zone 1), ni les repas
+ * prescrits (zone 3), ni les six autres jours. Elle n'écrit rien : elle rend
+ * un nouvel état, que l'appelant passe à `onChange`. La persistance reste le
+ * seul fait du bouton « Enregistrer ».
  *
  * LES VERROUS SONT LEVÉS. Un verrou dit « ne recalcule pas ce créneau quand
  * je bouge les autres ». Le conserver après un préset le figerait sur une
@@ -408,10 +431,16 @@ export function applyDayMacroPreset(
   const jour = findDay(state, day);
   if (!jour) return { ok: false, message: "Jour introuvable." };
 
-  const résultat = presetPour(horaire, creneauxActifs(jour));
-  if (!résultat.ok) return { ok: false, message: résultat.message };
+  const nombreDeRepas = creneauxActifs(jour).length;
+  const lignes = presetPour(horaire, nombreDeRepas);
+  // Défensif seulement : le builder impose 3 à 6 repas cochés, donc cette
+  // branche ne devrait jamais être atteinte. Elle n'est PAS un refus lié à
+  // la combinaison de repas — cette notion a disparu.
+  if (!lignes) {
+    return { ok: false, message: `Aucune table de référence pour ${nombreDeRepas} repas.` };
+  }
 
-  const parCreneau = new Map(résultat.lignes.map((ligne) => [ligne.slot, ligne] as const));
+  const parCreneau = new Map(lignes.map((ligne) => [ligne.slot, ligne] as const));
 
   return {
     ok: true,
@@ -419,12 +448,15 @@ export function applyDayMacroPreset(
       ...j,
       slots: j.slots.map((allocation) => {
         const ligne = parCreneau.get(allocation.slot);
-        // Un créneau hors préset est forcément inactif (sinon `presetPour`
-        // aurait refusé) : ses trois parts restent à zéro, comme le veut
-        // l'invariant « désactivé ⇒ allocation nulle ».
-        if (!ligne) return { ...allocation, proteinBp: 0, carbBp: 0, fatBp: 0 };
+        // Hors du jeu prescrit : le créneau est décoché et ses trois parts
+        // reviennent à zéro — c'est l'invariant « désactivé ⇒ allocation
+        // nulle ». `displayOrder` n'est jamais touché.
+        if (!ligne) {
+          return { ...allocation, enabled: false, proteinBp: 0, carbBp: 0, fatBp: 0 };
+        }
         return {
           ...allocation,
+          enabled: true,
           proteinBp: ligne.proteinBp,
           carbBp: ligne.carbBp,
           fatBp: ligne.fatBp,
@@ -441,11 +473,6 @@ export function creneauxActifs(jour: DayTargetsForm): MealSlotKey[] {
     .sort((a, b) => a.displayOrder - b.displayOrder)
     .filter((allocation) => allocation.enabled)
     .map((allocation) => allocation.slot);
-}
-
-/** Le préset est-il applicable en l'état ? Sert à désactiver le bouton. */
-export function presetApplicable(jour: DayTargetsForm, horaire: HoraireEntrainement): ResultatPreset {
-  return presetPour(horaire, creneauxActifs(jour));
 }
 
 /* ═════════════════════ Zone 3 — repas prescrits ═════════════════════ */
