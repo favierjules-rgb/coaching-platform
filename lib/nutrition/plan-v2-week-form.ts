@@ -1,6 +1,7 @@
 import { BASIS_POINTS_TOTAL } from "@/lib/nutrition/basis-points";
 import { internalProfileKeyForDay, MAIN_DAY_PROFILE_KEY } from "@/lib/nutrition/day-profile-keys";
 import { rebalanceDailyMacros, rebalanceSlotMacro } from "@/lib/nutrition/macro-rebalance";
+import { presetPour, type HoraireEntrainement, type ResultatPreset } from "@/lib/nutrition/macro-presets";
 import {
   MEAL_SLOT_KEYS,
   createEmptyAllocations,
@@ -359,6 +360,92 @@ export function distributeDayRest(
     ok: true,
     state: remplacerJour(state, day, (j) => avecEtatMacros(j, résultat.state)),
   };
+}
+
+/* ═════════════════ Zone 2 bis — présets par horaire ═════════════════ */
+
+export type ApplyPresetOutcome =
+  | { readonly ok: true; readonly state: WeekFormState }
+  | { readonly ok: false; readonly message: string };
+
+/**
+ * APPLIQUE UN PRÉSET DE RÉPARTITION À UN JOUR.
+ *
+ * ════════════════════════════════════════════════════════════════════════
+ * POURQUOI CE N'EST PAS UNE BOUCLE SUR `setDaySlotMacroBp`
+ * ════════════════════════════════════════════════════════════════════════
+ * Les curseurs sont SOLIDAIRES : `setDaySlotMacroBp` déplace un créneau et
+ * fait absorber le reste par les autres, pour que la macro somme toujours à
+ * 10 000. Appeler cette fonction cinq fois de suite écraserait donc les
+ * quatre valeurs précédentes à chaque appel — le préset n'arriverait jamais
+ * intact à l'écran.
+ *
+ * Ici, les trois macros de tous les créneaux sont posées EN UNE FOIS, à
+ * partir d'une table dont chaque colonne somme déjà à 10 000 (garde de
+ * chargement dans `macro-presets.ts`). L'invariant est donc respecté par
+ * construction, sans rééquilibrage.
+ *
+ * ════════════════════════════════════════════════════════════════════════
+ * CE QUE LA FONCTION NE FAIT PAS
+ * ════════════════════════════════════════════════════════════════════════
+ * Elle ne coche ni ne décoche aucun repas : les créneaux actifs sont une
+ * décision du coach, et le préset s'y conforme ou refuse. Elle ne touche ni
+ * aux calories du jour, ni à la répartition P/G/L journalière (zone 1), ni
+ * aux repas prescrits (zone 3). Elle n'écrit rien : elle rend un nouvel
+ * état, que l'appelant passe à `onChange`.
+ *
+ * LES VERROUS SONT LEVÉS. Un verrou dit « ne recalcule pas ce créneau quand
+ * je bouge les autres ». Le conserver après un préset le figerait sur une
+ * valeur que le préset vient justement de remplacer : le cadenas
+ * désignerait un chiffre qui n'a plus de raison d'être. On repart donc d'une
+ * page blanche, et le coach reverrouille ce qu'il veut.
+ */
+export function applyDayMacroPreset(
+  state: WeekFormState,
+  day: WeekdayKey,
+  horaire: HoraireEntrainement,
+): ApplyPresetOutcome {
+  const jour = findDay(state, day);
+  if (!jour) return { ok: false, message: "Jour introuvable." };
+
+  const résultat = presetPour(horaire, creneauxActifs(jour));
+  if (!résultat.ok) return { ok: false, message: résultat.message };
+
+  const parCreneau = new Map(résultat.lignes.map((ligne) => [ligne.slot, ligne] as const));
+
+  return {
+    ok: true,
+    state: remplacerJour(state, day, (j) => ({
+      ...j,
+      slots: j.slots.map((allocation) => {
+        const ligne = parCreneau.get(allocation.slot);
+        // Un créneau hors préset est forcément inactif (sinon `presetPour`
+        // aurait refusé) : ses trois parts restent à zéro, comme le veut
+        // l'invariant « désactivé ⇒ allocation nulle ».
+        if (!ligne) return { ...allocation, proteinBp: 0, carbBp: 0, fatBp: 0 };
+        return {
+          ...allocation,
+          proteinBp: ligne.proteinBp,
+          carbBp: ligne.carbBp,
+          fatBp: ligne.fatBp,
+        };
+      }),
+      locked: { protein: [], carb: [], fat: [] },
+    })),
+  };
+}
+
+/** Créneaux cochés d'un jour, dans l'ordre d'affichage canonique. */
+export function creneauxActifs(jour: DayTargetsForm): MealSlotKey[] {
+  return [...jour.slots]
+    .sort((a, b) => a.displayOrder - b.displayOrder)
+    .filter((allocation) => allocation.enabled)
+    .map((allocation) => allocation.slot);
+}
+
+/** Le préset est-il applicable en l'état ? Sert à désactiver le bouton. */
+export function presetApplicable(jour: DayTargetsForm, horaire: HoraireEntrainement): ResultatPreset {
+  return presetPour(horaire, creneauxActifs(jour));
 }
 
 /* ═════════════════════ Zone 3 — repas prescrits ═════════════════════ */

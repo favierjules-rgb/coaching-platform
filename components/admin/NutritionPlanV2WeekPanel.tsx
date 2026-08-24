@@ -9,13 +9,16 @@ import { NutritionDayTabs } from "@/components/admin/NutritionDayTabs";
 import { NutritionDayTargets } from "@/components/admin/NutritionDayTargets";
 import { NBSP, formatIntegerFr } from "@/lib/nutrition/basis-points";
 import type { MealSlotKey } from "@/lib/nutrition/meal-distribution";
+import { HORAIRES_ENTRAINEMENT, type HoraireEntrainement } from "@/lib/nutrition/macro-presets";
 import {
   addMeal,
+  applyDayMacroPreset,
   applyDayToWholeWeek,
   addChoiceSlot,
   duplicateDay,
   findDay,
   moveChoiceSlot,
+  presetApplicable,
   removeChoiceSlot,
   removeMeal,
   replaceChoiceSlot,
@@ -58,6 +61,14 @@ export function NutritionPlanV2WeekPanel({
 }) {
   const [jourOuvert, setJourOuvert] = useState<WeekdayKey>("monday");
   const [cibles, setCibles] = useState<readonly WeekdayKey[]>([]);
+  /**
+   * Horaire d'entraînement appliqué, PAR JOUR. Purement visuel : il éclaire
+   * le bouton correspondant. Il n'est ni envoyé, ni enregistré, ni relu au
+   * chargement — rouvrir le plan n'affiche donc aucun horaire actif, ce qui
+   * est honnête : la base ne stocke que des pourcentages, jamais l'intention
+   * qui les a produits.
+   */
+  const [horaireParJour, setHoraireParJour] = useState<Partial<Record<WeekdayKey, HoraireEntrainement>>>({});
   const panneauId = useId();
 
   const jour = findDay(state, jourOuvert);
@@ -115,6 +126,24 @@ export function NutritionPlanV2WeekPanel({
             onChange(setDaySlotMacroBp(state, jourOuvert, slot, macro, bp))
           }
           onToggleLock={(macro, slot) => onChange(toggleDaySlotLock(state, jourOuvert, macro, slot))}
+          /* PRÉSETS — ils ne font que déplacer les curseurs dans l'état
+             local, par le même `onChange` que n'importe quel geste manuel.
+             Aucune écriture : « Enregistrer » reste l'unique persistance. */
+          presets={{
+            etat: Object.fromEntries(
+              HORAIRES_ENTRAINEMENT.map((horaire) => {
+                const verdict = presetApplicable(jour, horaire);
+                return [horaire, verdict.ok ? { ok: true } : { ok: false, message: verdict.message }];
+              }),
+            ) as Record<HoraireEntrainement, { ok: boolean; message?: string }>,
+            actif: horaireParJour[jourOuvert] ?? null,
+            onAppliquer: (horaire) => {
+              const résultat = applyDayMacroPreset(state, jourOuvert, horaire);
+              if (!résultat.ok) return;
+              onChange(résultat.state);
+              setHoraireParJour((actuels) => ({ ...actuels, [jourOuvert]: horaire }));
+            },
+          }}
         />
 
         {/* ── ZONE 3 ────────────────────────────────────────────────── */}

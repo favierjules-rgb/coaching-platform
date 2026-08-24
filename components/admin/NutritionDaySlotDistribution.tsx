@@ -9,6 +9,7 @@ import {
 import { NBSP, formatDecimalFr } from "@/lib/nutrition/basis-points";
 import { computeDailyMacroTargets } from "@/lib/nutrition/macro-targets";
 import { MACRO_KEYS, MEAL_SLOT_LABELS_FR, type MacroKey, type MealSlotKey } from "@/lib/nutrition/meal-distribution";
+import { HORAIRES_ENTRAINEMENT, HORAIRE_LABELS_FR, type HoraireEntrainement } from "@/lib/nutrition/macro-presets";
 import { dayTargetsAsFormState, type DayTargetsForm } from "@/lib/nutrition/plan-v2-week-form";
 
 /**
@@ -38,11 +39,25 @@ export function NutritionDaySlotDistribution({
   onToggleSlot,
   onChangeSlotBp,
   onToggleLock,
+  presets,
 }: {
   readonly targets: DayTargetsForm;
   readonly onToggleSlot: (slot: MealSlotKey, enabled: boolean) => void;
   readonly onChangeSlotBp: (slot: MealSlotKey, macro: MacroKey, bp: number) => void;
   readonly onToggleLock: (macro: MacroKey, slot: MealSlotKey) => void;
+  /**
+   * Applique un préset d'horaire d'entraînement. OPTIONNELLE : sans elle,
+   * les boutons ne sont pas rendus et le panneau se comporte exactement
+   * comme avant — les harnais de rendu existants n'ont rien à changer.
+   *
+   * `etat` dit, pour chaque horaire, si le préset est applicable et sinon
+   * pourquoi. Le composant ne recalcule rien : il affiche.
+   */
+  readonly presets?: {
+    readonly etat: Readonly<Record<HoraireEntrainement, { readonly ok: boolean; readonly message?: string }>>;
+    readonly onAppliquer: (horaire: HoraireEntrainement) => void;
+    readonly actif: HoraireEntrainement | null;
+  };
 }) {
   const [macroActive, setMacroActive] = useState<MacroKey>("protein");
   const titreId = useId();
@@ -92,6 +107,52 @@ export function NutritionDaySlotDistribution({
       <p className="mb-4 text-xs text-muted-foreground">
         Désactiver un repas remet ses trois parts à zéro. Rien n&apos;est enregistré avant Enregistrer.
       </p>
+
+      {/*
+        LES PRÉSETS PAR HORAIRE D'ENTRAÎNEMENT.
+
+        Placés en premier parce qu'ils s'utilisent en premier : on choisit
+        le moment de la séance, les curseurs se placent, puis on ajuste à la
+        main si besoin. Rien n'est enregistré — c'est le bouton
+        « Enregistrer » du constructeur qui persiste, comme avant.
+
+        Un horaire dont la table ne correspond pas aux repas cochés est
+        DÉSACTIVÉ, avec la raison en info-bulle : aucune répartition n'est
+        extrapolée.
+      */}
+      {presets ? (
+        <div className="mb-5">
+          <p className="mb-2 text-[11px] uppercase tracking-widest text-muted-foreground">
+            Placer les curseurs selon l&apos;horaire d&apos;entraînement
+          </p>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {HORAIRES_ENTRAINEMENT.map((horaire) => {
+              const etat = presets.etat[horaire];
+              const choisi = presets.actif === horaire;
+              return (
+                <button
+                  key={horaire}
+                  type="button"
+                  disabled={!etat.ok}
+                  aria-pressed={choisi}
+                  title={etat.ok ? undefined : etat.message}
+                  onClick={() => presets.onAppliquer(horaire)}
+                  className={`pressable min-h-[44px] rounded-control border px-3 py-2 text-[11px] font-bold uppercase tracking-widest transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-40 ${
+                    choisi
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border text-muted-foreground hover:border-primary hover:text-primary"
+                  }`}
+                >
+                  {HORAIRE_LABELS_FR[horaire]}
+                </button>
+              );
+            })}
+          </div>
+          {messagePresets(presets.etat) ? (
+            <p className="mt-2 text-xs text-muted-foreground">{messagePresets(presets.etat)}</p>
+          ) : null}
+        </div>
+      ) : null}
 
       {/* Les six créneaux — communs aux trois macros, donc au-dessus des onglets. */}
       <div className="mb-5 grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -162,4 +223,21 @@ export function NutritionDaySlotDistribution({
       </div>
     </section>
   );
+}
+
+/**
+ * Une seule ligne d'explication quand AUCUN horaire n'est applicable —
+ * inutile de répéter la même raison quatre fois sous quatre boutons gris.
+ * Dès qu'un horaire au moins fonctionne, on se tait : l'info-bulle des
+ * boutons désactivés suffit.
+ */
+function messagePresets(
+  etat: Readonly<Record<HoraireEntrainement, { readonly ok: boolean; readonly message?: string }>>,
+): string | null {
+  const horaires = HORAIRES_ENTRAINEMENT;
+  if (horaires.some((h) => etat[h].ok)) return null;
+  const messages = new Set(horaires.map((h) => etat[h].message).filter((m): m is string => Boolean(m)));
+  // Toutes identiques (cas « nombre de repas non couvert ») : on la donne.
+  if (messages.size === 1) return [...messages][0];
+  return "Les répartitions de référence couvrent 3 à 5 repas, et attendent des créneaux précis.";
 }

@@ -50,12 +50,25 @@ import {
   PLAN_V2_DISTRIBUTION_MESSAGE_FR,
 } from "../../lib/nutrition/plan-v2-validation";
 import {
+  applyDayMacroPreset,
   createBlankWeek,
+  creneauxActifs,
+  findDay,
   initializeAllDays,
+  presetApplicable,
   setDayCalories,
   setDayMacroBp,
+  setDaySlotEnabled,
+  setDaySlotMacroBp,
+  toggleDaySlotLock,
   type WeekFormState,
 } from "../../lib/nutrition/plan-v2-week-form";
+import {
+  HORAIRES_ENTRAINEMENT,
+  NOMBRES_DE_REPAS_COUVERTS,
+  PRESETS_MACROS,
+} from "../../lib/nutrition/macro-presets";
+import { MEAL_SLOT_LABELS_FR } from "../../lib/nutrition/meal-distribution";
 import { toDuplicateWeekPayload, toWeekSavePayload } from "../../lib/nutrition/plan-v2-week-form";
 import { ConfirmActionModal, DeleteConfirmationModal } from "../../components/admin/LifecycleActions";
 import {
@@ -1343,6 +1356,265 @@ await test("71. le propriétaire d'un plan est posé par la BASE, jamais par l'�
   // cessait de dépendre de la colonne.
   assert.ok(sql.includes("nutrition_recipes_select_student"));
   assert.ok(sql.includes("ce trigger est à revoir"));
+});
+
+
+/* ══════════════ PRÉSETS DE RÉPARTITION PAR HORAIRE D'ENTRAÎNEMENT ══════════════
+ *
+ * Ce que ces tests prouvent : les tables sont exactes, la sélection ne
+ * s'applique qu'aux jeux de créneaux qu'elle couvre, l'application n'écrit
+ * rien et laisse le coach reprendre la main. Ce qu'ils ne prouvent PAS :
+ * l'apparence des quatre boutons — c'est le rendu, testé séparément.
+ */
+
+/** Une semaine dont le lundi n'a QUE les créneaux demandés. */
+function semaineAvecCreneaux(slots: readonly string[]): WeekFormState {
+  let semaine = semaineComplète();
+  for (const slot of MEAL_SLOT_KEYS) {
+    semaine = setDaySlotEnabled(semaine, "monday", slot, (slots as readonly string[]).includes(slot));
+  }
+  return semaine;
+}
+
+function lundi(semaine: WeekFormState) {
+  const jour = findDay(semaine, "monday");
+  assert.ok(jour, "lundi doit exister");
+  return jour;
+}
+
+function partsDe(semaine: WeekFormState, slot: string) {
+  const allocation = lundi(semaine).slots.find((a) => a.slot === slot);
+  assert.ok(allocation, `créneau ${slot} introuvable`);
+  return { carb: allocation.carbBp, protein: allocation.proteinBp, fat: allocation.fatBp };
+}
+
+await test("PRESET-01 — les douze tables somment à 100 % sur CHAQUE macro", () => {
+  for (const horaire of HORAIRES_ENTRAINEMENT) {
+    for (const nombre of NOMBRES_DE_REPAS_COUVERTS) {
+      const lignes = PRESETS_MACROS[horaire][nombre];
+      assert.equal(lignes.length, nombre, `${horaire}/${nombre} : ${lignes.length} lignes`);
+      for (const macro of ["carbBp", "proteinBp", "fatBp"] as const) {
+        const total = lignes.reduce((somme, l) => somme + l[macro], 0);
+        assert.equal(total, BASIS_POINTS_TOTAL, `${horaire}/${nombre}/${macro} = ${total}`);
+      }
+      // Un créneau ne peut pas recevoir deux lignes : la seconde écraserait
+      // la première en silence.
+      assert.equal(new Set(lignes.map((l) => l.slot)).size, nombre, `${horaire}/${nombre} : créneau répété`);
+    }
+  }
+});
+
+await test("PRESET-02 — MATIN × 3, 4 et 5 : valeurs EXACTES de la table", () => {
+  const attendu = {
+    3: { breakfast: [30, 30, 15], lunch: [45, 35, 25], dinner: [25, 35, 60] },
+    4: {
+      breakfast: [30, 25, 10],
+      lunch: [40, 30, 20],
+      afternoon_snack: [15, 20, 30],
+      dinner: [15, 25, 40],
+    },
+    5: {
+      breakfast: [25, 20, 10],
+      morning_snack: [30, 20, 10],
+      lunch: [20, 25, 30],
+      afternoon_snack: [10, 15, 20],
+      dinner: [15, 20, 30],
+    },
+  } as const;
+  for (const nombre of NOMBRES_DE_REPAS_COUVERTS) {
+    const table = attendu[nombre] as Record<string, readonly number[]>;
+    const semaine = semaineAvecCreneaux(Object.keys(table));
+    const résultat = applyDayMacroPreset(semaine, "monday", "matin");
+    assert.ok(résultat.ok, `matin/${nombre} doit s'appliquer`);
+    for (const [slot, [g, p, l]] of Object.entries(table)) {
+      assert.deepEqual(
+        partsDe(résultat.state, slot),
+        { carb: g * 100, protein: p * 100, fat: l * 100 },
+        `matin/${nombre} — ${slot}`,
+      );
+    }
+  }
+});
+
+await test("PRESET-03 — les douze combinaisons s'appliquent et redonnent 100 % par macro", () => {
+  for (const horaire of HORAIRES_ENTRAINEMENT) {
+    for (const nombre of NOMBRES_DE_REPAS_COUVERTS) {
+      const lignes = PRESETS_MACROS[horaire][nombre];
+      const semaine = semaineAvecCreneaux(lignes.map((l) => l.slot));
+      const résultat = applyDayMacroPreset(semaine, "monday", horaire);
+      assert.ok(résultat.ok, `${horaire}/${nombre}`);
+      const jour = lundi(résultat.state);
+      for (const macro of ["protein", "carb", "fat"] as const) {
+        assert.equal(
+          describeMacroBalance(jour.slots, macro).totalBp,
+          BASIS_POINTS_TOTAL,
+          `${horaire}/${nombre}/${macro} après application`,
+        );
+      }
+      // Chaque ligne a bien atterri sur SON créneau.
+      for (const ligne of lignes) {
+        assert.deepEqual(partsDe(résultat.state, ligne.slot), {
+          carb: ligne.carbBp,
+          protein: ligne.proteinBp,
+          fat: ligne.fatBp,
+        });
+      }
+    }
+  }
+});
+
+await test("PRESET-04 — les rôles pré-training et collation du soir sont explicites, jamais positionnels", () => {
+  // Avant une séance de MIDI, le pré-training est le MATIN.
+  assert.equal(
+    PRESETS_MACROS.midi[4].find((l) => l.role === "collation_pre_training")?.slot,
+    "morning_snack",
+  );
+  // L'APRÈS-MIDI, il tombe après le déjeuner.
+  assert.equal(
+    PRESETS_MACROS.apres_midi[4].find((l) => l.role === "collation_pre_training")?.slot,
+    "afternoon_snack",
+  );
+  // SOIR × 5 : `afternoon_snack` est DÉJÀ pris par la collation d'après-midi,
+  // le pré-training occupe donc `dessert` — le créneau affiché « Collation
+  // du soir ». C'est le cas qui interdit un mapping par position.
+  const soirCinq = PRESETS_MACROS.soir[5];
+  assert.equal(soirCinq.find((l) => l.role === "collation_apres_midi")?.slot, "afternoon_snack");
+  assert.equal(soirCinq.find((l) => l.role === "collation_pre_training")?.slot, "dessert");
+  // Et l'étiquette suit, sinon le coach ne comprendrait pas où il place quoi.
+  assert.equal(MEAL_SLOT_LABELS_FR.dessert, "Collation du soir");
+});
+
+await test("PRESET-05 — un nombre de repas hors 3-5 : AUCUNE répartition inventée", () => {
+  for (const slots of [
+    ["breakfast", "dinner"],
+    ["breakfast", "morning_snack", "lunch", "afternoon_snack", "dinner", "dessert"],
+  ]) {
+    const semaine = semaineAvecCreneaux(slots);
+    for (const horaire of HORAIRES_ENTRAINEMENT) {
+      const verdict = presetApplicable(lundi(semaine), horaire);
+      assert.equal(verdict.ok, false, `${horaire} × ${slots.length} repas`);
+      assert.equal(verdict.ok === false && verdict.raison, "nombre");
+      const résultat = applyDayMacroPreset(semaine, "monday", horaire);
+      assert.equal(résultat.ok, false, "et l'application refuse aussi");
+    }
+    // L'état n'a pas bougé d'un point de base.
+    const avant = JSON.stringify(lundi(semaine).slots);
+    applyDayMacroPreset(semaine, "monday", "matin");
+    assert.equal(JSON.stringify(lundi(semaine).slots), avant, "aucune mutation de l'entrée");
+  }
+});
+
+await test("PRESET-06 — le BON nombre mais le MAUVAIS jeu de créneaux : refus nommé", () => {
+  // Quatre repas, mais la collation du MATIN là où MATIN × 4 attend celle de
+  // l'après-midi. Poser les valeurs « dans l'ordre » donnerait à la collation
+  // du matin les parts prévues pour l'après-midi : c'est une autre
+  // prescription, donc on refuse.
+  const semaine = semaineAvecCreneaux(["breakfast", "morning_snack", "lunch", "dinner"]);
+  const verdict = presetApplicable(lundi(semaine), "matin");
+  assert.equal(verdict.ok, false);
+  assert.equal(verdict.ok === false && verdict.raison, "creneaux");
+  assert.ok(
+    verdict.ok === false && verdict.message.includes("Collation de l'après-midi"),
+    `le message doit nommer le créneau manquant — lu : « ${verdict.ok === false ? verdict.message : ""} »`,
+  );
+  assert.equal(applyDayMacroPreset(semaine, "monday", "matin").ok, false);
+});
+
+await test("PRESET-07 — les créneaux DÉCOCHÉS restent à zéro après application", () => {
+  const semaine = semaineAvecCreneaux(["breakfast", "lunch", "dinner"]);
+  const résultat = applyDayMacroPreset(semaine, "monday", "soir");
+  assert.ok(résultat.ok);
+  for (const slot of ["morning_snack", "afternoon_snack", "dessert"]) {
+    assert.deepEqual(partsDe(résultat.state, slot), { carb: 0, protein: 0, fat: 0 }, slot);
+  }
+  assert.deepEqual(creneauxActifs(lundi(résultat.state)), ["breakfast", "lunch", "dinner"]);
+});
+
+await test("PRESET-08 — après un préset, le coach reprend la main à la souris", () => {
+  const semaine = semaineAvecCreneaux(["breakfast", "lunch", "dinner"]);
+  const appliqué = applyDayMacroPreset(semaine, "monday", "matin");
+  assert.ok(appliqué.ok);
+  assert.equal(partsDe(appliqué.state, "breakfast").carb, 3000);
+
+  // Un geste manuel ordinaire : les curseurs restent solidaires et la macro
+  // continue de sommer à 100 %.
+  const modifié = setDaySlotMacroBp(appliqué.state, "monday", "breakfast", "carb", 5000);
+  assert.equal(partsDe(modifié, "breakfast").carb, 5000, "la valeur saisie est prise");
+  assert.equal(
+    describeMacroBalance(lundi(modifié).slots, "carb").totalBp,
+    BASIS_POINTS_TOTAL,
+    "et le reste absorbe la différence",
+  );
+});
+
+await test("PRESET-09 — appliquer un préset LÈVE les verrous du jour", () => {
+  const semaine = semaineAvecCreneaux(["breakfast", "lunch", "dinner"]);
+  const verrouillé = toggleDaySlotLock(semaine, "monday", "carb", "breakfast");
+  assert.ok(lundi(verrouillé).locked.carb.includes("breakfast"), "verrou posé");
+  const résultat = applyDayMacroPreset(verrouillé, "monday", "midi");
+  assert.ok(résultat.ok);
+  assert.deepEqual(lundi(résultat.state).locked, { protein: [], carb: [], fat: [] });
+  // Le cadenas désignait une valeur que le préset vient de remplacer : le
+  // garder aurait figé un chiffre qui n'a plus de raison d'être.
+  assert.equal(partsDe(résultat.state, "breakfast").carb, 2500);
+});
+
+await test("PRESET-10 — un préset ne touche NI les calories, NI la macro journalière, NI les repas", () => {
+  const semaine = semaineAvecCreneaux(["breakfast", "lunch", "dinner"]);
+  const avant = lundi(semaine);
+  const résultat = applyDayMacroPreset(semaine, "monday", "apres_midi");
+  assert.ok(résultat.ok);
+  const après = lundi(résultat.state);
+  assert.equal(après.dailyCalories, avant.dailyCalories);
+  assert.equal(après.proteinBp, avant.proteinBp);
+  assert.equal(après.carbBp, avant.carbBp);
+  assert.equal(après.fatBp, avant.fatBp);
+  assert.deepEqual(après.meals, avant.meals);
+  // Les six autres jours sont intacts.
+  for (const jour of résultat.state.days) {
+    if (jour.day === "monday") continue;
+    const référence = semaine.days.find((d) => d.day === jour.day);
+    assert.deepEqual(jour, référence, `${jour.day} ne doit pas bouger`);
+  }
+});
+
+await test("PRESET-11 — la fonction est PURE : aucune écriture, aucun appel Supabase", () => {
+  const source = lire("../../lib/nutrition/macro-presets.ts");
+  const forme = lire("../../lib/nutrition/plan-v2-week-form.ts");
+  for (const [nom, code] of [["macro-presets", source], ["plan-v2-week-form", forme]] as const) {
+    assert.ok(!code.includes("createSupabaseBrowserClient"), `${nom} : aucun client Supabase`);
+    assert.ok(!code.includes(".from("), `${nom} : aucune requête`);
+    assert.ok(!code.includes("fetch("), `${nom} : aucun réseau`);
+  }
+  // Et le panneau n'enregistre rien au clic : il passe par `onChange`, comme
+  // n'importe quel geste manuel.
+  const panneau = lire("../../components/admin/NutritionPlanV2WeekPanel.tsx");
+  const bloc = panneau.slice(panneau.indexOf("onAppliquer:"), panneau.indexOf("onAppliquer:") + 400);
+  assert.ok(bloc.includes("onChange("), "le préset passe par onChange");
+  assert.ok(!bloc.includes("save") && !bloc.includes("Save"), "aucun enregistrement déclenché");
+});
+
+await test("PRESET-12 — les quatre boutons sont rendus au-dessus des cases de repas", () => {
+  const html = rendre(étatComplet(), { week: semaineAvecCreneaux(["breakfast", "lunch", "dinner"]) });
+  for (const libellé of ["Matin", "Midi", "Après-midi", "Soir"]) {
+    assert.ok(html.includes(`>${libellé}</button>`), `bouton « ${libellé} »`);
+  }
+  // Ce qui compte, c'est que les présets précèdent les CONTRÔLES qu'ils
+  // pilotent : les cases de repas puis les onglets de macro. Le titre de la
+  // section et sa phrase d'intro restent au-dessus, à leur place.
+  const iPresets = html.indexOf("Placer les curseurs");
+  assert.ok(iPresets > -1, "le bloc de présets est rendu");
+  assert.ok(iPresets < html.indexOf("Petit déjeuner"), "les présets précèdent les cases de repas");
+  // Le premier `role="tablist"` de la page est celui des JOURS : on vise
+  // celui des macros par son libellé, sinon on comparerait avec un autre
+  // composant.
+  assert.ok(
+    iPresets < html.indexOf("Macronutriment"),
+    "et les onglets de macro",
+  );
+  // Dans un <form>, un bouton sans type vaut « submit » : il enregistrerait.
+  const zone = html.slice(iPresets, html.indexOf("Petit déjeuner"));
+  assert.equal((zone.match(/type="button"/g) ?? []).length, 4, "les quatre boutons sont type=button");
 });
 
 
