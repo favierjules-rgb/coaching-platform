@@ -61,7 +61,11 @@ export const MEAL_SLOT_LABELS_FR: Readonly<Record<MealSlotKey, string>> = {
   lunch: "Déjeuner",
   afternoon_snack: "Collation de l'après-midi",
   dinner: "Dîner",
-  dessert: "Dessert",
+  // « Collation du soir » et non « Dessert » : ce créneau sert de collation
+  // de fin de journée dans les répartitions par horaire d'entraînement (voir
+  // lib/nutrition/macro-presets.ts). SEULE l'étiquette change — la clé
+  // technique reste `dessert`, valeur d'enum en base et clé des recettes.
+  dessert: "Collation du soir",
 };
 
 /** Les trois macros réparties, dans leur ordre canonique. */

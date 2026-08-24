@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useRef, useState } from "react";
+import { CloudSun, Moon, Sun, Sunrise } from "lucide-react";
 
 import {
   MACRO_LABELS_FR,
@@ -9,6 +10,10 @@ import {
 import { NBSP, formatDecimalFr } from "@/lib/nutrition/basis-points";
 import { computeDailyMacroTargets } from "@/lib/nutrition/macro-targets";
 import { MACRO_KEYS, MEAL_SLOT_LABELS_FR, type MacroKey, type MealSlotKey } from "@/lib/nutrition/meal-distribution";
+import { HORAIRES_ENTRAINEMENT, HORAIRE_LABELS_FR, type HoraireEntrainement } from "@/lib/nutrition/macro-presets";
+
+/** Une icône par horaire, prises dans la bibliothèque déjà utilisée partout. */
+const ICONE_HORAIRE = { matin: Sunrise, midi: Sun, apres_midi: CloudSun, soir: Moon } as const;
 import { dayTargetsAsFormState, type DayTargetsForm } from "@/lib/nutrition/plan-v2-week-form";
 
 /**
@@ -38,11 +43,28 @@ export function NutritionDaySlotDistribution({
   onToggleSlot,
   onChangeSlotBp,
   onToggleLock,
+  presets,
 }: {
   readonly targets: DayTargetsForm;
   readonly onToggleSlot: (slot: MealSlotKey, enabled: boolean) => void;
   readonly onChangeSlotBp: (slot: MealSlotKey, macro: MacroKey, bp: number) => void;
   readonly onToggleLock: (macro: MacroKey, slot: MealSlotKey) => void;
+  /**
+   * Applique un préset d'horaire d'entraînement. OPTIONNELLE : sans elle,
+   * les boutons ne sont pas rendus et le panneau se comporte exactement
+   * comme avant — les harnais de rendu existants n'ont rien à changer.
+   *
+   * ⚠️ AUCUN ÉTAT DE DISPONIBILITÉ. Les quatre raccourcis sont TOUJOURS
+   * cliquables : la table est choisie par « horaire × nombre de repas », et
+   * ce nombre est toujours entre 3 et 6. Une version précédente recevait ici
+   * un `etat` par horaire et grisait les boutons quand la combinaison des
+   * repas cochés ne correspondait pas à la table — c'est exactement le bug
+   * qui a été corrigé. Ne pas réintroduire de `disabled` sur ces boutons.
+   */
+  readonly presets?: {
+    readonly onAppliquer: (horaire: HoraireEntrainement) => void;
+    readonly actif: HoraireEntrainement | null;
+  };
 }) {
   const [macroActive, setMacroActive] = useState<MacroKey>("protein");
   const titreId = useId();
@@ -86,9 +108,52 @@ export function NutritionDaySlotDistribution({
 
   return (
     <section aria-labelledby={titreId} className="rounded-panel border border-border p-4 sm:p-5">
-      <h3 id={titreId} className="mb-1 text-xs font-bold uppercase tracking-widest text-muted-foreground">
-        Répartition par créneau
-      </h3>
+      {/*
+        L'EN-TÊTE ET LES RACCOURCIS, SUR LA MÊME LIGNE.
+
+        Les quatre horaires ne sont pas des actions principales : ce sont des
+        raccourcis de réglage. Ils occupaient auparavant quatre pavés pleine
+        largeur, qui pesaient visuellement plus lourd que les curseurs qu'ils
+        servent à placer. Ils sont donc revenus à leur juste rang — une ligne
+        discrète à hauteur du titre, en typographie réduite, avec une icône
+        pour se repérer d'un coup d'œil.
+      */}
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <h3 id={titreId} className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
+          Répartition par créneau
+        </h3>
+
+        {presets ? (
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="mr-1 text-[10px] uppercase tracking-wide text-muted-foreground/70">
+              Entraînement
+            </span>
+            {HORAIRES_ENTRAINEMENT.map((horaire) => {
+              const choisi = presets.actif === horaire;
+              const Icone = ICONE_HORAIRE[horaire];
+              return (
+                <button
+                  key={horaire}
+                  type="button"
+                  data-raccourci-horaire={horaire}
+                  aria-pressed={choisi}
+                  title={`Placer les curseurs pour un entraînement du ${HORAIRE_LABELS_FR[horaire].toLowerCase()}`}
+                  onClick={() => presets.onAppliquer(horaire)}
+                  className={`inline-flex h-7 items-center gap-1 rounded-control border px-2 text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+                    choisi
+                      ? "border-primary/60 bg-primary/15 text-primary"
+                      : "border-border/70 text-muted-foreground hover:border-primary/60 hover:text-primary"
+                  }`}
+                >
+                  <Icone size={12} aria-hidden="true" className="flex-shrink-0" />
+                  {HORAIRE_LABELS_FR[horaire]}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+      </div>
+
       <p className="mb-4 text-xs text-muted-foreground">
         Désactiver un repas remet ses trois parts à zéro. Rien n&apos;est enregistré avant Enregistrer.
       </p>

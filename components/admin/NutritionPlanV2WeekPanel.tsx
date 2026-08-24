@@ -9,8 +9,10 @@ import { NutritionDayTabs } from "@/components/admin/NutritionDayTabs";
 import { NutritionDayTargets } from "@/components/admin/NutritionDayTargets";
 import { NBSP, formatIntegerFr } from "@/lib/nutrition/basis-points";
 import type { MealSlotKey } from "@/lib/nutrition/meal-distribution";
+import { type HoraireEntrainement } from "@/lib/nutrition/macro-presets";
 import {
   addMeal,
+  applyDayMacroPreset,
   applyDayToWholeWeek,
   addChoiceSlot,
   duplicateDay,
@@ -58,6 +60,14 @@ export function NutritionPlanV2WeekPanel({
 }) {
   const [jourOuvert, setJourOuvert] = useState<WeekdayKey>("monday");
   const [cibles, setCibles] = useState<readonly WeekdayKey[]>([]);
+  /**
+   * Horaire d'entraînement appliqué, PAR JOUR. Purement visuel : il éclaire
+   * le bouton correspondant. Il n'est ni envoyé, ni enregistré, ni relu au
+   * chargement — rouvrir le plan n'affiche donc aucun horaire actif, ce qui
+   * est honnête : la base ne stocke que des pourcentages, jamais l'intention
+   * qui les a produits.
+   */
+  const [horaireParJour, setHoraireParJour] = useState<Partial<Record<WeekdayKey, HoraireEntrainement>>>({});
   const panneauId = useId();
 
   const jour = findDay(state, jourOuvert);
@@ -115,6 +125,25 @@ export function NutritionPlanV2WeekPanel({
             onChange(setDaySlotMacroBp(state, jourOuvert, slot, macro, bp))
           }
           onToggleLock={(macro, slot) => onChange(toggleDaySlotLock(state, jourOuvert, macro, slot))}
+          /* PRÉSETS — ils ne font que déplacer les curseurs dans l'état
+             local, par le même `onChange` que n'importe quel geste manuel.
+             Aucune écriture : « Enregistrer » reste l'unique persistance.
+
+             AUCUN ÉTAT DE DISPONIBILITÉ N'EST CALCULÉ ICI, et c'est le
+             cœur de la règle : la table est choisie par « horaire ×
+             nombre de repas », jamais par la combinaison des créneaux
+             cochés. Les quatre raccourcis sont donc toujours cliquables.
+             Rétablir un calcul de disponibilité à cet endroit ramènerait
+             le bug des boutons grisés à 6 repas. */
+          presets={{
+            actif: horaireParJour[jourOuvert] ?? null,
+            onAppliquer: (horaire) => {
+              const résultat = applyDayMacroPreset(state, jourOuvert, horaire);
+              if (!résultat.ok) return;
+              onChange(résultat.state);
+              setHoraireParJour((actuels) => ({ ...actuels, [jourOuvert]: horaire }));
+            },
+          }}
         />
 
         {/* ── ZONE 3 ────────────────────────────────────────────────── */}
