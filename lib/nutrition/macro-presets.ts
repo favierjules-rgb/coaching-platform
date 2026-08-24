@@ -265,8 +265,15 @@ function estCouvert(nombre: number): nombre is NombreDeRepasCouvert {
   return (NOMBRES_DE_REPAS_COUVERTS as readonly number[]).includes(nombre);
 }
 
+/**
+ * « A, B, C et D » — le message nomme les créneaux TELS QU'ILS SONT ÉCRITS
+ * sur les cases à cocher, sinon le coach chercherait un libellé qui n'existe
+ * nulle part à l'écran.
+ */
 function enumererFr(slots: readonly MealSlotKey[]): string {
-  return slots.map((slot) => MEAL_SLOT_LABELS_FR[slot]).join(", ");
+  const libelles = slots.map((slot) => MEAL_SLOT_LABELS_FR[slot]);
+  if (libelles.length <= 1) return libelles.join("");
+  return `${libelles.slice(0, -1).join(", ")} et ${libelles[libelles.length - 1]}`;
 }
 
 /**
@@ -291,7 +298,10 @@ export function presetPour(
     return {
       ok: false,
       raison: "nombre",
-      message: `Les répartitions de référence couvrent 3 à 5 repas. Ce jour en compte ${nombre}.`,
+      // Le document de référence s'arrête à 5 repas. Aucune extrapolation :
+      // un sixième repas changerait la répartition des cinq autres, et
+      // personne n'a validé ces chiffres.
+      message: `Répartition automatique non définie pour ${nombre} repas.`,
     };
   }
 
@@ -304,7 +314,7 @@ export function presetPour(
     return {
       ok: false,
       raison: "creneaux",
-      message: `${HORAIRE_LABELS_FR[horaire]} à ${nombre} repas attend : ${enumererFr(attendus)}.`,
+      message: `Cette répartition nécessite : ${enumererFr(attendus)}.`,
       attendus,
     };
   }

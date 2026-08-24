@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useRef, useState } from "react";
+import { CloudSun, Moon, Sun, Sunrise } from "lucide-react";
 
 import {
   MACRO_LABELS_FR,
@@ -10,6 +11,9 @@ import { NBSP, formatDecimalFr } from "@/lib/nutrition/basis-points";
 import { computeDailyMacroTargets } from "@/lib/nutrition/macro-targets";
 import { MACRO_KEYS, MEAL_SLOT_LABELS_FR, type MacroKey, type MealSlotKey } from "@/lib/nutrition/meal-distribution";
 import { HORAIRES_ENTRAINEMENT, HORAIRE_LABELS_FR, type HoraireEntrainement } from "@/lib/nutrition/macro-presets";
+
+/** Une icône par horaire, prises dans la bibliothèque déjà utilisée partout. */
+const ICONE_HORAIRE = { matin: Sunrise, midi: Sun, apres_midi: CloudSun, soir: Moon } as const;
 import { dayTargetsAsFormState, type DayTargetsForm } from "@/lib/nutrition/plan-v2-week-form";
 
 /**
@@ -101,57 +105,59 @@ export function NutritionDaySlotDistribution({
 
   return (
     <section aria-labelledby={titreId} className="rounded-panel border border-border p-4 sm:p-5">
-      <h3 id={titreId} className="mb-1 text-xs font-bold uppercase tracking-widest text-muted-foreground">
-        Répartition par créneau
-      </h3>
-      <p className="mb-4 text-xs text-muted-foreground">
-        Désactiver un repas remet ses trois parts à zéro. Rien n&apos;est enregistré avant Enregistrer.
-      </p>
-
       {/*
-        LES PRÉSETS PAR HORAIRE D'ENTRAÎNEMENT.
+        L'EN-TÊTE ET LES RACCOURCIS, SUR LA MÊME LIGNE.
 
-        Placés en premier parce qu'ils s'utilisent en premier : on choisit
-        le moment de la séance, les curseurs se placent, puis on ajuste à la
-        main si besoin. Rien n'est enregistré — c'est le bouton
-        « Enregistrer » du constructeur qui persiste, comme avant.
-
-        Un horaire dont la table ne correspond pas aux repas cochés est
-        DÉSACTIVÉ, avec la raison en info-bulle : aucune répartition n'est
-        extrapolée.
+        Les quatre horaires ne sont pas des actions principales : ce sont des
+        raccourcis de réglage. Ils occupaient auparavant quatre pavés pleine
+        largeur, qui pesaient visuellement plus lourd que les curseurs qu'ils
+        servent à placer. Ils sont donc revenus à leur juste rang — une ligne
+        discrète à hauteur du titre, en typographie réduite, avec une icône
+        pour se repérer d'un coup d'œil.
       */}
-      {presets ? (
-        <div className="mb-5">
-          <p className="mb-2 text-[11px] uppercase tracking-widest text-muted-foreground">
-            Placer les curseurs selon l&apos;horaire d&apos;entraînement
-          </p>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <h3 id={titreId} className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
+          Répartition par créneau
+        </h3>
+
+        {presets ? (
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="mr-1 text-[10px] uppercase tracking-wide text-muted-foreground/70">
+              Entraînement
+            </span>
             {HORAIRES_ENTRAINEMENT.map((horaire) => {
               const etat = presets.etat[horaire];
               const choisi = presets.actif === horaire;
+              const Icone = ICONE_HORAIRE[horaire];
               return (
                 <button
                   key={horaire}
                   type="button"
+                  data-raccourci-horaire={horaire}
                   disabled={!etat.ok}
                   aria-pressed={choisi}
-                  title={etat.ok ? undefined : etat.message}
+                  title={etat.ok ? `Placer les curseurs pour un entraînement du ${HORAIRE_LABELS_FR[horaire].toLowerCase()}` : etat.message}
                   onClick={() => presets.onAppliquer(horaire)}
-                  className={`pressable min-h-[44px] rounded-control border px-3 py-2 text-[11px] font-bold uppercase tracking-widest transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-40 ${
+                  className={`inline-flex h-7 items-center gap-1 rounded-control border px-2 text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-35 ${
                     choisi
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border text-muted-foreground hover:border-primary hover:text-primary"
+                      ? "border-primary/60 bg-primary/15 text-primary"
+                      : "border-border/70 text-muted-foreground hover:border-primary/60 hover:text-primary"
                   }`}
                 >
+                  <Icone size={12} aria-hidden="true" className="flex-shrink-0" />
                   {HORAIRE_LABELS_FR[horaire]}
                 </button>
               );
             })}
           </div>
-          {messagePresets(presets.etat) ? (
-            <p className="mt-2 text-xs text-muted-foreground">{messagePresets(presets.etat)}</p>
-          ) : null}
-        </div>
+        ) : null}
+      </div>
+
+      <p className="mb-4 text-xs text-muted-foreground">
+        Désactiver un repas remet ses trois parts à zéro. Rien n&apos;est enregistré avant Enregistrer.
+      </p>
+      {presets && messagePresets(presets.etat) ? (
+        <p className="-mt-2 mb-4 text-xs text-muted-foreground/80">{messagePresets(presets.etat)}</p>
       ) : null}
 
       {/* Les six créneaux — communs aux trois macros, donc au-dessus des onglets. */}
