@@ -68,6 +68,13 @@ export function builderSaveUserMessage(outcome: BuilderSaveOutcome): string | nu
   }
   if (outcome.kind === "error") {
     const message = outcome.error instanceof Error ? outcome.error.message : "";
+    // Incident du 25/08 : une lecture tronquée faisait sauter des séances, et
+    // l'enregistrement se déclarait réussi. Ce cas a désormais son propre code
+    // ET son propre message — le traiter comme un « SAVE_FAILED » enverrait le
+    // coach vérifier ses droits, ce qui n'a rien à voir.
+    if (message.startsWith("STRUCTURE_INCOMPLETE")) {
+      return "Une partie du programme n'a pas pu être enregistrée. Recharge la page et vérifie le contenu avant de réessayer — n'enregistre pas par-dessus.";
+    }
     if (/NOT_AUTHORIZED|42501|SAVE_FAILED/.test(message)) {
       return "Ta session n'a plus les droits coach (compte élève connecté dans ce navigateur ?). Reconnecte-toi en admin puis réessaie — tes modifications sont conservées.";
     }

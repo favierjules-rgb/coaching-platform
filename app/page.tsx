@@ -1,4 +1,5 @@
 import { FreeAssessment } from "@/components/sections/FreeAssessment";
+import { GoogleReviews } from "@/components/sections/GoogleReviews";
 import { Hero } from "@/components/sections/Hero";
 import { MethodStorytelling } from "@/components/sections/MethodStorytelling";
 import { Newsletter } from "@/components/sections/Newsletter";
@@ -33,10 +34,19 @@ export default function HomePage() {
       <Hero />
       <MethodStorytelling />
       <Transformations />
-      {/* « Mon bilan offert » s'intercale entre les résultats et les offres :
-          le visiteur vient de voir des transformations réelles, c'est le
-          moment où il se demande ce que ça donnerait pour lui. L'ordre
-          Transformations → bilan → programmes est intentionnel. */}
+      {/* Les avis s'intercalent entre les résultats et le bilan : les
+          transformations se voient, les avis se lisent — la preuve visuelle
+          puis la preuve dite. ⚠️ PHASE A : les avis affichés sont des données
+          de démonstration, et la section porte un bandeau qui le dit à
+          l'écran (voir lib/reviews/source.ts). La section ne rend RIEN si
+          aucun avis publiable n'existe, auquel cas cette ligne est invisible
+          et l'ordre d'origine est intact. */}
+      <GoogleReviews />
+      {/* « Mon bilan offert » s'intercale entre la preuve sociale et les
+          offres : le visiteur vient de voir des transformations réelles et de
+          lire ce que les élèves en disent, c'est le moment où il se demande ce
+          que ça donnerait pour lui. L'ordre Transformations → avis → bilan →
+          programmes est intentionnel. */}
       <FreeAssessment />
       <PublicPrograms />
       <Newsletter />
