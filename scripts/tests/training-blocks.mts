@@ -345,6 +345,14 @@ function makeProgramsFake(opts?: { store?: Record<string, Record<string, unknown
     payload: Record<string, unknown> | null = null;
     filters: { type: "eq" | "in"; col: string; val: unknown }[] = [];
     isSingle = false;
+    // ⚠️ AJOUTÉS LE 25/08, ET AUCUNE ASSERTION N'A BOUGÉ. Les lectures de
+    // `programs.ts` sont désormais paginées (`.order().range()`) après
+    // l'incident de troncature silencieuse. Sans ces deux méthodes, la base
+    // factice lève « order is not a function » et le harnais ne mesure plus
+    // rien. Elle rend TOUT, comme avant : le plafond est éprouvé ailleurs,
+    // par `builder-lecture-paginee.mts`.
+    tris: string[] = [];
+    plage: { debut: number; fin: number } | null = null;
     constructor(public table: string) {}
     select() {
       if (!this.op) this.op = "select";
@@ -370,6 +378,14 @@ function makeProgramsFake(opts?: { store?: Record<string, Record<string, unknown
     }
     in(col: string, val: unknown[]) {
       this.filters.push({ type: "in", col, val });
+      return this;
+    }
+    order(col: string) {
+      this.tris.push(col);
+      return this;
+    }
+    range(debut: number, fin: number) {
+      this.plage = { debut, fin };
       return this;
     }
     single() {
@@ -400,7 +416,18 @@ function makeProgramsFake(opts?: { store?: Record<string, Record<string, unknown
         store[this.table] = rows(this.table).filter((r) => !matches(r, this.filters));
         return { data: null, error: null };
       }
-      const found = rows(this.table).filter((r) => matches(r, this.filters));
+      let found = rows(this.table).filter((r) => matches(r, this.filters));
+      if (this.tris.length > 0) {
+        found = found
+          .slice()
+          .sort((a, b) =>
+            this.tris.reduce(
+              (ordre, c) => (ordre !== 0 ? ordre : String(a[c] ?? "").localeCompare(String(b[c] ?? ""))),
+              0,
+            ),
+          );
+      }
+      if (this.plage) found = found.slice(this.plage.debut, this.plage.fin + 1);
       return { data: this.isSingle ? (found[0] ?? null) : found, error: null };
     }
   }

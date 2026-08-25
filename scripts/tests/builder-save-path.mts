@@ -55,12 +55,30 @@ function creerBase() {
   let horloge = 1;
 
   function from(nom: string) {
-    const état: { op: "select" | "insert" | "update" | "delete"; valeurs?: Ligne; filtres: Array<[string, unknown]>; } = { op: "select", filtres: [] };
+    const état: {
+      op: "select" | "insert" | "update" | "delete";
+      valeurs?: Ligne;
+      filtres: Array<[string, unknown]>;
+      tris: string[];
+      plage: { debut: number; fin: number } | null;
+    } = { op: "select", filtres: [], tris: [], plage: null };
     const correspond = (l: Ligne) =>
       état.filtres.every(([c, v]) => (c.startsWith("__in__") ? (v as unknown[]).includes(l[c.slice(6)]) : l[c] === v));
     const exécuter = () => {
       const lignes = table(nom);
-      if (état.op === "select") return lignes.filter(correspond).map((l) => ({ ...l }));
+      if (état.op === "select") {
+        let sortie = lignes.filter(correspond).map((l) => ({ ...l }));
+        if (état.tris.length > 0) {
+          sortie = sortie.sort((a, b) =>
+            état.tris.reduce(
+              (ordre, c) => (ordre !== 0 ? ordre : String(a[c] ?? "").localeCompare(String(b[c] ?? ""))),
+              0,
+            ),
+          );
+        }
+        if (état.plage) sortie = sortie.slice(état.plage.debut, état.plage.fin + 1);
+        return sortie;
+      }
       if (état.op === "insert") {
         const ligne = { id: `${nom}-${(compteur += 1)}`, updated_at: `t${(horloge += 1)}`, ...état.valeurs };
         lignes.push(ligne);
@@ -83,6 +101,14 @@ function creerBase() {
       delete() { état.op = "delete"; return chaîne; },
       eq(c: string, v: unknown) { état.filtres.push([c, v]); return chaîne; },
       in(c: string, v: unknown[]) { état.filtres.push([`__in__${c}`, v]); return chaîne; },
+      // ⚠️ AJOUTÉES LE 25/08, ET AUCUNE ASSERTION N'A BOUGÉ. Les lectures de
+      // `programs.ts` sont désormais PAGINÉES (`.order().range()`) après
+      // l'incident de troncature silencieuse ; sans ces deux méthodes, la base
+      // factice lève « order is not a function » et le harnais ne mesure plus
+      // rien. Le plafond, lui, est éprouvé par `builder-lecture-paginee.mts` :
+      // cette base-ci rend tout, comme avant.
+      order(c: string) { état.tris.push(c); return chaîne; },
+      range(debut: number, fin: number) { état.plage = { debut, fin }; return chaîne; },
       limit: () => chaîne,
       maybeSingle: () => Promise.resolve({ data: exécuter()[0] ?? null, error: null }),
       single: () => {

@@ -76,6 +76,7 @@ import { isContradictoryProgramMode, resolveProgramProvisioningMode } from "@/li
 type TypedSupabaseClient = SupabaseClient<Database>;
 
 type ProgramRow = Database["public"]["Tables"]["programs"]["Row"];
+type ProgramWeekRow = Database["public"]["Tables"]["program_weeks"]["Row"];
 type WorkoutSessionRow = Database["public"]["Tables"]["workout_sessions"]["Row"];
 type WorkoutExerciseRow = Database["public"]["Tables"]["workout_exercises"]["Row"];
 type AssignmentRow = Database["public"]["Tables"]["assignments"]["Row"];
@@ -88,6 +89,87 @@ function devWarn(context: string, error: { message: string; code?: string; detai
       `[Supabase] ${context} : ${error.message}${error.code ? ` (code ${error.code})` : ""}${error.details ? ` — ${error.details}` : ""}${error.hint ? ` — ${error.hint}` : ""}`,
     );
   }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * PAGINATION DES LECTURES — L'INCIDENT DU 25/08 ET SA CAUSE
+ * ══════════════════════════════════════════════════════════════════════════
+ *
+ * LE FAIT MESURÉ. Le 25/08/2026 en production : un exercice ajouté depuis la
+ * banque était correctement ÉCRIT en base, l'enregistrement se déclarait
+ * réussi, et l'exercice disparaissait de l'écran. Comptages du jour :
+ *
+ *     workout_exercises   1 224 lignes   ← au-delà du plafond
+ *     training_blocks       369 lignes
+ *     workout_sessions      315 lignes
+ *
+ * PostgREST plafonne une réponse à `max_rows` (1 000 par défaut, voir
+ * supabase/config.toml) et TRONQUE EN SILENCE : pas d'erreur, pas de code,
+ * rien à journaliser. `loadPrograms` lisait `workout_exercises` sans borne :
+ * 224 exercices étaient donc invisibles. Les blocs, eux, passaient sous le
+ * plafond — d'où le symptôme exact : le bloc survit, son contenu disparaît.
+ *
+ * ⚠️ ET C'ÉTAIT AUTO-AGGRAVANT. Le builder se remonte sur cette lecture
+ * tronquée, puis la renvoie telle quelle à `save_training_session_blocks`,
+ * dont la dernière étape supprime tout ce qui n'est pas dans la charge. Les
+ * lignes seulement INVISIBLES devenaient donc réellement DÉTRUITES au
+ * premier enregistrement suivant.
+ *
+ * ────────────────────────────────────────────────────────────────────────
+ * DEUX DÉTAILS SANS LESQUELS CETTE PAGINATION SERAIT FAUSSE
+ * ────────────────────────────────────────────────────────────────────────
+ * 1. ON AVANCE DE `lot.length`, JAMAIS DE `TAILLE_DE_PAGE`. Si le serveur
+ *    plafonne plus bas que la page demandée (un `max_rows` à 500 face à une
+ *    page de 1 000), avancer du pas demandé sauterait la moitié des lignes,
+ *    et s'arrêter sur « lot plus court que demandé » s'arrêterait dès la
+ *    première page. Avancer du nombre RÉELLEMENT reçu est correct quel que
+ *    soit le plafond du serveur ; on ne s'arrête que sur un lot VIDE.
+ *
+ * 2. UN `.order()` EXPLICITE EST OBLIGATOIRE. Sans tri, PostgreSQL ne
+ *    garantit aucun ordre stable entre deux requêtes : des lignes peuvent
+ *    être rendues deux fois et d'autres jamais. La pagination serait alors
+ *    silencieusement lacunaire — le même genre de panne, en plus difficile
+ *    à voir. Chaque appelant trie donc sur `id`.
+ */
+const TAILLE_DE_PAGE = 1000;
+/** Garde-fou : 200 pages = 200 000 lignes. Une boucle sans fin ne doit pas exister. */
+const PAGES_MAX = 200;
+
+/**
+ * Lit TOUTES les lignes d'une requête, page après page.
+ *
+ * `page(debut, fin)` doit reconstruire la requête complète à chaque appel
+ * (un constructeur Supabase n'est pas réutilisable) et poser un `.order()`.
+ *
+ * Rend aussi `complet` : `false` si une erreur a interrompu la lecture ou si
+ * le garde-fou a été atteint. Les appelants qui écrivent ensuite DOIVENT le
+ * regarder — une lecture partielle suivie d'une écriture est exactement le
+ * mécanisme qui a détruit des données le 25/08.
+ */
+async function lireToutesLesLignes<T>(
+  contexte: string,
+  page: (
+    debut: number,
+    fin: number,
+  ) => PromiseLike<{ data: T[] | null; error: { message: string; code?: string } | null }>,
+): Promise<{ rows: T[]; complet: boolean }> {
+  const rows: T[] = [];
+  let debut = 0;
+  for (let n = 0; n < PAGES_MAX; n += 1) {
+    const { data, error } = await page(debut, debut + TAILLE_DE_PAGE - 1);
+    if (error) {
+      devWarn(`${contexte} (pagination interrompue)`, error);
+      return { rows, complet: false };
+    }
+    const lot = data ?? [];
+    if (lot.length === 0) return { rows, complet: true };
+    rows.push(...lot);
+    debut += lot.length;
+  }
+  devWarn(`${contexte} (pagination)`, {
+    message: `garde-fou atteint après ${PAGES_MAX} pages (${rows.length} lignes lues) — lecture déclarée INCOMPLÈTE`,
+  });
+  return { rows, complet: false };
 }
 
 function groupBy<T, K>(items: T[], key: (item: T) => K): Map<K, T[]> {
@@ -305,20 +387,39 @@ async function loadPrograms(supabase: TypedSupabaseClient, programRows: ProgramR
   }
   const programIds = programRows.map((p) => p.id);
 
+  // ⚠️ TOUTES CES LECTURES SONT PAGINÉES. Voir `lireToutesLesLignes` plus haut :
+  // un `select()` non borné est tronqué en silence par PostgREST au-delà de
+  // `max_rows`, et c'est ce qui a fait disparaître 224 exercices le 25/08.
   const [weeksResult, assignmentsResult, copiesResult] = await Promise.all([
-    supabase.from("program_weeks").select("*").in("program_id", programIds),
-    supabase.from("assignments").select("*").eq("content_type", "programme").in("content_id", programIds),
+    lireToutesLesLignes<ProgramWeekRow>("loadPrograms (program_weeks)", (debut, fin) =>
+      supabase.from("program_weeks").select("*").in("program_id", programIds).order("id").range(debut, fin),
+    ),
+    lireToutesLesLignes<AssignmentRow>("loadPrograms (assignments)", (debut, fin) =>
+      supabase
+        .from("assignments")
+        .select("*")
+        .eq("content_type", "programme")
+        .in("content_id", programIds)
+        .order("id")
+        .range(debut, fin),
+    ),
     // fix/program-assignment-checkbox : depuis l'individualisation, l'assignation
     // d'un programme individuel vise la COPIE de l'élève — pour afficher les
     // cases cochées du MODÈLE, il faut donc aussi ses copies (owner + source).
-    supabase.from("programs").select("id, owner_student_id, source_template_id").in("source_template_id", programIds),
+    lireToutesLesLignes<{ id: string; owner_student_id: string | null; source_template_id: string | null }>(
+      "loadPrograms (copies individuelles)",
+      (debut, fin) =>
+        supabase
+          .from("programs")
+          .select("id, owner_student_id, source_template_id")
+          .in("source_template_id", programIds)
+          .order("id")
+          .range(debut, fin),
+    ),
   ]);
-  devWarn("loadPrograms (program_weeks)", weeksResult.error);
-  devWarn("loadPrograms (assignments)", assignmentsResult.error);
-  devWarn("loadPrograms (copies individuelles)", copiesResult.error);
-  const weekRows = weeksResult.data ?? [];
-  const assignmentRows: AssignmentRow[] = assignmentsResult.data ?? [];
-  const allCopyRows = (copiesResult.data ?? []).filter(
+  const weekRows = weeksResult.rows;
+  const assignmentRows: AssignmentRow[] = assignmentsResult.rows;
+  const allCopyRows = copiesResult.rows.filter(
     (c): c is { id: string; owner_student_id: string; source_template_id: string } =>
       Boolean(c.id && c.owner_student_id && c.source_template_id),
   );
@@ -328,46 +429,88 @@ async function loadPrograms(supabase: TypedSupabaseClient, programRows: ProgramR
   // plus cocher l'élève sur le modèle. Seules les copies portant un lien
   // ACTIF participent à l'affichage ; une réassignation la réutilisera.
   const copyIds = allCopyRows.map((c) => c.id);
-  const { data: copyLinksRaw, error: copyLinksError } =
+  const copyLinksResult =
     copyIds.length > 0
-      ? await supabase.from("assignments").select("content_id").eq("content_type", "programme").in("content_id", copyIds)
-      : { data: [] as { content_id: string }[], error: null };
-  devWarn("loadPrograms (liens actifs des copies)", copyLinksError);
+      ? await lireToutesLesLignes<{ content_id: string }>("loadPrograms (liens actifs des copies)", (debut, fin) =>
+          supabase
+            .from("assignments")
+            .select("content_id")
+            .eq("content_type", "programme")
+            .in("content_id", copyIds)
+            .order("content_id")
+            .range(debut, fin),
+        )
+      : { rows: [] as { content_id: string }[], complet: true };
   const copyRows = keepCopiesWithActiveAssignment(
     allCopyRows,
-    (copyLinksRaw ?? []).map((l) => l.content_id),
+    copyLinksResult.rows.map((l) => l.content_id),
   );
 
   const weekIds = weekRows.map((w) => w.id);
-  const { data: sessionRowsRaw, error: sessionsError } =
+  const sessionsResult =
     weekIds.length > 0
-      ? await supabase.from("workout_sessions").select("*").in("program_week_id", weekIds)
-      : { data: [] as WorkoutSessionRow[], error: null };
-  devWarn("loadPrograms (workout_sessions)", sessionsError);
-  const sessionRows = sessionRowsRaw ?? [];
+      ? await lireToutesLesLignes<WorkoutSessionRow>("loadPrograms (workout_sessions)", (debut, fin) =>
+          supabase.from("workout_sessions").select("*").in("program_week_id", weekIds).order("id").range(debut, fin),
+        )
+      : { rows: [] as WorkoutSessionRow[], complet: true };
+  const sessionRows = sessionsResult.rows;
 
   const sessionIds = sessionRows.map((s) => s.id);
-  const { data: exerciseRowsRaw, error: exercisesError } =
+  const exercisesResult =
     sessionIds.length > 0
-      ? await supabase.from("workout_exercises").select("*").in("session_id", sessionIds)
-      : { data: [] as WorkoutExerciseRow[], error: null };
-  devWarn("loadPrograms (workout_exercises)", exercisesError);
-  const exerciseRows = exerciseRowsRaw ?? [];
+      ? await lireToutesLesLignes<WorkoutExerciseRow>("loadPrograms (workout_exercises)", (debut, fin) =>
+          supabase.from("workout_exercises").select("*").in("session_id", sessionIds).order("id").range(debut, fin),
+        )
+      : { rows: [] as WorkoutExerciseRow[], complet: true };
+  const exerciseRows = exercisesResult.rows;
 
-  const { data: blockRowsRaw, error: blocksError } =
+  const blocksResult =
     sessionIds.length > 0
-      ? await supabase.from("training_blocks").select("*").in("session_id", sessionIds)
-      : { data: [] as TrainingBlockRow[], error: null };
-  devWarn("loadPrograms (training_blocks)", blocksError);
-  const blockRows = blockRowsRaw ?? [];
+      ? await lireToutesLesLignes<TrainingBlockRow>("loadPrograms (training_blocks)", (debut, fin) =>
+          supabase.from("training_blocks").select("*").in("session_id", sessionIds).order("id").range(debut, fin),
+        )
+      : { rows: [] as TrainingBlockRow[], complet: true };
+  const blockRows = blocksResult.rows;
 
   const blockIds = blockRows.map((b) => b.id);
-  const { data: segmentRowsRaw, error: segmentsError } =
+  const segmentsResult =
     blockIds.length > 0
-      ? await supabase.from("training_prescriptions").select("*").in("block_id", blockIds)
-      : { data: [] as TrainingPrescriptionRow[], error: null };
-  devWarn("loadPrograms (training_prescriptions)", segmentsError);
-  const segmentRows = segmentRowsRaw ?? [];
+      ? await lireToutesLesLignes<TrainingPrescriptionRow>("loadPrograms (training_prescriptions)", (debut, fin) =>
+          supabase.from("training_prescriptions").select("*").in("block_id", blockIds).order("id").range(debut, fin),
+        )
+      : { rows: [] as TrainingPrescriptionRow[], complet: true };
+  const segmentRows = segmentsResult.rows;
+
+  /*
+   * ⚠️ UNE LECTURE PARTIELLE NE DOIT JAMAIS ALIMENTER LE BUILDER.
+   *
+   * Si l'une des lectures a été interrompue, le programme rendu serait
+   * amputé — et le prochain enregistrement renverrait cet état amputé à
+   * `save_training_session_blocks`, dont la dernière étape supprime tout ce
+   * qui n'est pas dans la charge. C'est exactement l'enchaînement qui a
+   * détruit des données le 25/08. On lève plutôt que de rendre un programme
+   * incomplet : l'écran affichera une erreur, ce qui est infiniment
+   * préférable à un builder qui propose d'écraser ce qu'il n'a pas lu.
+   */
+  const lecturesIncompletes = (
+    [
+      ["program_weeks", weeksResult.complet],
+      ["assignments", assignmentsResult.complet],
+      ["copies individuelles", copiesResult.complet],
+      ["liens actifs des copies", copyLinksResult.complet],
+      ["workout_sessions", sessionsResult.complet],
+      ["workout_exercises", exercisesResult.complet],
+      ["training_blocks", blocksResult.complet],
+      ["training_prescriptions", segmentsResult.complet],
+    ] as const
+  )
+    .filter(([, complet]) => !complet)
+    .map(([nom]) => nom);
+  if (lecturesIncompletes.length > 0) {
+    throw new Error(
+      `loadPrograms : lecture incomplète (${lecturesIncompletes.join(", ")}). Programmes non rendus pour ne pas risquer un écrasement à l'enregistrement.`,
+    );
+  }
 
   const weeksByProgram = groupBy(weekRows, (w) => w.program_id);
   const sessionsByWeek = groupBy(sessionRows, (s) => s.program_week_id);
@@ -418,9 +561,16 @@ async function loadPrograms(supabase: TypedSupabaseClient, programRows: ProgramR
 
 /** Liste de tous les programmes Supabase pour /admin/programmes, plus récents en premier. */
 export async function getPrograms(supabase: TypedSupabaseClient): Promise<AdminProgram[]> {
-  const { data, error } = await supabase.from("programs").select("*").order("created_at", { ascending: false });
-  devWarn("getPrograms", error);
-  return loadPrograms(supabase, data ?? []);
+  // Paginé comme les lectures de `loadPrograms` : la table est petite
+  // aujourd'hui, et c'est exactement ce qu'on disait de `workout_exercises`
+  // avant qu'elle ne franchisse le plafond.
+  const { rows, complet } = await lireToutesLesLignes<ProgramRow>("getPrograms", (debut, fin) =>
+    supabase.from("programs").select("*").order("created_at", { ascending: false }).order("id").range(debut, fin),
+  );
+  if (!complet) {
+    throw new Error("getPrograms : lecture incomplète de la liste des programmes.");
+  }
+  return loadPrograms(supabase, rows);
 }
 
 /**
@@ -760,20 +910,58 @@ async function duplicateProgramCore(
  *   nouvel exercice ; un id en base absent du nouveau jeu de données est
  *   supprimé.
  */
+/**
+ * Ce que l'écriture de structure a RÉELLEMENT fait.
+ *
+ * ⚠️ CE TYPE EXISTE PARCE QUE `void` MENTAIT. Jusqu'au 25/08,
+ * `diffProgramStructure` ne rendait rien et `updateProgram` rendait `true`
+ * juste après : une séance sautée, une semaine non insérée ou une lecture
+ * ratée produisaient un « enregistré » à l'écran. Le coach voyait « À JOUR »
+ * et son travail avait disparu.
+ */
+interface BilanDeStructure {
+  /** `false` dès qu'une séance n'a PAS été écrite comme demandé. */
+  readonly complet: boolean;
+  /** Ce qui a été sauté, nommément. Vide quand tout est passé. */
+  readonly ignorees: readonly string[];
+}
+
 async function diffProgramStructure(
   supabase: TypedSupabaseClient,
   programId: string,
   sessions: AdminWorkoutSession[],
   mode: ProgramContentMode,
-): Promise<void> {
+): Promise<BilanDeStructure> {
+  // Chaque `continue` silencieux vient s'inscrire ici. Une séance sautée est
+  // une PERTE pour le coach, pas un détail d'implémentation.
+  const ignorees: string[] = [];
   const incomingWeekNumbers = Array.from(new Set(sessions.map((s) => s.weekNumber))).sort((a, b) => a - b);
 
-  const { data: existingWeeksRaw, error: existingWeeksError } = await supabase
-    .from("program_weeks")
-    .select("id, week_number")
-    .eq("program_id", programId);
-  devWarn("diffProgramStructure (program_weeks lecture)", existingWeeksError);
-  const existingWeeks = existingWeeksRaw ?? [];
+  /*
+   * ⚠️ CETTE LECTURE EST PAGINÉE, ET SON INTÉGRITÉ CONDITIONNE L'ÉCRITURE.
+   *
+   * Tronquée, elle rendrait des semaines existantes INVISIBLES : elles
+   * seraient réinsérées en double, et leurs séances traitées comme neuves —
+   * donc les vraies lignes marquées à la suppression. Une lecture partielle
+   * ici ne coûte pas un affichage, elle coûte des données.
+   */
+  const semainesExistantes = await lireToutesLesLignes<{ id: string; week_number: number }>(
+    "diffProgramStructure (program_weeks lecture)",
+    (debut, fin) =>
+      supabase
+        .from("program_weeks")
+        .select("id, week_number")
+        .eq("program_id", programId)
+        .order("id")
+        .range(debut, fin),
+  );
+  if (!semainesExistantes.complet) {
+    return {
+      complet: false,
+      ignorees: [`lecture des semaines du programme ${programId} incomplète — aucune écriture de structure tentée`],
+    };
+  }
+  const existingWeeks = semainesExistantes.rows;
 
   const weekIdByNumber = new Map<number, string>(existingWeeks.map((w) => [w.week_number, w.id]));
 
@@ -803,12 +991,32 @@ async function diffProgramStructure(
 
   const keptOrNewWeekIds = incomingWeekNumbers.map((n) => weekIdByNumber.get(n)).filter((id): id is string => Boolean(id));
 
-  const { data: existingSessionsRaw, error: existingSessionsError } =
+  /*
+   * ⚠️ MÊME ENJEU, EN PIRE. Une séance absente de cette lecture n'entre pas
+   * dans `idsConserves` : elle est traitée comme neuve, et sa VRAIE ligne
+   * part dans `sessionsToDelete`. Une troncature silencieuse ici supprime
+   * des séances entières.
+   */
+  const seancesExistantes =
     keptOrNewWeekIds.length > 0
-      ? await supabase.from("workout_sessions").select("id, program_week_id, day").in("program_week_id", keptOrNewWeekIds)
-      : { data: [] as { id: string; program_week_id: string; day: string }[], error: null };
-  devWarn("diffProgramStructure (workout_sessions lecture)", existingSessionsError);
-  const existingSessions = existingSessionsRaw ?? [];
+      ? await lireToutesLesLignes<{ id: string; program_week_id: string; day: string }>(
+          "diffProgramStructure (workout_sessions lecture)",
+          (debut, fin) =>
+            supabase
+              .from("workout_sessions")
+              .select("id, program_week_id, day")
+              .in("program_week_id", keptOrNewWeekIds)
+              .order("id")
+              .range(debut, fin),
+        )
+      : { rows: [] as { id: string; program_week_id: string; day: string }[], complet: true };
+  if (!seancesExistantes.complet) {
+    return {
+      complet: false,
+      ignorees: [`lecture des séances du programme ${programId} incomplète — aucune suppression tentée`],
+    };
+  }
+  const existingSessions = seancesExistantes.rows;
 
   // ════════════════════════════════════════════════════════════════════════
   // ⚠️ L'IDENTITÉ D'UNE SÉANCE EST SON `id`, PLUS SA CASE DANS LA GRILLE
@@ -833,7 +1041,14 @@ async function diffProgramStructure(
 
   for (const session of sessions) {
     const weekId = weekIdByNumber.get(session.weekNumber);
-    if (!weekId) continue;
+    if (!weekId) {
+      // ⚠️ SEMAINE ABSENTE = SÉANCE PERDUE, PAS SÉANCE IGNORÉE. Son insertion
+      // a échoué plus haut. Sauter en silence laissait la séance tomber dans
+      // `sessionsToDelete` : sa ligne était SUPPRIMÉE et l'enregistrement se
+      // déclarait réussi. On le compte comme un échec.
+      ignorees.push(`séance ${session.id} (semaine ${session.weekNumber} indisponible)`);
+      continue;
+    }
     const ligne = existingRowById.get(session.id);
     // ⚠️ UNE SÉANCE NE CHANGE PAS DE SEMAINE — et si elle le faisait un jour,
     // on ne le maquillerait pas. `session_patch` n'accepte pas
@@ -870,7 +1085,10 @@ async function diffProgramStructure(
   const insertedByKey = new Map<AdminWorkoutSession, { id: string; updatedAt: string }>();
   for (const session of sessionsToInsert) {
     const weekId = weekIdByNumber.get(session.weekNumber);
-    if (!weekId) continue;
+    if (!weekId) {
+      ignorees.push(`séance ${session.id} (semaine ${session.weekNumber} indisponible à l'insertion)`);
+      continue;
+    }
     // En canonique, is_rest_day/session_type DÉRIVÉS des blocs (jamais saisis).
     const canonical = mode === "canonical" ? toCanonicalSessionSaveData(session) : null;
     const { data: sessionRow, error } = await supabase
@@ -916,12 +1134,23 @@ async function diffProgramStructure(
   // directement de blocks[], donc pas de lecture.
   const strengthBlockIdBySession = new Map<string, string>();
   if (mode === "legacy" && existingSessionIds.length > 0) {
-    const { data: blockRows, error: blocksError } = await supabase
-      .from("training_blocks")
-      .select("id, session_id, block_type")
-      .in("session_id", existingSessionIds);
-    devWarn("diffProgramStructure (training_blocks lecture)", blocksError);
-    for (const row of blockRows ?? []) {
+    const blocsExistants = await lireToutesLesLignes<{ id: string; session_id: string; block_type: string }>(
+      "diffProgramStructure (training_blocks lecture)",
+      (debut, fin) =>
+        supabase
+          .from("training_blocks")
+          .select("id, session_id, block_type")
+          .in("session_id", existingSessionIds)
+          .order("id")
+          .range(debut, fin),
+    );
+    if (!blocsExistants.complet) {
+      return {
+        complet: false,
+        ignorees: [`lecture des blocs du programme ${programId} incomplète — aucune écriture legacy tentée`],
+      };
+    }
+    for (const row of blocsExistants.rows) {
       if (row.block_type !== "cardio") strengthBlockIdBySession.set(row.session_id, row.id);
     }
   }
@@ -946,6 +1175,7 @@ async function diffProgramStructure(
           devWarn("diffProgramStructure (séance existante sans updatedAt de snapshot)", {
             message: `séance ${existingId} ignorée`,
           });
+          ignorees.push(`séance ${existingId} (aucun updatedAt de snapshot)`);
           continue;
         }
         // Verrou = SNAPSHOT chargé ; blocks[] + session_patch atomique (UPDATE
@@ -962,7 +1192,11 @@ async function diffProgramStructure(
         );
       } else {
         const inserted = insertedByKey.get(session);
-        if (!inserted) continue;
+        if (!inserted) {
+          // L'INSERT de la séance a échoué : son contenu n'a nulle part où aller.
+          ignorees.push(`séance ${session.id} (insertion échouée, contenu non écrit)`);
+          continue;
+        }
         // Nouvelle séance : champs déjà posés par l'INSERT (pas de session_patch) ;
         // verrou = updated_at exact de l'INSERT ; repos (aucun bloc) → pas de RPC.
         if (data.blocks.length > 0) {
@@ -985,6 +1219,7 @@ async function diffProgramStructure(
         devWarn("diffProgramStructure (séance existante sans updatedAt de snapshot)", {
           message: `séance ${existingId} ignorée`,
         });
+        ignorees.push(`séance ${existingId} (aucun updatedAt de snapshot, chemin legacy)`);
         continue;
       }
       await saveTrainingSessionBlocks(
@@ -1007,7 +1242,10 @@ async function diffProgramStructure(
       );
     } else {
       const inserted = insertedByKey.get(session);
-      if (!inserted) continue;
+      if (!inserted) {
+        ignorees.push(`séance ${session.id} (insertion échouée, contenu non écrit, chemin legacy)`);
+        continue;
+      }
       await saveTrainingSessionBlocks(
         supabase,
         buildLegacySessionBlocksInput({
@@ -1018,6 +1256,8 @@ async function diffProgramStructure(
       );
     }
   }
+
+  return { complet: ignorees.length === 0, ignorees };
 }
 
 /**
@@ -1076,7 +1316,26 @@ export async function updateProgram(
   // updateProgram est l'entrée du BUILDER multi-blocs (seul appelant) : mode
   // CANONIQUE explicite — la persistance vient de blocks[], jamais de
   // exercises[]/cardioBlocks[]/sessionType.
-  await diffProgramStructure(supabase, programId, data.sessions, "canonical");
+  //
+  // ⚠️ LE RÉSULTAT EST REGARDÉ, ET C'EST UNE CORRECTION DU 25/08. Cette ligne
+  // était `await diffProgramStructure(...); return true;` : le compte-rendu
+  // était jeté, et une séance sautée passait pour un enregistrement réussi.
+  // L'écran affichait « À JOUR » sur un travail perdu. Une structure
+  // incomplète est désormais un ÉCHEC, et le builder le dira.
+  const bilan = await diffProgramStructure(supabase, programId, data.sessions, "canonical");
+  if (!bilan.complet) {
+    devWarn("updateProgram (structure incomplète)", {
+      message: `programme ${programId} : ${bilan.ignorees.length} séance(s) non écrite(s) — ${bilan.ignorees.join(" ; ")}`,
+    });
+    // ⚠️ ON LÈVE PLUTÔT QUE DE RENDRE `false`. `false` remonte en
+    // « SAVE_FAILED », que le message utilisateur traduit par un problème de
+    // DROITS — ce serait un diagnostic faux, et le coach chercherait au
+    // mauvais endroit. Un code distinct permet de lui dire ce qui s'est
+    // réellement passé.
+    throw new Error(
+      `STRUCTURE_INCOMPLETE : ${bilan.ignorees.length} séance(s) non écrite(s) — ${bilan.ignorees.join(" ; ")}`,
+    );
+  }
   return true;
 }
 
