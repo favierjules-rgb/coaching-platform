@@ -35,8 +35,21 @@ export interface GoogleReview {
   readonly rating: NoteAvis;
   /** Texte de l'avis, tel quel. Jamais reformulé, jamais tronqué. */
   readonly text: string;
-  /** Date de publication, au format ISO 8601. */
-  readonly date: string;
+  /**
+   * Date de publication au format ISO 8601, ou `null` quand elle est
+   * INCONNUE.
+   *
+   * ⚠️ `null` N'EST PAS UN OUBLI, C'EST UNE INFORMATION. L'interface Google
+   * n'affiche jamais de date absolue : elle écrit « il y a 4 jours »,
+   * « 6 days ago ». Un avis recopié depuis une capture ne peut donc pas en
+   * porter une, et convertir « il y a 4 jours » en date ISO reviendrait à
+   * fabriquer une donnée à partir de l'instant de la recopie.
+   *
+   * Un avis sans date affiche simplement une carte sans ligne de date — voir
+   * `moisEtAnnee()` dans la pile. Mieux vaut une information absente qu'une
+   * information inventée.
+   */
+  readonly date: string | null;
   /** Lien vers l'avis chez Google, quand il existe. Jamais fabriqué. */
   readonly googleUrl: string | null;
 }
@@ -79,12 +92,28 @@ export function estPubliable(avis: GoogleReview): boolean {
   return avis.rating === NOTE_PUBLIABLE && avis.text.trim().length > 0;
 }
 
-/** Les avis affichables, du plus récent au plus ancien. */
+/**
+ * Les avis affichables, du plus récent au plus ancien.
+ *
+ * ⚠️ LES AVIS SANS DATE CONSERVENT L'ORDRE DU TABLEAU SOURCE. `Array.sort`
+ * est stable : deux avis sans date se comparent à 0 et ne bougent donc pas
+ * l'un par rapport à l'autre. C'est ce qui rend l'affichage déterministe
+ * quand AUCUNE date n'est connue — cas actuel des neuf avis recopiés, où
+ * l'ordre visible est exactement l'ordre du tableau.
+ *
+ * ⚠️ ET ILS PASSENT APRÈS LES AVIS DATÉS, jamais avant : une date absente ne
+ * doit pas se faire passer pour une date récente.
+ */
 export function avisPubliables(avis: readonly GoogleReview[]): readonly GoogleReview[] {
   return avis
     .filter(estPubliable)
     .slice()
-    .sort((a, b) => b.date.localeCompare(a.date));
+    .sort((a, b) => {
+      if (a.date === null && b.date === null) return 0;
+      if (a.date === null) return 1;
+      if (b.date === null) return -1;
+      return b.date.localeCompare(a.date);
+    });
 }
 
 /**

@@ -236,40 +236,108 @@ await test("R2 — desktop : les cartes se RECOUVRENT, ce n'est pas une grille s
   // de géométrie.
   assert.ok(g.nb >= 6, `l'effet de pile demande plusieurs cartes — ${g.nb} rendues`);
 
-  // Au moins une paire voisine doit se chevaucher horizontalement : sinon la
-  // « pile » n'est qu'une rangée de cartes côte à côte.
-  let recouvrements = 0;
-  for (let i = 1; i < g.rects.length; i += 1) {
-    if (g.rects[i].x < g.rects[i - 1].droite - 4) recouvrements += 1;
+  /*
+   * ⚠️ CE TEST EXIGEAIT DES RECOUVREMENTS ENTRE VOISINES. IL N'EN EXIGE PLUS,
+   * et c'est un changement de contrat assumé.
+   *
+   * Le recouvrement était produit par des marges négatives, et il a coûté
+   * deux défauts réels : du texte, puis un en-tête, passés sous la carte
+   * d'à côté. La consigne est désormais explicite — le désordre vient des
+   * POSITIONS, les gouttières sont plus larges que l'étalement des décalages,
+   * donc deux voisines ne peuvent plus se toucher.
+   *
+   * Ce qui reste à prouver, et qui est la vraie exigence : que la composition
+   * ne soit PAS une grille sagement alignée.
+   */
+  const xs = g.rects.map((r) => Math.round(r.x));
+  const ys = g.rects.map((r) => Math.round(r.y));
+
+  // Aucune carte ne partage exactement la position d'une autre.
+  const positions = new Set(g.rects.map((r) => `${Math.round(r.x)}|${Math.round(r.y)}`));
+  assert.equal(positions.size, g.rects.length, "deux cartes occupent la même position");
+
+  // Les cartes d'une même rangée ne sont pas alignées au pixel près : c'est
+  // précisément ce qui distingue cette composition d'un tableau.
+  const rangees = new Map<number, number[]>();
+  for (const r of g.rects) {
+    const cle = Math.round(r.y / 120);
+    rangees.set(cle, [...(rangees.get(cle) ?? []), Math.round(r.y)]);
   }
+  const rangeeDesalignee = [...rangees.values()].some((v) => v.length > 1 && new Set(v).size > 1);
+  assert.ok(rangeeDesalignee, "au moins une rangée doit être désalignée verticalement");
+
+  // Et les écarts horizontaux entre cartes voisines ne sont pas constants.
+  const ecarts = xs.slice(1).map((v, i) => v - xs[i]).filter((e) => e > 0);
   assert.ok(
-    recouvrements >= 3,
-    `les cartes doivent se recouvrir — seulement ${recouvrements} recouvrement(s) sur ${g.rects.length - 1}`,
+    new Set(ecarts).size > 1,
+    `les espacements horizontaux doivent être irréguliers — ${[...new Set(ecarts)].join(", ")}`,
   );
 
-  // Et elles ne sont pas toutes à la même hauteur : le décalage vertical fait
-  // partie de la composition.
-  const y = new Set(g.rects.map((r) => Math.round(r.y)));
-  assert.ok(y.size >= 2, "les cartes doivent être décalées verticalement");
+  assert.ok(new Set(ys).size >= 2, "les cartes doivent être décalées verticalement");
   await page.context().close();
 });
 
-await test("R3 — mobile : pile VERTICALE, chaque carte pleine largeur", async () => {
+await test("R3 — mobile : un AMAS COMPACT, pas une colonne interminable", async () => {
+  /*
+   * ⚠️ CE TEST EXIGEAIT UNE COLONNE DE CARTES PLEINE LARGEUR. IL EXIGE
+   * MAINTENANT L'INVERSE, et le renversement est demandé.
+   *
+   * Neuf cartes pleine largeur mesuraient plus de trois écrans : la secousse
+   * de groupe y était invisible, on ne voyait bouger que la carte touchée et
+   * sa voisine. Or c'est tout l'intérêt du geste. Les cartes sont donc
+   * réduites et rangées sur deux colonnes.
+   *
+   * L'invariant mesuré : l'ensemble tient dans une hauteur qui permet de VOIR
+   * le groupe réagir, sans jamais déborder latéralement.
+   */
   const page = await atelier({ width: 390, height: 844 }, { tactile: true });
   const g = await geometrie(page);
 
-  // Chaque carte commence sous la précédente : sur un pouce, on lit, on ne
-  // devine pas.
-  for (let i = 1; i < g.rects.length; i += 1) {
-    assert.ok(
-      g.rects[i].y > g.rects[i - 1].y,
-      `mobile : la carte ${i + 1} doit être SOUS la carte ${i}`,
-    );
+  // ── DEUX COLONNES : des cartes partagent une même ligne.
+  const parLigne = new Map<number, number>();
+  for (const r of g.rects) {
+    const ligne = Math.round(r.y / 60);
+    parLigne.set(ligne, (parLigne.get(ligne) ?? 0) + 1);
   }
-  // Et aucune n'est plus étroite que l'écran moins ses marges.
+  const lignesDoubles = [...parLigne.values()].filter((n) => n >= 2).length;
+  assert.ok(
+    lignesDoubles >= 3,
+    `au moins trois lignes doivent porter deux cartes — ${lignesDoubles}`,
+  );
+
+  // ── DES CARTES PETITES : c'est ce qui rend l'amas visible d'un coup d'œil.
   for (const [i, r] of g.rects.entries()) {
-    assert.ok(r.w >= 300, `mobile : la carte ${i + 1} ne fait que ${Math.round(r.w)} px de large`);
+    assert.ok(
+      r.w < 200,
+      `mobile : la carte ${i + 1} fait ${Math.round(r.w)} px — trop large pour un amas`,
+    );
+    assert.ok(r.w > 120, `mobile : la carte ${i + 1} est illisible (${Math.round(r.w)} px)`);
   }
+
+  // ── UN AMAS COMPACT : la hauteur totale de la pile reste de l'ordre d'un
+  // écran, sans quoi le mouvement du groupe ne se lit pas.
+  const hauteur = await page.evaluate(() => {
+    const p = document.querySelector<HTMLElement>("[data-avis-pile]");
+    return p?.offsetHeight ?? 0;
+  });
+  /*
+   * ⚠️ LE SEUIL EST EXPRIMÉ EN HAUTEURS D'ÉCRAN, PAS EN PIXELS RONDS.
+   *
+   * La propriété qui compte n'est pas « moins de mille pixels », c'est « on
+   * voit assez de l'ensemble pour que sa réaction se lise ». Un plafond en
+   * pixels absolus n'aurait aucun sens sur un écran plus haut, et
+   * m'inviterait surtout à rogner le contenu jusqu'à tomber sous le chiffre.
+   * L'ancienne colonne pleine largeur dépassait TROIS écrans ; une pile et
+   * quart reste largement lisible d'un coup d'œil.
+   */
+  assert.ok(
+    hauteur <= 844 * 1.3,
+    `la pile mobile doit rester compacte — ${Math.round(hauteur)} px pour un écran de 844 px`,
+  );
+
+  // ── ET AUCUN DÉBORDEMENT LATÉRAL malgré les décalages.
+  assert.ok(g.scrollWidth <= g.innerWidth + 1, "aucun débordement horizontal");
+
   await page.screenshot({ path: join(CAPTURES, "mobile-pile.png"), fullPage: true });
   await page.context().close();
 });
@@ -325,14 +393,39 @@ await test("R5 — les voisines LAISSENT DE LA PLACE à la carte mise en avant",
   await page.waitForTimeout(320);
   const apres = await geometrie(page);
 
-  // La carte qui SUIT la carte mise en avant doit s'être écartée vers la
-  // droite : c'est le « les cartes voisines se déplacent légèrement ».
-  // L'écartement est une marge posée sur le `<li>` : on mesure donc l'hôte,
-  // pas la carte (dont la position dépend en plus de sa propre rotation).
-  const deplacement = apres.hotes[3].x - avant.hotes[3].x;
+  /*
+   * ⚠️ CE TEST EXIGEAIT QUE LA VOISINE S'ÉCARTE. IL EXIGE MAINTENANT
+   * L'INVERSE, et le renversement est délibéré.
+   *
+   * L'écartement venait d'une marge négative annulée au survol. Or déplier un
+   * avis de huit cents caractères fait grandir la carte : si ses voisines
+   * bougeaient en même temps, toute la composition sauterait sous le curseur,
+   * et viser une carte deviendrait un jeu d'adresse. Les hôtes ont donc une
+   * hauteur fixe et les cartes sont en position absolue — la carte mise en
+   * avant grandit PAR-DESSUS, sans déplacer personne.
+   *
+   * L'invariant mesuré : les voisines ne bougent pas d'un pixel.
+   */
+  for (const i of [0, 1, 3, 4]) {
+    if (!avant.hotes[i] || !apres.hotes[i]) continue;
+    assert.ok(
+      Math.abs(apres.hotes[i].x - avant.hotes[i].x) < 1.5,
+      `la carte ${i + 1} a bougé horizontalement de ${Math.round(apres.hotes[i].x - avant.hotes[i].x)} px`,
+    );
+    assert.ok(
+      Math.abs(apres.hotes[i].y - avant.hotes[i].y) < 1.5,
+      `la carte ${i + 1} a bougé verticalement de ${Math.round(apres.hotes[i].y - avant.hotes[i].y)} px`,
+    );
+  }
+
+  // Et la carte visée, elle, a bien grandi.
   assert.ok(
-    deplacement > 2,
-    `la voisine de droite doit s'écarter — déplacement mesuré : ${Math.round(deplacement)} px`,
+    apres.rects[2].w > avant.rects[2].w + 1,
+    `la carte mise en avant doit s'élargir — ${Math.round(avant.rects[2].w)} → ${Math.round(apres.rects[2].w)} px`,
+  );
+  assert.ok(
+    apres.rects[2].h > avant.rects[2].h + 1,
+    "et grandir en hauteur, puisqu'elle dévoile l'avis entier",
   );
   await page.context().close();
 });
@@ -560,24 +653,65 @@ await test("R7 — aucune carte n'est transparente ni masquée au repos", async 
   await page.context().close();
 });
 
-await test("R8 — le texte n'est jamais tronqué, quelle que soit sa longueur", async () => {
+await test("R8 — écrêté au repos, ENTIER au survol — et jamais coupé sans recours", async () => {
+  /*
+   * ⚠️ CE TEST INTERDISAIT TOUT ÉCRÊTAGE. LE CONTRAT A CHANGÉ : au repos, la
+   * carte ne montre que les premières lignes ; le texte complet apparaît au
+   * survol. Ce qui serait inacceptable, et que ce test verrouille désormais,
+   * c'est un texte coupé SANS MOYEN DE LE LIRE.
+   *
+   * Trois choses sont donc mesurées : l'écrêtage existe au repos, le texte
+   * intégral est dans le DOM malgré lui, et le survol le rend entièrement
+   * visible.
+   */
   const page = await atelier({ width: 1440, height: 900 });
-  const debordements = await page.evaluate(() =>
+
+  const repos = await page.evaluate(() =>
     [...document.querySelectorAll<HTMLElement>("[data-avis-pile] .avis-texte")].map((p, i) => ({
       i,
-      // Un texte coupé a un contenu plus haut que sa boîte.
       coupe: p.scrollHeight > p.clientHeight + 1,
-      clamp: getComputedStyle(p).webkitLineClamp,
-      overflow: getComputedStyle(p).overflow,
+      lignes: getComputedStyle(p).webkitLineClamp,
+      // ⚠️ LE TEXTE COMPLET EST DANS LE DOM MÊME ÉCRÊTÉ : c'est ce qui
+      // distingue une mise en page d'un masquage.
+      caracteres: (p.textContent ?? "").length,
     })),
   );
-  for (const d of debordements) {
-    assert.ok(!d.coupe, `le texte de la carte ${d.i + 1} est tronqué`);
-    assert.ok(
-      d.clamp === "none" || d.clamp === "" || d.clamp === "auto",
-      `la carte ${d.i + 1} porte un line-clamp (${d.clamp})`,
-    );
+
+  const ecretees = repos.filter((r) => r.coupe);
+  assert.ok(
+    ecretees.length >= 3,
+    `l'écrêtage au repos doit être visible sur plusieurs cartes — ${ecretees.length}`,
+  );
+  for (const r of repos) {
+    assert.notEqual(r.lignes, "none", `la carte ${r.i + 1} ne porte aucun écrêtage au repos`);
+    assert.ok(r.caracteres > 0, `le texte de la carte ${r.i + 1} doit rester dans le DOM`);
   }
+
+  // ── LE SURVOL REND L'AVIS ENTIER.
+  const cible = ecretees[0].i + 1;
+  const avantSurvol = repos[ecretees[0].i].caracteres;
+  await page.hover(`[data-avis-pile] > li:nth-child(${cible}) .avis-carte`);
+  await page.waitForTimeout(320);
+  const survole = await page.evaluate((n: number) => {
+    const p = document.querySelector<HTMLElement>(
+      `[data-avis-pile] > li:nth-child(${n}) .avis-texte`,
+    );
+    if (!p) return null;
+    return {
+      coupe: p.scrollHeight > p.clientHeight + 1,
+      lignes: getComputedStyle(p).webkitLineClamp,
+      caracteres: (p.textContent ?? "").length,
+    };
+  }, cible);
+
+  assert.ok(survole, "la carte survolée doit être trouvée");
+  assert.ok(!survole.coupe, `le texte de la carte ${cible} reste tronqué au survol`);
+  assert.equal(survole.lignes, "none", "l'écrêtage doit être levé au survol");
+  assert.equal(
+    survole.caracteres,
+    avantSurvol,
+    "le survol ne doit RIEN ajouter au texte — il le dévoile, il ne le complète pas",
+  );
   await page.context().close();
 });
 
@@ -701,7 +835,7 @@ await test("R11 — AUCUN avis de moins de 5 étoiles n'atteint le rendu réel",
   await page.context().close();
 });
 
-await test("R12 — le bandeau de démonstration est VISIBLE à l'écran", async () => {
+await test("R12 — le bandeau de provenance est VISIBLE à l'écran", async () => {
   const page = await atelier({ width: 1440, height: 900 });
   const bandeau = await page.evaluate(() => {
     const e = document.querySelector<HTMLElement>("[data-avis-demonstration]");
@@ -717,12 +851,231 @@ await test("R12 — le bandeau de démonstration est VISIBLE à l'écran", async
     };
   });
   assert.ok(bandeau, "le bandeau doit être présent");
-  assert.ok(/démonstration/i.test(bandeau.texte), "il dit qu'il s'agit d'une démonstration");
-  assert.ok(/pas de vrais avis/i.test(bandeau.texte), "et le dit sans ambiguïté");
+  // ⚠️ LE LIBELLÉ A CHANGÉ DE PROPOS : les avis affichés sont RÉELS, seule
+  // leur synchronisation ne l'est pas. Voir le test 7 de `avis-google.mts`.
+  assert.ok(
+    /recopiés manuellement/i.test(bandeau.texte),
+    "il dit que les avis sont recopiés à la main",
+  );
+  assert.ok(/non synchronisés/i.test(bandeau.texte), "et qu'ils ne sont pas synchronisés");
+  // ⚠️ ET SURTOUT : il ne doit PAS prétendre que ces avis seraient faux. Ils
+  // sont réels, écrits par des clients. L'ancienne rédaction l'affirmait, ce
+  // qui est devenu un mensonge le jour où le mock a cessé d'être inventé.
+  assert.ok(
+    !/pas de vrais avis/i.test(bandeau.texte),
+    "le bandeau ne doit pas nier la réalité des avis affichés",
+  );
   // Présent dans le DOM ne suffit pas : il doit être PEINT.
   assert.ok(bandeau.largeur > 100 && bandeau.hauteur > 10, "il occupe une place réelle à l'écran");
   assert.equal(bandeau.opacite, 1, "il n'est pas atténué");
   assert.notEqual(bandeau.affichage, "none", "il n'est pas masqué");
+  await page.context().close();
+});
+
+/* ═══════ R13-R15. HORIZONTALITÉ ET RÉACTION DE GROUPE ═══════ */
+
+await test("R13 — AUCUNE carte n'est tournée : mesuré dans la matrice calculée", async () => {
+  /*
+   * ⚠️ ON NE LIT PAS LE CSS, ON LIT CE QUE LE NAVIGATEUR APPLIQUE.
+   *
+   * Une inclinaison pourrait revenir par une variable, un héritage, une
+   * classe utilitaire. La seule preuve qui vaut est la matrice calculée :
+   * `matrix(a, b, c, d, e, f)`. Une transformation sans rotation ni
+   * cisaillement a b = c = 0. Toute inclinaison, quelle qu'en soit l'origine,
+   * fait sortir b et c de zéro.
+   */
+  const page = await atelier({ width: 1440, height: 900 });
+
+  const matrices = await page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>("[data-avis-pile] .avis-carte")].map((e, i) => ({
+      i,
+      transform: getComputedStyle(e).transform,
+    })),
+  );
+
+  const sansRotation = (transform: string, ou: string) => {
+    if (transform === "none") return;
+    const valeurs = /matrix\(([^)]+)\)/.exec(transform);
+    assert.ok(valeurs, `${ou} : transformation illisible (${transform})`);
+    const [, b, c] = valeurs[1].split(",").map((v) => Number(v.trim()));
+    assert.ok(Math.abs(b) < 1e-6, `${ou} : la carte est tournée (b = ${b})`);
+    assert.ok(Math.abs(c) < 1e-6, `${ou} : la carte est cisaillée (c = ${c})`);
+  };
+
+  for (const m of matrices) sansRotation(m.transform, `repos, carte ${m.i + 1}`);
+  assert.ok(matrices.length >= 6, `toutes les cartes doivent être mesurées — ${matrices.length}`);
+
+  // ── ET AU SURVOL, où l'ancienne version remettait explicitement `rotate(0)`.
+  await page.hover("[data-avis-pile] > li:nth-child(2) .avis-carte");
+  await page.waitForTimeout(320);
+  const auSurvol = await page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>("[data-avis-pile] .avis-carte")].map((e, i) => ({
+      i,
+      transform: getComputedStyle(e).transform,
+    })),
+  );
+  for (const m of auSurvol) sansRotation(m.transform, `survol, carte ${m.i + 1}`);
+
+  await page.screenshot({ path: join(CAPTURES, "survol-texte-complet.png"), fullPage: true });
+  await page.context().close();
+});
+
+await test("R14 — tactile : le GROUPE réagit, et c'est le conteneur qui bouge", async () => {
+  /*
+   * ⚠️ LA DIFFÉRENCE MESURÉE ICI EST TOUTE LA DEMANDE.
+   *
+   * « Le groupe réagit » et « chaque carte réagit » produisent deux
+   * impressions opposées : une pile qu'on effleure, ou neuf objets qui
+   * sursautent chacun dans leur coin. Le test vérifie donc DEUX choses à la
+   * fois — que le conteneur bouge, ET que les cartes, elles, ne bougent pas
+   * d'elles-mêmes.
+   */
+  const page = await atelier({ width: 390, height: 844 }, { tactile: true });
+
+  const lire = () =>
+    page.evaluate(() => {
+      const pile = document.querySelector<HTMLElement>("[data-avis-pile]");
+      return {
+        groupe: pile ? getComputedStyle(pile).transform : "absent",
+        secousse: pile?.dataset.avisSecousse ?? null,
+        origine: pile ? getComputedStyle(pile).transformOrigin : "",
+        variables: {
+          x: pile?.style.getPropertyValue("--avis-groupe-x") ?? "",
+          y: pile?.style.getPropertyValue("--avis-groupe-y") ?? "",
+          rotation: pile?.style.getPropertyValue("--avis-groupe-rotation") ?? "",
+        },
+        cartes: [...document.querySelectorAll<HTMLElement>("[data-avis-pile] .avis-carte")].map(
+          (e) => getComputedStyle(e).transform,
+        ),
+      };
+    });
+
+  const avant = await lire();
+  assert.equal(avant.variables.x, "0px", "au repos le groupe ne bouge pas");
+  assert.equal(avant.secousse, null, "et il ne porte pas la marque de secousse");
+
+  await page.tap("[data-avis-pile] > li:nth-child(2) .avis-carte");
+  await page.waitForTimeout(40);
+  const pendant = await lire();
+
+  // ── 1. LE GROUPE A BOUGÉ.
+  assert.equal(pendant.secousse, "true", "le conteneur porte la marque de secousse");
+  assert.notEqual(pendant.groupe, avant.groupe, "la transformation du conteneur doit changer");
+  const dx = parseFloat(pendant.variables.x);
+  const dy = parseFloat(pendant.variables.y);
+  assert.ok(
+    Math.abs(dx) + Math.abs(dy) > 0,
+    `le groupe doit se déplacer — (${pendant.variables.x}, ${pendant.variables.y})`,
+  );
+  // ⚠️ AMPLITUDE FAIBLE : c'est un frémissement, pas un déplacement.
+  assert.ok(Math.hypot(dx, dy) <= 12, `déplacement trop ample : ${Math.round(Math.hypot(dx, dy))} px`);
+  // ⚠️ ET LA MICRO-ROTATION RESTE SOUS LE PLAFOND DEMANDÉ.
+  assert.ok(
+    Math.abs(parseFloat(pendant.variables.rotation)) <= 0.5,
+    `rotation du groupe hors plafond : ${pendant.variables.rotation}`,
+  );
+
+  // ── 2. AUTOUR D'UN POINT CENTRAL.
+  const [ox, oy] = pendant.origine.split(" ").map((v) => parseFloat(v));
+  /*
+   * ⚠️ `offsetWidth` ET NON `getBoundingClientRect`. Le conteneur est en train
+   * de pivoter : sa boîte englobante est plus large que sa boîte de mise en
+   * page, d'autant plus que la pile est haute. Comparer l'origine — exprimée
+   * dans le repère non transformé — à une boîte tournée faisait rougir ce
+   * test une fois sur deux, selon l'angle tiré au sort. La mesure était
+   * fausse, pas le code.
+   */
+  const boite = await page.evaluate(() => {
+    const p = document.querySelector<HTMLElement>("[data-avis-pile]");
+    return { w: p?.offsetWidth ?? 0, h: p?.offsetHeight ?? 0 };
+  });
+  assert.ok(Math.abs(ox - boite.w / 2) < 2, `l'origine n'est pas centrée en x (${pendant.origine})`);
+  assert.ok(Math.abs(oy - boite.h / 2) < 2, `l'origine n'est pas centrée en y (${pendant.origine})`);
+
+  // ── 3. AUCUNE CARTE N'A BOUGÉ D'ELLE-MÊME.
+  /*
+   * La carte tapée est mise en avant, donc sa propre transformation change
+   * légitimement — elle se soulève. Toutes les AUTRES doivent être identiques
+   * au pixel près : si elles avaient chacune reçu la secousse, elles auraient
+   * toutes changé.
+   */
+  let inchangees = 0;
+  for (let i = 0; i < avant.cartes.length; i += 1) {
+    if (i === 1) continue;
+    assert.equal(
+      pendant.cartes[i],
+      avant.cartes[i],
+      `la carte ${i + 1} a reçu la secousse individuellement — elle ne devrait pas`,
+    );
+    inchangees += 1;
+  }
+  assert.ok(inchangees >= 5, `assez de cartes témoins — ${inchangees}`);
+
+  // ── 4. ET ELLE RETOMBE.
+  await page.waitForTimeout(400);
+  const apres = await lire();
+  assert.equal(apres.secousse, null, "la secousse doit retomber d'elle-même");
+  assert.equal(apres.variables.x, "0px", "et le groupe revenir à sa place");
+
+  await page.context().close();
+});
+
+await test("R15 — la direction de la secousse change d'un tap à l'autre", async () => {
+  /*
+   * ⚠️ « DIRECTION ALÉATOIRE À CHAQUE INTERACTION » est vérifiable sans
+   * fragilité : on tape plusieurs fois et on regarde combien de vecteurs
+   * DISTINCTS sortent. Un tirage figé n'en donnerait qu'un.
+   *
+   * Le seuil est bas à dessein — deux vecteurs distincts sur six taps
+   * suffisent à prouver qu'il y a tirage, sans qu'un hasard malheureux fasse
+   * rougir une suite qui doit rester déterministe dans son verdict.
+   */
+  const page = await atelier({ width: 390, height: 844 }, { tactile: true });
+  const vecteurs = new Set<string>();
+
+  for (let n = 0; n < 6; n += 1) {
+    await page.tap(`[data-avis-pile] > li:nth-child(${(n % 4) + 1}) .avis-carte`);
+    await page.waitForTimeout(40);
+    const v = await page.evaluate(() => {
+      const p = document.querySelector<HTMLElement>("[data-avis-pile]");
+      return [
+        p?.style.getPropertyValue("--avis-groupe-x") ?? "",
+        p?.style.getPropertyValue("--avis-groupe-y") ?? "",
+        p?.style.getPropertyValue("--avis-groupe-rotation") ?? "",
+      ].join("|");
+    });
+    /*
+     * ⚠️ ON N'ENREGISTRE QUE LES VECTEURS NON NULS, ET C'EST ESSENTIEL.
+     *
+     * Ce test a été mis à l'épreuve en FIGEANT la direction : il est resté
+     * vert. La raison : entre le tap et la lecture, la secousse peut déjà
+     * être retombée à (0, 0), et ce zéro comptait comme un second vecteur
+     * « distinct ». Le test prouvait alors l'existence de la retombée, pas
+     * celle du tirage au sort.
+     */
+    if (!/^0px\|0px\|0deg$/.test(v)) vecteurs.add(v);
+    await page.waitForTimeout(320);
+  }
+
+  assert.ok(vecteurs.size >= 1, "aucune secousse n'a été observée sur six taps");
+  assert.ok(
+    vecteurs.size >= 2,
+    `la direction doit varier — un seul vecteur observé sur six taps : ${[...vecteurs][0]}`,
+  );
+
+  // Et le texte complet est bien apparu sur la carte tapée.
+  await page.tap("[data-avis-pile] > li:nth-child(1) .avis-carte");
+  await page.waitForTimeout(320);
+  const deplie = await page.evaluate(() => {
+    const p = document.querySelector<HTMLElement>("[data-avis-pile] > li:nth-child(1) .avis-texte");
+    if (!p) return null;
+    return { coupe: p.scrollHeight > p.clientHeight + 1, lignes: getComputedStyle(p).webkitLineClamp };
+  });
+  assert.ok(deplie, "la première carte doit être trouvée");
+  assert.equal(deplie.lignes, "none", "le tap doit lever l'écrêtage");
+  assert.ok(!deplie.coupe, "et montrer l'avis en entier");
+
+  await page.screenshot({ path: join(CAPTURES, "mobile-tap-groupe.png"), fullPage: true });
   await page.context().close();
 });
 

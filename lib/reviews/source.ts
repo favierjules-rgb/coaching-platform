@@ -19,7 +19,7 @@ import { avisPubliables, moyenne, type ReviewsPayload } from "@/lib/reviews/type
  *
  *   1. remplacer `AVIS_DEMONSTRATION` par la lecture de la source réelle
  *      (table miroir alimentée par une synchronisation serveur) ;
- *   2. passer `demonstration` à `false` ;
+ *   2. passer `demonstration` à `false` — les avis, eux, sont déjà réels ;
  *   3. lire la note moyenne CHEZ GOOGLE plutôt que de la recalculer — voir
  *      l'avertissement sur `moyenne()` dans `types.ts` : la moyenne des avis
  *      AFFICHÉS n'est pas la moyenne de la fiche.
@@ -38,7 +38,10 @@ import { avisPubliables, moyenne, type ReviewsPayload } from "@/lib/reviews/type
  */
 export async function getReviews(): Promise<ReviewsPayload> {
   try {
-    // ── PHASE A : données de démonstration. Voir google-reviews.mock.ts.
+    // ── SOURCE LOCALE : neuf VRAIS avis Google recopiés à la main, plus
+    // trois avis pièges qui n'atteindront jamais le rendu. Le contenu est
+    // réel ; c'est le circuit qui ne l'est pas encore. Voir
+    // google-reviews.mock.ts.
     const bruts = AVIS_DEMONSTRATION;
 
     // Le filtre 5 étoiles est appliqué ICI, une seule fois, avant que
@@ -49,9 +52,9 @@ export async function getReviews(): Promise<ReviewsPayload> {
     return {
       reviews,
       // ⚠️ LE JOUR OÙ CE DRAPEAU PASSE À `false`, LE BANDEAU DISPARAÎT.
-      // Tant qu'il vaut `true`, la section dit à l'écran que ces avis sont
-      // des exemples. C'est la garde qui empêche de publier de faux
-      // témoignages en oubliant une étape.
+      // Il vaut `true` non pas parce que les avis seraient faux — ils sont
+      // réels — mais parce que la source est LOCALE ET FIGÉE. C'est la garde
+      // qui empêche de présenter une recopie manuelle comme un flux vivant.
       demonstration: true,
       average: moyenne(reviews),
       count: reviews.length,

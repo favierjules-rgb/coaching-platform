@@ -7,7 +7,7 @@ import { avisPubliables } from "../../../lib/reviews/types";
 /**
  * Point d'entrée du harnais de rendu réel — chantier AVIS GOOGLE, Phase A.
  *
- * ⚠️ Il monte les VRAIES données de démonstration, passées par le VRAI filtre
+ * ⚠️ Il monte les VRAIES données de la source, passées par le VRAI filtre
  * `avisPubliables` — pas une fixture parallèle. Si le filtre laissait passer
  * un 3 étoiles, il apparaîtrait ici, et le test R11 le verrait.
  *
@@ -22,7 +22,7 @@ if (racine) {
     <div style={{ background: "var(--color-background)", minHeight: "100vh" }}>
       <section
         id="avis-clients"
-        style={{ overflow: "hidden", paddingTop: "3.5rem", paddingBottom: "5rem" }}
+        style={{ overflowX: "clip", paddingTop: "3rem", paddingBottom: "3.5rem" }}
       >
         <div style={{ margin: "0 auto", maxWidth: "80rem", padding: "0 1.5rem" }}>
           <h2
@@ -35,7 +35,7 @@ if (racine) {
               marginBottom: "1rem",
             }}
           >
-            Avis Google
+            Leur expérience
           </h2>
           <p
             data-avis-demonstration
@@ -51,10 +51,10 @@ if (racine) {
               marginBottom: "0.5rem",
             }}
           >
-            Données de démonstration — ces avis sont des exemples, pas de vrais avis Google
+            Avis Google réels, recopiés manuellement — non synchronisés automatiquement
           </p>
         </div>
-        <div style={{ margin: "0 auto", maxWidth: "80rem", padding: "0 1.5rem" }}>
+        <div style={{ margin: "0 auto", maxWidth: "64rem", padding: "0 1.5rem" }}>
           <GoogleReviewsStack avis={AVIS} />
         </div>
       </section>
