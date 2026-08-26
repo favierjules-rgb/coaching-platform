@@ -11,17 +11,27 @@ import { getReviews } from "@/lib/reviews/source";
  * ici ce que les élèves en disent, avant qu'on lui propose quoi que ce soit.
  *
  * ════════════════════════════════════════════════════════════════════════
- * ⚠️ PHASE A — LES AVIS AFFICHÉS SONT DES DONNÉES DE DÉMONSTRATION
+ * ⚠️ LES AVIS SONT RÉELS ; LEUR CIRCUIT NE L'EST PAS ENCORE
  * ════════════════════════════════════════════════════════════════════════
  * L'accès à l'API Google Business Profile est en cours d'examen. En
- * attendant, `getReviews()` rend un jeu d'exemples (voir
- * `lib/reviews/google-reviews.mock.ts`) et pose `demonstration: true`.
+ * attendant, `getReviews()` rend NEUF VRAIS AVIS GOOGLE recopiés à la main
+ * depuis des captures d'écran (voir `lib/reviews/google-reviews.mock.ts`).
  *
- * Tant que ce drapeau vaut `true`, la section affiche un BANDEAU VISIBLE
- * disant à l'écran que ces avis sont des exemples. Le jour où la Phase B
- * branche Google, le drapeau passe à `false` dans la source et le bandeau
- * disparaît tout seul — personne n'a à penser à le retirer, et il est donc
- * impossible de publier de faux témoignages en oubliant une étape.
+ * ⚠️ IL N'Y A PLUS DE BANDEAU DE PROVENANCE À L'ÉCRAN. Il en existait un
+ * — « Avis Google réels, recopiés manuellement — non synchronisés
+ * automatiquement » — et il a été RETIRÉ sur demande explicite. Ce qu'il
+ * disait ne portait pas sur l'authenticité du contenu, qui n'a jamais été en
+ * doute : ces neuf avis sont de vrais avis, écrits par de vrais clients, et
+ * recopiés au caractère près. Il portait sur la FRAÎCHEUR : un avis publié
+ * demain n'apparaîtra pas tout seul, un avis supprimé par son auteur
+ * resterait affiché.
+ *
+ * Cette réserve reste vraie, elle n'est simplement plus dite à l'écran. Le
+ * drapeau `demonstration` de la source, lui, n'a pas bougé — il continue de
+ * documenter la provenance côté code, et la Phase B le basculera.
+ *
+ * ⚠️ NE PAS REMETTRE DE TEXTE DE PROVENANCE ICI sans le demander : le test 7
+ * vérifie qu'aucun n'est rendu.
  *
  * ════════════════════════════════════════════════════════════════════════
  * COMPOSANT SERVEUR, COMME SES VOISINES
@@ -50,20 +60,20 @@ import { getReviews } from "@/lib/reviews/source";
  * endroits à maintenir, et l'un des deux finirait par diverger.
  */
 export async function GoogleReviews() {
-  const { reviews, demonstration, average, count } = await getReviews();
+  const { reviews, average, count } = await getReviews();
   if (reviews.length === 0) return null;
 
   return (
     <section
       id="avis-clients"
-      className="scroll-mt-24 overflow-hidden bg-background pt-14 pb-20 md:pt-20 md:pb-24"
+      className="scroll-mt-24 overflow-x-clip bg-background pt-10 pb-12 md:pt-14 md:pb-14"
     >
       <div className="mx-auto max-w-7xl px-6">
         <SectionLabel>Preuve sociale</SectionLabel>
-        <h2 className="mb-4 font-heading text-4xl font-extrabold uppercase text-foreground md:text-6xl">
-          Avis Google
+        <h2 className="mb-3 font-heading text-4xl font-extrabold uppercase text-foreground md:text-6xl">
+          Leur expérience
         </h2>
-        <p className="mb-6 max-w-xl text-muted-foreground">Ils parlent de leur expérience.</p>
+        <p className="mb-4 max-w-xl text-muted-foreground">Ce qu&apos;ils en pensent réellement</p>
 
         {/*
           LA NOTE GLOBALE — celle des avis AFFICHÉS, et le libellé le dit.
@@ -72,7 +82,7 @@ export async function GoogleReviews() {
           faux. La Phase B lira la vraie moyenne chez Google.
         */}
         {average !== null ? (
-          <p className="mb-6 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <p className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="font-heading text-2xl font-extrabold text-foreground">
               {average.toFixed(1).replace(".", ",")}
             </span>
@@ -87,31 +97,26 @@ export async function GoogleReviews() {
           </p>
         ) : null}
 
-        {/*
-          ⚠️ LE BANDEAU DE DÉMONSTRATION. Il n'est pas décoratif : c'est ce
-          qui empêche qu'un faux témoignage soit lu comme un vrai. Il
-          disparaît automatiquement quand la source cesse d'être une
-          démonstration.
-        */}
-        {demonstration ? (
-          <p
-            data-avis-demonstration
-            role="note"
-            className="mb-2 inline-flex flex-wrap items-center gap-2 border border-primary/50 px-3 py-2 text-[0.7rem] uppercase tracking-[0.16em] text-primary"
-          >
-            <span aria-hidden="true">●</span>
-            Données de démonstration — ces avis sont des exemples, pas de vrais avis Google
-          </p>
-        ) : null}
       </div>
 
       {/*
-        La pile déborde volontairement de la grille sur les grands écrans : les
-        cartes s'inclinent et se décalent, et un conteneur trop serré les
-        rognerait. `overflow-hidden` sur la <section> garantit qu'aucun
-        débordement ne produit de barre de défilement horizontale sur la page.
+        ⚠️ `overflow-x-clip` ET NON `overflow-hidden`.
+
+        Les deux empêchent la barre de défilement horizontale, ce qui est
+        l'objectif — les cartes se décalent latéralement et un conteneur trop
+        serré les rognerait. Mais `overflow-hidden` force AUSSI un
+        `overflow-y: auto` implicite, qui guillotinerait verticalement une
+        carte dépliée au survol : l'avis de huit cents caractères serait coupé
+        net au bas de la section. `overflow-x: clip` laisse l'axe vertical
+        entièrement libre, sans rien concéder sur l'horizontal.
       */}
-      <div className="mx-auto max-w-7xl px-6">
+      {/*
+        ⚠️ REMBOURRAGE RÉDUIT SOUS `md`. La scène est carrée : chaque pixel
+        retiré sur les côtés est un pixel de rayon gagné pour l'orbite. À
+        390 px, les 24 px de `px-6` coûtaient assez de place pour que la carte
+        la plus au large sorte de l'écran.
+      */}
+      <div className="mx-auto max-w-5xl px-2 md:px-6">
         <GoogleReviewsStack avis={reviews} />
       </div>
     </section>
