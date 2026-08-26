@@ -1,3 +1,4 @@
+import { Loader } from "@/components/ui/Loader";
 import { SectionLabel } from "@/components/ui/SectionLabel";
 
 /**
@@ -19,8 +20,16 @@ export default function ProgrammesLoading() {
           Tous les programmes disponibles en accès immédiat — gratuits ou en paiement unique, sans abonnement.
         </p>
 
-        <div className="flex flex-wrap gap-6" role="status">
-          <span className="sr-only">Chargement des programmes…</span>
+        {/*
+          ⚠️ L'EMBLÈME REMPLACE LE `role="status"` INVISIBLE DE LA GRILLE.
+          Le squelette dessinait déjà la forme du contenu attendu, mais son
+          seul signal d'activité était un texte pour lecteurs d'écran : à
+          l'œil, la page semblait figée. L'emblème dit « ça travaille », et
+          c'est le même partout sur le site.
+        */}
+        <Loader libelle="Chargement des programmes…" variante="ligne" className="justify-start" />
+
+        <div className="flex flex-wrap gap-6" aria-hidden="true">
           {[0, 1, 2].map((i) => (
             <div key={i} aria-hidden="true" className="flex w-72 flex-shrink-0 flex-col border border-border bg-zinc-950">
               <div className="aspect-[16/10] w-full bg-zinc-900" />
