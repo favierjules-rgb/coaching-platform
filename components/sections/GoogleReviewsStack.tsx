@@ -165,7 +165,12 @@ function rayon(index: number): number {
  */
 function plan(index: number, total: number): number {
   const rangs = Array.from({ length: total }, (_, i) => i).sort((a, b) => rayon(a) - rayon(b));
-  return rangs.indexOf(index) + 1;
+  /*
+   * ⚠️ LE DÉCALAGE DE 10 N'EST PAS COSMÉTIQUE : il place TOUTES les cartes
+   * au-dessus de la photo, qui occupe le plan 5. Sans lui, un avis déplié
+   * passait derrière elle et se retrouvait coupé en deux à l'écran.
+   */
+  return 10 + rangs.indexOf(index);
 }
 
 function Etoiles({ note }: { readonly note: number }) {
@@ -397,6 +402,30 @@ export function GoogleReviewsStack({ avis }: Props) {
       data-avis-orbite={actif !== null ? "pause" : "tourne"}
     >
       {/*
+        LES TRAITS. Un rayon fin part du centre vers chaque carte. Ils sont
+        purement décoratifs — l'information est dans les cartes — donc
+        masqués aux lecteurs d'écran.
+
+        Leur racine est au centre exact de la scène, donc SOUS la photo, qui
+        les recouvre : on ne voit que la portion qui va du bord de la photo
+        à la carte.
+      */}
+      <div className="avis-rayons" aria-hidden="true">
+        {avis.map((item, index) => (
+          <span
+            key={item.id}
+            className="avis-lien"
+            style={
+              {
+                "--avis-angle": `${angle(index)}`,
+                "--avis-rayon": `${rayon(index)}`,
+              } as React.CSSProperties
+            }
+          />
+        ))}
+      </div>
+
+      {/*
         LA PHOTO. Elle est FIXE : ni l'orbite ni la secousse ne la touchent,
         elle est posée hors de l'amas. C'est le point autour duquel tout
         tourne, et le seul élément qui matérialise ce point — aucun repère,
@@ -419,9 +448,22 @@ export function GoogleReviewsStack({ avis }: Props) {
       </figure>
 
       {/*
-        L'AMAS — traits et cartes ensemble. C'est lui, et non la scène, qui
-        porte la secousse tactile : la photo doit rester immobile pendant que
-        le groupe frémit autour d'elle.
+        L'AMAS — les cartes. C'est lui, et non la scène, qui porte la secousse
+        tactile : la photo doit rester immobile pendant que le groupe frémit
+        autour d'elle.
+
+        ⚠️ LES TRAITS N'Y SONT PLUS, ET CE N'EST PAS UN DÉTAIL DE RANGEMENT.
+        Un `transform` crée un contexte d'empilement : tant que traits et
+        cartes vivaient tous deux ici, leurs plans respectifs ne pouvaient plus
+        se comparer à celui de la photo — l'amas entier passait derrière elle,
+        et un avis déplié se retrouvait coupé par le portrait.
+
+        Séparés, les trois plans s'ordonnent enfin comme il faut :
+        traits (1) < photo (5) < cartes (10).
+
+        La secousse ne porte donc plus sur les traits. C'est sans conséquence :
+        chaque trait s'arrête au CENTRE de sa carte, donc sous elle — son bout
+        n'est jamais visible.
       */}
       <div
         className="avis-amas"
@@ -434,30 +476,6 @@ export function GoogleReviewsStack({ avis }: Props) {
           } as React.CSSProperties
         }
       >
-        {/*
-          LES TRAITS. Un rayon fin part du centre vers chaque carte. Ils sont
-          purement décoratifs — l'information est dans les cartes — donc
-          masqués aux lecteurs d'écran.
-
-          Leur racine est au centre exact de la scène, donc SOUS la photo, qui
-          les recouvre : on ne voit que la portion qui va du bord de la photo
-          à la carte.
-        */}
-        <div className="avis-rayons" aria-hidden="true">
-          {avis.map((item, index) => (
-            <span
-              key={item.id}
-              className="avis-lien"
-              style={
-                {
-                  "--avis-angle": `${angle(index)}`,
-                  "--avis-rayon": `${rayon(index)}`,
-                } as React.CSSProperties
-              }
-            />
-          ))}
-        </div>
-
         <ul ref={piste} className="avis-pile" data-avis-pile>
         {avis.map((item, index) => {
           const enAvant = actif === index;

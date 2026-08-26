@@ -1315,9 +1315,14 @@ await test("R18 — l'amas tourne LENTEMENT, autour du centre exact de la photo"
   });
   assert.ok(duree, "la scène doit exister");
   assert.notEqual(duree.nom, "none", "l'orbite doit être animée");
+  /*
+   * ⚠️ LA BORNE EST PASSÉE DE « 30 à 45 s » À « 45 à 75 s ». L'orbite a été
+   * ralentie de quinze secondes sur demande : elle ne doit pas se remarquer
+   * en arrivant sur la section, mais en la regardant.
+   */
   assert.ok(
-    duree.duree >= 30 && duree.duree <= 45,
-    `un tour doit durer de 30 à 45 s — mesuré ${duree.duree} s`,
+    duree.duree >= 45 && duree.duree <= 75,
+    `un tour doit durer de 45 à 75 s — mesuré ${duree.duree} s`,
   );
   assert.equal(duree.fonction, "linear", "une orbite ne doit ni accélérer ni ralentir");
   assert.equal(duree.iterations, "infinite", "elle ne s'arrête pas d'elle-même");
@@ -1359,7 +1364,10 @@ await test("R18 — l'amas tourne LENTEMENT, autour du centre exact de la photo"
     arrivee.cartes[0].x - depart.cartes[0].x,
     arrivee.cartes[0].y - depart.cartes[0].y,
   );
-  assert.ok(parcours > 3, `l'amas doit se déplacer — ${Math.round(parcours)} px en ~4 s`);
+  // ⚠️ SEUIL ABAISSÉ AVEC LA VITESSE. À 53 s le tour, quatre secondes ne
+  // valent plus que ~27° d'arc : exiger le même déplacement qu'à 38 s
+  // reviendrait à exiger une orbite plus rapide que celle demandée.
+  assert.ok(parcours > 2, `l'amas doit se déplacer — ${Math.round(parcours)} px en ~4 s`);
 
   // ── 2. MAIS LENTEMENT. À 38 s le tour, quatre secondes valent environ
   // 38° d'arc, soit une fraction du rayon — jamais la moitié du cercle.

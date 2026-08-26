@@ -1553,7 +1553,12 @@ body {
   --avis-rayon-base: 6.15rem;
   --avis-photo: 4.75rem;
   --avis-carte-large: 6.5rem;
-  --avis-tour: 38s;
+  /*
+   * ⚠️ CINQUANTE-TROIS SECONDES POUR UN TOUR — quinze de plus qu'avant.
+   * L'orbite ne doit pas se remarquer tout de suite : on la découvre en
+   * regardant, pas en arrivant.
+   */
+  --avis-tour: 53s;
 
   position: relative;
   width: min(100%, 24rem);
@@ -1561,8 +1566,8 @@ body {
   margin: 0 auto;
 
   /*
-   * L'ORBITE. Trente-huit secondes pour un tour : le mouvement ne se voit pas
-   * tout de suite, il se remarque au bout de quelques secondes. C'est la
+   * L'ORBITE. Cinquante-trois secondes pour un tour : le mouvement ne se voit
+   * pas tout de suite, il se remarque au bout d'un moment. C'est la
    * différence entre une composition vivante et un manège.
    */
   animation: avis-orbite var(--avis-tour) linear infinite;
@@ -1589,14 +1594,27 @@ body {
   position: absolute;
   left: 50%;
   top: 50%;
-  z-index: 30;
+  /*
+   * ⚠️ TROIS PLANS, DANS CET ORDRE : traits (plan automatique) < photo (5) <
+   * cartes (10 et au-dessus).
+   *
+   * La photo était au plan 30, donc au-dessus de tout : un avis déplié
+   * passait DERRIÈRE elle et se retrouvait coupé en deux. Elle descend sous
+   * les cartes, mais reste au-dessus des traits — dont la racine est au
+   * centre exact, et qui doivent rester cachés sous elle.
+   */
+  z-index: 5;
   width: var(--avis-photo);
   height: var(--avis-photo);
   margin: 0;
   transform: translate(-50%, -50%);
   border-radius: 9999px;
   overflow: hidden;
-  border: 3px solid var(--avis-g-fond);
+  /*
+   * ⚠️ AUCUN LISERÉ. Le contour blanc de 3 px a été retiré : il détourait la
+   * photo comme une vignette rapportée. Seule l'ombre portée la détache du
+   * fond, sans lui dessiner de cadre.
+   */
   box-shadow:
     0 4px 12px 3px rgb(60 64 67 / 0.2),
     0 1px 3px rgb(60 64 67 / 0.35);
@@ -1619,6 +1637,16 @@ body {
 .avis-amas {
   position: absolute;
   inset: 0;
+  /*
+   * ⚠️ PLAN 10 : AU-DESSUS DE LA PHOTO (5).
+   *
+   * Le `transform` ci-dessous crée un contexte d'empilement — les plans des
+   * cartes ne se comparent donc qu'ENTRE EUX, jamais à celui de la photo.
+   * C'est ce plan-ci, posé sur l'amas entier, qui décide que les avis passent
+   * devant le portrait. Sans lui, un avis déplié était coupé en deux par la
+   * photo, quel que soit le plan de la carte.
+   */
+  z-index: 10;
   transform: translate3d(var(--avis-groupe-x, 0px), var(--avis-groupe-y, 0px), 0);
   transition: transform 260ms var(--ease-out);
 }
@@ -1626,6 +1654,9 @@ body {
 .avis-rayons {
   position: absolute;
   inset: 0;
+  /* ⚠️ PLAN 1 : SOUS LA PHOTO. La racine des traits est au centre exact ; le
+     portrait doit la couvrir, sinon neuf traits convergent sur son visage. */
+  z-index: 1;
   /* ⚠️ LA COUCHE DE TRAITS NE DOIT RIEN INTERCEPTER. Elle couvre toute la
      scène ; sans cette ligne, elle capterait des clics destinés aux cartes. */
   pointer-events: none;
