@@ -74,6 +74,12 @@ import type { GoogleReview } from "@/lib/reviews/types";
  * différence entre « la pile bouge » et « neuf cartes bougent chacune dans
  * leur coin », et c'est visible à l'œil.
  *
+ * ⚠️ CE CENTRE EST PUREMENT CONCEPTUEL. `transform-origin` est une propriété
+ * de calcul : elle ne dessine RIEN. Il ne doit exister nulle part de cercle,
+ * de point, d'axe ou de pseudo-élément qui le représenterait — ni ici, ni en
+ * CSS. Le lecteur doit sentir que l'amas s'organise autour de quelque chose,
+ * sans jamais voir ce quelque chose.
+ *
  * ⚠️ LE TIRAGE AU SORT N'A LIEU QUE DANS UN GESTIONNAIRE D'ÉVÉNEMENT, jamais
  * au rendu : un `Math.random()` appelé pendant le rendu donnerait au serveur
  * et au client deux valeurs différentes, et l'hydratation échouerait.
@@ -95,7 +101,7 @@ interface Props {
  * grille, en diagonale au lieu d'être droite, mais une grille quand même.
  */
 function decalageX(index: number): number {
-  const ecarts = [0, 14, -10, 18, -6, 10, -16];
+  const ecarts = [0, 11, -8, 13, -5, 8, -11];
   return ecarts[index % ecarts.length];
 }
 
@@ -108,7 +114,7 @@ function decalageX(index: number): number {
  * c'est ce qui garantit qu'aucune rangée ne s'aligne au pixel près.
  */
 function decalageY(index: number): number {
-  const ecarts = [0, 12, -8, 16, -5];
+  const ecarts = [0, 9, -6, 11, -4];
   return ecarts[index % ecarts.length];
 }
 
@@ -152,7 +158,7 @@ function ContenuCarte({ item, lien }: { readonly item: GoogleReview; readonly li
   const date = moisEtAnnee(item.date);
   return (
     <>
-      <div className="mb-3 flex items-center gap-3">
+      <div className="avis-entete mb-3 flex items-center gap-3">
         {/*
           L'avatar. Balise <img> native et non next/image : en Phase B l'URL
           viendra de googleusercontent.com, qui n'est pas déclaré dans
@@ -188,7 +194,7 @@ function ContenuCarte({ item, lien }: { readonly item: GoogleReview; readonly li
             {item.authorName}
           </span>
           {date ? (
-            <span className="block text-[0.7rem] uppercase tracking-[0.16em] text-muted-foreground">
+            <span className="avis-date block text-[0.7rem] uppercase tracking-[0.16em] text-muted-foreground">
               {date}
             </span>
           ) : null}
@@ -208,9 +214,14 @@ function ContenuCarte({ item, lien }: { readonly item: GoogleReview; readonly li
   );
 }
 
-/** L'amplitude maximale de la secousse du groupe, en pixels. Volontairement
- *  faible : c'est un frémissement, pas un déplacement. */
-const AMPLITUDE_SECOUSSE = 10;
+/**
+ * L'amplitude maximale de la secousse du groupe, en pixels.
+ *
+ * ⚠️ HUIT PIXELS, PAS DAVANTAGE. C'est un frémissement, pas un déplacement :
+ * l'amas doit sembler effleuré, jamais bousculé. Le tirage tire entre 60 % et
+ * 100 % de cette valeur, soit un mouvement réel de 5 à 8 px.
+ */
+const AMPLITUDE_SECOUSSE = 8;
 /** Le plafond de la micro-rotation GLOBALE, en degrés. Jamais au-delà : une
  *  rotation visible contredirait l'exigence « toutes les cartes horizontales ». */
 const ROTATION_GROUPE_MAX = 0.4;

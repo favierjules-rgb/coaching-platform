@@ -22,7 +22,7 @@ if (racine) {
     <div style={{ background: "var(--color-background)", minHeight: "100vh" }}>
       <section
         id="avis-clients"
-        style={{ overflowX: "clip", paddingTop: "3rem", paddingBottom: "3.5rem" }}
+        style={{ overflowX: "clip", paddingTop: "2.5rem", paddingBottom: "3rem" }}
       >
         <div style={{ margin: "0 auto", maxWidth: "80rem", padding: "0 1.5rem" }}>
           <h2
@@ -37,22 +37,6 @@ if (racine) {
           >
             Leur expérience
           </h2>
-          <p
-            data-avis-demonstration
-            style={{
-              display: "inline-flex",
-              gap: "0.5rem",
-              border: "1px solid color-mix(in oklab, var(--color-primary) 50%, transparent)",
-              padding: "0.5rem 0.75rem",
-              fontSize: "0.7rem",
-              textTransform: "uppercase",
-              letterSpacing: "0.16em",
-              color: "var(--color-primary)",
-              marginBottom: "0.5rem",
-            }}
-          >
-            Avis Google réels, recopiés manuellement — non synchronisés automatiquement
-          </p>
         </div>
         <div style={{ margin: "0 auto", maxWidth: "64rem", padding: "0 1.5rem" }}>
           <GoogleReviewsStack avis={AVIS} />

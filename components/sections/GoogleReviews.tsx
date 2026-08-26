@@ -15,14 +15,23 @@ import { getReviews } from "@/lib/reviews/source";
  * ════════════════════════════════════════════════════════════════════════
  * L'accès à l'API Google Business Profile est en cours d'examen. En
  * attendant, `getReviews()` rend NEUF VRAIS AVIS GOOGLE recopiés à la main
- * depuis des captures d'écran (voir `lib/reviews/google-reviews.mock.ts`), et
- * pose `demonstration: true` — non pas parce que les avis seraient faux, mais
- * parce que la source est locale et figée.
+ * depuis des captures d'écran (voir `lib/reviews/google-reviews.mock.ts`).
  *
- * Tant que ce drapeau vaut `true`, la section affiche un BANDEAU VISIBLE
- * disant à l'écran que ces avis ne sont pas synchronisés. Le jour où la
- * Phase B branche Google, le drapeau passe à `false` dans la source et le
- * bandeau disparaît tout seul — personne n'a à penser à le retirer.
+ * ⚠️ IL N'Y A PLUS DE BANDEAU DE PROVENANCE À L'ÉCRAN. Il en existait un
+ * — « Avis Google réels, recopiés manuellement — non synchronisés
+ * automatiquement » — et il a été RETIRÉ sur demande explicite. Ce qu'il
+ * disait ne portait pas sur l'authenticité du contenu, qui n'a jamais été en
+ * doute : ces neuf avis sont de vrais avis, écrits par de vrais clients, et
+ * recopiés au caractère près. Il portait sur la FRAÎCHEUR : un avis publié
+ * demain n'apparaîtra pas tout seul, un avis supprimé par son auteur
+ * resterait affiché.
+ *
+ * Cette réserve reste vraie, elle n'est simplement plus dite à l'écran. Le
+ * drapeau `demonstration` de la source, lui, n'a pas bougé — il continue de
+ * documenter la provenance côté code, et la Phase B le basculera.
+ *
+ * ⚠️ NE PAS REMETTRE DE TEXTE DE PROVENANCE ICI sans le demander : le test 7
+ * vérifie qu'aucun n'est rendu.
  *
  * ════════════════════════════════════════════════════════════════════════
  * COMPOSANT SERVEUR, COMME SES VOISINES
@@ -51,20 +60,20 @@ import { getReviews } from "@/lib/reviews/source";
  * endroits à maintenir, et l'un des deux finirait par diverger.
  */
 export async function GoogleReviews() {
-  const { reviews, demonstration, average, count } = await getReviews();
+  const { reviews, average, count } = await getReviews();
   if (reviews.length === 0) return null;
 
   return (
     <section
       id="avis-clients"
-      className="scroll-mt-24 overflow-x-clip bg-background pt-12 pb-14 md:pt-16 md:pb-16"
+      className="scroll-mt-24 overflow-x-clip bg-background pt-10 pb-12 md:pt-14 md:pb-14"
     >
       <div className="mx-auto max-w-7xl px-6">
         <SectionLabel>Preuve sociale</SectionLabel>
         <h2 className="mb-3 font-heading text-4xl font-extrabold uppercase text-foreground md:text-6xl">
           Leur expérience
         </h2>
-        <p className="mb-5 max-w-xl text-muted-foreground">Ce qu&apos;ils en pensent réellement</p>
+        <p className="mb-4 max-w-xl text-muted-foreground">Ce qu&apos;ils en pensent réellement</p>
 
         {/*
           LA NOTE GLOBALE — celle des avis AFFICHÉS, et le libellé le dit.
@@ -73,7 +82,7 @@ export async function GoogleReviews() {
           faux. La Phase B lira la vraie moyenne chez Google.
         */}
         {average !== null ? (
-          <p className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <p className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="font-heading text-2xl font-extrabold text-foreground">
               {average.toFixed(1).replace(".", ",")}
             </span>
@@ -88,31 +97,6 @@ export async function GoogleReviews() {
           </p>
         ) : null}
 
-        {/*
-          ⚠️ LE BANDEAU DE PROVENANCE. Il n'est pas décoratif, et il a CHANGÉ
-          DE PROPOS : les avis affichés sont désormais de vrais avis Google,
-          écrits par de vraies personnes. Dire d'eux qu'ils sont « des
-          exemples » serait devenu un mensonge, et un mensonge aux dépens des
-          clients qui les ont écrits.
-
-          Ce qui reste à signaler, c'est le CIRCUIT : ces avis sont recopiés à
-          la main dans le dépôt, pas lus chez Google. Un nouvel avis
-          n'apparaîtra pas tout seul, un avis supprimé resterait affiché. Le
-          bandeau dit exactement cela, et rien de plus.
-
-          Il disparaît automatiquement le jour où la source cesse d'être
-          locale — personne n'a à penser à le retirer.
-        */}
-        {demonstration ? (
-          <p
-            data-avis-demonstration
-            role="note"
-            className="mb-2 inline-flex flex-wrap items-center gap-2 border border-primary/50 px-3 py-2 text-[0.7rem] uppercase tracking-[0.16em] text-primary"
-          >
-            <span aria-hidden="true">●</span>
-            Avis Google réels, recopiés manuellement — non synchronisés automatiquement
-          </p>
-        ) : null}
       </div>
 
       {/*

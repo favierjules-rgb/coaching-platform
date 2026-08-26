@@ -222,50 +222,60 @@ await test("6. la source ne lève jamais et rend une charge complète", async ()
 
 /* ═══════════════ 7-8. LE BANDEAU DE DÉMONSTRATION ═══════════════ */
 
-await test("7. le bandeau de PROVENANCE est RENDU tant que la source est locale", async () => {
-  const { demonstration } = await getReviews();
-  assert.equal(demonstration, true, "la source est bien locale");
+await test("7. AUCUN texte de provenance n'est rendu à l'écran", async () => {
+  /*
+   * ⚠️ CE TEST EXIGEAIT UN BANDEAU. IL EXIGE MAINTENANT SON ABSENCE, et le
+   * renversement est une demande explicite — pas une dérive.
+   *
+   * Le bandeau disait « Avis Google réels, recopiés manuellement — non
+   * synchronisés automatiquement ». Ce qu'il annonçait n'a jamais porté sur
+   * l'AUTHENTICITÉ du contenu : ces neuf avis sont de vrais avis, écrits par
+   * de vrais clients, recopiés au caractère près — les tests 24 et 28 le
+   * verrouillent, et ils n'ont pas bougé. Il portait sur la FRAÎCHEUR : un
+   * avis publié demain n'apparaîtra pas tout seul.
+   *
+   * Cette réserve reste vraie côté code — `demonstration: true` n'a pas
+   * changé dans la source — elle n'est simplement plus dite à l'écran.
+   *
+   * Ce que ce test verrouille désormais : qu'aucun texte de provenance ne
+   * revienne par inadvertance, et surtout qu'il ne soit pas remplacé par un
+   * autre libellé.
+   */
+  const section = sansCommentaires(SECTION);
+  assert.ok(!section.includes("data-avis-demonstration"), "plus aucun bandeau dans la section");
+  for (const motif of [
+    /recopiés? manuellement/i,
+    /non synchronis/i,
+    /données de démonstration/i,
+    /pas de vrais avis/i,
+    /mock/i,
+    /local/i,
+  ]) {
+    assert.ok(!motif.test(section), `un texte de provenance subsiste : ${motif}`);
+  }
 
-  assert.ok(SECTION.includes("data-avis-demonstration"), "le bandeau est repérable");
-  assert.ok(SECTION.includes("{demonstration ? ("), "il est conditionné au drapeau de la source");
-
-  // ⚠️ LE LIBELLÉ A CHANGÉ DE PROPOS, ET C'EST DÉLIBÉRÉ. L'ancien disait
-  // « ces avis sont des exemples, pas de vrais avis Google ». Les avis
-  // affichés étant désormais RÉELS, cette phrase serait devenue un mensonge
-  // — aux dépens des clients qui les ont écrits. Ce qui reste à signaler
-  // n'est plus la véracité du contenu mais l'état du CIRCUIT : recopie
-  // manuelle, aucune synchronisation.
-  assert.ok(
-    /recopiés manuellement/i.test(SECTION),
-    "le bandeau dit que les avis sont recopiés à la main",
-  );
-  assert.ok(
-    /non synchronisés/i.test(SECTION),
-    "et qu'ils ne sont pas synchronisés — explicite, pas allusif",
-  );
-  // La garde de fond : le bandeau ne doit jamais affirmer que les avis
-  // seraient faux, puisqu'ils ne le sont pas.
-  assert.ok(
-    !/pas de vrais avis/i.test(SECTION),
-    "le bandeau ne doit plus prétendre que ces avis ne sont pas réels",
-  );
+  // La preuve par le HTML rendu, et pas seulement par le source.
+  const { reviews } = await getReviews();
+  const html = renderToStaticMarkup(createElement(GoogleReviewsStack, { avis: reviews }));
+  assert.ok(!/recopi|synchronis|démonstration/i.test(html), "rien n'est rendu par la pile non plus");
 });
 
-await test("8. le bandeau disparaîtra TOUT SEUL quand Google alimentera la section", () => {
-  // ⚠️ C'EST LA GARDE QUI COMPTE. Le bandeau ne dépend d'aucune constante
-  // locale qu'il faudrait penser à changer : il suit le drapeau de la source.
-  // Passer `demonstration` à `false` suffit, et rien d'autre n'est à faire.
+await test("8. le drapeau de provenance vit toujours dans la SOURCE", () => {
+  /*
+   * ⚠️ RETIRER LE BANDEAU N'EST PAS RETIRER LE DRAPEAU. L'affichage a
+   * disparu ; l'information de provenance, elle, reste au seul endroit où
+   * elle a une valeur technique — la source. C'est ce que la Phase B
+   * basculera, et c'est ce qui permettrait de réafficher un jour une mention
+   * sans avoir à retrouver comment elle était calculée.
+   */
+  assert.ok(SOURCE.includes("demonstration: true"), "la source porte toujours le drapeau");
+  // Et la section ne le lit plus : elle n'a plus rien à en faire.
   const section = sansCommentaires(SECTION);
   assert.ok(
-    !/const\s+\w*[Dd]emo\w*\s*=\s*(true|false)/.test(section),
-    "aucun drapeau de démonstration codé en dur dans la section",
+    !/\bdemonstration\b/.test(section),
+    "la section ne doit plus lire un drapeau qu'elle n'affiche pas",
   );
-  assert.ok(
-    section.includes("demonstration") && section.includes("getReviews"),
-    "le bandeau lit le drapeau que la source rend",
-  );
-  // Le drapeau vit à UN SEUL endroit.
-  assert.ok(SOURCE.includes("demonstration: true"), "la source porte le drapeau");
+  assert.ok(section.includes("getReviews"), "elle appelle toujours la source");
 });
 
 /* ═══════════════ 9-11. LA SECTION DANS LA PAGE ═══════════════ */
@@ -378,7 +388,21 @@ await test("15. la découverte fonctionne au clavier, avec un focus visible", ()
   assert.ok(PILE.includes("onBlur: retirer(index)"), "et la quitter la remet en place");
   assert.ok(PILE.includes("tabIndex={0}"), "les cartes sans lien restent tabulables");
   assert.ok(CSS_PILE.includes(".avis-carte:focus-visible"), "le focus produit la même mise en avant");
-  assert.ok(CSS_PILE.includes("outline: 2px solid var(--color-primary)"), "et un contour visible");
+  /*
+   * ⚠️ LE CONTOUR NE PEUT PLUS ÊTRE `--color-primary`. Ce jeton vaut BLANC en
+   * thème sombre — et les cartes sont devenues blanches. Le liseré de focus
+   * clavier aurait purement et simplement disparu : invisible, donc inexistant
+   * pour qui navigue sans souris. Il est passé au bleu Google, lisible sur
+   * blanc dans les deux thèmes.
+   */
+  assert.ok(
+    /outline:\s*2px solid var\(--avis-g-focus\)/.test(CSS_PILE),
+    "le contour de focus utilise une couleur lisible sur une carte blanche",
+  );
+  assert.ok(
+    !/outline:[^;]*--color-primary/.test(CSS_PILE),
+    "et surtout pas le jeton blanc du thème sombre",
+  );
 });
 
 /* ═══════════════ 16-18. ANIMATION, RESPONSIVE, IDENTITÉ ═══════════════ */
@@ -419,7 +443,17 @@ await test("18. la section reprend les codes visuels de ses voisines", () => {
     "le titre suit exactement le gabarit des autres h2",
   );
   assert.ok(SECTION.includes("scroll-mt-24"), "l'ancre est décalée comme ailleurs");
-  assert.ok(SECTION.includes("overflow-hidden"), "la section coupe son débordement");
+  /*
+   * ⚠️ CETTE ASSERTION ÉTAIT DEVENUE VIDE, et je l'ai laissée passer une fois.
+   * La section est passée à `overflow-x-clip` ; l'assertion cherchait
+   * `overflow-hidden` dans le fichier BRUT et le trouvait… dans le commentaire
+   * qui explique pourquoi ce n'est plus ça. Elle est verte pour une raison
+   * fausse. On cherche donc dans le code nettoyé, et on nomme la bonne règle.
+   */
+  assert.ok(
+    sansCommentaires(SECTION).includes("overflow-x-clip"),
+    "la section coupe son débordement horizontal sans guillotiner le vertical",
+  );
   // Jetons sémantiques uniquement : aucune couleur brute, donc aucun risque
   // de « couleurs Google criardes ».
   const section = sansCommentaires(SECTION) + sansCommentaires(PILE);
@@ -855,14 +889,23 @@ await test("30. chaque carte a sa propre position, et deux tables décalées la 
   assert.ok(new Set(ecarts).size > 2, "les écarts horizontaux ne forment pas une progression");
 });
 
-await test("31. les gouttières couvrent l'étalement des décalages", () => {
+await test("31. le recouvrement entre voisines reste SOUS le rembourrage", () => {
   /*
-   * ⚠️ C'EST CETTE INÉGALITÉ QUI REMPLACE LES ANCIENNES COMPENSATIONS DE
-   * ROTATION. Tant que la gouttière dépasse l'étalement d'une table, deux
-   * cartes voisines ne peuvent pas se toucher — donc aucune ne peut recouvrir
-   * le texte ou l'en-tête d'une autre. Élargir une table sans élargir la
-   * gouttière rouvrirait la classe de défauts que R5 bis et R5 quater ont
-   * attrapée deux fois.
+   * ⚠️ CE TEST EXIGEAIT « gouttière ≥ étalement », c'est-à-dire AUCUN
+   * recouvrement. Les cartes doivent maintenant se chevaucher — demande
+   * explicite, pour resserrer l'amas. L'inégalité change donc de forme, mais
+   * pas de raison d'être.
+   *
+   * Ce qui compte n'a jamais été l'absence de contact : c'est qu'aucune carte
+   * ne cache le texte ou l'en-tête d'une autre. Une carte porte un rembourrage
+   * intérieur ; tant que le recouvrement reste inférieur à ce rembourrage, les
+   * cartes mordent l'une sur l'autre DANS LEUR MARGE, et rien de lisible ne
+   * disparaît.
+   *
+   *     recouvrement = étalement de la table − gouttière ≤ rembourrage
+   *
+   * R5 bis et R5 quater mesurent la conséquence à l'écran ; ce test-ci nomme
+   * la cause, et rougit avant même qu'un pixel soit peint.
    */
   const pile = sansCommentaires(PILE);
   const lire = (nom: string): number[] => {
@@ -877,13 +920,27 @@ await test("31. les gouttières couvrent l'étalement des décalages", () => {
   const rangee = /row-gap:\s*([\d.]+)rem/.exec(desktop);
   assert.ok(colonne && rangee, "les deux gouttières doivent être déclarées sur desktop");
 
+  // Le rembourrage effectif d'une carte, borne haute du clamp.
+  const rembourrage = /padding:\s*clamp\([\d.]+rem,\s*[\d.]+vw,\s*([\d.]+)rem\)/.exec(CSS_PILE);
+  assert.ok(rembourrage, "le rembourrage de la carte doit être lisible");
+  const marge = Number(rembourrage[1]) * 16;
+
+  const recouvrementX = etalement(lire("decalageX")) - Number(colonne[1]) * 16;
+  const recouvrementY = etalement(lire("decalageY")) - Number(rangee[1]) * 16;
+
   assert.ok(
-    Number(colonne[1]) * 16 >= etalement(lire("decalageX")),
-    `gouttière horizontale ${Number(colonne[1]) * 16} px < étalement ${etalement(lire("decalageX"))} px`,
+    recouvrementX <= marge,
+    `recouvrement horizontal ${Math.round(recouvrementX)} px > rembourrage ${Math.round(marge)} px — du texte passerait sous la carte voisine`,
   );
   assert.ok(
-    Number(rangee[1]) * 16 >= etalement(lire("decalageY")),
-    `gouttière verticale ${Number(rangee[1]) * 16} px < étalement ${etalement(lire("decalageY"))} px`,
+    recouvrementY <= marge,
+    `recouvrement vertical ${Math.round(recouvrementY)} px > rembourrage ${Math.round(marge)} px — un en-tête passerait sous la carte du dessus`,
+  );
+
+  // ⚠️ ET IL EXISTE VRAIMENT : sans contact, l'amas redevient une grille aérée.
+  assert.ok(
+    recouvrementX > 0 || recouvrementY > 0,
+    "les cartes doivent se toucher — sinon ce n'est plus un amas",
   );
 
   // ⚠️ Les anciennes compensations de rotation n'ont plus lieu d'être : leur
@@ -892,6 +949,56 @@ await test("31. les gouttières couvrent l'étalement des décalages", () => {
     !/--avis-marge-rotation/.test(CSS_PILE),
     "les marges de compensation de rotation doivent avoir disparu",
   );
+});
+
+await test("32. les cartes portent les codes couleur de Google", () => {
+  /*
+   * ⚠️ CES COULEURS SONT DES VALEURS BRUTES, ET C'EST LE SEUL ENDROIT DU
+   * DÉPÔT OÙ C'EST JUSTIFIÉ. Une carte d'avis doit être reconnue comme une
+   * carte Google avant d'être lue. Les passer en jetons sémantiques les
+   * rendrait noires en thème sombre — elles cesseraient d'être des cartes
+   * Google.
+   *
+   * Elles sont nommées une fois, sur le conteneur, et jamais semées dans les
+   * règles : ce test verrouille les deux.
+   */
+  const attendus: Record<string, string> = {
+    "--avis-g-fond": "#ffffff",
+    "--avis-g-bordure": "#dadce0",
+    "--avis-g-nom": "#202124",
+    "--avis-g-texte": "#3c4043",
+    "--avis-g-secondaire": "#70757a",
+    "--avis-g-etoile": "#fbbc04",
+    "--avis-g-avatar": "#f1f3f4",
+    "--avis-g-focus": "#1a73e8",
+  };
+  for (const [jeton, valeur] of Object.entries(attendus)) {
+    assert.ok(
+      new RegExp(`${jeton}:\\s*${valeur}\\b`, "i").test(CSS_PILE),
+      `${jeton} doit valoir ${valeur}`,
+    );
+  }
+
+  // Les règles utilisent les jetons, pas les valeurs recopiées à la main.
+  const regles = reglesCss(CSS_PILE);
+  for (const valeur of ["#dadce0", "#202124", "#3c4043", "#70757a", "#1a73e8"]) {
+    const occurrences = regles.split(valeur).length - 1;
+    assert.ok(occurrences <= 1, `${valeur} est recopié ${occurrences} fois au lieu d'être un jeton`);
+  }
+
+  // Le fond de la carte et la couleur des étoiles viennent bien des jetons.
+  assert.ok(
+    /background-color:\s*var\(--avis-g-fond\)/.test(regles),
+    "le fond de la carte est le blanc Google",
+  );
+  assert.ok(
+    /\.avis-etoile\s*\{[^}]*var\(--avis-g-etoile/.test(CSS_PILE),
+    "les étoiles portent le jaune Google",
+  );
+
+  // ⚠️ ET AUCUN LOGO NI BADGE : le mot « Google » suffit à nommer la source,
+  // reproduire la marque ne nous appartient pas.
+  assert.ok(!/logo|badge/i.test(sansCommentaires(PILE)), "aucun badge ni logo Google reproduit");
 });
 
 console.log(`\n${réussis} réussis, ${échecs} échecs`);

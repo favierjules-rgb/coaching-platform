@@ -1512,10 +1512,47 @@ body {
  * grandit par-dessus ses voisines — c'est le comportement d'une pile.
  */
 .avis-pile {
+  /*
+   * ════════════════════════════════════════════════════════════════════
+   * LA PALETTE GOOGLE — DÉLIBÉRÉMENT HORS DU SYSTÈME DE COULEURS DU SITE
+   * ════════════════════════════════════════════════════════════════════
+   * Ces valeurs sont celles de Google, reprises telles quelles : fond blanc,
+   * filet gris, nom presque noir, corps de texte gris, étoiles jaunes. Une
+   * carte d'avis doit être reconnue comme un avis Google avant d'être lue —
+   * c'est ce que ces couleurs achètent.
+   *
+   * ⚠️ ELLES NE SUIVENT PAS LE THÈME DU SITE, ET C'EST VOULU. Les cartes
+   * Google sont blanches partout, sur fond clair comme sur fond sombre ; les
+   * passer en jetons sémantiques les rendrait noires en thème sombre et elles
+   * cesseraient d'être reconnaissables. C'est la seule zone du dépôt où des
+   * couleurs brutes sont justifiées, et elles sont nommées ici plutôt que
+   * semées dans les règles.
+   *
+   * ⚠️ CONSÉQUENCE À NE PAS OUBLIER : sur une carte blanche, le blanc du
+   * thème sombre devient invisible. Le liseré de focus et la bordure de
+   * survol utilisent donc le bleu Google, pas `--color-primary` — sans quoi
+   * le focus clavier disparaîtrait purement et simplement.
+   */
+  --avis-g-fond: #ffffff;
+  --avis-g-bordure: #dadce0;
+  --avis-g-nom: #202124;
+  --avis-g-texte: #3c4043;
+  --avis-g-secondaire: #70757a;
+  --avis-g-etoile: #fbbc04;
+  --avis-g-avatar: #f1f3f4;
+  --avis-g-focus: #1a73e8;
+
+  /*
+   * UNE SEULE LIGNE AU REPOS. La carte n'est plus qu'une amorce : un nom, une
+   * note, un début de phrase. Tout le reste attend le survol — et le texte
+   * complet demeure dans le DOM, écrêté à l'œil seulement.
+   */
+  --avis-lignes: 1;
+
   display: grid;
   grid-template-columns: 1fr;
   justify-items: center;
-  padding: clamp(1rem, 2.5vw, 1.75rem) 0 clamp(1.5rem, 3.5vw, 3rem);
+  padding: clamp(0.5rem, 1.5vw, 1rem) 0 clamp(1rem, 2.5vw, 2rem);
 
   /*
    * LA SECOUSSE DU GROUPE — tactile uniquement, pilotée par React.
@@ -1544,10 +1581,15 @@ body {
 
 .avis-carte {
   display: block;
-  padding: clamp(1.1rem, 2.4vw, 1.6rem);
-  border: 1px solid var(--color-border);
-  border-radius: clamp(0.75rem, 1.8vw, 1.25rem);
-  background-color: var(--color-surface);
+  padding: clamp(0.85rem, 1.8vw, 1.15rem);
+  border: 1px solid var(--avis-g-bordure);
+  /* Le rayon des fiches Google : franc, mais pas une pastille. */
+  border-radius: 0.5rem;
+  background-color: var(--avis-g-fond);
+  /* L'ombre portée de Material, celle des cartes Google. */
+  box-shadow:
+    0 1px 2px rgb(60 64 67 / 0.3),
+    0 1px 3px 1px rgb(60 64 67 / 0.15);
   text-decoration: none;
   /*
    * ⚠️ TRANSLATION SEULE — PAS DE `rotate()`, PAS DE `skew()`. La carte se
@@ -1584,8 +1626,16 @@ body {
   /* ⚠️ TOUJOURS SANS ROTATION. Seuls un léger soulèvement et un
      agrandissement discret marquent la mise en avant. */
   transform: translate3d(var(--avis-dx, 0px), calc(var(--avis-dy, 0px) - 6px), 0) scale(1.03);
-  border-color: color-mix(in oklab, var(--color-primary) 55%, transparent);
-  box-shadow: 0 18px 40px -18px rgb(0 0 0 / 0.55);
+  /*
+   * ⚠️ PLUS DE `--color-primary` ICI. Il vaut blanc en thème sombre : sur une
+   * carte devenue blanche, la bordure de survol devenait invisible et la mise
+   * en avant ne se voyait plus qu'à l'ombre. Le bleu Google la rend lisible
+   * dans les deux thèmes.
+   */
+  border-color: var(--avis-g-focus);
+  box-shadow:
+    0 4px 8px 3px rgb(60 64 67 / 0.15),
+    0 1px 3px rgb(60 64 67 / 0.3);
 }
 
 /* L'AVIS COMPLET. C'est la seule chose que la mise en avant révèle. */
@@ -1597,22 +1647,65 @@ body {
 }
 
 .avis-carte:focus-visible {
-  outline: 2px solid var(--color-primary);
+  /* ⚠️ MÊME RAISON : un liseré blanc sur une carte blanche n'existe pas. */
+  outline: 2px solid var(--avis-g-focus);
   outline-offset: 3px;
 }
 
+/* Le jaune des étoiles Google. Il vaut aussi pour la note moyenne affichée
+   au-dessus de la pile : une seule couleur d'étoile sur toute la section. */
 .avis-etoile {
-  color: var(--color-primary);
+  color: var(--avis-g-etoile, #fbbc04);
   fill: currentColor;
 }
 
 .avis-avatar {
-  width: 2.25rem;
-  height: 2.25rem;
   flex-shrink: 0;
   border-radius: 9999px;
   object-fit: cover;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--avis-g-bordure);
+}
+
+/*
+ * LE RESSERREMENT DE LA CARTE.
+ *
+ * ⚠️ C'EST LA HAUTEUR DE LA CARTE QUI COMMANDE CELLE DES RANGÉES, pas
+ * l'inverse. Une première tentative de compacité n'avait réduit que la place
+ * réservée par l'hôte : la carte la plus haute — celle de Vincent, dont le nom
+ * court sur trois lignes — a débordé et recouvert l'en-tête de la carte du
+ * dessous. Mesuré : 11 px sur 247 px de large. On resserre donc la carte
+ * d'abord, la rangée ensuite.
+ */
+.avis-auteur {
+  /* Un nom de quarante-cinq caractères passe à la ligne ; un interligne serré
+     lui coûte quinze pixels de moins sans rien couper. */
+  line-height: 1.2;
+  /* ⚠️ `!important` : les classes utilitaires posent `text-foreground`, qui
+     vaut blanc en thème sombre — donc invisible sur une carte blanche. */
+  color: var(--avis-g-nom) !important;
+}
+
+.avis-date,
+.avis-source {
+  color: var(--avis-g-secondaire) !important;
+}
+
+.avis-texte {
+  color: var(--avis-g-texte) !important;
+}
+
+.avis-source {
+  margin-top: 0.6rem;
+}
+
+.avis-entete {
+  margin-bottom: 0.5rem;
+}
+
+.avis-avatar,
+.avis-avatar-initiale {
+  width: 2rem;
+  height: 2rem;
 }
 
 .avis-avatar-initiale {
@@ -1622,8 +1715,8 @@ body {
   font-family: var(--font-heading), sans-serif;
   font-size: 0.9rem;
   font-weight: 700;
-  color: var(--color-muted-foreground);
-  background-color: var(--color-surface-elevated, var(--color-surface));
+  color: var(--avis-g-secondaire);
+  background-color: var(--avis-g-avatar);
 }
 
 /*
@@ -1635,17 +1728,30 @@ body {
  */
 @media (min-width: 768px) {
   .avis-pile {
-    grid-template-columns: repeat(auto-fit, minmax(min(15rem, 100%), 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(16rem, 100%), 1fr));
     justify-items: stretch;
     align-items: start;
     /*
-     * Voir l'en-tête : ces gouttières couvrent l'étalement des tables de
-     * décalage, ce qui rend tout recouvrement entre voisines impossible.
-     * Étalement horizontal : 18 − (−16) = 34 px, gouttière 2,25 rem (36 px).
-     * Étalement vertical : 16 − (−8) = 24 px, gouttière 1,75 rem (28 px).
+     * ════════════════════════════════════════════════════════════════════
+     * LES CARTES SE CHEVAUCHENT MAINTENANT — MAIS D'UNE QUANTITÉ BORNÉE
+     * ════════════════════════════════════════════════════════════════════
+     * Les gouttières sont passées SOUS l'étalement des tables de décalage :
+     * deux voisines peuvent donc se recouvrir, ce qui donne l'amas serré
+     * demandé.
+     *
+     * ⚠️ LE RECOUVREMENT RESTE INFÉRIEUR AU REMBOURRAGE DE LA CARTE, et c'est
+     * toute la sûreté du dispositif. Horizontal : 24 − 12 = 12 px de
+     * recouvrement maximal, pour 18,4 px de rembourrage. Vertical :
+     * 17 − 8 = 9 px, même rembourrage. Les cartes mordent donc l'une sur
+     * l'autre DANS LEUR MARGE, jamais sur du texte ni sur un en-tête.
+     *
+     * C'est ce que vérifient R5 bis (le texte d'une carte commence après le
+     * bord de sa voisine) et R5 quater (aucun en-tête recouvert). Élargir une
+     * table ou rétrécir une gouttière sans regarder le rembourrage remet du
+     * texte de client sous une autre carte — le test 31 le refuse.
      */
-    column-gap: 2.25rem;
-    row-gap: 1.75rem;
+    column-gap: 0.75rem;
+    row-gap: 0.5rem;
     /*
      * ⚠️ LA RESPIRATION LATÉRALE N'EST PAS DÉCORATIVE. Les cartes des colonnes
      * de bord sont translatées jusqu'à 34 px vers l'extérieur ; sans ce
@@ -1654,8 +1760,8 @@ body {
      * défilement horizontale sur la page entière. Le rembourrage couvre
      * l'écart maximal des deux tables.
      */
-    padding-inline: 1.5rem;
-    padding-top: clamp(1rem, 2.5vw, 1.75rem);
+    padding-inline: 0.85rem;
+    padding-top: clamp(0.5rem, 1.5vw, 1rem);
   }
 
   .avis-carte-hote {
@@ -1667,7 +1773,7 @@ body {
      * avis déplié peut alors grandir autant qu'il veut sans déplacer une
      * seule de ses voisines.
      */
-    height: var(--avis-hauteur, 15rem);
+    height: var(--avis-hauteur, 9.5rem);
   }
 
   .avis-carte {
@@ -1707,14 +1813,12 @@ body {
 @media (max-width: 767px) {
   .avis-pile {
     /*
-     * Trois lignes au repos : de quoi donner envie, pas de quoi lire.
-     *
-     * ⚠️ PAS DEUX. À deux lignes, la carte d'Audrey ZIGGIOTTI n'affichait
-     * qu'une rangée d'étoiles et des points de suspension — son avis commence
-     * par « ⭐⭐⭐⭐⭐ » suivi d'une ligne vide, qui consommaient à elles seules
-     * tout le budget. La troisième ligne lui rend une phrase.
+     * ⚠️ UNE SEULE LIGNE, COMME SUR DESKTOP. Conséquence connue et assumée :
+     * la carte d'Audrey ZIGGIOTTI n'affiche que la rangée d'étoiles qu'elle a
+     * tapée en tête de son avis — c'est littéralement sa première ligne. On ne
+     * réécrit pas son texte pour arranger la vignette ; le tap montre tout.
      */
-    --avis-lignes: 3;
+    --avis-lignes: 1;
     grid-auto-flow: row;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     /*
@@ -1726,11 +1830,14 @@ body {
      * carte visible à 390 px.
      */
     justify-items: stretch;
-    /* Étalement horizontal atténué : 34 px × 0,35 ≈ 12 px, gouttière 0,9 rem. */
-    column-gap: 0.9rem;
-    /* Étalement vertical atténué : 24 px × 0,35 ≈ 9 px, gouttière 0,75 rem. */
-    row-gap: 0.75rem;
-    padding: 0.75rem 0.6rem 1.25rem;
+    /*
+     * Étalement atténué : 24 px × 0,35 ≈ 8 px en X, 17 px × 0,35 ≈ 6 px en Y.
+     * Gouttières encore plus serrées qu'en desktop — les cartes se touchent,
+     * et le recouvrement éventuel reste sous le rembourrage de 13,6 px.
+     */
+    column-gap: 0.45rem;
+    row-gap: 0.4rem;
+    padding: 0.5rem 0.5rem 1rem;
   }
 
   .avis-carte-hote {
@@ -1739,9 +1846,13 @@ body {
     width: auto;
     min-width: 0;
     max-width: 100%;
-    /* La place réservée par carte. Trois lignes de texte y tiennent, nom
-       compris, même quand le nom court sur quatre lignes. */
-    height: 12rem;
+    /*
+     * La place réservée par carte, mesurée sur la plus haute — celle de
+     * Vincent, 139 px, dont le nom court sur trois lignes. Avec la gouttière
+     * de 0,4 rem, le budget d'une rangée vaut 146 px : aucune carte ne peut
+     * déborder sur celle du dessous. Voir R16, qui vérifie cet invariant.
+     */
+    height: 8.75rem;
   }
 
   .avis-carte {
@@ -1780,7 +1891,7 @@ body {
    */
   .avis-carte-hote[data-en-avant="true"] {
     height: auto;
-    min-height: 12rem;
+    min-height: 8.75rem;
   }
 
   .avis-carte-hote[data-en-avant="true"] .avis-carte {
@@ -1849,8 +1960,10 @@ body {
 @media (hover: hover) and (pointer: fine) {
   .avis-carte:hover {
     transform: translate3d(var(--avis-dx, 0px), calc(var(--avis-dy, 0px) - 6px), 0) scale(1.03);
-    border-color: color-mix(in oklab, var(--color-primary) 55%, transparent);
-    box-shadow: 0 18px 40px -18px rgb(0 0 0 / 0.55);
+    border-color: var(--avis-g-focus);
+    box-shadow:
+      0 4px 8px 3px rgb(60 64 67 / 0.15),
+      0 1px 3px rgb(60 64 67 / 0.3);
     min-height: 0;
   }
 
@@ -1884,7 +1997,7 @@ body {
   .avis-carte:focus-visible,
   .avis-carte:hover {
     transform: none;
-    border-color: color-mix(in oklab, var(--color-primary) 55%, transparent);
+    border-color: var(--avis-g-focus);
     box-shadow: none;
   }
 

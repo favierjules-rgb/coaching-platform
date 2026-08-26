@@ -603,11 +603,22 @@ await test("R5 ter — les cartes courtes ne s'étirent pas jusqu'à la plus hau
   const g = await geometrie(page);
   const hauteurs = g.rects.map((r) => Math.round(r.h));
 
-  // LA PROPRIÉTÉ RÉELLE : les hauteurs DIFFÈRENT. Si les cartes s'étiraient,
-  // elles sortiraient toutes à la même hauteur, et cet ensemble aurait un
-  // seul élément.
+  /*
+   * ⚠️ LE SEUIL EST TOMBÉ DE TROIS HAUTEURS DISTINCTES À DEUX, et il faut
+   * savoir pourquoi plutôt que de le croire assoupli par confort.
+   *
+   * Au repos, l'avis n'occupe plus qu'UNE ligne écrêtée. Toutes les cartes
+   * ont donc la même charpente — en-tête, étoiles, une ligne, mention — et
+   * ne diffèrent plus que par le nombre de lignes du NOM. Deux hauteurs
+   * distinctes (les huit cartes ordinaires, et celle de Vincent dont le nom
+   * passe à la ligne) sont exactement ce que produit une composition qui ne
+   * s'étire pas. En exiger trois reviendrait à exiger des avis de longueurs
+   * différentes, ce qui ne dépend plus de la mise en page.
+   *
+   * La vraie garde contre l'étirement est plus bas, dans la feuille de style.
+   */
   assert.ok(
-    new Set(hauteurs).size >= 3,
+    new Set(hauteurs).size >= 2,
     `les cartes doivent prendre leur hauteur naturelle — hauteurs mesurées : ${hauteurs.join(", ")}`,
   );
 
@@ -835,40 +846,34 @@ await test("R11 — AUCUN avis de moins de 5 étoiles n'atteint le rendu réel",
   await page.context().close();
 });
 
-await test("R12 — le bandeau de provenance est VISIBLE à l'écran", async () => {
+await test("R12 — AUCUN texte de provenance n'est peint à l'écran", async () => {
+  /*
+   * ⚠️ CE TEST VÉRIFIAIT QUE LE BANDEAU ÉTAIT BIEN VISIBLE. Il vérifie
+   * maintenant qu'il n'y a PLUS RIEN — retrait demandé explicitement.
+   *
+   * La mesure porte sur le TEXTE PEINT, pas sur le source : un libellé
+   * réintroduit ailleurs dans la page — en petit, en bas, dans une autre
+   * couleur — serait attrapé ici alors qu'une recherche dans le fichier de la
+   * section le manquerait.
+   */
   const page = await atelier({ width: 1440, height: 900 });
-  const bandeau = await page.evaluate(() => {
-    const e = document.querySelector<HTMLElement>("[data-avis-demonstration]");
-    if (!e) return null;
-    const r = e.getBoundingClientRect();
-    const s = getComputedStyle(e);
-    return {
-      texte: (e.textContent ?? "").trim(),
-      largeur: r.width,
-      hauteur: r.height,
-      opacite: Number(s.opacity),
-      affichage: s.display,
-    };
-  });
-  assert.ok(bandeau, "le bandeau doit être présent");
-  // ⚠️ LE LIBELLÉ A CHANGÉ DE PROPOS : les avis affichés sont RÉELS, seule
-  // leur synchronisation ne l'est pas. Voir le test 7 de `avis-google.mts`.
-  assert.ok(
-    /recopiés manuellement/i.test(bandeau.texte),
-    "il dit que les avis sont recopiés à la main",
-  );
-  assert.ok(/non synchronisés/i.test(bandeau.texte), "et qu'ils ne sont pas synchronisés");
-  // ⚠️ ET SURTOUT : il ne doit PAS prétendre que ces avis seraient faux. Ils
-  // sont réels, écrits par des clients. L'ancienne rédaction l'affirmait, ce
-  // qui est devenu un mensonge le jour où le mock a cessé d'être inventé.
-  assert.ok(
-    !/pas de vrais avis/i.test(bandeau.texte),
-    "le bandeau ne doit pas nier la réalité des avis affichés",
-  );
-  // Présent dans le DOM ne suffit pas : il doit être PEINT.
-  assert.ok(bandeau.largeur > 100 && bandeau.hauteur > 10, "il occupe une place réelle à l'écran");
-  assert.equal(bandeau.opacite, 1, "il n'est pas atténué");
-  assert.notEqual(bandeau.affichage, "none", "il n'est pas masqué");
+  const vu = await page.evaluate(() => ({
+    bandeau: document.querySelector("[data-avis-demonstration]") !== null,
+    texte: document.body.innerText,
+  }));
+
+  assert.equal(vu.bandeau, false, "plus aucun élément de bandeau dans le DOM");
+  for (const motif of [
+    /recopiés? manuellement/i,
+    /non synchronis/i,
+    /données de démonstration/i,
+    /pas de vrais avis/i,
+  ]) {
+    assert.ok(!motif.test(vu.texte), `un texte de provenance est peint : ${motif}`);
+  }
+
+  // Et les avis, eux, sont toujours là — le retrait n'a rien emporté d'autre.
+  assert.ok(vu.texte.includes("NAÏLA NACH") || vu.texte.includes("Naïla Nach"), "les avis sont rendus");
   await page.context().close();
 });
 
@@ -1076,6 +1081,114 @@ await test("R15 — la direction de la secousse change d'un tap à l'autre", asy
   assert.ok(!deplie.coupe, "et montrer l'avis en entier");
 
   await page.screenshot({ path: join(CAPTURES, "mobile-tap-groupe.png"), fullPage: true });
+  await page.context().close();
+});
+
+await test("R16 — la place réservée par rangée couvre la carte la PLUS HAUTE", async () => {
+  /*
+   * ⚠️ L'INVARIANT QUI MANQUAIT, ET QUI A COÛTÉ UN DÉFAUT RÉEL.
+   *
+   * Les cartes sont en position absolue dans un hôte de hauteur fixe. Tant
+   * que `hauteur d'hôte + gouttière` dépasse la carte la plus haute, rien ne
+   * déborde sur la rangée suivante. En resserrant la composition, la place
+   * réservée est passée sous la hauteur de la carte de Vincent — dont le nom
+   * court sur trois lignes — et son bas a recouvert l'en-tête de la carte du
+   * dessous : 11 px sur 247 px de large.
+   *
+   * R5 quater l'a vu, mais seulement APRÈS coup et sans dire pourquoi. Ce
+   * test-ci nomme la cause : il compare directement le budget de la rangée à
+   * la carte la plus haute, et son message donne les deux chiffres.
+   */
+  // ⚠️ LES DEUX COMPOSITIONS SONT VÉRIFIÉES. Desktop et mobile réservent des
+  // hauteurs différentes pour des cartes différentes ; resserrer l'une sans
+  // l'autre est exactement l'erreur que ce test doit rendre impossible.
+  for (const taille of [
+    { width: 1440, height: 900 },
+    { width: 390, height: 844 },
+  ]) {
+    const page = await atelier(taille, { tactile: taille.width < 768 });
+    const mesures = await page.evaluate(() => {
+      const pile = document.querySelector<HTMLElement>("[data-avis-pile]");
+      const hotes = [...document.querySelectorAll<HTMLElement>("[data-avis-pile] > li")];
+      return {
+        gouttiere: parseFloat(pile ? getComputedStyle(pile).rowGap : "0") || 0,
+        hotes: hotes.map((l) => l.offsetHeight),
+        cartes: hotes.map((li, i) => ({
+          i: i + 1,
+          hauteur: li.querySelector<HTMLElement>(".avis-carte")?.offsetHeight ?? 0,
+        })),
+      };
+    });
+
+    const budget = mesures.hotes[0] + mesures.gouttiere;
+    const plusHaute = mesures.cartes.reduce((a, b) => (b.hauteur > a.hauteur ? b : a));
+    assert.ok(
+      plusHaute.hauteur <= budget,
+      `${taille.width} px : la carte ${plusHaute.i} fait ${Math.round(plusHaute.hauteur)} px pour un budget de rangée de ${Math.round(budget)} px — elle débordera sur la rangée suivante`,
+    );
+
+    // ⚠️ ET LES HÔTES SONT TOUS ÉGAUX : c'est ce qui rend le budget calculable.
+    assert.equal(
+      new Set(mesures.hotes).size,
+      1,
+      `${taille.width} px : toutes les rangées doivent réserver la même place — ${[...new Set(mesures.hotes)].join(", ")}`,
+    );
+    await page.context().close();
+  }
+});
+
+await test("R17 — le centre du groupe est IMAGINAIRE : rien ne le représente", async () => {
+  /*
+   * ⚠️ `transform-origin` EST UN POINT DE CALCUL, PAS UN OBJET. L'amas doit
+   * sembler s'organiser autour de quelque chose sans que ce quelque chose
+   * soit jamais peint. Ce test cherche donc tout ce qui pourrait le trahir :
+   * un pseudo-élément, un enfant qui ne serait pas une carte, un repère
+   * dessiné.
+   */
+  const page = await atelier({ width: 1440, height: 900 });
+  // ⚠️ AUCUNE FONCTION NOMMÉE DANS `page.evaluate`. tsx instrumente les
+  // déclarations avec un helper `__name` qui n'existe pas dans la page ;
+  // l'appel à `getComputedStyle` est donc répété en ligne plutôt qu'extrait.
+  const inspection = await page.evaluate(() => {
+    const pile = document.querySelector<HTMLElement>("[data-avis-pile]");
+    if (!pile) return null;
+    return {
+      // Le conteneur ne contient QUE des cartes.
+      enfants: [...pile.children].map((e) => e.tagName.toLowerCase()),
+      // Aucun pseudo-élément peint sur le conteneur.
+      avant: getComputedStyle(pile, "::before").content,
+      apres: getComputedStyle(pile, "::after").content,
+      // Ni sur les hôtes.
+      pseudosHotes: [...pile.children].flatMap((e) => [
+        getComputedStyle(e, "::before").content,
+        getComputedStyle(e, "::after").content,
+      ]),
+      // Aucun SVG, cercle ou repère hors des cartes.
+      reperes: pile.querySelectorAll("svg:not(.avis-etoile), circle, line, hr").length,
+    };
+  });
+
+  assert.ok(inspection, "le conteneur doit exister");
+  assert.ok(
+    inspection.enfants.every((t) => t === "li"),
+    `le conteneur ne doit contenir que des cartes — trouvé : ${inspection.enfants.join(", ")}`,
+  );
+  for (const [nom, valeur] of [
+    ["::before", inspection.avant],
+    ["::after", inspection.apres],
+  ] as const) {
+    assert.ok(
+      valeur === "none" || valeur === "normal" || valeur === "",
+      `un pseudo-élément ${nom} est peint sur le groupe (${valeur}) — le centre doit rester invisible`,
+    );
+  }
+  for (const v of inspection.pseudosHotes) {
+    assert.ok(
+      v === "none" || v === "normal" || v === "",
+      `un pseudo-élément est peint sur une carte (${v})`,
+    );
+  }
+  assert.equal(inspection.reperes, 0, "aucun cercle, axe ou repère ne doit être dessiné");
   await page.context().close();
 });
 
