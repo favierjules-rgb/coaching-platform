@@ -1353,6 +1353,21 @@ body {
   padding: 1.5rem 0;
 }
 
+/*
+ * ⚠️ `inline` NE PORTE AUCUNE MARGE ET SUIT LA TAILLE DU TEXTE. C'est la
+ * forme des actions courtes — un envoi, une recherche — où l'emblème
+ * accompagne une phrase au lieu d'occuper un bloc. Lui donner du
+ * rembourrage décalerait la ligne où il apparaît.
+ */
+.seth-loader-inline {
+  display: inline-flex;
+  vertical-align: middle;
+}
+
+.seth-loader-inline .seth-loader-marque {
+  width: 1em;
+}
+
 .seth-loader-marque {
   width: 1.75rem;
   height: auto;

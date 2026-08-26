@@ -43,10 +43,18 @@ interface LoaderProps {
    *  le permet — « Chargement des programmes… » vaut mieux que « Chargement… ». */
   readonly libelle?: string;
   /**
-   * `plein` occupe toute la hauteur disponible et centre l'emblème : c'est la
-   * forme des pages entières. `ligne` s'insère dans un bloc existant.
+   * TROIS FORMES, POUR TROIS NATURES D'ATTENTE — et le choix n'est pas
+   * décoratif : un écran pleine page posé sur une action de deux secondes
+   * fait paraître l'application cassée.
+   *
+   *   `plein`   une PAGE entière se charge. Occupe la hauteur disponible et
+   *             centre l'emblème.
+   *   `ligne`   une SECTION ou un composant se charge. S'insère dans le bloc
+   *             existant, sans le faire grandir démesurément.
+   *   `inline`  une ACTION COURTE est en cours. L'emblème seul, à la taille
+   *             du texte qui l'entoure, sans marge propre.
    */
-  readonly variante?: "plein" | "ligne";
+  readonly variante?: "plein" | "ligne" | "inline";
   readonly className?: string;
 }
 

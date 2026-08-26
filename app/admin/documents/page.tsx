@@ -25,6 +25,7 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { updateDocument as updateDocumentSupabase } from "@/lib/supabase/documents";
 import type { AdminDocument, AdminDocumentStatus } from "@/types";
+import { Loader } from "@/components/ui/Loader";
 
 type StatusFilter = "tous" | AdminDocumentStatus;
 type LevelFilter = "tous" | 1 | 2 | 3 | 4;
@@ -73,7 +74,7 @@ export default function AdminDocumentsPage() {
   const [levelFilter, setLevelFilter] = useState<LevelFilter>("tous");
 
   if (supabaseActive && supabaseDocuments.loading) {
-    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+    return <Loader libelle="Chargement…" variante="ligne" />;
   }
 
   const filtered = documents.filter(

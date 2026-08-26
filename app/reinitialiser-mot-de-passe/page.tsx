@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 
 import { ResetPasswordForm } from "@/components/auth/ResetPasswordForm";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
+import { Loader } from "@/components/ui/Loader";
 
 export const metadata: Metadata = {
   title: "Nouveau mot de passe — Seth Préparation Physique",
@@ -30,7 +31,16 @@ export const revalidate = 0;
 // (lecture de ?token_hash=...&type=... dans ResetPasswordForm).
 export default function ReinitialiserMotDePassePage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense
+      fallback={
+        /*
+         * ⚠️ `null` LAISSAIT UN ÉCRAN VIDE. Le temps que Next.js lise les
+         * paramètres d'URL, la page ne montrait strictement rien — un blanc
+         * qu'on lit comme une erreur, pas comme une attente.
+         */
+        <Loader libelle="Chargement du formulaire…" variante="ligne" />
+      }
+    >
       <ResetPasswordForm supabaseConfigured={isSupabaseConfigured()} />
     </Suspense>
   );

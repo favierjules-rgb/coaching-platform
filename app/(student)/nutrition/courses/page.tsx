@@ -6,6 +6,7 @@ import Link from "next/link";
 import { ListeDeCoursesParcours } from "@/components/student/ListeDeCoursesParcours";
 import { useStudentNutritionPlanV2 } from "@/hooks/useStudentNutritionPlanV2";
 import { useSupabaseNutritionForStudent } from "@/hooks/useSupabaseNutritionForStudent";
+import { Loader } from "@/components/ui/Loader";
 
 /**
  * COURSES C1 — LA ROUTE `/nutrition/courses`.
@@ -60,7 +61,7 @@ export default function ListeDeCoursesPage() {
   }, []);
 
   if (!nutrition.ready || v2.loading) {
-    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+    return <Loader libelle="Chargement…" variante="ligne" />;
   }
 
   if (!nutrition.activePlan) {

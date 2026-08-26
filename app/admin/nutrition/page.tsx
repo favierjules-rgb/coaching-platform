@@ -32,6 +32,7 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { updateNutritionPlanStatus } from "@/lib/supabase/nutrition";
 import type { AdminContentStatus } from "@/types";
+import { Loader } from "@/components/ui/Loader";
 
 type StatusFilter = "tous" | AdminContentStatus;
 
@@ -138,7 +139,7 @@ export default function AdminNutritionPlansPage() {
   }
 
   if (supabaseActive && supabaseNutritionPlans.loading) {
-    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+    return <Loader libelle="Chargement…" variante="ligne" />;
   }
 
   const filtered = nutritionPlans.filter(

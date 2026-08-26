@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useState } from "react";
 import { ProfileSection } from "@/components/student/ProfileSection";
+import { Loader } from "@/components/ui/Loader";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -61,7 +62,7 @@ export function NewsletterPreferenceToggle() {
   return (
     <ProfileSection title="Préférences email">
       {loadState === "loading" ? (
-        <p className="text-sm text-muted-foreground">Chargement…</p>
+        <Loader libelle="Chargement…" variante="ligne" />
       ) : loadState === "error" ? (
         <p role="alert" className="text-sm text-destructive">
           Impossible de charger vos préférences email.

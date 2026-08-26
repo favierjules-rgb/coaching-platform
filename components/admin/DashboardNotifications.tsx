@@ -5,6 +5,7 @@ import { Activity } from "lucide-react";
 
 import { EVENT_ICONS, relativeTime } from "@/components/admin/ActivityFeed";
 import type { ActivityEvent } from "@/types";
+import { Loader } from "@/components/ui/Loader";
 
 /**
  * Notifications du dashboard admin (polish final, remplace les exemples
@@ -69,9 +70,7 @@ interface DashboardNotificationsProps {
 export function DashboardNotifications({ events, loading }: DashboardNotificationsProps) {
   if (loading) {
     return (
-      <p role="status" className="text-sm text-muted-foreground">
-        Chargement des notifications…
-      </p>
+      <Loader libelle="Chargement des notifications…" variante="ligne" />
     );
   }
 

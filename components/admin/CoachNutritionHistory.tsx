@@ -25,6 +25,7 @@ import {
   semaineContenant,
 } from "@/lib/nutrition/historique";
 import { WEEKDAY_LABELS_FR, WEEKDAY_KEYS } from "@/lib/nutrition/weekdays";
+import { Loader } from "@/components/ui/Loader";
 
 /**
  * L'HISTORIQUE ALIMENTAIRE D'UN ÉLÈVE, VU PAR SON COACH (ALIMENTS A5.8).
@@ -116,7 +117,7 @@ export function CoachNutritionHistory({
       )}
 
       {historique.loading ? (
-        <p className="px-1 text-sm text-muted-foreground">Chargement de la semaine…</p>
+        <Loader libelle="Chargement de la semaine…" variante="ligne" />
       ) : (
         <NutritionDayCarousel
           dates={semaine.dates}

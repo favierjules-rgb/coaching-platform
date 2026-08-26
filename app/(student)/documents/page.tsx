@@ -6,6 +6,7 @@ import { RealDocumentLibrary } from "@/components/student/RealDocumentLibrary";
 import { documentResources, student, studentDocumentAccess } from "@/data/student";
 import { useEtatOfflineEleve } from "@/hooks/useEtatOfflineEleve";
 import { useSupabaseStudentDocuments } from "@/hooks/useSupabaseStudentDocuments";
+import { Loader } from "@/components/ui/Loader";
 
 /**
  * Priorité Supabase dès qu'un compte élève réel est identifié (même
@@ -41,7 +42,7 @@ export default function DocumentsPage() {
   const local = useEtatOfflineEleve(supabaseDocuments.ready && !supabaseDocuments.active);
 
   if (!supabaseDocuments.ready) {
-    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+    return <Loader libelle="Chargement…" variante="ligne" />;
   }
 
   if (supabaseDocuments.active) {
@@ -54,7 +55,7 @@ export default function DocumentsPage() {
   }
 
   if (local.etat === "chargement") {
-    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+    return <Loader libelle="Chargement…" variante="ligne" />;
   }
 
   if (local.etat !== "mock") {

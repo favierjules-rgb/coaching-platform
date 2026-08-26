@@ -20,6 +20,7 @@ import {
   type RecipeFormState,
 } from "@/lib/nutrition/recipe-form";
 import type { RecipeStatus } from "@/lib/nutrition/recipe-rows";
+import { Loader } from "@/components/ui/Loader";
 
 /**
  * Création d'une recette.
@@ -104,7 +105,7 @@ export default function AdminNutritionRecipeNewPage() {
   }
 
   if (coachLoading) {
-    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+    return <Loader libelle="Chargement…" variante="ligne" />;
   }
 
   if (!formulaire) {

@@ -60,6 +60,7 @@ import type {
   ExerciseSubstituteOption,
   TrainingBlock,
 } from "@/types";
+import { Loader } from "@/components/ui/Loader";
 
 // 1 → 10 PAR PAS DE 0,5 : 19 valeurs. La borne 1-10 est celle du CHECK
 // workout_feedback_global_rpe_check, inchangée — seul le pas a bougé.
@@ -690,7 +691,7 @@ export function SessionFeedbackSection({
   }, [hydrate, authUserId, etatSaisie, brouillonLocal]);
 
   if (!supabaseFeedback.ready) {
-    return <p className="text-sm text-muted-foreground">Chargement du retour…</p>;
+    return <Loader libelle="Chargement du retour…" variante="ligne" />;
   }
 
   function handleSetChange(

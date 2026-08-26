@@ -6,6 +6,7 @@ import { useSupabaseNutritionWeek } from "@/hooks/useSupabaseNutritionWeek";
 import type { DailyNutritionLog, NutritionDailyTarget } from "@/lib/nutrition-weekly";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { getLatestNutritionLog } from "@/lib/supabase/nutrition-logs";
+import { Loader } from "@/components/ui/Loader";
 
 interface NutritionWeekSummaryCardProps {
   studentId: string;
@@ -51,7 +52,7 @@ export function NutritionWeekSummaryCard({ studentId, planId, target }: Nutritio
   }, [studentId]);
 
   if (loading || !adjustment) {
-    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+    return <Loader libelle="Chargement…" variante="ligne" />;
   }
 
   const { calories } = adjustment;
@@ -84,7 +85,7 @@ export function NutritionWeekSummaryCard({ studentId, planId, target }: Nutritio
       <div className="border-t border-border pt-3">
         <span className="block text-xs uppercase tracking-wide text-muted-foreground">Dernier log nutrition</span>
         {!latestLoaded ? (
-          <span className="text-sm text-muted-foreground">Chargement…</span>
+          <Loader libelle="Chargement…" variante="ligne" />
         ) : latestLog ? (
           <span className="text-sm text-foreground">
             {new Date(latestLog.logDate).toLocaleDateString("fr-FR")} · {latestLog.calories ?? "—"} kcal

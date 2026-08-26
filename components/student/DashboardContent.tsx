@@ -26,6 +26,7 @@ import type {
   TrainingProgram,
   UpcomingSession,
 } from "@/types";
+import { Loader } from "@/components/ui/Loader";
 
 interface DashboardContentProps {
   studentId: string;
@@ -77,7 +78,7 @@ export function DashboardContent({
   const local = useEtatOfflineEleve(supabaseProfile.ready && !useSupabase);
 
   if (!supabaseProfile.ready) {
-    return <p className="text-sm text-muted-foreground">Chargement du dashboard…</p>;
+    return <Loader libelle="Chargement du dashboard…" variante="ligne" />;
   }
 
   /* ══════════════════════════════════════════════════════════════════
@@ -98,7 +99,7 @@ export function DashboardContent({
    * l'une regardait les variables d'environnement et l'autre le client. */
   if (local.etat !== "mock" && !useSupabase) {
     if (local.etat === "chargement") {
-      return <p className="text-sm text-muted-foreground">Chargement du dashboard…</p>;
+      return <Loader libelle="Chargement du dashboard…" variante="ligne" />;
     }
 
     return (

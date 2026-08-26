@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarPlus, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 
 import { AdminCalendar } from "@/components/admin/calendar/AdminCalendar";
 import {
@@ -37,6 +37,7 @@ import {
   updateCoachEventAtomic,
 } from "@/lib/supabase/appointments";
 import type { AdminAppointment, AvailableSlot, CoachAvailability } from "@/types";
+import { Loader } from "@/components/ui/Loader";
 
 type Tab = "rendez-vous" | "disponibilites";
 
@@ -351,10 +352,7 @@ export default function AdminCalendrierPage() {
               création d&apos;un rendez-vous.
             </p>
             {slotsLoading ? (
-              <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                <CalendarPlus size={16} />
-                Chargement des créneaux…
-              </p>
+              <Loader libelle="Chargement des créneaux…" variante="ligne" />
             ) : (
               <BookingSlotPicker
                 slots={slots}

@@ -10,6 +10,7 @@ import { formatDateTime, matchesTextSearch } from "@/lib/admin";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { getEmailLogs } from "@/lib/supabase/email-logs";
 import type { EmailLog, EmailStatus, EmailType } from "@/types";
+import { Loader } from "@/components/ui/Loader";
 
 const emailTypeLabels: Record<EmailType, string> = {
   welcome: "Bienvenue",
@@ -236,9 +237,7 @@ export default function AdminEmailsPage() {
       </div>
 
       {loading ? (
-        <p role="status" className="text-sm text-muted-foreground">
-          Chargement…
-        </p>
+        <Loader libelle="Chargement des emails…" variante="ligne" />
       ) : filtered.length === 0 ? (
         <p className="rounded-card border border-border bg-card p-6 text-sm text-muted-foreground shadow-soft">
           {logs.length === 0 ? "Aucun email envoyé pour le moment." : "Aucun email ne correspond à ces filtres."}

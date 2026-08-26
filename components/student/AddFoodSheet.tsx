@@ -41,6 +41,7 @@ import {
   searchCatalogFoods,
 } from "@/lib/supabase/consumed-meals";
 import type { CibleRecente } from "@/lib/nutrition/recents";
+import { Loader } from "@/components/ui/Loader";
 
 /**
  * AJOUTER UN ALIMENT — deux parcours, aucun cul-de-sac.
@@ -606,8 +607,17 @@ export function AddFoodSheet({
               ) : (
                 <>
                   {hydratation && (
-                    <p className="py-2 text-center text-sm text-muted-foreground" role="status">
-                      Chargement de la fiche produit…
+                    <p className="flex items-center justify-center gap-2 py-2 text-center text-sm text-muted-foreground">
+                      {/*
+                        ⚠️ ACTION COURTE : la phrase RESTE. L'hydratation d'une
+                        fiche produit dure une poignée de centaines de
+                        millisecondes ; remplacer le texte par un emblème seul
+                        priverait l'élève de l'explication au moment précis où
+                        elle est utile. L'emblème l'accompagne, il ne le
+                        remplace pas.
+                      */}
+                      <Loader libelle="Chargement de la fiche produit…" variante="inline" />
+                      <span aria-hidden="true">Chargement de la fiche produit…</span>
                     </p>
                   )}
                   {échecHydratation && (

@@ -9,6 +9,7 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { lireSnapshotDeListe, type SnapshotDeListe } from "@/lib/supabase/food-lists";
 import type { MealChoiceSlot } from "@/lib/nutrition/plan-v2-week";
 import { ColorKeyDot } from "@/components/ui/ColorKeyDot";
+import { Loader } from "@/components/ui/Loader";
 
 /**
  * N1.3 — LES CHOIX ALIMENTAIRES D'UN REPAS, CÔTÉ COACH.
@@ -277,7 +278,7 @@ function SelecteurDeListe({
         )}
 
         {chargement ? (
-          <p className="text-sm text-muted-foreground">Chargement…</p>
+          <Loader libelle="Chargement…" variante="ligne" />
         ) : erreur ? (
           <p className="rounded-control border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
             {erreur}

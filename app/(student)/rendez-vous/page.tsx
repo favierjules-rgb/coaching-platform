@@ -15,6 +15,7 @@ import {
   notifyAppointmentConfirmation,
 } from "@/lib/supabase/appointments";
 import type { AdminAppointment, AvailableSlot } from "@/types";
+import { Loader } from "@/components/ui/Loader";
 
 export default function RendezVousPage() {
   const supabaseAppointments = useSupabaseAppointmentsForStudent();
@@ -38,7 +39,7 @@ export default function RendezVousPage() {
   }, []);
 
   if (!supabaseAppointments.ready) {
-    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+    return <Loader libelle="Chargement…" variante="ligne" />;
   }
 
   if (!supabaseAppointments.active) {

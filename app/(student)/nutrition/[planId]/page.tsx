@@ -24,6 +24,7 @@ import { type Semaine, decalerSemaine, semaineContenant } from "@/lib/nutrition/
 import { useEtatOfflineEleve } from "@/hooks/useEtatOfflineEleve";
 import { useStudentNutritionPlanV2 } from "@/hooks/useStudentNutritionPlanV2";
 import { useSupabaseNutritionForStudent } from "@/hooks/useSupabaseNutritionForStudent";
+import { Loader } from "@/components/ui/Loader";
 
 export default function NutritionPlanDetailPage() {
   const params = useParams<{ planId: string }>();
@@ -109,7 +110,7 @@ export default function NutritionPlanDetailPage() {
   );
 
   if (!supabaseNutrition.ready) {
-    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+    return <Loader libelle="Chargement…" variante="ligne" />;
   }
 
   if (supabaseNutrition.active) {
@@ -185,7 +186,7 @@ export default function NutritionPlanDetailPage() {
             Semaine alimentaire
           </h2>
           {v2.loading ? (
-            <p className="text-sm text-muted-foreground">Chargement de la semaine…</p>
+            <Loader libelle="Chargement de la semaine…" variante="ligne" />
           ) : v2.error ? (
             <ÉtatErreur message={v2.error} onRéessayer={() => void v2.refetch()} />
           ) : v2.week ? (
@@ -289,7 +290,7 @@ export default function NutritionPlanDetailPage() {
    * plan de démonstration sous l'identifiant demandé, ce qui donnait à un
    * élève réel des macros qui n'étaient pas les siennes. */
   if (local.etat === "chargement") {
-    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+    return <Loader libelle="Chargement…" variante="ligne" />;
   }
 
   if (local.etat !== "mock") {

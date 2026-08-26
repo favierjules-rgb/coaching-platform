@@ -32,6 +32,7 @@ import {
 } from "@/lib/nutrition/proposition-rapide";
 import type { RepasDeLaPeriode } from "@/lib/nutrition/repas-de-la-periode";
 import { compterCartes, groupesParJour, type CarteRepas, type GroupeDeJour } from "@/lib/nutrition/repas-par-jour";
+import { Loader } from "@/components/ui/Loader";
 
 /**
  * COURSES C1.1 — DEUX MANIÈRES DE PRÉPARER SA SEMAINE, UNE SEULE LISTE.
@@ -475,7 +476,7 @@ export function EcranPreferencesRapides({
         </p>
       </div>
 
-      {chargement && <p className="text-sm text-muted-foreground">Chargement…</p>}
+      {chargement && <Loader libelle="Chargement…" variante="ligne" />}
 
       {!chargement && options.length === 0 && (
         <p className="text-sm text-muted-foreground">
@@ -608,7 +609,7 @@ export function EcranProposition({
   const comptes = compterCartes(groupes);
   const proposables = aValider.length;
 
-  if (chargement) return <p className="text-sm text-muted-foreground">Chargement…</p>;
+  if (chargement) return <Loader libelle="Chargement…" variante="ligne" />;
   // ⚠️ CORRECTIF D-1 — L'ERREUR AVANT LE VIDE, comme sur l'écran des repas.
   if (!ok) return <LectureImpossible />;
 
@@ -744,7 +745,7 @@ export function EcranRepasParJour({
   const comptes = compterCartes(groupes);
   const restants = comptes.total - comptes.prets;
 
-  if (chargement) return <p className="text-sm text-muted-foreground">Chargement…</p>;
+  if (chargement) return <Loader libelle="Chargement…" variante="ligne" />;
 
   // ⚠️ UNE LECTURE RATÉE N'EST PAS « RIEN DE PRÉVU ». Afficher « tout reste à
   // composer » à un élève qui a tout validé l'enverrait tout refaire.

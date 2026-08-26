@@ -43,6 +43,7 @@ import {
 } from "@/lib/nutrition/lifecycle";
 import { RECIPE_STATUS_LABELS_FR } from "@/lib/nutrition/recipe-labels";
 import type { RecipeStatus } from "@/lib/nutrition/recipe-rows";
+import { Loader } from "@/components/ui/Loader";
 
 /**
  * Modification d'une recette, et son CYCLE DE VIE complet.
@@ -227,7 +228,7 @@ export default function AdminNutritionRecipeDetailPage() {
   }
 
   if (loading) {
-    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+    return <Loader libelle="Chargement…" variante="ligne" />;
   }
 
   const retour = (

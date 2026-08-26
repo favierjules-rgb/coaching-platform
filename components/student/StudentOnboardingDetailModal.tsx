@@ -21,6 +21,7 @@ import {
   type OnboardingProfileSource,
 } from "@/lib/onboarding-form";
 import type { SupabaseStudentProfile } from "@/types";
+import { Loader } from "@/components/ui/Loader";
 
 function val(value: string): string {
   return value.trim() !== "" ? value : "Non renseigné";
@@ -178,7 +179,7 @@ export function StudentOnboardingDetailModal({ student }: { student: OnboardingP
 
             <div className="flex-1 overflow-y-auto px-6 py-4">
               {loading ? (
-                <p className="text-sm text-muted-foreground">Chargement…</p>
+                <Loader libelle="Chargement…" variante="ligne" />
               ) : error ? (
                 <div className="mb-4 flex items-center gap-3 rounded-control border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
                   <AlertTriangle size={18} className="flex-shrink-0" />

@@ -6,6 +6,7 @@ import { Lock } from "lucide-react";
 
 import { PaymentResultCard } from "@/components/shared/PaymentResultCard";
 import { useSupabaseMyAccess } from "@/hooks/useSupabaseMyAccess";
+import { Loader } from "@/components/ui/Loader";
 
 /**
  * Contenu de /acces-limite (chantier "supabase-stripe-access-control",
@@ -44,7 +45,7 @@ export function AccessLimitedContent() {
       message="Votre accès aux programmes, documents et plans nutritionnels sera activé après validation de votre abonnement."
     >
       {!access.ready ? (
-        <span className="border border-border px-4 py-3 text-xs uppercase tracking-widest text-muted-foreground">Chargement…</span>
+        <Loader libelle="Chargement…" variante="ligne" />
       ) : access.assignedTemplate ? (
         <button
           type="button"
