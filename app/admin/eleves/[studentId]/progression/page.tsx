@@ -20,6 +20,7 @@ import { useSupabaseStudentDetail } from "@/hooks/useSupabaseStudentDetail";
 import { useSupabaseStudentProgress } from "@/hooks/useSupabaseStudentProgress";
 import { fullName } from "@/lib/admin";
 import { buildTransformationRecapInput } from "@/lib/pdf/transformation-recap";
+import { Loader } from "@/components/ui/Loader";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -39,7 +40,7 @@ export default function AdminStudentProgressionPage() {
   const [nextObjective, setNextObjective] = useState("");
 
   if (detail.loading || progress.loading) {
-    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+    return <Loader libelle="Chargement…" variante="ligne" />;
   }
 
   if (!detail.student) {

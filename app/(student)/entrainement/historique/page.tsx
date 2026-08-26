@@ -16,6 +16,7 @@ import { getCurrentStudentId } from "@/lib/supabase/current-student";
 import { getWorkoutFeedbackForStudent } from "@/lib/supabase/workout-feedback";
 import { resolvePrescription } from "@/lib/workout-history";
 import type { AdminStudentFeedback } from "@/types";
+import { Loader } from "@/components/ui/Loader";
 
 /**
  * Historique des retours de séance de l'élève — chemin de lecture
@@ -122,7 +123,7 @@ export default function HistoriqueRetoursPage() {
       </div>
 
       {!ready ? (
-        <p className="text-sm text-muted-foreground">Chargement…</p>
+        <Loader libelle="Chargement…" variante="ligne" />
       ) : feedbacks.length === 0 ? (
         <p className="text-sm text-muted-foreground">Aucun retour de séance pour le moment.</p>
       ) : (

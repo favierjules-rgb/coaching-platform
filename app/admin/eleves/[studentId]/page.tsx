@@ -70,6 +70,7 @@ import type {
   StudentPaymentProfile,
 } from "@/types";
 import type { CustomMeasurementInput } from "@/components/student/UpdateMeasurementsModal";
+import { Loader } from "@/components/ui/Loader";
 
 /**
  * Un profil élève Supabase pas encore complété (student_profiles absent)
@@ -181,7 +182,7 @@ export default function AdminStudentDetailPage() {
 
   if (!rawStudent) {
     if (supabaseDetail.loading) {
-      return <p className="text-sm text-muted-foreground">Chargement…</p>;
+      return <Loader libelle="Chargement…" variante="ligne" />;
     }
     return (
       <div>

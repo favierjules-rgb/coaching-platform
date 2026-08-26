@@ -6,6 +6,7 @@ import Link from "next/link";
 import { PaymentResultCard } from "@/components/shared/PaymentResultCard";
 import { useCurrentUserRole } from "@/hooks/useCurrentUserRole";
 import { resolveSpaceHref } from "@/lib/stripe/return-routes";
+import { Loader } from "@/components/ui/Loader";
 
 /**
  * Contenu de /paiement/success (chantier "supabase-stripe-payments-subscriptions").
@@ -32,7 +33,7 @@ export function PaymentSuccessContent() {
           Retour à mon espace
         </Link>
       ) : (
-        <span className="border border-border px-4 py-3 text-xs uppercase tracking-widest text-muted-foreground">Chargement…</span>
+        <Loader libelle="Chargement…" variante="ligne" />
       )}
     </PaymentResultCard>
   );

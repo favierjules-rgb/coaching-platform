@@ -7,6 +7,7 @@ import { ArrowLeft } from "lucide-react";
 import { StudentAdaptiveRecipes } from "@/components/student/StudentAdaptiveRecipes";
 import { useStudentNutritionPlanV2 } from "@/hooks/useStudentNutritionPlanV2";
 import { useSupabaseNutritionForStudent } from "@/hooks/useSupabaseNutritionForStudent";
+import { Loader } from "@/components/ui/Loader";
 
 /**
  * LES RECETTES ADAPTATIVES — leur propre parcours.
@@ -38,7 +39,7 @@ export default function StudentRecipesPage() {
   );
 
   if (!supabaseNutrition.ready) {
-    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+    return <Loader libelle="Chargement…" variante="ligne" />;
   }
 
   if (!supabaseNutrition.active) {
@@ -89,7 +90,7 @@ export default function StudentRecipesPage() {
       </div>
 
       {v2.loading ? (
-        <p className="text-sm text-muted-foreground">Chargement des recettes…</p>
+        <Loader libelle="Chargement des recettes…" variante="ligne" />
       ) : v2.error ? (
         <div
           className="flex flex-col items-start gap-3 rounded-panel border border-destructive/40 bg-destructive/10 px-4 py-3"

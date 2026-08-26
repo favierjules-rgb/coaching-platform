@@ -14,6 +14,7 @@ import {
   student,
 } from "@/data/student";
 import { useSeanceHorsLigne } from "@/hooks/useSeanceHorsLigne";
+import { Loader } from "@/components/ui/Loader";
 
 /**
  * LA SÉANCE — SIX ÉTATS, ET PLUS UN SEUL BOOLÉEN.
@@ -54,7 +55,7 @@ export default function SessionDetailPage() {
   const seance = useSeanceHorsLigne(params.sessionId);
 
   if (seance.etat === "chargement") {
-    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+    return <Loader libelle="Chargement…" variante="ligne" />;
   }
 
   /* ── ÉTATS SANS DONNÉES ÉLÈVE ──────────────────────────────────────────

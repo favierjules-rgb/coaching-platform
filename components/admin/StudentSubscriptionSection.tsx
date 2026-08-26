@@ -17,6 +17,7 @@ import { buildCheckoutOffers, formatTemplateOffer } from "@/lib/stripe/plans";
 import { formatAmountCents, toStudentBillingStatus } from "@/lib/stripe/status";
 import { accessModeLabels, accessReasonLabels, type UpdateStudentAccessInput } from "@/lib/supabase/student-access";
 import type { BillingAccessMode, StudentAccessStatus, StudentBillingSummary, StudentPaymentProfile, SubscriptionTemplate } from "@/types";
+import { Loader } from "@/components/ui/Loader";
 
 const accessModeOptions: { value: BillingAccessMode; label: string }[] = [
   { value: "subscription_required", label: accessModeLabels.subscription_required },
@@ -51,7 +52,7 @@ export function StudentSubscriptionSection({
   return (
     <AdminSection title="Abonnement & Paiement">
       {loading ? (
-        <p className="text-sm text-muted-foreground">Chargement…</p>
+        <Loader libelle="Chargement…" variante="ligne" />
       ) : (
         <StudentSubscriptionForm
           studentId={studentId}

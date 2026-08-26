@@ -19,6 +19,7 @@ import { useEtatOfflineEleve } from "@/hooks/useEtatOfflineEleve";
 import { useStudentNutritionPlanV2 } from "@/hooks/useStudentNutritionPlanV2";
 import { useSupabaseNutritionForStudent } from "@/hooks/useSupabaseNutritionForStudent";
 import { dailyTargetsByWeekday, weeklyCaloriesFromDays } from "@/lib/nutrition/plan-v2-week";
+import { Loader } from "@/components/ui/Loader";
 
 /**
  * Priorité Supabase dès qu'un compte élève réel est identifié (même
@@ -74,7 +75,7 @@ export default function NutritionPage() {
     : undefined;
 
   if (!supabaseNutrition.ready) {
-    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+    return <Loader libelle="Chargement…" variante="ligne" />;
   }
 
   if (supabaseNutrition.active) {
@@ -210,7 +211,7 @@ export default function NutritionPage() {
    * — « 3 000 kcal », des compléments, un conseil du jour — à un élève réel
    * qui a simplement perdu le réseau. */
   if (local.etat === "chargement") {
-    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+    return <Loader libelle="Chargement…" variante="ligne" />;
   }
 
   if (local.etat !== "mock") {

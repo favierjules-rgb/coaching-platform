@@ -16,6 +16,7 @@ import {
   nomDeCopie,
   nomPropre,
 } from "@/lib/supabase/food-lists";
+import { Loader } from "@/components/ui/Loader";
 
 /**
  * N1.2 — MES LISTES D'ALIMENTS.
@@ -154,7 +155,7 @@ export default function AdminFoodListsPage() {
       {/* ⚠️ JAMAIS D'ÉCRAN BLANC : chargement, erreur, vide et « rien à
           afficher » ont chacun leur phrase. */}
       {chargement || chargementCoach ? (
-        <p className="text-sm text-muted-foreground">Chargement…</p>
+        <Loader libelle="Chargement…" variante="ligne" />
       ) : erreur ? (
         <p
           className="rounded-panel border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"

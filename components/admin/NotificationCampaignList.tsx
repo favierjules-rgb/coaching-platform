@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { CalendarClock, History } from "lucide-react";
 
 import { decrireRegle, lireRegle, FUSEAU_PAR_DEFAUT } from "@/lib/notifications/recurrence";
+import { Loader } from "@/components/ui/Loader";
 
 /**
  * À VENIR, ET CE QUI EST DÉJÀ PARTI.
@@ -133,7 +134,7 @@ export function NotificationCampaignList({ rafraichir }: { rafraichir: number })
           <CalendarClock size={18} className="text-primary" aria-hidden="true" />À venir
         </h2>
         {chargement ? (
-          <p className="text-sm text-muted-foreground">Chargement…</p>
+          <Loader libelle="Chargement…" variante="ligne" />
         ) : aVenir.length === 0 ? (
           <p className="text-sm text-muted-foreground">Aucune notification programmée.</p>
         ) : (

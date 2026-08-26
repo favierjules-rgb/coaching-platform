@@ -16,6 +16,7 @@ import { formatAmountCents } from "@/lib/stripe/status";
 import { accessReasonLabels } from "@/lib/supabase/student-access";
 import type { AdminBillingListItem } from "@/lib/supabase/billing";
 import type { StudentBillingStatus } from "@/types";
+import { Loader } from "@/components/ui/Loader";
 
 type StatusFilter = "tous" | "actif" | "en_retard" | "annule" | "sans_abonnement";
 type AccessFilter = "tous" | "autorise" | "bloque";
@@ -315,7 +316,7 @@ export default function AdminBillingPage() {
       </div>
 
       {billing.loading ? (
-        <p className="text-sm text-muted-foreground">Chargement…</p>
+        <Loader libelle="Chargement…" variante="ligne" />
       ) : filtered.length === 0 ? (
         <p className="text-sm text-muted-foreground">Aucun élève ne correspond à ces filtres.</p>
       ) : (

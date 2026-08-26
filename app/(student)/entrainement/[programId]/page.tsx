@@ -25,6 +25,7 @@ import {
   toEleveTrainingProgram,
   toEleveWorkoutSession,
 } from "@/lib/training-schedule";
+import { Loader } from "@/components/ui/Loader";
 
 export default function ProgramDetailPage() {
   const params = useParams<{ programId: string }>();
@@ -34,7 +35,7 @@ export default function ProgramDetailPage() {
   const local = useEtatOfflineEleve(supabaseTraining.ready && !supabaseTraining.active);
 
   if (!supabaseTraining.ready) {
-    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+    return <Loader libelle="Chargement…" variante="ligne" />;
   }
 
   if (supabaseTraining.active) {
@@ -170,7 +171,7 @@ export default function ProgramDetailPage() {
    * bien de CELUI-CI, et la séance du jour — les deux viennent du snapshot
    * réel préparé en ligne. */
   if (local.etat === "chargement") {
-    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+    return <Loader libelle="Chargement…" variante="ligne" />;
   }
 
   if (local.etat === "offline" || local.etat === "erreur" || local.etat === "indisponible") {

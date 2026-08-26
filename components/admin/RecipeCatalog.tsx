@@ -31,6 +31,7 @@ import {
   describeSlot,
   describeTag,
 } from "@/lib/nutrition/recipe-labels";
+import { Loader } from "@/components/ui/Loader";
 
 /**
  * Catalogue des recettes — administration.
@@ -213,7 +214,7 @@ export function RecipeCatalog({
   }
 
   if (loading) {
-    return <p className="text-sm text-muted-foreground">Chargement du catalogue…</p>;
+    return <Loader libelle="Chargement du catalogue…" variante="ligne" />;
   }
 
   if (error) {

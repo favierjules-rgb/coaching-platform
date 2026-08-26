@@ -1310,6 +1310,110 @@ body {
 }
 
 /*
+ * LOADER — components/ui/Loader.tsx
+ *
+ * ════════════════════════════════════════════════════════════════════════
+ * DEUX POINTES QUI ALTERNENT, PAS UN CERCLE QUI TOURNE
+ * ════════════════════════════════════════════════════════════════════════
+ * L'emblème a un haut et un bas : le faire tourner le déformerait. Ses deux
+ * étoiles s'éclairent donc l'une après l'autre, en opposition de phase — le
+ * battement d'un indicateur, sans toucher à la géométrie de la marque.
+ *
+ * ⚠️ `linear`, ET C'EST UNE RÈGLE, PAS UN GOÛT. Un mouvement PERPÉTUEL qui
+ * accélère et ralentit attrape l'œil bien plus qu'un indicateur ne le doit.
+ * Les courbes d'accélération sont pour les entrées et les sorties ; une
+ * boucle se joue à vitesse constante.
+ *
+ * ⚠️ 1,4 s LE CYCLE. Assez lent pour ne pas s'agiter, assez rapide pour
+ * qu'on lise « ça travaille » et non « c'est figé ».
+ */
+@keyframes seth-loader-battement {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.seth-loader {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Pleine page : l'emblème est seul, centré, avec de l'air autour. */
+.seth-loader-plein {
+  min-height: 60vh;
+  width: 100%;
+}
+
+.seth-loader-ligne {
+  padding: 1.5rem 0;
+}
+
+/*
+ * ⚠️ `inline` NE PORTE AUCUNE MARGE ET SUIT LA TAILLE DU TEXTE. C'est la
+ * forme des actions courtes — un envoi, une recherche — où l'emblème
+ * accompagne une phrase au lieu d'occuper un bloc. Lui donner du
+ * rembourrage décalerait la ligne où il apparaît.
+ */
+.seth-loader-inline {
+  display: inline-flex;
+  vertical-align: middle;
+}
+
+.seth-loader-inline .seth-loader-marque {
+  width: 1em;
+}
+
+.seth-loader-marque {
+  width: 1.75rem;
+  height: auto;
+  color: var(--color-primary);
+}
+
+.seth-loader-plein .seth-loader-marque {
+  width: 2.5rem;
+}
+
+/*
+ * ⚠️ LES DEUX TRACÉS SONT VISÉS PAR LEUR RANG, et c'est délibéré.
+ *
+ * `DoubleStar` ne pose ses classes (`double-star-a` / `-b`) que lorsqu'on lui
+ * demande son allumage en cascade — une animation qui ne se joue QU'UNE FOIS
+ * et n'a rien à voir avec une attente. Le loader ne l'active donc pas et vise
+ * les chemins directement, ce qui lui évite d'ajouter une variante à un
+ * composant partagé pour son seul usage.
+ */
+.seth-loader-marque path {
+  animation: seth-loader-battement 1400ms linear infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* La seconde étoile en opposition de phase : quand l'une s'éteint, l'autre
+   s'allume. C'est ce décalage qui fait le battement. */
+.seth-loader-marque path:nth-of-type(2) {
+  animation-delay: 700ms;
+}
+
+/*
+ * ⚠️ MOUVEMENT RÉDUIT : ON RETIRE LE BATTEMENT, PAS LE SIGNAL.
+ *
+ * Un indicateur de chargement qui disparaîtrait laisserait l'utilisateur sans
+ * savoir que quelque chose travaille — la page semblerait cassée. L'emblème
+ * reste donc affiché, pleinement opaque, simplement immobile.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .seth-loader-marque path {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+/*
  * ════════════════════════════════════════════════════════════════════════
  * F2 — CARTE DE FIN DE SÉANCE : l'allumage de la double étoile
  * ════════════════════════════════════════════════════════════════════════

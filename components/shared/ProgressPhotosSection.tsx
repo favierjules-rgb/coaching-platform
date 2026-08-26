@@ -8,6 +8,7 @@ import type { ProgressPhotosGalleryState } from "@/hooks/useProgressPhotosGaller
 import { formatDate } from "@/lib/admin";
 import { validateProgressPhotoFile } from "@/lib/supabase/storage-progress-photos";
 import type { ProgressPhoto, ProgressPhotoAngle } from "@/types";
+import { Loader } from "@/components/ui/Loader";
 
 const angleOptions: { value: ProgressPhotoAngle; label: string }[] = [
   { value: "face", label: "Face" },
@@ -129,7 +130,7 @@ export function ProgressPhotosSection({ gallery, defaultWeightKg = null }: Progr
       </div>
 
       {loading ? (
-        <p className="text-sm text-muted-foreground">Chargement…</p>
+        <Loader libelle="Chargement…" variante="ligne" />
       ) : sorted.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-3 rounded-card border border-dashed border-border bg-surface-soft/40 py-10 text-center">
           <ImageOff size={22} className="text-muted-foreground" aria-hidden="true" />

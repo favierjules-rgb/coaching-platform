@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertCircle, CalendarDays, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
+import { AlertCircle, CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 
 import type { AdminCalendarEvent } from "@/lib/admin-calendar-events";
 import { CALENDAR_KIND_LABELS, type AdminCalendarEventKind } from "@/lib/admin-calendar-events";
 import { periodTitle, shiftAnchor, startOfDay, viewPeriod, weekDays, type CalendarView } from "@/lib/calendar-grid";
 import { MonthGrid } from "./MonthGrid";
 import { TimeGrid } from "./TimeGrid";
+import { Loader } from "@/components/ui/Loader";
 
 /**
  * Calendrier admin façon Calendrier Apple (vue Semaine par défaut, Jour,
@@ -166,12 +167,15 @@ export function AdminCalendar({
           </button>
         </div>
       ) : loading ? (
-        <div
-          role="status"
-          aria-label="Chargement du calendrier"
-          className="flex min-h-[20rem] items-center justify-center rounded-card border border-border"
-        >
-          <Loader2 size={20} className="motion-safe:animate-spin text-muted-foreground" />
+        /*
+         * ⚠️ C'ÉTAIT UNE SECONDE IDENTITÉ DE CHARGEMENT. Un `Loader2` de
+         * lucide qui tourne : un cercle générique, sans rapport avec la
+         * marque, au milieu d'une section entière en attente. L'emblème le
+         * remplace — et le `role="status"` du composant remplace celui posé
+         * ici à la main.
+         */
+        <div className="flex min-h-[20rem] items-center justify-center rounded-card border border-border">
+          <Loader libelle="Chargement du calendrier…" variante="ligne" />
         </div>
       ) : (
         <>

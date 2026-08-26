@@ -13,6 +13,7 @@ import { ProgressWorkoutSection } from "@/components/shared/ProgressWorkoutSecti
 import { useProgressPhotosGallery } from "@/hooks/useProgressPhotosGallery";
 import { useSupabaseMyProgress } from "@/hooks/useSupabaseMyProgress";
 import { buildTransformationRecapInput } from "@/lib/pdf/transformation-recap";
+import { Loader } from "@/components/ui/Loader";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -28,7 +29,7 @@ export default function StudentProgressionPage() {
   const gallery = useProgressPhotosGallery(progress.studentId, "student");
 
   if (!progress.ready) {
-    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+    return <Loader libelle="Chargement…" variante="ligne" />;
   }
 
   if (!progress.active) {

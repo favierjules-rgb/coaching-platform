@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { ImageOff, Loader2, RefreshCw, Trash2, Upload } from "lucide-react";
 
 import { RecipeImage } from "@/components/shared/RecipeImage";
+import { Loader } from "@/components/ui/Loader";
 import {
   RECIPE_IMAGE_MAX_EDGE,
   RECIPE_IMAGE_SOURCE_MIME,
@@ -272,9 +273,16 @@ export function RecipeImageField({
       </div>
 
       {enCours && aUneImage && (
-        <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground" role="status">
-          <Loader2 size={12} className="animate-spin" />
-          Traitement de l&apos;image…
+        <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+          {/*
+            ⚠️ ACTION COURTE, MAIS HORS D'UN BOUTON : la phrase reste — elle
+            explique ce qui se passe pendant que la photo est retaillée — et
+            l'emblème l'accompagne au lieu d'un cercle générique. Le `Loader`
+            porte lui-même `role="status"` : le paragraphe ne le double plus,
+            sinon l'annonce serait lue deux fois.
+          */}
+          <Loader libelle="Traitement de l&apos;image…" variante="inline" />
+          <span aria-hidden="true">Traitement de l&apos;image…</span>
         </p>
       )}
 

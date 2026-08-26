@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Loader2, MailCheck } from "lucide-react";
+import { MailCheck } from "lucide-react";
+import { Loader } from "@/components/ui/Loader";
 
 const POLL_INTERVAL_MS = 1500;
 const MAX_ATTEMPTS = 14; // ~20s, au-delà on bascule sur le message email.
@@ -85,7 +86,9 @@ export function ProgrammesMerciStatus() {
   if (phase === "checking") {
     return (
       <div className="w-full max-w-md border border-border bg-zinc-950 p-8">
-        <Loader2 size={28} className="mx-auto mb-4 animate-spin text-primary" />
+        {/* ⚠️ Même raison qu'ailleurs : le cercle générique de lucide cède la
+            place à l'emblème, seule identité de chargement du site. */}
+        <Loader libelle="Préparation de ton accès…" variante="ligne" className="mb-2" />
         <h1 className="mb-2 font-heading text-2xl font-extrabold uppercase text-foreground">Un instant...</h1>
         <p className="text-sm leading-relaxed text-muted-foreground">On prépare ton accès.</p>
       </div>

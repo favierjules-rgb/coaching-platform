@@ -14,6 +14,7 @@ import {
 import { useEtatOfflineEleve } from "@/hooks/useEtatOfflineEleve";
 import { useSupabaseTrainingProgram } from "@/hooks/useSupabaseTrainingProgram";
 import { computeCurrentWeekNumber, toEleveTrainingProgram, toEleveWorkoutSession } from "@/lib/training-schedule";
+import { Loader } from "@/components/ui/Loader";
 
 /**
  * Priorité Supabase dès qu'un compte élève réel est identifié (même
@@ -29,7 +30,7 @@ export default function EntrainementPage() {
   const local = useEtatOfflineEleve(supabaseTraining.ready && !supabaseTraining.active);
 
   if (!supabaseTraining.ready) {
-    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+    return <Loader libelle="Chargement…" variante="ligne" />;
   }
 
   if (supabaseTraining.active) {
@@ -128,7 +129,7 @@ export default function EntrainementPage() {
    * Même règle que sur l'écran de séance : la démonstration n'est atteinte
    * que si Supabase n'est réellement pas configuré. */
   if (local.etat === "chargement") {
-    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+    return <Loader libelle="Chargement…" variante="ligne" />;
   }
 
   if (local.etat === "offline" && local.contenu && local.sessionId) {

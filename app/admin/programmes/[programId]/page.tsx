@@ -27,6 +27,7 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { updateProgramStatus as updateProgramStatusSupabase } from "@/lib/supabase/programs";
 import { calculateTrainingMetrics, calculateWeekMetrics, formatSets, formatTonnage, formatVolume, muscleGroupLabels } from "@/lib/training-metrics";
 import type { MuscleGroupFilter } from "@/types";
+import { Loader } from "@/components/ui/Loader";
 
 /**
  * Page de détail — reste un aperçu en lecture seule (résumé, analyse,
@@ -61,7 +62,7 @@ export default function ProgramDetailPage() {
   // les ids ne correspondent jamais à un vrai programme) — même garde que
   // /admin/programmes/[programId]/builder/page.tsx.
   if (supabasePrograms.loading && !isSupabaseProgramsActive) {
-    return <div className="text-sm text-muted-foreground">Chargement…</div>;
+    return <Loader libelle="Chargement…" variante="ligne" />;
   }
 
   if (!program) {

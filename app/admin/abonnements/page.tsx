@@ -11,6 +11,7 @@ import { useSupabaseSubscriptionTemplates } from "@/hooks/useSupabaseSubscriptio
 import { billingIntervalLabels } from "@/lib/stripe/plans";
 import { formatAmountCents } from "@/lib/stripe/status";
 import type { BillingInterval, SubscriptionTemplate } from "@/types";
+import { Loader } from "@/components/ui/Loader";
 
 const intervalOptions: { value: BillingInterval; label: string }[] = [
   { value: "monthly", label: "Mensuel" },
@@ -323,7 +324,7 @@ function DeleteTemplateModal({ template, onChanged }: { template: SubscriptionTe
       {open && (
         <Modal title="Supprimer le modèle" onClose={() => setOpen(false)} maxWidth="max-w-lg">
           {loading ? (
-            <p className="text-sm text-muted-foreground">Chargement…</p>
+            <Loader libelle="Chargement…" variante="ligne" />
           ) : info ? (
             <div className="flex flex-col gap-4">
               <div className="rounded-panel border border-border bg-surface-soft/40 p-4">
@@ -547,7 +548,7 @@ export default function AdminSubscriptionTemplatesPage() {
       </div>
 
       {templates.loading ? (
-        <p className="text-sm text-muted-foreground">Chargement…</p>
+        <Loader libelle="Chargement…" variante="ligne" />
       ) : templates.templates.length === 0 ? (
         <p className="text-sm text-muted-foreground">Aucun modèle d&apos;abonnement pour le moment.</p>
       ) : (

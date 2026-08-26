@@ -11,6 +11,7 @@ import { formatDate } from "@/lib/admin";
 import { billingIntervalFrequencyLabels, billingIntervalLabels } from "@/lib/stripe/plans";
 import { formatAmountCents } from "@/lib/stripe/status";
 import { accessReasonLabels } from "@/lib/supabase/student-access";
+import { Loader } from "@/components/ui/Loader";
 
 /**
  * Section "Mon abonnement" de /profil. L'élève ne choisit jamais une
@@ -26,7 +27,7 @@ export function SubscriptionSection() {
   const [payError, setPayError] = useState<string | null>(null);
 
   if (!billing.ready || !access.ready) {
-    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+    return <Loader libelle="Chargement…" variante="ligne" />;
   }
 
   if (!billing.active || !billing.summary) {

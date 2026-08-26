@@ -64,6 +64,7 @@ import {
 import { deleteNutritionPlan } from "@/lib/supabase/nutrition-lifecycle";
 import { saveNutritionPlanV2 } from "@/lib/supabase/nutrition-v2";
 import type { AdminContentStatus } from "@/types";
+import { Loader } from "@/components/ui/Loader";
 
 const goalLabels: Record<string, string> = {
   "perte-de-poids": "Perte de poids",
@@ -145,7 +146,7 @@ export default function NutritionPlanDetailPage() {
   );
 
   if (isSupabasePlansActive && supabaseNutritionPlans.loading) {
-    return <p className="text-sm text-muted-foreground">Chargement…</p>;
+    return <Loader libelle="Chargement…" variante="ligne" />;
   }
 
   if (!plan) {
@@ -495,7 +496,7 @@ export default function NutritionPlanDetailPage() {
   }
 
   if (isV2 && canonique.loading) {
-    return <p className="text-sm text-muted-foreground">Chargement de la répartition…</p>;
+    return <Loader libelle="Chargement de la répartition…" variante="ligne" />;
   }
 
   return (

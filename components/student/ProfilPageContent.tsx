@@ -21,6 +21,7 @@ import { useEtatOfflineEleve } from "@/hooks/useEtatOfflineEleve";
 import { useStudentProfile, type StudentProfileState } from "@/hooks/useStudentProfile";
 import { useSupabaseStudentProfile } from "@/hooks/useSupabaseStudentProfile";
 import type { FoodPreferences, InjuryNote, SportPreferences, StudentGoal } from "@/types";
+import { Loader } from "@/components/ui/Loader";
 
 interface ProfilPageContentProps {
   studentId: string;
@@ -79,7 +80,7 @@ export function ProfilPageContent({
   }
 
   if (!supabaseProfile.ready) {
-    return <p className="text-sm text-muted-foreground">Chargement du profil…</p>;
+    return <Loader libelle="Chargement du profil…" variante="ligne" />;
   }
 
   /* ══════════════════════════════════════════════════════════════════
@@ -105,7 +106,7 @@ export function ProfilPageContent({
    * même garde depuis toujours. Voir `scripts/tests/profil-push-render.mts`. */
   if (!useSupabase) {
     if (local.etat === "chargement") {
-      return <p className="text-sm text-muted-foreground">Chargement du profil…</p>;
+      return <Loader libelle="Chargement du profil…" variante="ligne" />;
     }
 
     if (local.etat !== "mock") {

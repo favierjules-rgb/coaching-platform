@@ -8,6 +8,7 @@ import { useSupabaseSessionTemplates } from "@/hooks/useSupabaseSessionTemplates
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { deleteSessionTemplate, duplicateSessionTemplate, updateSessionTemplateMeta } from "@/lib/supabase/session-templates";
 import type { SessionTemplate, SessionType } from "@/types";
+import { Loader } from "@/components/ui/Loader";
 
 type SessionTypeFilter = "tous" | SessionType;
 
@@ -82,10 +83,7 @@ export default function AdminSeancesPage() {
       </div>
 
       {loading ? (
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Layers size={16} />
-          Chargement…
-        </p>
+        <Loader libelle="Chargement des modèles de séance…" variante="ligne" />
       ) : filtered.length === 0 ? (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <Layers size={16} />

@@ -15,6 +15,7 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { updateProgram as updateProgramSupabase } from "@/lib/supabase/programs";
 import { createSessionTemplate } from "@/lib/supabase/session-templates";
 import type { AdminProgram, AdminWorkoutSession } from "@/types";
+import { Loader } from "@/components/ui/Loader";
 
 /**
  * Builder plein écran V3 (/admin/programmes/[programId]/builder) : route
@@ -91,7 +92,7 @@ export default function ProgramBuilderPage() {
   }
 
   if (supabasePrograms.loading && !isSupabaseActive && !activeProgram) {
-    return <div className="flex h-dvh items-center justify-center text-sm text-muted-foreground">Chargement…</div>;
+    return <Loader libelle="Chargement du builder…" className="h-dvh" />;
   }
 
   if (!activeProgram) {

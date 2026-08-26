@@ -1,7 +1,6 @@
 import { Star } from "lucide-react";
 
 import { GoogleReviewsStack } from "@/components/sections/GoogleReviewsStack";
-import { SectionLabel } from "@/components/ui/SectionLabel";
 import { getReviews } from "@/lib/reviews/source";
 
 /**
@@ -69,7 +68,6 @@ export async function GoogleReviews() {
       className="scroll-mt-24 overflow-x-clip bg-background pt-10 pb-12 md:pt-14 md:pb-14"
     >
       <div className="mx-auto max-w-7xl px-6">
-        <SectionLabel>Preuve sociale</SectionLabel>
         <h2 className="mb-3 font-heading text-4xl font-extrabold uppercase text-foreground md:text-6xl">
           Leur expérience
         </h2>
