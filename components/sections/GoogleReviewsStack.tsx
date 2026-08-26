@@ -93,29 +93,79 @@ interface Props {
 }
 
 /**
- * LE DÉCALAGE HORIZONTAL d'une carte au repos, en pixels.
+ * L'ANGLE d'une carte sur son orbite, en TOURS (1 = 360°).
  *
- * C'est lui qui remplace l'ancienne inclinaison : une carte plus à gauche,
- * la suivante plus à droite, sans qu'aucune ne penche. Les valeurs sont
- * irrégulières À DESSEIN — une progression régulière redessinerait une
- * grille, en diagonale au lieu d'être droite, mais une grille quand même.
+ * ════════════════════════════════════════════════════════════════════════
+ * DES COORDONNÉES POLAIRES, PLUS UNE GRILLE
+ * ════════════════════════════════════════════════════════════════════════
+ * Les cartes ne sont plus posées dans une grille puis décalées : elles sont
+ * placées AUTOUR d'un centre, chacune par son angle et son rayon. Le centre
+ * de ce repère est le centre de la scène — c'est-à-dire, exactement, le
+ * centre de la photo qui y est posée.
+ *
+ * ⚠️ CE N'EST PAS UN `transform-origin`, ET C'EST MIEUX. Une rotation de
+ * conteneur autour d'une origine peut dériver dès que le conteneur change de
+ * taille ou de rembourrage. Ici, la position de chaque carte est CALCULÉE
+ * depuis le centre : le centre de rotation ne peut pas se décaler de la
+ * photo, il est le même point par construction.
+ *
+ * Les angles ne sont pas régulièrement espacés : un neuvième de tour entre
+ * chaque carte donnerait une horloge. Les écarts vont de 0,085 à 0,135 tour.
  */
-function decalageX(index: number): number {
-  const ecarts = [0, 11, -8, 13, -5, 8, -11];
-  return ecarts[index % ecarts.length];
+function angle(index: number): number {
+  const angles = [0.02, 0.145, 0.245, 0.335, 0.44, 0.55, 0.655, 0.775, 0.885];
+  return angles[index % angles.length];
 }
 
 /**
- * LE DÉCALAGE VERTICAL au repos, en pixels.
+ * LE RAYON d'une carte, en fraction du rayon de référence de la scène.
  *
- * ⚠️ SEPT VALEURS EN HORIZONTAL, CINQ EN VERTICAL. Les deux longueurs sont
- * premières entre elles : le couple (dx, dy) ne se répète qu'au bout de
- * 35 cartes. Avec neuf avis, aucune carte n'a la position d'une autre, et
- * c'est ce qui garantit qu'aucune rangée ne s'aligne au pixel près.
+ * ⚠️ IL VARIE D'UNE CARTE À L'AUTRE, et pas seulement pour l'allure. À rayon
+ * constant, neuf cartes sur un cercle forment un anneau régulier — un
+ * cadran. En faisant respirer le rayon, l'amas cesse d'être un anneau :
+ * certaines cartes sont plus proches de la photo, d'autres plus au large.
+ *
+ * ⚠️ LE PLANCHER EST À 0,94, ET CE N'EST PAS UN RÉGLAGE ESTHÉTIQUE. Une
+ * première version descendait à 0,80 : la carte la plus proche venait se
+ * glisser SOUS la photo, qui la recouvre — elle devenait alors intouchable au
+ * doigt comme à la souris. Le harnais l'a vu avant moi, un tap sur cette
+ * carte ne la mettait plus en avant.
+ *
+ * L'invariant à tenir est donc double, et R1 comme R18 le vérifient :
+ *
+ *     rayon min × base − demi-carte  ≥  rayon de la photo
+ *     rayon max × base + demi-carte  ≤  demi-scène
  */
-function decalageY(index: number): number {
-  const ecarts = [0, 9, -6, 11, -4];
-  return ecarts[index % ecarts.length];
+function rayon(index: number): number {
+  /*
+   * ⚠️ LA CARTE 4 — VINCENT — NE PORTE PAS LE PLUS GRAND RAYON, ET C'EST
+   * DÉLIBÉRÉ. Son nom court sur quatre lignes : c'est la carte la plus HAUTE
+   * du lot. Placée au plus large, son bas sortait de la scène à 390 px. Le
+   * grand rayon revient donc à la carte 7 — « Très bon coach 10/10 » — la
+   * plus courte, celle qui a de la marge.
+   */
+  const rayons = [1.0, 0.96, 1.12, 1.02, 1.06, 0.94, 1.16, 1.1, 0.98];
+  return rayons[index % rayons.length];
+}
+
+/**
+ * LE PLAN D'UNE CARTE — DÉTERMINÉ PAR SON RAYON, PAS PAR SON RANG.
+ *
+ * ⚠️ CE DÉTAIL A COÛTÉ UN AVIS IMPOSSIBLE À OUVRIR.
+ *
+ * Le plan suivait d'abord l'ordre de la liste : la première carte devant, la
+ * dernière derrière. Sur un cercle, ça revient à laisser une carte PROCHE du
+ * centre recouvrir une carte LOINTAINE — et à 390 px, la carte 7 se retrouvait
+ * entièrement cachée sous sa voisine. Un avis qu'on ne peut ni voir ni taper
+ * n'a rien à faire dans la page.
+ *
+ * Les cartes sont donc empilées par rayon croissant : plus une carte est au
+ * large, plus elle est devant. Une carte extérieure ne peut plus disparaître
+ * sous une carte intérieure, et l'empilement se lit comme une profondeur.
+ */
+function plan(index: number, total: number): number {
+  const rangs = Array.from({ length: total }, (_, i) => i).sort((a, b) => rayon(a) - rayon(b));
+  return rangs.indexOf(index) + 1;
 }
 
 function Etoiles({ note }: { readonly note: number }) {
@@ -222,16 +272,18 @@ function ContenuCarte({ item, lien }: { readonly item: GoogleReview; readonly li
  * 100 % de cette valeur, soit un mouvement réel de 5 à 8 px.
  */
 const AMPLITUDE_SECOUSSE = 8;
-/** Le plafond de la micro-rotation GLOBALE, en degrés. Jamais au-delà : une
- *  rotation visible contredirait l'exigence « toutes les cartes horizontales ». */
-const ROTATION_GROUPE_MAX = 0.4;
 /** La durée de l'aller-retour, en millisecondes. Sous les 300 ms de la maison. */
 const DUREE_SECOUSSE = 260;
 
+/**
+ * ⚠️ LA SECOUSSE N'A PLUS DE COMPOSANTE DE ROTATION. Une version précédente
+ * ajoutait une micro-rotation globale de ±0,4° ; elle a été retirée. Le
+ * mouvement du groupe est désormais une pure combinaison de translations —
+ * plus rien, nulle part, ne tourne autour d'un axe visible.
+ */
 interface Secousse {
   readonly x: number;
   readonly y: number;
-  readonly rotation: number;
 }
 
 export function GoogleReviewsStack({ avis }: Props) {
@@ -255,19 +307,17 @@ export function GoogleReviewsStack({ avis }: Props) {
    * `Math.random()` évalué pendant le rendu produirait un HTML serveur
    * différent du HTML client, et React refuserait l'hydratation.
    *
-   * ⚠️ CE QUI SORT D'ICI EST POSÉ SUR LE CONTENEUR, pas sur les cartes : ce
-   * sont trois variables lues par `.avis-pile`, dont le `transform-origin`
-   * est le centre. La pile pivote et glisse d'un bloc ; aucune carte ne
-   * tourne sur elle-même.
+   * ⚠️ CE QUI SORT D'ICI EST POSÉ SUR L'AMAS, pas sur les cartes : deux
+   * variables lues par `.avis-amas`, qui porte traits et cartes ensemble. La
+   * photo, elle, est en dehors — elle ne bouge pas d'un pixel pendant que le
+   * groupe frémit autour d'elle.
    */
   const secouerLeGroupe = useCallback(() => {
     const angle = Math.random() * Math.PI * 2;
     const amplitude = AMPLITUDE_SECOUSSE * (0.6 + Math.random() * 0.4);
-    const rotation = (Math.random() * 2 - 1) * ROTATION_GROUPE_MAX;
     setSecousse({
       x: Math.round(Math.cos(angle) * amplitude),
       y: Math.round(Math.sin(angle) * amplitude),
-      rotation: Math.round(rotation * 100) / 100,
     });
     if (minuterie.current !== null) window.clearTimeout(minuterie.current);
     minuterie.current = window.setTimeout(() => setSecousse(null), DUREE_SECOUSSE);
@@ -323,67 +373,140 @@ export function GoogleReviewsStack({ avis }: Props) {
   if (avis.length === 0) return null;
 
   return (
-    <ul
-      ref={piste}
-      className="avis-pile"
-      data-avis-pile
-      data-avis-secousse={secousse ? "true" : undefined}
-      style={
-        {
-          // ⚠️ TROIS VARIABLES SUR LE CONTENEUR, ZÉRO SUR LES CARTES. C'est
-          // ce qui fait réagir la pile comme un objet unique.
-          "--avis-groupe-x": `${secousse?.x ?? 0}px`,
-          "--avis-groupe-y": `${secousse?.y ?? 0}px`,
-          "--avis-groupe-rotation": `${secousse?.rotation ?? 0}deg`,
-        } as React.CSSProperties
-      }
+    /*
+     * ════════════════════════════════════════════════════════════════════
+     * LA SCÈNE — ELLE PORTE L'ORBITE, ET RIEN D'AUTRE
+     * ════════════════════════════════════════════════════════════════════
+     * L'orbite est une variable animée (`--avis-orb`, déclarée en `@property`
+     * pour être interpolable) qui vaut 0 puis 1 sur un tour complet. Chaque
+     * carte et chaque trait lisent cette variable et calculent leur position
+     * en `cos()` / `sin()`.
+     *
+     * ⚠️ IL N'Y A DONC AUCUNE ROTATION DE CONTENEUR. Rien ne tourne : les
+     * éléments se DÉPLACENT le long d'un cercle. C'est ce qui garantit, sans
+     * contre-rotation ni correction, que les cartes restent parfaitement
+     * horizontales à tout instant.
+     *
+     * ⚠️ ET LE CENTRE NE PEUT PAS DÉRIVER. Ce n'est pas un `transform-origin`
+     * mais l'origine d'un repère polaire : le point 50 % / 50 % de la scène,
+     * qui est aussi, exactement, le centre de la photo posée dessus.
+     */
+    <div
+      className="avis-scene"
+      data-avis-scene
+      data-avis-orbite={actif !== null ? "pause" : "tourne"}
     >
-      {avis.map((item, index) => {
-        const enAvant = actif === index;
-        const lien = item.googleUrl;
-        const gestes = {
-          className: "avis-carte",
-          onMouseEnter: mettreEnAvant(index),
-          onMouseLeave: retirer(index),
-          onFocus: mettreEnAvant(index),
-          onBlur: retirer(index),
-          // ⚠️ LE TAP EST DANS LES GESTES COMMUNS, donc il vaut aussi pour la
-          // carte SANS lien — c'est-à-dire pour les neuf avis actuels.
-          onClick: (event: React.MouseEvent<HTMLElement>) => surTap(index, event),
-        } as const;
+      {/*
+        LA PHOTO. Elle est FIXE : ni l'orbite ni la secousse ne la touchent,
+        elle est posée hors de l'amas. C'est le point autour duquel tout
+        tourne, et le seul élément qui matérialise ce point — aucun repère,
+        aucun cercle, aucun axe n'est dessiné en plus.
 
-        return (
-          <li
-            key={item.id}
-            className="avis-carte-hote"
-            style={
-              {
-                // ⚠️ AUCUNE VARIABLE DE ROTATION ICI. Le désordre est
-                // entièrement porté par ces deux translations.
-                "--avis-dx": `${decalageX(index)}px`,
-                "--avis-dy": `${decalageY(index)}px`,
-                // Les cartes se recouvrent dans l'ordre du DOM ; la carte mise
-                // en avant passe au-dessus de toutes les autres.
-                "--avis-plan": enAvant ? 50 : avis.length - index,
-              } as React.CSSProperties
-            }
-            data-en-avant={enAvant ? "true" : undefined}
-          >
-            {lien ? (
-              <a {...gestes} href={lien} target="_blank" rel="noopener noreferrer nofollow">
-                <ContenuCarte item={item} lien={lien} />
-              </a>
-            ) : (
-              // Sans lien, la carte reste atteignable au clavier : c'est elle
-              // qui porte la mise en avant, et l'exclure du parcours rendrait
-              // la découverte impossible sans souris.
-              <div {...gestes} tabIndex={0}>
-                <ContenuCarte item={item} lien={null} />
-              </div>
-            )}
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
+        Balise <img> native plutôt que next/image : l'image est déjà servie à
+        la bonne taille depuis `public/`, et le harnais de rendu monte ce
+        composant seul, hors du runtime Next.
+      */}
+      <figure className="avis-centre" aria-hidden="true">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/brand/avis/jules-portrait.webp"
+          alt=""
+          width={1000}
+          height={1000}
+          decoding="async"
+          className="avis-centre-photo"
+        />
+      </figure>
+
+      {/*
+        L'AMAS — traits et cartes ensemble. C'est lui, et non la scène, qui
+        porte la secousse tactile : la photo doit rester immobile pendant que
+        le groupe frémit autour d'elle.
+      */}
+      <div
+        className="avis-amas"
+        data-avis-amas
+        data-avis-secousse={secousse ? "true" : undefined}
+        style={
+          {
+            "--avis-groupe-x": `${secousse?.x ?? 0}px`,
+            "--avis-groupe-y": `${secousse?.y ?? 0}px`,
+          } as React.CSSProperties
+        }
+      >
+        {/*
+          LES TRAITS. Un rayon fin part du centre vers chaque carte. Ils sont
+          purement décoratifs — l'information est dans les cartes — donc
+          masqués aux lecteurs d'écran.
+
+          Leur racine est au centre exact de la scène, donc SOUS la photo, qui
+          les recouvre : on ne voit que la portion qui va du bord de la photo
+          à la carte.
+        */}
+        <div className="avis-rayons" aria-hidden="true">
+          {avis.map((item, index) => (
+            <span
+              key={item.id}
+              className="avis-lien"
+              style={
+                {
+                  "--avis-angle": `${angle(index)}`,
+                  "--avis-rayon": `${rayon(index)}`,
+                } as React.CSSProperties
+              }
+            />
+          ))}
+        </div>
+
+        <ul ref={piste} className="avis-pile" data-avis-pile>
+        {avis.map((item, index) => {
+          const enAvant = actif === index;
+          const lien = item.googleUrl;
+          const gestes = {
+            className: "avis-carte",
+            onMouseEnter: mettreEnAvant(index),
+            onMouseLeave: retirer(index),
+            onFocus: mettreEnAvant(index),
+            onBlur: retirer(index),
+            // ⚠️ LE TAP EST DANS LES GESTES COMMUNS, donc il vaut aussi pour la
+            // carte SANS lien — c'est-à-dire pour les neuf avis actuels.
+            onClick: (event: React.MouseEvent<HTMLElement>) => surTap(index, event),
+          } as const;
+
+          return (
+            <li
+              key={item.id}
+              className="avis-carte-hote"
+              style={
+                {
+                  // ⚠️ AUCUNE VARIABLE DE ROTATION ICI. La carte est placée
+                  // par un angle et un rayon, puis TRANSLATÉE — jamais tournée.
+                  "--avis-angle": `${angle(index)}`,
+                  "--avis-rayon": `${rayon(index)}`,
+                  // Les cartes se recouvrent dans l'ordre du DOM ; la carte mise
+                  // en avant passe au-dessus de toutes les autres.
+                  "--avis-plan": enAvant ? 50 : plan(index, avis.length),
+                } as React.CSSProperties
+              }
+              data-en-avant={enAvant ? "true" : undefined}
+            >
+              {lien ? (
+                <a {...gestes} href={lien} target="_blank" rel="noopener noreferrer nofollow">
+                  <ContenuCarte item={item} lien={lien} />
+                </a>
+              ) : (
+                // Sans lien, la carte reste atteignable au clavier : c'est elle
+                // qui porte la mise en avant, et l'exclure du parcours rendrait
+                // la découverte impossible sans souris.
+                <div {...gestes} tabIndex={0}>
+                  <ContenuCarte item={item} lien={null} />
+                </div>
+              )}
+            </li>
+          );
+          })}
+          </ul>
+        </div>
+      </div>
+    );
+  }

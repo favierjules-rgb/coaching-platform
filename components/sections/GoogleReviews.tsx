@@ -110,7 +110,13 @@ export async function GoogleReviews() {
         net au bas de la section. `overflow-x: clip` laisse l'axe vertical
         entièrement libre, sans rien concéder sur l'horizontal.
       */}
-      <div className="mx-auto max-w-5xl px-6">
+      {/*
+        ⚠️ REMBOURRAGE RÉDUIT SOUS `md`. La scène est carrée : chaque pixel
+        retiré sur les côtés est un pixel de rayon gagné pour l'orbite. À
+        390 px, les 24 px de `px-6` coûtaient assez de place pour que la carte
+        la plus au large sorte de l'écran.
+      */}
+      <div className="mx-auto max-w-5xl px-2 md:px-6">
         <GoogleReviewsStack avis={reviews} />
       </div>
     </section>

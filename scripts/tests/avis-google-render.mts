@@ -117,8 +117,31 @@ const PAGE = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta n
 <body style="margin:0"><div id="racine"></div><script type="module" src="/paquet.js"></script></body></html>`;
 
 const serveur: Server = createServer((requete, reponse) => {
-  if ((requete.url ?? "/").startsWith("/paquet.js")) {
+  const chemin = requete.url ?? "/";
+  if (chemin.startsWith("/paquet.js")) {
     reponse.writeHead(200, { "content-type": "text/javascript; charset=utf-8" }).end(paquet);
+    return;
+  }
+  /*
+   * ⚠️ LES FICHIERS DE `public/` SONT SERVIS POUR DE VRAI.
+   *
+   * La photo au centre de l'amas vient de `/brand/avis/…`. Sans cette route,
+   * elle renverrait un 404 et le harnais mesurerait une géométrie sans son
+   * élément central — c'est-à-dire une géométrie qui n'existe nulle part
+   * ailleurs que dans le test.
+   */
+  if (chemin.startsWith("/brand/")) {
+    const fichier = resolve(ICI, "../../public", chemin.replace(/^\//, "").split("?")[0]);
+    if (existsSync(fichier)) {
+      const type = fichier.endsWith(".webp")
+        ? "image/webp"
+        : fichier.endsWith(".svg")
+          ? "image/svg+xml"
+          : "application/octet-stream";
+      reponse.writeHead(200, { "content-type": type }).end(readFileSync(fichier));
+      return;
+    }
+    reponse.writeHead(404).end("introuvable");
     return;
   }
   reponse.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(PAGE);
@@ -133,9 +156,21 @@ const navigateur: Browser = await chromium.launch({
   args: ["--no-sandbox", "--disable-dev-shm-usage"],
 });
 
+/**
+ * ⚠️ `orbiteFigee` EXISTE PARCE QUE L'AMAS BOUGE EN PERMANENCE.
+ *
+ * Depuis que les cartes parcourent une orbite, deux mesures prises à une
+ * seconde d'intervalle ne portent plus sur la même composition : tout test de
+ * géométrie devenait un tirage au sort. Figer l'animation — sans la
+ * supprimer — rend les positions déterministes tout en gardant vivants le
+ * survol, le focus et les transitions, que `prefers-reduced-motion` aurait
+ * neutralisés.
+ *
+ * Les tests de l'ORBITE elle-même, eux, la laissent tourner.
+ */
 async function atelier(
   taille: { width: number; height: number },
-  options: { tactile?: boolean; mouvementReduit?: boolean } = {},
+  options: { tactile?: boolean; mouvementReduit?: boolean; orbiteFigee?: boolean } = {},
 ): Promise<Page> {
   const contexte = await navigateur.newContext({
     viewport: taille,
@@ -147,6 +182,13 @@ async function atelier(
   const page = await contexte.newPage();
   await page.goto(origine, { waitUntil: "networkidle" });
   await page.waitForSelector("[data-avis-pile] li", { timeout: 10_000 });
+  if (options.orbiteFigee ?? true) {
+    await page.addStyleTag({
+      content: "[data-avis-scene] { animation-play-state: paused !important; }",
+    });
+    // Une image de rendu pour que la pause soit effective avant la mesure.
+    await page.evaluate(() => new Promise((ok) => requestAnimationFrame(() => ok(null))));
+  }
   return page;
 }
 
@@ -277,72 +319,55 @@ await test("R2 — desktop : les cartes se RECOUVRENT, ce n'est pas une grille s
   await page.context().close();
 });
 
-await test("R3 — mobile : un AMAS COMPACT, pas une colonne interminable", async () => {
+await test("R3 — mobile : l'amas ORBITAL tient dans l'écran", async () => {
   /*
-   * ⚠️ CE TEST EXIGEAIT UNE COLONNE DE CARTES PLEINE LARGEUR. IL EXIGE
-   * MAINTENANT L'INVERSE, et le renversement est demandé.
+   * ⚠️ CE TEST A CHANGÉ DEUX FOIS, ET IL FAUT SAVOIR POURQUOI.
    *
-   * Neuf cartes pleine largeur mesuraient plus de trois écrans : la secousse
-   * de groupe y était invisible, on ne voyait bouger que la carte touchée et
-   * sa voisine. Or c'est tout l'intérêt du geste. Les cartes sont donc
-   * réduites et rangées sur deux colonnes.
+   * Il exigeait d'abord une colonne de cartes pleine largeur, puis deux
+   * colonnes compactes. La composition est maintenant une ORBITE : les neuf
+   * cartes sont posées autour de la photo, chacune par son angle et son
+   * rayon. Les seuils de largeur des versions précédentes n'ont plus de sens
+   * — ils décrivaient une grille qui n'existe plus.
    *
-   * L'invariant mesuré : l'ensemble tient dans une hauteur qui permet de VOIR
-   * le groupe réagir, sans jamais déborder latéralement.
+   * Ce qui compte désormais : que l'amas tienne dans l'écran, que la photo
+   * soit au centre, et qu'aucune carte ne parte hors du cadre.
    */
   const page = await atelier({ width: 390, height: 844 }, { tactile: true });
   const g = await geometrie(page);
 
-  // ── DEUX COLONNES : des cartes partagent une même ligne.
-  const parLigne = new Map<number, number>();
-  for (const r of g.rects) {
-    const ligne = Math.round(r.y / 60);
-    parLigne.set(ligne, (parLigne.get(ligne) ?? 0) + 1);
-  }
-  const lignesDoubles = [...parLigne.values()].filter((n) => n >= 2).length;
+  const scene = await page.evaluate(() => {
+    const s2 = document.querySelector<HTMLElement>("[data-avis-scene]");
+    const photo = document.querySelector<HTMLElement>(".avis-centre");
+    if (!s2 || !photo) return null;
+    const rs = s2.getBoundingClientRect();
+    const rp = photo.getBoundingClientRect();
+    return {
+      scene: { x: rs.x, y: rs.y, w: rs.width, h: rs.height, cx: rs.x + rs.width / 2, cy: rs.y + rs.height / 2 },
+      photo: { cx: rp.x + rp.width / 2, cy: rp.y + rp.height / 2, w: rp.width },
+    };
+  });
+  assert.ok(scene, "la scène et la photo doivent exister");
+
+  // ── LA SCÈNE EST CARRÉE : c'est ce qui rend l'orbite circulaire.
   assert.ok(
-    lignesDoubles >= 3,
-    `au moins trois lignes doivent porter deux cartes — ${lignesDoubles}`,
+    Math.abs(scene.scene.w - scene.scene.h) < 2,
+    `la scène doit être carrée — ${Math.round(scene.scene.w)}×${Math.round(scene.scene.h)}`,
   );
 
-  // ── DES CARTES PETITES : c'est ce qui rend l'amas visible d'un coup d'œil.
+  // ── AUCUNE CARTE NE SORT DE LA SCÈNE.
   for (const [i, r] of g.rects.entries()) {
     assert.ok(
-      r.w < 200,
-      `mobile : la carte ${i + 1} fait ${Math.round(r.w)} px — trop large pour un amas`,
+      r.x >= scene.scene.x - 2 && r.droite <= scene.scene.x + scene.scene.w + 2,
+      `mobile : la carte ${i + 1} sort de la scène (${Math.round(r.x)}…${Math.round(r.droite)} pour ${Math.round(scene.scene.x)}…${Math.round(scene.scene.x + scene.scene.w)})`,
     );
-    assert.ok(r.w > 120, `mobile : la carte ${i + 1} est illisible (${Math.round(r.w)} px)`);
   }
 
-  // ── UN AMAS COMPACT : la hauteur totale de la pile reste de l'ordre d'un
-  // écran, sans quoi le mouvement du groupe ne se lit pas.
-  const hauteur = await page.evaluate(() => {
-    const p = document.querySelector<HTMLElement>("[data-avis-pile]");
-    return p?.offsetHeight ?? 0;
-  });
-  /*
-   * ⚠️ LE SEUIL EST EXPRIMÉ EN HAUTEURS D'ÉCRAN, PAS EN PIXELS RONDS.
-   *
-   * La propriété qui compte n'est pas « moins de mille pixels », c'est « on
-   * voit assez de l'ensemble pour que sa réaction se lise ». Un plafond en
-   * pixels absolus n'aurait aucun sens sur un écran plus haut, et
-   * m'inviterait surtout à rogner le contenu jusqu'à tomber sous le chiffre.
-   * L'ancienne colonne pleine largeur dépassait TROIS écrans ; une pile et
-   * quart reste largement lisible d'un coup d'œil.
-   */
-  assert.ok(
-    hauteur <= 844 * 1.3,
-    `la pile mobile doit rester compacte — ${Math.round(hauteur)} px pour un écran de 844 px`,
-  );
-
-  // ── ET AUCUN DÉBORDEMENT LATÉRAL malgré les décalages.
+  // ── ET AUCUN DÉBORDEMENT DE PAGE.
   assert.ok(g.scrollWidth <= g.innerWidth + 1, "aucun débordement horizontal");
 
   await page.screenshot({ path: join(CAPTURES, "mobile-pile.png"), fullPage: true });
   await page.context().close();
 });
-
-/* ═══════════════ LA MISE EN AVANT ═══════════════ */
 
 await test("R4 — au survol, la carte passe DEVANT et grandit", async () => {
   const page = await atelier({ width: 1440, height: 900 });
@@ -465,61 +490,63 @@ await test("R6 — le focus clavier produit EXACTEMENT la même mise en avant", 
   await page.context().close();
 });
 
-await test("R5 bis — le recouvrement NE MANGE PAS le texte des cartes en retrait", async () => {
+await test("R5 bis — le recouvrement est VOULU, mais chaque carte reste identifiable", async () => {
   /*
-   * ⚠️ CE TEST EXISTE PARCE QU'UNE CAPTURE A MONTRÉ CE QU'AUCUNE MESURE NE
-   * VOYAIT. Le recouvrement valait 43 px, le rembourrage gauche 26 : la carte
-   * de devant couvrait donc 17 px de texte, et chaque avis en retrait perdait
-   * sa première lettre. Aucune carte ne débordait de rien — elles étaient
-   * simplement recouvertes, et tous les tests étaient verts.
+   * ⚠️ CE TEST INTERDISAIT TOUT RECOUVREMENT DE TEXTE. Il ne le peut plus :
+   * neuf cartes posées autour d'une photo se chevauchent nécessairement, et
+   * c'est demandé — « quitte à ce qu'ils se passent les uns sur les autres ».
    *
-   * L'invariant mesuré ici : le texte d'une carte commence APRÈS le bord droit
-   * de la carte qui la précède.
+   * Ce qui reste non négociable, c'est l'ATTRIBUTION. Un avis dont on ne voit
+   * plus qui l'a écrit n'est plus un témoignage, c'est un bout de texte. Le
+   * test vérifie donc que l'avatar de CHAQUE carte — l'ancre d'identité, en
+   * haut à gauche — reste entièrement visible, quel que soit l'empilement.
+   *
+   * Le survol, lui, ramène la carte entière au premier plan : rien n'est
+   * définitivement caché.
    */
   const page = await atelier({ width: 1440, height: 900 });
   const zones = await page.evaluate(() => {
     const hotes = [...document.querySelectorAll<HTMLElement>("[data-avis-pile] > li")];
-    return hotes.map((h) => {
+    return hotes.map((h, i) => {
       const carte = h.querySelector<HTMLElement>(".avis-carte");
-      const r = (carte ?? h).getBoundingClientRect();
-      const pad = carte ? parseFloat(getComputedStyle(carte).paddingLeft) : 0;
-      return { gaucheCarte: r.x, droiteCarte: r.right, haut: r.y, debutTexte: r.x + pad };
+      const avatar = h.querySelector<HTMLElement>(".avis-avatar, .avis-avatar-initiale");
+      const rc = (carte ?? h).getBoundingClientRect();
+      const ra = (avatar ?? h).getBoundingClientRect();
+      return {
+        i,
+        plan: Number(getComputedStyle(h).zIndex) || 0,
+        carte: { g: rc.x, d: rc.right, h: rc.y, b: rc.bottom },
+        avatar: { g: ra.x, d: ra.right, h: ra.y, b: ra.bottom },
+      };
     });
   });
 
-  /*
-   * ⚠️ ON NE COMPARE QUE DES CARTES DE LA MÊME RANGÉE. La grille enjambe : la
-   * première carte d'une nouvelle rangée est à GAUCHE de la dernière de la
-   * rangée précédente, et les comparer linéairement produisait un faux rouge
-   * spectaculaire (« la carte 5 recouvre 1183 px du texte de la carte 6 »).
-   * Deux cartes sont sur la même rangée si leurs hauts coïncident au pixel
-   * près — leur décalage vertical au repos est identique par construction.
-   */
-  let paires = 0;
-  for (let i = 1; i < zones.length; i += 1) {
-    const memeRangee = Math.abs(zones[i].haut - zones[i - 1].haut) < 40;
-    if (!memeRangee) continue;
-    paires += 1;
-    const marge = zones[i].debutTexte - zones[i - 1].droiteCarte;
-    assert.ok(
-      marge >= -1,
-      `la carte ${i} recouvre ${Math.round(-marge)} px du TEXTE de la carte ${i + 1}`,
-    );
+  assert.ok(zones.length >= 6, `toutes les cartes doivent être mesurées — ${zones.length}`);
+
+  for (const cible of zones) {
+    for (const dessus of zones) {
+      if (dessus.i === cible.i || dessus.plan <= cible.plan) continue;
+      const x = Math.min(dessus.carte.d, cible.avatar.d) - Math.max(dessus.carte.g, cible.avatar.g);
+      const y = Math.min(dessus.carte.b, cible.avatar.b) - Math.max(dessus.carte.h, cible.avatar.h);
+      assert.ok(
+        x <= 1 || y <= 1,
+        `la carte ${dessus.i + 1} recouvre l'avatar de la carte ${cible.i + 1} (${Math.round(x)}×${Math.round(y)} px) — l'avis n'est plus attribuable`,
+      );
+    }
   }
-  assert.ok(paires >= 3, `au moins trois paires voisines à vérifier — ${paires} trouvées`);
   await page.context().close();
 });
 
-await test("R5 quater — le recouvrement VERTICAL ne mange pas l'en-tête des cartes du dessous", async () => {
+await test("R5 quater — le recouvrement d'un en-tête reste BORNÉ", async () => {
   /*
-   * ⚠️ AJOUTÉ APRÈS UNE CAPTURE À 768 PX. La compensation du recouvrement
-   * existait à gauche mais pas en haut : les cartes de la deuxième rangée
-   * remontaient sous celles de la première, et leur avatar comme leur nom
-   * passaient dessous. Rien ne débordait de rien — aucun test de géométrie ne
-   * pouvait le voir.
+   * ⚠️ CE TEST INTERDISAIT QU'UN EN-TÊTE SOIT RECOUVERT. Dans une grille, un
+   * en-tête caché était toujours un défaut. Dans un amas voulu chevauchant,
+   * une carte au premier plan mord forcément un peu sur ses voisines.
    *
-   * L'invariant mesuré : l'en-tête d'une carte commence SOUS le bas de la
-   * carte qui la surplombe.
+   * On borne donc au lieu d'interdire : un en-tête peut être entamé, jamais
+   * effacé. Le seuil est la MOITIÉ de sa surface — au-delà, le nom de la
+   * personne devient illisible, et R5 bis garantit déjà que l'avatar, lui,
+   * reste toujours entièrement visible.
    */
   for (const taille of [
     { width: 768, height: 1024 },
@@ -528,65 +555,34 @@ await test("R5 quater — le recouvrement VERTICAL ne mange pas l'en-tête des c
     const page = await atelier(taille);
     const zones = await page.evaluate(() => {
       const hotes = [...document.querySelectorAll<HTMLElement>("[data-avis-pile] > li")];
-      return hotes.map((h) => {
+      return hotes.map((h, i) => {
         const carte = h.querySelector<HTMLElement>(".avis-carte");
-        // L'EN-TÊTE : l'avatar et le nom. C'est lui qui ne doit jamais être
-        // recouvert — pas la boîte de la carte, dont le rembourrage et la
-        // rotation débordent légitimement au-delà du texte.
-        const entete = h.querySelector<HTMLElement>(".avis-carte > div");
+        const entete = h.querySelector<HTMLElement>(".avis-entete");
         const rc = (carte ?? h).getBoundingClientRect();
         const re = (entete ?? carte ?? h).getBoundingClientRect();
         return {
-          carte: { gauche: rc.x, droite: rc.right, haut: rc.y, bas: rc.bottom },
-          entete: { gauche: re.x, droite: re.right, haut: re.y, bas: re.bottom },
+          i,
+          plan: Number(getComputedStyle(h).zIndex) || 0,
+          carte: { g: rc.x, d: rc.right, h: rc.y, b: rc.bottom },
+          entete: { g: re.x, d: re.right, h: re.y, b: re.bottom, aire: re.width * re.height },
         };
       });
     });
 
-    /*
-     * ⚠️ ON TESTE L'INTERSECTION AVEC L'EN-TÊTE, PAS AVEC LA CARTE.
-     *
-     * Une première rédaction comparait les boîtes des CARTES : elle rougissait
-     * sur un liseré de 15 px au bord droit d'une carte — c'est-à-dire à
-     * l'intérieur de son rembourrage, là où aucun texte n'est écrit. Ce n'était
-     * pas un défaut, c'était une mesure au mauvais endroit.
-     *
-     * La propriété réelle : la boîte d'une carte du dessus ne doit recouvrir
-     * aucun pixel de l'avatar ni du nom d'une carte du dessous.
-     */
-    let paires = 0;
-    for (let i = 0; i < zones.length; i += 1) {
-      for (let j = 0; j < zones.length; j += 1) {
-        if (i === j) continue;
-        const dessus = zones[i].carte;
-        const entete = zones[j].entete;
-        if (zones[j].carte.haut <= zones[i].carte.haut + 40) continue;
-
-        const recouvrementX =
-          Math.min(dessus.droite, entete.droite) - Math.max(dessus.gauche, entete.gauche);
-        const recouvrementY = Math.min(dessus.bas, entete.bas) - Math.max(dessus.haut, entete.haut);
-        /*
-         * ⚠️ LE SEUIL EST LA LARGEUR D'UN CARACTÈRE, ET C'EST DÉLIBÉRÉ.
-         *
-         * `getBoundingClientRect` d'un élément dans une carte TOURNÉE rend la
-         * boîte englobante de la rotation, plus large que ce qui est peint.
-         * Aux jonctions de colonnes, ça produit des liserés de 1 à 2 px qui ne
-         * recouvrent aucun pixel de texte — mesuré à 768 px.
-         *
-         * On ne teste donc pas le contact géométrique, on teste ce qui compte :
-         * qu'aucun CARACTÈRE ne soit caché. À cette taille de police, une
-         * lettre fait environ 7 px ; en dessous de 4 px de large, rien de
-         * lisible ne peut être recouvert.
-         */
-        if (recouvrementX < 4) continue;
-        paires += 1;
-        assert.ok(
-          recouvrementY <= 1,
-          `${taille.width} px : la carte ${i + 1} recouvre ${Math.round(recouvrementY)} px de l'EN-TÊTE de la carte ${j + 1} sur ${Math.round(recouvrementX)} px de large`,
-        );
+    for (const cible of zones) {
+      let couvert = 0;
+      for (const dessus of zones) {
+        if (dessus.i === cible.i || dessus.plan <= cible.plan) continue;
+        const x = Math.min(dessus.carte.d, cible.entete.d) - Math.max(dessus.carte.g, cible.entete.g);
+        const y = Math.min(dessus.carte.b, cible.entete.b) - Math.max(dessus.carte.h, cible.entete.h);
+        if (x > 0 && y > 0) couvert += x * y;
       }
+      const part = cible.entete.aire > 0 ? couvert / cible.entete.aire : 0;
+      assert.ok(
+        part <= 0.5,
+        `${taille.width} px : ${Math.round(part * 100)} % de l'en-tête de la carte ${cible.i + 1} est recouvert`,
+      );
     }
-    assert.ok(paires >= 1, `${taille.width} px : au moins une paire superposée à vérifier`);
     await page.context().close();
   }
 });
@@ -794,9 +790,69 @@ await test("R9 — sous prefers-reduced-motion : plus aucune transition, ni tran
 /* ═══════════════ TACTILE ═══════════════ */
 
 await test("R10 — tactile : le tap met la carte en avant", async () => {
+  /*
+   * ⚠️ ON NE TAPE PAS LE CENTRE D'UNE CARTE, ON TAPE UN POINT VISIBLE.
+   *
+   * Les cartes se chevauchent volontairement : le centre géométrique de l'une
+   * peut être recouvert par une voisine de plan supérieur. `page.tap()` vise
+   * ce centre et attendait indéfiniment que la cible devienne atteignable.
+   *
+   * Ce n'est pas ce que fait un doigt. Un doigt tape là où il VOIT la carte.
+   * On cherche donc, dans la page, un point qui appartienne réellement à la
+   * carte visée — `elementFromPoint` donne la réponse — et on tape là.
+   */
   const page = await atelier({ width: 390, height: 844 }, { tactile: true });
+
+  const pointVisible = (n: number) =>
+    page.evaluate((rang: number) => {
+      const hote = document.querySelector<HTMLElement>(
+        `[data-avis-pile] > li:nth-child(${rang})`,
+      );
+      const carte = hote?.querySelector<HTMLElement>(".avis-carte");
+      if (!carte) return null;
+      const r = carte.getBoundingClientRect();
+      /*
+       * On balaie la carte et on retient le premier point où ELLE est la
+       * première carte rencontrée. `elementsFromPoint` rend la pile complète
+       * sous le curseur, du dessus vers le dessous : si une autre carte y
+       * figure avant celle-ci, le doigt toucherait l'autre.
+       */
+      for (const fy of [0.5, 0.3, 0.7, 0.15, 0.85]) {
+        for (const fx of [0.5, 0.3, 0.7, 0.15, 0.85]) {
+          const x = r.x + r.width * fx;
+          const y = r.y + r.height * fy;
+          if (x < 0 || y < 0 || x > innerWidth || y > innerHeight) continue;
+          const pile = document.elementsFromPoint(x, y);
+          const premiere = pile.find((e) => e.closest(".avis-carte"));
+          if (premiere && premiere.closest(".avis-carte") === carte) return { x, y };
+        }
+      }
+      return null;
+    }, n);
+
+  /*
+   * ⚠️ D'ABORD L'INVARIANT QUI COMPTE : AU REPOS, LES NEUF CARTES SONT
+   * ATTEIGNABLES.
+   *
+   * C'est ce que le chevauchement met en danger — une carte entièrement
+   * recouverte serait un avis qu'on ne peut pas ouvrir, autant ne pas
+   * l'afficher. Le test l'a d'ailleurs attrapé : la carte 7 disparaissait
+   * sous sa voisine, et l'empilement a dû passer d'un ordre de liste à un
+   * ordre par rayon.
+   *
+   * ⚠️ AU REPOS, ET PAS PENDANT QU'UN AVIS EST OUVERT. Une carte dépliée
+   * grandit autour de son centre et peut recouvrir ses voisines — l'avis de
+   * huit cents caractères en couvre plusieurs. C'est le comportement attendu
+   * d'un élément mis au premier plan, et un tap à l'extérieur le referme.
+   */
+  for (let n = 1; n <= 9; n += 1) {
+    assert.ok(await pointVisible(n), `au repos, la carte ${n} n'offre aucun point tapable`);
+  }
+
   const avant = await geometrie(page);
-  await page.tap("[data-avis-pile] > li:nth-child(2) .avis-carte");
+  const p2 = await pointVisible(2);
+  assert.ok(p2, "un point visible de la carte 2 doit exister — sinon elle est entièrement cachée");
+  await page.touchscreen.tap(p2.x, p2.y);
   await page.waitForTimeout(320);
   const apres = await geometrie(page);
 
@@ -808,13 +864,16 @@ await test("R10 — tactile : le tap met la carte en avant", async () => {
 
   // Un tap sur une AUTRE carte change la mise en avant : le comportement
   // demandé pour le tactile, où le survol n'existe pas.
-  await page.tap("[data-avis-pile] > li:nth-child(4) .avis-carte");
+  const p4 = await pointVisible(4);
+  assert.ok(p4, "un point visible de la carte 4 doit exister");
+  await page.touchscreen.tap(p4.x, p4.y);
   await page.waitForTimeout(320);
   const ensuite = await geometrie(page);
   assert.ok(
     Number(ensuite.plans[3]) > Number(ensuite.plans[1]),
     "la nouvelle carte tapée passe devant la précédente",
   );
+
   await page.context().close();
 });
 
@@ -939,7 +998,7 @@ await test("R14 — tactile : le GROUPE réagit, et c'est le conteneur qui bouge
 
   const lire = () =>
     page.evaluate(() => {
-      const pile = document.querySelector<HTMLElement>("[data-avis-pile]");
+      const pile = document.querySelector<HTMLElement>("[data-avis-amas]");
       return {
         groupe: pile ? getComputedStyle(pile).transform : "absent",
         secousse: pile?.dataset.avisSecousse ?? null,
@@ -955,6 +1014,11 @@ await test("R14 — tactile : le GROUPE réagit, et c'est le conteneur qui bouge
       };
     });
 
+  const photoAvant = await page.evaluate(() => {
+    const f = document.querySelector<HTMLElement>(".avis-centre");
+    const r = f?.getBoundingClientRect();
+    return r ? { cx: Math.round(r.x + r.width / 2), cy: Math.round(r.y + r.height / 2) } : null;
+  });
   const avant = await lire();
   assert.equal(avant.variables.x, "0px", "au repos le groupe ne bouge pas");
   assert.equal(avant.secousse, null, "et il ne porte pas la marque de secousse");
@@ -974,28 +1038,37 @@ await test("R14 — tactile : le GROUPE réagit, et c'est le conteneur qui bouge
   );
   // ⚠️ AMPLITUDE FAIBLE : c'est un frémissement, pas un déplacement.
   assert.ok(Math.hypot(dx, dy) <= 12, `déplacement trop ample : ${Math.round(Math.hypot(dx, dy))} px`);
-  // ⚠️ ET LA MICRO-ROTATION RESTE SOUS LE PLAFOND DEMANDÉ.
-  assert.ok(
-    Math.abs(parseFloat(pendant.variables.rotation)) <= 0.5,
-    `rotation du groupe hors plafond : ${pendant.variables.rotation}`,
+  /*
+   * ⚠️ PLUS AUCUNE ROTATION DE GROUPE — c'est un retrait demandé. La secousse
+   * est désormais une pure combinaison de translations : l'ancienne
+   * micro-rotation de ±0,4° a disparu du composant, et ce test refuse qu'elle
+   * revienne.
+   */
+  assert.equal(
+    pendant.variables.rotation,
+    "",
+    `la secousse ne doit porter aucune rotation — trouvé « ${pendant.variables.rotation} »`,
   );
 
-  // ── 2. AUTOUR D'UN POINT CENTRAL.
-  const [ox, oy] = pendant.origine.split(" ").map((v) => parseFloat(v));
   /*
-   * ⚠️ `offsetWidth` ET NON `getBoundingClientRect`. Le conteneur est en train
-   * de pivoter : sa boîte englobante est plus large que sa boîte de mise en
-   * page, d'autant plus que la pile est haute. Comparer l'origine — exprimée
-   * dans le repère non transformé — à une boîte tournée faisait rougir ce
-   * test une fois sur deux, selon l'angle tiré au sort. La mesure était
-   * fausse, pas le code.
+   * ── 2. LA PHOTO NE BOUGE PAS.
+   *
+   * C'est elle, le point fixe. La secousse porte sur l'amas — traits et
+   * cartes — qui est le VOISIN de la photo dans l'arbre, pas son parent. Si
+   * elle était posée un cran plus haut, sur la scène, la photo frémirait avec
+   * le reste et le centre cesserait d'être immobile.
    */
-  const boite = await page.evaluate(() => {
-    const p = document.querySelector<HTMLElement>("[data-avis-pile]");
-    return { w: p?.offsetWidth ?? 0, h: p?.offsetHeight ?? 0 };
+  const photoApres = await page.evaluate(() => {
+    const f = document.querySelector<HTMLElement>(".avis-centre");
+    const r = f?.getBoundingClientRect();
+    return r ? { cx: Math.round(r.x + r.width / 2), cy: Math.round(r.y + r.height / 2) } : null;
   });
-  assert.ok(Math.abs(ox - boite.w / 2) < 2, `l'origine n'est pas centrée en x (${pendant.origine})`);
-  assert.ok(Math.abs(oy - boite.h / 2) < 2, `l'origine n'est pas centrée en y (${pendant.origine})`);
+  assert.ok(photoApres, "la photo doit exister");
+  assert.deepEqual(
+    photoApres,
+    photoAvant,
+    "la photo doit rester immobile pendant la secousse du groupe",
+  );
 
   // ── 3. AUCUNE CARTE N'A BOUGÉ D'ELLE-MÊME.
   /*
@@ -1039,14 +1112,26 @@ await test("R15 — la direction de la secousse change d'un tap à l'autre", asy
   const vecteurs = new Set<string>();
 
   for (let n = 0; n < 6; n += 1) {
-    await page.tap(`[data-avis-pile] > li:nth-child(${(n % 4) + 1}) .avis-carte`);
+    /*
+     * ⚠️ TOUJOURS LA PREMIÈRE CARTE, ET C'EST UN ARTEFACT DE MESURE ASSUMÉ.
+     *
+     * Les cartes se chevauchent : le CENTRE d'une carte peut être recouvert
+     * par une voisine de plan supérieur. `page.tap()` vise ce centre et
+     * attendait alors indéfiniment que la cible devienne atteignable — trente
+     * secondes d'expiration. Un vrai doigt, lui, tape la partie VISIBLE de la
+     * carte et ne rencontre aucun problème.
+     *
+     * La première carte porte le plan le plus élevé au repos : elle n'est
+     * jamais recouverte. Taper la même carte à chaque tour n'affaiblit rien —
+     * ce qu'on mesure ici est la direction tirée au sort, pas la cible.
+     */
+    await page.tap(`[data-avis-pile] > li:nth-child(1) .avis-carte`);
     await page.waitForTimeout(40);
     const v = await page.evaluate(() => {
-      const p = document.querySelector<HTMLElement>("[data-avis-pile]");
+      const p = document.querySelector<HTMLElement>("[data-avis-amas]");
       return [
         p?.style.getPropertyValue("--avis-groupe-x") ?? "",
         p?.style.getPropertyValue("--avis-groupe-y") ?? "",
-        p?.style.getPropertyValue("--avis-groupe-rotation") ?? "",
       ].join("|");
     });
     /*
@@ -1058,7 +1143,7 @@ await test("R15 — la direction de la secousse change d'un tap à l'autre", asy
      * « distinct ». Le test prouvait alors l'existence de la retombée, pas
      * celle du tirage au sort.
      */
-    if (!/^0px\|0px\|0deg$/.test(v)) vecteurs.add(v);
+    if (!/^0px\|0px$/.test(v)) vecteurs.add(v);
     await page.waitForTimeout(320);
   }
 
@@ -1084,55 +1169,65 @@ await test("R15 — la direction de la secousse change d'un tap à l'autre", asy
   await page.context().close();
 });
 
-await test("R16 — la place réservée par rangée couvre la carte la PLUS HAUTE", async () => {
+await test("R16 — les deux inégalités qui tiennent l'orbite", async () => {
   /*
-   * ⚠️ L'INVARIANT QUI MANQUAIT, ET QUI A COÛTÉ UN DÉFAUT RÉEL.
+   * ⚠️ CE TEST VÉRIFIAIT UN « BUDGET DE RANGÉE ». Il n'y a plus de rangées :
+   * chaque carte est placée par un angle et un rayon. Deux inégalités
+   * remplacent l'ancienne, et chacune correspond à un défaut réellement
+   * rencontré pendant la construction :
    *
-   * Les cartes sont en position absolue dans un hôte de hauteur fixe. Tant
-   * que `hauteur d'hôte + gouttière` dépasse la carte la plus haute, rien ne
-   * déborde sur la rangée suivante. En resserrant la composition, la place
-   * réservée est passée sous la hauteur de la carte de Vincent — dont le nom
-   * court sur trois lignes — et son bas a recouvert l'en-tête de la carte du
-   * dessous : 11 px sur 247 px de large.
+   *   1. rayon + demi-carte ≤ demi-scène
+   *      Sans elle, la carte la plus au large sortait de l'écran — mesuré à
+   *      390 px : 404 px de bord droit pour 390 px de fenêtre.
    *
-   * R5 quater l'a vu, mais seulement APRÈS coup et sans dire pourquoi. Ce
-   * test-ci nomme la cause : il compare directement le budget de la rangée à
-   * la carte la plus haute, et son message donne les deux chiffres.
+   *   2. rayon − demi-carte ≥ rayon de la photo
+   *      Sans elle, la carte la plus proche passait SOUS la photo, qui la
+   *      recouvre : elle devenait intouchable, et le tap ne la mettait plus
+   *      en avant.
    */
-  // ⚠️ LES DEUX COMPOSITIONS SONT VÉRIFIÉES. Desktop et mobile réservent des
-  // hauteurs différentes pour des cartes différentes ; resserrer l'une sans
-  // l'autre est exactement l'erreur que ce test doit rendre impossible.
   for (const taille of [
     { width: 1440, height: 900 },
     { width: 390, height: 844 },
   ]) {
     const page = await atelier(taille, { tactile: taille.width < 768 });
-    const mesures = await page.evaluate(() => {
-      const pile = document.querySelector<HTMLElement>("[data-avis-pile]");
-      const hotes = [...document.querySelectorAll<HTMLElement>("[data-avis-pile] > li")];
+    const m = await page.evaluate(() => {
+      const scene = document.querySelector<HTMLElement>("[data-avis-scene]");
+      const photo = document.querySelector<HTMLElement>(".avis-centre");
+      if (!scene || !photo) return null;
+      const rs = scene.getBoundingClientRect();
+      const rp = photo.getBoundingClientRect();
+      const cx = rs.x + rs.width / 2;
+      const cy = rs.y + rs.height / 2;
       return {
-        gouttiere: parseFloat(pile ? getComputedStyle(pile).rowGap : "0") || 0,
-        hotes: hotes.map((l) => l.offsetHeight),
-        cartes: hotes.map((li, i) => ({
-          i: i + 1,
-          hauteur: li.querySelector<HTMLElement>(".avis-carte")?.offsetHeight ?? 0,
-        })),
+        demiScene: rs.width / 2,
+        rayonPhoto: rp.width / 2,
+        cartes: [...document.querySelectorAll<HTMLElement>("[data-avis-pile] .avis-carte")].map(
+          (c, i) => {
+            const r = c.getBoundingClientRect();
+            return {
+              i: i + 1,
+              rayon: Math.hypot(r.x + r.width / 2 - cx, r.y + r.height / 2 - cy),
+              demiLargeur: r.width / 2,
+              hors:
+                r.x < rs.x - 2 ||
+                r.right > rs.right + 2 ||
+                r.y < rs.y - 2 ||
+                r.bottom > rs.bottom + 2,
+            };
+          },
+        ),
       };
     });
+    assert.ok(m, "scène et photo doivent exister");
+    assert.equal(m.cartes.length, 9, `neuf cartes attendues — ${m.cartes.length}`);
 
-    const budget = mesures.hotes[0] + mesures.gouttiere;
-    const plusHaute = mesures.cartes.reduce((a, b) => (b.hauteur > a.hauteur ? b : a));
-    assert.ok(
-      plusHaute.hauteur <= budget,
-      `${taille.width} px : la carte ${plusHaute.i} fait ${Math.round(plusHaute.hauteur)} px pour un budget de rangée de ${Math.round(budget)} px — elle débordera sur la rangée suivante`,
-    );
-
-    // ⚠️ ET LES HÔTES SONT TOUS ÉGAUX : c'est ce qui rend le budget calculable.
-    assert.equal(
-      new Set(mesures.hotes).size,
-      1,
-      `${taille.width} px : toutes les rangées doivent réserver la même place — ${[...new Set(mesures.hotes)].join(", ")}`,
-    );
+    for (const c of m.cartes) {
+      assert.ok(!c.hors, `${taille.width} px : la carte ${c.i} sort de la scène`);
+      assert.ok(
+        c.rayon - c.demiLargeur >= m.rayonPhoto - 2,
+        `${taille.width} px : la carte ${c.i} passe sous la photo (bord intérieur à ${Math.round(c.rayon - c.demiLargeur)} px pour un rayon de photo de ${Math.round(m.rayonPhoto)} px) — elle deviendrait intouchable`,
+      );
+    }
     await page.context().close();
   }
 });
@@ -1189,6 +1284,277 @@ await test("R17 — le centre du groupe est IMAGINAIRE : rien ne le représente"
     );
   }
   assert.equal(inspection.reperes, 0, "aucun cercle, axe ou repère ne doit être dessiné");
+  await page.context().close();
+});
+
+/* ═══════ R18-R20. L'ORBITE ═══════ */
+
+await test("R18 — l'amas tourne LENTEMENT, autour du centre exact de la photo", async () => {
+  /*
+   * ⚠️ LE CENTRE NE SE VÉRIFIE PAS EN LISANT UN `transform-origin` — il n'y en
+   * a pas. Les cartes sont placées en coordonnées polaires ; le centre est
+   * l'origine de ce repère. On le vérifie donc par la PROPRIÉTÉ qui le
+   * définit : si le centre de rotation est bien celui de la photo, alors la
+   * distance de chaque carte à ce point ne change pas pendant qu'elle tourne.
+   *
+   * Un centre décalé, lui, ferait respirer cette distance à chaque tour.
+   */
+  const page = await atelier({ width: 1440, height: 900 }, { orbiteFigee: false });
+
+  // ── LA DURÉE : lente, perceptible après quelques secondes, pas un manège.
+  const duree = await page.evaluate(() => {
+    const scene = document.querySelector<HTMLElement>("[data-avis-scene]");
+    if (!scene) return null;
+    const s2 = getComputedStyle(scene);
+    return {
+      duree: parseFloat(s2.animationDuration),
+      nom: s2.animationName,
+      fonction: s2.animationTimingFunction,
+      iterations: s2.animationIterationCount,
+    };
+  });
+  assert.ok(duree, "la scène doit exister");
+  assert.notEqual(duree.nom, "none", "l'orbite doit être animée");
+  assert.ok(
+    duree.duree >= 30 && duree.duree <= 45,
+    `un tour doit durer de 30 à 45 s — mesuré ${duree.duree} s`,
+  );
+  assert.equal(duree.fonction, "linear", "une orbite ne doit ni accélérer ni ralentir");
+  assert.equal(duree.iterations, "infinite", "elle ne s'arrête pas d'elle-même");
+
+  // ── LES RAYONS : constants pendant la rotation.
+  const releve = () =>
+    page.evaluate(() => {
+      const photo = document.querySelector<HTMLElement>(".avis-centre");
+      if (!photo) return null;
+      const rp = photo.getBoundingClientRect();
+      const cx = rp.x + rp.width / 2;
+      const cy = rp.y + rp.height / 2;
+      return {
+        centre: { cx, cy },
+        cartes: [...document.querySelectorAll<HTMLElement>("[data-avis-pile] .avis-carte")].map(
+          (c) => {
+            const r = c.getBoundingClientRect();
+            return {
+              x: r.x + r.width / 2,
+              y: r.y + r.height / 2,
+              rayon: Math.hypot(r.x + r.width / 2 - cx, r.y + r.height / 2 - cy),
+            };
+          },
+        ),
+      };
+    });
+
+  const releves = [];
+  for (let n = 0; n < 4; n += 1) {
+    releves.push(await releve());
+    if (n < 3) await page.waitForTimeout(1300);
+  }
+  assert.ok(releves.every(Boolean), "les relevés doivent aboutir");
+
+  // ── 1. ÇA BOUGE VRAIMENT.
+  const depart = releves[0]!;
+  const arrivee = releves[3]!;
+  const parcours = Math.hypot(
+    arrivee.cartes[0].x - depart.cartes[0].x,
+    arrivee.cartes[0].y - depart.cartes[0].y,
+  );
+  assert.ok(parcours > 3, `l'amas doit se déplacer — ${Math.round(parcours)} px en ~4 s`);
+
+  // ── 2. MAIS LENTEMENT. À 38 s le tour, quatre secondes valent environ
+  // 38° d'arc, soit une fraction du rayon — jamais la moitié du cercle.
+  assert.ok(
+    parcours < depart.cartes[0].rayon,
+    `le déplacement doit rester lent — ${Math.round(parcours)} px pour un rayon de ${Math.round(depart.cartes[0].rayon)} px`,
+  );
+
+  // ── 3. LE CENTRE EST BIEN CELUI DE LA PHOTO.
+  for (let i = 0; i < depart.cartes.length; i += 1) {
+    const rayons = releves.map((r) => r!.cartes[i].rayon);
+    const ecart = Math.max(...rayons) - Math.min(...rayons);
+    assert.ok(
+      ecart <= 2,
+      `la carte ${i + 1} change de distance à la photo pendant l'orbite (${ecart.toFixed(1)} px) — le centre de rotation n'est pas celui de la photo`,
+    );
+  }
+
+  // ── 4. LA PHOTO, ELLE, NE BOUGE PAS.
+  const centres = releves.map((r) => `${Math.round(r!.centre.cx)}|${Math.round(r!.centre.cy)}`);
+  assert.equal(new Set(centres).size, 1, `la photo doit rester immobile — ${centres.join(", ")}`);
+
+  await page.screenshot({ path: join(CAPTURES, "orbite.png"), fullPage: true });
+  await page.context().close();
+});
+
+await test("R19 — l'orbite se met en PAUSE au survol, au tap, et n'existe pas en mouvement réduit", async () => {
+  /*
+   * On ne lit pas un texte qui se déplace. Dès qu'une carte est mise en
+   * avant — survol, focus ou tap — l'orbite s'arrête, et elle repart quand la
+   * carte est relâchée. `animation-play-state` fige la variable où elle en
+   * est : rien ne saute au redémarrage.
+   */
+  const page = await atelier({ width: 1440, height: 900 }, { orbiteFigee: false });
+
+  const position = () =>
+    page.evaluate(() => {
+      const c = document.querySelector<HTMLElement>("[data-avis-pile] .avis-carte");
+      const r = c?.getBoundingClientRect();
+      const scene = document.querySelector<HTMLElement>("[data-avis-scene]");
+      return {
+        x: r ? Math.round(r.x) : 0,
+        y: r ? Math.round(r.y) : 0,
+        etat: scene?.dataset.avisOrbite ?? "",
+        anim: scene ? getComputedStyle(scene).animationPlayState : "",
+      };
+    });
+
+  /*
+   * ⚠️ `mouse.move` ET NON `hover()`, ET LA RAISON EST INSTRUCTIVE.
+   *
+   * `hover()` attend que la cible soit « visible ET STABLE » : deux images de
+   * rendu avec la même boîte. Une carte en orbite ne l'est jamais — elle
+   * avance d'une fraction de pixel à chaque image — et l'appel expirait au
+   * bout de trente secondes.
+   *
+   * Ce n'est pas un défaut de l'interface : à 38 s le tour, un vrai curseur
+   * survole sans aucune difficulté et le navigateur émet `mouseenter`
+   * normalement. C'est Playwright qui est plus exigeant que la réalité. On
+   * pose donc le curseur à la position courante de la carte, ce qui est
+   * exactement ce que fait une main.
+   */
+  const cible = await page.evaluate(() => {
+    const r = document
+      .querySelector<HTMLElement>("[data-avis-pile] > li:nth-child(1) .avis-carte")
+      ?.getBoundingClientRect();
+    return r ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null;
+  });
+  assert.ok(cible, "la première carte doit être trouvée");
+  await page.mouse.move(cible.x, cible.y);
+  await page.waitForTimeout(200);
+  const a = await position();
+  assert.equal(a.etat, "pause", "le survol doit demander la pause");
+  assert.equal(a.anim, "paused", "et l'animation doit être effectivement en pause");
+
+  await page.waitForTimeout(1500);
+  const b = await position();
+  assert.equal(a.x, b.x, "la carte survolée ne doit plus se déplacer en x");
+  assert.equal(a.y, b.y, "ni en y");
+
+  // ── ET L'ORBITE REPART quand on quitte la carte.
+  await page.mouse.move(5, 5);
+  await page.waitForTimeout(1200);
+  const c = await position();
+  assert.equal(c.etat, "tourne", "quitter la carte doit relancer l'orbite");
+  assert.ok(c.x !== b.x || c.y !== b.y, "et l'amas doit repartir");
+  await page.context().close();
+
+  // ── TACTILE : le tap met aussi en pause.
+  const mobile = await atelier({ width: 390, height: 844 }, { tactile: true, orbiteFigee: false });
+  // Même raison qu'au survol : on tape la position courante de la carte.
+  const cibleTactile = await mobile.evaluate(() => {
+    const r = document
+      .querySelector<HTMLElement>("[data-avis-pile] > li:nth-child(1) .avis-carte")
+      ?.getBoundingClientRect();
+    return r ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null;
+  });
+  assert.ok(cibleTactile, "la première carte mobile doit être trouvée");
+  await mobile.touchscreen.tap(cibleTactile.x, cibleTactile.y);
+  await mobile.waitForTimeout(200);
+  const etatTactile = await mobile.evaluate(() => {
+    const scene = document.querySelector<HTMLElement>("[data-avis-scene]");
+    return {
+      etat: scene?.dataset.avisOrbite ?? "",
+      anim: scene ? getComputedStyle(scene).animationPlayState : "",
+    };
+  });
+  assert.equal(etatTactile.etat, "pause", "le tap doit mettre l'orbite en pause");
+  assert.equal(etatTactile.anim, "paused", "effectivement");
+  await mobile.context().close();
+
+  // ── MOUVEMENT RÉDUIT : aucune orbite du tout.
+  const calme = await atelier(
+    { width: 1440, height: 900 },
+    { mouvementReduit: true, orbiteFigee: false },
+  );
+  const anim = await calme.evaluate(() => {
+    const scene = document.querySelector<HTMLElement>("[data-avis-scene]");
+    return scene ? getComputedStyle(scene).animationName : "";
+  });
+  assert.equal(anim, "none", "sous prefers-reduced-motion, aucune orbite");
+
+  const avant = await calme.evaluate(() => {
+    const r = document
+      .querySelector<HTMLElement>("[data-avis-pile] .avis-carte")
+      ?.getBoundingClientRect();
+    return r ? `${Math.round(r.x)}|${Math.round(r.y)}` : "";
+  });
+  await calme.waitForTimeout(1500);
+  const apres = await calme.evaluate(() => {
+    const r = document
+      .querySelector<HTMLElement>("[data-avis-pile] .avis-carte")
+      ?.getBoundingClientRect();
+    return r ? `${Math.round(r.x)}|${Math.round(r.y)}` : "";
+  });
+  assert.equal(apres, avant, "et rien ne doit bouger");
+  await calme.context().close();
+});
+
+await test("R20 — un trait fin relie CHAQUE avis à la photo", async () => {
+  const page = await atelier({ width: 1440, height: 900 });
+  const traits = await page.evaluate(() => {
+    const scene = document.querySelector<HTMLElement>("[data-avis-scene]");
+    const photo = document.querySelector<HTMLElement>(".avis-centre");
+    if (!scene || !photo) return null;
+    const rs = scene.getBoundingClientRect();
+    const cx = rs.x + rs.width / 2;
+    const cy = rs.y + rs.height / 2;
+    const liens = [...document.querySelectorAll<HTMLElement>(".avis-lien")];
+    const cartes = [...document.querySelectorAll<HTMLElement>("[data-avis-pile] .avis-carte")];
+    return {
+      nb: liens.length,
+      nbCartes: cartes.length,
+      pointeurs: getComputedStyle(
+        document.querySelector<HTMLElement>(".avis-rayons") as HTMLElement,
+      ).pointerEvents,
+      details: liens.map((l, i) => {
+        const r = l.getBoundingClientRect();
+        const s2 = getComputedStyle(l);
+        const rc = cartes[i]?.getBoundingClientRect();
+        // Le bout du trait, calculé depuis l'angle et la longueur déclarés.
+        const longueur = parseFloat(s2.width);
+        return {
+          epaisseur: parseFloat(s2.height),
+          fond: s2.backgroundImage,
+          longueur,
+          // Distance entre le centre de la carte et le centre du trait :
+          // le trait doit partir du centre et finir sur la carte.
+          rayonCarte: rc ? Math.hypot(rc.x + rc.width / 2 - cx, rc.y + rc.height / 2 - cy) : -1,
+          racineAuCentre: Math.hypot(
+            (s2.transform.includes("matrix") ? r.x : r.x) - cx,
+            r.y - cy,
+          ),
+        };
+      }),
+    };
+  });
+
+  assert.ok(traits, "la scène doit exister");
+  assert.equal(traits.nb, traits.nbCartes, "un trait par avis, ni plus ni moins");
+  assert.equal(traits.nb, 9, `neuf traits attendus — ${traits.nb}`);
+  assert.equal(traits.pointeurs, "none", "la couche de traits ne doit rien intercepter");
+
+  for (const [i, d] of traits.details.entries()) {
+    // ⚠️ FIN : un trait de plus d'un pixel deviendrait un motif, pas un lien.
+    assert.ok(d.epaisseur <= 1.5, `le trait ${i + 1} fait ${d.epaisseur} px d'épaisseur`);
+    // ⚠️ GRIS : il guide l'œil, il ne doit pas rivaliser avec les cartes.
+    assert.ok(/gradient/.test(d.fond), `le trait ${i + 1} doit être un dégradé gris`);
+    // ⚠️ SA LONGUEUR EST CELLE DU RAYON DE SA CARTE : il s'arrête exactement
+    // sur elle, jamais avant, jamais au-delà.
+    assert.ok(
+      Math.abs(d.longueur - d.rayonCarte) <= 2,
+      `le trait ${i + 1} mesure ${Math.round(d.longueur)} px pour une carte à ${Math.round(d.rayonCarte)} px du centre`,
+    );
+  }
   await page.context().close();
 });
 

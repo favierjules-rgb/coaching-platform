@@ -1466,72 +1466,57 @@ body {
 }
 
 /*
- * PILE D'AVIS — components/sections/GoogleReviewsStack.tsx
+ * AMAS D'AVIS EN ORBITE — components/sections/GoogleReviewsStack.tsx
  *
  * ════════════════════════════════════════════════════════════════════════
- * RÈGLE ABSOLUE : AUCUNE CARTE N'EST TOURNÉE. JAMAIS.
+ * RIEN NE TOURNE : TOUT SE DÉPLACE
  * ════════════════════════════════════════════════════════════════════════
- * Toutes les cartes sont parfaitement horizontales, au repos comme au survol,
- * au focus comme au tap. Une version précédente inclinait chaque carte de
- * ±2,2° (`rotate(var(--avis-rotation))`) : ces règles ont été SUPPRIMÉES,
- * ainsi que les deux marges de compensation qui n'existaient que pour
- * absorber le débordement des coins tournés.
+ * C'est l'idée centrale, et elle règle d'un coup deux exigences qui semblaient
+ * s'opposer — « l'amas tourne autour d'un centre » et « aucune carte n'est
+ * inclinée ».
  *
- * ⚠️ NE PAS RÉINTRODUIRE `rotate()` SUR `.avis-carte`. Le seul `rotate()`
- * admis dans tout ce bloc porte sur `.avis-pile` — le GROUPE — et il est
- * borné à 0,4°.
+ * Une rotation de conteneur entraînerait ses enfants ; il faudrait alors
+ * contre-tourner chaque carte de −θ pour la redresser, c'est-à-dire poser une
+ * rotation sur chaque carte. Ici, personne ne tourne : une variable animée
+ * `--avis-orb` va de 0 à 1 sur un tour, et chaque élément calcule sa position
+ * en `cos()` / `sin()`. Les cartes PARCOURENT un cercle en restant strictement
+ * horizontales, sans la moindre correction.
  *
- * ════════════════════════════════════════════════════════════════════════
- * LE DÉSORDRE VIENT DES POSITIONS
- * ════════════════════════════════════════════════════════════════════════
- * Chaque carte reçoit de React deux variables, `--avis-dx` et `--avis-dy`,
- * tirées de deux tables de longueurs 7 et 5. Premières entre elles : sur neuf
- * cartes, aucun couple ne se répète, donc aucune rangée ni colonne ne
- * s'aligne. C'est une grille dont chaque case a bougé, pas une grille.
+ * ⚠️ LE CENTRE EST L'ORIGINE D'UN REPÈRE, PAS UN `transform-origin`. Il vaut
+ * 50 % / 50 % de la scène, exactement là où la photo est centrée. Il ne peut
+ * pas dériver : il n'est pas réglé, il est structurel. Et il n'est matérialisé
+ * par rien — aucun point, aucun cercle, aucun axe n'est dessiné.
  *
- * ⚠️ LES GOUTTIÈRES SONT CALCULÉES SUR L'AMPLITUDE DES TABLES, et ce n'est
- * pas décoratif. Étalement horizontal : 34 − (−28) = 62 px, gouttière 4 rem
- * (64 px). Étalement vertical : 30 − (−14) = 44 px, gouttière 3 rem (48 px).
- * Tant que la gouttière dépasse l'étalement, deux cartes voisines ne peuvent
- * PAS se recouvrir — donc aucune ne peut manger le texte ou l'en-tête d'une
- * autre. Élargir une table sans élargir la gouttière casse cette garantie ;
- * R5 bis et R5 quater le verraient.
- *
- * ════════════════════════════════════════════════════════════════════════
- * LE TEXTE EST ÉCRÊTÉ AU REPOS, ENTIER AU SURVOL
- * ════════════════════════════════════════════════════════════════════════
- * ⚠️ ÉCRÊTÉ, PAS RETIRÉ. `line-clamp` limite le nombre de lignes PEINTES ;
- * le texte reste intégralement dans le DOM. Un lecteur d'écran le lit en
- * entier sans survoler quoi que ce soit. Ne jamais remplacer cet écrêtage par
- * un `display: none`, une `opacity: 0` ou un rendu conditionnel : ce serait
- * réserver de l'information au pointeur.
- *
- * ⚠️ LA CARTE EST EN POSITION ABSOLUE DANS UN HÔTE DE HAUTEUR FIXE. Sans ça,
- * déplier un avis de 800 caractères ferait grandir sa rangée et toute la
- * composition sauterait sous le curseur. L'hôte réserve la place, la carte
- * grandit par-dessus ses voisines — c'est le comportement d'une pile.
+ * ⚠️ `@property` EST INDISPENSABLE. Sans déclaration typée, une variable
+ * personnalisée ne s'interpole pas : l'animation sauterait de 0 à 1 d'un coup.
  */
-.avis-pile {
+@property --avis-orb {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+@keyframes avis-orbite {
+  to {
+    --avis-orb: 1;
+  }
+}
+
+.avis-scene {
   /*
    * ════════════════════════════════════════════════════════════════════
    * LA PALETTE GOOGLE — DÉLIBÉRÉMENT HORS DU SYSTÈME DE COULEURS DU SITE
    * ════════════════════════════════════════════════════════════════════
-   * Ces valeurs sont celles de Google, reprises telles quelles : fond blanc,
-   * filet gris, nom presque noir, corps de texte gris, étoiles jaunes. Une
-   * carte d'avis doit être reconnue comme un avis Google avant d'être lue —
-   * c'est ce que ces couleurs achètent.
+   * Ces valeurs sont celles de Google, reprises telles quelles. Une carte
+   * d'avis doit être reconnue comme un avis Google avant d'être lue.
    *
    * ⚠️ ELLES NE SUIVENT PAS LE THÈME DU SITE, ET C'EST VOULU. Les cartes
-   * Google sont blanches partout, sur fond clair comme sur fond sombre ; les
-   * passer en jetons sémantiques les rendrait noires en thème sombre et elles
-   * cesseraient d'être reconnaissables. C'est la seule zone du dépôt où des
-   * couleurs brutes sont justifiées, et elles sont nommées ici plutôt que
-   * semées dans les règles.
+   * Google sont blanches partout ; les passer en jetons sémantiques les
+   * rendrait noires en thème sombre.
    *
-   * ⚠️ CONSÉQUENCE À NE PAS OUBLIER : sur une carte blanche, le blanc du
-   * thème sombre devient invisible. Le liseré de focus et la bordure de
-   * survol utilisent donc le bleu Google, pas `--color-primary` — sans quoi
-   * le focus clavier disparaîtrait purement et simplement.
+   * ⚠️ CONSÉQUENCE : sur une carte blanche, le blanc du thème sombre devient
+   * invisible. Le liseré de focus et la bordure de survol utilisent donc le
+   * bleu Google, pas `--color-primary`.
    */
   --avis-g-fond: #ffffff;
   --avis-g-bordure: #dadce0;
@@ -1541,61 +1526,177 @@ body {
   --avis-g-etoile: #fbbc04;
   --avis-g-avatar: #f1f3f4;
   --avis-g-focus: #1a73e8;
+  /* Le gris du trait qui relie chaque avis à la photo. Discret : il guide
+     l'œil vers le centre, il ne doit pas devenir un motif. */
+  --avis-g-trait: rgb(154 160 166 / 0.45);
 
-  /*
-   * UNE SEULE LIGNE AU REPOS. La carte n'est plus qu'une amorce : un nom, une
-   * note, un début de phrase. Tout le reste attend le survol — et le texte
-   * complet demeure dans le DOM, écrêté à l'œil seulement.
-   */
+  /* Une seule ligne d'avis au repos ; le survol montre tout. */
   --avis-lignes: 1;
 
-  display: grid;
-  grid-template-columns: 1fr;
-  justify-items: center;
-  padding: clamp(0.5rem, 1.5vw, 1rem) 0 clamp(1rem, 2.5vw, 2rem);
+  /*
+   * LA GÉOMÉTRIE DE L'ORBITE. Tout en découle, et les trois mesures sont
+   * liées par une inégalité qu'il ne faut pas casser :
+   *
+   *     rayon maximal (1,16 × base) + demi-largeur de carte ≤ demi-scène
+   *
+   * Sans elle, la carte la plus au large sort de la scène et déclenche une
+   * barre de défilement horizontale sur toute la page — mesuré à 390 px :
+   * 404 px de bord droit pour 390 px de fenêtre. R1 le rattrape.
+   */
+  /*
+   * ⚠️ CES TROIS MESURES SONT SERRÉES, ET ELLES ONT ÉTÉ TROUVÉES PAR LA
+   * MESURE, PAS PAR LE GOÛT. Neuf cartes plus une photo dans un carré de
+   * 374 px laissent peu de marge : la contrainte qui mord n'est pas la
+   * largeur mais la HAUTEUR des cartes, celles dont le nom passe à la ligne.
+   * R16 refuse toute valeur qui fait sortir une carte de la scène.
+   */
+  --avis-rayon-base: 6.15rem;
+  --avis-photo: 4.75rem;
+  --avis-carte-large: 6.5rem;
+  --avis-tour: 38s;
+
+  position: relative;
+  width: min(100%, 24rem);
+  aspect-ratio: 1;
+  margin: 0 auto;
 
   /*
-   * LA SECOUSSE DU GROUPE — tactile uniquement, pilotée par React.
-   *
-   * ⚠️ ELLE VIT ICI, SUR LE CONTENEUR, ET NULLE PART AILLEURS. Le
-   * `transform-origin` est le centre de l'ensemble : la pile glisse et pivote
-   * d'un bloc autour d'un point commun. Poser ce mouvement sur les cartes une
-   * à une donnerait neuf objets indépendants au lieu d'un.
-   *
-   * Les trois variables valent 0 au repos, y compris au rendu serveur — le
-   * tirage au sort n'a lieu que dans un gestionnaire d'événement.
+   * L'ORBITE. Trente-huit secondes pour un tour : le mouvement ne se voit pas
+   * tout de suite, il se remarque au bout de quelques secondes. C'est la
+   * différence entre une composition vivante et un manège.
    */
-  transform-origin: 50% 50%;
-  transform: translate3d(var(--avis-groupe-x, 0px), var(--avis-groupe-y, 0px), 0)
-    rotate(var(--avis-groupe-rotation, 0deg));
+  animation: avis-orbite var(--avis-tour) linear infinite;
+}
+
+/*
+ * LA PAUSE. Survol, focus clavier ou tap : dès qu'une carte est mise en
+ * avant, l'orbite s'arrête — on ne lit pas un texte qui se déplace.
+ * `animation-play-state` fige la variable où elle en est ; rien ne saute.
+ */
+.avis-scene[data-avis-orbite="pause"] {
+  animation-play-state: paused;
+}
+
+/*
+ * LA PHOTO — FIXE, ET SEULE À MARQUER LE CENTRE.
+ *
+ * ⚠️ ELLE EST HORS DE L'AMAS. Ni l'orbite ni la secousse tactile ne la
+ * touchent : c'est le point immobile autour duquel le reste se déplace.
+ * Son z-index la place AU-DESSUS des traits, dont la racine est au centre
+ * exact : on ne voit donc du trait que la portion qui sort de la photo.
+ */
+.avis-centre {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 30;
+  width: var(--avis-photo);
+  height: var(--avis-photo);
+  margin: 0;
+  transform: translate(-50%, -50%);
+  border-radius: 9999px;
+  overflow: hidden;
+  border: 3px solid var(--avis-g-fond);
+  box-shadow:
+    0 4px 12px 3px rgb(60 64 67 / 0.2),
+    0 1px 3px rgb(60 64 67 / 0.35);
+}
+
+.avis-centre-photo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* ⚠️ AUCUN FILTRE. Les couleurs de la photo sont conservées telles quelles. */
+}
+
+/*
+ * L'AMAS — traits et cartes, ensemble.
+ *
+ * C'est lui qui porte la secousse tactile, pas la scène : la photo doit
+ * rester parfaitement immobile pendant que le groupe frémit autour d'elle.
+ */
+.avis-amas {
+  position: absolute;
+  inset: 0;
+  transform: translate3d(var(--avis-groupe-x, 0px), var(--avis-groupe-y, 0px), 0);
   transition: transform 260ms var(--ease-out);
 }
 
-.avis-carte-hote {
-  position: relative;
-  grid-area: 1 / 1;
-  z-index: var(--avis-plan, 1);
-  width: min(100%, 26rem);
+.avis-rayons {
+  position: absolute;
+  inset: 0;
+  /* ⚠️ LA COUCHE DE TRAITS NE DOIT RIEN INTERCEPTER. Elle couvre toute la
+     scène ; sans cette ligne, elle capterait des clics destinés aux cartes. */
+  pointer-events: none;
+}
+
+/*
+ * UN TRAIT PAR AVIS, DU CENTRE VERS LA CARTE.
+ *
+ * ⚠️ SEUL ÉLÉMENT DU BLOC QUI TOURNE — et ce n'est pas une carte. Un trait
+ * qui relie deux points DOIT s'orienter ; c'est sa raison d'être. Sa longueur
+ * vaut exactement le rayon de la carte qu'il rejoint, donc il s'arrête au
+ * centre de celle-ci, jamais avant ni après.
+ */
+.avis-lien {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  height: 1px;
+  width: calc(var(--avis-rayon-base) * var(--avis-rayon, 1));
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    var(--avis-g-trait) 22%,
+    var(--avis-g-trait) 100%
+  );
+  transform-origin: 0 50%;
+  transform: rotate(calc((var(--avis-angle, 0) + var(--avis-orb, 0)) * 1turn));
+}
+
+.avis-pile {
+  position: absolute;
+  inset: 0;
   list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/*
+ * UNE CARTE, PLACÉE PAR SON ANGLE ET SON RAYON.
+ *
+ * ⚠️ DEUX TRANSLATIONS, ZÉRO ROTATION. La première recentre la carte sur son
+ * point d'ancrage, la seconde la porte sur son orbite. Le résultat est une
+ * matrice sans composante de rotation — R13 le mesure.
+ */
+.avis-carte-hote {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: var(--avis-plan, 1);
+  width: var(--avis-carte-large);
+  list-style: none;
+  --avis-a: calc((var(--avis-angle, 0) + var(--avis-orb, 0)) * 1turn);
+  transform: translate(-50%, -50%)
+    translate(
+      calc(cos(var(--avis-a)) * var(--avis-rayon-base) * var(--avis-rayon, 1)),
+      calc(sin(var(--avis-a)) * var(--avis-rayon-base) * var(--avis-rayon, 1))
+    );
 }
 
 .avis-carte {
   display: block;
-  padding: clamp(0.85rem, 1.8vw, 1.15rem);
+  padding: 0.6rem;
   border: 1px solid var(--avis-g-bordure);
-  /* Le rayon des fiches Google : franc, mais pas une pastille. */
   border-radius: 0.5rem;
   background-color: var(--avis-g-fond);
-  /* L'ombre portée de Material, celle des cartes Google. */
   box-shadow:
     0 1px 2px rgb(60 64 67 / 0.3),
     0 1px 3px 1px rgb(60 64 67 / 0.15);
   text-decoration: none;
-  /*
-   * ⚠️ TRANSLATION SEULE — PAS DE `rotate()`, PAS DE `skew()`. La carte se
-   * déplace, elle ne penche pas.
-   */
-  transform: translate3d(var(--avis-dx, 0px), var(--avis-dy, 0px), 0);
+  /* ⚠️ AUCUN `transform` ICI. Le placement appartient à l'hôte ; la carte ne
+     porte que son agrandissement au survol, et jamais de rotation. */
   transition:
     transform 200ms var(--ease-out),
     box-shadow 200ms var(--ease-out),
@@ -1603,35 +1704,29 @@ body {
 }
 
 /*
- * L'ÉCRÊTAGE DU TEXTE.
- *
- * `pre-line` conserve les sauts de ligne et les paragraphes réellement écrits
- * par les auteurs : rendus dans un `<p>` ordinaire, ils seraient écrasés en
- * un pavé — une reformulation silencieuse, faite par le navigateur.
+ * L'ÉCRÊTAGE DU TEXTE. `pre-line` conserve les sauts de ligne réellement
+ * écrits par les auteurs — sans lui, le navigateur les écraserait, ce qui est
+ * une reformulation silencieuse.
  */
 .avis-texte {
   white-space: pre-line;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: var(--avis-lignes, 3);
-  line-clamp: var(--avis-lignes, 3);
+  -webkit-line-clamp: var(--avis-lignes, 1);
+  line-clamp: var(--avis-lignes, 1);
   overflow: hidden;
 }
 
-/* La mise en avant, dans les trois cas : survol souris, focus clavier, tap.
-   Une seule déclaration pour les trois — l'expérience clavier est identique à
-   l'expérience souris, elle n'en est pas une approximation. */
+/* La mise en avant : survol souris, focus clavier, tap. Une seule
+   déclaration pour les trois — l'expérience clavier est identique. */
+.avis-carte-hote[data-en-avant="true"] {
+  z-index: 60;
+}
+
 .avis-carte-hote[data-en-avant="true"] .avis-carte,
 .avis-carte:focus-visible {
-  /* ⚠️ TOUJOURS SANS ROTATION. Seuls un léger soulèvement et un
-     agrandissement discret marquent la mise en avant. */
-  transform: translate3d(var(--avis-dx, 0px), calc(var(--avis-dy, 0px) - 6px), 0) scale(1.03);
-  /*
-   * ⚠️ PLUS DE `--color-primary` ICI. Il vaut blanc en thème sombre : sur une
-   * carte devenue blanche, la bordure de survol devenait invisible et la mise
-   * en avant ne se voyait plus qu'à l'ombre. Le bleu Google la rend lisible
-   * dans les deux thèmes.
-   */
+  /* ⚠️ SANS ROTATION. Un agrandissement et une ombre, rien d'autre. */
+  transform: scale(1.06);
   border-color: var(--avis-g-focus);
   box-shadow:
     0 4px 8px 3px rgb(60 64 67 / 0.15),
@@ -1647,42 +1742,21 @@ body {
 }
 
 .avis-carte:focus-visible {
-  /* ⚠️ MÊME RAISON : un liseré blanc sur une carte blanche n'existe pas. */
   outline: 2px solid var(--avis-g-focus);
   outline-offset: 3px;
 }
 
-/* Le jaune des étoiles Google. Il vaut aussi pour la note moyenne affichée
-   au-dessus de la pile : une seule couleur d'étoile sur toute la section. */
 .avis-etoile {
   color: var(--avis-g-etoile, #fbbc04);
   fill: currentColor;
 }
 
-.avis-avatar {
-  flex-shrink: 0;
-  border-radius: 9999px;
-  object-fit: cover;
-  border: 1px solid var(--avis-g-bordure);
-}
-
-/*
- * LE RESSERREMENT DE LA CARTE.
- *
- * ⚠️ C'EST LA HAUTEUR DE LA CARTE QUI COMMANDE CELLE DES RANGÉES, pas
- * l'inverse. Une première tentative de compacité n'avait réduit que la place
- * réservée par l'hôte : la carte la plus haute — celle de Vincent, dont le nom
- * court sur trois lignes — a débordé et recouvert l'en-tête de la carte du
- * dessous. Mesuré : 11 px sur 247 px de large. On resserre donc la carte
- * d'abord, la rangée ensuite.
- */
 .avis-auteur {
-  /* Un nom de quarante-cinq caractères passe à la ligne ; un interligne serré
-     lui coûte quinze pixels de moins sans rien couper. */
   line-height: 1.2;
   /* ⚠️ `!important` : les classes utilitaires posent `text-foreground`, qui
      vaut blanc en thème sombre — donc invisible sur une carte blanche. */
   color: var(--avis-g-nom) !important;
+  font-size: 0.62rem;
 }
 
 .avis-date,
@@ -1692,20 +1766,34 @@ body {
 
 .avis-texte {
   color: var(--avis-g-texte) !important;
+  font-size: 0.66rem;
+  line-height: 1.4;
+  margin-top: 0.35rem;
 }
 
 .avis-source {
-  margin-top: 0.6rem;
+  margin-top: 0.4rem;
+  font-size: 0.5rem;
 }
 
 .avis-entete {
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.35rem;
+  gap: 0.4rem;
+}
+
+.avis-notes svg {
+  width: 9px;
+  height: 9px;
 }
 
 .avis-avatar,
 .avis-avatar-initiale {
-  width: 2rem;
-  height: 2rem;
+  width: 1.35rem;
+  height: 1.35rem;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  object-fit: cover;
+  border: 1px solid var(--avis-g-bordure);
 }
 
 .avis-avatar-initiale {
@@ -1713,258 +1801,65 @@ body {
   align-items: center;
   justify-content: center;
   font-family: var(--font-heading), sans-serif;
-  font-size: 0.9rem;
+  font-size: 0.6rem;
   font-weight: 700;
   color: var(--avis-g-secondaire);
   background-color: var(--avis-g-avatar);
 }
 
 /*
- * DESKTOP — LES CARTES SE POSENT DANS L'ESPACE.
+ * DESKTOP — LA MÊME ORBITE, EN GRAND.
  *
- * Colonnes à largeur plancher : la grille passe à la rangée suivante plutôt
- * que de comprimer les cartes en bandes illisibles. Chaque carte est ensuite
- * déplacée de son propre écart, ce qui défait l'alignement sans rien incliner.
+ * Seules quatre mesures changent : la scène, le rayon, la photo et la largeur
+ * des cartes. La mécanique, elle, est identique — c'est tout l'intérêt d'une
+ * géométrie polaire.
  */
 @media (min-width: 768px) {
-  .avis-pile {
-    grid-template-columns: repeat(auto-fit, minmax(min(16rem, 100%), 1fr));
-    justify-items: stretch;
-    align-items: start;
-    /*
-     * ════════════════════════════════════════════════════════════════════
-     * LES CARTES SE CHEVAUCHENT MAINTENANT — MAIS D'UNE QUANTITÉ BORNÉE
-     * ════════════════════════════════════════════════════════════════════
-     * Les gouttières sont passées SOUS l'étalement des tables de décalage :
-     * deux voisines peuvent donc se recouvrir, ce qui donne l'amas serré
-     * demandé.
-     *
-     * ⚠️ LE RECOUVREMENT RESTE INFÉRIEUR AU REMBOURRAGE DE LA CARTE, et c'est
-     * toute la sûreté du dispositif. Horizontal : 24 − 12 = 12 px de
-     * recouvrement maximal, pour 18,4 px de rembourrage. Vertical :
-     * 17 − 8 = 9 px, même rembourrage. Les cartes mordent donc l'une sur
-     * l'autre DANS LEUR MARGE, jamais sur du texte ni sur un en-tête.
-     *
-     * C'est ce que vérifient R5 bis (le texte d'une carte commence après le
-     * bord de sa voisine) et R5 quater (aucun en-tête recouvert). Élargir une
-     * table ou rétrécir une gouttière sans regarder le rembourrage remet du
-     * texte de client sous une autre carte — le test 31 le refuse.
-     */
-    column-gap: 0.75rem;
-    row-gap: 0.5rem;
-    /*
-     * ⚠️ LA RESPIRATION LATÉRALE N'EST PAS DÉCORATIVE. Les cartes des colonnes
-     * de bord sont translatées jusqu'à 34 px vers l'extérieur ; sans ce
-     * rembourrage, celle de droite dépassait le bord du conteneur — mesuré à
-     * 768 px : 770 px de bord droit pour 768 px de fenêtre, soit une barre de
-     * défilement horizontale sur la page entière. Le rembourrage couvre
-     * l'écart maximal des deux tables.
-     */
-    padding-inline: 0.85rem;
-    padding-top: clamp(0.5rem, 1.5vw, 1rem);
-  }
-
-  .avis-carte-hote {
-    grid-area: auto;
-    width: auto;
-    min-width: 0;
-    /*
-     * ⚠️ HAUTEUR FIXE : c'est l'hôte qui réserve la place, pas la carte. Un
-     * avis déplié peut alors grandir autant qu'il veut sans déplacer une
-     * seule de ses voisines.
-     */
-    height: var(--avis-hauteur, 9.5rem);
+  .avis-scene {
+    --avis-rayon-base: 14.8rem;
+    --avis-photo: 11rem;
+    --avis-carte-large: 11.5rem;
+    width: min(100%, 46rem);
   }
 
   .avis-carte {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    /*
-     * ⚠️ PAS DE `min-height: 100%`. Avec, un avis d'une seule ligne — « Très
-     * bon coach 10/10 » — traînerait deux cents pixels de vide sous son texte
-     * pour s'aligner sur son voisin de quinze lignes. Chaque carte s'arrête à
-     * son propre contenu ; l'hôte, lui, réserve la place de la rangée.
-     */
-  }
-}
-
-/*
- * MOBILE — UN AMAS COMPACT, PAS UNE COLONNE INTERMINABLE.
- *
- * ════════════════════════════════════════════════════════════════════════
- * POURQUOI DEUX COLONNES ET DES CARTES PLUS PETITES
- * ════════════════════════════════════════════════════════════════════════
- * Une colonne de neuf cartes pleine largeur mesurait plus de trois écrans de
- * haut. La secousse de groupe y était INVISIBLE : on ne voyait bouger que la
- * carte qu'on venait de toucher et sa voisine immédiate, jamais l'ensemble.
- * Or c'est tout l'intérêt du geste — sentir que la pile réagit comme un
- * objet.
- *
- * Les cartes sont donc réduites et rangées sur deux colonnes : les neuf
- * tiennent dans la hauteur d'un écran, et le mouvement du groupe se lit d'un
- * coup d'œil. Ce qu'on perd en confort de lecture au repos, le tap le rend —
- * il déplie l'avis en entier.
- *
- * ⚠️ TOUJOURS AUCUNE ROTATION, y compris ici : l'ancienne règle
- * `rotate(calc(var(--avis-rotation) / 2))` a été supprimée avec le reste.
- */
-@media (max-width: 767px) {
-  .avis-pile {
-    /*
-     * ⚠️ UNE SEULE LIGNE, COMME SUR DESKTOP. Conséquence connue et assumée :
-     * la carte d'Audrey ZIGGIOTTI n'affiche que la rangée d'étoiles qu'elle a
-     * tapée en tête de son avis — c'est littéralement sa première ligne. On ne
-     * réécrit pas son texte pour arranger la vignette ; le tap montre tout.
-     */
-    --avis-lignes: 1;
-    grid-auto-flow: row;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    /*
-     * ⚠️ `stretch` EST INDISPENSABLE, PAS COSMÉTIQUE. Le bloc de base pose
-     * `justify-items: center`, qui rend la largeur de l'hôte dépendante de son
-     * contenu — or la carte est en position absolue, donc hors flux, donc elle
-     * ne contribue à aucune largeur. Les hôtes tombaient à ZÉRO pixel de large
-     * et disparaissaient de l'écran : le harnais ne trouvait plus une seule
-     * carte visible à 390 px.
-     */
-    justify-items: stretch;
-    /*
-     * Étalement atténué : 24 px × 0,35 ≈ 8 px en X, 17 px × 0,35 ≈ 6 px en Y.
-     * Gouttières encore plus serrées qu'en desktop — les cartes se touchent,
-     * et le recouvrement éventuel reste sous le rembourrage de 13,6 px.
-     */
-    column-gap: 0.45rem;
-    row-gap: 0.4rem;
-    padding: 0.5rem 0.5rem 1rem;
+    padding: 0.75rem;
   }
 
-  .avis-carte-hote {
-    position: relative;
-    grid-area: auto;
-    width: auto;
-    min-width: 0;
-    max-width: 100%;
-    /*
-     * La place réservée par carte, mesurée sur la plus haute — celle de
-     * Vincent, 139 px, dont le nom court sur trois lignes. Avec la gouttière
-     * de 0,4 rem, le budget d'une rangée vaut 146 px : aucune carte ne peut
-     * déborder sur celle du dessous. Voir R16, qui vérifie cet invariant.
-     */
-    height: 8.75rem;
+  .avis-auteur {
+    font-size: 0.68rem;
   }
 
-  .avis-carte {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    padding: 0.7rem;
-    border-radius: 0.6rem;
-    /*
-     * ⚠️ LES DÉCALAGES SONT ATTÉNUÉS, PAS SUPPRIMÉS. À pleine amplitude, une
-     * carte de bord sortirait de l'écran ; à zéro, la composition
-     * redeviendrait une grille sage. Le tiers de l'amplitude garde le
-     * désordre sans jamais déborder — R1 le mesure à 390 px.
-     */
-    transform: translate3d(
-      calc(var(--avis-dx, 0px) * 0.35),
-      calc(var(--avis-dy, 0px) * 0.35),
-      0
-    );
+  .avis-texte {
+    font-size: 0.72rem;
   }
 
-  /*
-   * ⚠️ LA CARTE DÉPLIÉE REPREND SA PLACE DANS LE FLUX — ET C'EST UNE
-   * CORRECTION, PAS UN DÉTAIL DE STYLE.
-   *
-   * En restant en position absolue, elle grandissait PAR-DESSUS la carte du
-   * dessous et la recouvrait entièrement. Sur desktop c'est le comportement
-   * voulu — le curseur quitte la carte, elle se replie. Sur tactile il n'y a
-   * pas de « quitter » : la carte recouverte devenait INTOUCHABLE, et on ne
-   * pouvait plus ouvrir l'avis suivant. Le harnais l'a vu avant moi — un tap
-   * sur la quatrième carte expirait au bout de trente secondes.
-   *
-   * Dépliée, la carte pousse donc les suivantes vers le bas, comme un
-   * accordéon. Toutes restent atteignables.
-   */
-  .avis-carte-hote[data-en-avant="true"] {
-    height: auto;
-    min-height: 8.75rem;
+  .avis-source {
+    font-size: 0.55rem;
   }
 
-  .avis-carte-hote[data-en-avant="true"] .avis-carte {
-    position: relative;
-  }
-
-  .avis-carte-hote[data-en-avant="true"] .avis-carte,
-  .avis-carte:focus-visible {
-    transform: translate3d(
-        calc(var(--avis-dx, 0px) * 0.35),
-        calc(var(--avis-dy, 0px) * 0.35 - 4px),
-        0
-      )
-      scale(1.02);
-  }
-
-  /*
-   * L'ÉCHELLE RÉDUITE. Chaque élément de la carte rétrécit — sinon l'avatar
-   * et le nom mangeraient à eux seuls la moitié d'une carte de 11 rem.
-   */
   .avis-avatar,
   .avis-avatar-initiale {
     width: 1.6rem;
     height: 1.6rem;
-    font-size: 0.65rem;
-  }
-
-  .avis-auteur {
-    font-size: 0.65rem;
-    letter-spacing: 0.02em;
-    line-height: 1.25;
   }
 
   .avis-notes svg {
     width: 10px;
     height: 10px;
   }
-
-  .avis-texte {
-    font-size: 0.72rem;
-    line-height: 1.45;
-    margin-top: 0.45rem;
-  }
-
-  .avis-source {
-    margin-top: 0.5rem;
-    font-size: 0.55rem;
-  }
-
-  /*
-   * ⚠️ LA CARTE DÉPLIÉE REPREND UNE TAILLE LISIBLE. Deux lignes à 0,72 rem
-   * suffisent à donner envie ; huit cents caractères à cette taille seraient
-   * illisibles. Le tap rend donc aussi la taille du texte, pas seulement les
-   * lignes manquantes.
-   */
-  .avis-carte-hote[data-en-avant="true"] .avis-texte,
-  .avis-carte:focus-visible .avis-texte {
-    font-size: 0.82rem;
-    line-height: 1.6;
-  }
 }
 
 /* Sur tactile, `:hover` reste collé après un tap : la mise en avant y passe
-   uniquement par `data-en-avant`. Cette règle n'existe donc que pour les
+   uniquement par `data-en-avant`. Cette règle n'existe que pour les
    pointeurs fins. */
 @media (hover: hover) and (pointer: fine) {
   .avis-carte:hover {
-    transform: translate3d(var(--avis-dx, 0px), calc(var(--avis-dy, 0px) - 6px), 0) scale(1.03);
+    transform: scale(1.06);
     border-color: var(--avis-g-focus);
     box-shadow:
       0 4px 8px 3px rgb(60 64 67 / 0.15),
       0 1px 3px rgb(60 64 67 / 0.3);
-    min-height: 0;
   }
 
   /* LE SURVOL RÉVÈLE L'AVIS COMPLET — l'exigence centrale du desktop. */
@@ -1978,17 +1873,21 @@ body {
 /*
  * MOUVEMENT RÉDUIT — la composition reste, le mouvement part.
  *
- * Les décalages et la secousse de groupe disparaissent, et la mise en avant
- * devient instantanée. La pile devient une liste de cartes nettes.
+ * ⚠️ AUCUNE ORBITE. L'animation est retirée, donc `--avis-orb` garde sa
+ * valeur initiale : les cartes restent exactement là où leur angle de départ
+ * les place. La composition est identique, simplement immobile.
  *
  * ⚠️ L'ÉCRÊTAGE DU TEXTE, LUI, RESTE : ce n'est pas du mouvement, c'est une
  * mise en page. Le texte complet demeure dans le DOM et s'affiche toujours au
  * survol comme au focus — sans transition.
  */
 @media (prefers-reduced-motion: reduce) {
-  .avis-pile,
-  .avis-carte,
-  .avis-carte-hote {
+  .avis-scene {
+    animation: none;
+  }
+
+  .avis-amas,
+  .avis-carte {
     transition: none;
     transform: none;
   }
@@ -1999,21 +1898,5 @@ body {
     transform: none;
     border-color: var(--avis-g-focus);
     box-shadow: none;
-  }
-
-  .avis-carte-hote {
-    height: auto;
-  }
-
-  .avis-carte {
-    position: static;
-    min-height: 0;
-  }
-
-  .avis-pile {
-    row-gap: 0.75rem;
-    column-gap: 1.5rem;
-    padding-left: 0;
-    padding-top: clamp(1.5rem, 4vw, 3rem);
   }
 }

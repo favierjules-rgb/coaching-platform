@@ -88,7 +88,19 @@ const CSS = lire("../../app/globals.css");
  * plus reconnaître — et les phrases qui DOCUMENTENT une règle feraient rougir
  * le test qui la vérifie.
  */
-const CSS_PILE = CSS.slice(CSS.lastIndexOf("/*", CSS.indexOf("PILE D'AVIS")));
+const MARQUEUR_BLOC = "AMAS D'AVIS EN ORBITE";
+const CSS_PILE = (() => {
+  const ou = CSS.indexOf(MARQUEUR_BLOC);
+  /*
+   * ⚠️ LE REPÈRE A DÉJÀ CHANGÉ UNE FOIS, ET DIX TESTS SONT TOMBÉS D'UN COUP.
+   * Le bloc s'appelait « PILE D'AVIS » ; renommé, `indexOf` a rendu −1, la
+   * découpe portait sur tout le fichier et les assertions cherchaient leurs
+   * règles au mauvais endroit. On échoue donc bruyamment plutôt que de
+   * mesurer n'importe quoi.
+   */
+  if (ou < 0) throw new Error(`bloc CSS introuvable : « ${MARQUEUR_BLOC} »`);
+  return CSS.slice(CSS.lastIndexOf("/*", ou));
+})();
 /** Les règles seules : ni commentaires, ni points de rupture `@media`. */
 function reglesCss(bloc: string): string {
   return bloc.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*@media[^{]*\{/gm, "");
@@ -464,14 +476,30 @@ await test("18. la section reprend les codes visuels de ses voisines", () => {
 });
 
 await test("19. aucun débordement horizontal n'est possible par construction", () => {
-  const mobile = CSS_PILE.slice(CSS_PILE.indexOf("@media (max-width: 767px)"));
-  assert.ok(mobile.includes("grid-auto-flow: row"), "empilement vertical sous 768 px");
-  assert.ok(mobile.includes("width: 100%"), "les cartes ne dépassent pas leur colonne");
-  assert.ok(mobile.includes("max-width: 100%"), "et sont bornées");
-  assert.ok(!/width:\s*\d{3,}px/.test(reglesCss(CSS_PILE)), "aucune largeur fixe en pixels");
-});
+  /*
+   * ⚠️ CE TEST DÉCRIVAIT UNE PILE VERTICALE, PUIS DEUX COLONNES. La
+   * composition est maintenant une ORBITE : il n'y a plus de flux à
+   * contraindre, mais une SCÈNE CARRÉE dans laquelle chaque carte est placée
+   * par un angle et un rayon.
+   *
+   * Le débordement se prévient donc autrement : la scène est bornée à la
+   * largeur disponible, et l'inégalité `rayon + demi-carte ≤ demi-scène` — que
+   * R16 mesure à l'écran — garde toutes les cartes à l'intérieur.
+   */
+  const regles = reglesCss(CSS_PILE);
+  assert.ok(
+    /width:\s*min\(100%,/.test(regles),
+    "la scène est bornée à la largeur disponible",
+  );
+  assert.ok(/aspect-ratio:\s*1/.test(regles), "et elle est carrée");
+  assert.ok(!/width:\s*\d{3,}px/.test(regles), "aucune largeur fixe en pixels");
 
-/* ═══════════════ 20-21. LE PÉRIMÈTRE DE LA PHASE A ═══════════════ */
+  // La section, elle, coupe l'axe horizontal sans guillotiner le vertical.
+  assert.ok(
+    sansCommentaires(SECTION).includes("overflow-x-clip"),
+    "la section coupe son débordement horizontal",
+  );
+});
 
 await test("20. PHASE A : aucun cron, aucune route API, aucune migration, aucun vercel.json touché", () => {
   const racine = new URL("../../", import.meta.url);
@@ -831,124 +859,132 @@ await test("29. AUCUNE carte n'est tournée — ni au repos, ni au survol, ni au
   }
   assert.ok(reglesDeCarte >= 5, `les règles de carte doivent être trouvées — ${reglesDeCarte}`);
 
-  // La seule rotation tolérée porte sur le GROUPE, et elle est bornée.
-  const groupe = declarations.find(([, sel]) => /^\s*\.avis-pile\s*$/.test(sel));
-  assert.ok(groupe, "la règle du conteneur doit exister");
+  /*
+   * ⚠️ IL N'Y A PLUS AUCUNE ROTATION DE GROUPE NON PLUS — et c'est ce qui
+   * rend la garde absolue.
+   *
+   * Une version précédente faisait pivoter le conteneur de ±0,4° pendant la
+   * secousse. L'orbite ne fonctionne plus ainsi : rien ne tourne, les
+   * éléments PARCOURENT un cercle par translation. C'est précisément ce qui
+   * garantit, sans contre-rotation, que les cartes restent horizontales.
+   *
+   * Le seul `rotate()` du bloc porte sur les TRAITS qui relient les avis à la
+   * photo : un trait qui joint deux points doit s'orienter, c'est sa raison
+   * d'être, et ce n'est pas une carte.
+   */
+  const rotations = declarations.filter(([, , corps]) => /\brotate\s*\(/.test(corps));
+  for (const [, selecteur] of rotations) {
+    assert.ok(
+      /\.avis-lien/.test(selecteur),
+      `« ${selecteur.trim()} » applique une rotation alors que seuls les traits y ont droit`,
+    );
+  }
+  assert.equal(rotations.length, 1, `un seul élément tourne : le trait — ${rotations.length} trouvés`);
+
+  // Et la secousse du groupe ne porte plus de composante angulaire.
   assert.ok(
-    /rotate\(var\(--avis-groupe-rotation/.test(groupe[2]),
-    "la rotation de groupe est pilotée par une variable dédiée",
+    !/ROTATION_GROUPE_MAX/.test(pile),
+    "le plafond de rotation de groupe n'a plus lieu d'être",
   );
   assert.ok(
-    /transform-origin:\s*50% 50%/.test(groupe[2]),
-    "et elle pivote autour d'un point CENTRAL commun",
+    !/--avis-groupe-rotation/.test(regles),
+    "aucune rotation posée sur le conteneur",
   );
 
-  // Le plafond est dans le composant, pas dans une valeur perdue en CSS.
-  const plafond = /ROTATION_GROUPE_MAX\s*=\s*([\d.]+)/.exec(pile);
-  assert.ok(plafond, "le plafond de rotation du groupe doit être nommé");
+  // ⚠️ LE MOUVEMENT VIENT DE `cos()` ET `sin()`, PAS D'UNE ROTATION.
   assert.ok(
-    Number(plafond[1]) <= 0.5,
-    `la rotation globale doit rester sous 0,5° — trouvé ${plafond[1]}°`,
+    /cos\(var\(--avis-a\)\)/.test(regles) && /sin\(var\(--avis-a\)\)/.test(regles),
+    "les cartes sont placées en coordonnées polaires, par translation",
   );
 });
 
-await test("30. chaque carte a sa propre position, et deux tables décalées la produisent", () => {
+await test("30. chaque avis a son propre angle ET son propre rayon", () => {
+  /*
+   * ⚠️ LES DEUX TABLES DE DÉCALAGE ONT ÉTÉ REMPLACÉES par des coordonnées
+   * polaires — un angle et un rayon par avis. L'exigence, elle, n'a pas
+   * changé : aucune carte ne doit occuper la position d'une autre, et
+   * l'ensemble ne doit ressembler ni à une grille ni à un cadran.
+   */
   const pile = sansCommentaires(PILE);
-  assert.ok(/function decalageX/.test(pile), "un décalage horizontal par carte");
-  assert.ok(/function decalageY/.test(pile), "un décalage vertical par carte");
-  assert.ok(/--avis-dx/.test(pile) && /--avis-dy/.test(pile), "les deux sont posés en ligne");
+  assert.ok(/function angle/.test(pile), "un angle par avis");
+  assert.ok(/function rayon/.test(pile), "un rayon par avis");
+  assert.ok(/--avis-angle/.test(pile) && /--avis-rayon/.test(pile), "les deux sont posés en ligne");
+  assert.ok(!/decalageX|decalageY/.test(pile), "les anciennes tables cartésiennes ont disparu");
 
   const lire = (nom: string): number[] => {
     const bloc = new RegExp(`function ${nom}[\\s\\S]*?\\[([^\\]]+)\\]`).exec(pile);
     assert.ok(bloc, `la table de ${nom} doit être lisible`);
     return bloc[1].split(",").map((v) => Number(v.trim()));
   };
-  const x = lire("decalageX");
-  const y = lire("decalageY");
+  const angles = lire("angle");
+  const rayons = lire("rayon");
 
-  /*
-   * ⚠️ LES LONGUEURS DOIVENT ÊTRE PREMIÈRES ENTRE ELLES. C'est ce qui garantit
-   * qu'aucune des neuf cartes ne partage la position d'une autre : le couple
-   * (dx, dy) ne se répète qu'au bout de ppcm(7, 5) = 35 cartes. Avec deux
-   * tables de même longueur, les cartes 1 et 8 seraient superposables.
-   */
-  const pgcd = (a: number, b: number): number => (b === 0 ? a : pgcd(b, a % b));
-  assert.equal(
-    pgcd(x.length, y.length),
-    1,
-    `les longueurs ${x.length} et ${y.length} doivent être premières entre elles`,
+  assert.equal(angles.length, 9, `neuf angles attendus — ${angles.length}`);
+  assert.equal(rayons.length, 9, `neuf rayons attendus — ${rayons.length}`);
+
+  // ── NEUF POSITIONS DISTINCTES.
+  const positions = angles.map((a, i) => `${a}|${rayons[i]}`);
+  assert.equal(new Set(positions).size, 9, "deux avis occupent la même position");
+
+  // ── PAS UN CADRAN : les écarts angulaires ne sont pas tous égaux.
+  const ecarts = angles.slice(1).map((a, i) => Number((a - angles[i]).toFixed(4)));
+  assert.ok(
+    new Set(ecarts).size > 2,
+    `les avis ne doivent pas être régulièrement espacés — écarts : ${ecarts.join(", ")}`,
   );
 
-  // Neuf cartes, neuf positions distinctes.
-  const positions = Array.from({ length: 9 }, (_, i) => `${x[i % x.length]}|${y[i % y.length]}`);
-  assert.equal(new Set(positions).size, 9, `neuf positions distinctes — ${new Set(positions).size}`);
+  // ── PAS UN ANNEAU : les rayons respirent.
+  assert.ok(
+    Math.max(...rayons) - Math.min(...rayons) >= 0.15,
+    `les rayons doivent varier — de ${Math.min(...rayons)} à ${Math.max(...rayons)}`,
+  );
 
-  // Et les écarts sont IRRÉGULIERS : une progression constante redessinerait
-  // une grille, en diagonale au lieu d'être droite, mais une grille.
-  const ecarts = x.slice(1).map((v, i) => v - x[i]);
-  assert.ok(new Set(ecarts).size > 2, "les écarts horizontaux ne forment pas une progression");
+  // ── ET LES ANGLES COUVRENT BIEN TOUT LE TOUR, sans se tasser d'un côté.
+  assert.ok(Math.min(...angles) < 0.15, "des avis en haut du cercle");
+  assert.ok(Math.max(...angles) > 0.85, "et d'autres qui bouclent le tour");
 });
 
-await test("31. le recouvrement entre voisines reste SOUS le rembourrage", () => {
+await test("31. le rayon PLANCHER dégage la photo, le rayon PLAFOND tient dans la scène", () => {
   /*
-   * ⚠️ CE TEST EXIGEAIT « gouttière ≥ étalement », c'est-à-dire AUCUN
-   * recouvrement. Les cartes doivent maintenant se chevaucher — demande
-   * explicite, pour resserrer l'amas. L'inégalité change donc de forme, mais
-   * pas de raison d'être.
+   * ⚠️ CE TEST COMPARAIT DES GOUTTIÈRES DE GRILLE. Il n'y a plus de grille.
+   * Les deux inégalités qui la remplacent portent sur le rayon, et chacune
+   * vient d'un défaut réellement rencontré :
    *
-   * Ce qui compte n'a jamais été l'absence de contact : c'est qu'aucune carte
-   * ne cache le texte ou l'en-tête d'une autre. Une carte porte un rembourrage
-   * intérieur ; tant que le recouvrement reste inférieur à ce rembourrage, les
-   * cartes mordent l'une sur l'autre DANS LEUR MARGE, et rien de lisible ne
-   * disparaît.
+   *   • un plancher trop bas et la carte la plus proche passe SOUS la photo,
+   *     qui la recouvre : elle devient intouchable ;
+   *   • un plafond trop haut et la carte la plus au large sort de l'écran.
    *
-   *     recouvrement = étalement de la table − gouttière ≤ rembourrage
-   *
-   * R5 bis et R5 quater mesurent la conséquence à l'écran ; ce test-ci nomme
-   * la cause, et rougit avant même qu'un pixel soit peint.
+   * Ici on vérifie les VALEURS déclarées ; R16 mesure le résultat à l'écran,
+   * aux deux largeurs.
    */
   const pile = sansCommentaires(PILE);
-  const lire = (nom: string): number[] => {
-    const bloc = new RegExp(`function ${nom}[\\s\\S]*?\\[([^\\]]+)\\]`).exec(pile);
-    assert.ok(bloc, `la table de ${nom} doit être lisible`);
-    return bloc[1].split(",").map((v) => Number(v.trim()));
-  };
-  const etalement = (t: number[]): number => Math.max(...t) - Math.min(...t);
+  const bloc = /function rayon[\s\S]*?\[([^\]]+)\]/.exec(pile);
+  assert.ok(bloc, "la table des rayons doit être lisible");
+  const rayons = bloc[1].split(",").map((v) => Number(v.trim()));
 
+  const regles = reglesCss(CSS_PILE);
+  const nombre = (nom: string, ou: string): number => {
+    const m = new RegExp(`${nom}:\\s*([\\d.]+)rem`).exec(ou);
+    assert.ok(m, `${nom} doit être déclaré`);
+    return Number(m[1]) * 16;
+  };
+
+  // Les deux jeux de mesures : mobile (bloc de base) puis desktop.
   const desktop = CSS_PILE.slice(CSS_PILE.indexOf("@media (min-width: 768px)"));
-  const colonne = /column-gap:\s*([\d.]+)rem/.exec(desktop);
-  const rangee = /row-gap:\s*([\d.]+)rem/.exec(desktop);
-  assert.ok(colonne && rangee, "les deux gouttières doivent être déclarées sur desktop");
+  for (const [nom, source] of [
+    ["mobile", CSS_PILE.slice(0, CSS_PILE.indexOf("@media (min-width: 768px)"))],
+    ["desktop", desktop],
+  ] as const) {
+    const base = nombre("--avis-rayon-base", source);
+    const photo = nombre("--avis-photo", source) / 2;
+    const demiCarte = nombre("--avis-carte-large", source) / 2;
 
-  // Le rembourrage effectif d'une carte, borne haute du clamp.
-  const rembourrage = /padding:\s*clamp\([\d.]+rem,\s*[\d.]+vw,\s*([\d.]+)rem\)/.exec(CSS_PILE);
-  assert.ok(rembourrage, "le rembourrage de la carte doit être lisible");
-  const marge = Number(rembourrage[1]) * 16;
-
-  const recouvrementX = etalement(lire("decalageX")) - Number(colonne[1]) * 16;
-  const recouvrementY = etalement(lire("decalageY")) - Number(rangee[1]) * 16;
-
-  assert.ok(
-    recouvrementX <= marge,
-    `recouvrement horizontal ${Math.round(recouvrementX)} px > rembourrage ${Math.round(marge)} px — du texte passerait sous la carte voisine`,
-  );
-  assert.ok(
-    recouvrementY <= marge,
-    `recouvrement vertical ${Math.round(recouvrementY)} px > rembourrage ${Math.round(marge)} px — un en-tête passerait sous la carte du dessus`,
-  );
-
-  // ⚠️ ET IL EXISTE VRAIMENT : sans contact, l'amas redevient une grille aérée.
-  assert.ok(
-    recouvrementX > 0 || recouvrementY > 0,
-    "les cartes doivent se toucher — sinon ce n'est plus un amas",
-  );
-
-  // ⚠️ Les anciennes compensations de rotation n'ont plus lieu d'être : leur
-  // présence signalerait qu'une inclinaison est revenue.
-  assert.ok(
-    !/--avis-marge-rotation/.test(CSS_PILE),
-    "les marges de compensation de rotation doivent avoir disparu",
-  );
+    assert.ok(
+      Math.min(...rayons) * base - demiCarte >= photo,
+      `${nom} : la carte la plus proche passe sous la photo (${Math.round(Math.min(...rayons) * base - demiCarte)} px pour un rayon de photo de ${Math.round(photo)} px)`,
+    );
+  }
+  assert.ok(regles.length > 0, "le bloc CSS doit être lisible");
 });
 
 await test("32. les cartes portent les codes couleur de Google", () => {
