@@ -635,6 +635,8 @@ export function supprimerEntree(
 
 /** Un aliment de la proposition, tel qu'il est AFFICHÉ. */
 export interface ItemStructureAEnregistrer {
+  /** N1.7 — occurrence écartée : elle ne devient JAMAIS une consommation. */
+  readonly ignore?: boolean;
   readonly slotId: string;
   readonly catalogFoodId: string | null;
   readonly productId: string | null;
@@ -681,13 +683,21 @@ export async function enregistrerRepasStructure(
   }>(supabase, "enregistrer_repas_structure_consomme", {
     p_meal_id: mealId,
     p_consumed_on: date,
-    p_items: items.map((item) => ({
-      slot_id: item.slotId,
-      catalog_food_id: item.catalogFoodId,
-      product_id: item.productId,
-      quantity: item.quantity,
-      unit: item.unit,
-    })),
+    // ⚠️ N1.7 — LES OCCURRENCES ÉCARTÉES NE PARTENT PAS EN CONSOMMATION, ET
+    // C'EST LA SEULE RÉPONSE JUSTE. Une absence ne se mange pas : elle ne
+    // produit aucune entrée alimentaire, aucune macro, aucun gramme. Le repas
+    // PLANIFIÉ garde sa trace (`planned_meal_skipped_slots`) parce qu'elle
+    // décrit une composition ; le repas CONSOMMÉ n'a rien à en dire, et cette
+    // RPC-ci n'a d'ailleurs aucune branche pour la recevoir.
+    p_items: items
+      .filter((item) => item.ignore !== true)
+      .map((item) => ({
+        slot_id: item.slotId,
+        catalog_food_id: item.catalogFoodId,
+        product_id: item.productId,
+        quantity: item.quantity,
+        unit: item.unit,
+      })),
   });
   return {
     plannedMealId: brut.planned_meal_id,
@@ -754,6 +764,18 @@ export interface ItemChoixAValider {
   /** ⚠️ LA QUANTITÉ ENTIÈRE AFFICHÉE, jamais le flottant du solveur. */
   readonly quantity: number;
   readonly unit: "g" | "ml";
+  /**
+   * N1.7 — CETTE OCCURRENCE A ÉTÉ ÉCARTÉE : « Rien ».
+   *
+   * ⚠️ ELLE RESTE DANS LA LISTE ENVOYÉE, ET C'EST OBLIGATOIRE. La RPC exige
+   * TOUTES les occurrences du repas, exactement une fois chacune ; l'omettre
+   * ferait lever `OCCURRENCE_MANQUANTE`, et « je ne prends rien » deviendrait
+   * indiscernable de « j'ai oublié de répondre ».
+   *
+   * Les autres champs sont alors ignorés — une absence n'a ni identité ni
+   * quantité.
+   */
+  readonly ignore?: boolean;
 }
 
 /** Un aliment retrouvé dans une composition DÉJÀ validée. */
@@ -804,13 +826,22 @@ export async function validerChoixRepas(
   return appeler<string>(supabase, "enregistrer_repas_planifie", {
     p_meal_id: mealId,
     p_planned_on: date,
-    p_items: items.map((item) => ({
-      slot_id: item.slotId,
-      catalog_food_id: item.catalogFoodId,
-      product_id: item.productId,
-      quantity: item.quantity,
-      unit: item.unit,
-    })),
+    p_items: items.map((item) =>
+      // ⚠️ N1.7 — UNE OCCURRENCE ÉCARTÉE N'ÉMET NI IDENTITÉ NI QUANTITÉ.
+      // Les envoyer à zéro ferait lever `IDENTITE_INVALIDE` puis
+      // `QUANTITE_INVALIDE` : la base refuse, à juste titre, un aliment qui
+      // n'en est pas un. Seul `ignore` voyage, et la RPC branche dessus AVANT
+      // ces contrôles.
+      item.ignore
+        ? { slot_id: item.slotId, ignore: true }
+        : {
+            slot_id: item.slotId,
+            catalog_food_id: item.catalogFoodId,
+            product_id: item.productId,
+            quantity: item.quantity,
+            unit: item.unit,
+          },
+    ),
   });
 }
 

@@ -919,6 +919,11 @@ export function toWeekSavePayload(state: WeekFormState): {
             // couleur est figée, et sans elle un simple ré-enregistrement
             // l'effacerait.
             color_key: occurrence.colorKey ?? null,
+            // ⚠️ N1.7 — DU SNAPSHOT, DONC ÉLLE REPART. Même ligne de partage
+            // que la couleur et la portion : sans elle, un simple
+            // ré-enregistrement de la semaine rendrait obligatoires toutes les
+            // occurrences que le coach avait rendues facultatives.
+            peut_etre_ignoree: occurrence.peutEtreIgnoree,
             options: occurrence.options.map((option) => ({
               catalog_food_id: option.type === "aliment" ? option.id : null,
               product_id: option.type === "produit" ? option.id : null,

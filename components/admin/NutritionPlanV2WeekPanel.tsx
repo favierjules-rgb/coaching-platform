@@ -161,6 +161,9 @@ export function NutritionPlanV2WeekPanel({
                 label: snapshot.label,
                 sourceListId: snapshot.sourceListId,
                 colorKey: snapshot.colorKey,
+                // N1.7 — figé À L'AJOUT, comme la couleur : le repas garde ce
+                // réglage même si la bibliothèque change d'avis ensuite.
+                peutEtreIgnoree: snapshot.peutEtreIgnoree,
                 options: snapshot.options,
               })),
             onRemplacer: (mealId, slotId, snapshot) =>
@@ -168,6 +171,9 @@ export function NutritionPlanV2WeekPanel({
                 label: snapshot.label,
                 sourceListId: snapshot.sourceListId,
                 colorKey: snapshot.colorKey,
+                // N1.7 — figé À L'AJOUT, comme la couleur : le repas garde ce
+                // réglage même si la bibliothèque change d'avis ensuite.
+                peutEtreIgnoree: snapshot.peutEtreIgnoree,
                 options: snapshot.options,
               })),
             onRetirer: (mealId, slotId) =>
