@@ -71,6 +71,7 @@ const OCCURRENCES: readonly MealChoiceSlot[] = [
     label: "Ta protéine",
     sourceListId: null,
     colorKey: null,
+    peutEtreIgnoree: false,
     options: [
       { type: "aliment", id: "food-poulet", optionId: "opt-poulet", displayName: "Poulet",
         nutrition: NUTRITION, quantityUnit: "g", preferredQuantity: null, minimumQuantity: null },
@@ -84,6 +85,7 @@ const OCCURRENCES: readonly MealChoiceSlot[] = [
     label: "Ton féculent",
     sourceListId: null,
     colorKey: null,
+    peutEtreIgnoree: false,
     options: [
       { type: "aliment", id: "food-riz", optionId: "opt-riz", displayName: "Riz",
         nutrition: { unit: "g", proteinPer100: 2.7, carbPer100: 28, fatPer100: 0.3 },
@@ -330,7 +332,14 @@ await test("C0-15/25. choisir ne déclenche AUCUNE écriture", () => {
   // hésitation, et la liste de courses suivrait des choix jamais confirmés.
   assert.ok(!CODE_CHOIX.includes("@/lib/supabase"), "l'écran des choix importe Supabase");
   const bloc = CODE_CHOIX.slice(CODE_CHOIX.indexOf("const choisir = useCallback("));
-  const corps = bloc.slice(0, bloc.indexOf("[selectionValidee],"));
+  // ⚠️ LA BORNE EST VÉRIFIÉE AVANT D'ÊTRE UTILISÉE. Une première version
+  // découpait jusqu'à `"[selectionValidee],"` en dur ; le jour où N1.7 a ajouté
+  // `occurrences` au tableau de dépendances, `indexOf` a rendu −1, la tranche a
+  // couvert TOUT le fichier, et le test a rougi pour une raison qui n'était pas
+  // la sienne. On mesure ce qu'on croit mesurer.
+  const finDesDeps = bloc.indexOf("  );");
+  assert.ok(finDesDeps > 0, "la fin du useCallback doit être trouvable");
+  const corps = bloc.slice(0, finDesDeps);
   assert.ok(corps.includes("setBrouillon("));
   assert.ok(!corps.includes("onValider"), "choisir déclenche la validation");
   assert.ok(!corps.includes("await"), "choisir fait un appel");
