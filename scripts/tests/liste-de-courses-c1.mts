@@ -504,7 +504,7 @@ await test("C1-07 / C1-08. seuls les repas de la période entrent, et tous y ent
 
   // Une composition datée d'un AUTRE jour ne rend pas le repas prêt.
   const ailleurs = new Map<string, CompositionConnue>([
-    ["repas-pdj-lundi|2026-08-24", { items: [{ slotId: "slot-proteine", catalogFoodId: "food-poulet", productId: null, quantity: 100, unit: "g" }], consomme: false }],
+    ["repas-pdj-lundi|2026-08-24", { items: [{ slotId: "slot-proteine", catalogFoodId: "food-poulet", productId: null, quantity: 100, unit: "g" }], consomme: false, ignorees: [] }],
   ]);
   assert.equal(repasDeLaPeriode(SEMAINE, periode, ailleurs)[0].pret, false);
 });
@@ -524,6 +524,7 @@ await test("C1-09 / C1-10. un repas non validé est SIGNALÉ, et n'invente aucun
           { slotId: "slot-feculent", catalogFoodId: "food-riz", productId: null, quantity: 80, unit: "g" },
         ],
         consomme: false,
+        ignorees: [],
       },
     ],
   ]);
@@ -555,15 +556,27 @@ await test("C1-11. la liste ne se calcule QUE depuis les items planifiés", () =
   // Le hook n'agrège que ce que le lecteur du planifié lui a rendu.
   assert.ok(CODE_HOOK.includes("lireRepasPlanifiesSurPeriode"));
   assert.ok(CODE_HOOK.includes("agregerListeDeCourses"));
-  // Le lecteur ne lit que les deux tables du planifié.
+  // Le lecteur ne lit que les tables du planifié.
   assert.ok(CODE_READER.includes('from("planned_meals")'));
   assert.ok(CODE_READER.includes('from("planned_meal_items")'));
+  // ⚠️ N1.7 — ET LES OCCURRENCES ÉCARTÉES, DANS LEUR PROPRE TABLE. Un « Rien »
+  // n'a aucune ligne dans `planned_meal_items` — cette table refuse une
+  // quantité nulle et une identité absente. Sans cette troisième lecture, la
+  // liste de courses rouvrirait comme incomplet un repas parfaitement réglé.
+  assert.ok(CODE_READER.includes('from("planned_meal_skipped_slots")'));
   for (const interdite of ["consumed_meals", "meal_entries", "meal_choice_options", "nutrition_days"]) {
     assert.ok(!CODE_READER.includes(`from("${interdite}")`), `le lecteur ne lit pas ${interdite}`);
   }
   // Les seules autres requêtes sont l'hydratation des NOMS.
   const tables = [...CODE_READER.matchAll(/\.from\("([a-z_]+)"\)/g)].map((m) => m[1]).sort();
-  assert.deepEqual([...new Set(tables)], ["food_catalog", "food_products", "planned_meal_items", "planned_meals"]);
+  // ⚠️ L'ENSEMBLE RESTE EXACT — il attraperait toujours une table inattendue.
+  assert.deepEqual([...new Set(tables)], [
+    "food_catalog",
+    "food_products",
+    "planned_meal_items",
+    "planned_meal_skipped_slots",
+    "planned_meals",
+  ]);
   // ⚠️ AUCUNE ÉCRITURE DANS LE LECTEUR.
   for (const ecriture of [".insert(", ".update(", ".upsert(", ".delete(", ".rpc("]) {
     assert.ok(!CODE_READER.includes(ecriture), `le lecteur n'écrit pas (${ecriture})`);
@@ -943,7 +956,7 @@ await test("NC-04 / NC-05. ni somme d'options, ni portion préférée", () => {
   const compositions = new Map<string, CompositionConnue>([
     [
       "repas-pdj-lundi|2026-08-17",
-      { items: [{ slotId: "slot-proteine", catalogFoodId: "food-poulet", productId: null, quantity: 120, unit: "g" }], consomme: false },
+      { items: [{ slotId: "slot-proteine", catalogFoodId: "food-poulet", productId: null, quantity: 120, unit: "g" }], consomme: false, ignorees: [] },
     ],
   ]);
   const repas = repasDeLaPeriode(SEMAINE, construirePeriode(LUNDI, 1)!, compositions);

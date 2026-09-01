@@ -795,6 +795,22 @@ export interface CompositionValidee {
   /** `true` si ce repas a AUSSI été déclaré consommé (N1.6B). */
   readonly consomme: boolean;
   readonly items: readonly ItemValide[];
+  /**
+   * N1.7 — LES OCCURRENCES AUXQUELLES L'ÉLÈVE A RÉPONDU « RIEN ».
+   *
+   * ⚠️ ELLES NE PEUVENT PAS VENIR DE `items`, ET C'EST TOUT LE PROBLÈME QUE
+   * CE CHAMP RÉSOUT. Une occurrence écartée n'a AUCUNE ligne dans
+   * `planned_meal_items` — les contraintes de cette table l'interdisent
+   * (`quantity > 0`, exactement une identité). Sans une seconde lecture, une
+   * composition relue est amputée de ses « rien », l'occurrence revient
+   * « pas encore choisie », et le repas repasse « À RECOMPOSER » à chaque
+   * rafraîchissement.
+   *
+   * ⚠️ CE CHAMP EST LA MOITIÉ LECTURE D'UNE PAIRE. La moitié écriture existe
+   * depuis N1.7 (`enregistrer_repas_planifie`, branche `"ignore": true`).
+   * Écrire sans relire est exactement le défaut que ce champ répare.
+   */
+  readonly ignorees: readonly string[];
 }
 
 /**
@@ -899,6 +915,34 @@ export async function lireCompositionsValidees(
   devWarn("lireCompositionsValidees:planned_meal_items", erreurItems);
   if (erreurItems) return vide;
 
+  /*
+   * ⚠️ N1.7 — LA SECONDE LECTURE, ET ELLE N'EST PAS FACULTATIVE. Les « rien »
+   * vivent dans leur propre table : `planned_meal_items` ne peut pas les
+   * porter. Les omettre ici ne casse rien de visible côté base — la
+   * composition existe bel et bien — mais l'écran, lui, croit l'élève
+   * indécis.
+   *
+   * ⚠️ UNE LECTURE RATÉE N'EST PAS « AUCUN RIEN », même raison que pour les
+   * items juste au-dessus : le dire ferait réapparaître des occurrences que
+   * l'élève avait écartées, et un second clic les réécrirait en base.
+   */
+  const { data: ecartees, error: erreurEcartees } = await supabase
+    .from("planned_meal_skipped_slots")
+    .select("planned_meal_id, choice_slot_id")
+    .in("planned_meal_id", lignes.map((l) => l.id));
+  devWarn("lireCompositionsValidees:planned_meal_skipped_slots", erreurEcartees);
+  if (erreurEcartees) return vide;
+
+  const ignoreesParRepas = new Map<string, string[]>();
+  for (const brut of (ecartees ?? []) as unknown as {
+    planned_meal_id: string;
+    choice_slot_id: string;
+  }[]) {
+    const liste = ignoreesParRepas.get(brut.planned_meal_id) ?? [];
+    liste.push(brut.choice_slot_id);
+    ignoreesParRepas.set(brut.planned_meal_id, liste);
+  }
+
   const parRepas = new Map<string, ItemValide[]>();
   for (const brut of (items ?? []) as unknown as {
     planned_meal_id: string;
@@ -924,15 +968,22 @@ export async function lireCompositionsValidees(
   const carte = new Map<string, CompositionValidee>();
   for (const ligne of lignes) {
     const items = parRepas.get(ligne.id) ?? [];
+    const ignorees = ignoreesParRepas.get(ligne.id) ?? [];
     // Un `planned_meal` sans item ne décrit aucune composition : l'ignorer
     // évite d'afficher « choix validés » sur un repas vide.
-    if (items.length === 0) continue;
+    //
+    // ⚠️ N1.7 — « SANS ITEM » NE VEUT PLUS DIRE « SANS COMPOSITION ». Un repas
+    // dont l'élève a écarté TOUTES les listes n'a aucun item et reste une
+    // composition parfaitement validée. Le test sur `items` seul l'aurait fait
+    // disparaître de la carte, donc réapparaître « à valider ».
+    if (items.length === 0 && ignorees.length === 0) continue;
     carte.set(`${ligne.meal_id}|${ligne.planned_on}`, {
       plannedMealId: ligne.id,
       mealId: ligne.meal_id,
       date: ligne.planned_on,
       consomme: ligne.consumed_meal_id !== null,
       items,
+      ignorees,
     });
   }
   return carte;

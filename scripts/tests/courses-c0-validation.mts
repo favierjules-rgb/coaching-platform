@@ -170,12 +170,26 @@ await test("C0-09. l'état validé est relu depuis la persistance, pas gardé en
   assert.ok(CODE_HOOK.includes("lireCompositionsValidees(supabase, clé.split(\",\"))"));
   assert.ok(CODE_SEMAINE.includes("suivi.compositionsValidees?.get(`${repas.id}|${date}`)"));
 
-  // ⚠️ ET LA LECTURE EST GROUPÉE, PAS UN N+1. Deux `select` batchés par
-  // `.in(...)` : les repas planifiés de l'intervalle, puis leurs items.
+  // ⚠️ ET LA LECTURE EST GROUPÉE, PAS UN N+1. TROIS `select` batchés par
+  // `.in(...)`, et pas un de plus : les repas planifiés de l'intervalle, leurs
+  // items, puis — depuis N1.7 — leurs occurrences ÉCARTÉES.
+  //
+  // ⚠️ LA TROISIÈME N'EST PAS UN CONFORT. Une occurrence à laquelle l'élève a
+  // répondu « Rien » n'a AUCUNE ligne dans `planned_meal_items` : les
+  // contraintes de cette table l'interdisent. Sans cette requête, le « Rien »
+  // est écrit puis perdu au rechargement, et le repas repasse « À RECOMPOSER ».
+  //
+  // Le compte reste EXACT — il attraperait toujours une quatrième requête, et
+  // donc un N+1 introduit par mégarde.
   const bloc = CODE_CONSO.slice(CODE_CONSO.indexOf("export async function lireCompositionsValidees"));
   const corps = bloc.slice(0, bloc.indexOf("\nexport "));
-  assert.equal(corps.split(".from(").length - 1, 2, "exactement deux requêtes");
-  assert.equal(corps.split(".in(").length - 1, 2, "les deux doivent être batchées");
+  assert.equal(corps.split(".from(").length - 1, 3, "exactement trois requêtes");
+  assert.ok(
+    corps.includes('.from("planned_meal_skipped_slots")'),
+    "et la troisième est bien celle des occurrences écartées",
+  );
+  // ⚠️ ET LES TROIS SONT BATCHÉES PAR `.in(...)`, jamais une requête par repas.
+  assert.equal(corps.split(".in(").length - 1, 3, "les trois doivent être batchées");
   assert.ok(!corps.includes("for (const date"), "aucune boucle de requêtes");
 });
 

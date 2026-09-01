@@ -789,10 +789,21 @@ await test("C4.6-40/41 — aucune écriture, aucune migration, aucun nouvel appe
   // migration connue est donc nommée, ET une seconde assertion interdit
   // SÉPARÉMENT toute migration portant le sujet de C4.6 : c'est celle-là qui
   // porte l'intention, et elle ne dépend d'aucun lot futur.
-  assert.equal(
-    migrations[migrations.length - 1],
-    "20260919090000_c4_3c_magasins_osm.sql",
-    "la dernière migration connue est celle de C4.3c",
+  // ⚠️ CORRIGÉ (N1.7) — ON NE MESURE PLUS UNE POSITION, ON MESURE UNE PRÉSENCE.
+  // Cette assertion disait `migrations[dernier] === C4.3c`. Elle a rougi le jour
+  // où un lot ÉTRANGER — N1.7, les listes ignorables — a déposé sa migration :
+  // C4.3c n'était plus la dernière, alors que C4.6 n'avait toujours rien
+  // ajouté. Le test accusait le mauvais coupable.
+  //
+  // Ce qu'il faut prouver n'a jamais été « C4.3c est la dernière du dépôt » —
+  // elle ne le restera pas — mais « la migration de C4.3c est toujours là,
+  // sous son nom ». L'assertion suivante, elle, porte l'intention réelle : elle
+  // balaie TOUTES les migrations, passées comme futures, et rougirait donc
+  // aussi bien sur un lot à venir. Elle est plus forte que le repère de
+  // position qu'elle remplace, et elle ne vieillit pas.
+  assert.ok(
+    migrations.includes("20260919090000_c4_3c_magasins_osm.sql"),
+    "la migration de C4.3c doit toujours exister sous ce nom",
   );
   assert.deepEqual(
     migrations.filter((f) => /_c4_6|budget_observ|observed_budget|minimum_observ/i.test(f)),

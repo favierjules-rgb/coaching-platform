@@ -305,6 +305,174 @@ await test("13. un aliment réellement enregistré l'emporte sur un « rien » r
   assert.equal(estIgnoree(relue, "s3"), false);
 });
 
+/* ═══════ 11bis-11quater. LE CYCLE COMPLET, DE LA BASE À L'ÉCRAN ═══════ */
+
+/**
+ * ⚠️ CES TROIS TESTS EXISTENT PARCE QUE LE TEST 11 NE SUFFISAIT PAS, ET C'EST
+ * LA LEÇON DU LOT.
+ *
+ * Le test 11 passe `["s3"]` À LA MAIN à `selectionDepuisComposition`. Il prouve
+ * que la FONCTION sait relire un « rien ». Il ne prouve RIEN sur le fait que
+ * quelqu'un, quelque part, aille chercher ce tableau en base — et pendant tout
+ * un chantier, personne ne le faisait : `planned_meal_skipped_slots` était
+ * écrite et jamais lue. La fonctionnalité était juste, le CÂBLAGE manquait, et
+ * aucun test ne regardait le câblage.
+ *
+ * On teste donc ici les DEUX BOUTS de la paire :
+ *   · que les lecteurs de base DEMANDENT la table (11bis) ;
+ *   · qu'ils TRANSPORTENT le résultat jusqu'au modèle (11ter) ;
+ *   · que la chaîne complète rende un repas COMPLET (11quater).
+ */
+
+/** Les lecteurs qui doivent interroger `planned_meal_skipped_slots`. */
+const LECTEURS_DE_COMPOSITION = [
+  "../../lib/supabase/consumed-meals.ts",
+  "../../lib/supabase/repas-planifies.ts",
+] as const;
+
+await test("11bis. les DEUX lecteurs de composition interrogent réellement la table", () => {
+  /*
+   * ⚠️ IL Y EN A DEUX, ET LES OUBLIER À MOITIÉ EST PIRE QUE DE TOUT OUBLIER :
+   * `lireCompositionsValidees` sert l'écran des repas, `lireRepasPlanifies…`
+   * sert la liste de courses. Un seul des deux branché, et la moitié de
+   * l'application croit l'élève indécis pendant que l'autre le sait décidé.
+   */
+  for (const chemin of LECTEURS_DE_COMPOSITION) {
+    const source = readFileSync(new URL(chemin, import.meta.url), "utf8");
+    const propre = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    assert.ok(
+      /\.from\("planned_meal_skipped_slots"\)/.test(propre),
+      `${chemin} n'interroge PAS planned_meal_skipped_slots : le « Rien » est écrit puis perdu`,
+    );
+    assert.ok(
+      /choice_slot_id/.test(propre),
+      `${chemin} doit sélectionner choice_slot_id`,
+    );
+  }
+});
+
+await test("11ter. le résultat de la lecture est TRANSPORTÉ jusqu'au modèle", () => {
+  /*
+   * ⚠️ LIRE NE SUFFIT PAS. Une requête dont le résultat n'atteint jamais
+   * `selectionDepuisComposition` coûte un aller-retour réseau et ne change
+   * rien à l'écran. On épingle donc le transport : le type porte les
+   * occurrences écartées, et les appels les passent.
+   */
+  const consumed = readFileSync(new URL("../../lib/supabase/consumed-meals.ts", import.meta.url), "utf8");
+  assert.ok(/readonly ignorees: readonly string\[\]/.test(consumed), "CompositionValidee doit transporter les « rien »");
+
+  const periode = readFileSync(new URL("../../lib/nutrition/repas-de-la-periode.ts", import.meta.url), "utf8");
+  assert.ok(
+    /selectionDepuisComposition\(repas\.choiceSlots, connue!\.items, connue!\.ignorees\)/.test(periode),
+    "repas-de-la-periode doit passer les occurrences écartées",
+  );
+
+  const parJour = readFileSync(new URL("../../lib/nutrition/repas-par-jour.ts", import.meta.url), "utf8");
+  assert.ok(
+    /selectionDepuisComposition\(\s*repas\.occurrences,\s*repas\.composition,\s*repas\.compositionIgnorees\s*\)/.test(parJour),
+    "repas-par-jour doit passer les occurrences écartées",
+  );
+
+  const ecran = readFileSync(new URL("../../components/student/StudentMealChoices.tsx", import.meta.url), "utf8");
+  assert.ok(
+    /selectionDepuisComposition\(occurrences, composition, compositionIgnorees\)/.test(ecran),
+    "l'écran des choix doit passer les occurrences écartées",
+  );
+
+  // ⚠️ ET LES DEUX FOURNISSEURS AUSSI : un type qui accepte le champ ne
+  // garantit pas qu'on le remplisse.
+  for (const [chemin, motif] of [
+    ["../../components/student/StudentPrescribedWeek.tsx", /compositionValideeIgnorees:/],
+    ["../../components/student/ListeDeCoursesParcours.tsx", /compositionValideeIgnorees: carte\.repas\.compositionIgnorees/],
+  ] as const) {
+    const src = readFileSync(new URL(chemin, import.meta.url), "utf8");
+    assert.ok(motif.test(src), `${chemin} doit fournir les occurrences écartées`);
+  }
+});
+
+await test("11quater. LE CYCLE COMPLET : enregistrer « Rien » → relire → repas COMPLET", async () => {
+  /*
+   * ⚠️ LE TEST QUE CE LOT AURAIT DÛ AVOIR DÈS LE DÉPART. On rejoue la chaîne
+   * ENTIÈRE avec un faux client Supabase : les deux tables répondent comme la
+   * vraie base après un enregistrement où l'élève a écarté la crème, et l'on
+   * vérifie que le repas rouvre COMPLET, avec ses quantités.
+   *
+   * ⚠️ LE FAUX CLIENT REND `planned_meal_items` SANS LA CRÈME — c'est la
+   * réalité : cette table ne peut PAS porter une absence. Si le code cesse de
+   * lire la seconde table, l'occurrence disparaît et ce test rougit.
+   */
+  const { lireCompositionsValidees } = await import("@/lib/supabase/consumed-meals");
+
+  const REPAS = "pm-1";
+  const reponses: Record<string, unknown[]> = {
+    planned_meals: [{ id: REPAS, meal_id: "m1", planned_on: "2026-09-21", consumed_meal_id: null }],
+    planned_meal_items: [
+      { planned_meal_id: REPAS, choice_slot_id: "s1", catalog_food_id: "f-poulet", product_id: null, quantity: 120, unit: "g" },
+      { planned_meal_id: REPAS, choice_slot_id: "s2", catalog_food_id: "f-riz", product_id: null, quantity: 200, unit: "g" },
+    ],
+    // La crème : AUCUN item, une ligne d'écart.
+    planned_meal_skipped_slots: [{ planned_meal_id: REPAS, choice_slot_id: "s3" }],
+  };
+  const interrogees: string[] = [];
+  const requete = (table: string) => {
+    interrogees.push(table);
+    const resultat = { data: reponses[table] ?? [], error: null };
+    const chainable: Record<string, unknown> = {};
+    for (const methode of ["select", "in", "order", "eq"]) {
+      chainable[methode] = () => chainable;
+    }
+    // `await` sur la chaîne rend le résultat : c'est ce que fait PostgREST.
+    chainable.then = (resoudre: (v: unknown) => unknown) => Promise.resolve(resultat).then(resoudre);
+    return chainable;
+  };
+  const faux = { from: requete } as unknown as Parameters<typeof lireCompositionsValidees>[0];
+
+  const carte = await lireCompositionsValidees(faux, ["2026-09-21"]);
+  assert.ok(
+    interrogees.includes("planned_meal_skipped_slots"),
+    "la lecture doit INTERROGER planned_meal_skipped_slots",
+  );
+
+  const composition = carte.get("m1|2026-09-21");
+  assert.ok(composition, "la composition validée doit être retrouvée");
+  assert.deepEqual([...composition!.ignorees], ["s3"], "et transporter l'occurrence écartée");
+
+  // ── Le bout de la chaîne : la sélection reconstruite, puis la progression ──
+  const occurrences = repas();
+  const selection = selectionDepuisComposition(occurrences, composition!.items, composition!.ignorees);
+  assert.equal(estIgnoree(selection, "s3"), true, "la crème est TOUJOURS écartée après rechargement");
+  assert.equal(
+    progressionDesChoix(occurrences, selection).complet,
+    true,
+    "le repas rouvre COMPLET — c'est exactement ce qui échouait en production",
+  );
+
+  // ── Et les quantités réapparaissent ──
+  const calcul = calculDuRepas(occurrences, selection, CIBLE);
+  assert.equal(calcul.etat, "calcule", "les quantités doivent être recalculées après rechargement");
+  if (calcul.etat !== "calcule") return;
+  assert.equal(calcul.solution.items.length, 2, "deux aliments, la crème reste écartée du solveur");
+  assert.ok(calcul.solution.items.every((i) => i.slotId !== "s3"));
+});
+
+await test("11quinquies. un repas ENTIÈREMENT écarté reste une composition validée", () => {
+  /*
+   * ⚠️ LE PIÈGE `items.length === 0`. Deux lecteurs écartaient une composition
+   * sans aucun item — « un repas sans item ne décrit aucune composition ».
+   * C'était vrai avant N1.7 ; ça ne l'est plus. Un élève qui écarte TOUTES ses
+   * listes a bel et bien validé quelque chose, et son repas repassait
+   * « à valider ».
+   */
+  for (const [chemin, motif] of [
+    ["../../lib/supabase/consumed-meals.ts", /items\.length === 0 && ignorees\.length === 0/],
+    ["../../lib/nutrition/repas-de-la-periode.ts", /connue\.items\.length > 0 \|\| connue\.ignorees\.length > 0/],
+    ["../../hooks/useListeDeCourses.ts", /repas\.items\.length === 0 && repas\.ignorees\.length === 0/],
+  ] as const) {
+    const src = readFileSync(new URL(chemin, import.meta.url), "utf8");
+    assert.ok(motif.test(src), `${chemin} écarte encore une composition entièrement « Rien »`);
+  }
+});
+
 /* ═══════════ 14-16. CE QUI NE DOIT PAS BOUGER ═══════════ */
 
 await test("14. une occurrence écartée n'achète RIEN", () => {

@@ -140,6 +140,15 @@ export function StudentMealChoices({
   readonly validation?: {
     /** La composition DÉJÀ en base, ou `null` si ce repas n'est pas validé. */
     readonly compositionValidee: readonly ChoixPersiste[] | null;
+    /**
+     * N1.7 — LES OCCURRENCES ÉCARTÉES DE LA COMPOSITION EN BASE.
+     *
+     * ⚠️ SANS ELLES, « RIEN » NE SURVIT PAS AU RECHARGEMENT. Elles ne sont
+     * pas dans `compositionValidee` : `planned_meal_items` ne peut pas porter
+     * une absence. L'occurrence reviendrait « pas encore choisie », le repas
+     * repasserait incomplet, et AUCUNE quantité ne serait plus affichée.
+     */
+    readonly compositionValideeIgnorees?: readonly string[];
     readonly enCours: boolean;
     readonly onValider: (items: readonly ItemPourEnregistrement[]) => void;
     /**
@@ -192,13 +201,17 @@ export function StudentMealChoices({
   const titreId = useId();
 
   const composition = validation?.compositionValidee ?? null;
+  const compositionIgnorees = validation?.compositionValideeIgnorees ?? EMPTY_IGNOREES;
   // ⚠️ LA SÉLECTION DE DÉPART. Elle vient de la composition VALIDÉE quand elle
   // existe — et, à défaut seulement, de la proposition du mode Rapide (C1.1),
   // qui n'est écrite nulle part. L'ordre n'est pas négociable : le validé
   // l'emporte toujours sur le proposé.
   const selectionValidee = useMemo(
-    () => (composition === null ? propositionInitiale : selectionDepuisComposition(occurrences, composition)),
-    [occurrences, composition, propositionInitiale],
+    () =>
+      composition === null
+        ? propositionInitiale
+        : selectionDepuisComposition(occurrences, composition, compositionIgnorees),
+    [occurrences, composition, compositionIgnorees, propositionInitiale],
   );
   const selection = brouillon ?? selectionValidee ?? AUCUNE_SELECTION;
 
@@ -651,6 +664,13 @@ export function QuantitesDuRepas({
  * `catalog_food_id` / `product_id` : cet écran ne connaît que ce que le
  * solveur lui a rendu, et inventer une identité ici serait la deviner.
  */
+/**
+ * ⚠️ RÉFÉRENCE STABLE, ET CE N'EST PAS DE LA COQUETTERIE. Un `[]` littéral dans
+ * la valeur par défaut serait un nouvel objet à chaque rendu : le `useMemo` de
+ * la sélection validée se recalculerait sans fin.
+ */
+const EMPTY_IGNOREES: readonly string[] = Object.freeze([]);
+
 export interface ItemPourEnregistrement {
   readonly slotId: string;
   readonly optionId: string;

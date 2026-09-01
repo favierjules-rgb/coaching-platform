@@ -102,7 +102,10 @@ function nomUtile(nom: string, libelleCreneau: string): string | null {
 export function selectionAffichee(repas: RepasDeLaPeriode): SelectionDeChoix | null {
   return repas.composition === null
     ? null
-    : selectionDepuisComposition(repas.occurrences, repas.composition);
+    // ⚠️ N1.7 — LES OCCURRENCES ÉCARTÉES ACCOMPAGNENT LES ALIMENTS. La carte
+    // du repas affiche « x / y choix » : sans elles, un repas dont l'élève a
+    // tout réglé afficherait 2/3 et se dirait à recomposer.
+    : selectionDepuisComposition(repas.occurrences, repas.composition, repas.compositionIgnorees);
 }
 
 /** La carte d'un repas, progression comprise. */

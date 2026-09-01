@@ -68,6 +68,15 @@ export interface RepasDeLaPeriode {
   readonly aRecomposer: boolean;
   /** La composition en base, ou `null`. Sert à ré-afficher les choix faits. */
   readonly composition: readonly ChoixPersiste[] | null;
+  /**
+   * N1.7 — les occurrences écartées de cette composition validée.
+   *
+   * ⚠️ SÉPARÉE DE `composition`, ET NON FONDUE DEDANS. `composition` est une
+   * liste d'ALIMENTS (`ChoixPersiste` porte une identité et une quantité) ;
+   * un « rien » n'en est pas un. Y glisser une entrée à identité nulle aurait
+   * obligé chaque lecteur à filtrer ce qu'il vient de recevoir.
+   */
+  readonly compositionIgnorees: readonly string[];
   /** `true` si ce repas a AUSSI été déclaré consommé — il est alors verrouillé. */
   readonly consomme: boolean;
 }
@@ -75,6 +84,12 @@ export interface RepasDeLaPeriode {
 export interface CompositionConnue {
   readonly items: readonly ChoixPersiste[];
   readonly consomme: boolean;
+  /**
+   * N1.7 — les occurrences écartées (« Rien »), lues dans
+   * `planned_meal_skipped_slots`. Absentes de `items` PAR CONSTRUCTION : une
+   * absence n'a ni identité ni quantité, et cette table-là les refuse.
+   */
+  readonly ignorees: readonly string[];
 }
 
 /**
@@ -120,12 +135,20 @@ export function repasDeLaPeriode(
       // qui existait à la validation. `selectionDepuisComposition` apparie par
       // `choice_slot_id` + IDENTITÉ : une option retirée par le coach ne se
       // retrouve tout simplement pas, et l'occurrence redevient sans choix.
-      const existe = connue !== null && connue.items.length > 0;
+      // ⚠️ N1.7 — UNE COMPOSITION PEUT N'AVOIR AUCUN ALIMENT. Si l'élève a
+      // écarté TOUTES les listes du repas, `items` est vide et la composition
+      // existe pourtant. Le test sur `items` seul la faisait disparaître, et le
+      // repas repassait « à valider » alors qu'il était validé.
+      const existe = connue !== null && (connue.items.length > 0 || connue.ignorees.length > 0);
       const encoreValide =
         existe &&
         progressionDesChoix(
           repas.choiceSlots,
-          selectionDepuisComposition(repas.choiceSlots, connue!.items),
+          // ⚠️ LES « RIEN » SONT PASSÉS ICI, ET C'EST CE QUI REND LE REPAS
+          // ENCORE VALIDE. Sans eux, l'occurrence écartée revient « sans
+          // choix », la progression n'est plus complète, et un repas
+          // parfaitement enregistré s'affiche « À RECOMPOSER ».
+          selectionDepuisComposition(repas.choiceSlots, connue!.items, connue!.ignorees),
         ).complet;
       resultat.push({
         cle,
@@ -138,6 +161,7 @@ export function repasDeLaPeriode(
         pret: encoreValide,
         aRecomposer: existe && !encoreValide,
         composition: connue?.items ?? null,
+        compositionIgnorees: connue?.ignorees ?? [],
         consomme: connue?.consomme ?? false,
       });
     }

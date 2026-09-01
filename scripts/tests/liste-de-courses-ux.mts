@@ -869,6 +869,7 @@ function repasApresChangement(identite: string, restantes: readonly string[]) {
     ["m|2026-08-17", {
       items: [{ slotId: "slot-a", catalogFoodId: identite, productId: null, quantity: 120, unit: "g" }],
       consomme: false,
+      ignorees: [],
     }],
   ]));
 }
@@ -981,6 +982,7 @@ await test("UX-SUP. un choix qui a quitté le snapshot passe « À RECOMPOSER »
             { slotId: "slot-a", catalogFoodId: "food-saumon", productId: null, quantity: 120, unit: "g" },
           ],
           consomme: false,
+          ignorees: [],
         },
       ],
     ]),
@@ -1002,6 +1004,7 @@ await test("UX-SUP. un choix qui a quitté le snapshot passe « À RECOMPOSER »
             { slotId: "slot-a", catalogFoodId: "food-riz", productId: null, quantity: 100, unit: "g" },
           ],
           consomme: false,
+          ignorees: [],
         },
       ],
     ]),

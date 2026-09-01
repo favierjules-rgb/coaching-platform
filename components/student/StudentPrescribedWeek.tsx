@@ -127,7 +127,14 @@ export interface SuiviConsommation {
    *
    * Optionnel : sans elles, l'écran est strictement celui de N1.6.
    */
-  readonly compositionsValidees?: ReadonlyMap<string, { readonly items: readonly ChoixPersiste[] }>;
+  readonly compositionsValidees?: ReadonlyMap<
+    string,
+    {
+      readonly items: readonly ChoixPersiste[];
+      /** N1.7 — les occurrences écartées (« Rien ») de cette composition. */
+      readonly ignorees?: readonly string[];
+    }
+  >;
   /**
    * COURSES C0 — « je prévois cette composition ».
    * Les quantités reçues sont ENTIÈRES, telles qu'affichées. Aucune macro.
@@ -423,6 +430,12 @@ export function StudentPrescribedWeek({
                               compositionValidee:
                                 suivi.compositionsValidees?.get(`${repas.id}|${date}`)?.items ??
                                 null,
+                              // ⚠️ N1.7 — LES « RIEN » VOYAGENT AVEC LES ALIMENTS.
+                              // Les oublier ici suffit à faire disparaître la
+                              // persistance : le composant croirait l'élève
+                              // indécis sur une occurrence qu'il a réglée.
+                              compositionValideeIgnorees:
+                                suivi.compositionsValidees?.get(`${repas.id}|${date}`)?.ignorees,
                               enCours: suivi.enCours,
                               onValider: (items) =>
                                 void suivi.onValiderChoixRepas?.(repas.id, date, items),
