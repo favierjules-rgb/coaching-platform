@@ -164,6 +164,27 @@ export interface MealChoiceSlot {
    * ⚠️ AUCUN SENS NUTRITIONNEL. Le solveur ne la reçoit pas.
    */
   readonly colorKey: ColorKey | null;
+  /**
+   * N1.7 — L'ÉLÈVE PEUT-IL RÉPONDRE « RIEN » À CETTE OCCURRENCE ?
+   *
+   * ⚠️ C'EST DU SNAPSHOT, PAS UNE VUE DE LA BIBLIOTHÈQUE — même règle que
+   * `colorKey`, et pour la même raison. Rendre « Boisson » ignorable
+   * aujourd'hui ne doit PAS rendre facultative une occurrence figée hier :
+   * le coach avait construit ce repas-là en la voulant obligatoire.
+   *
+   * ⚠️ LE RÉGLAGE APPARTIENT À LA LISTE, JAMAIS À UN ALIMENT. « Boisson peut
+   * être ignorée » est une question qui n'a qu'une réponse par liste ; la
+   * poser aliment par aliment donnerait des états qui ne veulent rien dire,
+   * puisqu'un seul choix est servi.
+   *
+   * ⚠️ AUCUN SENS NUTRITIONNEL. Le solveur ne la reçoit pas : il ne voit que
+   * les aliments réellement retenus, et une occurrence écartée ne lui arrive
+   * simplement jamais.
+   *
+   * `false` par défaut — toutes les occurrences d'avant ce lot, et toutes
+   * celles dont le coach n'a rien dit, restent obligatoires.
+   */
+  readonly peutEtreIgnoree: boolean;
   readonly options: readonly ChoiceOption[];
 }
 

@@ -71,6 +71,7 @@ const OCCURRENCES: readonly MealChoiceSlot[] = [
     label: "Ta protéine",
     sourceListId: null,
     colorKey: null,
+    peutEtreIgnoree: false,
     options: [
       { type: "aliment", id: "food-poulet", optionId: "opt-poulet", displayName: "Poulet",
         nutrition: NUTRITION, quantityUnit: "g", preferredQuantity: null, minimumQuantity: null },
@@ -84,6 +85,7 @@ const OCCURRENCES: readonly MealChoiceSlot[] = [
     label: "Ton féculent",
     sourceListId: null,
     colorKey: null,
+    peutEtreIgnoree: false,
     options: [
       { type: "aliment", id: "food-riz", optionId: "opt-riz", displayName: "Riz",
         nutrition: { unit: "g", proteinPer100: 2.7, carbPer100: 28, fatPer100: 0.3 },
@@ -168,12 +170,26 @@ await test("C0-09. l'état validé est relu depuis la persistance, pas gardé en
   assert.ok(CODE_HOOK.includes("lireCompositionsValidees(supabase, clé.split(\",\"))"));
   assert.ok(CODE_SEMAINE.includes("suivi.compositionsValidees?.get(`${repas.id}|${date}`)"));
 
-  // ⚠️ ET LA LECTURE EST GROUPÉE, PAS UN N+1. Deux `select` batchés par
-  // `.in(...)` : les repas planifiés de l'intervalle, puis leurs items.
+  // ⚠️ ET LA LECTURE EST GROUPÉE, PAS UN N+1. TROIS `select` batchés par
+  // `.in(...)`, et pas un de plus : les repas planifiés de l'intervalle, leurs
+  // items, puis — depuis N1.7 — leurs occurrences ÉCARTÉES.
+  //
+  // ⚠️ LA TROISIÈME N'EST PAS UN CONFORT. Une occurrence à laquelle l'élève a
+  // répondu « Rien » n'a AUCUNE ligne dans `planned_meal_items` : les
+  // contraintes de cette table l'interdisent. Sans cette requête, le « Rien »
+  // est écrit puis perdu au rechargement, et le repas repasse « À RECOMPOSER ».
+  //
+  // Le compte reste EXACT — il attraperait toujours une quatrième requête, et
+  // donc un N+1 introduit par mégarde.
   const bloc = CODE_CONSO.slice(CODE_CONSO.indexOf("export async function lireCompositionsValidees"));
   const corps = bloc.slice(0, bloc.indexOf("\nexport "));
-  assert.equal(corps.split(".from(").length - 1, 2, "exactement deux requêtes");
-  assert.equal(corps.split(".in(").length - 1, 2, "les deux doivent être batchées");
+  assert.equal(corps.split(".from(").length - 1, 3, "exactement trois requêtes");
+  assert.ok(
+    corps.includes('.from("planned_meal_skipped_slots")'),
+    "et la troisième est bien celle des occurrences écartées",
+  );
+  // ⚠️ ET LES TROIS SONT BATCHÉES PAR `.in(...)`, jamais une requête par repas.
+  assert.equal(corps.split(".in(").length - 1, 3, "les trois doivent être batchées");
   assert.ok(!corps.includes("for (const date"), "aucune boucle de requêtes");
 });
 
@@ -330,7 +346,14 @@ await test("C0-15/25. choisir ne déclenche AUCUNE écriture", () => {
   // hésitation, et la liste de courses suivrait des choix jamais confirmés.
   assert.ok(!CODE_CHOIX.includes("@/lib/supabase"), "l'écran des choix importe Supabase");
   const bloc = CODE_CHOIX.slice(CODE_CHOIX.indexOf("const choisir = useCallback("));
-  const corps = bloc.slice(0, bloc.indexOf("[selectionValidee],"));
+  // ⚠️ LA BORNE EST VÉRIFIÉE AVANT D'ÊTRE UTILISÉE. Une première version
+  // découpait jusqu'à `"[selectionValidee],"` en dur ; le jour où N1.7 a ajouté
+  // `occurrences` au tableau de dépendances, `indexOf` a rendu −1, la tranche a
+  // couvert TOUT le fichier, et le test a rougi pour une raison qui n'était pas
+  // la sienne. On mesure ce qu'on croit mesurer.
+  const finDesDeps = bloc.indexOf("  );");
+  assert.ok(finDesDeps > 0, "la fin du useCallback doit être trouvable");
+  const corps = bloc.slice(0, finDesDeps);
   assert.ok(corps.includes("setBrouillon("));
   assert.ok(!corps.includes("onValider"), "choisir déclenche la validation");
   assert.ok(!corps.includes("await"), "choisir fait un appel");

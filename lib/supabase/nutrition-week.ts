@@ -222,6 +222,7 @@ interface SlotRowShape {
   label: string;
   source_list_id: string | null;
   color_key?: string | null;
+  peut_etre_ignoree?: boolean | null;
 }
 
 interface OptionRowShape {
@@ -252,7 +253,7 @@ async function lireOccurrences(
 
   const { data: slotRows, error: slotError } = await supabase
     .from("meal_choice_slots")
-    .select("id, meal_id, position, label, source_list_id, color_key")
+    .select("id, meal_id, position, label, source_list_id, color_key, peut_etre_ignoree")
     .in("meal_id", [...mealIds])
     .order("position", { ascending: true });
   devWarn("readNutritionPlanV2Week (meal_choice_slots)", slotError);
@@ -349,6 +350,11 @@ async function lireOccurrences(
       // élève n'a aucune policy `select` sur la bibliothèque : la lire serait
       // impossible, et la deviner serait pire.
       colorKey: isColorKey(s.color_key) ? s.color_key : null,
+      // ⚠️ N1.7 — `=== true`, ET NON `??  false`. La colonne est `not null` en
+      // base, mais ce lecteur tolère un snapshot partiel (`peut_etre_ignoree?`)
+      // : tout ce qui n'est pas un `true` franc laisse l'occurrence
+      // OBLIGATOIRE. Le défaut sûr est celui qui ne retire rien au coach.
+      peutEtreIgnoree: s.peut_etre_ignoree === true,
       options: parSlot.get(s.id) ?? [],
     });
     parRepas.set(s.meal_id, liste);

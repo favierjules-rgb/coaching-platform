@@ -97,6 +97,7 @@ const OCC_A: MealChoiceSlot = {
   label: "Ta base",
   sourceListId: "l1",
   colorKey: "red",
+  peutEtreIgnoree: false,
   options: [option("food-riz", "Riz"), option("food-poulet", "Poulet"), option("food-saumon", "Saumon")],
 };
 const OCC_B: MealChoiceSlot = {
@@ -104,6 +105,7 @@ const OCC_B: MealChoiceSlot = {
   label: "Ton accompagnement",
   sourceListId: "l2",
   colorKey: null,
+  peutEtreIgnoree: false,
   options: [option("prod-yaourt", "MarqueY — Yaourt", "produit"), option("food-pomme", "Pomme")],
 };
 
@@ -435,6 +437,7 @@ await test("UX-15. aucun aliment hors snapshot ne peut entrer, ni dans les préf
     label: "X",
     sourceListId: null,
     colorKey: null,
+    peutEtreIgnoree: false,
     options: [option("food-vide", "Sans macros", "aliment", false)],
   };
   assert.equal(choisirPourOccurrence(occInutilisable, VIDE, VIDE), null);
@@ -866,6 +869,7 @@ function repasApresChangement(identite: string, restantes: readonly string[]) {
     ["m|2026-08-17", {
       items: [{ slotId: "slot-a", catalogFoodId: identite, productId: null, quantity: 120, unit: "g" }],
       consomme: false,
+      ignorees: [],
     }],
   ]));
 }
@@ -978,6 +982,7 @@ await test("UX-SUP. un choix qui a quitté le snapshot passe « À RECOMPOSER »
             { slotId: "slot-a", catalogFoodId: "food-saumon", productId: null, quantity: 120, unit: "g" },
           ],
           consomme: false,
+          ignorees: [],
         },
       ],
     ]),
@@ -999,6 +1004,7 @@ await test("UX-SUP. un choix qui a quitté le snapshot passe « À RECOMPOSER »
             { slotId: "slot-a", catalogFoodId: "food-riz", productId: null, quantity: 100, unit: "g" },
           ],
           consomme: false,
+          ignorees: [],
         },
       ],
     ]),

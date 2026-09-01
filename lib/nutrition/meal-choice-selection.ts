@@ -33,6 +33,50 @@ export type SelectionDeChoix = Readonly<Record<string, string>>;
 export const AUCUNE_SELECTION: SelectionDeChoix = Object.freeze({});
 
 /**
+ * N1.7 — « RIEN » : LA TROISIÈME RÉPONSE POSSIBLE À UNE OCCURRENCE.
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * POURQUOI UNE SENTINELLE ET NON UN SECOND ÉTAT À CÔTÉ
+ * ────────────────────────────────────────────────────────────────────────────
+ * Une occurrence a désormais TROIS états, pas deux : *pas encore décidée*,
+ * *un aliment*, *rien*. Les deux premiers vivaient déjà dans la même carte
+ * (`occurrenceId → optionId`, absent = pas décidée) ; ajouter le troisième
+ * dans une SECONDE structure aurait ouvert la porte à l'état impossible
+ * « cette occurrence porte à la fois un aliment et un rien », qu'il aurait
+ * fallu arbitrer partout. Une seule carte, une seule vérité.
+ *
+ * ⚠️ LA VALEUR NE PEUT PAS ENTRER EN COLLISION AVEC UN `optionId`. Ceux-ci
+ * sont des UUID de `meal_choice_options.id` ; `"__rien__"` n'en est pas un et
+ * n'en sera jamais un. La collision est donc structurellement impossible, pas
+ * seulement improbable.
+ */
+export const RIEN = "__rien__" as const;
+
+/** L'occurrence a-t-elle été explicitement écartée ? */
+export function estIgnoree(selection: SelectionDeChoix, slotId: string): boolean {
+  return selection[slotId] === RIEN;
+}
+
+/**
+ * Écarte une occurrence — ou refuse de le faire.
+ *
+ * ⚠️ LE REFUS EST LE POINT IMPORTANT DE CETTE FONCTION, PAS L'ÉCRITURE. Le
+ * SNAPSHOT de l'occurrence fait foi : une liste rendue ignorable dans la
+ * bibliothèque APRÈS la construction du repas ne rend pas facultative une
+ * occurrence figée obligatoire. Rendre la sélection inchangée plutôt que de
+ * lever : l'appelant est une interface, et un `null` silencieux y serait plus
+ * dangereux qu'un bouton qui ne fait rien — mais l'interface ne propose de
+ * toute façon « Rien » que là où c'est permis, et la RPC porte le même refus.
+ */
+export function ignorerOccurrence(
+  selection: SelectionDeChoix,
+  occurrence: MealChoiceSlot,
+): SelectionDeChoix {
+  if (!occurrence.peutEtreIgnoree) return selection;
+  return { ...selection, [occurrence.id]: RIEN };
+}
+
+/**
  * La portée d'un brouillon : CE repas, CE jour.
  *
  * ⚠️ LE JOUR FAIT PARTIE DE LA CLÉ, MÊME SI L'IDENTIFIANT DE REPAS SUFFIRAIT
@@ -83,6 +127,12 @@ export function optionChoisie(
 ): ChoiceOption | null {
   const id = optionChoisieId(selection, occurrence.id);
   if (id === null) return null;
+  // ⚠️ N1.7 — « RIEN » N'EST PAS UNE OPTION, ET NE DOIT JAMAIS EN DEVENIR UNE.
+  // Sans ce retour, la recherche ci-dessous échouerait de toute façon (aucune
+  // option ne porte cet identifiant) et rendrait `null` — le MÊME `null` que
+  // « pas encore choisie ». Deux états distincts confondus en un : c'est
+  // exactement ce que ce lot doit empêcher.
+  if (id === RIEN) return null;
   return occurrence.options.find((o) => o.optionId === id) ?? null;
 }
 
@@ -117,7 +167,14 @@ export function progressionDesChoix(
   selection: SelectionDeChoix,
 ): ProgressionDesChoix {
   const total = occurrences.length;
-  const choisis = occurrences.filter((o) => optionChoisie(o, selection) !== null).length;
+  // ⚠️ N1.7 — UNE OCCURRENCE ÉCARTÉE EST DÉCIDÉE, DONC ELLE COMPTE. Ne compter
+  // que les aliments laisserait un repas dont l'élève a tout réglé
+  // éternellement « incomplet » : aucune quantité ne serait jamais calculée, et
+  // le bouton de validation resterait mort. C'est la ligne qui fait exister la
+  // fonctionnalité.
+  const choisis = occurrences.filter(
+    (o) => optionChoisie(o, selection) !== null || estIgnoree(selection, o.id),
+  ).length;
   return { total, choisis, complet: total > 0 && choisis === total };
 }
 
@@ -139,12 +196,40 @@ export function choixResolus(
 ): readonly ChoixResolu[] {
   const resolus: ChoixResolu[] = [];
   for (const occurrence of occurrences) {
+    // ⚠️ N1.7 — UNE OCCURRENCE ÉCARTÉE N'ENTRE PAS ICI, ET C'EST TOUT LE
+    // MÉCANISME. `optionChoisie` rend `null` sur un « rien » : l'occurrence
+    // n'ajoute aucune variable au système, et le solveur redistribue les
+    // trois macros entre les aliments RESTANTS. Il n'y a rien de plus à
+    // écrire — il traite déjà N = 1 comme N = 10, sans cas particulier.
     const option = optionChoisie(occurrence, selection);
     if (option?.optionId) {
       resolus.push({ slotId: occurrence.id, optionId: option.optionId, option });
     }
   }
   return resolus;
+}
+
+/**
+ * N1.7 — LES OCCURRENCES ÉCARTÉES, DANS L'ORDRE DU COACH.
+ *
+ * ⚠️ ELLES NE SORTENT PAS DE `choixResolus`, ET C'EST DÉLIBÉRÉ. Celui-ci
+ * répond « quels ALIMENTS le solveur doit-il calculer ? » — un « rien » n'y a
+ * rien à faire. Celle-ci répond « quelles occurrences faut-il déclarer
+ * écartées à l'enregistrement ? », qui est une autre question. Les fondre
+ * obligerait chaque appelant à retrier ce qu'il vient de recevoir.
+ *
+ * ⚠️ LE SNAPSHOT EST REVÉRIFIÉ ICI AUSSI. Une sélection portant un « rien » sur
+ * une occurrence redevenue obligatoire ne doit pas partir vers la RPC : elle y
+ * serait refusée (`OCCURRENCE_NON_IGNORABLE`), et l'élève verrait une erreur
+ * technique au lieu d'une occurrence à recomposer.
+ */
+export function occurrencesIgnorees(
+  occurrences: readonly MealChoiceSlot[],
+  selection: SelectionDeChoix,
+): readonly string[] {
+  return occurrences
+    .filter((o) => o.peutEtreIgnoree && estIgnoree(selection, o.id))
+    .map((o) => o.id);
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -270,6 +355,7 @@ export type EtatDuCalculDuRepas =
   | { readonly etat: "incomplet" }
   | { readonly etat: "sans-cible" }
   | { readonly etat: "non-calculable" }
+  | { readonly etat: "vide" }
   | { readonly etat: "calcule"; readonly solution: MealChoiceSolution };
 
 export function calculDuRepas(
@@ -284,7 +370,19 @@ export function calculDuRepas(
 
   const aliments = alimentsPourLeSolveur(choixResolus(occurrences, selection));
   if (aliments === null) return { etat: "non-calculable" };
-  if (cible === null || aliments.length === 0) return { etat: "sans-cible" };
+
+  // ⚠️ N1.7 — « VIDE » N'EST PAS « SANS CIBLE », ET LES CONFONDRE MENTIRAIT.
+  // Avant ce lot, zéro aliment sur un repas COMPLET était impossible : chaque
+  // occurrence rendait forcément un aliment. Il l'est désormais — l'élève peut
+  // écarter toutes les listes — et la cause n'a rien à voir avec l'absence de
+  // cible. « Sans cible » dit « le jour n'a pas de profil exploitable » ;
+  // ici le jour va très bien, c'est le repas qui ne contient rien.
+  //
+  // ⚠️ ET ON NE LE CALCULE PAS. Un système sans une seule variable n'a pas de
+  // solution de norme minimale : il n'a pas de solution du tout.
+  if (aliments.length === 0) return { etat: "vide" };
+
+  if (cible === null) return { etat: "sans-cible" };
 
   const solution = solveMealChoices(aliments, cible);
 
@@ -347,9 +445,25 @@ function identiteDeLOption(option: ChoiceOption): {
 export function selectionDepuisComposition(
   occurrences: readonly MealChoiceSlot[],
   items: readonly ChoixPersiste[],
+  ignorees: readonly string[] = [],
 ): SelectionDeChoix {
   const parOccurrence = new Map(occurrences.map((o) => [o.id, o] as const));
   const selection: Record<string, string> = {};
+
+  // ⚠️ N1.7 — LES « RIEN » D'ABORD, ET ILS VIENNENT D'UNE AUTRE TABLE.
+  // `planned_meal_items` ne peut pas les porter : ses contraintes de sécurité
+  // (`quantity > 0`, exactement une identité d'aliment) l'interdisent. Sans
+  // cette relecture, une occurrence écartée reviendrait « pas encore choisie »
+  // et la carte du repas repasserait « À RECOMPOSER » à chaque rafraîchissement
+  // — le « rien » ne survivrait jamais à un rechargement.
+  //
+  // ⚠️ ON REVÉRIFIE LE SNAPSHOT. Une ligne enregistrée quand la liste était
+  // ignorable ne doit pas rouvrir le droit si le coach l'a refermé depuis :
+  // l'occurrence redevient simplement sans choix, et l'élève doit trancher.
+  for (const slotId of ignorees) {
+    const occurrence = parOccurrence.get(slotId);
+    if (occurrence?.peutEtreIgnoree) selection[slotId] = RIEN;
+  }
 
   for (const item of items) {
     const occurrence = parOccurrence.get(item.slotId);
@@ -361,6 +475,10 @@ export function selectionDepuisComposition(
       );
     });
     if (!option || typeof option.optionId !== "string") continue;
+    // ⚠️ UN ALIMENT L'EMPORTE TOUJOURS SUR UN « RIEN ». Les deux tables ne
+    // devraient jamais désigner la même occurrence — la RPC efface les deux
+    // ensemble avant de réécrire — mais si une incohérence survivait, un
+    // aliment RÉELLEMENT enregistré est le fait le plus fort des deux.
     selection[item.slotId] = option.optionId;
   }
 

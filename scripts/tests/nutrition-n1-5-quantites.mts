@@ -438,7 +438,7 @@ const optionHydratée = (
 const occurrence = (id: string, label: string, options: readonly ChoiceOption[]): MealChoiceSlot => ({
   id,
   label,
-  sourceListId: null, colorKey: null,
+  sourceListId: null, colorKey: null, peutEtreIgnoree: false,
   options,
 });
 

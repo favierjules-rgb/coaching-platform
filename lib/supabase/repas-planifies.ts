@@ -121,6 +121,15 @@ export interface RepasPlanifie {
   /** `true` si ce repas a AUSSI été déclaré consommé (N1.6B). */
   readonly consomme: boolean;
   readonly items: readonly ItemPlanifie[];
+  /**
+   * N1.7 — les occurrences auxquelles l'élève a répondu « Rien ».
+   *
+   * ⚠️ SECOND CHEMIN DE LECTURE, MÊME RÈGLE. `lireCompositionsValidees` sert
+   * l'écran des repas ; celui-ci sert la liste de courses. Les deux doivent
+   * relire `planned_meal_skipped_slots`, sinon la moitié de l'application
+   * croit l'élève indécis pendant que l'autre le sait décidé.
+   */
+  readonly ignorees: readonly string[];
 }
 
 export interface LecturePeriodePlanifiee {
@@ -171,6 +180,32 @@ export async function lireRepasPlanifiesSurPeriode(
     .order("position");
   devWarn("planned_meal_items", erreurItems);
   if (erreurItems) return LECTURE_VIDE;
+
+  /*
+   * ⚠️ N1.7 — LES OCCURRENCES ÉCARTÉES, DANS LEUR PROPRE TABLE. Elles ne
+   * peuvent pas vivre dans `planned_meal_items` (`quantity > 0`, exactement
+   * une identité) : une absence n'est pas un aliment à zéro gramme.
+   *
+   * ⚠️ ET UNE LECTURE RATÉE REND `ok: false`, comme pour les items. « Rien lu »
+   * n'est pas « rien d'écarté » : le confondre ferait réapparaître dans la
+   * liste de courses des aliments que l'élève avait justement retirés.
+   */
+  const { data: ecarteesBrutes, error: erreurEcartees } = await supabase
+    .from("planned_meal_skipped_slots")
+    .select("planned_meal_id, choice_slot_id")
+    .in("planned_meal_id", lignesRepas.map((l) => l.id));
+  devWarn("planned_meal_skipped_slots", erreurEcartees);
+  if (erreurEcartees) return LECTURE_VIDE;
+
+  const ignoreesParRepas = new Map<string, string[]>();
+  for (const brut of (ecarteesBrutes ?? []) as unknown as {
+    planned_meal_id: string;
+    choice_slot_id: string;
+  }[]) {
+    const liste = ignoreesParRepas.get(brut.planned_meal_id) ?? [];
+    liste.push(brut.choice_slot_id);
+    ignoreesParRepas.set(brut.planned_meal_id, liste);
+  }
 
   const lignesItems = (itemsBruts ?? []) as unknown as {
     planned_meal_id: string;
@@ -236,6 +271,7 @@ export async function lireRepasPlanifiesSurPeriode(
       label: ligne.label,
       consomme: ligne.consumed_meal_id !== null,
       items: parRepas.get(ligne.id) ?? [],
+      ignorees: ignoreesParRepas.get(ligne.id) ?? [],
     }),
   );
 

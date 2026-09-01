@@ -68,7 +68,7 @@ const option = (optionId: string, id: string, displayName: string | null, type: 
 const occurrence = (id: string, label: string, options: readonly ChoiceOption[]): MealChoiceSlot => ({
   id,
   label,
-  sourceListId: null, colorKey: null,
+  sourceListId: null, colorKey: null, peutEtreIgnoree: false,
   options,
 });
 
@@ -239,8 +239,21 @@ await test("N1.4-08/09/12. un choix remplace le précédent, et referme la liste
   // COURSES C0, le point de départ n'est plus forcément l'état local : c'est
   // le brouillon S'IL EXISTE, sinon la sélection restaurée depuis la base.
   // Changer sa protéine ne doit pas effacer son féculent déjà validé.
-  assert.ok(choisir.includes("choisirOption(precedente ?? selectionValidee ?? AUCUNE_SELECTION"));
-  assert.ok(!/setBrouillon\([^)]*\{/.test(choisir), "le geste recalcule la sélection à la main");
+  //
+  // ⚠️ N1.7 — LE POINT DE DÉPART EST NOMMÉ `base`, ET LA RÈGLE N'A PAS CHANGÉ.
+  // Le geste sait désormais aiguiller « Rien » vers `ignorerOccurrence` (qui
+  // relit le snapshot) et tout le reste vers `choisirOption` ; ce qu'on épingle
+  // ici reste ce qu'on épinglait : le geste DÉLÈGUE aux fonctions pures, et
+  // part du brouillon s'il existe, sinon de la sélection restaurée.
+  assert.ok(
+    choisir.includes("precedente ?? selectionValidee ?? AUCUNE_SELECTION"),
+    "le point de départ reste le brouillon, sinon la sélection restaurée",
+  );
+  assert.ok(choisir.includes("choisirOption(base, slotId, optionId)"), "un aliment passe par la fonction pure");
+  assert.ok(
+    choisir.includes("ignorerOccurrence(base, occurrence)"),
+    "et « Rien » passe par celle qui relit le snapshot — jamais par une écriture directe",
+  );
 });
 
 await test("N1.4-10/11. la ligne fermée montre le choix, et propose de le modifier", () => {
@@ -250,8 +263,17 @@ await test("N1.4-10/11. la ligne fermée montre le choix, et propose de le modif
   assert.ok(!html.includes("Modifier"), "« Modifier » ne doit pas s'afficher sans choix");
 
   // Avec choix : le NOM de l'option, et « Modifier » — le contrat de rendu.
-  assert.ok(CODE_CHOIX.includes('{choisie ? (choisie.displayName ?? "Aliment indisponible") : "Aucun choix"}'));
-  assert.ok(CODE_CHOIX.includes('{choisie ? "Modifier" : "Choisir"}'));
+  // ⚠️ N1.7 — TROIS ÉTATS DEPUIS CE LOT, ET LE CONTRAT DE RENDU LES DISTINGUE
+  // TOUS LES TROIS. « Rien » (une décision) ne doit jamais s'afficher comme
+  // « Aucun choix » (une case encore vide) : l'élève ne saurait plus s'il a
+  // répondu.
+  assert.ok(CODE_CHOIX.includes('? (choisie.displayName ?? "Aliment indisponible")'));
+  assert.ok(CODE_CHOIX.includes('"Aucun choix"'));
+  assert.ok(/\{ignoree\s*\?\s*"Rien"/.test(CODE_CHOIX), "« Rien » a son propre libellé");
+  // ⚠️ N1.7 — « MODIFIER » VAUT AUSSI POUR UN « RIEN ». Répondre « Rien » EST
+  // une réponse : proposer « Choisir » ensuite laisserait croire que rien n'a
+  // été fait.
+  assert.ok(CODE_CHOIX.includes('{choisie || ignoree ? "Modifier" : "Choisir"}'));
   // Rouvrir passe par le MÊME bouton : une seule commande, pas deux chemins.
   assert.equal((CODE_CHOIX.match(/aria-expanded=/g) ?? []).length, 1);
 });

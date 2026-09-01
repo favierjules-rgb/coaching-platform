@@ -281,6 +281,43 @@ await test("CONTRACT-07. le CONTRACT s'applique en DERNIER — l'ordre de rollou
       // La boucle ci-dessous rejoue cette dernière preuve à chaque exécution :
       // l'inscrire ne suffit pas, il faut que le fichier tienne.
       "20260919090000_c4_3c_magasins_osm.sql",
+      // ⚠️ N1.7 INSCRITE ICI, ET C'EST LE CAS LE PLUS DÉLICAT DE LA LISTE —
+      // parce que c'est la SEULE qui reproduise `save_nutrition_plan_v2`.
+      //
+      // Les listes ignorables ajoutent `peut_etre_ignoree` au snapshot d'une
+      // occurrence. Cette colonne voyage dans la RPC de plan, qui doit donc
+      // être redonnée en entier : PostgreSQL n'a pas de « patch de fonction ».
+      // Le corps recopié est celui du CONTRACT lui-même (20260913), vérifié
+      // identique à l'octet près contre la base distante avant recopie — il ne
+      // peut donc pas ramener une version antérieure et « défaire » le
+      // CONTRACT par écrasement. L'ordre est également garanti : 20260920 est
+      // postérieure à 20260913.
+      //
+      // ⚠️ ET ELLE CONTIENT LA CHAÎNE `preferred_unit`, UNE FOIS, DANS DU CODE.
+      // C'est `nullif(v_option->>'preferred_unit', '')` — la CLÉ D'ENTRÉE JSON
+      // que le CONTRACT a délibérément conservée quand il a supprimé la
+      // COLONNE (« la clé d'entrée survit à la colonne »). La recopier est la
+      // seule façon de ne pas casser la compatibilité de charge utile que le
+      // CONTRACT a voulue ; la retirer serait la régression.
+      //
+      // La boucle ci-dessous ne cherche donc plus la chaîne, mais la
+      // DÉPENDANCE À LA COLONNE — voir son commentaire.
+      "20260920090000_n1_7_listes_ignorables.sql",
+      // ⚠️ N1.7.1 — LE CORRECTIF DE CONSOMMATION, ET C'EST LA PLUS ÉTROITE DU
+      // LOT : elle redonne UNE fonction, avec UN `continue` de plus.
+      //
+      // Contrairement à N1.7, elle ne reproduit PAS `save_nutrition_plan_v2` —
+      // seulement `enregistrer_repas_structure_consomme`. Mesuré sur le
+      // fichier, code dépouillé de sa prose :
+      //   · `preferred_unit` : ZÉRO occurrence, pas même comme clé JSON ;
+      //   · aucune table créée ni altérée, aucune colonne, aucune contrainte,
+      //     aucune policy — le test 22 de `nutrition-liste-ignorable` rejoue
+      //     cette preuve à chaque exécution ;
+      //   · `quantity_unit` et `meal_choice_options` : ABSENTS.
+      //
+      // Elle est donc hors de portée du CONTRACT : elle ne dit rien d'une
+      // unité, elle dit qu'une absence ne produit aucune entrée alimentaire.
+      "20260921090000_n1_7_1_consommer_avec_rien.sql",
     ],
     "une migration postérieure au CONTRACT n'a pas été déclarée sûre",
   );
@@ -291,8 +328,40 @@ await test("CONTRACT-07. le CONTRACT s'applique en DERNIER — l'ordre de rollou
     // d'EXPLIQUER le CONTRACT en commentaire ; elle n'a pas le droit d'en
     // dépendre. Sans ce dépouillement, l'en-tête de C0.1 suffirait à rougir.
     const code = source.replace(/--[^\n]*/g, " ").replace(/comment on [^;]*;/gi, " ");
-    assert.ok(!code.includes("preferred_unit"),
-      `${nom} nomme preferred_unit : elle dépend d'une colonne supprimée`);
+
+    /*
+     * ⚠️ RESSERRÉ (N1.7) — ON CHERCHE LA DÉPENDANCE À LA COLONNE, PLUS LA
+     * SIMPLE CHAÎNE.
+     *
+     * L'interdiction portait sur le TEXTE `preferred_unit`. Elle a rougi sur
+     * N1.7, qui recopie `save_nutrition_plan_v2` — et donc le
+     * `nullif(v_option->>'preferred_unit', '')` que le CONTRACT lui-même y a
+     * laissé, EXPRÈS, pour que les charges utiles d'avant continuent d'être
+     * acceptées (« la clé d'entrée survit à la colonne »). Interdire cette
+     * occurrence-là reviendrait à interdire la compatibilité que le CONTRACT a
+     * construite — et à pousser un lot futur à la supprimer pour passer au
+     * vert. C'est le test qui aurait causé la régression.
+     *
+     * Ce qui doit rester interdit, c'est de DÉPENDRE DE LA COLONNE supprimée :
+     * la lire (`o.preferred_unit`), l'écrire (`set preferred_unit = …`), la
+     * recréer (`add column preferred_unit`), ou la nommer dans une contrainte.
+     *
+     * ⚠️ ON RETIRE DONC LA CLÉ JSON — ET ELLE SEULE. `'preferred_unit'` entre
+     * apostrophes est du TEXTE dans une charge utile ; la colonne peut être
+     * partie depuis des mois, la clé reste lisible. Tout ce qui subsiste après
+     * ce retrait est un IDENTIFIANT SQL, et un identifiant `preferred_unit` ne
+     * peut désigner que la colonne.
+     *
+     * ⚠️ ET C'EST UN RETRAIT LITTÉRAL, PAS UN ANALYSEUR DE CHAÎNES SQL. Une
+     * première version neutralisait TOUTES les chaînes par expression
+     * régulière : sur 1 300 lignes de plpgsql où les apostrophes françaises
+     * sont doublées (`l''occurrence`), l'appariement se décalait d'un quote et
+     * laissait passer exactement ce qu'il devait attraper. On mesure ce qu'on
+     * croit mesurer.
+     */
+    const sansCleJson = code.split("'preferred_unit'").join(" ");
+    assert.ok(!sansCleJson.includes("preferred_unit"),
+      `${nom} nomme preferred_unit hors d'une clé JSON : elle dépend de la colonne supprimée`);
   }
 
   // ⚠️ ET N1.6B NE DÉPEND PAS DU CONTRACT — c'est ce qui rend l'ordre

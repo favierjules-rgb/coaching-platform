@@ -156,7 +156,10 @@ export function useListeDeCourses(
   const compositions = useMemo(() => {
     const carte = new Map<string, CompositionConnue>();
     for (const repas of planifies) {
-      if (repas.items.length === 0) continue;
+      // ⚠️ N1.7 — UN REPAS ENTIÈREMENT ÉCARTÉ N'A AUCUN ITEM ET EXISTE QUAND
+      // MÊME. Sauter sur `items` seul le faisait disparaître de la carte des
+      // compositions, donc réapparaître « à valider ».
+      if (repas.items.length === 0 && repas.ignorees.length === 0) continue;
       const items: ChoixPersiste[] = repas.items.map((item) => ({
         slotId: item.choiceSlotId,
         catalogFoodId: item.catalogFoodId,
@@ -164,7 +167,11 @@ export function useListeDeCourses(
         quantity: item.quantity,
         unit: item.unit,
       }));
-      carte.set(`${repas.mealId}|${repas.plannedOn}`, { items, consomme: repas.consomme });
+      carte.set(`${repas.mealId}|${repas.plannedOn}`, {
+        items,
+        consomme: repas.consomme,
+        ignorees: repas.ignorees,
+      });
     }
     return carte;
   }, [planifies]);

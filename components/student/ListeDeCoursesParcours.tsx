@@ -874,6 +874,11 @@ function ListeDesJours({
                       propositionInitiale={proposition?.get(carte.repas.cle)?.selection ?? null}
                       validation={{
                         compositionValidee: carte.repas.composition,
+                        // ⚠️ N1.7 — SECOND FOURNISSEUR, MÊME OBLIGATION que
+                        // `StudentPrescribedWeek` : sans les occurrences
+                        // écartées, le parcours de courses rouvrirait un repas
+                        // réglé comme s'il était incomplet.
+                        compositionValideeIgnorees: carte.repas.compositionIgnorees,
                         enCours,
                         // ⚠️ CORRECTIF D-2 — LE MODE EST DÉCLARÉ, PAS DEVINÉ.
                         // `onRetoucher` ⇒ semaine proposée : rien n'est écrit,

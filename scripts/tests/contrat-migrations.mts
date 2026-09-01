@@ -96,6 +96,28 @@ export const MIGRATION_C4_3C = "20260919090000_c4_3c_magasins_osm.sql";
  * qui ajoute une migration doit venir l'inscrire ici — c'est précisément ce que
  * le compte seul ne demandait pas, et c'est pour ça qu'il a été remplacé.
  */
+/**
+ * N1.7 — LA PREMIÈRE MIGRATION POSTÉRIEURE AU CHANTIER COURSES.
+ *
+ * ⚠️ ELLE N'APPARTIENT PAS À COURSES, ET C'EST TOUT L'INTÉRÊT DE LA NOMMER À
+ * PART. Le contrat disait jusqu'ici « après C0.1, il n'y a QUE des migrations
+ * COURSES » — une formulation qui n'était vraie que tant qu'aucun autre
+ * chantier n'ajoutait de migration. La règle réelle, celle qui vaut la peine
+ * d'être gardée, est plus simple : TOUTE migration ajoutée doit être inscrite
+ * ici, nommément. Elle l'est.
+ */
+export const MIGRATION_N1_7 = "20260920090000_n1_7_listes_ignorables.sql";
+
+/**
+ * N1.7.1 — LE CORRECTIF DE CONSOMMATION.
+ *
+ * ⚠️ UNE SECONDE MIGRATION POUR LE MÊME CHANTIER, ET ELLE EST INSCRITE À PART
+ * PLUTÔT QUE FONDUE DANS N1.7. Celle-ci ne pouvait pas modifier la première :
+ * N1.7 est DÉJÀ APPLIQUÉE sur la base distante, et réécrire une migration
+ * jouée est le seul geste que ce dépôt s'interdit sans exception.
+ */
+export const MIGRATION_N1_7_1 = "20260921090000_n1_7_1_consommer_avec_rien.sql";
+
 export const MIGRATIONS_COURSES: readonly string[] = [
   MIGRATION_C2,
   MIGRATION_C3,
@@ -104,8 +126,22 @@ export const MIGRATIONS_COURSES: readonly string[] = [
   MIGRATION_C4_3C,
 ];
 
+/**
+ * TOUT CE QUI SUIT C0.1, DANS L'ORDRE D'APPLICATION — chantier COURSES compris.
+ *
+ * ⚠️ C'EST CETTE LISTE QUE LES POINTS 2 ET 5 COMPARENT, et plus
+ * `MIGRATIONS_COURSES` seule. Une migration ajoutée sans être inscrite ici
+ * rougit toujours : la garantie est intacte, elle a seulement cessé de
+ * supposer que le dernier chantier du dépôt serait éternellement COURSES.
+ */
+export const MIGRATIONS_APRES_C0_1: readonly string[] = [
+  ...MIGRATIONS_COURSES,
+  MIGRATION_N1_7,
+  MIGRATION_N1_7_1,
+];
+
 /** Le compte attendu — nécessaire, jamais suffisant. */
-export const NOMBRE_DE_MIGRATIONS = 85;
+export const NOMBRE_DE_MIGRATIONS = 87;
 
 /**
  * L'empreinte des 79 migrations ANTÉRIEURES à C0.1, dans l'ordre.
@@ -152,9 +188,9 @@ export function verifierContratDesMigrations(assert: typeof import("node:assert/
   // 2. L'ORDRE ET L'IDENTITÉ DES DERNIÈRES. C0.1, puis C2, puis C3 — et rien
   //    après. Antidater l'une d'elles casse l'ordre, et rougit ici.
   assert.deepEqual(
-    migrations.slice(-(1 + MIGRATIONS_COURSES.length)),
-    [MIGRATION_C0_1, ...MIGRATIONS_COURSES],
-    "les dernières migrations doivent être C0.1 puis les migrations COURSES, dans l'ordre",
+    migrations.slice(-(1 + MIGRATIONS_APRES_C0_1.length)),
+    [MIGRATION_C0_1, ...MIGRATIONS_APRES_C0_1],
+    "les dernières migrations doivent être C0.1 puis celles déclarées, dans l'ordre",
   );
 
   // 3. L'HORODATAGE, pas seulement l'ordre alphabétique. Un nom qui trie bien
@@ -163,7 +199,7 @@ export function verifierContratDesMigrations(assert: typeof import("node:assert/
   const tC01 = estampille(MIGRATION_C0_1);
   assert.ok(tC01 !== null, "la migration C0.1 doit être horodatée");
   let precedente = tC01;
-  for (const nom of MIGRATIONS_COURSES) {
+  for (const nom of MIGRATIONS_APRES_C0_1) {
     const t = estampille(nom);
     assert.ok(t !== null, `${nom} doit être horodatée`);
     assert.ok(t > precedente, `${nom} (${t}) doit être POSTÉRIEURE à ${precedente}`);
@@ -195,10 +231,10 @@ export function verifierContratDesMigrations(assert: typeof import("node:assert/
     const t = estampille(f);
     return t !== null && t >= tC01;
   });
-  const autorisees = new Set([MIGRATION_C0_1, ...MIGRATIONS_COURSES]);
+  const autorisees = new Set([MIGRATION_C0_1, ...MIGRATIONS_APRES_C0_1]);
   assert.deepEqual(
     apresC01,
-    [MIGRATION_C0_1, ...MIGRATIONS_COURSES],
+    [MIGRATION_C0_1, ...MIGRATIONS_APRES_C0_1],
     `migrations inattendues depuis C0.1 : ${apresC01.filter((f) => !autorisees.has(f)).join(", ")}`,
   );
 
@@ -210,7 +246,7 @@ export function verifierContratDesMigrations(assert: typeof import("node:assert/
   });
   assert.equal(
     historique.length,
-    NOMBRE_DE_MIGRATIONS - 1 - MIGRATIONS_COURSES.length,
+    NOMBRE_DE_MIGRATIONS - 1 - MIGRATIONS_APRES_C0_1.length,
     "l'historique antérieur a changé de taille",
   );
   assert.equal(

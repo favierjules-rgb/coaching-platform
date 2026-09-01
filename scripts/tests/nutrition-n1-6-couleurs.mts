@@ -236,7 +236,7 @@ await test("COLOR-11. l'élève ne lit JAMAIS food_lists pour la couleur", () =>
   assert.ok(!CODE_LECTURE.includes("food_lists"), "le lecteur élève touche food_lists");
   assert.ok(!CODE_CHOIX.includes("food_lists"));
   // La couleur vient de la colonne snapshotée, et le select la demande.
-  assert.ok(CODE_LECTURE.includes('"id, meal_id, position, label, source_list_id, color_key"'));
+  assert.ok(CODE_LECTURE.includes('"id, meal_id, position, label, source_list_id, color_key, peut_etre_ignoree"'));
 });
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -343,6 +343,7 @@ function occurrence(id: string, label: string, colorKey: string | null): MealCho
   return {
     id, label, sourceListId: null,
     colorKey: isColorKey(colorKey) ? colorKey : null,
+    peutEtreIgnoree: false,
     options: [{ type: "aliment", id: POULET, optionId: `opt-${id}`, displayName: "Poulet" }],
   } as MealChoiceSlot;
 }

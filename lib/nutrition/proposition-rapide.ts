@@ -1,5 +1,6 @@
 import {
   AUCUNE_SELECTION,
+  RIEN,
   optionCalculable,
   optionExploitable,
   type SelectionDeChoix,
@@ -109,7 +110,18 @@ export function proposerSelection(
   const selection: Record<string, string> = {};
   for (const occurrence of occurrences) {
     const choix = choisirPourOccurrence(occurrence, preferences, favoris);
-    if (choix !== null) selection[choix.slotId] = choix.optionId;
+    if (choix !== null) {
+      selection[choix.slotId] = choix.optionId;
+      continue;
+    }
+    // ⚠️ N1.7 — « RIEN » N'EST JAMAIS PRÉFÉRÉ À UN ALIMENT, il n'arrive QUE
+    // là où aucun aliment n'est possible. La proposition rapide propose un
+    // aliment ; ce repli ne s'ouvre que sur une occurrence FACULTATIVE dont
+    // pas une seule option n'est utilisable — le cas qui, avant ce lot,
+    // laissait le repas définitivement incomposable, sans que l'élève puisse
+    // rien y faire. Répondre « rien » là où le coach a dit que c'était permis
+    // est la seule sortie honnête.
+    if (occurrence.peutEtreIgnoree) selection[occurrence.id] = RIEN;
   }
   return Object.keys(selection).length === 0 ? AUCUNE_SELECTION : selection;
 }

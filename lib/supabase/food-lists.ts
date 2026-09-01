@@ -103,6 +103,11 @@ export interface FoodListSummary {
    * ⚠️ ELLE NE PORTE AUCUN SENS NUTRITIONNEL. Aucun calcul ne la lit.
    */
   readonly colorKey: ColorKey | null;
+  /**
+   * N1.7 — l'élève peut répondre « Rien » aux occurrences issues de cette
+   * liste. Réglage VIVANT : les repas déjà construits gardent leur copie figée.
+   */
+  readonly peutEtreIgnoree: boolean;
 }
 
 /** Un aliment d'une liste, résolu contre sa source vivante. */
@@ -146,6 +151,8 @@ export interface FoodListDetail {
   readonly items: readonly FoodListItem[];
   /** N1.6A — voir `FoodListSummary.colorKey`. Purement visuelle. */
   readonly colorKey: ColorKey | null;
+  /** N1.7 — voir `FoodListSummary.peutEtreIgnoree`. */
+  readonly peutEtreIgnoree: boolean;
 }
 
 /** Le résultat d'un ajout — « déjà présent » n'est PAS une erreur. */
@@ -155,6 +162,7 @@ interface LigneListe {
   id: string;
   name: string;
   color_key?: string | null;
+  peut_etre_ignoree?: boolean | null;
   archived_at: string | null;
   updated_at: string;
 }
@@ -187,7 +195,7 @@ export async function listerFoodLists(
 ): Promise<readonly FoodListSummary[]> {
   const requête = supabase
     .from("food_lists")
-    .select("id, name, archived_at, updated_at, color_key")
+    .select("id, name, archived_at, updated_at, color_key, peut_etre_ignoree")
     .order("name", { ascending: true });
 
   const { data, error } = options.avecArchivees
@@ -219,6 +227,9 @@ export async function listerFoodLists(
     updatedAt: l.updated_at,
     nbAliments: compte.get(l.id) ?? 0,
     colorKey: couleurValide(l.color_key),
+    // ⚠️ `=== true` : tout ce qui n'est pas un vrai franc laisse la liste
+    // OBLIGATOIRE. Le défaut sûr ne retire rien au coach.
+    peutEtreIgnoree: l.peut_etre_ignoree === true,
   }));
 }
 
@@ -236,7 +247,7 @@ export async function lireFoodList(
 ): Promise<FoodListDetail | null> {
   const { data: liste, error } = await supabase
     .from("food_lists")
-    .select("id, name, archived_at, updated_at, color_key")
+    .select("id, name, archived_at, updated_at, color_key, peut_etre_ignoree")
     .eq("id", listId)
     .maybeSingle();
   // ⚠️ `null` NE DOIT VOULOIR DIRE QU'UNE SEULE CHOSE : « pas de ligne visible »
@@ -303,7 +314,14 @@ export async function lireFoodList(
     }
   }
 
-  return { id: l.id, name: l.name, archivedAt: l.archived_at, items: resolus, colorKey: couleurValide(l.color_key) };
+  return {
+    id: l.id,
+    name: l.name,
+    archivedAt: l.archived_at,
+    items: resolus,
+    colorKey: couleurValide(l.color_key),
+    peutEtreIgnoree: l.peut_etre_ignoree === true,
+  };
 }
 
 /**
@@ -908,10 +926,38 @@ export async function definirCouleurDeListe(
   return !error;
 }
 
+/**
+ * N1.7 — RENDRE UNE LISTE IGNORABLE, OU LA REDEVENIR OBLIGATOIRE.
+ *
+ * ⚠️ AUCUN EFFET DE BORD, ET SURTOUT AUCUN EFFET RÉTROACTIF. Cette écriture ne
+ * touche ni les aliments de la liste, ni leurs portions, ni leurs minimums, ni
+ * AUCUN repas déjà construit : chaque occurrence porte sa propre copie figée.
+ * Refermer le droit ici n'invalide donc pas les « Rien » déjà enregistrés dans
+ * les repas d'hier — c'est exactement la garantie du snapshot, et c'est voulu.
+ */
+export async function definirListeIgnorable(
+  supabase: TypedSupabaseClient,
+  listId: string,
+  ignorable: boolean,
+): Promise<boolean> {
+  const { error } = await supabase
+    .from("food_lists")
+    .update({ peut_etre_ignoree: ignorable } as never)
+    .eq("id", listId);
+  devWarn("definirListeIgnorable", error);
+  return !error;
+}
+
 export interface SnapshotDeListe {
   readonly label: string;
   readonly sourceListId: string;
   readonly colorKey: ColorKey | null;
+  /**
+   * N1.7 — LE RÉGLAGE EST FIGÉ ICI, au même instant que la couleur et les
+   * portions. Après ce point, rendre la liste ignorable dans la bibliothèque
+   * ne touche plus ce repas.
+   */
+  readonly peutEtreIgnoree: boolean;
   readonly options: readonly ChoiceOption[];
 }
 
@@ -929,6 +975,10 @@ export async function lireSnapshotDeListe(
     // ce point, repeindre la bibliothèque ne touche plus ce repas. Et elle DOIT
     // être figée, parce qu'un élève n'a aucune policy pour lire `food_lists`.
     colorKey: liste.colorKey,
+    // ⚠️ N1.7 — FIGÉ AU MÊME TITRE QUE LA COULEUR, et pour la même raison :
+    // un élève n'a aucune policy `select` sur `food_lists`, donc relire la
+    // bibliothèque plus tard serait impossible autant qu'incorrect.
+    peutEtreIgnoree: liste.peutEtreIgnoree,
     // ⚠️ `displayName` EST POSÉ ICI SANS UNE REQUÊTE DE PLUS : `lireFoodList` a
     // déjà résolu chaque item contre sa source. C'est de l'HYDRATATION, pas du
     // snapshot — l'identité reste seule à voyager vers la base.

@@ -14,6 +14,7 @@ import { StudentPrescribedWeek } from "@/components/student/StudentPrescribedWee
 import type { ItemPourEnregistrement } from "@/components/student/StudentMealChoices";
 import { StatCard } from "@/components/shared/StatCard";
 import { nutritionGoalLabels } from "@/lib/nutrition";
+import { RIEN } from "@/lib/nutrition/meal-choice-selection";
 import { weeklyCaloriesFromDays } from "@/lib/nutrition/plan-v2-week";
 import { WEEKDAY_KEYS, type WeekdayKey } from "@/lib/nutrition/weekdays";
 import { getCurrentWeekDates } from "@/lib/nutrition-weekly";
@@ -93,6 +94,21 @@ export default function NutritionPlanDetailPage() {
         ),
       );
       return items.map((item) => {
+        // ⚠️ N1.7 — « RIEN » TRAVERSE INTACT, IL N'EST PAS RÉSOLU. Chercher
+        // une identité pour une absence rendrait `undefined`, donc deux
+        // identités nulles, donc `IDENTITE_INVALIDE` à l'arrivée. L'occurrence
+        // écartée se déclare telle quelle ; c'est la RPC qui sait quoi en
+        // faire, et seule celle du repas PLANIFIÉ l'accepte.
+        if (item.optionId === RIEN) {
+          return {
+            slotId: item.slotId,
+            catalogFoodId: null,
+            productId: null,
+            quantity: 0,
+            unit: item.unit,
+            ignore: true as const,
+          };
+        }
         const option = parOption.get(item.optionId);
         return {
           slotId: item.slotId,

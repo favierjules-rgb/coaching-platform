@@ -18,6 +18,7 @@ import {
   nomPropre,
   portionEffective,
   definirCouleurDeListe,
+  definirListeIgnorable,
   renommerFoodList,
   reordonnerFoodList,
   retirerAlimentDeListe,
@@ -190,6 +191,38 @@ export function FoodListEditor({
           />
           <span className="text-[11px] text-muted-foreground">
             Repère visuel uniquement — sans effet sur les quantités calculées.
+          </span>
+        </div>
+
+        {/* ── N1.7 — LA LISTE PEUT-ELLE ÊTRE IGNORÉE ? ─────────────────
+            ⚠️ LE RÉGLAGE APPARTIENT À LA LISTE, PAS À CHAQUE ALIMENT, et il
+            est placé ici pour que ce soit évident : « Boisson peut être
+            ignorée » est une question qui n'a qu'une réponse. La poser aliment
+            par aliment donnerait des états qui ne veulent rien dire, puisque
+            l'élève ne sert qu'un seul choix.
+
+            ⚠️ ÉCRITURE IMMÉDIATE, comme la couleur : une case à cocher n'a pas
+            d'état intermédiaire à valider.
+
+            ⚠️ ET AUCUN EFFET RÉTROACTIF — la phrase le dit à l'écran. Chaque
+            repas déjà construit porte sa propre copie figée du réglage ; le
+            coach doit pouvoir compter dessus sans lire le code. */}
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
+          <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={liste.peutEtreIgnoree}
+              disabled={occupe}
+              onChange={(e) =>
+                void avec((c) => definirListeIgnorable(c, liste.id, e.target.checked))
+              }
+              className="size-4 accent-primary disabled:cursor-not-allowed"
+            />
+            Peut être ignorée
+          </label>
+          <span className="text-[11px] text-muted-foreground">
+            L&apos;élève pourra répondre « Rien » — les quantités des autres aliments du repas
+            sont alors recalculées. Sans effet sur les repas déjà construits.
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-3">

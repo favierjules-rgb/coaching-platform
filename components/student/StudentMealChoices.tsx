@@ -11,6 +11,10 @@ import {
   type ChoixPersiste,
   calculDuRepas,
   choisirOption,
+  RIEN,
+  estIgnoree,
+  ignorerOccurrence,
+  occurrencesIgnorees,
   optionChoisie,
   optionExploitable,
   progressionDesChoix,
@@ -136,6 +140,15 @@ export function StudentMealChoices({
   readonly validation?: {
     /** La composition DÉJÀ en base, ou `null` si ce repas n'est pas validé. */
     readonly compositionValidee: readonly ChoixPersiste[] | null;
+    /**
+     * N1.7 — LES OCCURRENCES ÉCARTÉES DE LA COMPOSITION EN BASE.
+     *
+     * ⚠️ SANS ELLES, « RIEN » NE SURVIT PAS AU RECHARGEMENT. Elles ne sont
+     * pas dans `compositionValidee` : `planned_meal_items` ne peut pas porter
+     * une absence. L'occurrence reviendrait « pas encore choisie », le repas
+     * repasserait incomplet, et AUCUNE quantité ne serait plus affichée.
+     */
+    readonly compositionValideeIgnorees?: readonly string[];
     readonly enCours: boolean;
     readonly onValider: (items: readonly ItemPourEnregistrement[]) => void;
     /**
@@ -188,13 +201,17 @@ export function StudentMealChoices({
   const titreId = useId();
 
   const composition = validation?.compositionValidee ?? null;
+  const compositionIgnorees = validation?.compositionValideeIgnorees ?? EMPTY_IGNOREES;
   // ⚠️ LA SÉLECTION DE DÉPART. Elle vient de la composition VALIDÉE quand elle
   // existe — et, à défaut seulement, de la proposition du mode Rapide (C1.1),
   // qui n'est écrite nulle part. L'ordre n'est pas négociable : le validé
   // l'emporte toujours sur le proposé.
   const selectionValidee = useMemo(
-    () => (composition === null ? propositionInitiale : selectionDepuisComposition(occurrences, composition)),
-    [occurrences, composition, propositionInitiale],
+    () =>
+      composition === null
+        ? propositionInitiale
+        : selectionDepuisComposition(occurrences, composition, compositionIgnorees),
+    [occurrences, composition, compositionIgnorees, propositionInitiale],
   );
   const selection = brouillon ?? selectionValidee ?? AUCUNE_SELECTION;
 
@@ -202,14 +219,24 @@ export function StudentMealChoices({
     (slotId: string, optionId: string) => {
       // ⚠️ LE PREMIER CLIC PART DE LA SÉLECTION RESTAURÉE, pas d'un objet vide :
       // changer sa protéine ne doit pas effacer son féculent déjà validé.
-      setBrouillon((precedente) =>
-        choisirOption(precedente ?? selectionValidee ?? AUCUNE_SELECTION, slotId, optionId),
-      );
+      setBrouillon((precedente) => {
+        const base = precedente ?? selectionValidee ?? AUCUNE_SELECTION;
+        // ⚠️ N1.7 — « RIEN » PASSE PAR `ignorerOccurrence`, PAS PAR
+        // `choisirOption`. Le bouton n'est rendu que là où c'est permis, mais
+        // l'interface n'est pas le lieu où une règle métier se garde : c'est le
+        // modèle qui relit le snapshot, et lui seul. Si l'occurrence est
+        // redevenue obligatoire, la sélection ressort INCHANGÉE.
+        if (optionId === RIEN) {
+          const occurrence = occurrences.find((o) => o.id === slotId);
+          return occurrence ? ignorerOccurrence(base, occurrence) : base;
+        }
+        return choisirOption(base, slotId, optionId);
+      });
       // Le choix fait, la liste se referme : l'élève voit sa composition, pas
       // dix listes ouvertes les unes sous les autres.
       setOuverte(null);
     },
-    [selectionValidee],
+    [selectionValidee, occurrences],
   );
 
   const progression = progressionDesChoix(occurrences, selection);
@@ -260,6 +287,7 @@ export function StudentMealChoices({
             key={occurrence.id}
             occurrence={occurrence}
             choisie={optionChoisie(occurrence, selection)}
+            ignoree={estIgnoree(selection, occurrence.id)}
             ouverte={ouverte === occurrence.id}
             onBasculer={() => setOuverte(ouverte === occurrence.id ? null : occurrence.id)}
             onChoisir={(optionId) => choisir(occurrence.id, optionId)}
@@ -275,9 +303,21 @@ export function StudentMealChoices({
         </p>
       )}
 
+      {/* ⚠️ N1.7 — UN REPAS ENTIÈREMENT ÉCARTÉ SE DIT, IL NE SE CALCULE PAS.
+          Il n'est pas « incomplet » : l'élève a répondu à chaque liste. Il
+          n'est pas « non calculable » non plus : rien n'est cassé. Il ne
+          contient simplement aucun aliment, et un système sans une seule
+          variable n'a pas de solution — pas même une mauvaise. */}
+      {calcul.etat === "vide" && (
+        <p className="rounded-control border border-border bg-card px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+          Tu n&apos;as retenu aucun aliment pour ce repas. Aucune quantité n&apos;est calculée.
+        </p>
+      )}
+
       {calcul.etat === "calcule" && (
         <QuantitesDuRepas
           solution={calcul.solution}
+          ignorees={occurrencesIgnorees(occurrences, selection)}
           enregistrement={enregistrement}
           validation={
             validation === null
@@ -336,10 +376,23 @@ export function StudentMealChoices({
  */
 export function QuantitesDuRepas({
   solution,
+  ignorees = [],
   enregistrement = null,
   validation = null,
 }: {
   readonly solution: MealChoiceSolution;
+  /**
+   * N1.7 — les occurrences auxquelles l'élève a répondu « Rien ».
+   *
+   * ⚠️ OPTIONNELLE, ET LE DÉFAUT EST LE SEUL QUI AIT UN SENS : un repas sans
+   * occurrence écartée. C'était l'état de TOUS les repas avant ce lot, et
+   * c'est ce que dit un tableau vide.
+   *
+   * ⚠️ L'OUBLIER NE CASSE RIEN EN SILENCE, et c'est ce qui rend l'option
+   * acceptable : la RPC exige toutes les occurrences du repas, donc un envoi
+   * amputé d'un « rien » est REFUSÉ (`OCCURRENCE_MANQUANTE`), bruyamment.
+   */
+  readonly ignorees?: readonly string[];
   readonly enregistrement?: {
     readonly dejaEnregistre: boolean;
     readonly enCours: boolean;
@@ -499,12 +552,24 @@ export function QuantitesDuRepas({
                 disabled={validation.enCours}
                 onClick={() =>
                   validation.onValider(
-                    solution.items.map((item) => ({
-                      slotId: item.slotId,
-                      optionId: item.optionId,
-                      quantity: item.displayQuantity,
-                      unit: item.unit,
-                    })),
+                    [
+                      ...solution.items.map((item) => ({
+                        slotId: item.slotId,
+                        optionId: item.optionId,
+                        quantity: item.displayQuantity,
+                        unit: item.unit,
+                      })),
+                      // ⚠️ N1.7 — LES OCCURRENCES ÉCARTÉES PARTENT AUSSI, ET
+                      // C'EST OBLIGATOIRE. La RPC exige TOUTES les occurrences
+                      // du repas, exactement une fois chacune : sans elles,
+                      // elle lèverait `OCCURRENCE_MANQUANTE`.
+                      ...ignorees.map((slotId) => ({
+                        slotId,
+                        optionId: RIEN,
+                        quantity: 0,
+                        unit: "g" as const,
+                      })),
+                    ],
                   )
                 }
                 className="pressable flex min-h-[44px] w-full items-center justify-center gap-2 rounded-control border border-border bg-card px-4 py-2 text-xs font-bold uppercase tracking-widest text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
@@ -545,12 +610,24 @@ export function QuantitesDuRepas({
               disabled={enregistrement.enCours}
               onClick={() =>
                 enregistrement.onEnregistrer(
-                  solution.items.map((item) => ({
-                    slotId: item.slotId,
-                    optionId: item.optionId,
-                    quantity: item.displayQuantity,
-                    unit: item.unit,
-                  })),
+                  // ⚠️ N1.7 — LE CHEMIN CONSOMMÉ REÇOIT LES « RIEN » LUI
+                  // AUSSI : c'est `enregistrerRepasStructure` qui les écarte,
+                  // en un seul endroit. Les filtrer ici aussi ferait deux
+                  // règles pour la même décision.
+                  [
+                    ...solution.items.map((item) => ({
+                      slotId: item.slotId,
+                      optionId: item.optionId,
+                      quantity: item.displayQuantity,
+                      unit: item.unit,
+                    })),
+                    ...ignorees.map((slotId) => ({
+                      slotId,
+                      optionId: RIEN,
+                      quantity: 0,
+                      unit: "g" as const,
+                    })),
+                  ],
                 )
               }
               className="pressable flex min-h-[44px] w-full items-center justify-center gap-2 rounded-control border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
@@ -587,6 +664,13 @@ export function QuantitesDuRepas({
  * `catalog_food_id` / `product_id` : cet écran ne connaît que ce que le
  * solveur lui a rendu, et inventer une identité ici serait la deviner.
  */
+/**
+ * ⚠️ RÉFÉRENCE STABLE, ET CE N'EST PAS DE LA COQUETTERIE. Un `[]` littéral dans
+ * la valeur par défaut serait un nouvel objet à chaque rendu : le `useMemo` de
+ * la sélection validée se recalculerait sans fin.
+ */
+const EMPTY_IGNOREES: readonly string[] = Object.freeze([]);
+
 export interface ItemPourEnregistrement {
   readonly slotId: string;
   readonly optionId: string;
@@ -657,6 +741,7 @@ function ligneMacros(macros: {
 function LigneChoix({
   occurrence,
   choisie,
+  ignoree,
   ouverte,
   onBasculer,
   onChoisir,
@@ -664,6 +749,8 @@ function LigneChoix({
 }: {
   readonly occurrence: MealChoiceSlot;
   readonly choisie: ReturnType<typeof optionChoisie>;
+  /** N1.7 — l'élève a répondu « Rien » à cette occurrence. */
+  readonly ignoree: boolean;
   readonly ouverte: boolean;
   readonly onBasculer: () => void;
   readonly onChoisir: (optionId: string) => void;
@@ -689,12 +776,21 @@ function LigneChoix({
         <span className="flex min-w-0 flex-col">
           <span className="truncate text-sm font-bold text-foreground">{occurrence.label}</span>
           <span className="truncate text-xs text-muted-foreground">
-            {choisie ? (choisie.displayName ?? "Aliment indisponible") : "Aucun choix"}
+            {/* ⚠️ N1.7 — TROIS ÉTATS, TROIS PHRASES. « Rien » n'est pas
+                « Aucun choix » : le premier est une décision de l'élève, le
+                second une case encore vide. Les afficher pareil rendrait la
+                fonctionnalité invisible — l'élève ne saurait pas s'il a
+                répondu. */}
+            {ignoree
+              ? "Rien"
+              : choisie
+                ? (choisie.displayName ?? "Aliment indisponible")
+                : "Aucun choix"}
           </span>
         </span>
         <span className="flex flex-shrink-0 items-center gap-2">
           <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
-            {choisie ? "Modifier" : "Choisir"}
+            {choisie || ignoree ? "Modifier" : "Choisir"}
           </span>
           <ChevronRight
             size={16}
@@ -712,6 +808,37 @@ function LigneChoix({
           aria-label={occurrence.label}
           className="flex min-w-0 flex-col gap-1 border-t border-border p-2"
         >
+          {/* ── N1.7 — « RIEN », ET SEULEMENT LÀ OÙ LE COACH L'A PERMIS ──
+              ⚠️ ELLE EST DANS LE MÊME `radiogroup` QUE LES ALIMENTS, et c'est
+              tout l'intérêt : « rien » est une RÉPONSE à la question posée,
+              pas une échappatoire à côté. Un bouton séparé aurait laissé
+              croire qu'on annule le choix, alors qu'on en fait un.
+
+              ⚠️ ABSENTE SUR UNE OCCURRENCE OBLIGATOIRE. Pas grisée : absente.
+              Une option désactivée inviterait à cliquer là où le coach a dit
+              non, et il faudrait alors expliquer un refus. */}
+          {occurrence.peutEtreIgnoree && (
+            <button
+              type="button"
+              role="radio"
+              aria-checked={ignoree}
+              onClick={() => onChoisir(RIEN)}
+              className="pressable flex min-h-[44px] w-full min-w-0 items-center gap-2 rounded-control px-3 py-2 text-left transition-colors hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            >
+              <span
+                aria-hidden="true"
+                className={`flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border ${
+                  ignoree ? "border-primary bg-primary text-primary-foreground" : "border-border"
+                }`}
+              >
+                {ignoree && <Check size={10} />}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-sm italic text-muted-foreground">
+                Rien
+              </span>
+            </button>
+          )}
+
           {occurrence.options.map((option) => {
             const exploitable = optionExploitable(option);
             const selectionnee = choisie?.optionId !== undefined && choisie.optionId === option.optionId;
