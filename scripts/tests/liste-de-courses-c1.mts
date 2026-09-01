@@ -98,6 +98,7 @@ const OCC_PROTEINE: MealChoiceSlot = {
   label: "Ta protéine",
   sourceListId: "liste-p",
   colorKey: "red",
+  peutEtreIgnoree: false,
   options: [
     { type: "aliment", id: "food-poulet", optionId: "opt-poulet", displayName: "Poulet" },
     { type: "produit", id: "prod-poulet", optionId: "opt-poulet-marque", displayName: "MarqueX — Poulet" },
@@ -108,6 +109,7 @@ const OCC_FECULENT: MealChoiceSlot = {
   label: "Ton féculent",
   sourceListId: "liste-f",
   colorKey: "yellow",
+  peutEtreIgnoree: false,
   options: [{ type: "aliment", id: "food-riz", optionId: "opt-riz", displayName: "Riz" }],
 };
 

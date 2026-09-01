@@ -110,7 +110,7 @@ function semaineAvecRepas(): { state: WeekFormState; mealId: string } {
 
 const occurrenceDe = (label: string, ...ids: string[]): Omit<MealChoiceSlot, "id"> => ({
   label,
-  sourceListId: null, colorKey: null,
+  sourceListId: null, colorKey: null, peutEtreIgnoree: false,
   options: ids.map((id) => ({ type: "aliment" as const, id })),
 });
 
@@ -168,13 +168,17 @@ await test("N1.3-04/05/06. les options n'ont QUE des identités : ni nom, ni mac
 
   const occurrences = repas.choice_slots as readonly Record<string, unknown>[];
   assert.equal(occurrences.length, 1);
-  // ⚠️ CINQ CLÉS DEPUIS N1.6A, ET PAS UNE DE PLUS. L'identifiant, le libellé,
-  // la liste source, les options — et la COULEUR, qui est du SNAPSHOT au même
-  // titre que la portion préférée : sans elle, un ré-enregistrement effacerait
-  // la couleur du repas. Elle ne porte AUCUN sens nutritionnel ; le contrôle
-  // `COLOR-06` vérifie que le solveur ne la reçoit jamais.
+  // ⚠️ SIX CLÉS DEPUIS N1.7, ET PAS UNE DE PLUS. L'identifiant, le libellé,
+  // la liste source, les options — la COULEUR, qui est du SNAPSHOT au même
+  // titre que la portion préférée — et, depuis N1.7, `peut_etre_ignoree`.
+  //
+  // ⚠️ CETTE DERNIÈRE EST DU SNAPSHOT POUR LA MÊME RAISON QUE LA COULEUR :
+  // sans elle, un simple ré-enregistrement de la semaine rendrait obligatoires
+  // toutes les occurrences que le coach avait rendues facultatives. Et comme
+  // la couleur, elle ne porte AUCUN sens nutritionnel — le solveur ne la
+  // reçoit jamais, il ne voit que les aliments réellement retenus.
   assert.deepEqual(Object.keys(occurrences[0]).sort(),
-    ["color_key", "id", "label", "options", "source_list_id"]);
+    ["color_key", "id", "label", "options", "peut_etre_ignoree", "source_list_id"]);
 
   const options = occurrences[0].options as readonly Record<string, unknown>[];
   for (const option of options) {
