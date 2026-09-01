@@ -303,6 +303,21 @@ await test("CONTRACT-07. le CONTRACT s'applique en DERNIER — l'ordre de rollou
       // La boucle ci-dessous ne cherche donc plus la chaîne, mais la
       // DÉPENDANCE À LA COLONNE — voir son commentaire.
       "20260920090000_n1_7_listes_ignorables.sql",
+      // ⚠️ N1.7.1 — LE CORRECTIF DE CONSOMMATION, ET C'EST LA PLUS ÉTROITE DU
+      // LOT : elle redonne UNE fonction, avec UN `continue` de plus.
+      //
+      // Contrairement à N1.7, elle ne reproduit PAS `save_nutrition_plan_v2` —
+      // seulement `enregistrer_repas_structure_consomme`. Mesuré sur le
+      // fichier, code dépouillé de sa prose :
+      //   · `preferred_unit` : ZÉRO occurrence, pas même comme clé JSON ;
+      //   · aucune table créée ni altérée, aucune colonne, aucune contrainte,
+      //     aucune policy — le test 22 de `nutrition-liste-ignorable` rejoue
+      //     cette preuve à chaque exécution ;
+      //   · `quantity_unit` et `meal_choice_options` : ABSENTS.
+      //
+      // Elle est donc hors de portée du CONTRACT : elle ne dit rien d'une
+      // unité, elle dit qu'une absence ne produit aucune entrée alimentaire.
+      "20260921090000_n1_7_1_consommer_avec_rien.sql",
     ],
     "une migration postérieure au CONTRACT n'a pas été déclarée sûre",
   );

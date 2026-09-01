@@ -92,7 +92,8 @@
     "20260917090000_c4_1_pont_retail.sql",
     "20260918090000_c4_2_magasins.sql",
     "20260919090000_c4_3c_magasins_osm.sql",
-    "20260920090000_n1_7_listes_ignorables.sql"
+    "20260920090000_n1_7_listes_ignorables.sql",
+    "20260921090000_n1_7_1_consommer_avec_rien.sql"
   ],
   "garanties_de_contenu": {
     "insert_de_donnees_metier": 0,

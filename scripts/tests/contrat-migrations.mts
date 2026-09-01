@@ -108,6 +108,16 @@ export const MIGRATION_C4_3C = "20260919090000_c4_3c_magasins_osm.sql";
  */
 export const MIGRATION_N1_7 = "20260920090000_n1_7_listes_ignorables.sql";
 
+/**
+ * N1.7.1 — LE CORRECTIF DE CONSOMMATION.
+ *
+ * ⚠️ UNE SECONDE MIGRATION POUR LE MÊME CHANTIER, ET ELLE EST INSCRITE À PART
+ * PLUTÔT QUE FONDUE DANS N1.7. Celle-ci ne pouvait pas modifier la première :
+ * N1.7 est DÉJÀ APPLIQUÉE sur la base distante, et réécrire une migration
+ * jouée est le seul geste que ce dépôt s'interdit sans exception.
+ */
+export const MIGRATION_N1_7_1 = "20260921090000_n1_7_1_consommer_avec_rien.sql";
+
 export const MIGRATIONS_COURSES: readonly string[] = [
   MIGRATION_C2,
   MIGRATION_C3,
@@ -124,10 +134,14 @@ export const MIGRATIONS_COURSES: readonly string[] = [
  * rougit toujours : la garantie est intacte, elle a seulement cessé de
  * supposer que le dernier chantier du dépôt serait éternellement COURSES.
  */
-export const MIGRATIONS_APRES_C0_1: readonly string[] = [...MIGRATIONS_COURSES, MIGRATION_N1_7];
+export const MIGRATIONS_APRES_C0_1: readonly string[] = [
+  ...MIGRATIONS_COURSES,
+  MIGRATION_N1_7,
+  MIGRATION_N1_7_1,
+];
 
 /** Le compte attendu — nécessaire, jamais suffisant. */
-export const NOMBRE_DE_MIGRATIONS = 86;
+export const NOMBRE_DE_MIGRATIONS = 87;
 
 /**
  * L'empreinte des 79 migrations ANTÉRIEURES à C0.1, dans l'ordre.

@@ -492,15 +492,44 @@ await test("14. une occurrence écartée n'achète RIEN", () => {
   );
 });
 
-await test("15. le chemin CONSOMMÉ écarte les « rien » — une absence ne se mange pas", () => {
+await test("15. le chemin CONSOMMÉ NE FILTRE PLUS — la régression exacte de la Preview", () => {
+  /*
+   * ⚠️ CE TEST DISAIT L'INVERSE, ET IL AVAIT TORT. Sa version précédente
+   * EXIGEAIT le filtre `.filter((item) => item.ignore !== true)` — au motif que
+   * « la RPC de consommation n'a aucune branche pour recevoir une occurrence
+   * écartée ». C'était faux : elle DÉLÈGUE à `enregistrer_repas_planifie`, qui
+   * exige TOUTES les occurrences. Le filtre faisait donc échouer
+   * l'enregistrement avec CHOIX_INCOMPLET, et ce test-ci le GARDAIT en place.
+   *
+   * Un test peut épingler une erreur aussi solidement qu'une vérité. Celui-ci
+   * garde désormais la propriété inverse : le filtre ne doit PAS revenir.
+   *
+   * « Une absence ne se mange pas » reste vrai — c'est la RPC qui le porte
+   * maintenant (test 21), et c'est le bon endroit : un garde-fou métier vit en
+   * base, pas dans un `.map()` de client.
+   */
   const source = readFileSync(new URL("../../lib/supabase/consumed-meals.ts", import.meta.url), "utf8");
   const propre = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
   const debut = propre.indexOf("export async function enregistrerRepasStructure(");
   assert.ok(debut > 0, "la fonction de consommation existe");
-  const bloc = propre.slice(debut, debut + 1200);
+  const bloc = propre.slice(debut, debut + 1400);
+
+  // ⚠️ `[^)]*` NE MARCHE PAS ICI, ET LE SABOTAGE L'A PROUVÉ. Le filtre s'écrit
+  // `.filter((item) => item.ignore !== true)` : la parenthèse fermante de
+  // `(item)` arrête la classe négative AVANT le mot `ignore`, et la garde
+  // laissait donc revenir exactement ce qu'elle devait interdire. On regarde
+  // une FENÊTRE après `.filter(`, sans essayer d'équilibrer des parenthèses.
+  for (const t of bloc.matchAll(/\.filter\(/g)) {
+    const fenetre = bloc.slice(t.index, t.index + 80);
+    assert.ok(
+      !fenetre.includes("ignore"),
+      `le filtre des « rien » ne doit PAS revenir — il fait lever CHOIX_INCOMPLET : ${fenetre.slice(0, 60)}`,
+    );
+  }
+  assert.ok(/item\.ignore/.test(bloc), "l'occurrence écartée doit être ÉMISE, marquée ignore");
   assert.ok(
-    /\.filter\(\(item\) => item\.ignore !== true\)/.test(bloc),
-    "la RPC de consommation ne reçoit JAMAIS une occurrence écartée : elle n'a aucune branche pour la recevoir",
+    /\{ slot_id: item\.slotId, ignore: true \}/.test(bloc),
+    "et émise sans identité ni quantité",
   );
 });
 
@@ -577,6 +606,105 @@ await test("19. la RPC refuse « rien » sur une occurrence non ignorable", () =
     /FUNCTION public\.enregistrer_repas_planifie\(p_meal_id uuid, p_planned_on date, p_items jsonb\)/.test(MIGRATION),
     "la signature de la RPC est inchangée",
   );
+});
+
+/* ═══════ 20-22. LE REPAS CONSOMMÉ — LE DÉFAUT DE LA PREVIEW ═══════ */
+
+await test("20. ENREGISTRER LE REPAS transmet l'occurrence écartée — pas de CHOIX_INCOMPLET", async () => {
+  /*
+   * ⚠️ LE CAS EXACT CONSTATÉ SUR LA PREVIEW : « Sucrants » à Rien, les trois
+   * autres aliments calculés, et l'enregistrement qui échoue.
+   *
+   * Le chemin CONSOMMÉ filtrait les « rien » avant l'appel, en affirmant que
+   * cette RPC n'avait aucune branche pour les recevoir. Elle DÉLÈGUE à
+   * `enregistrer_repas_planifie`, qui exige TOUTES les occurrences du repas :
+   * l'occurrence retirée faisait lever CHOIX_INCOMPLET.
+   *
+   * ⚠️ ON MESURE LE PAYLOAD, PAS LE RETOUR. C'est là que la donnée se perdait,
+   * et un faux client qui rendrait « ok » ne prouverait rien.
+   */
+  const { enregistrerRepasStructure } = await import("@/lib/supabase/consumed-meals");
+  const OCCURRENCES = ["s1", "s2", "s3"];
+  let envoye: { p_items?: readonly Record<string, unknown>[] } | null = null;
+  const faux = {
+    rpc: (_nom: string, args: { p_items?: readonly Record<string, unknown>[] }) => {
+      envoye = args;
+      return Promise.resolve({ data: {}, error: null });
+    },
+  };
+
+  await enregistrerRepasStructure(faux as never, "m1", "2026-09-21", [
+    { slotId: "s1", catalogFoodId: "f-pain", productId: null, quantity: 229, unit: "g" },
+    { slotId: "s2", catalogFoodId: "f-oeuf", productId: null, quantity: 82, unit: "g" },
+    { slotId: "s3", catalogFoodId: null, productId: null, quantity: 0, unit: "g", ignore: true },
+  ]).catch(() => {});
+
+  const items = (envoye as { p_items?: readonly Record<string, unknown>[] } | null)?.p_items ?? [];
+  const slots = items.map((i) => i.slot_id as string).sort();
+  assert.deepEqual(slots, OCCURRENCES, "TOUTES les occurrences doivent partir, « rien » compris");
+
+  const ecartee = items.find((i) => i.slot_id === "s3");
+  assert.equal(ecartee?.ignore, true, "l'occurrence écartée porte ignore:true");
+  // ⚠️ ET AUCUNE IDENTITÉ, AUCUNE QUANTITÉ. Les envoyer à zéro ferait lever
+  // IDENTITE_INVALIDE puis QUANTITE_INVALIDE : la base refuse, à juste titre,
+  // un aliment qui n'en est pas un.
+  assert.equal(ecartee?.catalog_food_id, undefined, "aucune identité — une absence n'en a pas");
+  assert.equal(ecartee?.quantity, undefined, "aucune quantité non plus");
+
+  // Les aliments réels, eux, partent complets.
+  const pain = items.find((i) => i.slot_id === "s1");
+  assert.equal(pain?.catalog_food_id, "f-pain");
+  assert.equal(pain?.quantity, 229);
+});
+
+await test("21. la RPC de consommation SAUTE les occurrences écartées", () => {
+  /*
+   * ⚠️ LA MOITIÉ BASE DE LA PAIRE. Renvoyer l'occurrence sans toucher à la RPC
+   * aurait seulement changé le motif de l'erreur : après la délégation, cette
+   * fonction reboucle sur `p_items` pour créer les `meal_entries`. Un item sans
+   * identité tombait dans la branche « produit », `p.id = null` ne trouvait
+   * rien, et elle levait PRODUIT_INACCESSIBLE.
+   */
+  const migration = readFileSync(
+    new URL("../../supabase/migrations/20260921090000_n1_7_1_consommer_avec_rien.sql", import.meta.url),
+    "utf8",
+  );
+  assert.ok(
+    /if coalesce\(\(v_item ->> 'ignore'\)::boolean, false\) then\s+continue;/.test(migration),
+    "la boucle des entrées doit sauter les items marqués ignore",
+  );
+  // ⚠️ ET LE SAUT EST AVANT LA LECTURE DES IDENTITÉS, sinon il ne sert à rien.
+  //
+  // ⚠️ ON DÉPOUILLE LES COMMENTAIRES AVANT DE MESURER L'ORDRE. Une première
+  // version comparait deux `indexOf` sur le fichier BRUT : le mot
+  // `catalog_food_id` figure dans la prose qui EXPLIQUE le saut, donc il
+  // apparaissait avant le `continue` et le test rougissait sur son propre
+  // commentaire. On mesure ce qu'on croit mesurer.
+  const codeSeul = migration.replace(/--[^\n]*/g, " ");
+  const boucle = codeSeul.slice(codeSeul.indexOf("for v_item in select * from jsonb_array_elements(p_items) loop"));
+  assert.ok(
+    boucle.indexOf("continue;") < boucle.indexOf("catalog_food_id"),
+    "le saut doit précéder la lecture de l'identité",
+  );
+  // ⚠️ AUCUNE AUTRE FONCTION REDONNÉE : réécrire `enregistrer_repas_planifie`
+  // ici risquerait d'écraser sa version N1.7 par une copie périmée.
+  assert.equal(
+    (migration.match(/CREATE OR REPLACE FUNCTION/g) ?? []).length,
+    1,
+    "la migration ne redonne qu'UNE fonction",
+  );
+  assert.ok(!/enregistrer_repas_planifie\(p_meal_id uuid/.test(migration), "et ce n'est pas la RPC planifiée");
+});
+
+await test("22. le correctif N1.7.1 ne touche NI table NI contrainte NI policy", () => {
+  const migration = readFileSync(
+    new URL("../../supabase/migrations/20260921090000_n1_7_1_consommer_avec_rien.sql", import.meta.url),
+    "utf8",
+  );
+  const code = migration.replace(/--[^\n]*/g, " ");
+  for (const interdit of [/create table/i, /alter table/i, /drop /i, /create policy/i, /add column/i]) {
+    assert.ok(!interdit.test(code), `la migration ne doit rien contenir de ${interdit}`);
+  }
 });
 
 console.log(`\n${réussis} réussis, ${échecs} échecs`);

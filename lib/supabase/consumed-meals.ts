@@ -683,21 +683,31 @@ export async function enregistrerRepasStructure(
   }>(supabase, "enregistrer_repas_structure_consomme", {
     p_meal_id: mealId,
     p_consumed_on: date,
-    // ⚠️ N1.7 — LES OCCURRENCES ÉCARTÉES NE PARTENT PAS EN CONSOMMATION, ET
-    // C'EST LA SEULE RÉPONSE JUSTE. Une absence ne se mange pas : elle ne
-    // produit aucune entrée alimentaire, aucune macro, aucun gramme. Le repas
-    // PLANIFIÉ garde sa trace (`planned_meal_skipped_slots`) parce qu'elle
-    // décrit une composition ; le repas CONSOMMÉ n'a rien à en dire, et cette
-    // RPC-ci n'a d'ailleurs aucune branche pour la recevoir.
-    p_items: items
-      .filter((item) => item.ignore !== true)
-      .map((item) => ({
-        slot_id: item.slotId,
-        catalog_food_id: item.catalogFoodId,
-        product_id: item.productId,
-        quantity: item.quantity,
-        unit: item.unit,
-      })),
+    // ⚠️ N1.7.1 — L'OCCURRENCE ÉCARTÉE PART, ELLE AUSSI. CORRECTIF D'UNE
+    // ERREUR DE CE MÊME FICHIER : la version précédente la FILTRAIT, en
+    // affirmant que « cette RPC-ci n'a aucune branche pour la recevoir ».
+    // C'était faux, et mesuré sur la Preview : `enregistrer_repas_structure_consomme`
+    // DÉLÈGUE à `enregistrer_repas_planifie` en lui passant `p_items` tel quel,
+    // et celle-ci exige TOUTES les occurrences du repas. L'occurrence retirée
+    // faisait donc lever CHOIX_INCOMPLET, et l'élève ne pouvait plus
+    // enregistrer un repas dont il avait écarté une liste.
+    //
+    // ⚠️ « ELLE NE SE MANGE PAS » RESTE VRAI, et c'est la RPC qui le porte
+    // désormais : depuis N1.7.1, sa boucle d'entrées saute les items marqués
+    // `ignore`. Aucune `meal_entries`, aucune macro, aucun gramme — mais
+    // l'occurrence est CITÉE, ce qui est la seule façon de dire « j'ai
+    // répondu, et ma réponse est rien ».
+    p_items: items.map((item) =>
+      item.ignore
+        ? { slot_id: item.slotId, ignore: true }
+        : {
+            slot_id: item.slotId,
+            catalog_food_id: item.catalogFoodId,
+            product_id: item.productId,
+            quantity: item.quantity,
+            unit: item.unit,
+          },
+    ),
   });
   return {
     plannedMealId: brut.planned_meal_id,
