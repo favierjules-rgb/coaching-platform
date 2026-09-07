@@ -16,6 +16,7 @@ import { StudentOnboardingDetailModal } from "@/components/student/StudentOnboar
 import { SubscriptionSection } from "@/components/student/SubscriptionSection";
 import { WeightEvolutionCard } from "@/components/student/WeightEvolutionCard";
 import { SectionIndisponible } from "@/components/pwa/SectionIndisponible";
+import { NolioConnexionCard } from "@/components/student/NolioConnexionCard";
 import { NotificationsSection } from "@/components/student/NotificationsSection";
 import { useEtatOfflineEleve } from "@/hooks/useEtatOfflineEleve";
 import { useStudentProfile, type StudentProfileState } from "@/hooks/useStudentProfile";
@@ -144,6 +145,10 @@ export function ProfilPageContent({
 
         <div className="mb-6">
           <ChangePasswordSection />
+        </div>
+
+        <div className="mb-6">
+          <NolioConnexionCard />
         </div>
 
         <NewsletterPreferenceToggle />

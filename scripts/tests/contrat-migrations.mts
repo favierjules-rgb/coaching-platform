@@ -118,6 +118,17 @@ export const MIGRATION_N1_7 = "20260920090000_n1_7_listes_ignorables.sql";
  */
 export const MIGRATION_N1_7_1 = "20260921090000_n1_7_1_consommer_avec_rien.sql";
 
+/**
+ * C5.1 — LA CONNEXION NOLIO DE L'ÉLÈVE.
+ *
+ * ⚠️ PREMIÈRE MIGRATION D'UN CHANTIER QUI N'EST NI COURSES NI NUTRITION, et
+ * elle est inscrite ici pour la même raison que les précédentes : la règle du
+ * contrat n'est pas « les migrations appartiennent à tel chantier », c'est
+ * « aucune migration n'existe sans avoir été nommée ». Elle crée
+ * `nolio_connections` — une table neuve, aucune table existante n'est touchée.
+ */
+export const MIGRATION_C5_1 = "20260922090000_c5_1_connexions_nolio.sql";
+
 export const MIGRATIONS_COURSES: readonly string[] = [
   MIGRATION_C2,
   MIGRATION_C3,
@@ -138,10 +149,11 @@ export const MIGRATIONS_APRES_C0_1: readonly string[] = [
   ...MIGRATIONS_COURSES,
   MIGRATION_N1_7,
   MIGRATION_N1_7_1,
+  MIGRATION_C5_1,
 ];
 
 /** Le compte attendu — nécessaire, jamais suffisant. */
-export const NOMBRE_DE_MIGRATIONS = 87;
+export const NOMBRE_DE_MIGRATIONS = 88;
 
 /**
  * L'empreinte des 79 migrations ANTÉRIEURES à C0.1, dans l'ordre.

@@ -318,6 +318,18 @@ await test("CONTRACT-07. le CONTRACT s'applique en DERNIER — l'ordre de rollou
       // Elle est donc hors de portée du CONTRACT : elle ne dit rien d'une
       // unité, elle dit qu'une absence ne produit aucune entrée alimentaire.
       "20260921090000_n1_7_1_consommer_avec_rien.sql",
+      // ⚠️ C5.1 — LA CONNEXION NOLIO, ET ELLE NE PARLE PAS D'ALIMENTS DU TOUT.
+      //
+      // Elle ne redonne aucune fonction, ne touche à aucune table existante :
+      // elle CRÉE `nolio_connections` et une vue de lecture. Mesuré sur le
+      // fichier, code dépouillé de sa prose :
+      //   · `preferred_unit` : ZÉRO occurrence, pas même comme clé JSON ;
+      //   · `quantity_unit` et `meal_choice_options` : ABSENTS ;
+      //   · aucun `alter table` sur une table du domaine nutrition.
+      //
+      // Elle est donc hors de portée du CONTRACT par construction, et non par
+      // tolérance : rien de ce qu'elle écrit ne peut exprimer une unité.
+      "20260922090000_c5_1_connexions_nolio.sql",
     ],
     "une migration postérieure au CONTRACT n'a pas été déclarée sûre",
   );
