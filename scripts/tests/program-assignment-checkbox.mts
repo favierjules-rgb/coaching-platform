@@ -40,6 +40,26 @@ const jules = { id: "eleve-jules", firstName: "Jules", lastName: "Favier", email
 
 const sourceModale = readFileSync(new URL("../../components/admin/AssignStudentsModal.tsx", import.meta.url), "utf8");
 
+/**
+ * Le même source, SANS SES COMMENTAIRES.
+ *
+ * ⚠️ POURQUOI CETTE SECONDE LECTURE. Trois contrôles ci-dessous exigent que
+ * deux appels se SUIVENT — c'est ce qui prouve qu'aucune écriture ne
+ * s'intercale. Ils cherchaient cette adjacence dans le source brut, donc
+ * commentaires compris : documenter la ligne suffisait à les faire rougir.
+ * C'est arrivé au chantier « date de début des programmes » (ab442d9), qui a
+ * inséré un commentaire entre `=>` et `onSetAssignment(` sans rien changer au
+ * chemin d'écriture.
+ *
+ * ⚠️ ON DÉPOUILLE, ON N'ASSOUPLIT PAS. L'adjacence reste exigée, à l'octet
+ * près, sur le CODE. Élargir les motifs à « n'importe quoi entre les deux »
+ * aurait laissé passer une vraie écriture intercalée — exactement ce que ces
+ * contrôles existent pour interdire.
+ */
+const codeModale = sourceModale
+  .replace(/\/\*[\s\S]*?\*\//g, " ")
+  .replace(/(^|[^:])\/\/.*$/gm, "$1 ");
+
 /* ─── Base factice minimale (pattern de student-workout-history.mts) ─── */
 type Ligne = Record<string, unknown>;
 function creerBase() {
@@ -159,7 +179,7 @@ await (async () => {
     // onSetAssignment n'apparaît que DANS le handler du bouton Terminer.
     const occurrences = sourceModale.match(/onSetAssignment\(/g) ?? [];
     assert.equal(occurrences.length, 1, "un seul point d'écriture");
-    assert.ok(/terminerType\(assignedStudentIds, selection, \(studentId, assigned\) =>\s*\n?\s*onSetAssignment\(/.test(sourceModale),
+    assert.ok(/terminerType\(assignedStudentIds, selection, \(studentId, assigned\) =>\s*onSetAssignment\(/.test(codeModale),
       "l'écriture vit dans le diff attendu par Terminer");
     assert.ok(/contentType === "nutrition" \? terminerAssignationUnique : terminerAssignation/.test(sourceModale),
       "seule la nutrition passe par le diff à choix unique");
@@ -168,7 +188,14 @@ await (async () => {
   await test("7. une affectation existante apparaît cochée à l'ouverture (copies comprises)", () => {
     // La sélection est initialisée depuis les assignations à CHAQUE ouverture
     // → fermer puis rouvrir recharge l'état réel.
-    assert.ok(/setSelection\(assignedStudentIds\);\s*\n?\s*setOpen\(true\)/.test(sourceModale),
+    /*
+     * ⚠️ MOTIF TEMPÉRÉ : d'autres initialisations d'ouverture peuvent
+     * s'intercaler (ab442d9 y a ajouté la date de début proposée), mais
+     * AUCUN second `setSelection(` ne le peut. C'est plus strict que la
+     * version précédente, qui exigeait seulement l'adjacence : elle aurait
+     * accepté un `setSelection([])` posé juste après `setOpen(true)`.
+     */
+    assert.ok(/setSelection\(assignedStudentIds\);(?:(?!setSelection\()[\s\S]){0,400}?setOpen\(true\)/.test(codeModale),
       "ouverture = sélection initialisée depuis les assignations existantes");
     // Et un élève individualisé (assignation sur SA copie) apparaît coché :
     assert.deepEqual(mergeAssignedStudentIds(["direct-1"], ["proprio-copie-1", "direct-1"]),
@@ -301,7 +328,22 @@ await (async () => {
     const cochés = mergeAssignedStudentIds([], ["eleve-gaelle"]);
     assert.deepEqual(cochés, ["eleve-gaelle"]);
     const programsSource = readFileSync(new URL("../../lib/supabase/programs.ts", import.meta.url), "utf8");
-    assert.ok(/select\("id, owner_student_id, source_template_id"\)\.in\("source_template_id", programIds\)/.test(programsSource),
+    /*
+     * ⚠️ `\s*` ENTRE LES DEUX APPELS, ET RIEN DE PLUS. Le motif exigeait que
+     * `.select(…)` et `.in(…)` soient collés sur UNE ligne. Ils ont cessé de
+     * l'être le 25/08/2026 au commit 49b98c1, quand la requête est passée
+     * sous `lireToutesLesLignes` et s'est répartie sur deux lignes — la
+     * requête elle-même n'a pas changé d'un caractère, seule sa mise en forme.
+     * Ce contrôle rougissait donc depuis, sans qu'aucune garantie ne soit
+     * perdue.
+     *
+     * ⚠️ LE CONTENU RESTE ÉPINGLÉ À L'OCTET PRÈS : les trois colonnes, leur
+     * ordre, la colonne filtrée et la variable filtrante. Seul l'espace entre
+     * les deux appels devient libre. Élargir davantage — un `[\s\S]*` par
+     * exemple — aurait laissé un `.eq()` ou un `.limit()` s'intercaler sans
+     * que ce test s'en aperçoive.
+     */
+    assert.ok(/select\("id, owner_student_id, source_template_id"\)\s*\.in\("source_template_id", programIds\)/.test(programsSource),
       "loadPrograms interroge réellement les copies individuelles");
     assert.ok(/keepCopiesWithActiveAssignment\(/.test(programsSource) && /liens actifs des copies/.test(programsSource),
       "seules les copies au lien assignments ACTIF participent aux cases cochées");
@@ -325,7 +367,18 @@ await (async () => {
     assert.ok(/\{saving \? "Enregistrement…" : "Terminer"\}/.test(sourceModale), "état de chargement visible");
     // Et le hook d'écriture REND sa promesse (plus de fire-and-forget).
     const hook = readFileSync(new URL("../../hooks/useContentAssignment.ts", import.meta.url), "utf8");
-    assert.ok(/return write\(supabase, studentId, contentId, assigned\)\.then/.test(hook),
+    const codeHook = hook.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/.*$/gm, "$1 ");
+    /*
+     * ⚠️ LES QUATRE PREMIERS ARGUMENTS, DANS L'ORDRE, ET LE `.then` CHAÎNÉ
+     * SUR LE RETOUR. Le motif tolère un appel réparti sur plusieurs lignes et
+     * des arguments SUPPLÉMENTAIRES (ab442d9 en a ajouté un cinquième, la
+     * date de début), mais rien d'autre : `[^;]*?` interdit qu'une
+     * instruction se glisse entre l'appel et son `.then`, donc qu'on revienne
+     * à un `write(...)` lancé puis oublié. La garantie — la modale attend la
+     * fin réelle de l'écriture — est intacte, et l'assertion suivante
+     * (`!/void write\(/`) reste le garde-fou anti fire-and-forget.
+     */
+    assert.ok(/return write\(\s*supabase,\s*studentId,\s*contentId,\s*assigned\s*[,)][^;]*?\)\.then/.test(codeHook),
       "useContentAssignment rend la promesse d'écriture à la modale");
     assert.ok(!/void write\(/.test(hook), "plus d'écriture lancée sans être attendue");
   });

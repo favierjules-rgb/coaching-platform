@@ -16,6 +16,7 @@ import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { contentStatusLabels, matchesTextSearch, totalSessions, totalWeeks } from "@/lib/admin";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { isSupabaseConfigured } from "@/lib/supabase/env";
 import {
   createExerciseLibraryItem,
   deleteExerciseLibraryItem,
@@ -23,6 +24,7 @@ import {
   updateExerciseLibraryItem,
 } from "@/lib/supabase/exercise-library";
 import { deleteProgram, duplicateProgram } from "@/lib/supabase/programs";
+import { Loader } from "@/components/ui/Loader";
 import type { AdminContentStatus, ExerciseLibraryItem } from "@/types";
 
 type StatusFilter = "tous" | AdminContentStatus;
@@ -39,14 +41,31 @@ export default function AdminProgramsPage() {
   const { state, setAssignment, createLibraryExercise, updateLibraryExercise } = useAdminData();
   const router = useRouter();
 
-  // Priorité Supabase dès qu'au moins un programme/élève réel existe, sinon
-  // repli sur les listes mock — même pattern que /admin/eleves. Les deux
-  // priorités sont indépendantes (un coach peut avoir des élèves réels sans
-  // avoir encore créé de programme réel, ou l'inverse) ; l'assignation
-  // réelle (table `assignments`) n'est activée que si les deux le sont.
+  /*
+   * ════════════════════════════════════════════════════════════════════
+   * LA SOURCE DÉPEND DE LA CONFIGURATION, PLUS DU NOMBRE DE LIGNES
+   * ════════════════════════════════════════════════════════════════════
+   * La règle était `programs.length > 0 ? supabase : mock`. Elle a l'air
+   * prudente et elle est fausse : au PREMIER rendu la requête n'a pas
+   * répondu, la liste est donc vide, et la page affichait les fixtures de
+   * `data/admin.ts` — « 3 programmes créés », Force & Hypertrophie, Sèche
+   * Estivale, Remise en Route — pendant toute la durée de la requête, à
+   * chaque ouverture. Ces trois programmes n'existent nulle part en base :
+   * l'audit du 08/09/2026 a compté 16 programmes réels et ZÉRO mock.
+   *
+   * ⚠️ « SUPABASE EST-IL CONFIGURÉ » EST LA BONNE QUESTION. Une liste vide
+   * après chargement veut dire « aucun programme », pas « montre-moi des
+   * faux ». C'est déjà le contrat de /admin/nutrition et /admin/documents
+   * (`supabaseActive ? … : state…`) ; ces deux pages-ci en étaient restées
+   * à l'ancienne règle, et ce sont exactement les deux où des données de
+   * démonstration apparaissaient.
+   *
+   * Le repli mock survit pour le seul cas où il a un sens : Supabase non
+   * configuré — développement local, démonstration.
+   */
+  const supabaseActive = isSupabaseConfigured();
   const supabasePrograms = useSupabasePrograms();
-  const isProgramsSupabaseActive = supabasePrograms.programs.length > 0;
-  const programs = isProgramsSupabaseActive ? supabasePrograms.programs : state.programs;
+  const programs = supabaseActive ? supabasePrograms.programs : state.programs;
   // Duplication (V3 étape 4) : Supabase uniquement, pas de repli mock — voir
   // lib/supabase/programs.ts#duplicateProgram. `duplicatingId` retient le
   // programme en cours de duplication pour désactiver son bouton le temps de
@@ -66,9 +85,21 @@ export default function AdminProgramsPage() {
     setDuplicatingId(null);
   }
   const supabaseStudents = useSupabaseStudents();
-  const students = supabaseStudents.students.length > 0 ? supabaseStudents.students : state.students;
+  const students = supabaseActive ? supabaseStudents.students : state.students;
+  /*
+   * ⚠️ L'ÉCRITURE RÉELLE NE DÉPEND PLUS DU NOMBRE DE LIGNES CHARGÉES, et
+   * c'était le défaut le plus grave. `useContentAssignment` retombe sur
+   * `setAssignment` — donc sur localStorage — quand ce drapeau est faux, ET
+   * REND `true`. Tant que la condition était `programs.length > 0 &&
+   * students.length > 0`, un coach qui cliquait « Assigner » avant la fin
+   * des deux requêtes voyait « Assignation mise à jour » sans qu'une seule
+   * ligne n'atteigne `assignments`.
+   *
+   * Le garde de chargement plus bas rend ce clic impossible ; ce drapeau est
+   * la seconde barrière, celle qui tient même si le garde saute.
+   */
   const handleSetAssignment = useContentAssignment(
-    { programme: supabasePrograms.programs.length > 0 && supabaseStudents.students.length > 0 },
+    { programme: supabaseActive },
     setAssignment,
     supabasePrograms.refetch,
   );
@@ -146,6 +177,21 @@ export default function AdminProgramsPage() {
   const [levelFilter, setLevelFilter] = useState("tous");
 
   const levels = useMemo(() => ["tous", ...Array.from(new Set(programs.map((p) => p.level)))], [programs]);
+
+  /*
+   * ⚠️ RIEN N'EST RENDU TANT QUE LES DEUX LISTES SONT EN VOL. Les élèves
+   * comptent autant que les programmes : la modale « Assigner » les affiche,
+   * et une liste d'élèves encore vide y ferait apparaître les 7 fixtures
+   * `@mail.mock`. Même contrat que /admin/nutrition (ligne 141) et
+   * /admin/documents (ligne 76).
+   *
+   * ⚠️ APRÈS TOUS LES HOOKS, JAMAIS AVANT. Un retour anticipé placé plus haut
+   * sauterait le `useMemo` ci-dessus au premier rendu puis l'exécuterait au
+   * second : React interdit qu'un hook change de position entre deux rendus.
+   */
+  if (supabaseActive && (supabasePrograms.loading || supabaseStudents.loading)) {
+    return <Loader libelle="Chargement…" variante="ligne" />;
+  }
 
   const filtered = programs.filter(
     (p) =>
@@ -283,7 +329,7 @@ export default function AdminProgramsPage() {
                 >
                   Modifier
                 </Link>
-                {isProgramsSupabaseActive && (
+                {supabaseActive && (
                   <button
                     type="button"
                     onClick={() => void handleDuplicate(program.id)}
@@ -302,7 +348,7 @@ export default function AdminProgramsPage() {
                   assignedStudentIds={program.assignedStudentIds}
                   onSetAssignment={handleSetAssignment}
                 />
-                {isProgramsSupabaseActive &&
+                {supabaseActive &&
                   (pendingDeleteProgramId === program.id ? (
                     <button
                       type="button"
