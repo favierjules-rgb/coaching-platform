@@ -1143,6 +1143,26 @@ export interface AdminProgram {
    */
   groupStartDate?: string | null;
   /**
+   * Date de début de CE programme pour L'ÉLÈVE consulté (YYYY-MM-DD), lue sur
+   * `assignments.program_start_date`.
+   *
+   * ⚠️ ELLE N'APPARTIENT PAS AU PROGRAMME, ELLE APPARTIENT À L'AFFECTATION.
+   * Elle n'est donc renseignée que par les lectures ORIENTÉES ÉLÈVE
+   * (`getAssignedProgramsForStudent`) : sur une liste de modèles, un même
+   * programme n'a pas UNE date de début, il en a autant que d'élèves. C'est
+   * pourquoi elle est optionnelle, et jamais posée par `mapProgramRow` seul.
+   *
+   * ⚠️ NE PAS CONFONDRE avec `groupStartDate` (mode groupe, partagée par la
+   * cohorte) ni avec `students.start_date` (début du SUIVI de l'élève). Ces
+   * trois dates répondent à trois questions différentes ; les confondre est
+   * précisément le défaut que ce champ corrige.
+   *
+   * `null`/absente = affectation non régularisée : le calcul retombe sur le
+   * repli `students.start_date`, signalé par `ancreDeSemaine` comme
+   * « repli-suivi ».
+   */
+  programStartDate?: string | null;
+  /**
    * Catalogue public (chantier module Programmation, étape 6) : isPublic
    * affiche le programme sur /programmes et la home page publique.
    * publicSubscriptionTemplateId pointe vers une formule "one_time" (prix

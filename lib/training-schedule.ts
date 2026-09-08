@@ -34,10 +34,62 @@ const STATUS_ADMIN_TO_STUDENT: Record<AdminContentStatus, ProgramStatus> = {
 };
 
 /**
- * Numéro de semaine "actuelle", dérivé soit de la date de début de suivi de
- * l'élève (mode individuel, comportement historique), soit de la date de
- * démarrage fixe du programme partagée par toute la cohorte (mode groupe —
- * chantier module Programmation, étape 5).
+ * D'OÙ VIENT LA DATE QUI SERT D'ANCRE — la question, avant le calcul.
+ *
+ *  · `programme`   — `assignment.programStartDate`. La vérité : la date à
+ *    laquelle CE programme commence pour CET élève, décidée par le coach.
+ *  · `groupe`      — `program.groupStartDate`. Inchangé : une cohorte partage
+ *    un calendrier, c'est le sens même du mode groupe.
+ *  · `repli-suivi` — `student.startDate`. L'ANCIENNE ancre, conservée pour les
+ *    affectations pas encore régularisées. Transitoire, et surtout NOMMÉE :
+ *    c'est ce qui empêche le repli de redevenir la norme en silence.
+ *  · `aucune`      — rien d'exploitable, semaine 1.
+ */
+export type OrigineAncre = "programme" | "groupe" | "repli-suivi" | "aucune";
+
+export interface AncreDeSemaine {
+  readonly origine: OrigineAncre;
+  readonly date: string | null;
+}
+
+/**
+ * L'ancre temporelle d'un programme, et d'où elle vient.
+ *
+ * ⚠️ RENDRE L'ORIGINE, PAS SEULEMENT LA DATE. Un calcul qui ne rendrait que la
+ * date serait juste et muet : impossible de distinguer « le coach a fixé le
+ * 17/08 » de « personne n'a rien fixé, on retombe sur la date d'inscription ».
+ * C'est exactement la confusion qui a produit le défaut d'origine — une élève
+ * ayant reçu son programme le jour même se voyait annoncer « Semaine 5 / 12 ».
+ * L'interface admin peut désormais signaler le repli au lieu de le subir.
+ */
+export function ancreDeSemaine(program: AdminProgram, student: AdminStudent | null): AncreDeSemaine {
+  if (program.programMode === "groupe") {
+    return program.groupStartDate
+      ? { origine: "groupe", date: program.groupStartDate }
+      : { origine: "aucune", date: null };
+  }
+  if (program.programStartDate) {
+    return { origine: "programme", date: program.programStartDate };
+  }
+  // ⚠️ LE REPLI N'EST PAS UN DÉFAUT DE CONCEPTION, C'EST UNE TRANSITION.
+  // 14 affectations existaient sans date au moment de ce lot ; les faire
+  // toutes retomber en « semaine 1 » du jour au lendemain serait une
+  // régression visible pour des élèves qui s'entraînent. Le repli tient le
+  // temps de la régularisation — et se voit, pendant ce temps.
+  return student?.startDate
+    ? { origine: "repli-suivi", date: student.startDate }
+    : { origine: "aucune", date: null };
+}
+
+/**
+ * Numéro de semaine "actuelle" du programme.
+ *
+ * ⚠️ L'ANCRE N'EST PLUS `students.start_date` POUR UN PROGRAMME INDIVIDUEL.
+ * Cette colonne est le début du SUIVI, et vaut son propre `created_at` dans
+ * 11 cas sur 15 en production : elle ne dit rien du programme. La date de
+ * début vit désormais sur l'AFFECTATION — voir `ancreDeSemaine`.
+ *
+ * La formule, elle, était juste et ne change pas : `floor(jours / 7) + 1`.
  */
 export function computeCurrentWeekNumber(
   program: AdminProgram,
@@ -48,12 +100,19 @@ export function computeCurrentWeekNumber(
     return 1;
   }
 
-  const referenceDate = program.programMode === "groupe" ? program.groupStartDate : student?.startDate;
+  const { date: referenceDate } = ancreDeSemaine(program, student);
   if (!referenceDate) {
     return 1;
   }
 
   const daysSinceStart = daysBetween(referenceDate, reference);
+  // ⚠️ `daysSinceStart < 0` EST REDONDANT AVEC LE `Math.max(1, …)` FINAL, et
+  // le sabotage l'a montré : le retirer ne rougit aucun test, parce qu'une
+  // date antérieure donne `floor(-7/7)+1 = 0`, que la borne ramène à 1. Il
+  // reste pour DIRE l'intention — « une date future n'est pas une semaine 0 »
+  // — au lieu de la laisser dépendre d'un effet de bord arithmétique deux
+  // lignes plus bas. `Number.isFinite`, lui, est indispensable : il attrape le
+  // NaN d'une date illisible, que `Math.max` propagerait.
   if (!Number.isFinite(daysSinceStart) || daysSinceStart < 0) {
     return 1;
   }
@@ -61,22 +120,39 @@ export function computeCurrentWeekNumber(
   return Math.min(Math.max(program.durationWeeks, 1), Math.max(1, weekNumber));
 }
 
-/** Planning des 7 jours d'une semaine donnée du programme, `isToday` calculé sur la date réelle (injectable). */
+/**
+ * Planning des 7 jours d'une semaine donnée du programme.
+ *
+ * ⚠️ `semaineCourante` DÉCIDE SI « AUJOURD'HUI » A LE DROIT D'EXISTER DANS CE
+ * BLOC. C'est le correctif C-min. La page de détail d'un programme empile les
+ * 12 semaines et appelait cette fonction une fois par semaine, sans jamais
+ * dire laquelle était la bonne : `isToday` se posait donc sur le mardi de la
+ * semaine 1, de la 2, de la 3… et des douze à la fois. Douze « aujourd'hui »
+ * simultanés, ce qui donnait l'impression d'un calendrier qui défile.
+ *
+ * ⚠️ PARAMÈTRE OPTIONNEL, ET C'EST DÉLIBÉRÉ. Omis, le repère reste posé —
+ * comportement historique, préservé pour les appels qui ne construisent qu'UNE
+ * semaine (le bandeau élève, la carte de programme) et pour lesquels la
+ * question ne se pose pas. Le rendre obligatoire aurait forcé à réécrire des
+ * appelants corrects, et c'est un autre chantier.
+ */
 export function buildScheduleForWeek(
   program: AdminProgram,
   weekNumber: number,
   reference: Date = currentDate(),
+  semaineCourante?: number,
 ): ProgramScheduleDay[] {
   // getDay() : 0 = dimanche .. 6 = samedi -> réindexé pour matcher weekDays (0 = lundi .. 6 = dimanche).
   const jsWeekday = reference.getDay();
   const todayIndex = (jsWeekday + 6) % 7;
+  const semaineAffichee = semaineCourante === undefined || semaineCourante === weekNumber;
   const sessionsForWeek = program.sessions.filter((s) => s.weekNumber === weekNumber);
 
   return weekDays.map((day, index) => {
     const session = sessionsForWeek.find((s) => s.day === day && !s.isRestDay);
     return {
       day,
-      isToday: index === todayIndex,
+      isToday: semaineAffichee && index === todayIndex,
       sessionId: session ? session.id : null,
     };
   });

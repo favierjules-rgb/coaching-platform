@@ -1204,10 +1204,23 @@ await test("N63. la migration C5.1 est déclarée dans les trois mécanismes de 
   const NOM = "20260922090000_c5_1_connexions_nolio.sql";
   const contrat = lire("./contrat-migrations.mts");
   assert.ok(contrat.includes(NOM), "non déclarée dans le contrat des migrations");
-  // ⚠️ LE COMPTE AUSSI. Le contrat vérifie un nombre exact : la déclarer sans
-  // incrémenter laisserait le contrat rouge, et déclarer un nom sans fichier
-  // le laisserait rouge dans l'autre sens.
-  assert.match(contrat, /NOMBRE_DE_MIGRATIONS = 88/);
+  /*
+   * ⚠️ ON GARDE LA DÉCLARATION, PLUS LE COMPTEUR GLOBAL.
+   *
+   * Ce test épinglait `NOMBRE_DE_MIGRATIONS = 88` — le total du dépôt au jour
+   * de C5.1. Il a rougi au lot suivant, qui a légitimement ajouté une
+   * migration sans rien changer à Nolio : le compteur mesurait le DÉPÔT, pas
+   * ce que ce fichier a le droit de garantir. Ce qui appartient à C5.1, c'est
+   * que SA migration soit nommée et rangée à sa place dans la liste ordonnée.
+   * `contrat-migrations` reste, lui, le seul juge du total.
+   */
+  assert.match(
+    contrat,
+    /export const MIGRATION_C5_1 = "20260922090000_c5_1_connexions_nolio\.sql";/,
+    "la migration C5.1 n'est plus nommément déclarée",
+  );
+  const liste = contrat.slice(contrat.indexOf("MIGRATIONS_APRES_C0_1"));
+  assert.match(liste, /MIGRATION_C5_1,/, "C5.1 absente de la liste ordonnée post-C0.1");
   assert.ok(lire("../../supabase/baseline/manifest.json").includes(NOM), "absente du manifeste de baseline");
   assert.ok(
     lire("./nutrition-contract-preferred-unit.mts").includes(NOM),

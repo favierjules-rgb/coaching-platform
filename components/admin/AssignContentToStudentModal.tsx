@@ -16,6 +16,14 @@ import { CheckboxField } from "@/components/admin/AdminFormFields";
 import { Modal, PrimaryButton } from "@/components/admin/Modal";
 import type { AdminDocument, AdminNutritionPlan, AdminProgram, AdminStudent, AssignableContentType } from "@/types";
 
+/** Date du jour `YYYY-MM-DD` en heure LOCALE — voir AssignStudentsModal. */
+function dateDuJourLocale(): string {
+  const maintenant = new Date();
+  const mois = String(maintenant.getMonth() + 1).padStart(2, "0");
+  const jour = String(maintenant.getDate()).padStart(2, "0");
+  return `${maintenant.getFullYear()}-${mois}-${jour}`;
+}
+
 interface AssignContentToStudentModalProps {
   student: AdminStudent;
   programs: AdminProgram[];
@@ -26,6 +34,8 @@ interface AssignContentToStudentModalProps {
     contentType: AssignableContentType,
     contentId: string,
     assigned: boolean,
+    /** Programmes uniquement — la date de début saisie dans la modale. */
+    programStartDate?: string | null,
   ) => void | boolean | Promise<boolean | void>;
   /** true si l'élève affiché est lui-même réel (Supabase). */
   isSupabaseStudent?: boolean;
@@ -79,6 +89,11 @@ export function AssignContentToStudentModal({
   // anti-double-clic), un échec laisse la modale OUVERTE avec un message.
   const [saving, setSaving] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
+  /**
+   * Date de début, PROGRAMMES UNIQUEMENT — proposée à aujourd'hui, modifiable.
+   * Voir `AssignStudentsModal` : même champ, même raison, même défaut évité.
+   */
+  const [dateDebut, setDateDebut] = useState<string>("");
 
   // Seuls les MODÈLES sont proposables — jamais les copies individuelles
   // (elles dupliqueraient la ligne du modèle, et attribuer la copie d'un
@@ -86,6 +101,7 @@ export function AssignContentToStudentModal({
   const modeles = filterAssignableProgramModels(programs);
 
   function ouvrir() {
+    setDateDebut(dateDuJourLocale());
     const état = initialContentSelection(student, {
       programs,
       nutritionPlanIds: nutritionPlans.map((p) => p.id),
@@ -134,7 +150,16 @@ export function AssignContentToStudentModal({
       (["programme", "nutrition", "document"] as const).map((type) => {
         const terminerType = type === "nutrition" ? terminerAssignationUnique : terminerAssignation;
         return terminerType(initial[type], selection[type], (contentId, assigned) =>
-          onSetAssignment(student.id, type, contentId, assigned),
+          // ⚠️ LA DATE NE CONCERNE QUE LES PROGRAMMES, ET QUE L'ATTRIBUTION.
+          // `undefined` partout ailleurs : nutrition et documents traversent
+          // ce point exactement comme avant.
+          onSetAssignment(
+            student.id,
+            type,
+            contentId,
+            assigned,
+            assigned && type === "programme" ? dateDebut || null : undefined,
+          ),
         );
       }),
     ).then((résultats) => {
@@ -187,6 +212,30 @@ export function AssignContentToStudentModal({
                         onChange={(checked) => basculer("programme", p.id, checked)}
                       />
                     ))}
+                  </div>
+                )}
+                {/* ⚠️ SOUS LES PROGRAMMES, ET NULLE PART AILLEURS. Les deux
+                    sections suivantes — plans alimentaires et documents — ne
+                    sont pas touchées : elles n'ont pas de semaine. */}
+                {selection.programme.length > 0 && (
+                  <div className="mt-3 flex flex-col gap-1.5 rounded-panel border border-border bg-surface-soft/40 px-4 py-3">
+                    <label
+                      htmlFor="date-debut-programme-eleve"
+                      className="text-xs font-bold uppercase tracking-widest text-muted-foreground"
+                    >
+                      Date de début du programme
+                    </label>
+                    <input
+                      id="date-debut-programme-eleve"
+                      type="date"
+                      value={dateDebut}
+                      onChange={(event) => setDateDebut(event.target.value)}
+                      className="min-h-[44px] rounded-control border border-border bg-card px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                    />
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      C&apos;est elle qui détermine la semaine affichée à l&apos;élève, et non sa date
+                      d&apos;inscription.
+                    </p>
                   </div>
                 )}
               </div>

@@ -36,6 +36,8 @@ import {
   weightHistory as elveWeightHistory,
 } from "@/data/student";
 import { useAdminData } from "@/hooks/useAdminData";
+import { computeCurrentWeekNumber } from "@/lib/training-schedule";
+import { ProgramStartDateField } from "@/components/admin/ProgramStartDateField";
 import { useContentAssignment } from "@/hooks/useContentAssignment";
 import { useGuardedNutritionAssignment } from "@/hooks/useGuardedNutritionAssignment";
 import { useStudentProfile } from "@/hooks/useStudentProfile";
@@ -46,7 +48,6 @@ import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
 import { useSupabaseStudentDetail } from "@/hooks/useSupabaseStudentDetail";
 import {
   computeDocumentAvailability,
-  daysBetween,
   feedbackStatusLabels,
   feedbackTypeLabels,
   formatDate,
@@ -129,6 +130,14 @@ export default function AdminStudentDetailPage() {
   // (UUID) ; sinon la page retombe sur la logique mock existante
   // (isLinked / useAdminData) — voir hooks/useSupabaseStudentDetail.ts.
   const supabaseDetail = useSupabaseStudentDetail(params.studentId);
+  /**
+   * Date de début du programme actif, lue sur l'affectation.
+   *
+   * ⚠️ ELLE NE VIENT PAS DE `programs` : `assignedProgram` sort d'une liste de
+   * MODÈLES, où un programme n'a pas de date de début — il en a une par élève.
+   * D'où cette lecture séparée, injectée dans le calcul plus bas.
+   */
+  const [debutProgrammeActif, setDebutProgrammeActif] = useState<string | null>(null);
   const isSupabaseStudent = supabaseDetail.student !== null;
   const canAssignRealPrograms = isSupabaseStudent && supabasePrograms.programs.length > 0;
   const canAssignRealNutrition = isSupabaseStudent && supabaseNutritionActive && supabaseNutritionPlans.plans.length > 0;
@@ -517,11 +526,17 @@ export default function AdminStudentDetailPage() {
     .slice()
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-  const daysSinceStart = daysBetween(student.startDate);
+  /**
+   * ⚠️ CE CALCUL ÉTAIT DUPLIQUÉ ICI, À LA MAIN, ET C'EST CE QUI LE RENDAIT
+   * FAUX. La page admin refaisait `floor(jours/7)+1` sur `student.startDate`
+   * pendant que l'élève, lui, passait par `computeCurrentWeekNumber` — deux
+   * implémentations de la même règle, condamnées à diverger. Il n'en reste
+   * qu'une, et elle connaît la date de début de l'affectation.
+   */
   const currentWeekNumber = assignedProgram
-    ? Math.min(
-        assignedProgram.durationWeeks,
-        Number.isFinite(daysSinceStart) ? Math.max(1, Math.floor(daysSinceStart / 7) + 1) : 1,
+    ? computeCurrentWeekNumber(
+        { ...assignedProgram, programStartDate: debutProgrammeActif },
+        student,
       )
     : 1;
   const currentWeekMetrics = assignedProgram
@@ -906,6 +921,12 @@ export default function AdminStudentDetailPage() {
               >
                 Retirer
               </button>
+              <ProgramStartDateField
+                studentId={student.id}
+                programId={assignedProgram.id}
+                actif={isSupabaseStudent}
+                onChargee={setDebutProgrammeActif}
+              />
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">Aucun programme attribué.</p>

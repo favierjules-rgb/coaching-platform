@@ -129,6 +129,16 @@ export const MIGRATION_N1_7_1 = "20260921090000_n1_7_1_consommer_avec_rien.sql";
  */
 export const MIGRATION_C5_1 = "20260922090000_c5_1_connexions_nolio.sql";
 
+/**
+ * LA DATE DE DÉBUT DES PROGRAMMES.
+ *
+ * ⚠️ UNE COLONNE, ET AUCUNE DONNÉE. Elle ajoute
+ * `assignments.program_start_date` sans remplir une seule des 15 affectations
+ * existantes : les régulariser demande une décision de coaching, pas une
+ * requête. C'est la migration la plus étroite du dépôt, et c'est voulu.
+ */
+export const MIGRATION_DEBUT_PROGRAMME = "20260923090000_date_debut_programme.sql";
+
 export const MIGRATIONS_COURSES: readonly string[] = [
   MIGRATION_C2,
   MIGRATION_C3,
@@ -150,10 +160,11 @@ export const MIGRATIONS_APRES_C0_1: readonly string[] = [
   MIGRATION_N1_7,
   MIGRATION_N1_7_1,
   MIGRATION_C5_1,
+  MIGRATION_DEBUT_PROGRAMME,
 ];
 
 /** Le compte attendu — nécessaire, jamais suffisant. */
-export const NOMBRE_DE_MIGRATIONS = 88;
+export const NOMBRE_DE_MIGRATIONS = 89;
 
 /**
  * L'empreinte des 79 migrations ANTÉRIEURES à C0.1, dans l'ordre.

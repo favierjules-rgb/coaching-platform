@@ -25,8 +25,23 @@ type AwaitableSetAssignmentFn = (
   contentType: AssignableContentType,
   contentId: string,
   assigned: boolean,
+  /**
+   * Date de début du programme (YYYY-MM-DD), PROGRAMMES UNIQUEMENT.
+   *
+   * ⚠️ OPTIONNELLE, ET IGNORÉE POUR NUTRITION ET DOCUMENTS — leurs écrivains
+   * gardent leur signature à 4 arguments, et le 5ᵉ ne leur est jamais passé.
+   * C'est ce qui permet d'ajouter une date aux programmes sans toucher d'un
+   * pixel les deux autres parcours d'affectation.
+   */
+  programStartDate?: string | null,
 ) => Promise<boolean>;
 
+/**
+ * ⚠️ TYPE ÉLARGI AU SEUL ÉCRIVAIN QUI EN A BESOIN. `setProgramAssignment`
+ * accepte 5 arguments, les deux autres 4 : TypeScript accepte qu'une fonction
+ * à 4 paramètres soit appelée avec 5 (l'extra est ignoré), donc un seul type
+ * couvre les trois sans faire semblant que nutrition comprend une date.
+ */
 const WRITERS: Partial<Record<AssignableContentType, typeof setProgramAssignment>> = {
   programme: setProgramAssignment,
   nutrition: setNutritionAssignment,
@@ -59,7 +74,7 @@ export function useContentAssignment(
 ): AwaitableSetAssignmentFn {
   const notifyByEmail = options?.notifyByEmail ?? true;
   return useCallback(
-    (studentId, contentType, contentId, assigned) => {
+    (studentId, contentType, contentId, assigned, programStartDate) => {
       const write = WRITERS[contentType];
       if (active[contentType] && write) {
         const supabase = createSupabaseBrowserClient();
@@ -67,7 +82,16 @@ export function useContentAssignment(
           // La PROMESSE est rendue à l'appelant : la modale attend la fin
           // réelle de l'écriture et reçoit son résultat (fix/program-
           // assignment-checkbox — plus jamais de faux succès fire-and-forget).
-          return write(supabase, studentId, contentId, assigned).then((ok) => {
+          // ⚠️ LE 5ᵉ ARGUMENT NE PART QUE POUR UN PROGRAMME. Le passer à
+          // `setNutritionAssignment` serait sans effet, mais mentirait sur
+          // l'intention : nutrition et documents n'ont pas de date de début.
+          return write(
+            supabase,
+            studentId,
+            contentId,
+            assigned,
+            contentType === "programme" ? programStartDate : undefined,
+          ).then((ok) => {
             onWritten?.();
             // Email envoyé uniquement lors d'une vraie nouvelle attribution
             // (jamais au retrait, "assigned" ci-dessus) — best-effort, ne

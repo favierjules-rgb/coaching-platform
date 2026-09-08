@@ -330,6 +330,15 @@ await test("CONTRACT-07. le CONTRACT s'applique en DERNIER — l'ordre de rollou
       // Elle est donc hors de portée du CONTRACT par construction, et non par
       // tolérance : rien de ce qu'elle écrit ne peut exprimer une unité.
       "20260922090000_c5_1_connexions_nolio.sql",
+      // ⚠️ LA DATE DE DÉBUT DES PROGRAMMES — hors de portée du CONTRACT par
+      // construction. Elle ajoute UNE colonne `date` à `assignments`, une
+      // table qui n'a jamais porté d'unité alimentaire :
+      //   · `preferred_unit` : ZÉRO occurrence ;
+      //   · `quantity_unit` et `meal_choice_options` : ABSENTS ;
+      //   · aucune fonction redonnée, aucune table du domaine nutrition
+      //     touchée — le test MIGRATION1 de `calendrier-semaines` rejoue cette
+      //     preuve à chaque exécution.
+      "20260923090000_date_debut_programme.sql",
     ],
     "une migration postérieure au CONTRACT n'a pas été déclarée sûre",
   );

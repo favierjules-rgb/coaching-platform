@@ -231,8 +231,73 @@ export const mealSlots = [
  */
 export const ADMIN_REFERENCE_DATE = new Date("2026-07-02T12:00:00.000Z");
 
+/**
+ * Le JOUR CALENDAIRE LOCAL d'une valeur, ramené à un repère comparable.
+ *
+ * ⚠️ DEUX FORMES ENTRENT ICI, ET ELLES N'ONT PAS LA MÊME NATURE.
+ *  · `2026-08-17` — une DATE, sans heure ni lieu. Le 17 août est le 17 août.
+ *  · `2026-08-17T23:30:00+02:00` — un INSTANT, dont le jour dépend du fuseau
+ *    depuis lequel on le regarde.
+ * Les confondre est précisément ce qui produisait le défaut corrigé ici.
+ *
+ * ⚠️ UNE DATE SEULE N'EST PAS PASSÉE À `new Date()`. ECMAScript interprète la
+ * forme `YYYY-MM-DD` en MINUIT UTC — soit 02:00 à Paris en été. Comparée à un
+ * instant local, la différence portait donc un décalage de deux heures, et la
+ * semaine basculait à 02:00 au lieu de minuit. Mesuré avant correction :
+ * `daysBetween("2026-08-10", 17/08 01:30 Paris)` rendait 6, puis 7 à 02:30.
+ * On lit donc les trois nombres tels qu'ils sont écrits.
+ *
+ * ⚠️ ET CETTE BRANCHE NE SE PROUVE PAS DEPUIS PARIS. Repasser par `new Date()`
+ * puis relire le jour LOCAL redonnerait le bon jour sous tout décalage
+ * POSITIF : minuit UTC vu depuis UTC+2 reste le même jour. Le défaut ne
+ * réapparaîtrait qu'à décalage négatif — un runtime aux Amériques, où minuit
+ * UTC est la veille au soir. Le harnais ne peut donc pas l'attraper par le
+ * comportement ; il garde cette branche par sa forme (`AFFECT`/`MINUIT6`).
+ *
+ * ⚠️ UN INSTANT, LUI, EST RAMENÉ À SON JOUR LOCAL via `getFullYear/Month/Date`
+ * — le jour que l'utilisateur a vécu, pas le jour UTC. Une connexion à 00:30
+ * heure de Paris appartient au jour qui vient de commencer, pas au précédent.
+ *
+ * Rend `null` sur une valeur illisible : l'appelant décide, personne
+ * n'invente 0.
+ */
+function jourCalendaireLocal(valeur: string | Date): number | null {
+  if (valeur instanceof Date) {
+    if (Number.isNaN(valeur.getTime())) return null;
+    return Date.UTC(valeur.getFullYear(), valeur.getMonth(), valeur.getDate());
+  }
+  const dateSeule = /^\s*(\d{4})-(\d{2})-(\d{2})\s*$/.exec(valeur);
+  if (dateSeule) {
+    return Date.UTC(Number(dateSeule[1]), Number(dateSeule[2]) - 1, Number(dateSeule[3]));
+  }
+  const instant = new Date(valeur);
+  if (Number.isNaN(instant.getTime())) return null;
+  return Date.UTC(instant.getFullYear(), instant.getMonth(), instant.getDate());
+}
+
+/**
+ * Nombre de JOURS CALENDAIRES entre `dateIso` et `reference`.
+ *
+ * ⚠️ CE N'EST PLUS UNE SOUSTRACTION D'INSTANTS. L'ancienne version divisait un
+ * écart de millisecondes par 86 400 000, ce qui répondait « combien de
+ * tranches de 24 h se sont écoulées » — une question voisine, mais pas celle
+ * qu'on pose. On veut « combien de fois minuit est passé », la seule qui fasse
+ * changer une semaine de programme au bon moment.
+ *
+ * ⚠️ `Math.round` PLUTÔT QUE `Math.floor`, ET SANS PRÉTENDRE QUE ÇA CHANGE
+ * QUELQUE CHOSE AUJOURD'HUI. `Date.UTC(y, m, d)` rend toujours un minuit UTC
+ * exact : l'écart entre deux bornes est donc toujours un multiple exact de
+ * 86 400 000, et `floor` rendrait le même nombre — vérifié, y compris à
+ * travers une transition d'heure d'été, que la normalisation ci-dessus a déjà
+ * neutralisée. `round` est une ceinture contre une imprécision flottante
+ * future, pas une correction active. Le sabotage le confirme : remplacer
+ * `round` par `floor` ne rougit aucun test, et c'est normal.
+ */
 export function daysBetween(dateIso: string, reference: Date = currentDate()): number {
-  return Math.floor((reference.getTime() - new Date(dateIso).getTime()) / 86_400_000);
+  const debut = jourCalendaireLocal(dateIso);
+  const fin = jourCalendaireLocal(reference);
+  if (debut === null || fin === null) return Number.NaN;
+  return Math.round((fin - debut) / 86_400_000);
 }
 
 export function studentsWithoutRecentLogin(

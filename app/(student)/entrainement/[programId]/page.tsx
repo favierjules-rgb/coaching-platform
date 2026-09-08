@@ -148,7 +148,7 @@ export default function ProgramDetailPage() {
                   Semaine {week}
                 </h2>
                 <ProgramWeekCalendar
-                  schedule={buildScheduleForWeek(realProgram, week)}
+                  schedule={buildScheduleForWeek(realProgram, week, undefined, weekNumber)}
                   sessions={realProgram.sessions.filter((s) => s.weekNumber === week).map(toEleveWorkoutSession)}
                 />
               </div>
