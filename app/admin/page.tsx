@@ -26,7 +26,7 @@ import { useSupabaseAdminBilling } from "@/hooks/useSupabaseAdminBilling";
 import { useSupabaseAppointments } from "@/hooks/useSupabaseAppointments";
 import { useSupabaseDocuments } from "@/hooks/useSupabaseDocuments";
 import { useSupabaseNutritionPlans } from "@/hooks/useSupabaseNutritionPlans";
-import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
+import { useSupabaseProgramsSummary } from "@/hooks/useSupabaseProgramsSummary";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { useSupabaseAdminFeedback } from "@/hooks/useSupabaseAdminFeedback";
 import { formatAmountCents } from "@/lib/stripe/status";
@@ -92,7 +92,7 @@ export default function AdminDashboardPage() {
   const students = supabaseStudents.students.length > 0 ? supabaseStudents.students : state.students;
   const supabaseFeedback = useSupabaseAdminFeedback();
   const feedback = supabaseFeedback.feedback.length > 0 ? supabaseFeedback.feedback : state.feedback;
-  const supabasePrograms = useSupabasePrograms();
+  const supabasePrograms = useSupabaseProgramsSummary();
   const programs = supabasePrograms.programs.length > 0 ? supabasePrograms.programs : state.programs;
   const programsAreReal = supabasePrograms.programs.length > 0;
   const supabaseNutritionPlans = useSupabaseNutritionPlans();

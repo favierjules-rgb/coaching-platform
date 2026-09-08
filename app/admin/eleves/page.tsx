@@ -12,7 +12,7 @@ import { useAdminData } from "@/hooks/useAdminData";
 import { useContentAssignment } from "@/hooks/useContentAssignment";
 import { useGuardedNutritionAssignment } from "@/hooks/useGuardedNutritionAssignment";
 import { useSupabaseNutritionPlans } from "@/hooks/useSupabaseNutritionPlans";
-import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
+import { useSupabaseProgramsSummary } from "@/hooks/useSupabaseProgramsSummary";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { formatDate, fullName, matchesStudentSearch, studentStatusLabels, weightProgressLabel } from "@/lib/admin";
 import { paymentSummaryLabel } from "@/lib/payments";
@@ -51,7 +51,7 @@ export default function AdminStudentsPage() {
   const supabaseActive = isSupabaseConfigured();
   const supabaseStudents = useSupabaseStudents();
   const students = supabaseActive ? supabaseStudents.students : state.students;
-  const supabasePrograms = useSupabasePrograms();
+  const supabasePrograms = useSupabaseProgramsSummary();
   const programs = supabaseActive ? supabasePrograms.programs : state.programs;
   const supabaseNutritionPlans = useSupabaseNutritionPlans();
   const nutritionPlans = supabaseActive ? supabaseNutritionPlans.plans : state.nutritionPlans;
