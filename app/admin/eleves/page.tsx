@@ -17,6 +17,7 @@ import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { formatDate, fullName, matchesStudentSearch, studentStatusLabels, weightProgressLabel } from "@/lib/admin";
 import { paymentSummaryLabel } from "@/lib/payments";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
+import { Loader } from "@/components/ui/Loader";
 import type { StudentAccountStatus } from "@/types";
 
 type StatusFilter = "tous" | StudentAccountStatus;
@@ -32,22 +33,38 @@ export default function AdminStudentsPage() {
   const { state, setAssignment } = useAdminData();
   const { documents } = state;
 
-  // Supabase a la priorité dès qu'il a au moins un élève/programme/plan
-  // réel ; sinon on retombe sur la liste mock (localStorage), sans jamais
-  // rien casser tant que Supabase n'est pas configuré ou n'a encore aucune
-  // donnée — voir hooks/useSupabaseStudents.ts, hooks/useSupabasePrograms.ts
-  // et hooks/useSupabaseNutritionPlans.ts. Documents restent mock dans tous
-  // les cas (non migrés à cette étape).
+  /*
+   * ════════════════════════════════════════════════════════════════════
+   * LA SOURCE DÉPEND DE LA CONFIGURATION, PLUS DU NOMBRE DE LIGNES
+   * ════════════════════════════════════════════════════════════════════
+   * `students.length > 0 ? supabase : mock` affichait les 7 fixtures
+   * `@mail.mock` de `data/admin.ts` — Camille Dubois, Thomas Nguyen, Léa
+   * Martin… — pendant toute la requête initiale, à chaque ouverture de la
+   * page. L'audit du 08/09/2026 a compté 26 élèves réels en base et ZÉRO
+   * mock : ces noms ne venaient donc pas de la base, mais du dépôt.
+   *
+   * ⚠️ APRÈS CHARGEMENT, UNE LISTE VIDE VEUT DIRE « AUCUN ÉLÈVE ». Le repli
+   * mock ne subsiste que pour le seul cas où il a un sens : Supabase non
+   * configuré. `supabaseNutritionActive` posait déjà exactement cette
+   * question pour la nutrition — les élèves et les programmes s'y alignent.
+   */
+  const supabaseActive = isSupabaseConfigured();
   const supabaseStudents = useSupabaseStudents();
-  const students = supabaseStudents.students.length > 0 ? supabaseStudents.students : state.students;
+  const students = supabaseActive ? supabaseStudents.students : state.students;
   const supabasePrograms = useSupabasePrograms();
-  const programs = supabasePrograms.programs.length > 0 ? supabasePrograms.programs : state.programs;
-  const supabaseNutritionActive = isSupabaseConfigured();
+  const programs = supabaseActive ? supabasePrograms.programs : state.programs;
   const supabaseNutritionPlans = useSupabaseNutritionPlans();
-  const nutritionPlans = supabaseNutritionActive ? supabaseNutritionPlans.plans : state.nutritionPlans;
-  const canAssignRealPrograms = supabaseStudents.students.length > 0 && supabasePrograms.programs.length > 0;
-  const canAssignRealNutrition =
-    supabaseStudents.students.length > 0 && supabaseNutritionActive && supabaseNutritionPlans.plans.length > 0;
+  const nutritionPlans = supabaseActive ? supabaseNutritionPlans.plans : state.nutritionPlans;
+  /*
+   * ⚠️ CES DEUX DRAPEAUX DÉCIDENT « VRAIE ÉCRITURE OU localStorage », et
+   * c'est le défaut le plus grave que ce lot ferme. Quand ils sont faux,
+   * `useContentAssignment` retombe sur `setAssignment` (localStorage) ET
+   * REND `true` : la modale affiche « Contenus attribués mis à jour » alors
+   * que rien n'a atteint Supabase. Les asseoir sur le nombre de lignes
+   * CHARGÉES rendait ce faux succès accessible à un simple clic rapide.
+   */
+  const canAssignRealPrograms = supabaseActive;
+  const canAssignRealNutrition = supabaseActive;
   const baseSetAssignment = useContentAssignment(
     { programme: canAssignRealPrograms, nutrition: canAssignRealNutrition },
     setAssignment,
@@ -73,6 +90,21 @@ export default function AdminStudentsPage() {
     const unique = new Set(students.map((s) => s.goal).filter((g) => g.trim().length > 0));
     return ["tous", ...Array.from(unique)];
   }, [students]);
+
+  /*
+   * ⚠️ LES TROIS LISTES, PAS SEULEMENT LES ÉLÈVES. La modale « Attribuer
+   * contenu » propose programmes et plans alimentaires : rendre la page
+   * avant qu'ils soient là ferait apparaître les fixtures dans la modale,
+   * là même où un clic écrit.
+   *
+   * ⚠️ APRÈS TOUS LES HOOKS — voir la même garde dans /admin/programmes.
+   */
+  if (
+    supabaseActive &&
+    (supabaseStudents.loading || supabasePrograms.loading || supabaseNutritionPlans.loading)
+  ) {
+    return <Loader libelle="Chargement…" variante="ligne" />;
+  }
 
   const filtered = students.filter(
     (s) =>
