@@ -1111,6 +1111,54 @@ export interface SessionTemplate {
  * quand elles ont au moins un programme réel (voir lib/supabase/programs.ts),
  * sinon mock/localStorage (useAdminData) — même forme dans les deux cas.
  */
+/**
+ * LE STRICT NÉCESSAIRE D'UNE LISTE ADMINISTRATIVE DE PROGRAMMES.
+ *
+ * ════════════════════════════════════════════════════════════════════════
+ * POURQUOI UN TYPE À PART, ET NON UN `AdminProgram` À MOITIÉ REMPLI
+ * ════════════════════════════════════════════════════════════════════════
+ * Mesuré sur la base de production le 08/09/2026 : lire un programme COMPLET
+ * coûte 887 641 octets, dont 782 276 — 88 % — d'exercices, de blocs et de
+ * prescriptions. Les listes `/admin`, `/admin/programmes` et `/admin/eleves`
+ * n'en affichent pas un seul : elles montrent un nom, un objectif, un niveau,
+ * une durée, un compte de séances et les élèves assignés.
+ *
+ * ⚠️ RENDRE UN `AdminProgram` AVEC `exercises: []` AURAIT ÉTÉ LE PIÈGE. Le
+ * type aurait menti : une page lisant `session.exercises` aurait reçu un
+ * tableau vide — pas une erreur, pas un écran cassé, juste des métriques
+ * fausses et silencieuses. Un type DISTINCT fait échouer la compilation à la
+ * place, ce qui est la seule façon de rendre l'erreur impossible plutôt
+ * qu'improbable.
+ *
+ * ⚠️ L'ASSIGNABILITÉ VA DANS UN SEUL SENS, ET C'EST VOULU. `AdminWorkoutSession`
+ * porte `weekNumber` et `isRestDay` : un `AdminProgram` est donc structurellement
+ * acceptable là où un résumé est attendu — c'est ce qui permet au repli mock et
+ * aux pages complètes de traverser sans conversion. L'inverse est refusé par
+ * TypeScript : un résumé ne peut jamais servir là où le détail est requis.
+ */
+export interface AdminProgramSummarySession {
+  weekNumber: number;
+  isRestDay: boolean;
+}
+
+export interface AdminProgramSummary {
+  id: string;
+  name: string;
+  goal: string;
+  level: string;
+  durationWeeks: number;
+  status: AdminContentStatus;
+  assignedStudentIds: string[];
+  /** Uniquement de quoi calculer `totalSessions` et `totalWeeks`. */
+  sessions: AdminProgramSummarySession[];
+  bannerUrl?: string | null;
+  programMode?: "individuel" | "groupe";
+  groupStartDate?: string | null;
+  isPublic?: boolean;
+  /** Nécessaire à `filterAssignableProgramModels` (exclut les copies d'élève). */
+  ownerStudentId?: string | null;
+}
+
 export interface AdminProgram {
   id: string;
   name: string;

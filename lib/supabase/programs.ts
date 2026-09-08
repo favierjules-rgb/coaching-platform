@@ -15,6 +15,8 @@ import type {
   AdminCardioSegment,
   AdminExercise,
   AdminProgram,
+  AdminProgramSummary,
+  AdminProgramSummarySession,
   AdminWorkoutSession,
   CardioSegmentType,
   CardioTrainingBlock,
@@ -164,6 +166,22 @@ async function lireToutesLesLignes<T>(
     const lot = data ?? [];
     if (lot.length === 0) return { rows, complet: true };
     rows.push(...lot);
+    /*
+     * ⚠️ UN LOT INCOMPLET EST LE DERNIER, ET IL FAUT LE DIRE ICI.
+     *
+     * La boucle ne s'arrêtait que sur un lot VIDE : chaque lecture payait donc
+     * une requête supplémentaire dont la seule information était « il n'y a
+     * plus rien ». Mesuré sur `getPrograms` avant ce lot : 9 requêtes vides
+     * sur 20, soit 45 % des allers-retours — invisibles en local, coûteuses
+     * sur une liaison lente, où chacune se paie une latence pleine.
+     *
+     * ⚠️ LA SÉMANTIQUE EST IDENTIQUE, PAS SEULEMENT ÉQUIVALENTE. PostgREST
+     * rend au plus `fin - debut + 1` lignes ; en rendre MOINS signifie qu'il
+     * a épuisé le jeu de résultats. Il n'existe pas de cas où un lot partiel
+     * serait suivi d'autre chose — c'est la garantie de `range`, pas une
+     * supposition sur les données.
+     */
+    if (lot.length < TAILLE_DE_PAGE) return { rows, complet: true };
     debut += lot.length;
   }
   devWarn(`${contexte} (pagination)`, {
@@ -428,10 +446,22 @@ async function loadPrograms(supabase: TypedSupabaseClient, programRows: ProgramR
   // (owner + historique) mais son lien `assignments` a disparu — elle ne doit
   // plus cocher l'élève sur le modèle. Seules les copies portant un lien
   // ACTIF participent à l'affichage ; une réassignation la réutilisera.
+  /*
+   * ⚠️ CES DEUX LECTURES SONT INDÉPENDANTES, ET ELLES ÉTAIENT SÉRIALISÉES.
+   * `liens actifs des copies` ne dépend que de `copyIds`, `workout_sessions`
+   * que de `weekIds` — les deux sont connus dès la vague précédente. Rien ne
+   * justifiait de les enchaîner : c'était un aller-retour de latence offert.
+   *
+   * ⚠️ ON NE PARALLÉLISE QUE CE QUI EST DÉMONTRÉ INDÉPENDANT. Les sessions
+   * doivent toujours SUIVRE les semaines, les exercices SUIVRE les sessions,
+   * les prescriptions SUIVRE les blocs : chacune consomme les identifiants
+   * produits par la précédente.
+   */
   const copyIds = allCopyRows.map((c) => c.id);
-  const copyLinksResult =
+  const weekIds = weekRows.map((w) => w.id);
+  const [copyLinksResult, sessionsResult] = await Promise.all([
     copyIds.length > 0
-      ? await lireToutesLesLignes<{ content_id: string }>("loadPrograms (liens actifs des copies)", (debut, fin) =>
+      ? lireToutesLesLignes<{ content_id: string }>("loadPrograms (liens actifs des copies)", (debut, fin) =>
           supabase
             .from("assignments")
             .select("content_id")
@@ -440,36 +470,39 @@ async function loadPrograms(supabase: TypedSupabaseClient, programRows: ProgramR
             .order("content_id")
             .range(debut, fin),
         )
-      : { rows: [] as { content_id: string }[], complet: true };
+      : Promise.resolve({ rows: [] as { content_id: string }[], complet: true }),
+    weekIds.length > 0
+      ? lireToutesLesLignes<WorkoutSessionRow>("loadPrograms (workout_sessions)", (debut, fin) =>
+          supabase.from("workout_sessions").select("*").in("program_week_id", weekIds).order("id").range(debut, fin),
+        )
+      : Promise.resolve({ rows: [] as WorkoutSessionRow[], complet: true }),
+  ]);
   const copyRows = keepCopiesWithActiveAssignment(
     allCopyRows,
     copyLinksResult.rows.map((l) => l.content_id),
   );
-
-  const weekIds = weekRows.map((w) => w.id);
-  const sessionsResult =
-    weekIds.length > 0
-      ? await lireToutesLesLignes<WorkoutSessionRow>("loadPrograms (workout_sessions)", (debut, fin) =>
-          supabase.from("workout_sessions").select("*").in("program_week_id", weekIds).order("id").range(debut, fin),
-        )
-      : { rows: [] as WorkoutSessionRow[], complet: true };
   const sessionRows = sessionsResult.rows;
 
+  /*
+   * ⚠️ MÊME CONSTAT : exercices et blocs ne dépendent QUE de `sessionIds`.
+   * Ils étaient lus l'un après l'autre. Les exercices comptent 2 105 lignes
+   * en production, soit 3 pages ; les attendre avant de demander les blocs
+   * ajoutait la page la plus lourde du chemin à la profondeur séquentielle.
+   */
   const sessionIds = sessionRows.map((s) => s.id);
-  const exercisesResult =
+  const [exercisesResult, blocksResult] = await Promise.all([
     sessionIds.length > 0
-      ? await lireToutesLesLignes<WorkoutExerciseRow>("loadPrograms (workout_exercises)", (debut, fin) =>
+      ? lireToutesLesLignes<WorkoutExerciseRow>("loadPrograms (workout_exercises)", (debut, fin) =>
           supabase.from("workout_exercises").select("*").in("session_id", sessionIds).order("id").range(debut, fin),
         )
-      : { rows: [] as WorkoutExerciseRow[], complet: true };
-  const exerciseRows = exercisesResult.rows;
-
-  const blocksResult =
+      : Promise.resolve({ rows: [] as WorkoutExerciseRow[], complet: true }),
     sessionIds.length > 0
-      ? await lireToutesLesLignes<TrainingBlockRow>("loadPrograms (training_blocks)", (debut, fin) =>
+      ? lireToutesLesLignes<TrainingBlockRow>("loadPrograms (training_blocks)", (debut, fin) =>
           supabase.from("training_blocks").select("*").in("session_id", sessionIds).order("id").range(debut, fin),
         )
-      : { rows: [] as TrainingBlockRow[], complet: true };
+      : Promise.resolve({ rows: [] as TrainingBlockRow[], complet: true }),
+  ]);
+  const exerciseRows = exercisesResult.rows;
   const blockRows = blocksResult.rows;
 
   const blockIds = blockRows.map((b) => b.id);
@@ -558,6 +591,186 @@ async function loadPrograms(supabase: TypedSupabaseClient, programRows: ProgramR
 }
 
 /* ─── Lecture ─── */
+
+/**
+ * LA LECTURE LÉGÈRE — six requêtes, aucun exercice.
+ *
+ * ════════════════════════════════════════════════════════════════════════
+ * CE QU'ELLE NE LIT PAS, ET POURQUOI C'EST L'ESSENTIEL
+ * ════════════════════════════════════════════════════════════════════════
+ * Ni `workout_exercises`, ni `training_blocks`, ni `training_prescriptions`.
+ * Mesuré en production : ces trois tables pèsent 782 276 des 887 641 octets
+ * d'une lecture complète — 88 % — et pas un seul de ces octets n'atteint une
+ * liste administrative, qui affiche un nom, un niveau, une durée, un compte
+ * de séances et des élèves assignés.
+ *
+ * ⚠️ `workout_sessions` EST LU EN COLONNES RESTREINTES. Un `select("*")` y
+ * ramènerait 91 943 octets pour deux champs réellement utilisés
+ * (`program_week_id` pour retrouver la semaine, `is_rest_day` pour compter).
+ * Le reste — échauffement, notes du coach, bannière — appartient au détail.
+ *
+ * ⚠️ ELLE REND `AdminProgramSummary`, PAS `AdminProgram`. Voir le commentaire
+ * du type : c'est le compilateur, et non la discipline, qui empêche une page
+ * de lire des exercices qui n'ont jamais été chargés.
+ *
+ * ⚠️ LE CALCUL DES ÉLÈVES ASSIGNÉS EST LE MÊME, À L'IDENTIQUE. Mêmes lectures
+ * (`assignments`, copies, liens actifs), même `mergeAssignedStudentIds`, même
+ * `keepCopiesWithActiveAssignment` : les cases cochées d'une modale ne
+ * dépendent pas de la lecture qui les a alimentées.
+ */
+async function loadProgramsSummary(
+  supabase: TypedSupabaseClient,
+  programRows: ProgramRow[],
+): Promise<AdminProgramSummary[]> {
+  if (programRows.length === 0) {
+    return [];
+  }
+  const programIds = programRows.map((p) => p.id);
+
+  const [weeksResult, assignmentsResult, copiesResult] = await Promise.all([
+    lireToutesLesLignes<{ id: string; program_id: string; week_number: number }>(
+      "loadProgramsSummary (program_weeks)",
+      (debut, fin) =>
+        supabase
+          .from("program_weeks")
+          .select("id, program_id, week_number")
+          .in("program_id", programIds)
+          .order("id")
+          .range(debut, fin),
+    ),
+    lireToutesLesLignes<{ content_id: string; student_id: string }>(
+      "loadProgramsSummary (assignments)",
+      (debut, fin) =>
+        supabase
+          .from("assignments")
+          .select("content_id, student_id")
+          .eq("content_type", "programme")
+          .in("content_id", programIds)
+          .order("id")
+          .range(debut, fin),
+    ),
+    lireToutesLesLignes<{ id: string; owner_student_id: string | null; source_template_id: string | null }>(
+      "loadProgramsSummary (copies individuelles)",
+      (debut, fin) =>
+        supabase
+          .from("programs")
+          .select("id, owner_student_id, source_template_id")
+          .in("source_template_id", programIds)
+          .order("id")
+          .range(debut, fin),
+    ),
+  ]);
+
+  const weekRows = weeksResult.rows;
+  const allCopyRows = copiesResult.rows.filter(
+    (c): c is { id: string; owner_student_id: string; source_template_id: string } =>
+      Boolean(c.id && c.owner_student_id && c.source_template_id),
+  );
+
+  // Même parallélisation démontrée que dans `loadPrograms` : `copyIds` et
+  // `weekIds` sont tous deux connus, aucune des deux lectures n'attend l'autre.
+  const copyIds = allCopyRows.map((c) => c.id);
+  const weekIds = weekRows.map((w) => w.id);
+  const [copyLinksResult, sessionsResult] = await Promise.all([
+    copyIds.length > 0
+      ? lireToutesLesLignes<{ content_id: string }>("loadProgramsSummary (liens actifs des copies)", (debut, fin) =>
+          supabase
+            .from("assignments")
+            .select("content_id")
+            .eq("content_type", "programme")
+            .in("content_id", copyIds)
+            .order("content_id")
+            .range(debut, fin),
+        )
+      : Promise.resolve({ rows: [] as { content_id: string }[], complet: true }),
+    weekIds.length > 0
+      ? lireToutesLesLignes<{ id: string; program_week_id: string; is_rest_day: boolean }>(
+          "loadProgramsSummary (workout_sessions)",
+          (debut, fin) =>
+            supabase
+              .from("workout_sessions")
+              .select("id, program_week_id, is_rest_day")
+              .in("program_week_id", weekIds)
+              .order("id")
+              .range(debut, fin),
+        )
+      : Promise.resolve({ rows: [] as { id: string; program_week_id: string; is_rest_day: boolean }[], complet: true }),
+  ]);
+
+  /*
+   * ⚠️ MÊME REFUS D'UNE LECTURE PARTIELLE QUE DANS `loadPrograms`, et pour une
+   * raison différente : ici rien ne sera réécrit, mais un compte de séances
+   * amputé afficherait « 3 séances » là où il y en a 84 — un chiffre faux est
+   * pire qu'une erreur visible.
+   */
+  const incompletes = (
+    [
+      ["program_weeks", weeksResult.complet],
+      ["assignments", assignmentsResult.complet],
+      ["copies individuelles", copiesResult.complet],
+      ["liens actifs des copies", copyLinksResult.complet],
+      ["workout_sessions", sessionsResult.complet],
+    ] as const
+  )
+    .filter(([, complet]) => !complet)
+    .map(([nom]) => nom);
+  if (incompletes.length > 0) {
+    throw new Error(`loadProgramsSummary : lecture incomplète (${incompletes.join(", ")}).`);
+  }
+
+  const copyRows = keepCopiesWithActiveAssignment(
+    allCopyRows,
+    copyLinksResult.rows.map((l) => l.content_id),
+  );
+  const weeksByProgram = groupBy(weekRows, (w) => w.program_id);
+  const sessionsByWeek = groupBy(sessionsResult.rows, (s) => s.program_week_id);
+  const assignmentsByProgram = groupBy(assignmentsResult.rows, (a) => a.content_id);
+  const copyOwnersByTemplate = groupBy(copyRows, (c) => c.source_template_id);
+
+  return programRows.map((programRow) => {
+    const weeksForProgram = weeksByProgram.get(programRow.id) ?? [];
+    const sessions: AdminProgramSummarySession[] = weeksForProgram.flatMap((week) =>
+      (sessionsByWeek.get(week.id) ?? []).map((s) => ({
+        weekNumber: week.week_number,
+        isRestDay: s.is_rest_day,
+      })),
+    );
+    return {
+      id: programRow.id,
+      name: programRow.name,
+      goal: programRow.goal,
+      level: programRow.level,
+      durationWeeks: programRow.duration_weeks,
+      status: programRow.status,
+      assignedStudentIds: mergeAssignedStudentIds(
+        (assignmentsByProgram.get(programRow.id) ?? []).map((a) => a.student_id),
+        (copyOwnersByTemplate.get(programRow.id) ?? []).map((c) => c.owner_student_id),
+      ),
+      sessions,
+      bannerUrl: programRow.banner_url ?? null,
+      programMode: programRow.program_mode ?? "individuel",
+      groupStartDate: programRow.group_start_date ?? null,
+      isPublic: programRow.is_public ?? false,
+      ownerStudentId: programRow.owner_student_id ?? null,
+    };
+  });
+}
+
+/**
+ * Les programmes pour une LISTE administrative — même tri que `getPrograms`.
+ *
+ * ⚠️ LE TRI EST REPRIS À L'IDENTIQUE (`created_at` décroissant, `id` en
+ * départage) : ce lot optimise des lectures, il ne réordonne rien.
+ */
+export async function getProgramsSummary(supabase: TypedSupabaseClient): Promise<AdminProgramSummary[]> {
+  const { rows, complet } = await lireToutesLesLignes<ProgramRow>("getProgramsSummary", (debut, fin) =>
+    supabase.from("programs").select("*").order("created_at", { ascending: false }).order("id").range(debut, fin),
+  );
+  if (!complet) {
+    throw new Error("getProgramsSummary : lecture incomplète de la liste des programmes.");
+  }
+  return loadProgramsSummary(supabase, rows);
+}
 
 /** Liste de tous les programmes Supabase pour /admin/programmes, plus récents en premier. */
 export async function getPrograms(supabase: TypedSupabaseClient): Promise<AdminProgram[]> {

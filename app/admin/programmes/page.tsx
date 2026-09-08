@@ -12,7 +12,7 @@ import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
 import { useContentAssignment } from "@/hooks/useContentAssignment";
 import { useSupabaseExerciseLibrary } from "@/hooks/useSupabaseExerciseLibrary";
-import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
+import { useSupabaseProgramsSummary } from "@/hooks/useSupabaseProgramsSummary";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { contentStatusLabels, matchesTextSearch, totalSessions, totalWeeks } from "@/lib/admin";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -64,7 +64,7 @@ export default function AdminProgramsPage() {
    * configuré — développement local, démonstration.
    */
   const supabaseActive = isSupabaseConfigured();
-  const supabasePrograms = useSupabasePrograms();
+  const supabasePrograms = useSupabaseProgramsSummary();
   const programs = supabaseActive ? supabasePrograms.programs : state.programs;
   // Duplication (V3 étape 4) : Supabase uniquement, pas de repli mock — voir
   // lib/supabase/programs.ts#duplicateProgram. `duplicatingId` retient le

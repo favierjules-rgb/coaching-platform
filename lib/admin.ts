@@ -186,11 +186,22 @@ export function studentsAssignedToDocument(
   return students.filter((s) => document.assignedStudentIds.includes(s.id));
 }
 
-export function totalSessions(program: AdminProgram): number {
+/*
+ * ⚠️ SIGNATURES STRUCTURELLES, ET NON `AdminProgram`. Ces deux fonctions ne
+ * lisent que `isRestDay`, `weekNumber` et `durationWeeks` — exiger un
+ * `AdminProgram` complet les rendrait inutilisables depuis une liste, qui ne
+ * charge délibérément ni exercices ni blocs. Élargir le paramètre à ce qui
+ * est RÉELLEMENT lu accepte les deux formes sans qu'aucune ne mente : un
+ * résumé ne devient pas un programme complet pour autant.
+ */
+export function totalSessions(program: { sessions: readonly { isRestDay: boolean }[] }): number {
   return program.sessions.filter((s) => !s.isRestDay).length;
 }
 
-export function totalWeeks(program: AdminProgram): number {
+export function totalWeeks(program: {
+  sessions: readonly { weekNumber: number }[];
+  durationWeeks: number;
+}): number {
   return new Set(program.sessions.map((s) => s.weekNumber)).size || program.durationWeeks;
 }
 

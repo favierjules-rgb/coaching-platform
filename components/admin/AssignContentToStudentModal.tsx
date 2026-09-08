@@ -14,7 +14,7 @@ import {
 } from "@/lib/assignment-selection";
 import { CheckboxField } from "@/components/admin/AdminFormFields";
 import { Modal, PrimaryButton } from "@/components/admin/Modal";
-import type { AdminDocument, AdminNutritionPlan, AdminProgram, AdminStudent, AssignableContentType } from "@/types";
+import type { AdminDocument, AdminNutritionPlan, AdminProgramSummary, AdminStudent, AssignableContentType } from "@/types";
 
 /** Date du jour `YYYY-MM-DD` en heure LOCALE — voir AssignStudentsModal. */
 function dateDuJourLocale(): string {
@@ -26,7 +26,14 @@ function dateDuJourLocale(): string {
 
 interface AssignContentToStudentModalProps {
   student: AdminStudent;
-  programs: AdminProgram[];
+  /**
+   * ⚠️ UN RÉSUMÉ SUFFIT, ET C'EST LE PLUS PETIT DÉNOMINATEUR. La modale ne lit
+   * que `id`, `name` et `ownerStudentId`. Accepter `AdminProgramSummary`
+   * permet aux listes de ne plus charger 88 % d'octets inutiles ; un
+   * `AdminProgram` complet reste accepté par assignabilité structurelle, donc
+   * `/admin/eleves/[studentId]` n'a rien à changer.
+   */
+  programs: AdminProgramSummary[];
   nutritionPlans: AdminNutritionPlan[];
   documents: AdminDocument[];
   onSetAssignment: (
