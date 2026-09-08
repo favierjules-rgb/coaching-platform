@@ -13,6 +13,20 @@ import { Modal, PrimaryButton } from "@/components/admin/Modal";
 import { StudentPickerList } from "@/components/admin/StudentPickerList";
 import type { AdminStudent, AssignableContentType } from "@/types";
 
+/**
+ * La date du jour au format `YYYY-MM-DD`, en heure LOCALE.
+ *
+ * ⚠️ PAS `toISOString().slice(0, 10)`, qui rend le jour UTC : passé 22h à
+ * Paris en été, il proposerait DEMAIN. C'est la même confusion instant/jour
+ * calendaire que celle corrigée dans `daysBetween`.
+ */
+function dateDuJourLocale(): string {
+  const maintenant = new Date();
+  const mois = String(maintenant.getMonth() + 1).padStart(2, "0");
+  const jour = String(maintenant.getDate()).padStart(2, "0");
+  return `${maintenant.getFullYear()}-${mois}-${jour}`;
+}
+
 interface AssignStudentsModalProps {
   contentLabel: string;
   contentType: AssignableContentType;
@@ -24,6 +38,8 @@ interface AssignStudentsModalProps {
     contentType: AssignableContentType,
     contentId: string,
     assigned: boolean,
+    /** Programmes uniquement — voir le champ « Date de début » ci-dessous. */
+    programStartDate?: string | null,
   ) => void | boolean | Promise<boolean | void>;
   triggerLabel?: string;
   triggerVariant?: "primary" | "outline";
@@ -51,6 +67,20 @@ export function AssignStudentsModal({
   // — jamais de faux succès.
   const [saving, setSaving] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
+  /**
+   * Date de début du programme, PROGRAMMES UNIQUEMENT.
+   *
+   * ⚠️ PROPOSÉE À AUJOURD'HUI, MAIS MODIFIABLE AVANT VALIDATION — et c'est la
+   * différence entre ce champ et le défaut qui a causé le bug. `students
+   * .start_date` portait un `DEFAULT CURRENT_DATE` que personne ne voyait
+   * jamais ; ici le coach LIT la date au moment où il assigne, et la corrige
+   * s'il prépare un programme qui démarre lundi prochain.
+   *
+   * ⚠️ UNE SEULE DATE POUR LE LOT COCHÉ : on assigne un programme à plusieurs
+   * élèves qui le commencent le même jour. Un élève qui démarre plus tard se
+   * régularise depuis sa fiche.
+   */
+  const [dateDebut, setDateDebut] = useState<string>("");
 
   function close() {
     setOpen(false);
@@ -66,6 +96,7 @@ export function AssignStudentsModal({
         onClick={(event) => {
           event.stopPropagation();
           setSelection(assignedStudentIds);
+          setDateDebut(dateDuJourLocale());
           setOpen(true);
         }}
         className={
@@ -110,6 +141,30 @@ export function AssignStudentsModal({
                   )
                 }
               />
+              {/* ⚠️ PROGRAMMES UNIQUEMENT. Un plan nutritionnel et un document
+                  n'ont pas de « semaine 4 » : leur parcours d'affectation ne
+                  change pas d'un pixel. */}
+              {contentType === "programme" && (
+                <div className="flex flex-col gap-1.5 rounded-panel border border-border bg-surface-soft/40 px-4 py-3">
+                  <label
+                    htmlFor="date-debut-programme"
+                    className="text-xs font-bold uppercase tracking-widest text-muted-foreground"
+                  >
+                    Date de début du programme
+                  </label>
+                  <input
+                    id="date-debut-programme"
+                    type="date"
+                    value={dateDebut}
+                    onChange={(event) => setDateDebut(event.target.value)}
+                    className="min-h-[44px] rounded-control border border-border bg-card px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                  />
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    C&apos;est elle qui détermine la semaine affichée à l&apos;élève. Laisse vide si
+                    tu ne la connais pas encore — tu pourras la renseigner depuis sa fiche.
+                  </p>
+                </div>
+              )}
               {saveFailed && (
                 <p className="rounded-panel border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
                   L&apos;enregistrement a échoué. Ta sélection est conservée — réessaie, ou vérifie ta connexion.
@@ -130,7 +185,17 @@ export function AssignStudentsModal({
                   const terminerType =
                     contentType === "nutrition" ? terminerAssignationUnique : terminerAssignation;
                   void terminerType(assignedStudentIds, selection, (studentId, assigned) =>
-                    onSetAssignment(studentId, contentType, contentId, assigned),
+                    // ⚠️ LA DATE NE PART QU'À L'ATTRIBUTION. Au retrait, la
+                    // ligne est supprimée : lui joindre une date n'aurait
+                    // aucun sens, et l'écrire avant de supprimer en aurait
+                    // encore moins.
+                    onSetAssignment(
+                      studentId,
+                      contentType,
+                      contentId,
+                      assigned,
+                      assigned && contentType === "programme" ? dateDebut || null : undefined,
+                    ),
                   ).then(({ ok }) => {
                     setSaving(false);
                     if (ok) {

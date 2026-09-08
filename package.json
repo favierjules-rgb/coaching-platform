@@ -129,7 +129,9 @@
     "test:overpass-c4-3c": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/overpass-c4-3c.mts",
     "test:decouverte-osm-c4-3c": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/decouverte-osm-c4-3c.mts",
     "test:select-osm-c4-3c": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/select-osm-c4-3c.mts",
-    "test:upsert-osm-c4-3c": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/upsert-osm-c4-3c.mts"
+    "test:upsert-osm-c4-3c": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/upsert-osm-c4-3c.mts",
+    "test:nolio-c5-1": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/nolio-c5-1.mts",
+    "test:calendrier-semaines": "TZ=Europe/Paris npx tsx scripts/tests/calendrier-semaines.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

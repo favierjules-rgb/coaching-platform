@@ -234,6 +234,41 @@ export const STORES_NEARBY: RateLimitRule = {
 };
 
 /**
+ * NOLIO C5.1 — démarrage du flux OAuth.
+ *
+ * Chaque appel pose un cookie de `state` et envoie l'élève chez Nolio. Six
+ * tentatives par minute couvrent largement un élève qui hésite ou revient en
+ * arrière ; au-delà, c'est une boucle ou un script.
+ */
+export const NOLIO_CONNECT: RateLimitRule = {
+  name: "nolio_connect",
+  limit: 6,
+  windowMs: MINUTE,
+};
+
+/**
+ * NOLIO C5.1 — le retour d'autorisation.
+ *
+ * ⚠️ PLUS SERRÉ QUE `connect`, ET C'EST L'INVERSE DE L'INTUITION. Un callback
+ * légitime survient UNE fois par tentative de connexion. Un flot de callbacks
+ * est soit un rejeu, soit une tentative de deviner un `state` — et chaque
+ * appel consomme un aller-retour vers `/api/token/`, donc du quota Nolio, qui
+ * est de 200 requêtes/heure en développement.
+ */
+export const NOLIO_CALLBACK: RateLimitRule = {
+  name: "nolio_callback",
+  limit: 10,
+  windowMs: MINUTE,
+};
+
+/** NOLIO C5.1 — déconnexion. Geste rare ; un quota suffit à borner un script. */
+export const NOLIO_DISCONNECT: RateLimitRule = {
+  name: "nolio_disconnect",
+  limit: 6,
+  windowMs: MINUTE,
+};
+
+/**
  * COURSES C4.3a — enregistrement du magasin choisi.
  *
  * Plus serré encore : le choix relit la fiche chez l'amont PUIS écrit dans le

@@ -586,7 +586,10 @@ export async function getAssignedProgramsForStudent(
 ): Promise<AdminProgram[]> {
   const { data: assignmentRows, error: assignmentError } = await supabase
     .from("assignments")
-    .select("content_id, assigned_at")
+    // ⚠️ `program_start_date` EST LU ICI ET NULLE PART AILLEURS. C'est la seule
+    // lecture orientée élève : ailleurs un programme est un modèle, et un
+    // modèle n'a pas UNE date de début — il en a autant que d'élèves.
+    .select("content_id, assigned_at, program_start_date")
     .eq("student_id", studentId)
     .eq("content_type", "programme")
     .order("assigned_at", { ascending: false });
@@ -596,6 +599,9 @@ export async function getAssignedProgramsForStudent(
   }
 
   const orderedProgramIds = assignmentRows.map((a) => a.content_id);
+  const debutParProgramme = new Map(
+    assignmentRows.map((a) => [a.content_id, a.program_start_date ?? null] as const),
+  );
   const { data: programRows, error: programsError } = await supabase.from("programs").select("*").in("id", orderedProgramIds);
   devWarn("getAssignedProgramsForStudent (programs)", programsError);
   if (!programRows || programRows.length === 0) {
@@ -604,7 +610,63 @@ export async function getAssignedProgramsForStudent(
 
   const programs = await loadPrograms(supabase, programRows);
   const programById = new Map(programs.map((p) => [p.id, p]));
-  return orderedProgramIds.map((id) => programById.get(id)).filter((p): p is AdminProgram => p !== undefined);
+  return orderedProgramIds
+    .map((id) => programById.get(id))
+    .filter((p): p is AdminProgram => p !== undefined)
+    // ⚠️ POSÉE ICI, PAS DANS `mapProgramRow` : la date vient de
+    // l'affectation, pas de la ligne `programs`.
+    .map((programme) => ({
+      ...programme,
+      programStartDate: debutParProgramme.get(programme.id) ?? null,
+    }));
+}
+
+/**
+ * La date de début d'un programme pour un élève, et rien d'autre.
+ *
+ * ⚠️ RENDUE SÉPARÉMENT DU PROGRAMME parce que l'interface admin en a besoin
+ * pour une affectation qu'elle n'a pas forcément chargée en entier — la fiche
+ * élève affiche le badge « date non renseignée » sans reconstruire les 12
+ * semaines de séances.
+ */
+export async function getProgramStartDate(
+  supabase: TypedSupabaseClient,
+  studentId: string,
+  programId: string,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("assignments")
+    .select("program_start_date")
+    .eq("student_id", studentId)
+    .eq("content_type", "programme")
+    .eq("content_id", programId)
+    .maybeSingle();
+  devWarn("getProgramStartDate", error);
+  return (data as { program_start_date: string | null } | null)?.program_start_date ?? null;
+}
+
+/**
+ * Régularise (ou corrige) la date de début d'un programme déjà affecté.
+ *
+ * ⚠️ `null` EST UNE VALEUR LÉGITIME : le coach doit pouvoir RETIRER une date
+ * posée par erreur, et retomber sur le repli explicite plutôt que de garder
+ * une date fausse. Un formulaire qui ne saurait qu'ajouter figerait la
+ * première saisie.
+ */
+export async function setProgramStartDate(
+  supabase: TypedSupabaseClient,
+  studentId: string,
+  programId: string,
+  programStartDate: string | null,
+): Promise<boolean> {
+  const { error } = await supabase
+    .from("assignments")
+    .update({ program_start_date: programStartDate } as never)
+    .eq("student_id", studentId)
+    .eq("content_type", "programme")
+    .eq("content_id", programId);
+  devWarn("setProgramStartDate", error);
+  return !error;
 }
 
 /**
@@ -1614,6 +1676,20 @@ export async function setProgramAssignment(
   studentId: string,
   programId: string,
   assigned: boolean,
+  /**
+   * Date de début du programme POUR CET ÉLÈVE (YYYY-MM-DD).
+   *
+   * ⚠️ OPTIONNELLE, ET JAMAIS REMPLACÉE PAR LA DATE DU JOUR. Une affectation
+   * sans date est explicitement « non régularisée » : elle se voit dans
+   * l'interface admin et se corrige. Poser `today` par défaut ici aurait
+   * recréé le défaut d'origine sous un autre nom — une date technique prise
+   * pour une décision de coaching.
+   *
+   * ⚠️ ELLE N'EST JAMAIS HÉRITÉE D'UNE AFFECTATION PRÉCÉDENTE. Une
+   * réaffectation est un nouveau départ : l'insert ci-dessous ne consulte
+   * aucune ligne supprimée.
+   */
+  programStartDate?: string | null,
 ): Promise<boolean> {
   if (!assigned) {
     // Lien direct (mode groupe, héritage pré-individualisation).
@@ -1696,7 +1772,10 @@ export async function setProgramAssignment(
     student_id: studentId,
     content_type: "programme",
     content_id: effectiveProgramId,
-  });
+    // ⚠️ `?? null` PLUTÔT QU'UN CHAMP OMIS : l'intention « pas de date » est
+    // écrite, pas laissée au hasard d'un défaut de colonne.
+    program_start_date: programStartDate ?? null,
+  } as never);
   // Violation d'unicité (23505, chantier conformité juridique/RGPD, Lot
   // E-bis technique — vérification des garanties DB réelles, suite audit) :
   // la table `assignments` a déjà `unique (student_id, content_type,

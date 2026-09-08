@@ -1427,6 +1427,7 @@ export interface Database {
           content_type: "programme" | "nutrition";
           content_id: string;
           assigned_at: string;
+          program_start_date: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -1436,6 +1437,7 @@ export interface Database {
           content_type: "programme" | "nutrition";
           content_id: string;
           assigned_at?: string;
+          program_start_date?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -1445,6 +1447,7 @@ export interface Database {
           content_type?: "programme" | "nutrition";
           content_id?: string;
           assigned_at?: string;
+          program_start_date?: string | null;
           created_at?: string;
           updated_at?: string;
         };
