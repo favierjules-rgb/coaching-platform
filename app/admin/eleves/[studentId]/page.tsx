@@ -44,7 +44,8 @@ import { useStudentProfile } from "@/hooks/useStudentProfile";
 import { useSupabaseDocuments } from "@/hooks/useSupabaseDocuments";
 import { useSupabaseDocumentsForStudent } from "@/hooks/useSupabaseDocumentsForStudent";
 import { useSupabaseNutritionPlans } from "@/hooks/useSupabaseNutritionPlans";
-import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
+import { useSupabaseProgram } from "@/hooks/useSupabaseProgram";
+import { useSupabaseProgramsSummary } from "@/hooks/useSupabaseProgramsSummary";
 import { useSupabaseStudentDetail } from "@/hooks/useSupabaseStudentDetail";
 import {
   computeDocumentAvailability,
@@ -101,8 +102,21 @@ export default function AdminStudentDetailPage() {
   // pattern que /admin/programmes, /admin/nutrition et /admin/eleves.
   // L'assignation réelle n'est activée que si l'élève affiché est lui-même
   // réel (isSupabaseStudent, défini plus bas).
-  const supabasePrograms = useSupabasePrograms();
-  const programs = supabasePrograms.programs.length > 0 ? supabasePrograms.programs : state.programs;
+  // ⚠️ DEUX BESOINS DISTINCTS, DEUX LECTURES DISTINCTES.
+  //
+  // 1. Le CATALOGUE, uniquement pour la modale « Attribuer un contenu » : elle
+  //    n'affiche que des noms et des compteurs, donc le RÉSUMÉ suffit — ni
+  //    exercices, ni blocs, ni prescriptions.
+  // 2. Le PROGRAMME ASSIGNÉ, lui, a besoin de ses séances complètes (métriques
+  //    de la semaine, recherche de la dernière séance faite) : il est lu seul,
+  //    par son identifiant.
+  //
+  // Auparavant cette page chargeait TOUT le catalogue COMPLET pour ces deux
+  // usages. C'est cette lecture globale qui gonflait la liste d'identifiants
+  // envoyée dans l'URL PostgREST jusqu'au rejet par la passerelle (voir
+  // `lireParLots` dans lib/supabase/programs.ts).
+  const supabaseProgramsSummary = useSupabaseProgramsSummary();
+  const programs = supabaseProgramsSummary.programs.length > 0 ? supabaseProgramsSummary.programs : state.programs;
   // Nutrition : dès que Supabase est configuré, jamais de repli mock (voir
   // /admin/nutrition) — un élève réel sans plan réel affiche "Aucun plan
   // attribué", jamais un plan mock.
@@ -139,7 +153,16 @@ export default function AdminStudentDetailPage() {
    */
   const [debutProgrammeActif, setDebutProgrammeActif] = useState<string | null>(null);
   const isSupabaseStudent = supabaseDetail.student !== null;
-  const canAssignRealPrograms = isSupabaseStudent && supabasePrograms.programs.length > 0;
+  const canAssignRealPrograms = isSupabaseStudent && supabaseProgramsSummary.programs.length > 0;
+  // Identifiant du programme assigné, déterminé EXACTEMENT comme avant (premier
+  // programme du catalogue figurant dans les assignations de l'élève) — seule
+  // la source change : le résumé au lieu du catalogue complet. Le hook est
+  // monté inconditionnellement (règle des hooks) et ne lit rien tant que cet
+  // identifiant est indéfini.
+  const idProgrammeAssigne = supabaseProgramsSummary.programs.find((p) =>
+    (supabaseDetail.student?.assignedProgramIds ?? []).includes(p.id),
+  )?.id;
+  const programmeAssigneComplet = useSupabaseProgram(idProgrammeAssigne);
   const canAssignRealNutrition = isSupabaseStudent && supabaseNutritionActive && supabaseNutritionPlans.plans.length > 0;
   const canAssignRealDocuments = isSupabaseStudent && supabaseDocumentsActive && supabaseDocuments.documents.length > 0;
 
@@ -155,7 +178,8 @@ export default function AdminStudentDetailPage() {
     { programme: canAssignRealPrograms, nutrition: canAssignRealNutrition, document: canAssignRealDocuments },
     setAssignment,
     () => {
-      void supabasePrograms.refetch();
+      void supabaseProgramsSummary.refetch();
+      void programmeAssigneComplet.refetch();
       void supabaseNutritionPlans.refetch();
       void supabaseDocuments.refetch();
       void studentDocuments.refetch();
@@ -447,7 +471,12 @@ export default function AdminStudentDetailPage() {
     addCoachNote(student!.id, text);
   }
 
-  const assignedProgram = programs.find((p) => student.assignedProgramIds.includes(p.id));
+  // ⚠️ LE PROGRAMME COMPLET, PAS LE RÉSUMÉ. Tout ce qui suit lit
+  // `assignedProgram.sessions` en détail (métriques, exercices) : un résumé y
+  // donnerait des chiffres faux plutôt qu'une erreur.
+  const assignedProgram = isSupabaseStudent
+    ? (programmeAssigneComplet.program ?? undefined)
+    : state.programs.find((p) => student.assignedProgramIds.includes(p.id));
   const assignedPlan = nutritionPlans.find((p) => student.assignedNutritionPlanIds.includes(p.id));
   // Documents : élève réel -> disponibilité réelle (déblocage propre à
   // l'assignation puis règle du document, voir lib/supabase/documents.ts) ;

@@ -8,10 +8,11 @@ import { ArrowLeft } from "lucide-react";
 import { ProgramBuilderFullscreen, type BuilderData } from "@/components/admin/ProgramBuilderFullscreen";
 import { useAdminData } from "@/hooks/useAdminData";
 import { useSupabaseExerciseLibrary } from "@/hooks/useSupabaseExerciseLibrary";
-import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
+import { useSupabaseProgram } from "@/hooks/useSupabaseProgram";
 import { useSupabaseSessionTemplates } from "@/hooks/useSupabaseSessionTemplates";
 import { builderSaveUserMessage, nextBuilderState, orchestrateBuilderSave } from "@/lib/admin-builder-save";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { updateProgram as updateProgramSupabase } from "@/lib/supabase/programs";
 import { createSessionTemplate } from "@/lib/supabase/session-templates";
 import type { AdminProgram, AdminWorkoutSession } from "@/types";
@@ -27,10 +28,17 @@ export default function ProgramBuilderPage() {
   const params = useParams<{ programId: string }>();
   const { state } = useAdminData();
 
-  const supabasePrograms = useSupabasePrograms();
-  const isSupabaseActive = supabasePrograms.programs.length > 0;
-  const programs = isSupabaseActive ? supabasePrograms.programs : state.programs;
-  const derivedProgram = programs.find((p) => p.id === params.programId);
+  // Lecture CIBLÉE : ce seul programme, pas la totalité du catalogue. Voir
+  // useSupabaseProgram — la lecture globale faisait dépasser le plafond d'URL
+  // de la passerelle PostgREST dès que le nombre de séances grandissait.
+  const supabaseProgram = useSupabaseProgram(params.programId);
+  // ⚠️ « Supabase est-il actif » se lit dans la CONFIGURATION, pas dans le
+  // résultat : un identifiant inconnu rend `null` et ne doit pas faire
+  // réapparaître les programmes de démonstration (cf. 65be51b).
+  const isSupabaseActive = isSupabaseConfigured();
+  const derivedProgram = isSupabaseActive
+    ? (supabaseProgram.program ?? undefined)
+    : state.programs.find((p) => p.id === params.programId);
 
   // Snapshot de page + révision qui pilotent le remount du builder.
   // `savedProgram` n'est écrit QUE dans le handler de sauvegarde (jamais dans un
@@ -69,10 +77,7 @@ export default function ProgramBuilderPage() {
       save: () => updateProgramSupabase(supabase, programId, data),
       // refetch RETOURNE la liste fraîche (jamais un état périmé) → on en extrait
       // le snapshot à jour (UUID réels + nouveaux updatedAt de séances).
-      refetch: async () => {
-        const list = await supabasePrograms.refetch();
-        return list.find((p) => p.id === programId) ?? null;
-      },
+      refetch: () => supabaseProgram.refetch(),
     });
 
     // Seul un succès remplace le snapshot et incrémente la révision → UN unique
@@ -91,7 +96,7 @@ export default function ProgramBuilderPage() {
     return { ok: false, userMessage: builderSaveUserMessage(outcome) };
   }
 
-  if (supabasePrograms.loading && !isSupabaseActive && !activeProgram) {
+  if (supabaseProgram.loading && !activeProgram) {
     return <Loader libelle="Chargement du builder…" className="h-dvh" />;
   }
 

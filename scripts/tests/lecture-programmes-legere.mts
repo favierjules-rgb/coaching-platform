@@ -50,6 +50,8 @@ interface Appel {
 
 let appels: Appel[] = [];
 let base: Record<string, Ligne[]> = {};
+/** Simule un serveur qui ne rend PAS `Content-Range`, même demandé (voir PAG4). */
+let masquerLeTotal = false;
 
 /** Table + filtres → lignes, dans l'ordre d'insertion. */
 function filtrer(table: string, params: URLSearchParams): Ligne[] {
@@ -67,7 +69,20 @@ function filtrer(table: string, params: URLSearchParams): Ligne[] {
   return lignes;
 }
 
-globalThis.fetch = (async (entree: unknown) => {
+/**
+ * Lit un en-tête quelle que soit la forme que fetch a reçue (objet simple,
+ * tableau de paires, ou `Headers`).
+ */
+function entete(init: RequestInit | undefined, nom: string): string {
+  const h = init?.headers;
+  if (!h) return "";
+  if (h instanceof Headers) return h.get(nom) ?? "";
+  if (Array.isArray(h)) return h.find(([c]) => c.toLowerCase() === nom.toLowerCase())?.[1] ?? "";
+  const cle = Object.keys(h).find((c) => c.toLowerCase() === nom.toLowerCase());
+  return cle ? String((h as Record<string, string>)[cle]) : "";
+}
+
+globalThis.fetch = (async (entree: unknown, init?: RequestInit) => {
   const url = new URL(typeof entree === "string" ? entree : String((entree as { url: string }).url));
   const table = url.pathname.split("/rest/v1/")[1] ?? "?";
   const colonnes = url.searchParams.get("select") ?? "*";
@@ -84,10 +99,22 @@ globalThis.fetch = (async (entree: unknown) => {
       : tranche.map((l) => Object.fromEntries(colonnes.split(",").map((c) => [c.trim(), l[c.trim()]])));
 
   appels.push({ table, colonnes, offset, limit, rendu: tranche.length });
-  return new Response(JSON.stringify(projetees), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
-  });
+
+  /*
+   * ⚠️ `Content-Range` N'EST RENDU QUE S'IL EST DEMANDÉ — COMME LE VRAI.
+   *
+   * PostgREST ne calcule le total que sur `Prefer: count=exact` ; sans cet
+   * en-tête il répond `*` et le client ne sait rien du volume restant.
+   * Reproduire cette conditionnalité est ce qui rend le harnais capable de
+   * distinguer le chemin normal (compte connu) du repli prudent.
+   */
+  const entetes: Record<string, string> = { "Content-Type": "application/json" };
+  if (!masquerLeTotal && entete(init, "Prefer").includes("count=exact")) {
+    const dernier = offset + tranche.length - 1;
+    entetes["Content-Range"] = tranche.length > 0 ? `${offset}-${dernier}/${toutes.length}` : `*/${toutes.length}`;
+  }
+
+  return new Response(JSON.stringify(projetees), { status: 200, headers: entetes });
 }) as typeof fetch;
 
 const { createSupabaseBrowserClient } = await import("../../lib/supabase/browser");
@@ -262,23 +289,64 @@ await test("PAG2. 2 105 lignes = 3 requêtes, pas 4", async () => {
   }
 });
 
-await test("PAG3. un multiple EXACT de la page exige bien une requête de plus", async () => {
+await test("PAG3. un multiple EXACT de la page ne coûte PLUS de requête de plus", async () => {
   /*
-   * ⚠️ LE CAS QUI INTERDIT DE SIMPLIFIER PLUS. Avec exactement 2 000 lignes,
-   * le second lot est PLEIN : rien ne dit qu'il n'y en a pas un troisième. Une
-   * requête supplémentaire est alors nécessaire, et son résultat vide est la
-   * seule preuve d'exhaustivité. L'optimisation supprime les requêtes vides
-   * INUTILES, pas celles qui portent une information.
+   * ⚠️ CE TEST DISAIT L'INVERSE, ET IL AVAIT RAISON À L'ÉPOQUE. Tant que la
+   * fin du jeu était DEVINÉE (« le lot est plus court que demandé, donc c'est
+   * fini »), un second lot PLEIN de 1 000 lignes ne prouvait rien : il fallait
+   * une troisième requête, dont le résultat vide était la seule preuve
+   * d'exhaustivité.
+   *
+   * Depuis que la première page réclame `count: "exact"`, le serveur ANNONCE
+   * son total. À 2 000 lignes lues sur 2 000 annoncées, l'exhaustivité est
+   * établie : la troisième requête ne porte plus aucune information, et elle
+   * disparaît. On vérifie les DEUX moitiés — qu'elle a disparu, et que rien
+   * n'a été perdu au passage.
    */
   base.workout_exercises = Array.from({ length: 2000 }, (_, i) => ({
     id: `X${i}`, session_id: "S1", name: "e", sets: 1, reps: "1", rest_seconds: 0, tempo: "",
     recommended_load: "", recommended_rpe: "", video_url: "", muscle_group: "", library_exercise_id: null, position: i,
   }));
   try {
-    await getPrograms(client!);
+    const programmes = await getPrograms(client!);
     const pages = appels.filter((a) => a.table === "workout_exercises");
-    assert.deepEqual(pages.map((p) => p.rendu), [1000, 1000, 0]);
+    assert.deepEqual(pages.map((p) => p.rendu), [1000, 1000], "une requête vide subsiste sur un multiple exact");
+    const lues = programmes.reduce(
+      (n, p) => n + p.sessions.reduce((m, s) => m + s.exercises.length, 0),
+      0,
+    );
+    assert.equal(lues, 2000, "des exercices ont été perdus en supprimant la requête de clôture");
   } finally {
+    poserBase();
+  }
+});
+
+await test("PAG4. SANS total annoncé, la requête de clôture reste OBLIGATOIRE", async () => {
+  /*
+   * ⚠️ LE REPLI DOIT RESTER SÛR, ET C'EST ICI QU'ON LE PROUVE.
+   *
+   * Si le serveur ne rend aucun `Content-Range` — vieille version, passerelle
+   * qui filtre l'en-tête, configuration inattendue — la lecture perd son
+   * arrêt positif. Elle ne doit PAS retomber sur « lot plus court = fini » :
+   * elle doit revenir à la seule autre règle sûre, l'arrêt sur lot VIDE, et
+   * donc payer à nouveau la requête de clôture. Plus lent, jamais faux.
+   */
+  base.workout_exercises = Array.from({ length: 2000 }, (_, i) => ({
+    id: `X${i}`, session_id: "S1", name: "e", sets: 1, reps: "1", rest_seconds: 0, tempo: "",
+    recommended_load: "", recommended_rpe: "", video_url: "", muscle_group: "", library_exercise_id: null, position: i,
+  }));
+  masquerLeTotal = true;
+  try {
+    const programmes = await getPrograms(client!);
+    const pages = appels.filter((a) => a.table === "workout_exercises");
+    assert.deepEqual(pages.map((p) => p.rendu), [1000, 1000, 0], "le repli ne s'arrête plus sur un lot vide");
+    const lues = programmes.reduce(
+      (n, p) => n + p.sessions.reduce((m, s) => m + s.exercises.length, 0),
+      0,
+    );
+    assert.equal(lues, 2000, "le repli a perdu des lignes");
+  } finally {
+    masquerLeTotal = false;
     poserBase();
   }
 });
@@ -393,6 +461,14 @@ await test("PAGES2. les trois pages de DÉTAIL gardent la lecture COMPLÈTE", as
    * compilation — `AdminProgram` est assignable au résumé, pas l'inverse — mais
    * la page ne compilerait plus du tout, ce qui est justement le but. Ce test
    * le dit à voix haute plutôt que de compter sur la découverte.
+   *
+   * ⚠️ CE QUI EST ÉPINGLÉ, C'EST « COMPLET », PAS « TOUT LE CATALOGUE ».
+   * Ce contrôle exigeait littéralement `useSupabasePrograms()`, c'est-à-dire la
+   * lecture de TOUS les programmes. Or c'est précisément cette lecture globale
+   * qui a fait tomber le builder le 11/09 : la liste d'identifiants envoyée
+   * dans l'URL PostgREST dépassait le plafond de la passerelle. Les trois pages
+   * lisent désormais `useSupabaseProgram(id)` — toujours le programme COMPLET,
+   * mais un seul. La garantie de fond est inchangée ; seule la source l'est.
    */
   for (const chemin of [
     "../../app/admin/eleves/[studentId]/page.tsx",
@@ -400,7 +476,30 @@ await test("PAGES2. les trois pages de DÉTAIL gardent la lecture COMPLÈTE", as
     "../../app/admin/programmes/[programId]/builder/page.tsx",
   ]) {
     const code = lire(chemin);
-    assert.match(code, /useSupabasePrograms\(\)/, `${chemin} : a perdu la lecture complète`);
+    assert.match(code, /useSupabaseProgram\(/, `${chemin} : a perdu la lecture complète`);
+  }
+
+  /*
+   * ⚠️ ET LE RÉSUMÉ NE DOIT PAS S'ÊTRE GLISSÉ DANS LE PROGRAMME AFFICHÉ.
+   * La fiche élève lit bien le résumé, mais UNIQUEMENT pour le catalogue de la
+   * modale d'attribution ; le programme dont on calcule les métriques vient de
+   * la lecture complète ciblée. Sans ce second contrôle, le premier serait
+   * satisfait par une page qui garderait le hook sans s'en servir.
+   */
+  const fiche = lire("../../app/admin/eleves/[studentId]/page.tsx");
+  assert.match(
+    fiche,
+    /const assignedProgram =[\s\S]{0,200}?programmeAssigneComplet\.program/,
+    "le programme assigné de la fiche élève ne vient plus de la lecture complète",
+  );
+  for (const chemin of [
+    "../../app/admin/programmes/[programId]/page.tsx",
+    "../../app/admin/programmes/[programId]/builder/page.tsx",
+  ]) {
+    assert.ok(
+      !/useSupabaseProgramsSummary\(/.test(lire(chemin)),
+      `${chemin} : affiche un programme construit à partir du RÉSUMÉ`,
+    );
   }
 });
 

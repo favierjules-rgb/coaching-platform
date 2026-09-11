@@ -125,7 +125,7 @@ function devWarn(context: string, error: { message: string; code?: string; detai
  *    page de 1 000), avancer du pas demandé sauterait la moitié des lignes,
  *    et s'arrêter sur « lot plus court que demandé » s'arrêterait dès la
  *    première page. Avancer du nombre RÉELLEMENT reçu est correct quel que
- *    soit le plafond du serveur ; on ne s'arrête que sur un lot VIDE.
+ *    soit le plafond du serveur.
  *
  * 2. UN `.order()` EXPLICITE EST OBLIGATOIRE. Sans tri, PostgreSQL ne
  *    garantit aucun ordre stable entre deux requêtes : des lignes peuvent
@@ -138,56 +138,211 @@ const TAILLE_DE_PAGE = 1000;
 const PAGES_MAX = 200;
 
 /**
+ * Options de `select()` à poser sur une page : on ne réclame le compte total
+ * que sur la PREMIÈRE, jamais sur les suivantes (voir `lireToutesLesLignes`).
+ *
+ * ⚠️ NE PAS REMPLACER PAR UN BOOLÉEN OUBLIABLE. Chaque appelant passe
+ * littéralement `optionsDePage(compter)` à son `.select()` ; un appelant qui
+ * l'omettrait ne recevrait jamais de compte, et sa lecture retomberait
+ * silencieusement sur le repli prudent — correcte, mais un aller-retour plus
+ * chère, sans que rien ne le signale.
+ */
+const optionsDePage = (compter: boolean) => (compter ? ({ count: "exact" } as const) : undefined);
+
+/**
  * Lit TOUTES les lignes d'une requête, page après page.
  *
- * `page(debut, fin)` doit reconstruire la requête complète à chaque appel
- * (un constructeur Supabase n'est pas réutilisable) et poser un `.order()`.
+ * `page(debut, fin, compter)` doit reconstruire la requête complète à chaque
+ * appel (un constructeur Supabase n'est pas réutilisable), poser un `.order()`
+ * et passer `optionsDePage(compter)` à son `.select()`.
  *
- * Rend aussi `complet` : `false` si une erreur a interrompu la lecture ou si
- * le garde-fou a été atteint. Les appelants qui écrivent ensuite DOIVENT le
+ * Rend aussi `complet` : `false` si une erreur a interrompu la lecture, si le
+ * serveur a cessé de rendre des lignes avant d'atteindre le total annoncé, ou
+ * si le garde-fou a été atteint. Les appelants qui écrivent ensuite DOIVENT le
  * regarder — une lecture partielle suivie d'une écriture est exactement le
  * mécanisme qui a détruit des données le 25/08.
+ *
+ * ════════════════════════════════════════════════════════════════════════
+ * L'ARRÊT EST POSITIF : ON COMPTE, ON NE DEVINE PAS
+ * ════════════════════════════════════════════════════════════════════════
+ * La première page réclame `count: "exact"`. PostgREST répond alors
+ * `Content-Range: 0-999/1379` et postgrest-js expose ce total dans `count`.
+ * La boucle s'arrête quand `rows.length >= total` — une CONFIRMATION, et non
+ * l'inférence « le lot est court, ce doit être la fin ».
+ *
+ * ⚠️ POURQUOI L'INFÉRENCE ÉTAIT FAUSSE, ET MESURÉE COMME TELLE. Une version
+ * précédente s'arrêtait sur `lot.length < TAILLE_DE_PAGE`, en affirmant que
+ * PostgREST ne rend moins que la plage demandée qu'une fois le jeu épuisé.
+ * C'est faux : il rend `min(plage demandée, db-max-rows)`. Relevé dans les
+ * journaux `edge_logs` du projet le 11/09 — `exercise_set_feedback`, 1 379
+ * lignes en base, requête SANS `limit`, SANS `offset`, SANS en-tête `Range` :
+ * réponse `Content-Range: 0-999/*`. Le plafond du serveur vaut donc 1 000,
+ * exactement `TAILLE_DE_PAGE`. L'arrêt sur lot partiel ne restait correct que
+ * par cette ÉGALITÉ FORTUITE de deux constantes sans lien : abaisser
+ * « Max rows » dans les réglages Supabase, ou monter `TAILLE_DE_PAGE`, et
+ * toute lecture se serait tronquée en silence, `complet` restant `true`.
+ *
+ * ⚠️ ET L'ARRÊT POSITIF COÛTE MOINS CHER QUE LA REQUÊTE QU'IL ÉVITE. Mesuré
+ * par EXPLAIN ANALYZE sur ce projet : le `count(*) OVER()` ajoute 1,1 ms sur
+ * un lot réel (844 lignes) et 9,2 ms dans le pire cas observé (14 003 lignes
+ * filtrées). Un aller-retour, lui, coûte 53 à 143 ms de médiane selon la
+ * table (`response.origin_time`), sans compter le trajet client. Connaître le
+ * total supprime aussi la requête vide que payait le cas « multiple exact de
+ * la page ».
+ *
+ * ⚠️ SANS COMPTE, ON REVIENT À LA SEULE AUTRE RÈGLE SÛRE. Si le serveur ne
+ * rend pas de total, on ne s'arrête QUE sur un lot vide. C'est plus coûteux
+ * d'un aller-retour, et toujours correct quel que soit le plafond. Ce qui ne
+ * revient JAMAIS, c'est l'arrêt sur lot partiel.
  */
 async function lireToutesLesLignes<T>(
   contexte: string,
   page: (
     debut: number,
     fin: number,
-  ) => PromiseLike<{ data: T[] | null; error: { message: string; code?: string } | null }>,
+    compter: boolean,
+  ) => PromiseLike<{
+    data: T[] | null;
+    error: { message: string; code?: string } | null;
+    count?: number | null;
+  }>,
 ): Promise<{ rows: T[]; complet: boolean }> {
   const rows: T[] = [];
   let debut = 0;
+  let total: number | null = null;
+
   for (let n = 0; n < PAGES_MAX; n += 1) {
-    const { data, error } = await page(debut, debut + TAILLE_DE_PAGE - 1);
+    const premiere = n === 0;
+    const { data, error, count } = await page(debut, debut + TAILLE_DE_PAGE - 1, premiere);
     if (error) {
       devWarn(`${contexte} (pagination interrompue)`, error);
       return { rows, complet: false };
     }
+    if (premiere && typeof count === "number") {
+      total = count;
+    }
+
     const lot = data ?? [];
-    if (lot.length === 0) return { rows, complet: true };
     rows.push(...lot);
-    /*
-     * ⚠️ UN LOT INCOMPLET EST LE DERNIER, ET IL FAUT LE DIRE ICI.
-     *
-     * La boucle ne s'arrêtait que sur un lot VIDE : chaque lecture payait donc
-     * une requête supplémentaire dont la seule information était « il n'y a
-     * plus rien ». Mesuré sur `getPrograms` avant ce lot : 9 requêtes vides
-     * sur 20, soit 45 % des allers-retours — invisibles en local, coûteuses
-     * sur une liaison lente, où chacune se paie une latence pleine.
-     *
-     * ⚠️ LA SÉMANTIQUE EST IDENTIQUE, PAS SEULEMENT ÉQUIVALENTE. PostgREST
-     * rend au plus `fin - debut + 1` lignes ; en rendre MOINS signifie qu'il
-     * a épuisé le jeu de résultats. Il n'existe pas de cas où un lot partiel
-     * serait suivi d'autre chose — c'est la garantie de `range`, pas une
-     * supposition sur les données.
-     */
-    if (lot.length < TAILLE_DE_PAGE) return { rows, complet: true };
+
+    // Le total est atteint : la lecture est complète, prouvée par le serveur.
+    if (total !== null && rows.length >= total) {
+      return { rows, complet: true };
+    }
+
+    if (lot.length === 0) {
+      /*
+       * ⚠️ LOT VIDE AVANT LE TOTAL = LECTURE INCOMPLÈTE, ET IL FAUT LE DIRE.
+       *
+       * Sans total connu, un lot vide est la fin normale du jeu. Avec un total
+       * connu et non atteint, c'est une anomalie : le serveur a cessé de
+       * rendre des lignes plus tôt que ce qu'il avait lui-même annoncé. On la
+       * signale plutôt que de rendre un jeu amputé — le builder réenregistre
+       * ce qu'il a lu, et ce qui manque serait détruit.
+       *
+       * Une suppression concurrente pendant la pagination produit le même
+       * symptôme. Le faux positif est assumé : une erreur visible vaut mieux
+       * qu'une perte silencieuse.
+       */
+      if (total !== null) {
+        devWarn(`${contexte} (pagination)`, {
+          message: `le serveur a cessé de rendre des lignes à ${rows.length} sur ${total} annoncées — lecture déclarée INCOMPLÈTE`,
+        });
+        return { rows, complet: false };
+      }
+      return { rows, complet: true };
+    }
+
     debut += lot.length;
   }
+
   devWarn(`${contexte} (pagination)`, {
     message: `garde-fou atteint après ${PAGES_MAX} pages (${rows.length} lignes lues) — lecture déclarée INCOMPLÈTE`,
   });
   return { rows, complet: false };
+}
+
+/*
+ * ────────────────────────────────────────────────────────────────────────
+ * POURQUOI UNE LISTE D'IDENTIFIANTS DOIT ÊTRE DÉCOUPÉE
+ * ────────────────────────────────────────────────────────────────────────
+ * postgrest-js traduit `.in("session_id", ids)` en PARAMÈTRE D'URL :
+ * `?session_id=in.(uuid1,uuid2,…)`. La liste entière voyage donc dans la
+ * ligne de requête HTTP, et une ligne de requête a une taille maximale.
+ *
+ * PANNE DU 11/09 — CONSTATÉE, PAS SUPPOSÉE. Les journaux `edge_logs` du
+ * projet montrent, sur 24 h, pour `workout_exercises` et `training_blocks` :
+ *   • URL de 399 à 6 678 caractères  → 200
+ *   • URL de 26 059 à 29 337         → 400, SANS AUCUNE trace côté
+ *     `postgres_logs` : la requête est rejetée par la passerelle et
+ *     n'atteint jamais la base.
+ * Le même essai rejoué contre le projet avec des en-têtes minimaux rend
+ * « 431 Request Header Fields Too Large » au-delà d'environ 32 300
+ * caractères ; avec les en-têtes réels d'un navigateur, le budget utile
+ * tombe entre 20 000 et 26 000. Les 749 séances de production pèsent
+ * 27 712 caractères d'identifiants : le mur était franchi.
+ *
+ * ⚠️ LA PAGINATION NE PROTÈGE PAS DE ÇA, ET C'EST LE PIÈGE.
+ * `lireToutesLesLignes` découpe le RÉSULTAT (`range`), pas la LISTE ENVOYÉE.
+ * Chaque page réémet la même URL surdimensionnée : paginer une requête trop
+ * longue ne fait que la rejouer. Seul le découpage de la liste d'entrée
+ * borne la taille de l'URL — c'est la raison d'être de `lireParLots`.
+ *
+ * ⚠️ LA BORNE PORTE SUR LA TAILLE, PAS SUR LE NOMBRE DE LIGNES. Un lot est
+ * dimensionné pour que l'URL reste courte quel que soit le volume en base ;
+ * le nombre de lignes rendues, lui, reste géré par la pagination, appliquée
+ * à l'intérieur de chaque lot.
+ */
+const TAILLE_DE_LOT_IDS = 200;
+
+/**
+ * Lit toutes les lignes correspondant à `ids`, en découpant la liste en lots
+ * dont l'URL reste sous le plafond de la passerelle.
+ *
+ * Chaque lot est lu intégralement par `lireToutesLesLignes` (donc paginé), et
+ * les lots partent en parallèle : sur une liaison lente, la latence d'un lot
+ * n'est pas payée autant de fois qu'il y a de lots.
+ *
+ * `complet` est le ET de tous les lots : si UN SEUL lot a été interrompu, la
+ * lecture entière est incomplète. Un appelant ne doit jamais confondre « j'ai
+ * des lignes » avec « j'ai toutes les lignes ».
+ */
+async function lireParLots<T>(
+  contexte: string,
+  ids: readonly string[],
+  page: (
+    lot: string[],
+    debut: number,
+    fin: number,
+    compter: boolean,
+  ) => PromiseLike<{
+    data: T[] | null;
+    error: { message: string; code?: string } | null;
+    count?: number | null;
+  }>,
+): Promise<{ rows: T[]; complet: boolean }> {
+  if (ids.length === 0) return { rows: [], complet: true };
+
+  const lots: string[][] = [];
+  for (let i = 0; i < ids.length; i += TAILLE_DE_LOT_IDS) {
+    lots.push(ids.slice(i, i + TAILLE_DE_LOT_IDS) as string[]);
+  }
+
+  const resultats = await Promise.all(
+    lots.map((lot, index) =>
+      // ⚠️ CHAQUE LOT COMPTE POUR LUI-MÊME. Le total annoncé vaut pour la
+      // requête émise, donc pour CE lot d'identifiants — jamais pour
+      // l'ensemble. Partager un total entre lots rendrait l'arrêt faux.
+      lireToutesLesLignes<T>(`${contexte} (lot ${index + 1}/${lots.length})`, (debut, fin, compter) =>
+        page(lot, debut, fin, compter),
+      ),
+    ),
+  );
+
+  return {
+    rows: resultats.flatMap((r) => r.rows),
+    complet: resultats.every((r) => r.complet),
+  };
 }
 
 function groupBy<T, K>(items: T[], key: (item: T) => K): Map<K, T[]> {
@@ -409,28 +564,29 @@ async function loadPrograms(supabase: TypedSupabaseClient, programRows: ProgramR
   // un `select()` non borné est tronqué en silence par PostgREST au-delà de
   // `max_rows`, et c'est ce qui a fait disparaître 224 exercices le 25/08.
   const [weeksResult, assignmentsResult, copiesResult] = await Promise.all([
-    lireToutesLesLignes<ProgramWeekRow>("loadPrograms (program_weeks)", (debut, fin) =>
-      supabase.from("program_weeks").select("*").in("program_id", programIds).order("id").range(debut, fin),
+    lireParLots<ProgramWeekRow>("loadPrograms (program_weeks)", programIds, (lot, debut, fin, compter) =>
+      supabase.from("program_weeks").select("*", optionsDePage(compter)).in("program_id", lot).order("id").range(debut, fin),
     ),
-    lireToutesLesLignes<AssignmentRow>("loadPrograms (assignments)", (debut, fin) =>
+    lireParLots<AssignmentRow>("loadPrograms (assignments)", programIds, (lot, debut, fin, compter) =>
       supabase
         .from("assignments")
-        .select("*")
+        .select("*", optionsDePage(compter))
         .eq("content_type", "programme")
-        .in("content_id", programIds)
+        .in("content_id", lot)
         .order("id")
         .range(debut, fin),
     ),
     // fix/program-assignment-checkbox : depuis l'individualisation, l'assignation
     // d'un programme individuel vise la COPIE de l'élève — pour afficher les
     // cases cochées du MODÈLE, il faut donc aussi ses copies (owner + source).
-    lireToutesLesLignes<{ id: string; owner_student_id: string | null; source_template_id: string | null }>(
+    lireParLots<{ id: string; owner_student_id: string | null; source_template_id: string | null }>(
       "loadPrograms (copies individuelles)",
-      (debut, fin) =>
+      programIds,
+      (lot, debut, fin, compter) =>
         supabase
           .from("programs")
-          .select("id, owner_student_id, source_template_id")
-          .in("source_template_id", programIds)
+          .select("id, owner_student_id, source_template_id", optionsDePage(compter))
+          .in("source_template_id", lot)
           .order("id")
           .range(debut, fin),
     ),
@@ -460,22 +616,18 @@ async function loadPrograms(supabase: TypedSupabaseClient, programRows: ProgramR
   const copyIds = allCopyRows.map((c) => c.id);
   const weekIds = weekRows.map((w) => w.id);
   const [copyLinksResult, sessionsResult] = await Promise.all([
-    copyIds.length > 0
-      ? lireToutesLesLignes<{ content_id: string }>("loadPrograms (liens actifs des copies)", (debut, fin) =>
-          supabase
-            .from("assignments")
-            .select("content_id")
-            .eq("content_type", "programme")
-            .in("content_id", copyIds)
-            .order("content_id")
-            .range(debut, fin),
-        )
-      : Promise.resolve({ rows: [] as { content_id: string }[], complet: true }),
-    weekIds.length > 0
-      ? lireToutesLesLignes<WorkoutSessionRow>("loadPrograms (workout_sessions)", (debut, fin) =>
-          supabase.from("workout_sessions").select("*").in("program_week_id", weekIds).order("id").range(debut, fin),
-        )
-      : Promise.resolve({ rows: [] as WorkoutSessionRow[], complet: true }),
+    lireParLots<{ content_id: string }>("loadPrograms (liens actifs des copies)", copyIds, (lot, debut, fin, compter) =>
+      supabase
+        .from("assignments")
+        .select("content_id", optionsDePage(compter))
+        .eq("content_type", "programme")
+        .in("content_id", lot)
+        .order("content_id")
+        .range(debut, fin),
+    ),
+    lireParLots<WorkoutSessionRow>("loadPrograms (workout_sessions)", weekIds, (lot, debut, fin, compter) =>
+      supabase.from("workout_sessions").select("*", optionsDePage(compter)).in("program_week_id", lot).order("id").range(debut, fin),
+    ),
   ]);
   const copyRows = keepCopiesWithActiveAssignment(
     allCopyRows,
@@ -491,27 +643,23 @@ async function loadPrograms(supabase: TypedSupabaseClient, programRows: ProgramR
    */
   const sessionIds = sessionRows.map((s) => s.id);
   const [exercisesResult, blocksResult] = await Promise.all([
-    sessionIds.length > 0
-      ? lireToutesLesLignes<WorkoutExerciseRow>("loadPrograms (workout_exercises)", (debut, fin) =>
-          supabase.from("workout_exercises").select("*").in("session_id", sessionIds).order("id").range(debut, fin),
-        )
-      : Promise.resolve({ rows: [] as WorkoutExerciseRow[], complet: true }),
-    sessionIds.length > 0
-      ? lireToutesLesLignes<TrainingBlockRow>("loadPrograms (training_blocks)", (debut, fin) =>
-          supabase.from("training_blocks").select("*").in("session_id", sessionIds).order("id").range(debut, fin),
-        )
-      : Promise.resolve({ rows: [] as TrainingBlockRow[], complet: true }),
+    lireParLots<WorkoutExerciseRow>("loadPrograms (workout_exercises)", sessionIds, (lot, debut, fin, compter) =>
+      supabase.from("workout_exercises").select("*", optionsDePage(compter)).in("session_id", lot).order("id").range(debut, fin),
+    ),
+    lireParLots<TrainingBlockRow>("loadPrograms (training_blocks)", sessionIds, (lot, debut, fin, compter) =>
+      supabase.from("training_blocks").select("*", optionsDePage(compter)).in("session_id", lot).order("id").range(debut, fin),
+    ),
   ]);
   const exerciseRows = exercisesResult.rows;
   const blockRows = blocksResult.rows;
 
   const blockIds = blockRows.map((b) => b.id);
-  const segmentsResult =
-    blockIds.length > 0
-      ? await lireToutesLesLignes<TrainingPrescriptionRow>("loadPrograms (training_prescriptions)", (debut, fin) =>
-          supabase.from("training_prescriptions").select("*").in("block_id", blockIds).order("id").range(debut, fin),
-        )
-      : { rows: [] as TrainingPrescriptionRow[], complet: true };
+  const segmentsResult = await lireParLots<TrainingPrescriptionRow>(
+    "loadPrograms (training_prescriptions)",
+    blockIds,
+    (lot, debut, fin, compter) =>
+      supabase.from("training_prescriptions").select("*", optionsDePage(compter)).in("block_id", lot).order("id").range(debut, fin),
+  );
   const segmentRows = segmentsResult.rows;
 
   /*
@@ -628,34 +776,37 @@ async function loadProgramsSummary(
   const programIds = programRows.map((p) => p.id);
 
   const [weeksResult, assignmentsResult, copiesResult] = await Promise.all([
-    lireToutesLesLignes<{ id: string; program_id: string; week_number: number }>(
+    lireParLots<{ id: string; program_id: string; week_number: number }>(
       "loadProgramsSummary (program_weeks)",
-      (debut, fin) =>
+      programIds,
+      (lot, debut, fin, compter) =>
         supabase
           .from("program_weeks")
-          .select("id, program_id, week_number")
-          .in("program_id", programIds)
+          .select("id, program_id, week_number", optionsDePage(compter))
+          .in("program_id", lot)
           .order("id")
           .range(debut, fin),
     ),
-    lireToutesLesLignes<{ content_id: string; student_id: string }>(
+    lireParLots<{ content_id: string; student_id: string }>(
       "loadProgramsSummary (assignments)",
-      (debut, fin) =>
+      programIds,
+      (lot, debut, fin, compter) =>
         supabase
           .from("assignments")
-          .select("content_id, student_id")
+          .select("content_id, student_id", optionsDePage(compter))
           .eq("content_type", "programme")
-          .in("content_id", programIds)
+          .in("content_id", lot)
           .order("id")
           .range(debut, fin),
     ),
-    lireToutesLesLignes<{ id: string; owner_student_id: string | null; source_template_id: string | null }>(
+    lireParLots<{ id: string; owner_student_id: string | null; source_template_id: string | null }>(
       "loadProgramsSummary (copies individuelles)",
-      (debut, fin) =>
+      programIds,
+      (lot, debut, fin, compter) =>
         supabase
           .from("programs")
-          .select("id, owner_student_id, source_template_id")
-          .in("source_template_id", programIds)
+          .select("id, owner_student_id, source_template_id", optionsDePage(compter))
+          .in("source_template_id", lot)
           .order("id")
           .range(debut, fin),
     ),
@@ -672,29 +823,29 @@ async function loadProgramsSummary(
   const copyIds = allCopyRows.map((c) => c.id);
   const weekIds = weekRows.map((w) => w.id);
   const [copyLinksResult, sessionsResult] = await Promise.all([
-    copyIds.length > 0
-      ? lireToutesLesLignes<{ content_id: string }>("loadProgramsSummary (liens actifs des copies)", (debut, fin) =>
-          supabase
-            .from("assignments")
-            .select("content_id")
-            .eq("content_type", "programme")
-            .in("content_id", copyIds)
-            .order("content_id")
-            .range(debut, fin),
-        )
-      : Promise.resolve({ rows: [] as { content_id: string }[], complet: true }),
-    weekIds.length > 0
-      ? lireToutesLesLignes<{ id: string; program_week_id: string; is_rest_day: boolean }>(
-          "loadProgramsSummary (workout_sessions)",
-          (debut, fin) =>
-            supabase
-              .from("workout_sessions")
-              .select("id, program_week_id, is_rest_day")
-              .in("program_week_id", weekIds)
-              .order("id")
-              .range(debut, fin),
-        )
-      : Promise.resolve({ rows: [] as { id: string; program_week_id: string; is_rest_day: boolean }[], complet: true }),
+    lireParLots<{ content_id: string }>(
+      "loadProgramsSummary (liens actifs des copies)",
+      copyIds,
+      (lot, debut, fin, compter) =>
+        supabase
+          .from("assignments")
+          .select("content_id", optionsDePage(compter))
+          .eq("content_type", "programme")
+          .in("content_id", lot)
+          .order("content_id")
+          .range(debut, fin),
+    ),
+    lireParLots<{ id: string; program_week_id: string; is_rest_day: boolean }>(
+      "loadProgramsSummary (workout_sessions)",
+      weekIds,
+      (lot, debut, fin, compter) =>
+        supabase
+          .from("workout_sessions")
+          .select("id, program_week_id, is_rest_day", optionsDePage(compter))
+          .in("program_week_id", lot)
+          .order("id")
+          .range(debut, fin),
+    ),
   ]);
 
   /*
@@ -763,8 +914,8 @@ async function loadProgramsSummary(
  * départage) : ce lot optimise des lectures, il ne réordonne rien.
  */
 export async function getProgramsSummary(supabase: TypedSupabaseClient): Promise<AdminProgramSummary[]> {
-  const { rows, complet } = await lireToutesLesLignes<ProgramRow>("getProgramsSummary", (debut, fin) =>
-    supabase.from("programs").select("*").order("created_at", { ascending: false }).order("id").range(debut, fin),
+  const { rows, complet } = await lireToutesLesLignes<ProgramRow>("getProgramsSummary", (debut, fin, compter) =>
+    supabase.from("programs").select("*", optionsDePage(compter)).order("created_at", { ascending: false }).order("id").range(debut, fin),
   );
   if (!complet) {
     throw new Error("getProgramsSummary : lecture incomplète de la liste des programmes.");
@@ -777,13 +928,43 @@ export async function getPrograms(supabase: TypedSupabaseClient): Promise<AdminP
   // Paginé comme les lectures de `loadPrograms` : la table est petite
   // aujourd'hui, et c'est exactement ce qu'on disait de `workout_exercises`
   // avant qu'elle ne franchisse le plafond.
-  const { rows, complet } = await lireToutesLesLignes<ProgramRow>("getPrograms", (debut, fin) =>
-    supabase.from("programs").select("*").order("created_at", { ascending: false }).order("id").range(debut, fin),
+  const { rows, complet } = await lireToutesLesLignes<ProgramRow>("getPrograms", (debut, fin, compter) =>
+    supabase.from("programs").select("*", optionsDePage(compter)).order("created_at", { ascending: false }).order("id").range(debut, fin),
   );
   if (!complet) {
     throw new Error("getPrograms : lecture incomplète de la liste des programmes.");
   }
   return loadPrograms(supabase, rows);
+}
+
+/**
+ * UN SEUL programme, complet, par son identifiant — pour la page de détail et
+ * pour le builder.
+ *
+ * ⚠️ POURQUOI CETTE FONCTION EXISTE. Ces deux écrans appelaient `getPrograms`,
+ * c'est-à-dire qu'ils lisaient LA TOTALITÉ des programmes, de leurs semaines,
+ * de leurs séances, de leurs exercices, de leurs blocs et de leurs
+ * prescriptions — pour n'en afficher qu'un. Ce n'était pas seulement coûteux :
+ * c'est ce qui faisait grossir la liste d'identifiants envoyée dans l'URL
+ * jusqu'à dépasser le plafond de la passerelle (voir `lireParLots`). Le
+ * découpage en lots empêche la panne ; ne plus lire que le programme demandé
+ * en supprime la cause.
+ *
+ * Rend `null` si l'identifiant n'existe pas. Une lecture interrompue, elle,
+ * LÈVE (via `loadPrograms`) : un programme amputé ne doit jamais atteindre le
+ * builder, dont l'enregistrement suivant supprimerait ce qui manque.
+ */
+export async function getProgramById(
+  supabase: TypedSupabaseClient,
+  programId: string,
+): Promise<AdminProgram | null> {
+  const { data, error } = await supabase.from("programs").select("*").eq("id", programId).maybeSingle();
+  devWarn("getProgramById", error);
+  if (error || !data) {
+    return null;
+  }
+  const programmes = await loadPrograms(supabase, [data]);
+  return programmes[0] ?? null;
 }
 
 /**
@@ -1222,10 +1403,10 @@ async function diffProgramStructure(
    */
   const semainesExistantes = await lireToutesLesLignes<{ id: string; week_number: number }>(
     "diffProgramStructure (program_weeks lecture)",
-    (debut, fin) =>
+    (debut, fin, compter) =>
       supabase
         .from("program_weeks")
-        .select("id, week_number")
+        .select("id, week_number", optionsDePage(compter))
         .eq("program_id", programId)
         .order("id")
         .range(debut, fin),
@@ -1276,10 +1457,10 @@ async function diffProgramStructure(
     keptOrNewWeekIds.length > 0
       ? await lireToutesLesLignes<{ id: string; program_week_id: string; day: string }>(
           "diffProgramStructure (workout_sessions lecture)",
-          (debut, fin) =>
+          (debut, fin, compter) =>
             supabase
               .from("workout_sessions")
-              .select("id, program_week_id, day")
+              .select("id, program_week_id, day", optionsDePage(compter))
               .in("program_week_id", keptOrNewWeekIds)
               .order("id")
               .range(debut, fin),
@@ -1411,10 +1592,10 @@ async function diffProgramStructure(
   if (mode === "legacy" && existingSessionIds.length > 0) {
     const blocsExistants = await lireToutesLesLignes<{ id: string; session_id: string; block_type: string }>(
       "diffProgramStructure (training_blocks lecture)",
-      (debut, fin) =>
+      (debut, fin, compter) =>
         supabase
           .from("training_blocks")
-          .select("id, session_id, block_type")
+          .select("id, session_id, block_type", optionsDePage(compter))
           .in("session_id", existingSessionIds)
           .order("id")
           .range(debut, fin),
