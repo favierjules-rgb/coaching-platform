@@ -201,8 +201,21 @@ await (async () => {
     assert.deepEqual(mergeAssignedStudentIds(["direct-1"], ["proprio-copie-1", "direct-1"]),
       ["direct-1", "proprio-copie-1"], "liens directs + propriétaires de copies, dédupliqués");
     const programsSource = readFileSync(new URL("../../lib/supabase/programs.ts", import.meta.url), "utf8");
-    assert.ok(/mergeAssignedStudentIds\(/.test(programsSource) && /source_template_id", programIds/.test(programsSource),
-      "loadPrograms compose les cases cochées avec les copies individuelles");
+    /*
+     * ⚠️ LA LISTE FILTRANTE A CHANGÉ DE PLACE, PAS DE VALEUR. Le filtre
+     * s'écrivait `.in("source_template_id", programIds)`. Depuis le découpage
+     * des listes d'identifiants (panne du 11/09 : l'URL PostgREST dépassait le
+     * plafond de la passerelle), `programIds` est remis à `lireParLots`, qui
+     * en tranche des `lot`. La requête interroge exactement les mêmes
+     * programmes ; seul le chemin de la liste diffère. Le contrôle épingle
+     * donc les DEUX bouts : la liste d'entrée ET la colonne filtrée.
+     */
+    assert.ok(/mergeAssignedStudentIds\(/.test(programsSource), "loadPrograms compose les cases cochées");
+    assert.ok(
+      /"loadPrograms \(copies individuelles\)",\s*programIds,/.test(programsSource) &&
+        /\.in\("source_template_id", lot\)/.test(programsSource),
+      "loadPrograms compose les cases cochées avec les copies individuelles",
+    );
   });
 
   await test("8. la sélection ne se réinitialise pas après le clic", () => {
@@ -343,8 +356,33 @@ await (async () => {
      * exemple — aurait laissé un `.eq()` ou un `.limit()` s'intercaler sans
      * que ce test s'en aperçoive.
      */
-    assert.ok(/select\("id, owner_student_id, source_template_id"\)\s*\.in\("source_template_id", programIds\)/.test(programsSource),
-      "loadPrograms interroge réellement les copies individuelles");
+    /*
+     * ⚠️ MISE À JOUR DU 11/09, MÊME NATURE QUE CELLE DU 25/08 CI-DESSUS : la
+     * requête n'a pas changé, son ALIMENTATION si. `programIds` passe
+     * désormais par `lireParLots`, qui la tranche en `lot` pour borner la
+     * longueur de l'URL. Les trois colonnes, leur ordre et la colonne filtrée
+     * restent épinglés à l'octet près ; on ajoute l'exigence que la liste
+     * remise au découpage soit bien `programIds` — sans quoi le filtre
+     * pourrait porter sur n'importe quoi.
+     */
+    /*
+     * ⚠️ TROISIÈME MISE À JOUR, MÊME NATURE QUE LES DEUX PRÉCÉDENTES. Le
+     * `.select()` porte désormais un second argument, `optionsDePage(compter)`,
+     * qui réclame `count: "exact"` sur la première page (arrêt de pagination
+     * prouvé plutôt que deviné). Les trois colonnes, leur ordre et la colonne
+     * filtrée restent épinglés à l'octet près ; seul l'ajout des options de
+     * page devient possible entre les deux.
+     */
+    assert.ok(
+      /select\("id, owner_student_id, source_template_id", optionsDePage\(compter\)\)\s*\.in\("source_template_id", lot\)/.test(
+        programsSource,
+      ),
+      "loadPrograms interroge réellement les copies individuelles",
+    );
+    assert.ok(
+      /"loadPrograms \(copies individuelles\)",\s*programIds,/.test(programsSource),
+      "le découpage des copies individuelles porte bien sur programIds",
+    );
     assert.ok(/keepCopiesWithActiveAssignment\(/.test(programsSource) && /liens actifs des copies/.test(programsSource),
       "seules les copies au lien assignments ACTIF participent aux cases cochées");
     // Et la RPC corrigée résout le staff par user_id (cause racine du bug Preview).

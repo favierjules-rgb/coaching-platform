@@ -20,10 +20,11 @@ import {
 } from "@/components/shared/TrainingMetricsSummary";
 import { useAdminData } from "@/hooks/useAdminData";
 import { useContentAssignment } from "@/hooks/useContentAssignment";
-import { useSupabasePrograms } from "@/hooks/useSupabasePrograms";
+import { useSupabaseProgram } from "@/hooks/useSupabaseProgram";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { contentStatusLabels, fullName, weekDays } from "@/lib/admin";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { updateProgramStatus as updateProgramStatusSupabase } from "@/lib/supabase/programs";
 import { calculateTrainingMetrics, calculateWeekMetrics, formatSets, formatTonnage, formatVolume, muscleGroupLabels } from "@/lib/training-metrics";
 import type { MuscleGroupFilter } from "@/types";
@@ -41,27 +42,32 @@ export default function ProgramDetailPage() {
   const { state, updateProgram, setAssignment } = useAdminData();
   const [selectedMuscleGroup, setSelectedMuscleGroup] = useState<MuscleGroupFilter>("tous");
 
-  // Priorité Supabase dès qu'au moins un programme/élève réel existe — même
-  // pattern que /admin/programmes. Quand actif, ce programme précis est
-  // garanti réel (la liste bascule entièrement, jamais de mélange mock/réel).
-  const supabasePrograms = useSupabasePrograms();
-  const isSupabaseProgramsActive = supabasePrograms.programs.length > 0;
-  const programs = isSupabaseProgramsActive ? supabasePrograms.programs : state.programs;
+  // Lecture CIBLÉE de ce seul programme. Lire tout le catalogue pour en
+  // afficher un faisait dépasser le plafond d'URL de la passerelle PostgREST
+  // dès que le nombre de séances grandissait (voir useSupabaseProgram).
+  //
+  // ⚠️ « Supabase est-il actif » se lit dans la CONFIGURATION, pas dans le
+  // résultat : un identifiant inconnu rend `null`, ce qui ne doit pas faire
+  // réapparaître les programmes de démonstration (cf. 65be51b).
+  const isSupabaseProgramsActive = isSupabaseConfigured();
+  const supabaseProgram = useSupabaseProgram(params.programId);
   const supabaseStudents = useSupabaseStudents();
   const students = supabaseStudents.students.length > 0 ? supabaseStudents.students : state.students;
   const handleSetAssignment = useContentAssignment(
     { programme: isSupabaseProgramsActive && supabaseStudents.students.length > 0 },
     setAssignment,
-    supabasePrograms.refetch,
+    supabaseProgram.refetch,
   );
 
-  const program = programs.find((p) => p.id === params.programId);
+  const program = isSupabaseProgramsActive
+    ? (supabaseProgram.program ?? undefined)
+    : state.programs.find((p) => p.id === params.programId);
 
   // Évite un flash "Programme introuvable." pendant la requête Supabase
   // initiale (mock encore affiché le temps que la vraie liste arrive, dont
   // les ids ne correspondent jamais à un vrai programme) — même garde que
   // /admin/programmes/[programId]/builder/page.tsx.
-  if (supabasePrograms.loading && !isSupabaseProgramsActive) {
+  if (isSupabaseProgramsActive && supabaseProgram.loading) {
     return <Loader libelle="Chargement…" variante="ligne" />;
   }
 
@@ -89,7 +95,7 @@ export default function ProgramDetailPage() {
       const supabase = createSupabaseBrowserClient();
       if (supabase) {
         await updateProgramStatusSupabase(supabase, program!.id, "archivé");
-        await supabasePrograms.refetch();
+        await supabaseProgram.refetch();
         return;
       }
     }

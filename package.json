@@ -133,7 +133,8 @@
     "test:nolio-c5-1": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/nolio-c5-1.mts",
     "test:calendrier-semaines": "TZ=Europe/Paris npx tsx scripts/tests/calendrier-semaines.mts",
     "test:admin-chargement-mock": "npx tsx scripts/tests/admin-chargement-mock.mts",
-    "test:lecture-programmes-legere": "npx tsx scripts/tests/lecture-programmes-legere.mts"
+    "test:lecture-programmes-legere": "npx tsx scripts/tests/lecture-programmes-legere.mts",
+    "test:lots-identifiants": "npx tsx scripts/tests/lots-identifiants.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",
