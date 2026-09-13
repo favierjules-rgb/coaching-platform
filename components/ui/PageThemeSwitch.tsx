@@ -3,6 +3,8 @@
 import { useSyncExternalStore } from "react";
 import { Moon, Sun } from "lucide-react";
 
+import { PAGE_THEME_ATTRIBUTE, type PageThemeConfig } from "@/lib/theme/page-theme";
+
 /**
  * Choix clair/sombre d'UNE page publique, porté par un attribut
  * `data-page-theme` sur son conteneur — jamais sur `<html>`.
@@ -26,26 +28,16 @@ import { Moon, Sun } from "lucide-react";
  * synchronise seul.
  *
  * Le sombre reste le défaut : sans choix mémorisé, rien ne change.
- */
-
-export interface PageThemeConfig {
-  /** `id` du conteneur qui porte l'attribut de thème. */
-  containerId: string;
-  /** Clé localStorage — DISTINCTE de celles des autres pages et de l'admin. */
-  storageKey: string;
-}
-
-/**
- * Script bloquant anti-flash, à insérer comme PREMIER ENFANT du conteneur.
  *
- * `document.currentScript.parentElement` est ce conteneur : au moment où le
- * script s'exécute, l'élément est parsé mais son contenu pas encore peint,
- * donc le thème mémorisé s'applique avant la première image. Tout est sous
- * try/catch — stockage indisponible (navigation privée stricte) = sombre.
+ * ⚠️ CE MODULE N'EXPORTE QU'UN COMPOSANT, ET C'EST UNE RÈGLE, PAS UN HASARD.
+ * `"use client"` qualifie le MODULE entier : chacun de ses exports devient
+ * une référence client, donc un proxy que le serveur ne peut pas exécuter.
+ * Un composant JSX s'en accommode ; une fonction appelée pendant le rendu
+ * serveur échoue au build — c'est ce qui a cassé le prerender de
+ * /services-entreprises le 1efdde2. La configuration, l'attribut et le
+ * script anti-flash vivent donc dans `lib/theme/page-theme.ts`, module
+ * neutre, et rien d'appelable côté serveur ne doit revenir ici.
  */
-export function pageThemeAntiFlashScript({ storageKey }: PageThemeConfig): string {
-  return `try{var t=localStorage.getItem("${storageKey}");if(t==="light"){var e=document.currentScript.parentElement;e.setAttribute("data-page-theme","light");}}catch(_){}`;
-}
 
 type PageTheme = "dark" | "light";
 
@@ -70,7 +62,7 @@ function instantanéServeur(): PageTheme {
 }
 
 function écrireThème(config: PageThemeConfig, suivant: PageTheme): void {
-  document.getElementById(config.containerId)?.setAttribute("data-page-theme", suivant);
+  document.getElementById(config.containerId)?.setAttribute(PAGE_THEME_ATTRIBUTE, suivant);
   try {
     window.localStorage.setItem(config.storageKey, suivant);
   } catch {

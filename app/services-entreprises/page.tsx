@@ -2,12 +2,16 @@ import type { Metadata } from "next";
 import Image from "next/image";
 
 import { EntrepriseConfigurateur } from "@/components/sections/EntrepriseConfigurateur";
-import {
-  PageThemeSwitch,
-  pageThemeAntiFlashScript,
-  type PageThemeConfig,
-} from "@/components/ui/PageThemeSwitch";
+import { PageThemeSwitch } from "@/components/ui/PageThemeSwitch";
 import { SectionLabel } from "@/components/ui/SectionLabel";
+/*
+ * ⚠️ LE SCRIPT ANTI-FLASH VIENT D'UN MODULE NEUTRE, PAS DU COMPOSANT.
+ * `PageThemeSwitch.tsx` porte `"use client"` : tous ses exports sont des
+ * références client, et en APPELER une pendant le rendu serveur casse le
+ * prerender. Seul le composant en vient ; la fonction, elle, est importée
+ * de `lib/theme/page-theme.ts`, qui n'a pas de directive.
+ */
+import { pageThemeAntiFlashScript, type PageThemeConfig } from "@/lib/theme/page-theme";
 import {
   CE_QUE_VOUS_OBTENEZ,
   ETAPES_DEPLOIEMENT,

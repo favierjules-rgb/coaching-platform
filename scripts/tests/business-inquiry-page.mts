@@ -390,8 +390,18 @@ test("T3. le choix est appliqué AVANT la première peinture", () => {
     posConteneur < posScript && posScript < posSection,
     "le script doit précéder tout contenu peint",
   );
-  // Stockage indisponible (navigation privée stricte) : sombre, sans planter.
-  assert.ok(/catch\s*\(_\)\s*\{\}/.test(switchSource), "script anti-flash sous try/catch");
+  /*
+   * ⚠️ LE SCRIPT A CHANGÉ DE FICHIER, PAS DE GARANTIE. Il vit désormais dans
+   * `lib/theme/page-theme.ts` (module neutre), parce qu'une fonction appelée
+   * par le serveur ne peut pas venir d'un module « use client » — voir T8.
+   * L'invariant contrôlé ici est le même : stockage indisponible
+   * (navigation privée stricte) = sombre, sans planter.
+   */
+  const scriptSource = readFileSync(new URL("../../lib/theme/page-theme.ts", import.meta.url), "utf8");
+  // Les DEUX moitiés : un `catch` orphelin passerait un contrôle qui ne
+  // vérifierait que lui, et le script planterait au premier stockage refusé.
+  assert.ok(/return\s+`try\{/.test(scriptSource), "le script ouvre bien un try");
+  assert.ok(/catch\s*\(_\)\s*\{\}/.test(scriptSource), "script anti-flash sous try/catch");
   assert.ok(switchSource.includes("useSyncExternalStore"), "pas de setState dans un effet");
 });
 
@@ -464,6 +474,120 @@ test("T7. le switch est un vrai bouton accessible, à cible tactile suffisante",
   assert.ok(/width: 2\.75rem/.test(cssSwitch) && /height: 2\.75rem/.test(cssSwitch), "cible tactile de 44px");
   assert.ok(/env\(safe-area-inset-right\)/.test(cssSwitch), "safe area iPhone respectée");
   assert.ok(/prefers-reduced-motion[\s\S]{0,300}\.page-theme-switch/.test(css), "animation neutralisée si demandé");
+});
+
+test("T8. AUCUNE fonction d'un module « use client » n'est appelée depuis la page serveur", () => {
+  /*
+   * ⚠️ LE DÉFAUT QUE CE TEST INTERDIT, ET QUI A CASSÉ UN DÉPLOIEMENT.
+   *
+   * `"use client"` ne qualifie pas un composant : il qualifie LE MODULE.
+   * Chacun de ses exports devient une référence client — un proxy
+   * sérialisable, pas le vrai code. Un composant JSX s'en accommode : la
+   * page pose un marqueur, le client hydrate. Une FONCTION, non : l'appeler
+   * pendant le rendu serveur lève
+   *
+   *     Attempted to call X() from the server but X is on the client.
+   *
+   * Constaté au prerender de /services-entreprises (Vercel, 1efdde2), sur
+   * `pageThemeAntiFlashScript` — une fonction qui n'avait pourtant rien de
+   * client, rangée dans un module client par simple proximité de sujet.
+   *
+   * Ce contrôle est GÉNÉRIQUE : il suit tous les imports relatifs de la
+   * page, ouvre chaque module, et refuse qu'un symbole venu d'un module
+   * « use client » soit appelé. Il ne connaît aucun nom en particulier,
+   * donc il attrapera le prochain cas, pas seulement celui-ci.
+   */
+  const pageUrl = new URL("../../app/services-entreprises/page.tsx", import.meta.url);
+  const brut = readFileSync(pageUrl, "utf8");
+  const corps = brut
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, " ")
+    .replace(/(^|[^:])\/\/.*$/gm, "$1 ");
+
+  assert.ok(!/^\s*["']use client["']/.test(brut), "la page doit rester un Server Component");
+
+  /** Résout un alias `@/…` ou un chemin relatif vers un fichier réel. */
+  function resoudre(spec: string): URL | null {
+    const base = spec.startsWith("@/")
+      ? new URL(`../../${spec.slice(2)}`, import.meta.url)
+      : spec.startsWith(".")
+        ? new URL(spec, pageUrl)
+        : null;
+    if (!base) return null; // paquet externe : hors de notre contrôle
+    for (const suffixe of [".tsx", ".ts", "/index.tsx", "/index.ts", ""]) {
+      const candidat = new URL(base.href + suffixe);
+      try {
+        readFileSync(candidat, "utf8");
+        return candidat;
+      } catch {
+        // suffixe suivant
+      }
+    }
+    return null;
+  }
+
+  const imports = [...corps.matchAll(/import\s+([\s\S]*?)\s+from\s+["']([^"']+)["']/g)];
+  assert.ok(imports.length > 0, "aucun import détecté : le test ne mesure rien");
+
+  let modulesClientVus = 0;
+  for (const [, clause, spec] of imports) {
+    const cible = resoudre(spec);
+    if (!cible) continue;
+    const source = readFileSync(cible, "utf8");
+    if (!/^\s*["']use client["']/.test(source)) continue;
+    modulesClientVus += 1;
+
+    // Symboles importés de ce module client, hors imports de type (effacés).
+    const symboles = clause
+      .replace(/^\{|\}$/g, "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0 && !s.startsWith("type "))
+      .map((s) => (s.includes(" as ") ? s.split(" as ")[1].trim() : s));
+
+    for (const symbole of symboles) {
+      const appel = new RegExp(`(?<![.\\w])${symbole}\\s*\\(`);
+      assert.ok(
+        !appel.test(corps),
+        `« ${symbole} » vient du module client ${spec} et est APPELÉ depuis la page serveur — ` +
+          `le prerender échouera. Déplacer cette fonction dans un module sans directive.`,
+      );
+    }
+  }
+
+  assert.ok(
+    modulesClientVus > 0,
+    "aucun module client parmi les imports : ce contrôle ne prouverait rien",
+  );
+});
+
+test("T9. le script anti-flash vient d'un module NEUTRE, appelable côté serveur", () => {
+  const neutre = readFileSync(new URL("../../lib/theme/page-theme.ts", import.meta.url), "utf8");
+  const client = readFileSync(new URL("../../components/ui/PageThemeSwitch.tsx", import.meta.url), "utf8");
+
+  // Le module neutre ne porte aucune directive : les deux côtés peuvent l'utiliser.
+  assert.ok(!/^\s*["']use client["']/.test(neutre), "le module du script ne doit pas être client");
+  assert.ok(!/^\s*["']server-only["']/.test(neutre), "ni réservé au serveur : le client en lit l'attribut");
+  assert.ok(neutre.includes("export function pageThemeAntiFlashScript"), "le script est produit ici");
+
+  // Le module client, lui, n'expose QUE le composant.
+  assert.ok(/^\s*["']use client["']/.test(client), "le switch reste un composant client");
+  const exportsClient = [...client.matchAll(/^export\s+(?:function|const|class)\s+(\w+)/gm)].map((m) => m[1]);
+  assert.deepEqual(exportsClient, ["PageThemeSwitch"], "le module client n'exporte que son composant");
+
+  /*
+   * ⚠️ ET AUCUN RE-EXPORT NON PLUS. `export { x } from "…"` ne ressemble pas
+   * à une déclaration et échappait au contrôle ci-dessus — or il rouvre
+   * exactement la même porte : le symbole redevient une référence client,
+   * prête à être appelée par erreur depuis le serveur. Seuls les exports de
+   * TYPE sont tolérés, puisqu'ils disparaissent à la compilation.
+   */
+  const reExports = [...client.matchAll(/^export\s+(?!type\b)\{[^}]*\}\s+from\s+["'][^"']+["']/gm)];
+  assert.deepEqual(
+    reExports.map((m) => m[0]),
+    [],
+    "le module client ne doit rien ré-exporter : un re-export redevient une référence client",
+  );
 });
 
 /* ─── SEO ─── */
