@@ -1,6 +1,12 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 
 import { EntrepriseConfigurateur } from "@/components/sections/EntrepriseConfigurateur";
+import {
+  PageThemeSwitch,
+  pageThemeAntiFlashScript,
+  type PageThemeConfig,
+} from "@/components/ui/PageThemeSwitch";
 import { SectionLabel } from "@/components/ui/SectionLabel";
 import {
   CE_QUE_VOUS_OBTENEZ,
@@ -29,6 +35,12 @@ import {
  *
  * Accessible depuis le menu burger ET depuis le footer (lien commercial
  * distinct de la navigation « Liens légaux », voir components/layout/Footer.tsx).
+ *
+ * ⚠️ VERSION CLAIRE DISPONIBLE. La page est sombre par défaut, comme le reste
+ * du site public, et un switch flottant permet de basculer en clair. Le choix
+ * est porté par `data-page-theme` sur le conteneur de la page — jamais sur
+ * `<html>` — avec sa propre clé de stockage : un visiteur qui éclaircit cette
+ * page ne change ni la home, ni l'admin. Voir components/ui/PageThemeSwitch.tsx.
  */
 
 export const metadata: Metadata = {
@@ -38,12 +50,47 @@ export const metadata: Metadata = {
   alternates: { canonical: "/services-entreprises" },
 };
 
+/** Conteneur et clé de stockage propres à cette page. */
+const THEME_ENTREPRISE: PageThemeConfig = {
+  containerId: "entreprise",
+  storageKey: "seth-entreprise-theme",
+};
+
 export default function ServicesEntreprisesPage() {
   return (
-    <>
-      {/* A — HERO */}
-      <section className="bg-background pb-16 pt-32 md:pb-24 md:pt-40">
-        <div className="mx-auto max-w-7xl px-6">
+    /*
+     * `suppressHydrationWarning` : le script anti-flash ci-dessous peut avoir
+     * changé l'attribut avant que React n'hydrate. Sombre par défaut — sans
+     * choix mémorisé, la page est exactement ce qu'elle a toujours été.
+     */
+    <div id="entreprise" data-page-theme="dark" suppressHydrationWarning>
+      <script dangerouslySetInnerHTML={{ __html: pageThemeAntiFlashScript(THEME_ENTREPRISE) }} />
+
+      {/* A — HERO, avec photo d'illustration en arrière-plan */}
+      <section className="relative overflow-hidden bg-background pb-16 pt-32 md:pb-24 md:pt-40">
+        {/*
+         * ⚠️ LA PHOTO EST DÉCORATIVE, PAS INFORMATIVE : `alt=""` et
+         * `aria-hidden`. Elle n'apporte aucune information que le texte ne
+         * porte déjà — la décrire ferait perdre du temps à un lecteur
+         * d'écran sans rien lui apprendre.
+         *
+         * `priority` : c'est l'image de plus grande surface au-dessus de la
+         * ligne de flottaison, donc le point de mesure du LCP. La laisser en
+         * chargement paresseux retarderait l'affichage perçu.
+         */}
+        <div className="absolute inset-0" aria-hidden>
+          <Image
+            src="/brand/backgrounds/hero.webp"
+            alt=""
+            fill
+            priority
+            sizes="100vw"
+            className="object-cover object-[center_30%] grayscale"
+          />
+          <div className="hero-voile absolute inset-0" />
+        </div>
+
+        <div className="relative z-10 mx-auto max-w-7xl px-6">
           <SectionLabel>GRIT Entreprise</SectionLabel>
           <h1 className="mb-6 max-w-4xl font-heading text-3xl font-extrabold uppercase leading-[1.05] text-foreground sm:text-4xl md:text-6xl">
             Le coaching sportif de vos collaborateurs. Pensé pour l&apos;entreprise.
@@ -205,6 +252,8 @@ export default function ServicesEntreprisesPage() {
           <EntrepriseConfigurateur />
         </div>
       </section>
-    </>
+
+      <PageThemeSwitch config={THEME_ENTREPRISE} />
+    </div>
   );
 }

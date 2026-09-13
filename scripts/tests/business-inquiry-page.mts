@@ -342,6 +342,130 @@ test("20. double clic : le verrou d'envoi est SYNCHRONE, pas dépendant du re-re
   assert.ok(/finally \{[\s\S]{0,200}sendingRef\.current = false/.test(source), "verrou relâché dans un finally");
 });
 
+/* ─── Thème clair et visuel d'en-tête ─── */
+
+test("T1. la page s'ouvre en SOMBRE, et le choix clair est porté par le conteneur", () => {
+  const source = readFileSync(new URL("../../app/services-entreprises/page.tsx", import.meta.url), "utf8");
+  /*
+   * ⚠️ SOMBRE PAR DÉFAUT, ET PORTÉ PAR LE CONTENEUR — JAMAIS PAR <html>.
+   * Écrire le thème sur la racine ferait déborder le choix sur l'admin et
+   * l'espace élève, qui ont leur propre mécanisme. Le conteneur isole.
+   */
+  assert.ok(pageHtml.includes('data-page-theme="dark"'), "rendu serveur en thème sombre");
+  assert.ok(pageHtml.includes('id="entreprise"'), "conteneur identifié");
+  assert.ok(source.includes("suppressHydrationWarning"), "l'attribut peut être changé avant hydratation");
+
+  const switchSource = readFileSync(new URL("../../components/ui/PageThemeSwitch.tsx", import.meta.url), "utf8");
+  assert.ok(!/documentElement/.test(switchSource), "le switch ne touche jamais <html>");
+  assert.ok(/getElementById\(config\.containerId\)/.test(switchSource), "le switch cible le conteneur reçu");
+});
+
+test("T2. la clé de stockage est DISTINCTE de la home et de l'admin", () => {
+  const source = readFileSync(new URL("../../app/services-entreprises/page.tsx", import.meta.url), "utf8");
+  /*
+   * Trois mécanismes de thème coexistent sur le site. Une clé partagée ferait
+   * qu'éclaircir cette page éclaircirait la home — ou l'admin.
+   */
+  assert.ok(source.includes('storageKey: "seth-entreprise-theme"'), "clé propre à cette page");
+  assert.ok(!source.includes('"seth-home-theme"'), "clé de la home non réutilisée");
+  assert.ok(!source.includes('"seth-theme"'), "clé de l'admin non réutilisée");
+});
+
+test("T3. le choix est appliqué AVANT la première peinture", () => {
+  const source = readFileSync(new URL("../../app/services-entreprises/page.tsx", import.meta.url), "utf8");
+  const switchSource = readFileSync(new URL("../../components/ui/PageThemeSwitch.tsx", import.meta.url), "utf8");
+
+  // Script bloquant, inséré comme premier enfant du conteneur.
+  assert.ok(source.includes("pageThemeAntiFlashScript(THEME_ENTREPRISE)"), "script anti-flash monté");
+  /*
+   * ⚠️ ON CHERCHE L'APPEL, PAS LE NOM. `pageThemeAntiFlashScript` apparaît
+   * aussi dans la ligne d'import, tout en haut du fichier : chercher le nom
+   * seul faisait échouer ce contrôle sur une occurrence qui n'a rien à voir
+   * avec la position du script dans le rendu.
+   */
+  const posConteneur = source.indexOf('id="entreprise"');
+  const posScript = source.indexOf("pageThemeAntiFlashScript(THEME_ENTREPRISE)");
+  const posSection = source.indexOf("<section");
+  assert.ok(
+    posConteneur < posScript && posScript < posSection,
+    "le script doit précéder tout contenu peint",
+  );
+  // Stockage indisponible (navigation privée stricte) : sombre, sans planter.
+  assert.ok(/catch\s*\(_\)\s*\{\}/.test(switchSource), "script anti-flash sous try/catch");
+  assert.ok(switchSource.includes("useSyncExternalStore"), "pas de setState dans un effet");
+});
+
+test("T4. la palette claire est partagée, jamais dupliquée", () => {
+  const css = readFileSync(new URL("../../app/globals.css", import.meta.url), "utf8");
+  const selecteur = css.slice(css.indexOf(".light,"), css.indexOf("--background: #f4f4f2"));
+  assert.ok(selecteur.includes('[data-page-theme="light"]'), "la page rejoint la palette claire existante");
+  // Une seconde déclaration des mêmes tokens signifierait deux palettes à maintenir.
+  assert.equal(
+    (css.match(/--background:\s*#f4f4f2/g) ?? []).length,
+    1,
+    "les valeurs claires ne sont déclarées qu'une fois",
+  );
+});
+
+test("T5. la photo d'en-tête est DÉCORATIVE et ne retarde pas l'affichage", () => {
+  const brut = readFileSync(new URL("../../app/services-entreprises/page.tsx", import.meta.url), "utf8");
+  /*
+   * ⚠️ ON LIT LE CODE, PAS LES COMMENTAIRES. Une première version de ce test
+   * cherchait « priority » dans le fichier entier : le mot figurait aussi
+   * dans le commentaire qui explique pourquoi l'attribut est là, si bien que
+   * retirer l'attribut laissait le test vert. Il mesurait sa propre prose.
+   */
+  const source = brut
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, " ")
+    .replace(/(^|[^:])\/\/.*$/gm, "$1 ");
+  assert.ok(source.includes('src="/brand/backgrounds/hero.webp"'), "image de fond câblée");
+  /*
+   * ⚠️ DÉCORATIVE : `alt=""` ET `aria-hidden`. Elle n'apporte rien que le
+   * texte ne dise déjà ; la décrire ferait perdre du temps à un lecteur
+   * d'écran. Et `priority` parce que c'est l'image du LCP — en chargement
+   * paresseux, elle retarderait l'affichage perçu du hero.
+   */
+  assert.ok(/alt=""/.test(source), "image sans texte alternatif (décorative)");
+  assert.ok(source.includes("aria-hidden"), "couche d'image masquée aux lecteurs d'écran");
+  assert.ok(source.includes("priority"), "image du LCP chargée en priorité");
+  assert.ok(source.includes('sizes="100vw"'), "dimensionnement responsive déclaré");
+  // Le contenu passe au-dessus du fond, sinon il serait recouvert.
+  assert.ok(source.includes("relative z-10"), "contenu du hero au-dessus de l'image");
+  assert.ok(source.includes("overflow-hidden"), "l'image ne déborde pas de la section");
+});
+
+test("T6. le voile de la photo SUIT le thème", () => {
+  const css = readFileSync(new URL("../../app/globals.css", import.meta.url), "utf8");
+  /*
+   * ⚠️ UN VOILE NOIR FIXE RENDRAIT LA VERSION CLAIRE ILLISIBLE : en clair le
+   * texte passe en quasi-noir, sur un dégradé noir. Le voile est donc exprimé
+   * par des tokens redéfinis avec la palette — la photo ne change pas, la
+   * teinte qui la couvre si.
+   */
+  assert.ok(css.includes("--hero-voile-haut"), "voile paramétré par token");
+  const clair = css.slice(css.indexOf('[data-page-theme="light"] {'));
+  assert.ok(
+    /--hero-voile-haut:\s*rgba\(244/.test(clair),
+    "le voile a une valeur claire sous le thème clair",
+  );
+  const source = readFileSync(new URL("../../app/services-entreprises/page.tsx", import.meta.url), "utf8");
+  assert.ok(source.includes("hero-voile"), "le voile est appliqué au hero");
+  assert.ok(!/bg-\[linear-gradient\(to_bottom,rgba\(0,0,0/.test(source), "aucun dégradé noir codé en dur");
+});
+
+test("T7. le switch est un vrai bouton accessible, à cible tactile suffisante", () => {
+  const switchSource = readFileSync(new URL("../../components/ui/PageThemeSwitch.tsx", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../../app/globals.css", import.meta.url), "utf8");
+  assert.ok(/<button[\s\S]{0,200}type="button"/.test(switchSource), "un <button>, pas une div cliquable");
+  assert.ok(/aria-label=\{versClair \? "Activer le thème clair"/.test(switchSource), "aria-label explicite");
+  assert.ok(switchSource.includes("aria-pressed"), "état courant annoncé");
+  const cssSwitch = css.slice(css.indexOf(".page-theme-switch"));
+  assert.ok(/width: 2\.75rem/.test(cssSwitch) && /height: 2\.75rem/.test(cssSwitch), "cible tactile de 44px");
+  assert.ok(/env\(safe-area-inset-right\)/.test(cssSwitch), "safe area iPhone respectée");
+  assert.ok(/prefers-reduced-motion[\s\S]{0,300}\.page-theme-switch/.test(css), "animation neutralisée si demandé");
+});
+
 /* ─── SEO ─── */
 
 test("SEO : métadonnées spécifiques, canonique, page indexable", () => {

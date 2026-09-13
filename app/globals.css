@@ -70,12 +70,15 @@
   --info-foreground: #06203f;
 }
 
-/* La palette claire sert deux maîtres : la classe .light (admin/élève,
-   posée sur <html> par ThemeProvider) et le conteneur de la home en thème
-   clair (attribut posé par le switch flottant — voir HomeThemeSwitch).
-   Un seul jeu de valeurs, jamais dupliqué. */
+/* La palette claire sert TROIS maîtres : la classe .light (admin/élève,
+   posée sur <html> par ThemeProvider), le conteneur de la home en thème
+   clair (attribut posé par le switch flottant — voir HomeThemeSwitch), et
+   les pages publiques dotées d'un switch générique (`data-page-theme`, voir
+   PageThemeSwitch). Un seul jeu de valeurs, jamais dupliqué : ajouter un
+   sélecteur ici suffit à donner sa version claire à une page entière. */
 .light,
-#accueil[data-home-theme="light"] {
+#accueil[data-home-theme="light"],
+[data-page-theme="light"] {
   --background: #f4f4f2;
   --foreground: #111111;
   --card: #ffffff;
@@ -374,6 +377,70 @@ body {
   .question-reveal {
     animation: none;
   }
+}
+
+/* Switch clair/sombre d'une page publique (voir PageThemeSwitch).
+
+   Géométrie identique à `.home-theme-switch` — 2.75rem, soit 44px de cible
+   tactile, et marge droite respectant la safe area iPhone — mais placé plus
+   haut : la page entreprise n'a pas la même densité verticale que la home,
+   et le bouton doit rester atteignable sans recouvrir un CTA. */
+.page-theme-switch {
+  position: fixed;
+  right: max(0.75rem, env(safe-area-inset-right));
+  top: 30%;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 9999px;
+  border: 1px solid var(--border-strong);
+  background: var(--card);
+  color: var(--foreground);
+  transition:
+    transform var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out);
+}
+
+.page-theme-switch:hover {
+  transform: scale(1.06);
+}
+
+.page-theme-switch:active {
+  transform: scale(0.96);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-theme-switch {
+    transition: none;
+  }
+  .page-theme-switch:hover,
+  .page-theme-switch:active {
+    transform: none;
+  }
+}
+
+/* Voile posé sur la photo d'en-tête.
+
+   ⚠️ IL DOIT SUIVRE LE THÈME, SINON LE TEXTE DEVIENT ILLISIBLE. Un dégradé
+   noir fixe fonctionne sur fond sombre et écrase la page en clair, où le
+   texte passe en quasi-noir. Le voile est donc exprimé par deux tokens,
+   redéfinis avec la palette : la photo reste identique, seule la teinte qui
+   la recouvre change. */
+:root {
+  --hero-voile-haut: rgba(5, 5, 5, 0.55);
+  --hero-voile-bas: rgba(5, 5, 5, 0.95);
+}
+
+[data-page-theme="light"] {
+  --hero-voile-haut: rgba(244, 244, 242, 0.55);
+  --hero-voile-bas: rgba(244, 244, 242, 0.95);
+}
+
+.hero-voile {
+  background: linear-gradient(to bottom, var(--hero-voile-haut) 0%, var(--hero-voile-bas) 100%);
 }
 
 /* Changement d'étape du configurateur entreprise (/services-entreprises).
