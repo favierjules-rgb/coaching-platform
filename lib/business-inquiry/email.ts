@@ -1,9 +1,12 @@
 import "server-only";
 
 import {
-  FORMAT_OPTIONS,
+  FREQUENCY_OPTIONS,
   HEADCOUNT_OPTIONS,
-  NEED_OPTIONS,
+  LOCATION_OPTIONS,
+  OBJECTIVE_OPTIONS,
+  SECTOR_OPTIONS,
+  TIMELINE_OPTIONS,
   labelFor,
   type BusinessInquiryInput,
 } from "@/lib/business-inquiry/schema";
@@ -45,9 +48,9 @@ export function getBusinessContactRecipient(): string | null {
   return recipient && recipient.length > 0 ? recipient : null;
 }
 
-/** Sujet : `[Demande entreprise] {entreprise} — {effectif}`. */
+/** Sujet : `[Devis entreprise] {entreprise} — {effectif} collaborateurs`. */
 export function buildBusinessInquirySubject(input: BusinessInquiryInput): string {
-  return `[Demande entreprise] ${input.companyName} — ${labelFor(HEADCOUNT_OPTIONS, input.headcount)}`;
+  return `[Devis entreprise] ${input.companyName} — ${labelFor(HEADCOUNT_OPTIONS, input.headcount)} collaborateurs`;
 }
 
 /** Horodatage lisible en Europe/Paris (fuseau métier du projet). */
@@ -64,28 +67,48 @@ interface Line {
   value: string;
 }
 
-/** Lignes du récapitulatif, dans l'ordre des questions du formulaire. */
+/**
+ * Lignes du récapitulatif, dans l'ordre du configurateur.
+ *
+ * ⚠️ CET EMAIL SERT À PRÉPARER L'APPEL, PAS À CHIFFRER. Il porte donc la
+ * configuration complète du projet — effectif, fréquence, objectifs,
+ * secteur, échéance, lieu — et AUCUN montant : les tarifs ne sont ni
+ * publiés sur le site, ni calculés, ni transmis ici (décision commerciale
+ * du 13/09/2026). Le prix se présente de vive voix.
+ *
+ * Le PROJET est placé juste avant les coordonnées : c'est ce qui se lit en
+ * premier pour préparer l'échange, l'identité venant ensuite.
+ */
 export function buildBusinessInquiryLines(input: BusinessInquiryInput, submittedAt: Date): Line[] {
-  const needs = input.needs.map((need) => labelFor(NEED_OPTIONS, need));
-  if (input.needs.includes("autre") && input.otherNeed) {
-    const index = needs.indexOf(labelFor(NEED_OPTIONS, "autre"));
-    if (index >= 0) needs[index] = `Autre : ${input.otherNeed}`;
-  }
+  const objectifs = input.objectives.map((objectif) => labelFor(OBJECTIVE_OPTIONS, objectif));
+
+  const lieu = input.location
+    ? input.city && input.city.length > 0
+      ? `${labelFor(LOCATION_OPTIONS, input.location)} — ${input.city}`
+      : labelFor(LOCATION_OPTIONS, input.location)
+    : "Non précisé";
 
   return [
     { label: "Reçue le", value: formatSubmittedAt(submittedAt) },
+
+    // — Le projet, d'abord : de quoi préparer l'appel.
+    { label: "Collaborateurs concernés", value: labelFor(HEADCOUNT_OPTIONS, input.headcount) },
+    { label: "Fréquence souhaitée", value: labelFor(FREQUENCY_OPTIONS, input.frequency) },
+    { label: "Objectifs", value: objectifs.join(" · ") },
+    { label: "Secteur", value: labelFor(SECTOR_OPTIONS, input.sector) },
+    { label: "Échéance", value: labelFor(TIMELINE_OPTIONS, input.timeline) },
+    { label: "Lieu souhaité", value: lieu },
+    {
+      label: "Détails du projet",
+      value: input.projectDetails && input.projectDetails.length > 0 ? input.projectDetails : "Non précisé",
+    },
+
+    // — Puis qui appeler.
     { label: "Entreprise", value: input.companyName },
     { label: "Contact", value: `${input.contactName} — ${input.contactRole}` },
     { label: "Email", value: input.email },
     { label: "Téléphone", value: input.phone && input.phone.length > 0 ? input.phone : "Non communiqué" },
-    { label: "Effectif concerné", value: labelFor(HEADCOUNT_OPTIONS, input.headcount) },
-    { label: "Besoins", value: needs.join(" · ") },
-    { label: "Format", value: labelFor(FORMAT_OPTIONS, input.format) },
-    { label: "Ville / zone", value: input.city && input.city.length > 0 ? input.city : "Non précisée" },
-    {
-      label: "Projet",
-      value: input.projectDetails && input.projectDetails.length > 0 ? input.projectDetails : "Non précisé",
-    },
+
     {
       label: "Politique de confidentialité",
       value: "Acceptée par le prospect (utilisation limitée au traitement de la demande)",

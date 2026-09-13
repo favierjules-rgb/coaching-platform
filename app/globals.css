@@ -70,12 +70,15 @@
   --info-foreground: #06203f;
 }
 
-/* La palette claire sert deux maîtres : la classe .light (admin/élève,
-   posée sur <html> par ThemeProvider) et le conteneur de la home en thème
-   clair (attribut posé par le switch flottant — voir HomeThemeSwitch).
-   Un seul jeu de valeurs, jamais dupliqué. */
+/* La palette claire sert TROIS maîtres : la classe .light (admin/élève,
+   posée sur <html> par ThemeProvider), le conteneur de la home en thème
+   clair (attribut posé par le switch flottant — voir HomeThemeSwitch), et
+   les pages publiques dotées d'un switch générique (`data-page-theme`, voir
+   PageThemeSwitch). Un seul jeu de valeurs, jamais dupliqué : ajouter un
+   sélecteur ici suffit à donner sa version claire à une page entière. */
 .light,
-#accueil[data-home-theme="light"] {
+#accueil[data-home-theme="light"],
+[data-page-theme="light"] {
   --background: #f4f4f2;
   --foreground: #111111;
   --card: #ffffff;
@@ -372,6 +375,157 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .question-reveal {
+    animation: none;
+  }
+}
+
+/* Switch clair/sombre d'une page publique (voir PageThemeSwitch).
+
+   Géométrie identique à `.home-theme-switch` — 2.75rem, soit 44px de cible
+   tactile, et marge droite respectant la safe area iPhone — mais placé plus
+   haut : la page entreprise n'a pas la même densité verticale que la home,
+   et le bouton doit rester atteignable sans recouvrir un CTA. */
+.page-theme-switch {
+  position: fixed;
+  right: max(0.75rem, env(safe-area-inset-right));
+  top: 30%;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 9999px;
+  border: 1px solid var(--border-strong);
+  background: var(--card);
+  color: var(--foreground);
+  transition:
+    transform var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out);
+}
+
+.page-theme-switch:hover {
+  transform: scale(1.06);
+}
+
+.page-theme-switch:active {
+  transform: scale(0.96);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-theme-switch {
+    transition: none;
+  }
+  .page-theme-switch:hover,
+  .page-theme-switch:active {
+    transform: none;
+  }
+}
+
+/* Page publique thémable — filets, ombres et fondus.
+
+   ⚠️ TOUT CE QUI TOUCHE À UNE SURFACE PASSE PAR UN TOKEN. L'en-tête de ce
+   fichier le dit déjà : « aucun composant ne doit coder une couleur de
+   surface en dur (bg-black, bg-white…) ». La première version de la page
+   entreprise utilisait `bg-black` pour ses sections alternées : en thème
+   clair, `--foreground` passe en quasi-noir et les titres devenaient
+   invisibles, noir sur noir. Les valeurs ci-dessous suivent la palette, donc
+   le contraste est garanti dans les deux thèmes par construction.
+
+   Mêmes intentions que le système de la home (`--home-*`) : filets fins,
+   ombres diffuses et retenues, rehaut d'arête haute — thème clair CONÇU,
+   jamais une simple inversion. */
+[data-page-theme] {
+  --page-line: rgba(255, 255, 255, 0.1);
+  --page-line-strong: rgba(255, 255, 255, 0.16);
+  --page-edge-light: rgba(255, 255, 255, 0.07);
+  --page-shadow: 0 30px 70px -38px rgba(0, 0, 0, 0.9);
+
+  /* Fondu latéral de la photo d'en-tête : opaque côté texte, transparent
+     côté sujet. Le texte ne repose donc JAMAIS sur l'image. */
+  --hero-fondu-plein: var(--background);
+  --hero-fondu-vide: rgba(5, 5, 5, 0);
+  /* Fondu vertical, qui raccorde la photo à la section suivante. */
+  --hero-fondu-bas: var(--background);
+}
+
+[data-page-theme="light"] {
+  /* Thème clair CONÇU : filets gris froids, ombres diffuses, rehaut blanc. */
+  --page-line: rgba(0, 0, 0, 0.1);
+  --page-line-strong: rgba(0, 0, 0, 0.16);
+  --page-edge-light: rgba(255, 255, 255, 0.85);
+  --page-shadow: 0 24px 55px -34px rgba(20, 20, 20, 0.28);
+
+  --hero-fondu-vide: rgba(244, 244, 242, 0);
+}
+
+/* Le conteneur porte lui-même sa surface et sa couleur de texte : une section
+   qui n'en déclare pas hérite donc d'un couple cohérent, jamais d'un fond
+   noir avec du texte noir. */
+[data-page-theme] {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* Carte de page — équivalent thémable de `.home-card`. */
+.page-card {
+  border-radius: clamp(0.75rem, 1.8vw, 1.25rem);
+  border: 1px solid var(--page-line);
+  background: var(--card);
+  box-shadow: inset 0 1px 0 var(--page-edge-light), var(--page-shadow);
+}
+
+/* Fondu de la photo d'en-tête : horizontal sur écran large (le texte occupe
+   la gauche), vertical sur mobile (la photo passe derrière, très atténuée). */
+.hero-fondu {
+  background: linear-gradient(
+    to bottom,
+    var(--hero-fondu-plein) 0%,
+    color-mix(in srgb, var(--hero-fondu-plein) 72%, transparent) 45%,
+    var(--hero-fondu-bas) 100%
+  );
+}
+
+@media (min-width: 768px) {
+  .hero-fondu {
+    background:
+      linear-gradient(
+        to right,
+        var(--hero-fondu-plein) 0%,
+        var(--hero-fondu-plein) 42%,
+        color-mix(in srgb, var(--hero-fondu-plein) 55%, transparent) 68%,
+        var(--hero-fondu-vide) 100%
+      ),
+      linear-gradient(to bottom, var(--hero-fondu-vide) 55%, var(--hero-fondu-bas) 100%);
+  }
+}
+
+/* Changement d'étape du configurateur entreprise (/services-entreprises).
+
+   ⚠️ TRANSLATION HORIZONTALE, CONTRAIREMENT À `question-reveal`. Le
+   dévoilement progressif fait DESCENDRE dans la page : une question
+   s'ajoute sous la précédente, d'où un mouvement vertical. Le configurateur
+   navigue LATÉRALEMENT entre des écrans qui se remplacent — le mouvement
+   doit dire « on avance », pas « il y a du contenu en plus ». Amplitude
+   faible (12px) et durée brève : la transition accompagne un clic
+   délibéré, elle ne doit jamais faire attendre. */
+@keyframes step-enter {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.step-enter {
+  animation: step-enter 200ms var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .step-enter {
     animation: none;
   }
 }

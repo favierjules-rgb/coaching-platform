@@ -24,6 +24,13 @@ import { Logo } from "@/components/ui/Logo";
  *
  * Grille 2 colonnes sur mobile / nav centrée entre logo et copyright sur
  * desktop, largeur de conteneur (max-w-7xl) identique au reste du site.
+ *
+ * ⚠️ « SERVICES AUX ENTREPRISES » EST UN LIEN COMMERCIAL, PAS UN LIEN LÉGAL.
+ * Il vit donc HORS de la nav `aria-label="Liens légaux"` : y glisser une
+ * page commerciale mentirait aux lecteurs d'écran, et défairait la
+ * simplification de juillet 2026 qui a volontairement ramené cette
+ * navigation à quatre liens juridiques. Les quatre liens restent intacts ;
+ * l'entrée entreprise se place à côté, avec son propre repère.
  */
 const footerLinks = [
   { href: "/informations-legales", label: "Informations légales" },
@@ -39,6 +46,18 @@ export function Footer() {
         <div className="w-full md:w-auto md:shrink-0">
           <Logo />
         </div>
+
+        <nav
+          aria-label="Entreprises"
+          className="w-full md:w-auto md:shrink-0"
+        >
+          <Link
+            href="/services-entreprises"
+            className="inline-flex min-h-[44px] items-center justify-center text-xs font-bold uppercase tracking-widest text-foreground transition-colors hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary md:justify-start"
+          >
+            Services aux entreprises
+          </Link>
+        </nav>
 
         <nav
           aria-label="Liens légaux"

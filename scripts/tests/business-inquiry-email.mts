@@ -24,14 +24,14 @@ import {
 } from "../../lib/business-inquiry/email";
 import { getPublicAppUrl } from "../../lib/email/templates/base";
 import {
-  allQuestionsComplete,
+  allStepsComplete,
   businessInquirySchema,
-  firstIncompleteQuestion,
+  firstIncompleteStep,
   looksAutomated,
-  FORMAT_OPTIONS,
+  LOCATION_OPTIONS,
   MAX_LENGTHS,
-  QUESTION_COUNT,
-  QUESTION_FIELDS,
+  STEP_COUNT,
+  STEP_FIELDS,
   type BusinessInquiryInput,
 } from "../../lib/business-inquiry/schema";
 import { consumeRateLimit } from "../../lib/security/rate-limit";
@@ -61,10 +61,12 @@ function validInquiry(overrides: Partial<BusinessInquiryInput> = {}): Record<str
     contactRole: "Responsable RH",
     email: "camille.martin@acme.test",
     phone: "01 23 45 67 89",
-    headcount: "26-50",
-    needs: ["prevention-tms", "qvt"],
-    otherNeed: "",
-    format: "sur-site",
+    headcount: "20-49",
+    frequency: "2-seances",
+    objectives: ["bien-etre", "condition-physique"],
+    sector: "services",
+    timeline: "des-que-possible",
+    location: "sur-site",
     city: "Lyon",
     projectDetails: "Deux séances par semaine à partir de septembre.",
     privacyAccepted: true,
@@ -101,25 +103,44 @@ await test("5. email invalide refusé, email valide accepté", () => {
 await test("6. effectif manquant ou inconnu refusé", () => {
   assert.equal(businessInquirySchema.safeParse(validInquiry({ headcount: "" })).success, false);
   assert.equal(businessInquirySchema.safeParse(validInquiry({ headcount: "12345" })).success, false);
+  // Une tranche hors liste ne passe pas davantage — l'effectif n'est jamais
+  // un nombre libre, il ne sert à aucun calcul.
+  assert.equal(businessInquirySchema.safeParse(validInquiry({ headcount: "-5" })).success, false);
+  assert.equal(businessInquirySchema.safeParse(validInquiry({ headcount: "0" })).success, false);
 });
 
-await test("7. aucun besoin sélectionné refusé ; « autre » exige une précision", () => {
-  assert.equal(businessInquirySchema.safeParse(validInquiry({ needs: [] })).success, false);
-
-  const sansPrecision = businessInquirySchema.safeParse(validInquiry({ needs: ["autre"], otherNeed: "" }));
-  assert.equal(sansPrecision.success, false, "« autre » sans précision doit être refusé");
-  assert.ok(sansPrecision.error?.issues.some((i) => i.path[0] === "otherNeed"));
-
-  assert.equal(businessInquirySchema.safeParse(validInquiry({ needs: ["autre"], otherNeed: "Séminaire" })).success, true);
+await test("7. au moins un objectif est exigé ; fréquence, secteur et échéance aussi", () => {
+  assert.equal(businessInquirySchema.safeParse(validInquiry({ objectives: [] })).success, false);
+  assert.equal(businessInquirySchema.safeParse(validInquiry({ objectives: ["inconnu"] })).success, false);
+  assert.equal(businessInquirySchema.safeParse(validInquiry({ frequency: "" })).success, false);
+  assert.equal(businessInquirySchema.safeParse(validInquiry({ sector: "" })).success, false);
+  assert.equal(businessInquirySchema.safeParse(validInquiry({ timeline: "" })).success, false);
+  // Plusieurs objectifs restent possibles.
+  assert.equal(
+    businessInquirySchema.safeParse(
+      validInquiry({ objectives: ["bien-etre", "cohesion", "performance"] }),
+    ).success,
+    true,
+  );
 });
 
-await test("8. ville requise sur site et en hybride, facultative à distance", () => {
-  for (const format of ["sur-site", "hybride"]) {
-    const result = businessInquirySchema.safeParse(validInquiry({ format, city: "" }));
-    assert.equal(result.success, false, `ville requise pour « ${format} »`);
+await test("8. ville requise dès qu'un déplacement est demandé, et seulement alors", () => {
+  for (const location of ["sur-site", "hybride"]) {
+    const result = businessInquirySchema.safeParse(validInquiry({ location, city: "" }));
+    assert.equal(result.success, false, `ville requise pour « ${location} »`);
     assert.ok(result.error?.issues.some((i) => i.path[0] === "city"));
   }
-  assert.equal(businessInquirySchema.safeParse(validInquiry({ format: "a-distance", city: "" })).success, true);
+  assert.equal(businessInquirySchema.safeParse(validInquiry({ location: "a-distance", city: "" })).success, true);
+  assert.equal(
+    businessInquirySchema.safeParse(validInquiry({ location: "salle-partenaire", city: "" })).success,
+    true,
+  );
+  /*
+   * ⚠️ LE LIEU LUI-MÊME EST FACULTATIF depuis la refonte : il se précise
+   * pendant l'appel. Ne pas le renseigner ne doit donc jamais bloquer la
+   * demande — et n'exige alors aucune ville.
+   */
+  assert.equal(businessInquirySchema.safeParse(validInquiry({ location: "", city: "" })).success, true);
 });
 
 await test("9. consentement absent refusé", () => {
@@ -155,7 +176,6 @@ await test("9ter. les messages de dépassement de longueur sont en français", (
     ["contactName", MAX_LENGTHS.contactName],
     ["contactRole", MAX_LENGTHS.contactRole],
     ["city", MAX_LENGTHS.city],
-    ["otherNeed", MAX_LENGTHS.otherNeed],
   ] as const) {
     const result = businessInquirySchema.safeParse(validInquiry({ [champ]: "x".repeat(max + 1) }));
     assert.equal(result.success, false, `${champ} : dépassement non détecté`);
@@ -171,81 +191,113 @@ await test("9ter. les messages de dépassement de longueur sont en français", (
 
 await test("9quater. progression : chaque question se débloque une fois la précédente remplie", () => {
   const vide = {
+    headcount: "",
+    frequency: "",
+    objectives: [] as string[],
+    sector: "",
+    timeline: "",
+    projectDetails: "",
+    location: "",
+    city: "",
     companyName: "",
     contactName: "",
     contactRole: "",
     email: "",
     phone: "",
-    headcount: "",
-    needs: [] as string[],
-    otherNeed: "",
-    format: "",
-    city: "",
-    projectDetails: "",
     privacyAccepted: false,
     website: "",
   };
-  assert.equal(firstIncompleteQuestion(vide), 1, "formulaire vierge : on est à la question 1");
+  assert.equal(firstIncompleteStep(vide), 1, "configurateur vierge : on est à l'étape 1");
 
+  /*
+   * ⚠️ L'ORDRE EST VÉRIFIÉ ICI, PAS SEULEMENT DANS LE COMPOSANT. Les cinq
+   * premières étapes ne demandent aucune donnée personnelle : c'est une
+   * propriété du SCHÉMA, donc elle se contrôle sur le schéma. Si un champ
+   * d'identité remontait dans les premières étapes, cette progression le
+   * révélerait immédiatement.
+   */
   const etapes: [Record<string, unknown>, number, string][] = [
-    [{ companyName: "Acme" }, 2, "entreprise renseignée ⇒ question 2"],
-    [{ contactName: "Camille Martin", contactRole: "RH" }, 3, "contact renseigné ⇒ question 3"],
-    [{ email: "camille@acme.test" }, 4, "email valide ⇒ question 4 (téléphone facultatif)"],
-    [{ headcount: "26-50" }, 5, "effectif choisi ⇒ question 5"],
-    [{ needs: ["qvt"] }, 6, "besoin choisi ⇒ question 6"],
-    [{ format: "a-distance" }, 8, "format à distance sans ville ⇒ parcours terminé"],
+    [{ headcount: "20-49" }, 2, "effectif choisi ⇒ étape 2"],
+    [{ frequency: "2-seances" }, 3, "fréquence choisie ⇒ étape 3"],
+    [{ objectives: ["bien-etre"] }, 4, "objectif choisi ⇒ étape 4"],
+    [{ sector: "services" }, 5, "secteur choisi ⇒ étape 5"],
+    /*
+     * ⚠️ ON SAUTE DE 5 À 7, ET C'EST VOLONTAIRE. L'étape 6 (projet, lieu,
+     * ville) est entièrement facultative : elle n'est donc JAMAIS
+     * « incomplète » au sens du schéma, et ne retient jamais le parcours.
+     * Un prospect pressé passe directement au contact — c'est exactement
+     * l'effet recherché sur le taux de complétion.
+     */
+    [{ timeline: "des-que-possible" }, 7, "échéance choisie ⇒ étape 7, l'étape 6 ne retient pas"],
   ];
   let etat: Record<string, unknown> = { ...vide };
   for (const [ajout, attendu, description] of etapes) {
     etat = { ...etat, ...ajout };
-    assert.equal(firstIncompleteQuestion(etat), attendu, description);
+    assert.equal(firstIncompleteStep(etat), attendu, description);
   }
 
-  // Un email mal formé ne débloque pas la suite.
+  // L'étape de contact retient le parcours tant qu'elle est incomplète.
+  assert.equal(firstIncompleteStep(etat), 7, "contact vide ⇒ étape 7");
+  const contact = {
+    companyName: "Acme Industries",
+    contactName: "Camille Martin",
+    contactRole: "Responsable RH",
+    email: "camille.martin@acme.test",
+  };
+  assert.equal(firstIncompleteStep({ ...etat, ...contact }), 8, "contact complet ⇒ parcours terminé");
+
+  // Un email mal formé ne débloque pas la fin du parcours.
   assert.equal(
-    firstIncompleteQuestion({ ...vide, companyName: "Acme", contactName: "Camille Martin", contactRole: "RH", email: "pas-un-email" }),
-    3,
-    "email invalide : on reste bloqué à la question 3",
+    firstIncompleteStep({ ...etat, ...contact, email: "pas-un-email" }),
+    7,
+    "email invalide : on reste à l'étape 7",
   );
 
-  // En présentiel, la ville manquante retient la question 6.
-  const presentielSansVille = { ...etat, format: "sur-site", city: "" };
-  assert.equal(firstIncompleteQuestion(presentielSansVille), 6, "présentiel sans ville ⇒ question 6");
-  assert.equal(firstIncompleteQuestion({ ...presentielSansVille, city: "Lyon" }), 8, "ville fournie ⇒ terminé");
-
-  // « Autre » sans précision retient la question 5.
+  // Un déplacement demandé sans ville retient l'étape 6.
   assert.equal(
-    firstIncompleteQuestion({ ...etat, needs: ["autre"], otherNeed: "" }),
-    5,
-    "« autre » sans précision ⇒ question 5",
+    firstIncompleteStep({ ...etat, ...contact, location: "sur-site", city: "" }),
+    6,
+    "déplacement sans ville ⇒ étape 6",
+  );
+  assert.equal(
+    firstIncompleteStep({ ...etat, ...contact, location: "sur-site", city: "Lyon" }),
+    8,
+    "ville fournie ⇒ terminé",
   );
 
-  // La question 7 est facultative : elle ne retient jamais le parcours.
-  assert.equal(allQuestionsComplete({ ...etat, projectDetails: "" }), true, "détails vides : parcours complet");
+  // L'étape 6 est facultative : elle ne retient jamais le parcours.
+  assert.equal(allStepsComplete({ ...etat, ...contact }), true, "étape 6 vide : parcours complet");
   assert.equal(
-    allQuestionsComplete({ ...etat, projectDetails: "x".repeat(MAX_LENGTHS.projectDetails + 1) }),
+    allStepsComplete({ ...etat, ...contact, projectDetails: "x".repeat(MAX_LENGTHS.projectDetails + 1) }),
     false,
     "détails trop longs : parcours incomplet",
   );
 
-  // Chaque champ appartient à une question et une seule.
-  const tousLesChamps = QUESTION_FIELDS.flat();
-  assert.equal(new Set(tousLesChamps).size, tousLesChamps.length, "aucun champ rattaché à deux questions");
-  assert.equal(QUESTION_COUNT, 7, "sept questions");
+  // Chaque champ appartient à une étape et une seule.
+  const tousLesChamps = STEP_FIELDS.flat();
+  assert.equal(new Set(tousLesChamps).size, tousLesChamps.length, "aucun champ rattaché à deux étapes");
+  assert.equal(STEP_COUNT, 7, "sept étapes");
+
+  // Les cinq premières étapes ne portent AUCUN champ d'identité.
+  const identite = ["companyName", "contactName", "contactRole", "email", "phone"];
+  for (let i = 0; i < 5; i += 1) {
+    for (const champ of STEP_FIELDS[i]) {
+      assert.ok(!identite.includes(champ), `l'étape ${i + 1} demande « ${champ} », donnée personnelle`);
+    }
+  }
 });
 
-await test("9quinquies. les formats nomment explicitement le présentiel", () => {
-  const libelles = FORMAT_OPTIONS.map((o) => o.label);
-  assert.ok(
-    libelles.filter((l) => /présentiel/i.test(l)).length >= 2,
-    "le présentiel doit apparaître dans les choix cliquables",
-  );
-  // Les valeurs, elles, ne changent pas : elles circulent dans l'email.
-  assert.deepEqual(
-    FORMAT_OPTIONS.map((o) => o.value),
-    ["sur-site", "a-distance", "hybride"],
-    "valeurs stables",
-  );
+await test("9quinquies. les lieux conservent leurs valeurs historiques", () => {
+  /*
+   * Les trois valeurs d'origine circulent dans les emails déjà reçus : les
+   * renommer aurait cassé l'historique. La refonte n'a changé que les
+   * libellés, et ajouté la salle partenaire comme mode principal.
+   */
+  const valeurs: readonly string[] = LOCATION_OPTIONS.map((o) => o.value);
+  for (const historique of ["sur-site", "a-distance", "hybride"]) {
+    assert.ok(valeurs.includes(historique), `valeur historique « ${historique} » perdue`);
+  }
+  assert.ok(valeurs.includes("salle-partenaire"), "le mode principal doit être proposé");
 });
 
 /* ─── 10-12. Anti-spam ─── */
@@ -292,7 +344,7 @@ await test("13. l'email contient toutes les informations de la demande", async (
 
   assert.equal(email.to, "destinataire@test.local", "destinataire = variable serveur, pas une adresse en dur");
   assert.equal(email.replyTo, "camille.martin@acme.test", "Reply-To = email du prospect");
-  assert.equal(email.subject, "[Demande entreprise] Acme Industries — 26 à 50");
+  assert.equal(email.subject, "[Devis entreprise] Acme Industries — 20 à 49 collaborateurs");
 
   for (const attendu of [
     "26 juillet 2026",
@@ -301,10 +353,13 @@ await test("13. l'email contient toutes les informations de la demande", async (
     "Responsable RH",
     "camille.martin@acme.test",
     "0601020304",
-    "26 à 50",
-    "Prévention des TMS",
-    "Qualité de vie au travail",
-    "En présentiel, dans vos locaux",
+    "20 à 49",
+    "2 séances par semaine",
+    "Bien-être",
+    "Condition physique",
+    "Services",
+    "Dès que possible",
+    "Dans nos locaux",
     "Lyon",
     "Deux séances par semaine",
     "Acceptée par le prospect",
@@ -561,7 +616,7 @@ await test("18. route : demande valide ⇒ 200 et UN email composé (fournisseur
   };
   assert.deepEqual([envoi.to].flat(), ["destinataire@exemple.test"], "destinataire = variable serveur");
   assert.deepEqual([envoi.reply_to].flat(), ["camille.martin@acme.test"], "Reply-To = adresse du prospect");
-  assert.match(envoi.subject, /^\[Demande entreprise\] /);
+  assert.match(envoi.subject, /^\[Devis entreprise\] /);
   for (const attendu of ["Acme Industries", "Camille Martin", "camille.martin@acme.test", "Lyon"]) {
     assert.ok(envoi.text.includes(attendu), `« ${attendu} » absent du corps texte`);
   }
