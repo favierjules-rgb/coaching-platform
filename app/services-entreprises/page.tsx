@@ -1,28 +1,40 @@
 import type { Metadata } from "next";
 
-import { BusinessInquiryForm } from "@/components/sections/BusinessInquiryForm";
+import { EntrepriseConfigurateur } from "@/components/sections/EntrepriseConfigurateur";
 import { SectionLabel } from "@/components/ui/SectionLabel";
 import {
-  BUSINESS_FORMATS,
-  BUSINESS_NEEDS,
-  BUSINESS_PROCESS_STEPS,
-} from "@/data/business-services";
+  CE_QUE_VOUS_OBTENEZ,
+  ETAPES_DEPLOIEMENT,
+  PARCOURS_COLLABORATEUR,
+  PRINCIPE_FORMULE,
+  REPERES_HERO,
+} from "@/data/entreprise";
 
 /**
- * Page publique « Services aux entreprises » (chantier
- * feat/business-services-contact, juillet 2026).
+ * Page publique « GRIT Entreprise » (/services-entreprises).
  *
- * Accessible uniquement depuis le menu burger — aucun lien dans la
- * navigation principale ni dans le footer — mais volontairement indexable :
- * un prospect non connecté doit pouvoir y arriver par son URL ou par un
- * moteur de recherche. Aucune donnée n'est stockée : le formulaire envoie
- * la demande par email (voir app/api/business-inquiry/route.ts).
+ * Refonte du 13/09/2026 : d'une page de présentation à une landing B2B
+ * orientée demande de devis. Le cœur de la page est le CONFIGURATEUR — sept
+ * étapes qui qualifient le projet — et non plus un formulaire de contact
+ * placé en fin de parcours.
+ *
+ * ⚠️ AUCUN TARIF N'EST PUBLIÉ, et ce n'est pas un oubli. Décision
+ * commerciale : le prix se présente et se discute pendant l'appel. La page
+ * promet une proposition adaptée, jamais un montant. Aucun paiement, aucun
+ * panier, aucun encaissement ici.
+ *
+ * Rendu SERVEUR pour tout le contenu éditorial — seul le configurateur est
+ * un composant client. C'est ce qui préserve le référencement malgré la
+ * réduction du texte.
+ *
+ * Accessible depuis le menu burger ET depuis le footer (lien commercial
+ * distinct de la navigation « Liens légaux », voir components/layout/Footer.tsx).
  */
 
 export const metadata: Metadata = {
-  title: "Services aux entreprises | Coaching sportif et QVT",
+  title: "Coaching sportif en entreprise | GRIT Entreprise",
   description:
-    "Coaching sportif en entreprise, prévention des TMS, qualité de vie au travail, cohésion d'équipe et accompagnement personnalisé.",
+    "Un accompagnement sportif individuel pour vos collaborateurs, sans infrastructure à gérer : séances de 45 minutes, programme personnalisé et suivi. Demandez votre devis.",
   alternates: { canonical: "/services-entreprises" },
 };
 
@@ -32,62 +44,135 @@ export default function ServicesEntreprisesPage() {
       {/* A — HERO */}
       <section className="bg-background pb-16 pt-32 md:pb-24 md:pt-40">
         <div className="mx-auto max-w-7xl px-6">
-          <SectionLabel>Entreprises</SectionLabel>
+          <SectionLabel>GRIT Entreprise</SectionLabel>
           <h1 className="mb-6 max-w-4xl font-heading text-3xl font-extrabold uppercase leading-[1.05] text-foreground sm:text-4xl md:text-6xl">
-            Sport et performance en entreprise
+            Le coaching sportif de vos collaborateurs. Pensé pour l&apos;entreprise.
           </h1>
           <p className="mb-10 max-w-2xl text-base leading-relaxed text-muted-foreground md:text-lg">
-            Des interventions adaptées à vos équipes pour améliorer la santé, l&apos;énergie, la cohésion et la
-            performance au travail. Le coaching se déroule <strong className="font-semibold text-foreground">en
-            présentiel, directement dans vos locaux</strong>, à distance en visio, ou en combinant les deux.
+            Des séances individuelles de 45 minutes, un accompagnement personnalisé, et aucune
+            infrastructure à gérer.
           </p>
-          <a
-            href="#demande"
-            className="pressable inline-flex min-h-[52px] items-center bg-foreground px-6 py-3 text-sm font-bold uppercase tracking-widest text-background transition-colors hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-          >
-            Parler de votre projet
-          </a>
+
+          <div className="mb-12 flex flex-col gap-4 sm:flex-row sm:items-center">
+            <a
+              href="#devis"
+              className="pressable inline-flex min-h-[52px] items-center justify-center bg-primary px-6 py-3 text-sm font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            >
+              Demander mon devis
+            </a>
+            <a
+              href="#programme"
+              className="pressable inline-flex min-h-[52px] items-center justify-center border border-border px-6 py-3 text-sm font-bold uppercase tracking-widest text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            >
+              Découvrir le programme
+            </a>
+          </div>
+
+          <dl className="grid grid-cols-1 gap-px border border-border bg-border sm:grid-cols-3">
+            {REPERES_HERO.map((repere) => (
+              <div key={repere.label} className="bg-card p-6">
+                <dt className="sr-only">{repere.label}</dt>
+                <dd>
+                  <span className="block font-heading text-2xl font-extrabold uppercase text-foreground md:text-3xl">
+                    {repere.value}
+                  </span>
+                  <span className="mt-1 block text-xs uppercase tracking-widest text-muted-foreground">
+                    {repere.label}
+                  </span>
+                </dd>
+              </div>
+            ))}
+          </dl>
         </div>
       </section>
 
-      {/* B — BESOINS TRAITÉS */}
-      <section className="bg-background py-16 md:py-24">
+      {/* B — COMMENT ÇA MARCHE */}
+      <section id="programme" className="scroll-mt-24 bg-black py-16 md:py-24">
         <div className="mx-auto max-w-7xl px-6">
-          <SectionLabel>Besoins traités</SectionLabel>
+          <SectionLabel>Comment ça marche</SectionLabel>
           <h2 className="mb-12 max-w-3xl font-heading text-2xl font-extrabold uppercase text-foreground sm:text-3xl md:text-5xl">
-            Ce que je peux améliorer dans votre entreprise
+            Quatre étapes, de votre besoin au terrain
           </h2>
 
-          <div className="grid grid-cols-1 gap-px bg-border sm:grid-cols-2 lg:grid-cols-3">
-            {BUSINESS_NEEDS.map(({ icon: Icon, title, description }) => (
-              <div key={title} className="bg-card p-6 lg:p-8">
+          <ol className="grid grid-cols-1 gap-px bg-border sm:grid-cols-2 lg:grid-cols-4">
+            {ETAPES_DEPLOIEMENT.map((etape, index) => (
+              <li key={etape.title} className="bg-card p-6 lg:p-8">
+                <p className="mb-4 font-heading text-3xl font-extrabold leading-none text-primary/30 md:text-4xl">
+                  {String(index + 1).padStart(2, "0")}
+                </p>
+                <h3 className="mb-2 font-heading text-base font-bold uppercase leading-tight text-foreground lg:text-lg">
+                  {etape.title}
+                </h3>
+                <p className="text-sm leading-relaxed text-muted-foreground">{etape.description}</p>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </section>
+
+      {/* C — CE QUE L'ENTREPRISE OBTIENT */}
+      <section className="bg-background py-16 md:py-24">
+        <div className="mx-auto max-w-7xl px-6">
+          <SectionLabel>Ce que vous obtenez</SectionLabel>
+          <h2 className="mb-12 max-w-3xl font-heading text-2xl font-extrabold uppercase text-foreground sm:text-3xl md:text-5xl">
+            Un service de coaching, pas un abonnement
+          </h2>
+
+          <ul className="grid grid-cols-1 gap-px bg-border sm:grid-cols-2 lg:grid-cols-3">
+            {CE_QUE_VOUS_OBTENEZ.map(({ icon: Icon, title, description }) => (
+              <li key={title} className="bg-card p-6 lg:p-8">
                 <Icon size={24} className="mb-4 h-5 w-5 text-primary lg:h-6 lg:w-6" aria-hidden />
                 <h3 className="mb-2 font-heading text-base font-bold uppercase leading-tight text-foreground lg:text-lg">
                   {title}
                 </h3>
                 <p className="text-sm leading-relaxed text-muted-foreground">{description}</p>
-              </div>
+              </li>
             ))}
-          </div>
+          </ul>
         </div>
       </section>
 
-      {/* C — FORMATS POSSIBLES */}
+      {/* D — POUR VOS COLLABORATEURS */}
       <section className="bg-black py-16 md:py-24">
         <div className="mx-auto max-w-7xl px-6">
-          <SectionLabel>Formats possibles</SectionLabel>
+          <SectionLabel>Pour vos collaborateurs</SectionLabel>
+          <h2 className="mb-12 max-w-3xl font-heading text-2xl font-extrabold uppercase text-foreground sm:text-3xl md:text-5xl">
+            Je suis accompagné individuellement
+          </h2>
+
+          <ol className="grid grid-cols-1 gap-px bg-border sm:grid-cols-2 lg:grid-cols-5">
+            {PARCOURS_COLLABORATEUR.map((jalon, index) => (
+              <li key={jalon.title} className="bg-card p-6">
+                <p className="mb-3 font-heading text-xs font-semibold uppercase tracking-[0.3em] text-primary">
+                  {String(index + 1).padStart(2, "0")}
+                </p>
+                <h3 className="mb-2 font-heading text-sm font-bold uppercase leading-tight text-foreground lg:text-base">
+                  {jalon.title}
+                </h3>
+                <p className="text-xs leading-relaxed text-muted-foreground">{jalon.description}</p>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </section>
+
+      {/* E — UNE FORMULE ADAPTÉE (aucun montant : voir en-tête de fichier) */}
+      <section className="bg-background py-16 md:py-24">
+        <div className="mx-auto max-w-7xl px-6">
+          <SectionLabel>Votre formule</SectionLabel>
           <h2 className="mb-4 max-w-3xl font-heading text-2xl font-extrabold uppercase text-foreground sm:text-3xl md:text-5xl">
-            Des interventions qui s&apos;adaptent à votre organisation
+            Une formule construite pour votre entreprise
           </h2>
           <p className="mb-12 max-w-2xl text-sm leading-relaxed text-muted-foreground md:text-base">
-            Le présentiel reste le format le plus efficace : je me déplace dans vos locaux pour encadrer les
-            séances sur place. Les formats à distance et hybrides restent possibles pour les équipes réparties
-            sur plusieurs sites.
+            Chaque dispositif dépend du nombre de collaborateurs, du rythme choisi et de vos
+            contraintes d&apos;organisation. Décrivez votre projet en quelques clics : nous revenons
+            vers vous avec une proposition adaptée.
           </p>
 
-          <ul className="grid grid-cols-1 gap-px bg-border sm:grid-cols-2 lg:grid-cols-3">
-            {BUSINESS_FORMATS.map(({ title, description }) => (
+          <ul className="mb-12 grid grid-cols-1 gap-px bg-border sm:grid-cols-3">
+            {PRINCIPE_FORMULE.map(({ icon: Icon, title, description }) => (
               <li key={title} className="bg-card p-6 lg:p-8">
+                <Icon size={24} className="mb-4 h-5 w-5 text-primary lg:h-6 lg:w-6" aria-hidden />
                 <h3 className="mb-2 font-heading text-base font-bold uppercase leading-tight text-foreground lg:text-lg">
                   {title}
                 </h3>
@@ -96,50 +181,28 @@ export default function ServicesEntreprisesPage() {
             ))}
           </ul>
 
-          <p className="mt-8 max-w-2xl text-sm text-muted-foreground">
-            Chaque intervention est construite sur mesure : le contenu, la fréquence et le tarif dépendent de vos
-            objectifs et de vos contraintes. Décrivez votre projet et je vous prépare une proposition adaptée.
-          </p>
+          <a
+            href="#devis"
+            className="pressable inline-flex min-h-[52px] items-center justify-center bg-primary px-6 py-3 text-sm font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          >
+            Construire mon projet
+          </a>
         </div>
       </section>
 
-      {/* D — FONCTIONNEMENT */}
-      <section className="bg-background py-16 md:py-24">
-        <div className="mx-auto max-w-7xl px-6">
-          <SectionLabel>Fonctionnement</SectionLabel>
-          <h2 className="mb-12 max-w-3xl font-heading text-2xl font-extrabold uppercase text-foreground sm:text-3xl md:text-5xl">
-            Trois étapes, sans engagement
-          </h2>
-
-          <ol className="grid grid-cols-1 gap-px bg-border md:grid-cols-3">
-            {BUSINESS_PROCESS_STEPS.map(({ title, description }, index) => (
-              <li key={title} className="bg-card p-6 lg:p-8">
-                <p className="mb-3 font-heading text-xs font-semibold uppercase tracking-[0.3em] text-primary">
-                  Étape {index + 1}
-                </p>
-                <h3 className="mb-2 font-heading text-base font-bold uppercase leading-tight text-foreground lg:text-lg">
-                  {title}
-                </h3>
-                <p className="text-sm leading-relaxed text-muted-foreground">{description}</p>
-              </li>
-            ))}
-          </ol>
-        </div>
-      </section>
-
-      {/* E — FORMULAIRE */}
-      <section id="demande" className="scroll-mt-24 bg-black py-16 md:py-24">
+      {/* F — CONFIGURATEUR */}
+      <section id="devis" className="scroll-mt-24 bg-black py-16 md:py-24">
         <div className="mx-auto max-w-3xl px-6">
-          <SectionLabel>Demande de contact</SectionLabel>
+          <SectionLabel>Demande de devis</SectionLabel>
           <h2 className="mb-4 font-heading text-2xl font-extrabold uppercase text-foreground sm:text-3xl md:text-5xl">
-            Parlez-moi de votre projet
+            Construisons votre programme
           </h2>
           <p className="mb-12 text-sm leading-relaxed text-muted-foreground md:text-base">
-            Répondez à ces quelques questions. Je vous recontacte pour préciser vos besoins et établir une
-            proposition adaptée.
+            Sept étapes courtes pour cadrer votre projet. Nous étudions votre besoin et revenons vers
+            vous avec une proposition adaptée à votre entreprise.
           </p>
 
-          <BusinessInquiryForm />
+          <EntrepriseConfigurateur />
         </div>
       </section>
     </>

@@ -376,6 +376,36 @@ body {
   }
 }
 
+/* Changement d'étape du configurateur entreprise (/services-entreprises).
+
+   ⚠️ TRANSLATION HORIZONTALE, CONTRAIREMENT À `question-reveal`. Le
+   dévoilement progressif fait DESCENDRE dans la page : une question
+   s'ajoute sous la précédente, d'où un mouvement vertical. Le configurateur
+   navigue LATÉRALEMENT entre des écrans qui se remplacent — le mouvement
+   doit dire « on avance », pas « il y a du contenu en plus ». Amplitude
+   faible (12px) et durée brève : la transition accompagne un clic
+   délibéré, elle ne doit jamais faire attendre. */
+@keyframes step-enter {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.step-enter {
+  animation: step-enter 200ms var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .step-enter {
+    animation: none;
+  }
+}
+
 /* Icône de confirmation de paiement réussi (chantier redesign UI, Lot 5,
    opportunité d'animation #6) — uniquement l'état succès de
    PaymentResultCard (iconTone "primary" par défaut, voir

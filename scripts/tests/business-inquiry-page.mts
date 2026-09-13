@@ -1,6 +1,11 @@
 /**
- * Harnais — page « Services aux entreprises » : RENDU des composants
- * (chantier feat/business-services-contact, juillet 2026).
+ * Harnais — page « GRIT Entreprise » : RENDU des composants.
+ *
+ * Refonte du 13/09/2026 : le formulaire progressif a laissé place au
+ * CONFIGURATEUR en sept étapes. Les garanties contrôlées ici n'ont pas
+ * changé de nature — sections présentes, une seule étape montée à la fois,
+ * aucun secret côté client, responsive, accessibilité, verrou de double
+ * soumission, SEO — seules leurs cibles ont suivi la refonte.
  *
  * Monté avec react-dom/server, donc SANS la condition `react-server` — la
  * logique serveur (envoi d'email, qui importe `server-only`) est couverte
@@ -17,7 +22,7 @@ import { readFileSync } from "node:fs";
 import { createElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { BusinessInquiryForm } from "../../components/sections/BusinessInquiryForm";
+import { EntrepriseConfigurateur } from "../../components/sections/EntrepriseConfigurateur";
 import { Header } from "../../components/layout/Header";
 import { Footer } from "../../components/layout/Footer";
 import * as servicesPageModule from "../../app/services-entreprises/page";
@@ -56,26 +61,49 @@ function test(name: string, fn: () => void) {
   }
 }
 
-const flowHtml = renderToStaticMarkup(createElement(BusinessInquiryForm));
+const flowHtml = renderToStaticMarkup(createElement(EntrepriseConfigurateur));
 const pageHtml = renderToStaticMarkup(createElement(ServicesEntreprisesPage));
 const headerHtml = renderToStaticMarkup(createElement(Header));
 const footerHtml = renderToStaticMarkup(createElement(Footer));
 
-test("1. le lien « Services aux entreprises » n'est ni dans la nav principale ni dans le footer", () => {
+test("1. le lien vit dans le burger ET dans le footer, hors navigation légale", () => {
   const headerSource = readFileSync(new URL("../../components/layout/Header.tsx", import.meta.url), "utf8");
+  const footerSource = readFileSync(new URL("../../components/layout/Footer.tsx", import.meta.url), "utf8");
   const mockSource = readFileSync(new URL("../../data/mock.ts", import.meta.url), "utf8");
 
   // Absent du menu fermé (rendu serveur) : il n'apparaît qu'une fois ouvert.
   assert.ok(!headerHtml.includes("/services-entreprises"), "menu fermé : aucun lien visible");
-  assert.ok(!footerHtml.includes("/services-entreprises"), "footer : aucun lien");
-  assert.ok(!mockSource.includes("services-entreprises"), "navLinks/footerLinks : aucune entrée");
+  assert.ok(!mockSource.includes("services-entreprises"), "navLinks : aucune entrée dans la nav principale");
 
   // Présent dans le code du burger, via la liste dédiée.
   assert.ok(headerSource.includes("burgerOnlyLinks"), "liste dédiée aux liens du burger");
-  assert.ok(headerSource.includes("/services-entreprises"), "lien déclaré dans le Header");
   assert.ok(
     headerSource.includes('{ label: "Services aux entreprises", href: "/services-entreprises" }'),
-    "libellé exact attendu",
+    "libellé exact attendu dans le Header",
+  );
+
+  /*
+   * ⚠️ LE FOOTER PORTE LE LIEN DEPUIS LE 13/09/2026, MAIS PAS N'IMPORTE OÙ.
+   *
+   * Ce contrôle disait l'inverse — « footer : aucun lien » — tant que la
+   * page n'était accessible que par le burger. Elle est désormais aussi
+   * atteignable depuis le footer, à une condition que ce test verrouille :
+   * le lien est COMMERCIAL, il ne doit donc pas rejoindre la navigation
+   * `aria-label="Liens légaux"`, qui a été volontairement ramenée à quatre
+   * entrées juridiques en juillet 2026. Un lien commercial annoncé comme
+   * « légal » serait un mensonge pour les lecteurs d'écran.
+   */
+  assert.ok(footerHtml.includes("/services-entreprises"), "footer : le lien entreprise est présent");
+  assert.ok(footerSource.includes('aria-label="Entreprises"'), "le lien vit dans sa propre nav nommée");
+
+  // Les quatre liens juridiques restent exactement ce qu'ils étaient.
+  for (const href of ["/informations-legales", "/confidentialite", "/cookies", "/profil"]) {
+    assert.ok(footerHtml.includes(href), `lien juridique manquant : ${href}`);
+  }
+  const navLegale = footerHtml.slice(footerHtml.indexOf('aria-label="Liens légaux"'));
+  assert.ok(
+    !navLegale.includes("/services-entreprises"),
+    "le lien commercial s'est glissé dans la navigation légale",
   );
 });
 
@@ -111,72 +139,83 @@ test("1ter. le bouton « En savoir plus sur la méthode » a été retiré du he
 
 test("2. la page contient toutes les sections attendues", () => {
   for (const attendu of [
-    "Sport et performance en entreprise",
-    "Parler de votre projet",
-    "Besoins traités",
-    "Formats possibles",
-    "Fonctionnement",
-    "Parlez-moi de votre projet",
+    "GRIT Entreprise",
+    "Comment ça marche",
+    "Ce que vous obtenez",
+    "Pour vos collaborateurs",
+    "Votre formule",
+    "Demande de devis",
+    "Construisons votre programme",
   ]) {
     assert.ok(pageHtml.includes(attendu), `section manquante : « ${attendu} »`);
   }
-  assert.ok(pageHtml.includes('id="demande"'), "ancre du formulaire présente");
-  assert.ok(pageHtml.includes('href="#demande"'), "le bouton hero défile vers le formulaire");
+  assert.ok(pageHtml.includes('id="devis"'), "ancre du configurateur présente");
+  assert.ok(pageHtml.includes('href="#devis"'), "le hero défile vers le configurateur");
+  assert.ok(pageHtml.includes('id="programme"'), "ancre du programme présente");
+  // Un H1 unique, la structure de titres reste exploitable pour le SEO.
+  assert.equal((pageHtml.match(/<h1/g) ?? []).length, 1, "un seul H1");
+  assert.ok((pageHtml.match(/<h2/g) ?? []).length >= 4, "les sections portent des H2");
 });
 
-test("3. à l'ouverture, SEULE la première question est proposée", () => {
-  // Dévoilement progressif : les questions suivantes ne sont pas seulement
-  // masquées, elles ne sont pas montées — ni tabulables, ni lues par un
-  // lecteur d'écran.
-  const numeros = flowHtml.match(/>0[1-9]</g) ?? [];
-  assert.deepEqual(numeros, [">01<"], "une seule question au premier rendu");
-  assert.ok(flowHtml.includes("Quel est le nom de votre entreprise"), "question 1 présente");
-  for (const libelleSuivant of [
-    "Qui puis-je contacter",
-    "Comment puis-je vous joindre",
-    "Combien de collaborateurs seraient concernés",
-    "Quel est votre besoin principal",
-    "sous quel format souhaitez-vous être accompagné",
-    "Pouvez-vous préciser votre projet",
+test("3. à l'ouverture, SEULE la première étape est montée", () => {
+  // Les étapes suivantes ne sont pas seulement masquées : elles n'existent
+  // pas dans le DOM — ni tabulables, ni lues par un lecteur d'écran.
+  const texte = flowHtml.replace(/<[^>]+>/g, " ");
+  assert.ok(texte.includes("Combien de collaborateurs"), "étape 1 présente");
+  for (const suivante of [
+    "À quelle fréquence",
+    "Quel est votre objectif principal",
+    "Quel est votre secteur",
+    "Quand souhaitez-vous lancer",
+    "Parlez-nous de votre projet",
+    "Parlons de votre projet",
   ]) {
-    assert.ok(!flowHtml.includes(libelleSuivant), `« ${libelleSuivant} » ne doit pas être montée d'emblée`);
+    assert.ok(!texte.includes(suivante), `« ${suivante} » ne doit pas être montée d'emblée`);
   }
-  // Le repère de progression compense la vue d'ensemble perdue.
-  assert.ok(/Question\s*1\s*sur\s*7/.test(flowHtml.replace(/<[^>]+>/g, " ")), "compteur « Question 1 sur 7 »");
-  // Ni consentement ni bouton d'envoi tant que le parcours n'est pas terminé.
-  assert.ok(!flowHtml.includes("bi-privacyAccepted"), "consentement dévoilé seulement à la fin");
-  assert.ok(!flowHtml.includes('type="submit"'), "bouton d'envoi dévoilé seulement à la fin");
-  assert.ok(flowHtml.includes("Le bouton d&#x27;envoi apparaîtra"), "repère de fin de parcours affiché");
+  // Le repère de progression remplace la vue d'ensemble.
+  assert.ok(/Étape\s*1\s*sur\s*7/.test(texte), "compteur « Étape 1 sur 7 »");
+  // Ni consentement, ni coordonnées, ni bouton d'envoi avant la fin.
+  assert.ok(!flowHtml.includes("ec-privacy"), "consentement réservé à la dernière étape");
+  assert.ok(!flowHtml.includes("ec-email"), "coordonnées réservées à la dernière étape");
+  assert.ok(!flowHtml.includes('type="submit"'), "bouton d'envoi réservé à la dernière étape");
 });
 
-test("3bis. les sept questions restent déclarées, dans l'ordre, dans le composant", () => {
+test("3bis. les sept étapes sont déclarées dans l'ordre, et l'identité vient en DERNIER", () => {
   const source = readFileSync(
-    new URL("../../components/sections/BusinessInquiryForm.tsx", import.meta.url),
+    new URL("../../components/sections/EntrepriseConfigurateur.tsx", import.meta.url),
     "utf8",
   );
+  /*
+   * ⚠️ L'ORDRE EST LE CŒUR DE LA REFONTE, PAS UN DÉTAIL DE PRÉSENTATION.
+   * La version précédente demandait l'entreprise, le contact puis l'email
+   * AVANT toute question de projet : trois écrans administratifs avant que
+   * le prospect ait rien construit. Les cinq premières étapes ne réclament
+   * désormais aucune donnée personnelle. Ce test échoue si l'ordre régresse.
+   */
   const libelles = [
-    "Quel est le nom de votre entreprise",
-    "Qui puis-je contacter",
-    "Comment puis-je vous joindre",
-    "Combien de collaborateurs seraient concernés",
-    "Quel est votre besoin principal",
-    "sous quel format souhaitez-vous être accompagné",
-    "Pouvez-vous préciser votre projet",
+    "Combien de collaborateurs souhaitez-vous accompagner",
+    "À quelle fréquence",
+    "Quel est votre objectif principal",
+    "Quel est votre secteur d'activité",
+    "Quand souhaitez-vous lancer le programme",
+    "Parlez-nous de votre projet",
+    "Parlons de votre projet",
   ];
   let position = -1;
   for (const libelle of libelles) {
     const index = source.indexOf(libelle);
-    assert.ok(index > position, `question « ${libelle} » absente ou mal ordonnée`);
+    assert.ok(index > position, `étape « ${libelle} » absente ou mal ordonnée`);
     position = index;
   }
-  assert.equal((source.match(/<QuestionBlock/g) ?? []).length, 7, "sept blocs de question");
-  // Le dévoilement ne doit jamais reculer : une question atteinte le reste.
-  assert.ok(source.includes("Math.max(current, atteinte)"), "dévoilement monotone");
-  // Le focus n'est pas volé pendant la frappe.
-  assert.ok(
-    !/revealed[\s\S]{0,400}\.focus\(\)/.test(source),
-    "aucun focus automatique déclenché par le dévoilement",
-  );
+
+  // Aucun champ d'identité avant l'étape de contact.
+  const avantContact = source.slice(0, source.indexOf("step === CONTACT_STEP"));
+  for (const champ of ["ec-email", "ec-companyName", "ec-contactName", "ec-phone"]) {
+    assert.ok(!avantContact.includes(champ), `${champ} apparaît avant l'étape de contact`);
+  }
+
+  // La liste des champs par étape vient du schéma, jamais d'une copie locale.
+  assert.ok(source.includes("STEP_FIELDS[cible - 1]"), "les champs d'étape sont lus dans le schéma");
 });
 
 /* ─── 4-9. Validation ─── */
@@ -185,7 +224,7 @@ test("17. aucun email réel ne peut partir depuis les tests", () => {
   assert.equal(process.env.EMAILS_ENABLED, "false", "coupe-circuit global posé");
   assert.equal(process.env.RESEND_API_KEY, undefined, "aucune clé Resend dans l'environnement de test");
   // La route serveur n'expose ni clé ni destinataire au navigateur.
-  const formSource = readFileSync(new URL("../../components/sections/BusinessInquiryForm.tsx", import.meta.url), "utf8");
+  const formSource = readFileSync(new URL("../../components/sections/EntrepriseConfigurateur.tsx", import.meta.url), "utf8");
   assert.ok(!formSource.includes("RESEND"), "le composant client ne référence aucune clé");
   assert.ok(!formSource.includes("B2B_CONTACT_RECIPIENT_EMAIL"), "le composant client ignore le destinataire");
   assert.ok(!formSource.includes("@gmail.com"), "aucune adresse en dur dans le composant");
@@ -199,52 +238,89 @@ test("18. responsive : aucune largeur fixe, grilles adaptatives, cibles tactiles
   assert.ok(pageHtml.includes("max-w-7xl") && pageHtml.includes("px-6"), "colonne centrée avec marges latérales");
   assert.ok(pageHtml.includes("sm:grid-cols-2") && pageHtml.includes("lg:grid-cols-3"), "grilles responsives");
   assert.ok(/text-3xl[^"]*sm:text-4xl[^"]*md:text-6xl/.test(pageHtml), "titre progressif mobile → desktop");
-  assert.ok(flowHtml.includes("min-h-[44px]"), "champs à hauteur tactile suffisante");
   assert.ok(!/style="[^"]*width:\s*\d+px/.test(pageHtml), "aucune largeur inline en pixels");
+
+  /*
+   * ⚠️ LES CARTES DE CHOIX SONT LA CIBLE TACTILE CRITIQUE. Tout le
+   * configurateur se remplit au doigt : une carte trop courte, et le
+   * parcours devient pénible là où il doit être rapide. 64 px, soit
+   * nettement au-dessus du minimum de 44 px.
+   */
+  assert.ok(flowHtml.includes("min-h-[64px]"), "cartes de choix confortables au doigt");
+
   const source = readFileSync(
-    new URL("../../components/sections/BusinessInquiryForm.tsx", import.meta.url),
+    new URL("../../components/sections/EntrepriseConfigurateur.tsx", import.meta.url),
     "utf8",
   );
-  // Le bouton d'envoi n'est monté qu'en fin de parcours : on le contrôle
-  // dans la source, son rendu réel étant couvert par la validation live.
+  const stepFlow = readFileSync(new URL("../../components/ui/StepFlow.tsx", import.meta.url), "utf8");
+  // Boutons de navigation et d'envoi : montés plus tard, contrôlés en source.
+  assert.ok(stepFlow.includes("min-h-[48px]"), "boutons de navigation confortables");
   assert.ok(source.includes("min-h-[52px]"), "bouton d'envoi confortable");
+  // Une seule colonne sur mobile pour les cartes de choix.
+  assert.ok(stepFlow.includes("grid-cols-1"), "cartes empilées sur mobile");
 });
 
 test("19. accessibilité : labels, groupes, erreurs reliées, clavier", () => {
-  const formSourceA11y = readFileSync(
-    new URL("../../components/sections/BusinessInquiryForm.tsx", import.meta.url),
+  const source = readFileSync(
+    new URL("../../components/sections/EntrepriseConfigurateur.tsx", import.meta.url),
     "utf8",
   );
+  const stepFlow = readFileSync(new URL("../../components/ui/StepFlow.tsx", import.meta.url), "utf8");
 
-  // Question 1, seule montée à l'ouverture : contrôlée sur le rendu réel.
-  assert.ok(flowHtml.includes('for="bi-companyName"'), "label manquant pour bi-companyName");
-  assert.ok(flowHtml.includes('id="bi-companyName"'), "champ bi-companyName absent");
+  // L'étape montée est un groupe nommé par son propre titre.
+  assert.ok(flowHtml.includes('role="group"'), "l'étape est un groupe");
+  assert.ok(flowHtml.includes('aria-labelledby="ec-step-title"'), "groupe relié à son titre");
 
-  // Questions dévoilées ensuite : contrôlées dans la source (leur rendu est
-  // vérifié en navigateur, une fois le parcours déroulé).
-  for (const id of ["bi-contactName", "bi-contactRole", "bi-email", "bi-phone", "bi-city", "bi-projectDetails"]) {
-    assert.ok(formSourceA11y.includes(`htmlFor="${id}"`), `label manquant pour ${id}`);
-    assert.ok(formSourceA11y.includes(`id="${id}"`), `champ ${id} absent`);
+  /*
+   * ⚠️ LES CARTES DE CHOIX SONT DE VRAIS BOUTONS, PAS DES INPUTS MASQUÉS.
+   * Un input caché sous un label casse la navigation clavier sur plusieurs
+   * lecteurs d'écran. Ici chaque carte est un <button> portant son rôle et
+   * son état cochés explicitement.
+   */
+  assert.ok(/role="radio"/.test(flowHtml), "choix unique exposé comme radio");
+  assert.ok(/aria-checked/.test(flowHtml), "état de sélection exposé");
+  assert.ok(stepFlow.includes('role={multiple ? "checkbox" : "radio"}'), "choix multiple exposé comme checkbox");
+
+  /*
+   * Champs de la dernière étape : montés plus tard, contrôlés en source.
+   * ⚠️ LES IDENTIFIANTS SONT COMPOSÉS (`ec-${id}`), pas écrits en clair :
+   * on cherche donc le NOM du champ tel qu'il est passé au composant, pas
+   * la chaîne assemblée qui n'existe qu'à l'exécution.
+   */
+  for (const id of ["companyName", "contactName", "contactRole", "email", "phone"]) {
+    assert.ok(source.includes(`id="${id}"`), `champ ${id} absent de l'étape de contact`);
   }
-  // Les choix multiples sont des groupes nommés (effectif, besoins, format).
-  assert.equal((formSourceA11y.match(/<fieldset/g) ?? []).length, 3, "trois fieldsets attendus");
-  assert.ok(formSourceA11y.includes("<legend"), "chaque groupe porte une légende");
-  assert.ok(flowHtml.includes("aria-invalid"), "état d'erreur exposé aux technologies d'assistance");
-  // Honeypot : monté dès le départ, masqué visuellement, aux lecteurs
-  // d'écran, et hors tabulation.
-  assert.ok(/aria-hidden="true"[\s\S]{0,300}bi-website/.test(flowHtml), "honeypot masqué aux lecteurs d'écran");
-  assert.ok(/tabindex="-1"/i.test(flowHtml), "honeypot hors ordre de tabulation");
+  for (const id of ["ec-city", "ec-projectDetails", "ec-privacy"]) {
+    assert.ok(source.includes(id), `champ ${id} absent`);
+  }
+  assert.ok(source.includes("htmlFor={`ec-${id}`}"), "chaque champ texte porte un label associé");
+  assert.ok(source.includes("aria-invalid"), "état d'erreur exposé aux technologies d'assistance");
+  assert.ok(source.includes("aria-describedby"), "erreurs reliées à leur champ");
+  assert.ok(source.includes("<legend"), "le groupe de lieu porte une légende");
+
+  // Honeypot : hors tabulation et masqué aux lecteurs d'écran.
+  assert.ok(/aria-hidden[\s\S]{0,200}ec-website/.test(source), "honeypot masqué aux lecteurs d'écran");
+  assert.ok(source.includes("tabIndex={-1}"), "honeypot hors ordre de tabulation");
+
   // Consentement obligatoire avec lien vers la politique.
-  assert.ok(formSourceA11y.includes("/confidentialite"), "lien vers la politique de confidentialité");
-  assert.ok(formSourceA11y.includes("uniquement pour répondre à ma demande"), "texte de consentement exact");
-  // Le bouton d'envoi est un vrai submit, désactivable pendant l'envoi.
-  assert.ok(formSourceA11y.includes('type="submit"'), "bouton de soumission natif");
-  assert.ok(formSourceA11y.includes('disabled={status === "sending"}'), "bouton désactivé pendant l'envoi");
-  assert.ok(formSourceA11y.includes('aria-live="polite"'), "état d'envoi annoncé");
+  assert.ok(source.includes("/confidentialite"), "lien vers la politique de confidentialité");
+  assert.ok(source.includes('type="submit"'), "bouton de soumission natif");
+  assert.ok(source.includes('disabled={status === "sending"}'), "bouton désactivé pendant l'envoi");
+  assert.ok(source.includes('aria-live="polite"'), "progression et résultat annoncés");
   assert.ok(
-    formSourceA11y.includes('if (sendingRef.current || status === "sending") return;'),
+    source.includes('if (sendingRef.current || status === "sending") return;'),
     "double soumission bloquée côté client",
   );
+
+  /*
+   * ⚠️ LE FOCUS SE DÉPLACE ICI, CONTRAIREMENT AU DÉVOILEMENT VERTICAL.
+   * Sur le formulaire progressif, déplacer le focus aurait coupé la frappe
+   * (les questions apparaissent pendant la saisie). Ici le changement
+   * d'étape est toujours provoqué par un clic délibéré : ne pas suivre le
+   * focus laisserait un utilisateur clavier au bas de l'écran précédent.
+   */
+  assert.ok(source.includes("focusStepTitle"), "le focus suit le changement d'étape");
+  assert.ok(stepFlow.includes("tabIndex={-1}"), "le titre d'étape est focusable par programme");
 });
 
 test("20. double clic : le verrou d'envoi est SYNCHRONE, pas dépendant du re-rendu", () => {
@@ -253,7 +329,7 @@ test("20. double clic : le verrou d'envoi est SYNCHRONE, pas dépendant du re-re
   // partaient. Le serveur les neutralisait (garde anti-rejeu), mais la
   // seconde requête ne devait pas être émise du tout.
   const source = readFileSync(
-    new URL("../../components/sections/BusinessInquiryForm.tsx", import.meta.url),
+    new URL("../../components/sections/EntrepriseConfigurateur.tsx", import.meta.url),
     "utf8",
   );
   assert.ok(source.includes("const sendingRef = useRef(false)"), "verrou synchrone déclaré");
@@ -269,9 +345,9 @@ test("20. double clic : le verrou d'envoi est SYNCHRONE, pas dépendant du re-re
 /* ─── SEO ─── */
 
 test("SEO : métadonnées spécifiques, canonique, page indexable", () => {
-  assert.equal(metadata.title, "Services aux entreprises | Coaching sportif et QVT");
-  assert.ok(String(metadata.description).includes("prévention des TMS"));
-  assert.ok(String(metadata.description).includes("qualité de vie au travail"));
+  assert.equal(metadata.title, "Coaching sportif en entreprise | GRIT Entreprise");
+  assert.ok(String(metadata.description).includes("individuel"), "la description porte la promesse centrale");
+  assert.ok(String(metadata.description).includes("devis"), "la description annonce l'action attendue");
   assert.equal(metadata.alternates?.canonical, "/services-entreprises");
   assert.ok(
     !("robots" in metadata) || !JSON.stringify(metadata.robots).includes("noindex"),
