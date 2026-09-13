@@ -23,6 +23,7 @@ import { useContentAssignment } from "@/hooks/useContentAssignment";
 import { useSupabaseProgram } from "@/hooks/useSupabaseProgram";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { contentStatusLabels, fullName, weekDays } from "@/lib/admin";
+import { formaterDureeMinutes } from "@/lib/duree";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { updateProgramStatus as updateProgramStatusSupabase } from "@/lib/supabase/programs";
@@ -276,7 +277,7 @@ export default function ProgramDetailPage() {
                         <span className="text-sm font-bold text-foreground">
                           S{session.weekNumber} · {session.day} — {session.name}
                         </span>
-                        <span className="text-xs text-muted-foreground">{session.durationMinutes} min</span>
+                        <span className="text-xs text-muted-foreground">{formaterDureeMinutes(session.durationMinutes)}</span>
                       </div>
                       {orderedBlocks.length === 0 ? (
                         <p className="text-xs text-muted-foreground">Séance sans bloc pour le moment.</p>

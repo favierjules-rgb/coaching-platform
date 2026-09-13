@@ -173,7 +173,11 @@ test("T5. une séance entièrement non chiffrable n'a pas de tonnage — pas un 
 test("T6. mise en forme : durée, tonnage, progression", () => {
   assert.equal(formatDureeSeance(48), "48 min");
   assert.equal(formatDureeSeance(60), "1 h");
-  assert.equal(formatDureeSeance(68), "1 h 08");
+  // CHANGEMENT DE CONTRAT ASSUMÉ (chantier « durées + chronomètre ») :
+  // « 1 h 08 » était la seconde graphie des heures dans l'application, face au
+  // « 1h00 » de formatDurationSeconds. Les deux ont convergé vers la règle
+  // unique de lib/duree.ts. Voir scripts/tests/duree-format.mts.
+  assert.equal(formatDureeSeance(68), "1 h 8 min");
   assert.equal(formatDureeSeance(null), null);
   assert.equal(formatDureeSeance(0), null, "zéro minute n'est pas une durée");
 
@@ -308,7 +312,7 @@ const rendre = (b: BilanFinSeance, celebre: boolean) =>
 
 test("R1. la carte montre la durée, les séries, le tonnage et la progression", () => {
   const html = rendre(BILAN_COMPLET, true);
-  assert.ok(html.includes("1 h 08"));
+  assert.ok(html.includes("1 h 8 min"));
   assert.ok(html.includes("18"));
   assert.ok(html.includes("4,3 t"));
   assert.ok(html.includes("Développé couché"));
@@ -356,7 +360,7 @@ test("R3bis. le TITRE n'affirme que ce que l'élève a déclaré", () => {
   assert.ok(interrompue.includes("Retour envoyé"));
   assert.ok(!interrompue.includes("Séance terminée"), "aucune séance terminée n'est annoncée");
   // Les chiffres, eux, restent : l'élève a bien fait ce travail.
-  assert.ok(interrompue.includes("1 h 08") && interrompue.includes("4,3 t"));
+  assert.ok(interrompue.includes("1 h 8 min") && interrompue.includes("4,3 t"));
 });
 
 test("R4. le tonnage partiel est expliqué, jamais présenté comme un total exact", () => {

@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { SessionBlockChips } from "@/components/student/SessionBlockChips";
+import { formaterDureeMinutes } from "@/lib/duree";
 import { derivedSessionTypeLabel } from "@/lib/session-summary";
 import { deriveSessionType } from "@/lib/training-blocks";
 import type { ProgramScheduleDay, WorkoutSession } from "@/types";
@@ -63,7 +64,7 @@ export function ProgramWeekCalendar({ schedule, sessions }: ProgramWeekCalendarP
               <div>
                 <span className="block text-sm font-medium leading-snug text-foreground">{session.name}</span>
                 <span className="text-[11px] text-muted-foreground">
-                  {session.durationMinutes} min{typeLabel ? ` · ${typeLabel}` : ""}
+                  {formaterDureeMinutes(session.durationMinutes)}{typeLabel ? ` · ${typeLabel}` : ""}
                 </span>
               </div>
               <SessionBlockChips blocks={blocks} max={3} />

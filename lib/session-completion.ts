@@ -1,4 +1,5 @@
 import { isCardioResultEntryName } from "@/lib/cardio-feedback";
+import { formaterDureeMinutes } from "@/lib/duree";
 import {
   buildPreviousPerformanceIndex,
   findPreviousPerformance,
@@ -196,14 +197,25 @@ export function construireBilanFinSeance(input: {
  * MISE EN FORME — une seule façon d'écrire ces chiffres
  * ════════════════════════════════════════════════════════════════════════ */
 
-/** « 1 h 05 » / « 48 min ». `null` si la durée n'a pas été renseignée. */
+/**
+ * « 1 h 5 min » / « 48 min ». `null` si la durée n'a pas été renseignée.
+ *
+ * ⚠️ CHANGEMENT DE CONTRAT ASSUMÉ : cette fonction écrivait « 1 h 08 »
+ * (minutes sur deux chiffres, sans unité). C'était la SECONDE graphie des
+ * heures dans l'application, la première étant le « 1h00 » de
+ * `formatDurationSeconds`. Les deux sont mortes : la règle unique vit dans
+ * `lib/duree.ts`, et 68 minutes s'écrivent désormais « 1 h 8 min » partout.
+ * `scripts/tests/session-completion.mts` a été mis à jour pour cette raison,
+ * et pour cette raison seulement.
+ *
+ * Ce qui reste ici, et qui n'appartient pas au formateur générique : une
+ * durée NON RENSEIGNÉE rend `null` — la carte de bilan n'affiche alors pas la
+ * ligne du tout, au lieu d'écrire « 0 s » sur un chiffre que l'élève n'a
+ * jamais donné.
+ */
 export function formatDureeSeance(minutes: number | null): string | null {
   if (minutes === null || !Number.isFinite(minutes) || minutes <= 0) return null;
-  const entières = Math.round(minutes);
-  if (entières < 60) return `${entières} min`;
-  const heures = Math.floor(entières / 60);
-  const reste = entières % 60;
-  return reste === 0 ? `${heures} h` : `${heures} h ${String(reste).padStart(2, "0")}`;
+  return formaterDureeMinutes(minutes);
 }
 
 /**

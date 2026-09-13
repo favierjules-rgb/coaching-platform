@@ -1,4 +1,5 @@
 import { generateId } from "@/lib/admin";
+import { formaterDuree } from "@/lib/duree";
 import { formatRpeFr } from "@/lib/rpe";
 import type {
   AdminCardioBlock,
@@ -135,16 +136,22 @@ export function formatSpeed(speedKmh: number | null | undefined): string {
   return `${speedKmh.toFixed(1)} km/h`;
 }
 
-/** Formate une durée en secondes (ex : 90 -> "1min30", 600 -> "10 min", 45 -> "45 s"), "—" si non calculable. */
+/**
+ * Formate une durée en secondes (ex : 90 -> « 1 min 30 s », 600 -> « 10 min »,
+ * 3600 -> « 1 h »), « — » si non calculable.
+ *
+ * La RÈGLE vit dans `lib/duree.ts` et nulle part ailleurs. Cette fonction ne
+ * garde que ce qui lui est propre : le tiret cadratin pour « pas de valeur »,
+ * qui distingue une durée absente d'une durée nulle — distinction que le
+ * formateur générique n'a pas à connaître.
+ *
+ * Avant convergence, cette fonction écrivait « 1min30 » / « 1h00 » pendant que
+ * `formatDureeSeance` écrivait « 1 h 08 » : deux graphies de la même grandeur,
+ * parfois dans la même page.
+ */
 export function formatDurationSeconds(seconds: number | null | undefined): string {
   if (!seconds || seconds <= 0) return "—";
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const secs = Math.round(seconds % 60);
-  if (hours > 0) return `${hours}h${String(minutes).padStart(2, "0")}`;
-  if (minutes > 0 && secs > 0) return `${minutes}min${String(secs).padStart(2, "0")}`;
-  if (minutes > 0) return `${minutes} min`;
-  return `${secs} s`;
+  return formaterDuree(seconds);
 }
 
 /** Formate une distance en mètres (ex : 400 -> "400 m", 5000 -> "5 km", 12500 -> "12.5 km"), "—" si non calculable. */

@@ -13,6 +13,7 @@ import {
   getWorkoutSession,
   student,
 } from "@/data/student";
+import { formaterDureeMinutes } from "@/lib/duree";
 import { useSeanceHorsLigne } from "@/hooks/useSeanceHorsLigne";
 import { Loader } from "@/components/ui/Loader";
 
@@ -114,7 +115,7 @@ export default function SessionDetailPage() {
             {realSession.name}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {realSession.day} · {realSession.durationMinutes} min
+            {realSession.day} · {formaterDureeMinutes(realSession.durationMinutes)}
             {(realSession.sessionType ?? "strength") !== "cardio" ? ` · ${realSession.exercises.length} exercices` : ""}
             {(realSession.sessionType ?? "strength") !== "strength"
               ? ` · ${(realSession.cardioBlocks ?? []).length} bloc${(realSession.cardioBlocks ?? []).length > 1 ? "s" : ""} cardio`
@@ -237,7 +238,7 @@ export default function SessionDetailPage() {
           {session.name}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          {session.day} · {session.durationMinutes} min ·{" "}
+          {session.day} · {formaterDureeMinutes(session.durationMinutes)} ·{" "}
           {session.exercises.length} exercices
         </p>
       </div>
