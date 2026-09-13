@@ -14,6 +14,7 @@ import { useSupabaseNutritionForStudent } from "@/hooks/useSupabaseNutritionForS
 import { useSupabaseStudentProfile } from "@/hooks/useSupabaseStudentProfile";
 import { useSupabaseTrainingProgram } from "@/hooks/useSupabaseTrainingProgram";
 import { formatDateTime } from "@/lib/admin";
+import { formaterDureeMinutes } from "@/lib/duree";
 import { coachingStatusLabels, computeWeightEvolution } from "@/lib/profile";
 import { getHighlightedScheduleDay } from "@/data/student";
 import { derivedSessionTypeLabel } from "@/lib/session-summary";
@@ -269,8 +270,8 @@ export function DashboardContent({
                 </div>
                 <div className="mt-0.5 text-xs text-muted-foreground">
                   {useSupabase
-                    ? `${realHighlightedDay?.isToday ? "Aujourd'hui" : realHighlightedDay?.day} · ${realHighlightedSession!.durationMinutes} min${realHighlightMeta ? ` · ${realHighlightMeta}` : ""}`
-                    : `${upcomingSession.day} · ${upcomingSession.time} · ${upcomingSession.durationMinutes} min · ${upcomingSession.exerciseCount} exercices`}
+                    ? `${realHighlightedDay?.isToday ? "Aujourd'hui" : realHighlightedDay?.day} · ${formaterDureeMinutes(realHighlightedSession!.durationMinutes)}${realHighlightMeta ? ` · ${realHighlightMeta}` : ""}`
+                    : `${upcomingSession.day} · ${upcomingSession.time} · ${formaterDureeMinutes(upcomingSession.durationMinutes)} · ${upcomingSession.exerciseCount} exercices`}
                 </div>
               </div>
             </div>

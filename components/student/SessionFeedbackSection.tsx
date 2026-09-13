@@ -46,6 +46,7 @@ import {
   type PainLevel,
 } from "@/lib/cardio-feedback";
 import { cardioTypeLabels, formatDistanceMeters, formatDurationSeconds } from "@/lib/cardio";
+import { formaterDuree } from "@/lib/duree";
 import { orderedStrengthExercises, orderedStudentSessionBlocks, type StudentSessionBlockView } from "@/lib/student-session-blocks";
 import { calculatePlannedVsActualMetrics, formatTonnage } from "@/lib/training-metrics";
 import { construireBilanFinSeance } from "@/lib/session-completion";
@@ -1143,7 +1144,7 @@ export function SessionFeedbackSection({
                         exercice.reps ? `${exercice.reps} reps` : null,
                         exercice.recommendedLoad ? `charge ${exercice.recommendedLoad}` : null,
                         exercice.recommendedRpe ? `RPE cible ${exercice.recommendedRpe}` : null,
-                        exercice.restSeconds !== null ? `repos ${exercice.restSeconds}s` : null,
+                        exercice.restSeconds !== null ? `repos ${formaterDuree(exercice.restSeconds)}` : null,
                       ]
                         .filter(Boolean)
                         .join(" · ")}

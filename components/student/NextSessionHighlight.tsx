@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowRight, Dumbbell } from "lucide-react";
 
 import { SessionBlockChips } from "@/components/student/SessionBlockChips";
+import { formaterDureeMinutes } from "@/lib/duree";
 import { derivedSessionTypeLabel } from "@/lib/session-summary";
 import { deriveSessionType } from "@/lib/training-blocks";
 import type { WorkoutSession } from "@/types";
@@ -35,7 +36,7 @@ export function NextSessionHighlight({
         <div>
           <div className="text-sm font-medium text-foreground">{session.name}</div>
           <div className="mt-0.5 text-xs text-muted-foreground">
-            {session.durationMinutes} min{typeLabel ? ` · ${typeLabel}` : ""}
+            {formaterDureeMinutes(session.durationMinutes)}{typeLabel ? ` · ${typeLabel}` : ""}
           </div>
         </div>
       </div>

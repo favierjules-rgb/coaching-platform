@@ -5,6 +5,7 @@ import { Copy, Dumbbell, Layers, Trash2 } from "lucide-react";
 
 import { SessionTemplateEditModal } from "@/components/admin/SessionTemplateEditModal";
 import { SearchInput } from "@/components/admin/SearchAndFilters";
+import { formaterDureeMinutes } from "@/lib/duree";
 import type { SessionTemplate, SessionType } from "@/types";
 
 export const sessionTypeLabels: Record<SessionType, string> = {
@@ -65,7 +66,7 @@ export function SessionTemplateLibraryManager({ templates, onUpdate, onDuplicate
 
                 <div className="flex flex-wrap gap-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
                   <span className="rounded-full border border-border px-2 py-0.5">{sessionTypeLabels[template.sessionType]}</span>
-                  {template.durationMinutes ? <span className="rounded-full border border-border px-2 py-0.5">{template.durationMinutes} min</span> : null}
+                  {template.durationMinutes ? <span className="rounded-full border border-border px-2 py-0.5">{formaterDureeMinutes(template.durationMinutes)}</span> : null}
                   {template.sessionType !== "cardio" && (
                     <span className="rounded-full border border-border px-2 py-0.5">
                       {exerciseCount} exercice{exerciseCount > 1 ? "s" : ""}

@@ -6,6 +6,7 @@ import {
   ExerciseSubstitutionPicker,
   type ChargeurRemplacants,
 } from "@/components/student/ExerciseSubstitutionPicker";
+import { formaterDuree } from "@/lib/duree";
 import {
   ExerciseVideoField,
   type DeposeurVideo,
@@ -136,7 +137,7 @@ export function ExerciseFeedbackCard({
             {[
               `${exercise.sets} séries`,
               `${exercise.reps} reps`,
-              `${exercise.restSeconds}s repos`,
+              `${formaterDuree(exercise.restSeconds)} de repos`,
               exercise.tempo ? `tempo ${exercise.tempo}` : null,
               exercise.recommendedLoad ? `charge conseillée ${exercise.recommendedLoad}` : null,
               (exercise.recommendedRpe ?? "").trim() ? `RPE cible ${exercise.recommendedRpe}` : null,

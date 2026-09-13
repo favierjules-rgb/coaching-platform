@@ -110,7 +110,8 @@ test("enregistrement : durée + distance + D+ → entrée réservée complète",
   assert.ok(payload);
   assert.equal(payload.exerciseName, CARDIO_RESULT_ENTRY_NAME);
   assert.equal(payload.sets.length, 2);
-  assert.equal(payload.sets[0].loadUsed, "Durée 44min30");
+  // Graphie unifiée (lib/duree.ts) : « 44min30 » n'existe plus à l'écriture.
+  assert.equal(payload.sets[0].loadUsed, "Durée 44 min 30 s");
   assert.equal(payload.sets[0].repsDone, "Distance 9.5 km");
   assert.equal(payload.sets[1].loadUsed, "D+ 320 m");
 });
@@ -136,7 +137,7 @@ test("restitution admin : durée, distance et D+ relus depuis les entrées", () 
     repsDone: set.repsDone,
   }));
   const summary = readCardioRealizedSummary(entries);
-  assert.deepEqual(summary, { durationLabel: "44min30", distanceLabel: "9.5 km", elevationLabel: "320 m" });
+  assert.deepEqual(summary, { durationLabel: "44 min 30 s", distanceLabel: "9.5 km", elevationLabel: "320 m" });
 });
 
 test("retour muscu pur : aucune détection cardio, détail exercices intact", () => {
@@ -333,7 +334,7 @@ test("compatibilité : ancien retour v1 lu comme « global historique », jamais
   const parsed = parseCardioResults([...legacyEntries, ...toEntries([serializeCardioBlockResult(v2)])]);
   assert.equal(parsed.blocks.length, 1);
   assert.equal(parsed.blocks[0].blockId, "blk-new");
-  assert.deepEqual(parsed.legacy, { durationLabel: "44min30", distanceLabel: "9.5 km", elevationLabel: "320 m" });
+  assert.deepEqual(parsed.legacy, { durationLabel: "44 min 30 s", distanceLabel: "9.5 km", elevationLabel: "320 m" });
 });
 
 test("v2 : JSON corrompu dans comment → traité en historique, jamais en bloc", () => {
