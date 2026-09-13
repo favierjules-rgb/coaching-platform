@@ -70,58 +70,63 @@ export default function ServicesEntreprisesPage() {
     <div id="entreprise" data-page-theme="dark" suppressHydrationWarning>
       <script dangerouslySetInnerHTML={{ __html: pageThemeAntiFlashScript(THEME_ENTREPRISE) }} />
 
-      {/* A — HERO, avec photo d'illustration en arrière-plan */}
-      <section className="relative overflow-hidden bg-background pb-16 pt-32 md:pb-24 md:pt-40">
-        {/*
-         * ⚠️ LA PHOTO EST DÉCORATIVE, PAS INFORMATIVE : `alt=""` et
-         * `aria-hidden`. Elle n'apporte aucune information que le texte ne
-         * porte déjà — la décrire ferait perdre du temps à un lecteur
-         * d'écran sans rien lui apprendre.
-         *
-         * `priority` : c'est l'image de plus grande surface au-dessus de la
-         * ligne de flottaison, donc le point de mesure du LCP. La laisser en
-         * chargement paresseux retarderait l'affichage perçu.
-         */}
+      {/* A — HERO
+       *
+       * ⚠️ DEUX COLONNES, PAS UN TEXTE POSÉ SUR LA PHOTO. L'image fournie est
+       * un PORTRAIT (1400×2096) : étalée en bandeau, le sujet serait coupé et
+       * le texte reposerait dessus, avec un contraste qui dépend de chaque
+       * pixel. Ici la photo occupe la droite, un fondu la raccorde au fond, et
+       * le texte vit sur une surface pleine — sa lisibilité ne dépend donc
+       * d'aucune zone de l'image. Sur mobile, la photo passe derrière, très
+       * atténuée par le même fondu en version verticale.
+       */}
+      <section className="relative overflow-hidden pb-16 pt-32 md:pb-24 md:pt-40">
         <div className="absolute inset-0" aria-hidden>
+          {/*
+           * Décorative : `alt=""` et `aria-hidden`. Elle n'apporte rien que le
+           * texte ne dise déjà. `priority` car c'est l'image du LCP.
+           */}
           <Image
-            src="/brand/backgrounds/hero.webp"
+            src="/brand/backgrounds/entreprise.webp"
             alt=""
             fill
             priority
-            sizes="100vw"
-            className="object-cover object-[center_30%] grayscale"
+            sizes="(min-width: 768px) 60vw, 100vw"
+            className="object-cover object-[75%_20%] opacity-70 grayscale md:object-[center_20%]"
           />
-          <div className="hero-voile absolute inset-0" />
+          <div className="hero-fondu absolute inset-0" />
         </div>
 
         <div className="relative z-10 mx-auto max-w-7xl px-6">
-          <SectionLabel>GRIT Entreprise</SectionLabel>
-          <h1 className="mb-6 max-w-4xl font-heading text-3xl font-extrabold uppercase leading-[1.05] text-foreground sm:text-4xl md:text-6xl">
-            Le coaching sportif de vos collaborateurs. Pensé pour l&apos;entreprise.
-          </h1>
-          <p className="mb-10 max-w-2xl text-base leading-relaxed text-muted-foreground md:text-lg">
-            Des séances individuelles de 45 minutes, un accompagnement personnalisé, et aucune
-            infrastructure à gérer.
-          </p>
+          <div className="max-w-2xl">
+            <SectionLabel>GRIT Entreprise</SectionLabel>
+            <h1 className="mb-6 font-heading text-3xl font-extrabold uppercase leading-[1.05] text-foreground sm:text-4xl md:text-6xl">
+              Le coaching sportif de vos collaborateurs. Pensé pour l&apos;entreprise.
+            </h1>
+            <p className="mb-10 text-base leading-relaxed text-muted-foreground md:text-lg">
+              Des séances individuelles de 45 minutes, un accompagnement personnalisé, et aucune
+              infrastructure à gérer.
+            </p>
 
-          <div className="mb-12 flex flex-col gap-4 sm:flex-row sm:items-center">
-            <a
-              href="#devis"
-              className="pressable inline-flex min-h-[52px] items-center justify-center bg-primary px-6 py-3 text-sm font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-            >
-              Demander mon devis
-            </a>
-            <a
-              href="#programme"
-              className="pressable inline-flex min-h-[52px] items-center justify-center border border-border px-6 py-3 text-sm font-bold uppercase tracking-widest text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-            >
-              Découvrir le programme
-            </a>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+              <a
+                href="#devis"
+                className="pressable inline-flex min-h-[52px] items-center justify-center rounded-control bg-primary px-6 py-3 text-sm font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+              >
+                Demander mon devis
+              </a>
+              <a
+                href="#programme"
+                className="pressable inline-flex min-h-[52px] items-center justify-center rounded-control border border-border-strong px-6 py-3 text-sm font-bold uppercase tracking-widest text-foreground transition-colors hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+              >
+                Découvrir le programme
+              </a>
+            </div>
           </div>
 
-          <dl className="grid grid-cols-1 gap-px border border-border bg-border sm:grid-cols-3">
+          <dl className="mt-14 grid max-w-3xl grid-cols-1 gap-4 sm:grid-cols-3">
             {REPERES_HERO.map((repere) => (
-              <div key={repere.label} className="bg-card p-6">
+              <div key={repere.label} className="page-card p-5">
                 <dt className="sr-only">{repere.label}</dt>
                 <dd>
                   <span className="block font-heading text-2xl font-extrabold uppercase text-foreground md:text-3xl">
@@ -138,17 +143,17 @@ export default function ServicesEntreprisesPage() {
       </section>
 
       {/* B — COMMENT ÇA MARCHE */}
-      <section id="programme" className="scroll-mt-24 bg-black py-16 md:py-24">
+      <section id="programme" className="scroll-mt-24 bg-surface py-16 md:py-24">
         <div className="mx-auto max-w-7xl px-6">
           <SectionLabel>Comment ça marche</SectionLabel>
           <h2 className="mb-12 max-w-3xl font-heading text-2xl font-extrabold uppercase text-foreground sm:text-3xl md:text-5xl">
             Quatre étapes, de votre besoin au terrain
           </h2>
 
-          <ol className="grid grid-cols-1 gap-px bg-border sm:grid-cols-2 lg:grid-cols-4">
+          <ol className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {ETAPES_DEPLOIEMENT.map((etape, index) => (
-              <li key={etape.title} className="bg-card p-6 lg:p-8">
-                <p className="mb-4 font-heading text-3xl font-extrabold leading-none text-primary/30 md:text-4xl">
+              <li key={etape.title} className="page-card p-6 lg:p-8">
+                <p className="mb-4 font-heading text-3xl font-extrabold leading-none text-primary md:text-4xl">
                   {String(index + 1).padStart(2, "0")}
                 </p>
                 <h3 className="mb-2 font-heading text-base font-bold uppercase leading-tight text-foreground lg:text-lg">
@@ -162,16 +167,16 @@ export default function ServicesEntreprisesPage() {
       </section>
 
       {/* C — CE QUE L'ENTREPRISE OBTIENT */}
-      <section className="bg-background py-16 md:py-24">
+      <section className="py-16 md:py-24">
         <div className="mx-auto max-w-7xl px-6">
           <SectionLabel>Ce que vous obtenez</SectionLabel>
           <h2 className="mb-12 max-w-3xl font-heading text-2xl font-extrabold uppercase text-foreground sm:text-3xl md:text-5xl">
             Un service de coaching, pas un abonnement
           </h2>
 
-          <ul className="grid grid-cols-1 gap-px bg-border sm:grid-cols-2 lg:grid-cols-3">
+          <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {CE_QUE_VOUS_OBTENEZ.map(({ icon: Icon, title, description }) => (
-              <li key={title} className="bg-card p-6 lg:p-8">
+              <li key={title} className="page-card p-6 lg:p-8">
                 <Icon size={24} className="mb-4 h-5 w-5 text-primary lg:h-6 lg:w-6" aria-hidden />
                 <h3 className="mb-2 font-heading text-base font-bold uppercase leading-tight text-foreground lg:text-lg">
                   {title}
@@ -184,16 +189,16 @@ export default function ServicesEntreprisesPage() {
       </section>
 
       {/* D — POUR VOS COLLABORATEURS */}
-      <section className="bg-black py-16 md:py-24">
+      <section className="bg-surface py-16 md:py-24">
         <div className="mx-auto max-w-7xl px-6">
           <SectionLabel>Pour vos collaborateurs</SectionLabel>
           <h2 className="mb-12 max-w-3xl font-heading text-2xl font-extrabold uppercase text-foreground sm:text-3xl md:text-5xl">
             Je suis accompagné individuellement
           </h2>
 
-          <ol className="grid grid-cols-1 gap-px bg-border sm:grid-cols-2 lg:grid-cols-5">
+          <ol className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
             {PARCOURS_COLLABORATEUR.map((jalon, index) => (
-              <li key={jalon.title} className="bg-card p-6">
+              <li key={jalon.title} className="page-card p-6">
                 <p className="mb-3 font-heading text-xs font-semibold uppercase tracking-[0.3em] text-primary">
                   {String(index + 1).padStart(2, "0")}
                 </p>
@@ -208,7 +213,7 @@ export default function ServicesEntreprisesPage() {
       </section>
 
       {/* E — UNE FORMULE ADAPTÉE (aucun montant : voir en-tête de fichier) */}
-      <section className="bg-background py-16 md:py-24">
+      <section className="py-16 md:py-24">
         <div className="mx-auto max-w-7xl px-6">
           <SectionLabel>Votre formule</SectionLabel>
           <h2 className="mb-4 max-w-3xl font-heading text-2xl font-extrabold uppercase text-foreground sm:text-3xl md:text-5xl">
@@ -220,9 +225,9 @@ export default function ServicesEntreprisesPage() {
             vers vous avec une proposition adaptée.
           </p>
 
-          <ul className="mb-12 grid grid-cols-1 gap-px bg-border sm:grid-cols-3">
+          <ul className="mb-12 grid grid-cols-1 gap-4 sm:grid-cols-3">
             {PRINCIPE_FORMULE.map(({ icon: Icon, title, description }) => (
-              <li key={title} className="bg-card p-6 lg:p-8">
+              <li key={title} className="page-card p-6 lg:p-8">
                 <Icon size={24} className="mb-4 h-5 w-5 text-primary lg:h-6 lg:w-6" aria-hidden />
                 <h3 className="mb-2 font-heading text-base font-bold uppercase leading-tight text-foreground lg:text-lg">
                   {title}
@@ -234,7 +239,7 @@ export default function ServicesEntreprisesPage() {
 
           <a
             href="#devis"
-            className="pressable inline-flex min-h-[52px] items-center justify-center bg-primary px-6 py-3 text-sm font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            className="pressable inline-flex min-h-[52px] items-center justify-center rounded-control bg-primary px-6 py-3 text-sm font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             Construire mon projet
           </a>
@@ -242,7 +247,7 @@ export default function ServicesEntreprisesPage() {
       </section>
 
       {/* F — CONFIGURATEUR */}
-      <section id="devis" className="scroll-mt-24 bg-black py-16 md:py-24">
+      <section id="devis" className="scroll-mt-24 bg-surface py-16 md:py-24">
         <div className="mx-auto max-w-3xl px-6">
           <SectionLabel>Demande de devis</SectionLabel>
           <h2 className="mb-4 font-heading text-2xl font-extrabold uppercase text-foreground sm:text-3xl md:text-5xl">

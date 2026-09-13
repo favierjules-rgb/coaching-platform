@@ -250,7 +250,7 @@ export function EntrepriseConfigurateur() {
   /* ─── Écran de confirmation ─── */
   if (status === "success") {
     return (
-      <div className="border border-border bg-card p-8 text-center md:p-12" role="status" aria-live="polite">
+      <div className="page-card p-8 text-center md:p-12" role="status" aria-live="polite">
         <CheckCircle2 size={40} className="mx-auto mb-6 text-primary" aria-hidden />
         <h3 className="mb-3 font-heading text-2xl font-extrabold uppercase text-foreground md:text-3xl">
           Demande envoyée.
@@ -261,7 +261,7 @@ export function EntrepriseConfigurateur() {
         <button
           type="button"
           onClick={reset}
-          className="pressable mt-8 inline-flex min-h-[48px] items-center gap-2 border border-border px-5 py-3 text-xs font-bold uppercase tracking-widest text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          className="pressable mt-8 inline-flex min-h-[48px] items-center gap-2 rounded-control border border-border-strong px-5 py-3 text-xs font-bold uppercase tracking-widest text-foreground transition-colors hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         >
           <RotateCcw size={14} aria-hidden />
           Nouvelle demande
@@ -509,7 +509,7 @@ export function EntrepriseConfigurateur() {
           <button
             type="button"
             onClick={goBack}
-            className="pressable inline-flex min-h-[48px] items-center justify-center gap-2 border border-border px-5 py-3 text-sm font-bold uppercase tracking-widest text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            className="pressable inline-flex min-h-[48px] items-center justify-center gap-2 rounded-control border border-border-strong px-5 py-3 text-sm font-bold uppercase tracking-widest text-foreground transition-colors hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             Retour
           </button>
@@ -517,7 +517,7 @@ export function EntrepriseConfigurateur() {
             type="submit"
             disabled={status === "sending"}
             aria-busy={status === "sending" ? true : undefined}
-            className="pressable inline-flex min-h-[52px] flex-1 items-center justify-center gap-2 bg-primary px-6 py-3 text-sm font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-60 sm:flex-none"
+            className="pressable inline-flex min-h-[52px] flex-1 items-center justify-center gap-2 rounded-control bg-primary px-6 py-3 text-sm font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-60 sm:flex-none"
           >
             {status === "sending" ? (
               <>
@@ -637,7 +637,7 @@ function Recapitulatif({ values }: { values: FormState }) {
   if (lignes.length === 0) return null;
 
   return (
-    <div className="border border-border bg-card p-6">
+    <div className="page-card p-6">
       <p className="mb-5 font-heading text-xs font-semibold uppercase tracking-[0.3em] text-primary">
         Votre projet
       </p>

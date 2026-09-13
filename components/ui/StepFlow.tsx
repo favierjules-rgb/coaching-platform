@@ -109,18 +109,18 @@ export function ChoiceCard({
       role={multiple ? "checkbox" : "radio"}
       aria-checked={selected}
       onClick={onSelect}
-      className={`pressable flex min-h-[64px] w-full items-center justify-between gap-4 border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 sm:p-5 ${
-        selected
-          ? "border-primary bg-primary/10"
-          : "border-border bg-card hover:border-primary/60"
+      className={`pressable page-card flex min-h-[64px] w-full items-center justify-between gap-4 p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 sm:p-5 ${
+        selected ? "border-primary bg-primary/10" : "hover:border-primary/60"
       }`}
     >
       <span className="flex flex-col gap-1">
-        <span
-          className={`font-heading text-sm font-bold uppercase leading-tight sm:text-base ${
-            selected ? "text-foreground" : "text-foreground/90"
-          }`}
-        >
+        {/*
+         * ⚠️ PLEIN CONTRASTE DANS LES DEUX ÉTATS. Le libellé d'une carte non
+         * sélectionnée était à 90 % d'opacité : sur la palette claire, cela
+         * rapprochait le texte du seuil AA sans aucun gain de lisibilité. La
+         * sélection se lit déjà par la bordure, le fond ET la coche.
+         */}
+        <span className="font-heading text-sm font-bold uppercase leading-tight text-foreground sm:text-base">
           {label}
         </span>
         {description ? (
@@ -178,7 +178,7 @@ export function StepNav({
         <button
           type="button"
           onClick={onBack}
-          className="pressable inline-flex min-h-[48px] items-center justify-center gap-2 border border-border px-5 py-3 text-sm font-bold uppercase tracking-widest text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          className="pressable inline-flex min-h-[48px] items-center justify-center gap-2 rounded-control border border-border-strong px-5 py-3 text-sm font-bold uppercase tracking-widest text-foreground transition-colors hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         >
           <ArrowLeft size={16} aria-hidden />
           {backLabel}
@@ -192,7 +192,7 @@ export function StepNav({
         onClick={onNext}
         disabled={nextDisabled}
         aria-busy={busy ? true : undefined}
-        className="pressable inline-flex min-h-[48px] flex-1 items-center justify-center gap-2 bg-primary px-6 py-3 text-sm font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-60 sm:flex-none"
+        className="pressable inline-flex min-h-[48px] flex-1 items-center justify-center gap-2 rounded-control bg-primary px-6 py-3 text-sm font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-60 sm:flex-none"
       >
         {nextLabel}
         <ArrowRight size={16} aria-hidden />

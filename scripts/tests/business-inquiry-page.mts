@@ -429,7 +429,18 @@ test("T5. la photo d'en-tête est DÉCORATIVE et ne retarde pas l'affichage", ()
     .replace(/\/\*[\s\S]*?\*\//g, " ")
     .replace(/\{\/\*[\s\S]*?\*\/\}/g, " ")
     .replace(/(^|[^:])\/\/.*$/gm, "$1 ");
-  assert.ok(source.includes('src="/brand/backgrounds/hero.webp"'), "image de fond câblée");
+  assert.ok(
+    source.includes('src="/brand/backgrounds/entreprise.webp"'),
+    "image d'en-tête propre à la page entreprise",
+  );
+  /*
+   * ⚠️ L'IMAGE EST UN PORTRAIT (1400×2096). Étalée en bandeau, le sujet serait
+   * coupé ET le texte reposerait dessus, avec un contraste qui varierait d'un
+   * pixel à l'autre. Elle occupe donc la moitié droite sur écran large, le
+   * texte vivant sur une surface pleine : la lisibilité ne dépend d'aucune
+   * zone de la photo.
+   */
+  assert.ok(source.includes('sizes="(min-width: 768px) 60vw, 100vw"'), "dimensionnement adapté aux deux colonnes");
   /*
    * ⚠️ DÉCORATIVE : `alt=""` ET `aria-hidden`. Elle n'apporte rien que le
    * texte ne dise déjà ; la décrire ferait perdre du temps à un lecteur
@@ -439,29 +450,99 @@ test("T5. la photo d'en-tête est DÉCORATIVE et ne retarde pas l'affichage", ()
   assert.ok(/alt=""/.test(source), "image sans texte alternatif (décorative)");
   assert.ok(source.includes("aria-hidden"), "couche d'image masquée aux lecteurs d'écran");
   assert.ok(source.includes("priority"), "image du LCP chargée en priorité");
-  assert.ok(source.includes('sizes="100vw"'), "dimensionnement responsive déclaré");
   // Le contenu passe au-dessus du fond, sinon il serait recouvert.
   assert.ok(source.includes("relative z-10"), "contenu du hero au-dessus de l'image");
   assert.ok(source.includes("overflow-hidden"), "l'image ne déborde pas de la section");
 });
 
-test("T6. le voile de la photo SUIT le thème", () => {
+test("T6. AUCUNE surface n'est codée en dur : tout suit le thème", () => {
   const css = readFileSync(new URL("../../app/globals.css", import.meta.url), "utf8");
-  /*
-   * ⚠️ UN VOILE NOIR FIXE RENDRAIT LA VERSION CLAIRE ILLISIBLE : en clair le
-   * texte passe en quasi-noir, sur un dégradé noir. Le voile est donc exprimé
-   * par des tokens redéfinis avec la palette — la photo ne change pas, la
-   * teinte qui la couvre si.
-   */
-  assert.ok(css.includes("--hero-voile-haut"), "voile paramétré par token");
-  const clair = css.slice(css.indexOf('[data-page-theme="light"] {'));
-  assert.ok(
-    /--hero-voile-haut:\s*rgba\(244/.test(clair),
-    "le voile a une valeur claire sous le thème clair",
+  const page = readFileSync(new URL("../../app/services-entreprises/page.tsx", import.meta.url), "utf8");
+  const flow = readFileSync(new URL("../../components/ui/StepFlow.tsx", import.meta.url), "utf8");
+  const conf = readFileSync(
+    new URL("../../components/sections/EntrepriseConfigurateur.tsx", import.meta.url),
+    "utf8",
   );
-  const source = readFileSync(new URL("../../app/services-entreprises/page.tsx", import.meta.url), "utf8");
-  assert.ok(source.includes("hero-voile"), "le voile est appliqué au hero");
-  assert.ok(!/bg-\[linear-gradient\(to_bottom,rgba\(0,0,0/.test(source), "aucun dégradé noir codé en dur");
+
+  /*
+   * ⚠️ LE DÉFAUT EXACT QUI A ÉTÉ CONSTATÉ À L'ÉCRAN, ET QUE CE TEST INTERDIT.
+   *
+   * Les sections alternées utilisaient `bg-black` — un noir absolu, pas un
+   * token. En thème clair, `--foreground` passe en quasi-noir : les titres
+   * devenaient invisibles, noir sur noir. L'en-tête de globals.css l'écrit
+   * pourtant depuis longtemps : « aucun composant ne doit coder une couleur
+   * de surface en dur (bg-black, bg-white, bg-zinc-*…) ».
+   */
+  for (const [nom, code] of [["page", page], ["StepFlow", flow], ["configurateur", conf]] as const) {
+    for (const motif of [/\bbg-black\b/, /\bbg-white\b/, /\bbg-zinc-/, /\btext-black\b/, /\btext-white\b/]) {
+      assert.ok(!motif.test(code), `${nom} : couleur de surface codée en dur (${motif})`);
+    }
+    assert.ok(!/rgba\(0,\s*0,\s*0/.test(code), `${nom} : noir littéral dans un dégradé`);
+  }
+
+  // Le conteneur porte sa propre surface ET sa couleur de texte : une section
+  // sans fond déclaré hérite d'un couple cohérent, jamais d'un mélange.
+  /*
+   * ⚠️ LE BLOC EST BORNÉ À SA PROPRE ACCOLADE FERMANTE. Une première version
+   * découpait « du sélecteur jusqu'à la fin du fichier » : la déclaration
+   * cherchée était alors trouvée dans un AUTRE sélecteur plus bas, et retirer
+   * la vraie ligne laissait le test vert.
+   */
+  const debutBloc = css.lastIndexOf("[data-page-theme] {");
+  const bloc = css.slice(debutBloc, css.indexOf("}", debutBloc));
+  assert.ok(/background:\s*var\(--background\)/.test(bloc), "le conteneur pose sa surface");
+  assert.ok(/color:\s*var\(--foreground\)/.test(bloc), "le conteneur pose sa couleur de texte");
+
+  // Le fondu de la photo est paramétré, avec une valeur propre au thème clair.
+  assert.ok(css.includes("--hero-fondu-plein"), "fondu paramétré par token");
+  const clair = css.slice(css.indexOf('[data-page-theme="light"] {'));
+  assert.ok(/--hero-fondu-vide:\s*rgba\(244/.test(clair), "le fondu a une valeur claire");
+  assert.ok(page.includes("hero-fondu"), "le fondu est appliqué au hero");
+});
+
+test("T6bis. contraste AA garanti dans les DEUX thèmes", () => {
+  /*
+   * Les ratios sont CALCULÉS depuis les tokens réels du fichier CSS, pas
+   * recopiés : si une valeur de palette change, ce test la reteste.
+   */
+  const css = readFileSync(new URL("../../app/globals.css", import.meta.url), "utf8");
+  const valeur = (bloc: string, nom: string): string => {
+    const m = new RegExp(`${nom}:\\s*(#[0-9a-fA-F]{6})`).exec(bloc);
+    assert.ok(m, `token ${nom} introuvable`);
+    return m![1];
+  };
+  const luminance = (hex: string): number => {
+    const c = (hex.match(/\w\w/g) ?? []).map((h) => parseInt(h, 16) / 255)
+      .map((v) => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)));
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  };
+  const ratio = (a: string, b: string): number => {
+    const [haut, bas] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+    return (haut + 0.05) / (bas + 0.05);
+  };
+
+  const sombre = css.slice(css.indexOf(":root {"), css.indexOf(".light,"));
+  const clair = css.slice(css.indexOf(".light,"), css.indexOf("--hero-fondu"));
+
+  for (const [nom, bloc] of [["sombre", sombre], ["clair", clair]] as const) {
+    const fond = valeur(bloc, "--background");
+    const surface = valeur(bloc, "--surface");
+    const carte = valeur(bloc, "--card");
+    const texte = valeur(bloc, "--foreground");
+    const doux = valeur(bloc, "--muted-foreground");
+
+    for (const [libelle, fg, bg] of [
+      ["titre sur fond", texte, fond],
+      ["titre sur surface", texte, surface],
+      ["titre sur carte", texte, carte],
+      ["texte doux sur fond", doux, fond],
+      ["texte doux sur surface", doux, surface],
+      ["texte doux sur carte", doux, carte],
+    ] as const) {
+      const r = ratio(fg, bg);
+      assert.ok(r >= 4.5, `thème ${nom} — ${libelle} : contraste ${r.toFixed(2)}, en dessous de AA (4.5)`);
+    }
+  }
 });
 
 test("T7. le switch est un vrai bouton accessible, à cible tactile suffisante", () => {
