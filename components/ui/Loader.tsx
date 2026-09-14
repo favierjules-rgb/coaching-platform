@@ -1,44 +1,42 @@
-import { AnneauxDeChargement } from "@/components/ui/AnneauxDeChargement";
-import {
-  DENSITE_COMPLETE,
-  DENSITE_MINIMALE,
-  DENSITE_REDUITE,
-  type DensiteDeChargement,
-} from "@/lib/loader-anneaux";
+import { DoubleStar } from "@/components/ui/DoubleStar";
 
 /**
- * LE LOADER — LES ANNEAUX DE POINTS, QUI RESPIRENT PENDANT L'ATTENTE.
+ * LE LOADER — L'EMBLÈME SETH, QUI RESPIRE PENDANT L'ATTENTE.
  *
  * ════════════════════════════════════════════════════════════════════════
- * CE QUI A CHANGÉ, ET CE QUI NE CHANGE PAS
+ * POURQUOI L'EMBLÈME ET PAS UN CERCLE QUI TOURNE
  * ════════════════════════════════════════════════════════════════════════
- * Ce loader affichait l'emblème SETH (`DoubleStar`), dont les deux pointes
- * s'allumaient en alternance. Il affiche désormais les anneaux concentriques
- * de `brand/loading.json`. C'est un changement de marque ASSUMÉ, décidé le
- * 14/09/2026 : l'emblème n'a pas été jugé insuffisant, un motif d'attente
- * dédié a été préféré. `DoubleStar` reste l'emblème du site et continue de
- * servir ailleurs (voir `SessionCompletionCard`).
+ * Un spinner générique ne dit rien : il occupe l'attente sans l'habiter. La
+ * double étoile, elle, est déjà la marque du site — la revoir pendant un
+ * chargement rattache le temps mort à la page qu'on attend au lieu de le
+ * suspendre dans le vide.
  *
- * Ce qui NE change pas, et qui comptait déjà :
- *   • le loader reste un COMPOSANT SERVEUR sans état ni réseau — il est dans
- *     le HTML initial, sinon il arriverait après ce qu'il est censé couvrir ;
- *   • il s'annonce toujours aux lecteurs d'écran (`role="status"`) ;
- *   • sous `prefers-reduced-motion`, on retire le battement, JAMAIS le
- *     signal : un indicateur qui disparaît fait croire à une page cassée ;
- *   • il ne redessine rien : la géométrie vient d'un fichier de marque, et
- *     un test relit ce fichier pour le prouver.
+ * ⚠️ C'EST LE MÊME TRACÉ QUE PARTOUT AILLEURS. `DoubleStar` porte les deux
+ * chemins du logo officiel ; on ne les redessine pas ici, on les réutilise.
+ * Un emblème redessiné pour un usage finirait par diverger de l'original.
  *
  * ════════════════════════════════════════════════════════════════════════
- * TROIS VARIANTES, TROIS DENSITÉS — ET C'EST LE CŒUR DU SUJET
+ * L'ANIMATION : DEUX ÉTOILES QUI ALTERNENT, PAS UNE ROTATION
  * ════════════════════════════════════════════════════════════════════════
- * Le motif d'origine compte 120 points sur un canevas de 1080 px. Rendu à
- * 28 px — la taille des attentes de section — chaque point mesurerait moins
- * d'un pixel. Rétrécir ce dessin, c'est le détruire.
+ * Les deux pointes s'éclairent l'une après l'autre, en boucle. Une rotation
+ * aurait déformé une marque qui a un haut et un bas ; l'alternance respecte
+ * sa géométrie tout en donnant le battement qu'on attend d'un indicateur.
  *
- * La taille et la densité varient donc ENSEMBLE : cinq anneaux en pleine
- * page, deux dans un bloc, un seul en ligne de texte. Le motif reste
- * reconnaissable partout au lieu de se dissoudre dans les petites tailles.
- * Voir `lib/loader-anneaux.ts` pour les proportions de chaque densité.
+ * `linear` et non `ease-out` : c'est un mouvement CONSTANT, pas une entrée.
+ * Un mouvement perpétuel qui accélère et ralentit attire l'œil bien plus
+ * qu'il ne le devrait (voir `.agents/skills/review-animations/STANDARDS.md`).
+ *
+ * ⚠️ COUPÉ SOUS `prefers-reduced-motion` : l'emblème reste affiché, immobile.
+ * Un indicateur qui disparaît en mouvement réduit laisserait l'utilisateur
+ * sans savoir que quelque chose charge — on retire le battement, pas le
+ * signal.
+ *
+ * ════════════════════════════════════════════════════════════════════════
+ * IL S'ANNONCE AUX LECTEURS D'ÉCRAN
+ * ════════════════════════════════════════════════════════════════════════
+ * `role="status"` et un libellé lu à voix haute : sans eux, l'attente est
+ * silencieuse pour qui ne voit pas l'écran, et la page semble simplement
+ * cassée.
  */
 interface LoaderProps {
   /** Le libellé lu par les lecteurs d'écran. Précisez-le quand le contexte
@@ -49,25 +47,16 @@ interface LoaderProps {
    * décoratif : un écran pleine page posé sur une action de deux secondes
    * fait paraître l'application cassée.
    *
-   *   `plein`   une PAGE entière se charge. Occupe la hauteur disponible,
-   *             centre le motif, et lui donne ses cinq anneaux.
+   *   `plein`   une PAGE entière se charge. Occupe la hauteur disponible et
+   *             centre l'emblème.
    *   `ligne`   une SECTION ou un composant se charge. S'insère dans le bloc
-   *             existant ; deux anneaux, points plus gros.
-   *   `inline`  une ACTION COURTE est en cours. À la taille du texte qui
-   *             l'entoure, sans marge propre ; un seul anneau.
+   *             existant, sans le faire grandir démesurément.
+   *   `inline`  une ACTION COURTE est en cours. L'emblème seul, à la taille
+   *             du texte qui l'entoure, sans marge propre.
    */
   readonly variante?: "plein" | "ligne" | "inline";
   readonly className?: string;
 }
-
-/* La densité est une conséquence de la variante, jamais un réglage à part :
-   laisser choisir « cinq anneaux en ligne de texte » serait laisser choisir
-   une bouillie. */
-const DENSITES: Record<NonNullable<LoaderProps["variante"]>, DensiteDeChargement> = {
-  plein: DENSITE_COMPLETE,
-  ligne: DENSITE_REDUITE,
-  inline: DENSITE_MINIMALE,
-};
 
 export function Loader({
   libelle = "Chargement…",
@@ -81,7 +70,7 @@ export function Loader({
       data-seth-loader={variante}
       className={`seth-loader seth-loader-${variante} ${className}`.trim()}
     >
-      <AnneauxDeChargement densite={DENSITES[variante]} />
+      <DoubleStar className="seth-loader-marque" />
       <span className="sr-only">{libelle}</span>
     </div>
   );

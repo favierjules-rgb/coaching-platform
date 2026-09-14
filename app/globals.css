@@ -51,30 +51,6 @@
   --primary-active: #bdbdbd;
   --primary-foreground: #050505;
 
-  /*
-   * LOADER — les deux couleurs de brand/loading.json, ajustées au fond.
-   *
-   * ⚠️ LE VIOLET DU FICHIER NE PASSE PAS SUR CE FOND-LÀ. Mesuré contre
-   * `--background` (#050505), le #2E03E5 d'origine donne 2,19:1 — sous le
-   * plancher de 3:1 que la WCAG 1.4.11 demande à un objet graphique porteur
-   * de sens, et un indicateur de chargement en est un. Il est éclairci à
-   * #5D38FC (3,34:1) en conservant sa teinte. La pâle, elle, est celle du
-   * fichier, intacte : #A1ADB7 donne 8,91:1 ici, elle n'a besoin de rien.
-   *
-   * Sur le fond clair, c'est exactement l'inverse — voir la palette claire.
-   * Chaque thème garde donc UNE des deux couleurs d'origine telle quelle et
-   * ne corrige l'autre qu'à hauteur du plancher de contraste.
-   *
-   * ⚠️ CONSÉQUENCE À CONNAÎTRE : sur fond sombre, la couleur « vive » est
-   * MOINS lumineuse que la pâle. La pulsation se lit donc comme un
-   * assombrissement, pas comme un éclat. C'est déjà ce que fait le fichier
-   * d'origine, dont l'aperçu se joue lui aussi sur du noir.
-   */
-  --loader-vive: #5d38fc;
-  --loader-pale: #a1adb7;
-  /* État figé sous mouvement réduit : la plus lisible des deux sur CE fond. */
-  --loader-repos: #a1adb7;
-
   /* États système — inchangés, restent distincts de l'identité de marque
      (conservent leurs couleurs fonctionnelles uniquement là où elles sont
      nécessaires à la compréhension). */
@@ -119,14 +95,6 @@
   --primary-hover: #2a2a2a;
   --primary-active: #444444;
   --primary-foreground: #ffffff;
-
-  /* LOADER — voir la palette sombre pour le raisonnement. Ici le violet du
-     fichier passe tel quel (#2E03E5 donne 8,44:1 sur #f4f4f2) ; c'est la pâle
-     qui disparaîtrait (#A1ADB7 : 2,08:1, sous le plancher de 3:1). Elle est
-     assombrie à #74838F (3,54:1) en conservant sa teinte. */
-  --loader-vive: #2e03e5;
-  --loader-pale: #74838f;
-  --loader-repos: #2e03e5;
 
   --destructive: #dc2626;
   --destructive-foreground: #ffffff;
@@ -971,11 +939,6 @@ body {
   --primary-hover: #d9d9d9;
   --primary-active: #bdbdbd;
   --primary-foreground: #050505;
-  /* Le loader aussi : un envoi de formulaire posé sur un panneau photo doit
-     rendre son indicateur lisible sur CE fond-là, pas sur celui de la page. */
-  --loader-vive: #5d38fc;
-  --loader-pale: #a1adb7;
-  --loader-repos: #a1adb7;
 }
 
 /* Switch flottant : capsule fixe à droite, sous le centre, hors du chemin
@@ -1504,74 +1467,27 @@ body {
  * LOADER — components/ui/Loader.tsx
  *
  * ════════════════════════════════════════════════════════════════════════
- * CINQ ANNEAUX QUI RESPIRENT, PAS UN CERCLE QUI TOURNE
+ * DEUX POINTES QUI ALTERNENT, PAS UN CERCLE QUI TOURNE
  * ════════════════════════════════════════════════════════════════════════
- * Le motif vient de `brand/loading.json`, relevé et non redessiné (voir
- * `lib/loader-anneaux.ts`). Il ne tourne pas et ne se déforme pas : ses
- * points sont immobiles, et ce sont leur ÉCHELLE et leur COULEUR qui
- * pulsent, anneau par anneau, de l'extérieur vers le centre.
+ * L'emblème a un haut et un bas : le faire tourner le déformerait. Ses deux
+ * étoiles s'éclairent donc l'une après l'autre, en opposition de phase — le
+ * battement d'un indicateur, sans toucher à la géométrie de la marque.
  *
- * ⚠️ L'INTERPOLATION N'EST PAS `linear`, ET C'EST UNE DÉROGATION ASSUMÉE.
- * La règle de la maison veut qu'une boucle perpétuelle se joue à vitesse
- * constante (`.agents/skills/review-animations/STANDARDS.md`, « Constant
- * motion ») : un mouvement qui accélère et ralentit attrape l'œil bien plus
- * qu'un indicateur ne le doit. Cette règle vise une ROTATION ou un
- * déplacement ; ici le mouvement est une PULSATION, et le fichier de marque
- * porte l'ease par défaut d'After Effects, `cubic-bezier(.333, 0, .667, 1)`.
- * Le reproduire en `linear` donnerait un clignotement mécanique là où le
- * fichier donne un souffle. On garde l'ease, et on l'écrit ici pour que la
- * dérogation soit un choix visible et réversible en une ligne.
+ * ⚠️ `linear`, ET C'EST UNE RÈGLE, PAS UN GOÛT. Un mouvement PERPÉTUEL qui
+ * accélère et ralentit attrape l'œil bien plus qu'un indicateur ne le doit.
+ * Les courbes d'accélération sont pour les entrées et les sorties ; une
+ * boucle se joue à vitesse constante.
  *
- * ⚠️ 3,033 s LE CYCLE — mais DEUX pulsations par cycle, soit un battement
- * toutes les 1,52 s. C'est cette période-là que mesure le garde-fou de
- * `scripts/tests/loader-marque.mts`, parce que c'est elle que l'œil voit.
- *
- * ⚠️ LES DEUX BATTEMENTS SONT DÉPHASÉS, et ce n'est pas une approximation :
- * l'échelle culmine aux images 13,0 et 58,0, la couleur aux images 31 et 75.
- * C'est ce décalage qui donne le relief. Les aligner aplatirait le motif.
+ * ⚠️ 1,4 s LE CYCLE. Assez lent pour ne pas s'agiter, assez rapide pour
+ * qu'on lise « ça travaille » et non « c'est figé ».
  */
-@keyframes seth-loader-souffle {
-  0% {
-    transform: scale(0.75);
-  }
-  14.336% {
-    transform: scale(0.9);
-  }
-  32.257% {
-    transform: scale(0.75);
-  }
-  49.451% {
-    transform: scale(0.75);
-  }
-  63.787% {
-    transform: scale(0.9);
-  }
-  81.708% {
-    transform: scale(0.75);
-  }
+@keyframes seth-loader-battement {
+  0%,
   100% {
-    transform: scale(0.75);
+    opacity: 0.25;
   }
-}
-
-@keyframes seth-loader-eclat {
-  0% {
-    color: var(--loader-pale);
-  }
-  34.066% {
-    color: var(--loader-vive);
-  }
-  54.945% {
-    color: var(--loader-pale);
-  }
-  82.418% {
-    color: var(--loader-vive);
-  }
-  98.901% {
-    color: var(--loader-pale);
-  }
-  100% {
-    color: var(--loader-pale);
+  50% {
+    opacity: 1;
   }
 }
 
@@ -1581,7 +1497,7 @@ body {
   justify-content: center;
 }
 
-/* Pleine page : le motif est seul, centré, avec de l'air autour. */
+/* Pleine page : l'emblème est seul, centré, avec de l'air autour. */
 .seth-loader-plein {
   min-height: 60vh;
   width: 100%;
@@ -1593,7 +1509,7 @@ body {
 
 /*
  * ⚠️ `inline` NE PORTE AUCUNE MARGE ET SUIT LA TAILLE DU TEXTE. C'est la
- * forme des actions courtes — un envoi, une recherche — où le motif
+ * forme des actions courtes — un envoi, une recherche — où l'emblème
  * accompagne une phrase au lieu d'occuper un bloc. Lui donner du
  * rembourrage décalerait la ligne où il apparaît.
  */
@@ -1602,95 +1518,52 @@ body {
   vertical-align: middle;
 }
 
-/*
- * ⚠️ LA TAILLE ET LA DENSITÉ VARIENT ENSEMBLE — voir components/ui/Loader.tsx.
- *
- * Le motif complet compte 120 points sur un canevas de 1080 : rendu à 40 px,
- * chaque point ferait 2,2 px, et à 28 px moins d'un pixel. Ce n'est pas une
- * question de goût, c'est une question de résolution. Chaque variante reçoit
- * donc la densité qui reste lisible à SA taille, et ces trois largeurs sont
- * calibrées sur ces densités-là. Agrandir `inline` sans lui rendre ses
- * anneaux, ou rétrécir `plein` en gardant les cinq, casse l'équilibre dans
- * les deux sens.
- */
-.seth-loader-anneaux {
-  height: auto;
-  display: block;
-}
-
-.seth-loader-plein .seth-loader-anneaux {
-  width: 8rem;
-}
-
-.seth-loader-ligne .seth-loader-anneaux {
-  width: 2.5rem;
-}
-
-.seth-loader-inline .seth-loader-anneaux {
+.seth-loader-inline .seth-loader-marque {
   width: 1em;
 }
 
+.seth-loader-marque {
+  width: 1.75rem;
+  height: auto;
+  color: var(--color-primary);
+}
+
+.seth-loader-plein .seth-loader-marque {
+  width: 2.5rem;
+}
+
 /*
- * ⚠️ LES DISQUES PRENNENT LA COULEUR DE LEUR ANNEAU, ILS N'EN PORTENT PAS.
+ * ⚠️ LES DEUX TRACÉS SONT VISÉS PAR LEUR RANG, et c'est délibéré.
  *
- * `fill: currentColor` sur les disques, `color` animé sur le `<g>` : une
- * seule animation par anneau au lieu de 120. Peindre chaque disque coûterait
- * quarante fois plus pour exactement le même résultat.
+ * `DoubleStar` ne pose ses classes (`double-star-a` / `-b`) que lorsqu'on lui
+ * demande son allumage en cascade — une animation qui ne se joue QU'UNE FOIS
+ * et n'a rien à voir avec une attente. Le loader ne l'active donc pas et vise
+ * les chemins directement, ce qui lui évite d'ajouter une variante à un
+ * composant partagé pour son seul usage.
  */
-.seth-loader-anneau circle {
-  fill: currentColor;
+.seth-loader-marque path {
+  animation: seth-loader-battement 1400ms linear infinite;
+  transform-box: fill-box;
+  transform-origin: center;
 }
 
-.seth-loader-anneau {
-  transform-box: view-box;
-  transform-origin: 50% 50%;
-  animation:
-    seth-loader-souffle 3033ms cubic-bezier(0.333, 0, 0.667, 1) infinite,
-    seth-loader-eclat 3033ms cubic-bezier(0.333, 0, 0.667, 1) infinite;
-}
-
-/*
- * ⚠️ LES ANNEAUX SONT VISÉS PAR LEUR RANG, et c'est ce qui rend les trois
- * densités gratuites : cinq règles couvrent le motif complet (5 anneaux), le
- * réduit (2) et le minimal (1), sans que le composant ait à calculer quoi que
- * ce soit au rendu. Le décalage vaut 130,4 ms — soit 3,913 images à 30 i/s,
- * la valeur exacte relevée dans le fichier. Négatif : l'anneau extérieur est
- * EN AVANCE, la vague va vers le centre.
- */
-.seth-loader-anneau:nth-of-type(2) {
-  animation-delay: -130.4ms, -130.4ms;
-}
-
-.seth-loader-anneau:nth-of-type(3) {
-  animation-delay: -260.9ms, -260.9ms;
-}
-
-.seth-loader-anneau:nth-of-type(4) {
-  animation-delay: -391.3ms, -391.3ms;
-}
-
-.seth-loader-anneau:nth-of-type(5) {
-  animation-delay: -521.7ms, -521.7ms;
+/* La seconde étoile en opposition de phase : quand l'une s'éteint, l'autre
+   s'allume. C'est ce décalage qui fait le battement. */
+.seth-loader-marque path:nth-of-type(2) {
+  animation-delay: 700ms;
 }
 
 /*
  * ⚠️ MOUVEMENT RÉDUIT : ON RETIRE LE BATTEMENT, PAS LE SIGNAL.
  *
  * Un indicateur de chargement qui disparaîtrait laisserait l'utilisateur sans
- * savoir que quelque chose travaille — la page semblerait cassée. Le motif
- * reste donc affiché, immobile, figé à une échelle intermédiaire.
- *
- * ⚠️ ET IL SE FIGE SUR LA COULEUR LA PLUS LISIBLE DE SON THÈME, pas sur une
- * des deux au hasard. Les deux couleurs du fichier n'ont pas du tout le même
- * contraste selon le fond : sur le fond sombre c'est la pâle qui ressort
- * (8,9:1 contre 3,3:1), sur le fond clair c'est la vive (8,4:1 contre 3,5:1).
- * `--loader-repos` porte le bon choix dans chaque palette.
+ * savoir que quelque chose travaille — la page semblerait cassée. L'emblème
+ * reste donc affiché, pleinement opaque, simplement immobile.
  */
 @media (prefers-reduced-motion: reduce) {
-  .seth-loader-anneau {
+  .seth-loader-marque path {
     animation: none;
-    transform: scale(0.85);
-    color: var(--loader-repos);
+    opacity: 1;
   }
 }
 
