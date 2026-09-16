@@ -195,6 +195,56 @@ export const AVIS_RECOPIES: readonly GoogleReview[] = [
     date: null,
     googleUrl: null,
   },
+  {
+    // Relevé sur la capture du 16/09/2026 : il y a 2 semaines · « Nouveau » ·
+    // Visité en août · Local Guide · 14 avis · 2 photos · avatar : photo de
+    // profil présente — non récupérable hors ligne
+    id: `${PREFIXE_MOCK}10`,
+    authorName: "Nathalie ZOLLI",
+    authorPhoto: null,
+    rating: 5,
+    text:
+      "J’ai des problèmes de poids depuis 2016 suite à une maladie auto immune appelée Hashimoto. Avec un métabolisme ralenti il est très difficile de perdre du poids à 47 ans. Après avoir tout essayé j’ai rencontré Jules. Il a su m’écouter, adapter les exercices, revoir ma nutrition. Avec un début à 93kg, j’ai perdu 10kg en 6 mois. Ça faisait des années que je ne faisais que grossir. J’ai encore du travail mais je suis très contente des résultats obtenus. Jules est toujours là à chaque difficulté. Rien n’est facile mais quand on trouve quelqu’un d’attentif, de professionnel comme lui, ça change tout. Merci encore Jules ☺️pour tout tes conseils et pour ta patience aussi. Rare sont les gens qui comprennent les difficultés comme les miennes et je garde espoir d’arriver à mon objectif ✌️",
+    date: null,
+    googleUrl: null,
+  },
+  {
+    // Relevé sur la capture du 16/09/2026 : il y a une semaine · « Nouveau » ·
+    // Visité en septembre · 1 avis · avatar : photo de profil présente — non
+    // récupérable hors ligne
+    //
+    // ⚠️ « Prix raisonnable » et le bloc « Services — Conseil en nutrition »
+    // NE SONT PAS DANS LE TEXTE. Ce sont des attributs que Google affiche
+    // AUTOUR de l’avis, pas des phrases écrites par l’autrice. Les inclure
+    // reviendrait à lui faire dire ce qu’elle n’a pas écrit.
+    //
+    // ⚠️ LES FAUTES SONT CONSERVÉES : « demarrè », « une prise de poid »,
+    // « pour des ses bons conseils », les quatre points de suspension. On ne
+    // corrige pas le texte d’un client.
+    id: `${PREFIXE_MOCK}11`,
+    authorName: "Christelle Gestin",
+    authorPhoto: null,
+    rating: 5,
+    text:
+      "Janvier 2026. Je me sentais déprimée, par le travail mais aussi à cause d'un manque de confiance en moi, une fatigue quotidienne et une prise de poid qui n'arrangeait pas les choses.\nJ'ai demarrè un suivi avec Jules avec un plan alimentaire et sportif. J'ai perdu 7 kg mais surtout j'ai retrouvé de l'énergie, de la confiance en moi, une bonne fatigue et un quotidien différent. Merci à Jules pour des ses bons conseils, ses petites astuces qui changent tout, sa patience et surtout pour avoir adapté son coaching à mes attentes, mon âge ( 57 ans) et quelques petits défauts qui m'appartiennent....\nJe garde le rythme c'est promis !",
+    date: null,
+    googleUrl: null,
+  },
+  {
+    // Relevé sur la capture du 16/09/2026 : il y a 3 semaines · « Nouveau » ·
+    // Visité en juillet · 2 avis · avatar : photo de profil présente — non
+    // récupérable hors ligne
+    //
+    // ⚠️ « 1an » SANS ESPACE et la flèche « —> » sont tels quels.
+    id: `${PREFIXE_MOCK}12`,
+    authorName: "Corentin Dubuisson",
+    authorPhoto: null,
+    rating: 5,
+    text:
+      "Jules m’accompagne depuis bientôt 1an et demi, la programmation, l’application, le suivi tout est irréprochable, un professionnel comme on en fait peu, à chaque problème une adaptation, à chaque changement de train de vie une solution. On continue sur cette lancée !\nRésultat : +7kg de muscle propre\nPerformances sur 10km : 1h10 —> 45min",
+    date: null,
+    googleUrl: null,
+  },
 ];
 
 /**

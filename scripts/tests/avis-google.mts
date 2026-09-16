@@ -8,7 +8,7 @@ process.env.TZ = "Europe/Paris";
  * ════════════════════════════════════════════════════════════════════════
  *   • le filtre 5 étoiles — et il travaille RÉELLEMENT, parce que le jeu
  *     contient trois avis pièges : des 3★, des 4★ et un 5★ sans texte ;
- *   • L'INTÉGRITÉ DES NEUF AVIS RÉELS : leur texte doit sortir dans le HTML
+ *   • L'INTÉGRITÉ DES DOUZE AVIS RÉELS : leur texte doit sortir dans le HTML
  *     au caractère près, sans troncature ni reformulation. Ce sont les mots
  *     de clients, pas du contenu qu'on peut retoucher ;
  *   • la frontière source / interface, celle qui permettra à la Phase B de
@@ -31,7 +31,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { GoogleReviewsStack } from "../../components/sections/GoogleReviewsStack";
+import { GoogleReviewsGrid } from "../../components/sections/GoogleReviewsGrid";
 import {
   AVIS_DEMONSTRATION,
   AVIS_PIEGES,
@@ -78,7 +78,7 @@ const TYPES = lire("../../lib/reviews/types.ts");
 const MOCK = lire("../../lib/reviews/google-reviews.mock.ts");
 const SOURCE = lire("../../lib/reviews/source.ts");
 const SECTION = lire("../../components/sections/GoogleReviews.tsx");
-const PILE = lire("../../components/sections/GoogleReviewsStack.tsx");
+const GRILLE = lire("../../components/sections/GoogleReviewsGrid.tsx");
 const PAGE_ACCUEIL = lire("../../app/page.tsx");
 const CSS = lire("../../app/globals.css");
 /**
@@ -88,8 +88,8 @@ const CSS = lire("../../app/globals.css");
  * plus reconnaître — et les phrases qui DOCUMENTENT une règle feraient rougir
  * le test qui la vérifie.
  */
-const MARQUEUR_BLOC = "AMAS D'AVIS EN ORBITE";
-const CSS_PILE = (() => {
+const MARQUEUR_BLOC = "REFONTE DU 16/09/2026 — L'ORBITE A DISPARU";
+const CSS_MOSAIQUE = (() => {
   const ou = CSS.indexOf(MARQUEUR_BLOC);
   /*
    * ⚠️ LE REPÈRE A DÉJÀ CHANGÉ UNE FOIS, ET DIX TESTS SONT TOMBÉS D'UN COUP.
@@ -139,7 +139,7 @@ await test("1. seuls les avis 5 étoiles sont publiables — et le filtre est UN
 
   // Et le filtre n'est écrit QU'À UN SEUL ENDROIT : deux copies finiraient
   // par diverger.
-  for (const [nom, code] of [["section", SECTION], ["pile", PILE]] as const) {
+  for (const [nom, code] of [["section", SECTION], ["mosaïque", GRILLE]] as const) {
     assert.ok(
       !/rating\s*===?\s*5/.test(sansCommentaires(code)),
       `${nom} : le filtre ne doit pas être recopié dans l'interface`,
@@ -176,7 +176,7 @@ await test("3. les avis à moins de 5 étoiles n'atteignent JAMAIS le rendu", as
   }
 
   // La preuve par le HTML : les textes des avis écartés ne sont nulle part.
-  const html = renderToStaticMarkup(createElement(GoogleReviewsStack, { avis: reviews }));
+  const html = renderToStaticMarkup(createElement(GoogleReviewsGrid, { avis: reviews }));
   for (const ecarte of AVIS_DEMONSTRATION.filter((a) => !estPubliable(a))) {
     assert.ok(
       !html.includes(echappe(ecarte.text.trim())) || ecarte.text.trim().length === 0,
@@ -192,7 +192,7 @@ await test("3. les avis à moins de 5 étoiles n'atteignent JAMAIS le rendu", as
 
 await test("4. l'interface ne connaît QUE le type d'un avis, jamais sa provenance", () => {
   // La pile n'importe ni le mock, ni la source : elle reçoit une liste.
-  const pile = sansCommentaires(PILE);
+  const pile = sansCommentaires(GRILLE);
   assert.ok(!pile.includes("google-reviews.mock"), "la pile n'importe pas le mock");
   assert.ok(!pile.includes("reviews/source"), "la pile n'importe pas la source");
   assert.ok(pile.includes('from "@/lib/reviews/types"'), "elle ne connaît que le type");
@@ -205,7 +205,7 @@ await test("4. l'interface ne connaît QUE le type d'un avis, jamais sa provenan
 
 await test("5. la source est le SEUL point à changer en Phase B", () => {
   // Le mock n'est importé qu'à un endroit dans tout le dépôt applicatif.
-  const importeurs = ["../../lib/reviews/source.ts", "../../components/sections/GoogleReviews.tsx", "../../components/sections/GoogleReviewsStack.tsx", "../../app/page.tsx"]
+  const importeurs = ["../../lib/reviews/source.ts", "../../components/sections/GoogleReviews.tsx", "../../components/sections/GoogleReviewsGrid.tsx", "../../app/page.tsx"]
     .filter((chemin) => sansCommentaires(lire(chemin)).includes("google-reviews.mock"));
   assert.deepEqual(
     importeurs,
@@ -241,7 +241,7 @@ await test("7. AUCUN texte de provenance n'est rendu à l'écran", async () => {
    *
    * Le bandeau disait « Avis Google réels, recopiés manuellement — non
    * synchronisés automatiquement ». Ce qu'il annonçait n'a jamais porté sur
-   * l'AUTHENTICITÉ du contenu : ces neuf avis sont de vrais avis, écrits par
+   * l'AUTHENTICITÉ du contenu : ces douze avis sont de vrais avis, écrits par
    * de vrais clients, recopiés au caractère près — les tests 24 et 28 le
    * verrouillent, et ils n'ont pas bougé. Il portait sur la FRAÎCHEUR : un
    * avis publié demain n'apparaîtra pas tout seul.
@@ -268,7 +268,7 @@ await test("7. AUCUN texte de provenance n'est rendu à l'écran", async () => {
 
   // La preuve par le HTML rendu, et pas seulement par le source.
   const { reviews } = await getReviews();
-  const html = renderToStaticMarkup(createElement(GoogleReviewsStack, { avis: reviews }));
+  const html = renderToStaticMarkup(createElement(GoogleReviewsGrid, { avis: reviews }));
   assert.ok(!/recopi|synchronis|démonstration/i.test(html), "rien n'est rendu par la pile non plus");
 });
 
@@ -337,82 +337,161 @@ await test("10. les sections voisines ne sont PAS modifiées", () => {
 await test("11. l'absence d'avis ne casse pas la page — la section disparaît", () => {
   assert.ok(SECTION.includes("if (reviews.length === 0) return null;"), "aucun avis ⇒ rien n'est rendu");
   assert.ok(!/bient[oô]t/i.test(sansCommentaires(SECTION)), "aucun texte d'attente inventé");
-  const html = renderToStaticMarkup(createElement(GoogleReviewsStack, { avis: [] }));
+  const html = renderToStaticMarkup(createElement(GoogleReviewsGrid, { avis: [] }));
   assert.equal(html, "", `une liste vide ne doit rien produire — reçu « ${html} »`);
 });
 
 /* ═══════════════ 12-15. RENDU ET ACCESSIBILITÉ ═══════════════ */
 
-await test("12. plusieurs cartes sont rendues, chacune avec son avis", async () => {
+await test("12. chaque avis a SA carte, et la boucle en pose une copie masquée", async () => {
   const { reviews } = await getReviews();
-  const html = renderToStaticMarkup(createElement(GoogleReviewsStack, { avis: reviews }));
-  const cartes = (html.match(/class="avis-carte-hote"/g) ?? []).length;
-  assert.equal(cartes, reviews.length, `${reviews.length} cartes attendues, ${cartes} rendues`);
-  assert.ok(cartes >= 6, `l'effet de pile demande plusieurs cartes — ${cartes} rendues`);
+  const html = renderToStaticMarkup(createElement(GoogleReviewsGrid, { avis: reviews }));
+
+  /*
+   * ⚠️ ON COMPTE LES CARTES RÉELLES, PAS LES CARTES RENDUES. Depuis que le
+   * mur défile en boucle, chaque colonne contient son contenu DEUX fois : la
+   * copie est ce qui rend le raccord invisible. Elle porte `aria-hidden`, et
+   * c'est exactement ce qui permet de la distinguer ici.
+   */
+  const toutes = (html.match(/class="avis-carte"/g) ?? []).length;
+  const copies = (html.match(/class="avis-carte" aria-hidden="true"/g) ?? []).length;
+  const reelles = toutes - copies;
+
+  assert.equal(reelles, reviews.length, `${reviews.length} cartes réelles attendues, ${reelles}`);
+  assert.equal(copies, reviews.length, "la copie couvre exactement les mêmes avis");
+  assert.equal(toutes, reviews.length * 2, "la piste fait bien le double de son contenu");
+
+  // Et chaque avis est présent, une fois pour de vrai.
+  for (const item of reviews) {
+    assert.ok(html.includes(echappe(item.authorName)), `${item.authorName} est rendu`);
+  }
 });
 
-await test("13. TOUT le contenu est dans le DOM, jamais réservé au survol", async () => {
+await test("13. TOUT le contenu est dans le DOM, et RIEN n'attend le survol", async () => {
   const { reviews } = await getReviews();
-  const html = renderToStaticMarkup(createElement(GoogleReviewsStack, { avis: reviews }));
+  const html = renderToStaticMarkup(createElement(GoogleReviewsGrid, { avis: reviews }));
   for (const item of reviews) {
     assert.ok(html.includes(echappe(item.text)), `le texte de ${item.id} est dans le DOM`);
     assert.ok(html.includes(echappe(item.authorName)), `l'auteur de ${item.id} est dans le DOM`);
   }
-  // La mise en avant est un attribut, pas un affichage conditionnel.
-  assert.ok(PILE.includes("data-en-avant"), "la mise en avant est un attribut");
-  // ⚠️ SUR LE CODE NETTOYÉ. Le composant CITE `{enAvant && …}` dans un
-  // commentaire pour expliquer pourquoi il ne le fait pas ; chercher le motif
-  // dans le texte brut ferait rougir le test sur la phrase qui le justifie.
-  assert.ok(
-    !sansCommentaires(PILE).includes("{enAvant && "),
-    "aucun contenu conditionné à la mise en avant",
-  );
+
   /*
-   * Et le CSS ne fait DISPARAÎTRE aucun contenu.
+   * ⚠️ CHANGEMENT DE CONTRAT DU 16/09/2026, ET IL VA DANS LE BON SENS.
    *
-   * ⚠️ L'ÉCRÊTAGE PAR `line-clamp` N'EST PAS UN MASQUAGE, et la distinction
-   * est celle qui compte ici. Un `display: none` retire le texte du DOM rendu
-   * — un lecteur d'écran ne le lit plus. `line-clamp` limite les lignes
-   * PEINTES : le texte reste entier dans le DOM, accessible, indexable, et
-   * l'assertion du dessus le vérifie avis par avis.
+   * L'ancienne mise en scène écrêtait le texte au repos et le dépliait au
+   * survol : le contenu était dans le DOM, mais une partie n'était PEINTE
+   * qu'à la souris. Le mur ne cache plus rien — chaque carte fait la hauteur
+   * de son avis, et ce qu'on lit ne dépend d'aucun geste.
    */
-  const regles = reglesCss(CSS_PILE);
+  const grille = sansCommentaires(GRILLE);
+  assert.ok(!/data-en-avant/.test(grille), "plus aucune mise en avant : rien ne se révèle");
+  assert.ok(!/useState|useEffect/.test(grille), "le mur n'a plus d'état");
+  assert.ok(!/"use client"/.test(grille), "et plus une ligne de JavaScript côté client");
+
+  const regles = reglesCss(CSS_MOSAIQUE);
   assert.ok(!/opacity:\s*0\b/.test(regles), "aucune carte rendue transparente");
   assert.ok(!/visibility:\s*hidden/.test(regles), "aucune carte masquée");
-  assert.ok(!/display:\s*none/.test(regles), "aucune carte retirée du flux");
+  assert.ok(!/line-clamp/.test(regles), "aucun écrêtage : la carte grandit, le texte reste entier");
+
+  /*
+   * ⚠️ LE SEUL `display: none` TOLÉRÉ VISE LES COPIES, et seulement sous
+   * mouvement réduit — où la boucle s'arrête et où la copie n'a plus de
+   * raison d'être. Toute autre règle qui retirerait une carte du flux
+   * cacherait un vrai témoignage.
+   */
+  for (const [, selecteur, corps] of regles.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    if (!/display:\s*none/.test(corps)) continue;
+    assert.ok(
+      /aria-hidden="true"/.test(selecteur),
+      `« ${selecteur.trim()} » retire une carte réelle du flux`,
+    );
+  }
 });
 
 await test("14. la note est lisible par un lecteur d'écran, les étoiles sont décoratives", () => {
-  const html = renderToStaticMarkup(createElement(GoogleReviewsStack, { avis: [avis(1)] }));
+  /*
+   * ⚠️ UN SEUL AVIS EN ENTRÉE, MAIS DEUX CARTES EN SORTIE : la piste duplique
+   * son contenu pour boucler. On compte donc les icônes de la PREMIÈRE carte,
+   * pas celles du document entier — sans quoi le test mesurerait la boucle et
+   * non la note.
+   */
+  const premiereCarte = (html: string) => html.slice(0, html.indexOf('aria-hidden="true"><div'));
+
+  const html = renderToStaticMarkup(createElement(GoogleReviewsGrid, { avis: [avis(1)] }));
   assert.ok(html.includes('aria-label="5 étoiles sur 5"'), "la note est dite en toutes lettres");
-  assert.equal((html.match(/lucide-star/g) ?? []).length, 5, "cinq icônes rendues");
+  assert.equal((premiereCarte(html).match(/lucide-star/g) ?? []).length, 5, "cinq icônes rendues");
   assert.ok(html.includes('aria-hidden="true"'), "les icônes sont masquées aux lecteurs d'écran");
+
   // Une note différente rend un nombre différent d'étoiles.
   const quatre = renderToStaticMarkup(
-    createElement(GoogleReviewsStack, { avis: [avis(2, { rating: 4 })] }),
+    createElement(GoogleReviewsGrid, { avis: [avis(2, { rating: 4 })] }),
   );
-  assert.equal((quatre.match(/lucide-star/g) ?? []).length, 4, "une note de 4 rend 4 icônes");
+  assert.equal(
+    (premiereCarte(quatre).match(/lucide-star/g) ?? []).length,
+    4,
+    "une note de 4 rend 4 icônes",
+  );
   assert.ok(quatre.includes("4 étoiles sur 5"), "et le libellé dit la vraie note");
 });
 
-await test("15. la découverte fonctionne au clavier, avec un focus visible", () => {
-  assert.ok(PILE.includes("onFocus: mettreEnAvant(index)"), "le focus met la carte en avant");
-  assert.ok(PILE.includes("onBlur: retirer(index)"), "et la quitter la remet en place");
-  assert.ok(PILE.includes("tabIndex={0}"), "les cartes sans lien restent tabulables");
-  assert.ok(CSS_PILE.includes(".avis-carte:focus-visible"), "le focus produit la même mise en avant");
+await test("15. le clavier atteint les deux appels à l'action, avec un focus visible", () => {
   /*
-   * ⚠️ LE CONTOUR NE PEUT PLUS ÊTRE `--color-primary`. Ce jeton vaut BLANC en
-   * thème sombre — et les cartes sont devenues blanches. Le liseré de focus
-   * clavier aurait purement et simplement disparu : invisible, donc inexistant
-   * pour qui navigue sans souris. Il est passé au bleu Google, lisible sur
-   * blanc dans les deux thèmes.
+   * ⚠️ IL N'Y A PLUS RIEN À « DÉCOUVRIR » AU CLAVIER, et c'est un progrès.
+   *
+   * L'ancienne mise en scène rendait chaque carte tabulable (`tabIndex={0}`)
+   * pour qu'un focus dévoile le texte écrêté : douze arrêts de tabulation
+   * pour lire ce qui aurait dû être lisible d'emblée. La mosaïque n'écrête
+   * plus rien, donc les cartes n'ont plus à être focusables — et le clavier
+   * ne traverse plus que ce qui est réellement actionnable.
+   */
+  const grille = sansCommentaires(GRILLE);
+  assert.ok(!/tabIndex/.test(grille), "une carte n'est pas un contrôle : elle ne se tabule pas");
+
+  /*
+   * Ce qui est actionnable, lui, doit se voir au clavier : les deux boutons
+   * du panneau. Le lien Google s'ouvre dans un nouvel onglet, ce qui impose
+   * `rel="noopener noreferrer"` — sans lui, la page ouverte garde une
+   * référence vers la nôtre via `window.opener`.
+   */
+  const section = sansCommentaires(SECTION);
+  /*
+   * ⚠️ LE FOCUS EST EN CSS, PAS EN CLASSE UTILITAIRE. L'anneau de Tailwind
+   * (`focus-visible:ring-primary`) vaut BLANC en thème sombre — et le panneau
+   * est devenu gris clair : l'anneau aurait disparu. Il est passé au bleu
+   * Google, sur `.avis-bouton`, lisible sur clair comme sur blanc.
+   */
+  assert.equal(
+    (section.match(/className="avis-bouton /g) ?? []).length,
+    2,
+    "les deux appels à l'action partagent la même classe de bouton",
+  );
+  assert.ok(
+    /\.avis-bouton:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--avis-g-bleu\)/.test(CSS_MOSAIQUE),
+    "et cette classe porte un contour de focus visible",
+  );
+  assert.ok(
+    /\.avis-bouton:focus-visible\s*\{[^}]*outline-offset/.test(CSS_MOSAIQUE),
+    "décollé du bouton, pour rester lisible sur un fond plein",
+  );
+  assert.ok(/target="_blank"/.test(section), "le lien Google s'ouvre à côté");
+  assert.ok(
+    /rel="noopener noreferrer"/.test(section),
+    "et il coupe l'accès à window.opener",
+  );
+
+  /*
+   * ⚠️ LE CONTOUR D'UN LIEN DANS UNE CARTE NE PEUT PAS ÊTRE `--color-primary`.
+   * Ce jeton vaut BLANC en thème sombre — et les cartes sont blanches. Le
+   * liseré aurait purement et simplement disparu : invisible, donc inexistant
+   * pour qui navigue sans souris. Il est au bleu Google, lisible sur blanc
+   * dans les deux thèmes.
    */
   assert.ok(
-    /outline:\s*2px solid var\(--avis-g-focus\)/.test(CSS_PILE),
+    /outline:\s*2px solid var\(--avis-g-bleu\)/.test(CSS_MOSAIQUE),
     "le contour de focus utilise une couleur lisible sur une carte blanche",
   );
   assert.ok(
-    !/outline:[^;]*--color-primary/.test(CSS_PILE),
+    !/outline:[^;]*--color-primary/.test(CSS_MOSAIQUE),
     "et surtout pas le jeton blanc du thème sombre",
   );
 });
@@ -428,30 +507,69 @@ await test("16. aucune bibliothèque d'animation n'a été ajoutée", () => {
   for (const interdite of ["framer-motion", "motion", "gsap", "react-spring", "@react-spring/web", "lottie-react", "@formkit/auto-animate"]) {
     assert.ok(!(interdite in toutes), `${interdite} ne doit pas avoir été ajoutée`);
   }
+
   // L'animation est du CSS maison, comme le reste du projet.
-  assert.ok(CSS_PILE.includes("transition:"), "la pile anime en CSS");
-  assert.ok(CSS_PILE.includes("var(--ease-out)"), "avec l'easing du projet");
-  assert.ok(!PILE.includes("import { motion"), "aucun import d'animation dans le composant");
+  assert.ok(/@keyframes avis-defilement/.test(CSS_MOSAIQUE), "le défilement est déclaré en CSS");
+  assert.ok(!GRILLE.includes("import { motion"), "aucun import d'animation dans le composant");
+
+  /*
+   * ⚠️ `linear`, ET C'EST LA RÈGLE DE LA MAISON, PAS UN GOÛT. Un mouvement
+   * PERPÉTUEL qui accélère et ralentit attrape l'œil bien plus qu'il ne le
+   * doit — voir `.agents/skills/review-animations/STANDARDS.md`, « constant
+   * motion (marquee) -> linear ». Les courbes d'accélération (`var(--ease-out)`)
+   * sont réservées aux entrées et sorties ponctuelles : ici, il n'y en a pas.
+   */
+  const defilement = /animation:\s*avis-defilement\s+(\S+)\s+(\w+)/.exec(reglesCss(CSS_MOSAIQUE));
+  assert.ok(defilement, "l'animation de la piste doit être lisible");
+  assert.equal(defilement[1], "linear", `une boucle ne doit pas accélérer — trouvé ${defilement[1]}`);
+  assert.equal(defilement[2], "infinite", "et elle ne s'arrête jamais d'elle-même");
+  assert.ok(
+    !/animation:\s*avis-defilement[^;]*var\(--ease-out\)/.test(CSS_MOSAIQUE),
+    "surtout pas l'easing des entrées/sorties sur une boucle",
+  );
 });
 
 await test("17. les animations se coupent sous prefers-reduced-motion", () => {
-  assert.ok(CSS_PILE.includes("@media (prefers-reduced-motion: reduce)"), "le garde existe");
-  const reduit = CSS_PILE.slice(CSS_PILE.indexOf("@media (prefers-reduced-motion: reduce)"));
+  assert.ok(CSS_MOSAIQUE.includes("@media (prefers-reduced-motion: reduce)"), "le garde existe");
+  const reduit = CSS_MOSAIQUE.slice(CSS_MOSAIQUE.indexOf("@media (prefers-reduced-motion: reduce)"));
   assert.ok(reduit.includes("transition: none"), "plus aucune transition");
   assert.ok(reduit.includes("transform: none"), "plus aucune transformation");
   // Le survol est gardé derrière un pointeur fin : sur tactile, `:hover` reste
   // collé après un tap et figerait une carte au premier plan.
   assert.ok(
-    CSS_PILE.includes("@media (hover: hover) and (pointer: fine)"),
+    CSS_MOSAIQUE.includes("@media (hover: hover) and (pointer: fine)"),
     "le survol est réservé aux pointeurs fins",
   );
 });
 
 await test("18. la section reprend les codes visuels de ses voisines", () => {
-  assert.ok(SECTION.includes("<SectionLabel>"), "l'ouvreur de section commun est réutilisé");
+  /*
+   * ⚠️ L'OUVREUR « PREUVE SOCIALE » A ÉTÉ RETIRÉ, sur demande. La section
+   * s'ouvre désormais directement sur son titre.
+   *
+   * Ce test exigeait `<SectionLabel>` au nom de la cohérence avec les
+   * sections voisines. Il exige maintenant l'inverse — qu'aucun ouvreur ne
+   * revienne par recopie d'une autre section — et continue de vérifier tout
+   * le reste du gabarit commun : conteneur, titre, ancre.
+   */
+  assert.ok(
+    !sansCommentaires(SECTION).includes("<SectionLabel>"),
+    "aucun ouvreur de section au-dessus des avis",
+  );
+  assert.ok(
+    !/Preuve sociale/i.test(sansCommentaires(SECTION)),
+    "le libellé « Preuve sociale » ne doit plus être rendu",
+  );
   assert.ok(SECTION.includes("mx-auto max-w-7xl px-6"), "le conteneur commun");
   assert.ok(
-    SECTION.includes("font-heading text-4xl font-extrabold uppercase text-foreground md:text-6xl"),
+    /*
+     * ⚠️ LE GABARIT TYPOGRAPHIQUE EST LE MÊME QUE PARTOUT ; LA COULEUR, NON.
+     * `text-foreground` a été retiré de la classe : sur un panneau gris clair,
+     * ce jeton vaut blanc en thème sombre et le titre disparaîtrait. La
+     * couleur vient de `.avis-titre` et de la palette Google.
+     */
+    SECTION.includes("font-heading text-4xl font-extrabold uppercase md:text-6xl") &&
+      SECTION.includes('className="avis-titre'),
     "le titre suit exactement le gabarit des autres h2",
   );
   assert.ok(SECTION.includes("scroll-mt-24"), "l'ancre est décalée comme ailleurs");
@@ -466,38 +584,64 @@ await test("18. la section reprend les codes visuels de ses voisines", () => {
     sansCommentaires(SECTION).includes("overflow-x-clip"),
     "la section coupe son débordement horizontal sans guillotiner le vertical",
   );
-  // Jetons sémantiques uniquement : aucune couleur brute, donc aucun risque
-  // de « couleurs Google criardes ».
-  const section = sansCommentaires(SECTION) + sansCommentaires(PILE);
+  /*
+   * ⚠️ AUCUNE COULEUR EN DUR DANS LES COMPOSANTS DE SECTION. Toutes les
+   * valeurs de la palette Google vivent dans le bloc CSS, sous forme de
+   * jetons — c'est ce qui permet de les mesurer (test 33) et d'empêcher
+   * qu'une nuance dérive au fil des retouches.
+   *
+   * ⚠️ `LogoGoogle` EST LA SEULE EXCEPTION, et elle est délibérée : les
+   * quatre couleurs de la marque sont posées tracé par tracé, dans le
+   * composant, parce qu'un logo officiel ne se thématise pas. Le test 32
+   * verrouille ces quatre valeurs et interdit toute règle qui le recolorerait.
+   */
+  const section = sansCommentaires(SECTION) + sansCommentaires(GRILLE);
   assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(section), "aucune couleur hexadécimale en dur");
   assert.ok(!/\b(rgb|hsl)a?\(/.test(section), "aucune couleur brute en dur");
-  // Aucun faux badge officiel : le mot « Google » suffit à nommer la source.
-  assert.ok(!/logo|badge/i.test(section), "aucun badge ni logo Google reproduit");
+  assert.ok(
+    !/#[0-9a-fA-F]{3,8}\b/.test(sansCommentaires(SECTION)),
+    "la section elle-même ne porte aucune couleur brute",
+  );
 });
 
 await test("19. aucun débordement horizontal n'est possible par construction", () => {
   /*
-   * ⚠️ CE TEST DÉCRIVAIT UNE PILE VERTICALE, PUIS DEUX COLONNES. La
-   * composition est maintenant une ORBITE : il n'y a plus de flux à
-   * contraindre, mais une SCÈNE CARRÉE dans laquelle chaque carte est placée
-   * par un angle et un rayon.
+   * ⚠️ TROIS COMPOSITIONS SE SONT SUCCÉDÉ ICI — pile verticale, deux
+   * colonnes, orbite — et chacune prévenait le débordement à sa façon. La
+   * mosaïque le prévient par ses colonnes : une colonne ne peut pas être plus
+   * large que son conteneur, et une carte ne peut pas déborder de sa colonne.
    *
-   * Le débordement se prévient donc autrement : la scène est bornée à la
-   * largeur disponible, et l'inégalité `rayon + demi-carte ≤ demi-scène` — que
-   * R16 mesure à l'écran — garde toutes les cartes à l'intérieur.
+   * Ce qui reste à verrouiller, c'est ce qui pourrait CASSER cette propriété.
    */
-  const regles = reglesCss(CSS_PILE);
-  assert.ok(
-    /width:\s*min\(100%,/.test(regles),
-    "la scène est bornée à la largeur disponible",
-  );
-  assert.ok(/aspect-ratio:\s*1/.test(regles), "et elle est carrée");
+  const regles = reglesCss(CSS_MOSAIQUE);
+
+  // Une largeur fixe en pixels ne rétrécit pas : sur un petit écran, elle pousse.
   assert.ok(!/width:\s*\d{3,}px/.test(regles), "aucune largeur fixe en pixels");
 
-  // La section, elle, coupe l'axe horizontal sans guillotiner le vertical.
+  // Une carte ne dépasse jamais sa colonne, même avec un mot à rallonge.
   assert.ok(
-    sansCommentaires(SECTION).includes("overflow-x-clip"),
-    "la section coupe son débordement horizontal",
+    /\.avis-carte[^{]*\{[^}]*max-width:\s*100%/.test(regles),
+    "une carte est bornée à la largeur de sa colonne",
+  );
+  assert.ok(
+    /overflow-wrap:\s*anywhere/.test(regles),
+    "un mot trop long est coupé plutôt que de pousser la carte",
+  );
+
+  // Les colonnes sont bornées des deux côtés : `minmax(0, …)` empêche la
+  // colonne de contenu de refuser de rétrécir sous la largeur de son contenu.
+  assert.ok(
+    /grid-template-columns:\s*minmax\(0,[^;]*minmax\(0,/.test(regles),
+    "les deux colonnes ont le droit de rétrécir",
+  );
+
+  // Et la section coupe l'axe horizontal sans guillotiner le vertical —
+  // `overflow: hidden` bloquerait aussi le collant du panneau.
+  const section = sansCommentaires(SECTION);
+  assert.ok(section.includes("overflow-x-clip"), "la section coupe son débordement horizontal");
+  assert.ok(
+    !/overflow-hidden/.test(section),
+    "et pas `overflow-hidden`, qui casserait le panneau collant",
   );
 });
 
@@ -530,7 +674,7 @@ await test("21. PHASE A : aucune variable d'environnement Google, aucun appel r�
   assert.ok(!/GOOGLE_BUSINESS/i.test(env), "aucune variable Google documentée");
   assert.ok(!/GOOGLE_REVIEWS/i.test(env), "aucune variable d'avis documentée");
 
-  for (const [nom, code] of [["types", TYPES], ["mock", MOCK], ["source", SOURCE], ["section", SECTION], ["pile", PILE]] as const) {
+  for (const [nom, code] of [["types", TYPES], ["mock", MOCK], ["source", SOURCE], ["section", SECTION], ["mosaïque", GRILLE]] as const) {
     const propre = sansCommentaires(code);
     assert.ok(!propre.includes("fetch("), `${nom} : aucun appel réseau`);
     assert.ok(!/process\.env\./.test(propre), `${nom} : aucune variable d'environnement lue`);
@@ -543,40 +687,35 @@ await test("21. PHASE A : aucune variable d'environnement Google, aucun appel r�
 
 await test("22. le texte d'un avis n'est jamais reformulé, tronqué ni complété", () => {
   const texte = "Un texte  avec   des espaces, des accents éàù et « des guillemets ».";
-  const html = renderToStaticMarkup(createElement(GoogleReviewsStack, { avis: [avis(1, { text: texte })] }));
+  const html = renderToStaticMarkup(createElement(GoogleReviewsGrid, { avis: [avis(1, { text: texte })] }));
   assert.ok(html.includes(echappe(texte)), "le texte sort exactement tel qu'il est entré");
 
   /*
-   * ⚠️ CE TEST INTERDISAIT TOUT `line-clamp`. IL NE LE PEUT PLUS, et c'est un
-   * changement de contrat assumé : au repos, la carte ne montre désormais que
-   * les premières lignes de l'avis, et le texte complet apparaît au survol.
+   * ⚠️ CE TEST A OSCILLÉ, ET IL REVIENT À SA FORME LA PLUS STRICTE.
    *
-   * Ce qui reste interdit, et que ces trois assertions verrouillent :
-   *   • que les données, elles, soient tronquées — c'est le test 28 ;
-   *   • que l'écrêtage ne soit JAMAIS levé, ce qui rendrait la fin d'un avis
-   *     réellement inatteignable ;
-   *   • qu'une ellipse vienne suggérer un texte « à rallonge » qu'on ne
-   *     pourrait pas lire.
+   * Il interdisait tout écrêtage ; la mise en scène orbitale l'a assoupli
+   * (écrêté au repos, entier au survol) ; la mosaïque le rend à nouveau
+   * absolu. Plus aucun `line-clamp`, nulle part : une carte fait la hauteur
+   * de son avis. Couper le témoignage d'un client à trois lignes pour
+   * l'esthétique d'une grille, c'est lui couper la parole.
    */
-  const clampLeve = /line-clamp:\s*none/.test(reglesCss(CSS_PILE));
-  assert.ok(clampLeve, "l'écrêtage doit être levé quelque part — sinon la fin de l'avis est perdue");
-  assert.ok(
-    /\.avis-carte:hover\s+\.avis-texte/.test(CSS_PILE),
-    "le survol lève l'écrêtage",
-  );
-  assert.ok(
-    /\[data-en-avant="true"\]\s+\.avis-texte/.test(CSS_PILE),
-    "la mise en avant (focus clavier, tap) le lève aussi",
-  );
-  assert.ok(!/text-overflow:\s*ellipsis/.test(reglesCss(CSS_PILE)), "aucune ellipse");
+  const regles = reglesCss(CSS_MOSAIQUE);
+  assert.ok(!/line-clamp/.test(regles), "aucun écrêtage du texte");
+  assert.ok(!/text-overflow:\s*ellipsis/.test(regles), "aucune ellipse");
+  assert.ok(!/max-height/.test(regles), "aucune hauteur plafonnée qui couperait un avis");
+
+  /*
+   * ⚠️ ET LES SAUTS DE LIGNE DE L'AUTEUR SURVIVENT. Plusieurs de ces avis
+   * sont écrits en paragraphes ; les aplatir en un pavé changerait leur
+   * lecture sans qu'un seul caractère ait été retiré.
+   */
+  assert.ok(/white-space:\s*pre-line/.test(regles), "les sauts de ligne sont restitués");
+
   // Le nom de l'auteur non plus : un nom coupé n'attribue plus rien.
   // ⚠️ SUR LE CODE NETTOYÉ. Le composant CITE `truncate` dans un commentaire
   // pour expliquer pourquoi il ne l'utilise pas : chercher le mot dans le
   // texte brut ferait rougir le test sur la phrase qui le justifie.
-  assert.ok(
-    !sansCommentaires(PILE).includes("truncate"),
-    "le nom de l'auteur n'est jamais tronqué",
-  );
+  assert.ok(!/truncate/.test(sansCommentaires(GRILLE)), "le nom de l'auteur n'est jamais tronqué");
 });
 
 await test("23. la provenance LOCALE est identifiable sans lire le contenu", () => {
@@ -682,6 +821,11 @@ const EMPREINTES = [
   { id: "mock-google-07", auteur: "Matthieu BALESTRIERI", caracteres: 44, empreinte: "fa0474eac4eade6e" },
   { id: "mock-google-08", auteur: "Foutse Yuehgoh", caracteres: 632, empreinte: "3782a91f6cf9b534" },
   { id: "mock-google-09", auteur: "Audrey ZIGGIOTTI", caracteres: 513, empreinte: "15d6ea23fbe5e169" },
+  // Transcrits le 16/09/2026 depuis quatre captures (la quatrième, Gaelle
+  // Balouzat, était déjà au dépôt et a servi de contrôle de fidélité).
+  { id: "mock-google-10", auteur: "Nathalie ZOLLI", caracteres: 788, empreinte: "5b165ef8e85938aa" },
+  { id: "mock-google-11", auteur: "Christelle Gestin", caracteres: 632, empreinte: "c6af0bdaa7edf211" },
+  { id: "mock-google-12", auteur: "Corentin Dubuisson", caracteres: 337, empreinte: "e3afd6764294113e" },
 ] as const;
 
 function empreinteDe(texte: string): string {
@@ -716,9 +860,9 @@ await test("28. AUCUN avis n'a été retouché depuis la transcription des captu
   }
 });
 
-await test("24. les NEUF avis réels sortent dans le HTML au caractère près", async () => {
+await test("24. les DOUZE avis réels sortent dans le HTML au caractère près", async () => {
   const { reviews } = await getReviews();
-  const html = renderToStaticMarkup(createElement(GoogleReviewsStack, { avis: reviews }));
+  const html = renderToStaticMarkup(createElement(GoogleReviewsGrid, { avis: reviews }));
 
   for (const item of AVIS_RECOPIES) {
     // ⚠️ LE TEXTE ENTIER, PAS SON DÉBUT. Une troncature à 200 caractères
@@ -737,7 +881,7 @@ await test("24. les NEUF avis réels sortent dans le HTML au caractère près", 
   // Les emoji et les sauts de ligne font partie du texte : ils survivent.
   assert.ok(html.includes("💪"), "les emoji des avis ne sont pas filtrés");
   assert.ok(
-    reglesCss(CSS_PILE).includes("white-space: pre-line"),
+    reglesCss(CSS_MOSAIQUE).includes("white-space: pre-line"),
     "les sauts de ligne des auteurs sont préservés au rendu",
   );
 });
@@ -764,10 +908,10 @@ await test("25. AUCUNE note inférieure à 5 ne disparaît en silence", () => {
     `${ecartes.length} avis réel(s) écarté(s) par le filtre : ${ecartes.map((a) => `${a.authorName} (${a.rating}★)`).join(", ")}`,
   );
   // Et les neuf arrivent bien jusqu'au rendu.
-  assert.equal(AVIS_RECOPIES.length, 9, `neuf avis recopiés attendus — ${AVIS_RECOPIES.length}`);
+  assert.equal(AVIS_RECOPIES.length, 12, `neuf avis recopiés attendus — ${AVIS_RECOPIES.length}`);
 });
 
-await test("26. aucun doublon, aucun avis fabriqué en plus des neuf", () => {
+await test("26. aucun doublon, aucun avis fabriqué en plus des douze", () => {
   const identifiants = AVIS_DEMONSTRATION.map((a) => a.id);
   assert.equal(
     new Set(identifiants).size,
@@ -782,8 +926,8 @@ await test("26. aucun doublon, aucun avis fabriqué en plus des neuf", () => {
   // mémoire — ce qui serait un faux avis, quelle qu'en soit l'intention.
   assert.equal(
     AVIS_RECOPIES.length,
-    9,
-    "exactement neuf avis recopiés : le dixième n'a pas de capture et ne doit pas être inventé",
+    12,
+    "exactement douze avis recopiés : le treizième n'a pas de capture et ne doit pas être inventé",
   );
 });
 
@@ -830,23 +974,20 @@ await test("29. AUCUNE carte n'est tournée — ni au repos, ni au survol, ni au
   /*
    * ⚠️ L'EXIGENCE EST ABSOLUE, DONC LA GARDE L'EST AUSSI.
    *
-   * Une version précédente inclinait chaque carte de ±2,2° via une fonction
-   * `inclinaison()` et une variable `--avis-rotation`. Les deux ont été
-   * supprimées. Ce test empêche qu'elles reviennent par la fenêtre — y
-   * compris sous une autre forme : `skew`, `rotate3d`, `matrix`.
+   * Une version de l'ancienne mise en scène inclinait chaque carte de ±2,2°
+   * via une fonction `inclinaison()` et une variable `--avis-rotation`. La
+   * mise en scène a disparu ; l'interdit, lui, reste. Ce test empêche qu'une
+   * rotation revienne par la fenêtre — y compris sous une autre forme :
+   * `skew`, `rotate3d`, `matrix`.
    */
-  const pile = sansCommentaires(PILE);
-  assert.ok(!/inclinaison/.test(pile), "la fonction d'inclinaison ne doit plus exister");
-  assert.ok(!/--avis-rotation\b/.test(pile), "aucune variable de rotation par carte");
-  assert.ok(!/rotate|skew|matrix/.test(pile), "aucune rotation posée en ligne par React");
+  const grille = sansCommentaires(GRILLE);
+  assert.ok(!/inclinaison/.test(grille), "la fonction d'inclinaison ne doit plus exister");
+  assert.ok(!/--avis-rotation\b/.test(grille), "aucune variable de rotation par carte");
+  assert.ok(!/rotate|skew|matrix/.test(grille), "aucune rotation posée en ligne par React");
 
-  /*
-   * Côté CSS : on isole les règles qui portent sur UNE CARTE, et on vérifie
-   * qu'aucune ne tourne. Le conteneur, lui, a le droit — c'est le groupe.
-   */
-  const regles = reglesCss(CSS_PILE);
+  const regles = reglesCss(CSS_MOSAIQUE);
   const declarations = [...regles.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
-  assert.ok(declarations.length > 10, `le bloc CSS doit être analysable — ${declarations.length} règles`);
+  assert.ok(declarations.length > 8, `le bloc CSS doit être analysable — ${declarations.length} règles`);
 
   let reglesDeCarte = 0;
   for (const [, selecteur, corps] of declarations) {
@@ -857,146 +998,95 @@ await test("29. AUCUNE carte n'est tournée — ni au repos, ni au survol, ni au
       `« ${selecteur.trim()} » applique une rotation à une carte : ${corps.trim()}`,
     );
   }
-  assert.ok(reglesDeCarte >= 5, `les règles de carte doivent être trouvées — ${reglesDeCarte}`);
+  assert.ok(reglesDeCarte >= 3, `les règles de carte doivent être trouvées — ${reglesDeCarte}`);
+});
+
+await test("30. le mur DÉFILE en boucle, et le raccord est exact", () => {
+  const regles = reglesCss(CSS_MOSAIQUE);
 
   /*
-   * ⚠️ IL N'Y A PLUS AUCUNE ROTATION DE GROUPE NON PLUS — et c'est ce qui
-   * rend la garde absolue.
+   * ⚠️ LA BOUCLE REPOSE SUR UNE ÉGALITÉ, PAS SUR UN RÉGLAGE VISUEL.
    *
-   * Une version précédente faisait pivoter le conteneur de ±0,4° pendant la
-   * secousse. L'orbite ne fonctionne plus ainsi : rien ne tourne, les
-   * éléments PARCOURENT un cercle par translation. C'est précisément ce qui
-   * garantit, sans contre-rotation, que les cartes restent horizontales.
+   * La piste contient son contenu deux fois et se translate de 0 à −50 %. À
+   * la fin du cycle, la copie occupe EXACTEMENT la place de départ de
+   * l'original : le raccord est invisible. Cette exactitude tient à une seule
+   * condition — que la piste mesure le double de sa première moitié.
    *
-   * Le seul `rotate()` du bloc porte sur les TRAITS qui relient les avis à la
-   * photo : un trait qui joint deux points doit s'orienter, c'est sa raison
-   * d'être, et ce n'est pas une carte.
+   * D'où l'interdit qui suit : ni `gap` ni marge sur la piste. L'espacement
+   * vient de la marge basse de CHAQUE carte, la dernière comprise. Un `gap`
+   * laisserait une demi-marge orpheline au raccord et le mur sauterait à
+   * chaque cycle — un défaut qu'on ne voit qu'après une minute d'observation,
+   * et qu'on ne retrouve plus ensuite.
    */
-  const rotations = declarations.filter(([, , corps]) => /\brotate\s*\(/.test(corps));
-  for (const [, selecteur] of rotations) {
-    assert.ok(
-      /\.avis-lien/.test(selecteur),
-      `« ${selecteur.trim()} » applique une rotation alors que seuls les traits y ont droit`,
-    );
-  }
-  assert.equal(rotations.length, 1, `un seul élément tourne : le trait — ${rotations.length} trouvés`);
-
-  // Et la secousse du groupe ne porte plus de composante angulaire.
+  assert.ok(/translateY\(-50%\)/.test(regles), "la piste se translate d'exactement la moitié");
   assert.ok(
-    !/ROTATION_GROUPE_MAX/.test(pile),
-    "le plafond de rotation de groupe n'a plus lieu d'être",
+    /\.avis-carte[^{]*\{[^}]*margin-bottom:/.test(regles),
+    "l'espacement est porté par la carte, y compris la dernière",
   );
+  const piste = /\.avis-piste\s*\{([^}]*)\}/.exec(regles);
+  assert.ok(piste, "la piste doit être déclarée");
+  assert.ok(!/gap:/.test(piste[1]), "aucun `gap` sur la piste : il fausserait le raccord");
+  assert.ok(!/margin/.test(piste[1]), "ni marge propre, pour la même raison");
+
+  /*
+   * ⚠️ ET LA FENÊTRE BORNE RÉELLEMENT. Sans hauteur ni `overflow`, les douze
+   * avis s'étalent sur près de trois mille pixels et la boucle ne se voit
+   * même pas — le mur défilerait hors de l'écran.
+   */
+  const fenetre = /\.avis-fenetre\s*\{([^}]*)\}/.exec(regles);
+  assert.ok(fenetre, "la fenêtre doit être déclarée");
+  assert.ok(/height:\s*clamp\(/.test(fenetre[1]), "sa hauteur est bornée des deux côtés");
+  assert.ok(/overflow:\s*hidden/.test(fenetre[1]), "et ce qui dépasse est coupé");
+
+  /*
+   * ⚠️ LE FONDU EST UN MASQUE, PAS UN VOILE. Un dégradé posé par-dessus
+   * prendrait la couleur du fond de la page : il trahirait la moindre section
+   * colorée derrière. `mask-image` retire de l'opacité au contenu lui-même.
+   */
+  assert.ok(/mask-image:\s*linear-gradient/.test(fenetre[1]), "les cartes s'effacent aux deux bords");
+  assert.ok(/-webkit-mask-image/.test(fenetre[1]), "avec le préfixe que WebKit exige encore");
+
+  // Deux colonnes sur grand écran, une seule sur téléphone.
+  assert.ok(/grid-template-columns:\s*repeat\(2,/.test(regles), "deux colonnes sur grand écran");
+});
+
+await test("31. le panneau est COLLANT sur grand écran, et libre sur téléphone", () => {
+  /*
+   * ⚠️ C'EST LA RAISON D'ÊTRE DE LA DISPOSITION. Au douzième témoignage,
+   * « Laisser un avis » doit encore être à l'écran : le panneau reste collé
+   * pendant que la mosaïque défile.
+   *
+   * ⚠️ MAIS PAS SUR TÉLÉPHONE. Sous `lg`, les deux colonnes s'empilent : un
+   * panneau collant y mangerait la moitié de la hauteur utile et on ferait
+   * défiler les avis dans une fente. Le collant vit donc DANS la requête
+   * média, jamais à la racine.
+   */
+  const ouvreLg = CSS_MOSAIQUE.indexOf("@media (min-width: 1024px)");
+  assert.ok(ouvreLg > 0, "le point de rupture grand écran existe");
+
+  const avantLg = CSS_MOSAIQUE.slice(0, ouvreLg);
   assert.ok(
-    !/--avis-groupe-rotation/.test(regles),
-    "aucune rotation posée sur le conteneur",
+    !/\.avis-panneau[^{]*\{[^}]*position:\s*sticky/.test(avantLg),
+    "le panneau ne doit pas être collant hors de la requête média",
   );
 
-  // ⚠️ LE MOUVEMENT VIENT DE `cos()` ET `sin()`, PAS D'UNE ROTATION.
+  const dansLg = CSS_MOSAIQUE.slice(ouvreLg, CSS_MOSAIQUE.indexOf("@media", ouvreLg + 10));
+  assert.ok(/position:\s*sticky/.test(dansLg), "il l'est à partir de 1024 px");
+  assert.ok(/top:\s*[\d.]+rem/.test(dansLg), "avec un décalage qui dégage l'en-tête fixe");
   assert.ok(
-    /cos\(var\(--avis-a\)\)/.test(regles) && /sin\(var\(--avis-a\)\)/.test(regles),
-    "les cartes sont placées en coordonnées polaires, par translation",
+    /grid-template-columns:\s*minmax\(/.test(dansLg),
+    "les deux colonnes apparaissent au même point de rupture",
   );
 });
 
-await test("30. chaque avis a son propre angle ET son propre rayon", () => {
-  /*
-   * ⚠️ LES DEUX TABLES DE DÉCALAGE ONT ÉTÉ REMPLACÉES par des coordonnées
-   * polaires — un angle et un rayon par avis. L'exigence, elle, n'a pas
-   * changé : aucune carte ne doit occuper la position d'une autre, et
-   * l'ensemble ne doit ressembler ni à une grille ni à un cadran.
-   */
-  const pile = sansCommentaires(PILE);
-  assert.ok(/function angle/.test(pile), "un angle par avis");
-  assert.ok(/function rayon/.test(pile), "un rayon par avis");
-  assert.ok(/--avis-angle/.test(pile) && /--avis-rayon/.test(pile), "les deux sont posés en ligne");
-  assert.ok(!/decalageX|decalageY/.test(pile), "les anciennes tables cartésiennes ont disparu");
-
-  const lire = (nom: string): number[] => {
-    const bloc = new RegExp(`function ${nom}[\\s\\S]*?\\[([^\\]]+)\\]`).exec(pile);
-    assert.ok(bloc, `la table de ${nom} doit être lisible`);
-    return bloc[1].split(",").map((v) => Number(v.trim()));
-  };
-  const angles = lire("angle");
-  const rayons = lire("rayon");
-
-  assert.equal(angles.length, 9, `neuf angles attendus — ${angles.length}`);
-  assert.equal(rayons.length, 9, `neuf rayons attendus — ${rayons.length}`);
-
-  // ── NEUF POSITIONS DISTINCTES.
-  const positions = angles.map((a, i) => `${a}|${rayons[i]}`);
-  assert.equal(new Set(positions).size, 9, "deux avis occupent la même position");
-
-  // ── PAS UN CADRAN : les écarts angulaires ne sont pas tous égaux.
-  const ecarts = angles.slice(1).map((a, i) => Number((a - angles[i]).toFixed(4)));
-  assert.ok(
-    new Set(ecarts).size > 2,
-    `les avis ne doivent pas être régulièrement espacés — écarts : ${ecarts.join(", ")}`,
-  );
-
-  // ── PAS UN ANNEAU : les rayons respirent.
-  assert.ok(
-    Math.max(...rayons) - Math.min(...rayons) >= 0.15,
-    `les rayons doivent varier — de ${Math.min(...rayons)} à ${Math.max(...rayons)}`,
-  );
-
-  // ── ET LES ANGLES COUVRENT BIEN TOUT LE TOUR, sans se tasser d'un côté.
-  assert.ok(Math.min(...angles) < 0.15, "des avis en haut du cercle");
-  assert.ok(Math.max(...angles) > 0.85, "et d'autres qui bouclent le tour");
-});
-
-await test("31. le rayon PLANCHER dégage la photo, le rayon PLAFOND tient dans la scène", () => {
-  /*
-   * ⚠️ CE TEST COMPARAIT DES GOUTTIÈRES DE GRILLE. Il n'y a plus de grille.
-   * Les deux inégalités qui la remplacent portent sur le rayon, et chacune
-   * vient d'un défaut réellement rencontré :
-   *
-   *   • un plancher trop bas et la carte la plus proche passe SOUS la photo,
-   *     qui la recouvre : elle devient intouchable ;
-   *   • un plafond trop haut et la carte la plus au large sort de l'écran.
-   *
-   * Ici on vérifie les VALEURS déclarées ; R16 mesure le résultat à l'écran,
-   * aux deux largeurs.
-   */
-  const pile = sansCommentaires(PILE);
-  const bloc = /function rayon[\s\S]*?\[([^\]]+)\]/.exec(pile);
-  assert.ok(bloc, "la table des rayons doit être lisible");
-  const rayons = bloc[1].split(",").map((v) => Number(v.trim()));
-
-  const regles = reglesCss(CSS_PILE);
-  const nombre = (nom: string, ou: string): number => {
-    const m = new RegExp(`${nom}:\\s*([\\d.]+)rem`).exec(ou);
-    assert.ok(m, `${nom} doit être déclaré`);
-    return Number(m[1]) * 16;
-  };
-
-  // Les deux jeux de mesures : mobile (bloc de base) puis desktop.
-  const desktop = CSS_PILE.slice(CSS_PILE.indexOf("@media (min-width: 768px)"));
-  for (const [nom, source] of [
-    ["mobile", CSS_PILE.slice(0, CSS_PILE.indexOf("@media (min-width: 768px)"))],
-    ["desktop", desktop],
-  ] as const) {
-    const base = nombre("--avis-rayon-base", source);
-    const photo = nombre("--avis-photo", source) / 2;
-    const demiCarte = nombre("--avis-carte-large", source) / 2;
-
-    assert.ok(
-      Math.min(...rayons) * base - demiCarte >= photo,
-      `${nom} : la carte la plus proche passe sous la photo (${Math.round(Math.min(...rayons) * base - demiCarte)} px pour un rayon de photo de ${Math.round(photo)} px)`,
-    );
-  }
-  assert.ok(regles.length > 0, "le bloc CSS doit être lisible");
-});
-
-await test("32. les cartes portent les codes couleur de Google", () => {
+await test("32. la palette Google, le logo officiel, et rien de redessiné", () => {
   /*
    * ⚠️ CES COULEURS SONT DES VALEURS BRUTES, ET C'EST LE SEUL ENDROIT DU
    * DÉPÔT OÙ C'EST JUSTIFIÉ. Une carte d'avis doit être reconnue comme une
    * carte Google avant d'être lue. Les passer en jetons sémantiques les
    * rendrait noires en thème sombre — elles cesseraient d'être des cartes
-   * Google.
-   *
-   * Elles sont nommées une fois, sur le conteneur, et jamais semées dans les
-   * règles : ce test verrouille les deux.
+   * Google. Elles sont nommées une fois, sur le conteneur, et jamais semées
+   * dans les règles : ce test verrouille les deux.
    */
   const attendus: Record<string, string> = {
     "--avis-g-fond": "#ffffff",
@@ -1005,36 +1095,139 @@ await test("32. les cartes portent les codes couleur de Google", () => {
     "--avis-g-texte": "#3c4043",
     "--avis-g-secondaire": "#70757a",
     "--avis-g-etoile": "#fbbc04",
-    "--avis-g-avatar": "#f1f3f4",
-    "--avis-g-focus": "#1a73e8",
+    "--avis-g-gris": "#f1f3f4",
+    "--avis-g-bleu": "#1a73e8",
   };
   for (const [jeton, valeur] of Object.entries(attendus)) {
     assert.ok(
-      new RegExp(`${jeton}:\\s*${valeur}\\b`, "i").test(CSS_PILE),
+      new RegExp(`${jeton}:\\s*${valeur}\\b`, "i").test(CSS_MOSAIQUE),
       `${jeton} doit valoir ${valeur}`,
     );
   }
 
   // Les règles utilisent les jetons, pas les valeurs recopiées à la main.
-  const regles = reglesCss(CSS_PILE);
-  for (const valeur of ["#dadce0", "#202124", "#3c4043", "#70757a", "#1a73e8"]) {
+  const regles = reglesCss(CSS_MOSAIQUE);
+  for (const valeur of ["#dadce0", "#202124", "#3c4043", "#70757a", "#f1f3f4", "#1a73e8"]) {
     const occurrences = regles.split(valeur).length - 1;
     assert.ok(occurrences <= 1, `${valeur} est recopié ${occurrences} fois au lieu d'être un jeton`);
   }
 
-  // Le fond de la carte et la couleur des étoiles viennent bien des jetons.
   assert.ok(
     /background-color:\s*var\(--avis-g-fond\)/.test(regles),
     "le fond de la carte est le blanc Google",
   );
   assert.ok(
-    /\.avis-etoile\s*\{[^}]*var\(--avis-g-etoile/.test(CSS_PILE),
+    /\.avis-etoile\s*\{[^}]*var\(--avis-g-etoile/.test(CSS_MOSAIQUE),
     "les étoiles portent le jaune Google",
   );
 
-  // ⚠️ ET AUCUN LOGO NI BADGE : le mot « Google » suffit à nommer la source,
-  // reproduire la marque ne nous appartient pas.
-  assert.ok(!/logo|badge/i.test(sansCommentaires(PILE)), "aucun badge ni logo Google reproduit");
+  /*
+   * ════════════════════════════════════════════════════════════════════════
+   * ⚠️ LE LOGO EST DÉSORMAIS EXIGÉ — CE TEST L'INTERDISAIT
+   * ════════════════════════════════════════════════════════════════════════
+   * Il vérifiait « aucun badge ni logo Google reproduit », au motif que
+   * reproduire la marque ne nous appartient pas. L'interdit a été levé le
+   * 16/09/2026, et la raison inverse est plus forte : afficher un avis Google
+   * SANS l'attribuer visuellement à Google est le vrai problème. Les règles
+   * de la fiche d'établissement demandent que les avis repris ailleurs
+   * restent identifiables comme venant de Google.
+   *
+   * Ce qui reste interdit, et que ces assertions verrouillent : le
+   * redessiner, le recolorer, le déformer.
+   */
+  const logo = lire("../../components/ui/LogoGoogle.tsx");
+  assert.ok(sansCommentaires(GRILLE).includes("<LogoGoogle"), "chaque carte porte le G de Google");
+
+  const MARQUE: Record<string, string> = {
+    bleu: "#4285F4",
+    vert: "#34A853",
+    jaune: "#FBBC05",
+    rouge: "#EA4335",
+  };
+  for (const [nom, valeur] of Object.entries(MARQUE)) {
+    assert.ok(logo.includes(`fill="${valeur}"`), `le ${nom} officiel ${valeur} doit être intact`);
+  }
+  assert.equal(
+    (logo.match(/<path/g) ?? []).length,
+    4,
+    "le logo a quatre tracés, un par couleur — ni plus, ni moins",
+  );
+  assert.ok(logo.includes('viewBox="0 0 48 48"'), "et le cadrage d'origine");
+
+  /*
+   * ⚠️ AUCUNE RÈGLE NE RECOLORE LE LOGO. `currentColor`, un `fill` ou un
+   * `filter` dans le CSS le ferait dériver de la marque — c'est précisément
+   * ce qu'on n'a pas le droit de faire.
+   */
+  const regleLogo = /\.logo-google\s*\{([^}]*)\}/.exec(regles);
+  assert.ok(regleLogo, "le logo est dimensionné une fois, en CSS");
+  assert.ok(!/fill|color|filter/.test(regleLogo[1]), "et jamais recoloré");
+  assert.ok(
+    /width:[^;]*;[\s\S]*height:/.test(regleLogo[1]),
+    "ses deux dimensions sont posées : il reste carré",
+  );
+
+  /*
+   * ⚠️ ET L'ATTRIBUTION RESTE LISIBLE SANS LES YEUX. Le logo est décoratif
+   * (`aria-hidden`) ; le texte « Avis Google » est passé en `sr-only`. Le
+   * retirer laisserait un avis non attribué à qui ne voit pas la page.
+   */
+  assert.ok(logo.includes('aria-hidden="true"'), "le logo est décoratif");
+  assert.ok(
+    /<span className="sr-only">Avis Google<\/span>/.test(GRILLE),
+    "l'attribution écrite reste, pour les lecteurs d'écran",
+  );
+});
+
+await test("33. l'îlot clair reste LISIBLE — contrastes mesurés, pas supposés", () => {
+  /*
+   * ⚠️ TOUTE LA SECTION EST PASSÉE EN CLAIR, jetons Google compris. Rien ne
+   * garantit plus que le thème du site rattrape une erreur : si un gris
+   * dérive, plus personne ne lit. Ce test refait le calcul WCAG sur les
+   * paires réellement utilisées.
+   *
+   * ⚠️ LE BOUTON EST LE POINT SENSIBLE. Blanc sur #1a73e8 donne 4,51:1 —
+   * au-dessus du plancher de 4,5:1 pour du petit texte, mais de 0,01. Toute
+   * tentative d'éclaircir ce bleu fera rougir ce test, et c'est le but.
+   */
+  const canal = (v: number) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  const luminance = (hex: string) => {
+    const n = hex.replace("#", "");
+    const [r, v, b] = [0, 2, 4].map((i) => canal(parseInt(n.slice(i, i + 2), 16) / 255));
+    return 0.2126 * r + 0.7152 * v + 0.0722 * b;
+  };
+  const contraste = (a: string, b: string) => {
+    const [x, y] = [luminance(a), luminance(b)].sort((p, q) => q - p);
+    return (x + 0.05) / (y + 0.05);
+  };
+  const jeton = (nom: string) => {
+    const trouve = new RegExp(`${nom}:\\s*(#[0-9a-fA-F]{6})`).exec(CSS_MOSAIQUE);
+    assert.ok(trouve, `${nom} introuvable`);
+    return trouve![1];
+  };
+
+  const blanc = jeton("--avis-g-fond");
+  const gris = jeton("--avis-g-gris");
+  const bleu = jeton("--avis-g-bleu");
+
+  const paires: [string, string, string, number][] = [
+    ["titre du panneau", jeton("--avis-g-nom"), gris, 4.5],
+    ["sous-titre du panneau", jeton("--avis-g-texte"), gris, 4.5],
+    ["texte d'un avis", jeton("--avis-g-texte"), blanc, 4.5],
+    ["nom de l'auteur", jeton("--avis-g-nom"), blanc, 4.5],
+    // La date est en petites majuscules espacées : traitée comme du texte normal.
+    ["date d'un avis", jeton("--avis-g-secondaire"), blanc, 4.5],
+    ["libellé du bouton bleu", blanc, bleu, 4.5],
+    // Une bordure est un objet graphique : le plancher est de 3:1.
+    ["bordure d'une carte", jeton("--avis-g-bordure"), gris, 1.1],
+  ];
+  for (const [quoi, avant, arriere, plancher] of paires) {
+    const ratio = contraste(avant, arriere);
+    assert.ok(
+      ratio >= plancher,
+      `${quoi} : ${avant} sur ${arriere} donne ${ratio.toFixed(2)}:1 — plancher ${plancher}:1`,
+    );
+  }
 });
 
 console.log(`\n${réussis} réussis, ${échecs} échecs`);
