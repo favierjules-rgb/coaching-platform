@@ -21,6 +21,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { prerenderToNodeStream } from "react-dom/static";
 
 import { EntrepriseConfigurateur } from "../../components/sections/EntrepriseConfigurateur";
 import { Header } from "../../components/layout/Header";
@@ -61,8 +62,29 @@ function test(name: string, fn: () => void) {
   }
 }
 
+/**
+ * ⚠️ LA PAGE CONTIENT DÉSORMAIS UN COMPOSANT SERVEUR ASYNCHRONE, et
+ * `renderToStaticMarkup` ne sait pas l'attendre.
+ *
+ * Depuis le 16/09/2026, la page monte `<GoogleReviews />`, qui appelle
+ * `getReviews()`. Le moteur SYNCHRONE de `react-dom/server` jetait alors
+ * « A component suspended while responding to synchronous input » : ce
+ * n'était pas un défaut de la page, mais la limite du moteur de rendu.
+ *
+ * `prerenderToNodeStream` (react-dom/static, React 19) attend les composants
+ * asynchrones et rend le HTML complet — exactement ce que fait Next.js. Les
+ * autres rendus du fichier restent synchrones : ils portent sur des
+ * composants client, qui n'ont rien à attendre.
+ */
+async function rendreAsynchrone(element: ReactElement): Promise<string> {
+  const { prelude } = await prerenderToNodeStream(element);
+  let html = "";
+  for await (const morceau of prelude) html += morceau as string;
+  return html;
+}
+
 const flowHtml = renderToStaticMarkup(createElement(EntrepriseConfigurateur));
-const pageHtml = renderToStaticMarkup(createElement(ServicesEntreprisesPage));
+const pageHtml = await rendreAsynchrone(createElement(ServicesEntreprisesPage));
 const headerHtml = renderToStaticMarkup(createElement(Header));
 const footerHtml = renderToStaticMarkup(createElement(Footer));
 
@@ -672,6 +694,53 @@ test("T9. le script anti-flash vient d'un module NEUTRE, appelable côté serveu
 });
 
 /* ─── SEO ─── */
+
+test("AVIS : la section est RÉELLEMENT montée sur la page entreprise", () => {
+  /*
+   * ⚠️ RIEN NE VERROUILLAIT CE MONTAGE, et c'est précisément pour ça que ce
+   * test existe. La section a été ajoutée à la page le 16/09/2026 ; jusqu'ici
+   * on pouvait la retirer de `/services-entreprises` sans qu'un seul test
+   * rougisse — le harnais montait bien la page entière, mais ne regardait
+   * jamais si les avis y étaient.
+   *
+   * On mesure sur le HTML RENDU, pas sur le source : un import conservé mais
+   * plus appelé passerait un contrôle textuel.
+   */
+  assert.ok(pageHtml.includes('id="avis-clients"'), "la section des avis est dans la page");
+  assert.ok(pageHtml.includes("La confiance de nos clients"), "avec son titre");
+
+  const cartes = (pageHtml.match(/class="avis-carte"/g) ?? []).length;
+  const copies = (pageHtml.match(/class="avis-carte" aria-hidden="true"/g) ?? []).length;
+  assert.ok(cartes - copies >= 9, `au moins neuf avis rendus — ${cartes - copies}`);
+  assert.equal(cartes - copies, copies, "la boucle duplique exactement le même nombre de cartes");
+
+  /*
+   * ⚠️ L'ANCRE DU SECOND BOUTON EST ABSOLUE ICI, ET C'EST UN PIÈGE SILENCIEUX.
+   * `#bilan-offert` vit sur l'ACCUEIL. Écrite sans le `/`, l'ancre ne pointe
+   * sur rien depuis cette page : le bouton reste cliquable et ne fait
+   * strictement rien — le genre de défaut qu'aucune erreur ne signale.
+   */
+  assert.ok(pageHtml.includes('href="/#bilan-offert"'), "« Mon bilan offert » ramène à l'accueil");
+  assert.ok(
+    !/href="#bilan-offert"/.test(pageHtml),
+    "et jamais l'ancre relative, qui ne mènerait nulle part depuis cette page",
+  );
+
+  // Le lien Google s'ouvre à côté, sans laisser prise à window.opener.
+  assert.ok(pageHtml.includes("share.google"), "« Laisser un avis » pointe vers la fiche Google");
+  assert.ok(pageHtml.includes('rel="noopener noreferrer"'), "et coupe l'accès à window.opener");
+
+  /*
+   * ⚠️ LA PREUVE PRÉCÈDE LA DEMANDE. Les avis sont placés AVANT le
+   * configurateur : une entreprise lit ce qu'on lui propose, puis ce que des
+   * clients en disent, puis elle décrit son projet. Inverser l'ordre
+   * reviendrait à demander avant d'avoir montré.
+   */
+  assert.ok(
+    pageHtml.indexOf('id="avis-clients"') < pageHtml.indexOf('id="devis"'),
+    "la section des avis vient avant le configurateur",
+  );
+});
 
 test("SEO : métadonnées spécifiques, canonique, page indexable", () => {
   assert.equal(metadata.title, "Coaching sportif en entreprise | GRIT Entreprise");
