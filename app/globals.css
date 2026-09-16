@@ -1911,7 +1911,25 @@ body {
  * s'effacent réellement, quel que soit ce qu'il y a derrière.
  */
 .avis-fenetre {
-  height: clamp(28rem, 62vh, 38rem);
+  /*
+   * ⚠️ TROIS BORNES, ET CHACUNE RÉPOND À UN ÉCRAN DIFFÉRENT.
+   *
+   * `34rem` : le plancher. Sur un portable à faible hauteur utile, une
+   * fenêtre plus courte ne montrerait qu'une carte et demie — le mur ne se
+   * lirait plus comme un mur.
+   *
+   * `85vh` : la valeur nominale. Le mur occupe l'essentiel de la hauteur
+   * visible, ce qui est le but : c'est la preuve, elle doit peser.
+   *
+   * `52rem` : le plafond. Sur un grand écran, laisser filer à 85 vh ferait
+   * une section de plus de mille pixels que personne ne voit d'un seul coup.
+   *
+   * ⚠️ ET LE FONDU MANGE LES 12 DERNIERS POUR CENT. C'est ce qui donnait
+   * l'impression d'un vide sous les cartes à la hauteur précédente : la
+   * fenêtre descendait bien plus bas que la dernière carte lisible. Le fondu
+   * étant proportionnel, l'agrandir agrandit aussi la zone réellement lue.
+   */
+  height: clamp(34rem, 85vh, 52rem);
   overflow: hidden;
   -webkit-mask-image: linear-gradient(
     to bottom,
