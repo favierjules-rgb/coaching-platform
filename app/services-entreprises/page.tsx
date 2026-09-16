@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 
 import { EntrepriseConfigurateur } from "@/components/sections/EntrepriseConfigurateur";
+import { GoogleReviews } from "@/components/sections/GoogleReviews";
 import { PageThemeSwitch } from "@/components/ui/PageThemeSwitch";
 import { SectionLabel } from "@/components/ui/SectionLabel";
 /*
@@ -246,7 +247,24 @@ export default function ServicesEntreprisesPage() {
         </div>
       </section>
 
-      {/* F — CONFIGURATEUR */}
+      {/*
+        F — LA PREUVE, JUSTE AVANT LA DEMANDE.
+
+        ⚠️ PLACÉE ICI ET PAS AILLEURS : une entreprise vient de lire ce qu'on
+        lui propose ; elle lit maintenant ce que des clients en disent, puis
+        elle décrit son projet. La preuve précède la demande, jamais l'inverse.
+
+        ⚠️ `ancreBilan` EST ABSOLU DEPUIS CETTE PAGE. L'ancre `#bilan-offert`
+        vit sur l'accueil ; écrite sans le `/`, elle ne pointerait sur rien
+        ici et le bouton ne ferait rien du tout.
+
+        ⚠️ AUCUN FOND DE SECTION, et c'est volontaire : la section porte déjà
+        son propre panneau et ses cartes, qui la détachent de sa voisine sans
+        qu'il faille peindre toute la largeur.
+      */}
+      <GoogleReviews ancreBilan="/#bilan-offert" />
+
+      {/* G — CONFIGURATEUR */}
       <section id="devis" className="scroll-mt-24 bg-surface py-16 md:py-24">
         <div className="mx-auto max-w-3xl px-6">
           <SectionLabel>Demande de devis</SectionLabel>
