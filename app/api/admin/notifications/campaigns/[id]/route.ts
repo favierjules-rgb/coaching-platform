@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 
 import { requireAdmin, requireStaff, requireStaffForStudent } from "@/lib/api/authz";
-import { lireCampagne, majCampagne, remplacerCibles } from "@/lib/notifications/depot";
+import {
+  lireCampagne,
+  majCampagne,
+  remplacerCibles,
+  retraitDuPlanificateur,
+} from "@/lib/notifications/depot";
 import { lireRegle, prochaineEcheance } from "@/lib/notifications/recurrence";
 import { estDestinationInterne } from "@/lib/push/destinations";
 import { LIMITE_CORPS, LIMITE_TITRE } from "@/lib/notifications/saisie";
@@ -21,9 +26,12 @@ export const dynamic = "force-dynamic";
  * d'aujourd'hui. Aucune écriture de cette route ne touche
  * `notification_occurrences` ni `notification_deliveries`.
  *
- * SUPPRESSION = ANNULATION. `status = 'annulee'`, `active = false`,
- * `next_run_at = null`. La ligne reste, donc l'historique reste rattachable.
- * Un `delete` ferait disparaître par cascade tout ce qui a été envoyé.
+ * SUPPRESSION = ANNULATION. `status = 'annulee'`, `active = false`, et
+ * l'échéance CONSERVÉE — voir `retraitDuPlanificateur` : la base n'autorise
+ * `next_run_at` nul que pour une campagne `now`, et l'écrire faisait échouer
+ * l'annulation entière en silence. La ligne reste, donc l'historique reste
+ * rattachable. Un `delete` ferait disparaître par cascade tout ce qui a été
+ * envoyé.
  *
  * RÉACTIVATION = RECALCUL. On ne remet pas l'ancienne échéance en place :
  * elle est probablement passée, et la campagne partirait immédiatement, puis
@@ -126,16 +134,31 @@ export async function PATCH(request: Request, contexte: { params: Promise<{ id: 
       // RÉACTIVATION : on recalcule, jamais on ne restaure.
       if (campagne.genreProgrammation === "recurring" && regleCourante) {
         const suivante = prochaineEcheance(regleCourante, campagne.fuseau, new Date());
-        patch.prochaineEcheance = suivante ? suivante.toISOString() : null;
+        // Aucune échéance calculable : on REFUSE, au lieu d'écrire un nul que
+        // la base rejette — la réactivation échouerait alors sans que personne
+        // sache pourquoi.
+        if (!suivante) {
+          return NextResponse.json({ error: "Règle de répétition invalide." }, { status: 400 });
+        }
+        patch.prochaineEcheance = suivante.toISOString();
       }
       if (campagne.statut === "annulee") patch.statut = "programmee";
     } else {
-      // PAUSE : plus aucune échéance à venir, la ligne reste intacte.
-      patch.prochaineEcheance = null;
+      // PAUSE : la campagne sort du planificateur, la ligne reste intacte et
+      // son échéance AUSSI. C'est `active = false` qui la retire — écrire
+      // `next_run_at = null` était refusé pour `once` comme pour `recurring`,
+      // et la pause d'une campagne programmée échouait donc toujours.
+      Object.assign(
+        patch,
+        retraitDuPlanificateur(campagne.genreProgrammation, campagne.prochaineEcheance),
+      );
     }
   } else if (patch.recurrence && campagne.active && campagne.genreProgrammation === "recurring") {
     const suivante = regleCourante ? prochaineEcheance(regleCourante, campagne.fuseau, new Date()) : null;
-    patch.prochaineEcheance = suivante ? suivante.toISOString() : null;
+    if (!suivante) {
+      return NextResponse.json({ error: "Règle de répétition invalide." }, { status: 400 });
+    }
+    patch.prochaineEcheance = suivante.toISOString();
   }
 
   const ok = await majCampagne(admin, id, patch);
@@ -154,8 +177,16 @@ export async function DELETE(_request: Request, contexte: { params: Promise<{ id
   const { id } = await contexte.params;
   const resultat = await autorisee(id);
   if (resultat.refus) return resultat.refus;
-  const { admin } = resultat;
+  const { admin, campagne } = resultat;
 
-  await majCampagne(admin, id, { active: false, prochaineEcheance: null, statut: "annulee" });
+  // Le résultat n'est PLUS ignoré : la version précédente répondait
+  // « annulée » alors que la base avait refusé l'écriture, et la campagne
+  // continuait de partir à chaque minute.
+  const ok = await majCampagne(admin, id, {
+    ...retraitDuPlanificateur(campagne.genreProgrammation, campagne.prochaineEcheance),
+    statut: "annulee",
+  });
+  if (!ok) return NextResponse.json({ error: "Annulation refusée." }, { status: 500 });
+
   return NextResponse.json({ ok: true, statut: "annulee" });
 }

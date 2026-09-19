@@ -9,6 +9,7 @@ import {
   majCampagne,
   occurrences,
   remplacerCibles,
+  retraitDuPlanificateur,
 } from "@/lib/notifications/depot";
 import { statutCampagneDepuisOccurrence, traiterEcheance } from "@/lib/notifications/execution";
 import { lireRegle, prochaineEcheance } from "@/lib/notifications/recurrence";
@@ -174,9 +175,11 @@ export async function POST(request: Request) {
   // « Maintenant » emprunte EXACTEMENT le chemin du planificateur : même
   // occurrence, mêmes contraintes d'unicité, même traitement des 410.
   const bilan = await traiterEcheance(admin, campagne, maintenant.toISOString());
-  await majCampagne(admin, campagne.id, {
-    active: false,
-    prochaineEcheance: null,
+  // Seule campagne pour laquelle la base autorise `next_run_at` nul : `now`.
+  // On passe quand même par l'invariant partagé, pour que personne n'ait à
+  // se souvenir de quel genre a le droit d'écrire quoi.
+  const cloturee = await majCampagne(admin, campagne.id, {
+    ...retraitDuPlanificateur(campagne.genreProgrammation, null),
     statut: statutCampagneDepuisOccurrence(bilan.statut),
   });
 
@@ -184,6 +187,9 @@ export async function POST(request: Request) {
     ok: true,
     campagneId: campagne.id,
     prochaineEcheance: null,
+    // Le push est PARTI. Répondre 500 ferait renvoyer le message ; on dit
+    // donc la vérité : l'envoi a eu lieu, la clôture n'a pas été écrite.
+    cloturee,
     appareilsCibles: bilan.appareilsCibles,
     envoyes: bilan.envoyes,
     echoues: bilan.echoues,

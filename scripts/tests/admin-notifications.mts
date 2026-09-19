@@ -81,13 +81,20 @@ const etat: {
   verdicts: Record<string, true | number>;
   envois: { endpoints: string[]; titre: string; corps: string; destination: string }[];
   compteur: number;
+  /**
+   * PANNES SIMULÉES — la base refuse ces écritures, comme une base coupée.
+   *
+   * Sans ce levier, « que fait le planificateur quand la base ne répond
+   * plus ? » resterait une intention. Avec lui, c'est un test.
+   */
+  pannes: { table: keyof Base; operation: "select" | "insert" | "update" | "delete" }[];
 } = {
   utilisateur: null, role: null,
   base: {
     students: [], coaches: [], push_subscriptions: [], notification_campaigns: [],
     notification_campaign_targets: [], notification_occurrences: [], notification_deliveries: [],
   },
-  verdicts: {}, envois: [], compteur: 0,
+  verdicts: {}, envois: [], compteur: 0, pannes: [],
 };
 
 function reinitialiser() {
@@ -96,6 +103,7 @@ function reinitialiser() {
   etat.verdicts = {};
   etat.envois = [];
   etat.compteur = 0;
+  etat.pannes = [];
   etat.base = {
     students: [
       { id: ELEVE_A, user_id: COMPTE_A, coach_id: null },
@@ -120,6 +128,51 @@ const UNIQUES: Record<string, string[][]> = {
   notification_deliveries: [["occurrence_id", "subscription_id"]],
   push_subscriptions: [["endpoint"]],
 };
+
+/**
+ * LES CONTRAINTES `check` DU SCHÉMA, APPLIQUÉES POUR DE VRAI.
+ *
+ * Le double appliquait déjà les deux contraintes d'UNICITÉ. Il ignorait les
+ * `check` — et c'est exactement ce trou qui a laissé passer en production une
+ * écriture que la base refuse : `next_run_at = null` sur une campagne dont
+ * `schedule_kind <> 'now'`. Les vingt-deux tests étaient verts pendant que le
+ * planificateur rejouait la même campagne chaque minute. Un double qui
+ * accepte ce que Postgres refuse ne prouve rien du tout.
+ *
+ * Source : `supabase/migrations/20260828090000_web_push_notifications.sql`,
+ * lignes 101-109.
+ */
+const CHECKS: Record<string, { nom: string; ok: (l: Ligne) => boolean }[]> = {
+  notification_campaigns: [
+    {
+      // check ( schedule_kind = 'now' or next_run_at is not null )
+      nom: "notification_campaigns_echeance_coherente",
+      ok: (l) => l.schedule_kind === "now" || (l.next_run_at !== null && l.next_run_at !== undefined),
+    },
+    {
+      // check ( (schedule_kind = 'recurring' and recurrence is not null)
+      //      or (schedule_kind <> 'recurring' and recurrence is null) )
+      nom: "notification_campaigns_recurrence_coherente",
+      ok: (l) =>
+        l.schedule_kind === "recurring"
+          ? l.recurrence !== null && l.recurrence !== undefined
+          : l.recurrence === null || l.recurrence === undefined,
+    },
+  ],
+};
+
+/** L'erreur que rend Postgres, avec son code et le nom de la contrainte. */
+function violation(table: string, ligne: Ligne): { code: string; message: string } | null {
+  for (const c of CHECKS[table] ?? []) {
+    if (!c.ok(ligne)) {
+      return {
+        code: "23514",
+        message: `new row for relation "${table}" violates check constraint "${c.nom}"`,
+      };
+    }
+  }
+  return null;
+}
 
 const DEFAUTS: Record<string, Ligne> = {
   notification_campaigns: { active: true, status: "programmee", recurrence: null, next_run_at: null, timezone: "Europe/Paris", created_at: "2026-08-10T00:00:00.000Z" },
@@ -154,6 +207,10 @@ function faireClient() {
     function executer(): { data: unknown; error: unknown } {
       const lignes = etat.base[table];
 
+      if (etat.pannes.some((p) => p.table === table && p.operation === operation)) {
+        return { data: null, error: { code: "57P01", message: "server closed the connection unexpectedly" } };
+      }
+
       if (operation === "insert") {
         const aInserer = Array.isArray(valeurs) ? valeurs : [valeurs];
         const creees: Ligne[] = [];
@@ -168,6 +225,9 @@ function faireClient() {
             const conflit = lignes.some((l) => cles.every((c) => l[c] === ligne[c]));
             if (conflit) return { data: null, error: { code: "23505", message: "duplicate key" } };
           }
+          // Les contraintes `check`, aussi.
+          const refus = violation(table, ligne);
+          if (refus) return { data: null, error: refus };
           lignes.push(ligne);
           creees.push(ligne);
         }
@@ -176,6 +236,14 @@ function faireClient() {
 
       if (operation === "update") {
         const touchees = lignes.filter((l) => correspond(l, filtres));
+        // Postgres valide la ligne RÉSULTANTE, et refuse l'INSTRUCTION
+        // ENTIÈRE : si une seule ligne visée violerait une contrainte, aucune
+        // ne bouge. Un double qui modifierait les autres mentirait sur
+        // l'atomicité.
+        for (const l of touchees) {
+          const refus = violation(table, { ...l, ...(valeurs as Ligne) });
+          if (refus) return { data: null, error: refus };
+        }
         for (const l of touchees) Object.assign(l, valeurs);
         return { data: touchees, error: null };
       }
@@ -470,17 +538,29 @@ async function campagneHebdo(id = "camp-vie") {
   return id;
 }
 
-await test("ADMINPUSH11. pause : plus aucune échéance, et le planificateur ne trouve rien", async () => {
+await test("ADMINPUSH11. pause : c'est `active` qui retire, l'échéance est conservée", async () => {
   reinitialiser();
   const id = await campagneHebdo();
+  const avant = String(etat.base.notification_campaigns[0].next_run_at);
   const res = await modifier(requeteJson({ active: false }), contexte(id));
   assert.equal(res.status, 200);
   const camp = etat.base.notification_campaigns[0];
   assert.equal(camp.active, false);
-  assert.equal(camp.next_run_at, null, "une campagne en pause n'a plus d'échéance en attente");
+
+  // CETTE ASSERTION A ÉTÉ CORRIGÉE, ET VOICI POURQUOI.
+  //
+  // Elle exigeait `next_run_at === null`. La base REFUSE cette valeur dès que
+  // `schedule_kind <> 'now'` (`notification_campaigns_echeance_coherente`), et
+  // le double ne le savait pas : le test était vert pendant que la pause
+  // échouait en production avec un 500. Ce n'est pas l'échéance qui retire une
+  // campagne du planificateur, c'est `active` — l'index partiel du schéma le
+  // dit, et la liste d'administration a besoin de cette date pour l'afficher.
+  assert.equal(camp.next_run_at, avant, "l'échéance reste écrite : la contrainte l'exige");
+  assert.notEqual(camp.next_run_at, null);
 
   const bilan = await (await planifier(requeteCron())).json();
-  assert.equal(bilan.occurrences, 0);
+  assert.equal(bilan.occurrences, 0, "`active = false` suffit à la retirer de la file");
+  assert.equal(bilan.campagnes, 0, "elle n'est même plus sélectionnée");
   assert.equal(etat.envois.length, 0);
 });
 
@@ -531,7 +611,10 @@ await test("ADMINPUSH14. annulation : la ligne reste, l'envoi ne repart pas", as
   const camp = etat.base.notification_campaigns[0];
   assert.equal(camp.status, "annulee");
   assert.equal(camp.active, false);
-  assert.equal(camp.next_run_at, null);
+  // Même correction qu'à ADMINPUSH11 : l'annulation écrivait `next_run_at =
+  // null`, la base refusait TOUTE l'instruction, et la route répondait quand
+  // même `{ ok: true, statut: "annulee" }`. La campagne restait active.
+  assert.notEqual(camp.next_run_at, null, "l'échéance d'une campagne annulée reste écrite");
   assert.equal(etat.base.notification_campaigns.length, 1, "une suppression dure emporterait tout l'historique par cascade");
 
   const bilan = await (await planifier(requeteCron())).json();
@@ -727,6 +810,409 @@ await test("ADMINPUSH22. aucune infrastructure Push parallèle, et le socle vali
   const sw = lire("public/sw.js");
   assert.ok(sw.includes('const VERSION = "seth-pwa-v4"'), "la génération de cache ne change pas");
   assert.ok(sw.includes("addEventListener(\"push\""), "le gestionnaire push validé est toujours là");
+});
+
+/* ════════════════════════════ PLANIF1-9 : LE PLANIFICATEUR NE BOUCLE PLUS ════════════════════════════ */
+
+/**
+ * LE BUG QUE CES NEUF TESTS EMPÊCHENT DE REVENIR.
+ *
+ * Le planificateur closait une campagne terminée en écrivant
+ * `next_run_at = null`. La contrainte `notification_campaigns_echeance_coherente`
+ * refuse cette valeur dès que `schedule_kind <> 'now'` : l'`update` échouait,
+ * son résultat était ignoré, la campagne restait `active` avec une échéance
+ * passée — et le passage suivant la reprenait. Chaque minute, indéfiniment.
+ *
+ * Les vingt-deux tests au-dessus étaient VERTS pendant ce temps, parce que le
+ * double ignorait les contraintes `check`. Il les applique maintenant.
+ */
+
+const PASSE = () => new Date(Date.now() - 60_000).toISOString();
+
+function campagnePonctuelle(id: string, echeance = PASSE()): string {
+  etat.base.notification_campaigns.push({
+    id, created_by: ADMIN, title: "Rappel", body: "Ton poids", destination: "/profil",
+    target_kind: "students", schedule_kind: "once", timezone: "Europe/Paris", recurrence: null,
+    next_run_at: echeance, active: true, status: "programmee",
+    created_at: "2026-08-10T00:00:00.000Z",
+  });
+  etat.base.notification_campaign_targets.push({ campaign_id: id, student_id: ELEVE_A });
+  return id;
+}
+
+const campagneEnBase = (id: string) => etat.base.notification_campaigns.find((c) => c.id === id)!;
+const heureParis = (d: Date) =>
+  new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(d);
+
+await test("PLANIF1 (CAS A). once traitée : désactivée, échéance conservée, jamais reprise", async () => {
+  reinitialiser();
+  const id = campagnePonctuelle("planif-a");
+  const echeance = String(campagneEnBase(id).next_run_at);
+
+  const premier = await (await planifier(requeteCron())).json();
+  assert.equal(premier.campagnes, 1);
+  assert.equal(premier.occurrences, 1, "l'échéance est traitée");
+  assert.equal(premier.envoyes, 2, "les deux appareils de A");
+  assert.equal(premier.bloquees, 0, "l'avance a été écrite");
+
+  const camp = campagneEnBase(id);
+  assert.equal(camp.active, false, "une campagne ponctuelle traitée sort du planificateur");
+  assert.equal(camp.next_run_at, echeance, "et garde l'échéance traitée — la contrainte l'exige");
+  assert.equal(camp.status, "envoyee");
+
+  etat.envois = [];
+  const second = await (await planifier(requeteCron())).json();
+  assert.equal(second.campagnes, 0, "elle n'est même plus sélectionnée");
+  assert.equal(second.occurrences, 0);
+  assert.equal(etat.envois.length, 0);
+});
+
+await test("PLANIF2 (CAS B). once déjà traitée, restée active : un seul passage la répare", async () => {
+  reinitialiser();
+  // L'ÉTAT EXACT DES CINQ CAMPAGNES DE PRODUCTION : l'occurrence est partie,
+  // le statut a été écrit, mais la clôture de la campagne a été refusée.
+  const id = campagnePonctuelle("planif-b");
+  const echeance = String(campagneEnBase(id).next_run_at);
+  campagneEnBase(id).status = "envoyee";
+  etat.base.notification_occurrences.push({
+    id: "occ-b", campaign_id: id, scheduled_for: echeance,
+    status: "envoyee", claimed_at: echeance, finished_at: echeance, created_at: echeance,
+  });
+
+  const premier = await (await planifier(requeteCron())).json();
+  assert.equal(etat.envois.length, 0, "aucun renvoi : l'occurrence était terminée");
+  assert.equal(premier.occurrences, 0);
+  assert.equal(premier.dejaTraitees, 1, "et c'est l'idempotence, pas une panne");
+  assert.equal(premier.erreurs, 0, "aucune erreur : pas de duplicate key qui remonte");
+  assert.equal(premier.bloquees, 0, "l'avance a bien été écrite");
+  assert.equal(etat.base.notification_occurrences.length, 1, "aucune occurrence en double");
+
+  const camp = campagneEnBase(id);
+  assert.equal(camp.active, false, "la campagne est enfin close");
+  assert.equal(camp.next_run_at, echeance, "et son échéance est CONSERVÉE");
+
+  const second = await (await planifier(requeteCron())).json();
+  assert.equal(second.campagnes, 0, "la boucle est terminée");
+  assert.equal(second.dejaTraitees, 0);
+  assert.equal(etat.envois.length, 0);
+});
+
+await test("PLANIF3 (CAS C). l'avance refusée : rien n'est envoyé, et le refus est VISIBLE", async () => {
+  reinitialiser();
+  const id = campagnePonctuelle("planif-c");
+  etat.pannes.push({ table: "notification_campaigns", operation: "update" });
+
+  const bilan = await (await planifier(requeteCron())).json();
+  assert.equal(bilan.bloquees, 1, "le résultat de majCampagne n'est plus ignoré");
+  assert.equal(bilan.occurrences, 0, "on ne traite pas une échéance qu'on n'a pas pu déplacer");
+  assert.equal(etat.envois.length, 0, "et on n'envoie rien");
+  assert.equal(etat.base.notification_occurrences.length, 0, "aucune occurrence n'est même ouverte");
+  assert.equal(campagneEnBase(id).active, true, "la base a bien refusé l'écriture");
+
+  etat.pannes = [];
+  const apres = await (await planifier(requeteCron())).json();
+  assert.equal(apres.bloquees, 0);
+  assert.equal(apres.occurrences, 1, "la panne levée, le passage suivant fait le travail");
+  assert.equal(campagneEnBase(id).active, false);
+});
+
+await test("PLANIF4 (CAS D). occurrence déjà ouverte mais pas servie : reprise, sans doublon", async () => {
+  reinitialiser();
+  const id = campagnePonctuelle("planif-d");
+  const echeance = String(campagneEnBase(id).next_run_at);
+  // Un passage précédent a créé l'occurrence puis s'est arrêté avant de la
+  // réserver : elle est `en_attente`, personne ne l'a servie.
+  etat.base.notification_occurrences.push({
+    id: "occ-d", campaign_id: id, scheduled_for: echeance,
+    status: "en_attente", claimed_at: null, finished_at: null, created_at: echeance,
+  });
+
+  const bilan = await (await planifier(requeteCron())).json();
+  assert.equal(
+    etat.base.notification_occurrences.length, 1,
+    "le conflit unique rend la LIGNE EXISTANTE, il n'en crée pas une seconde",
+  );
+  assert.equal(etat.base.notification_occurrences[0].id, "occ-d", "c'est bien celle-là qui a servi");
+  assert.equal(bilan.occurrences, 1);
+  assert.deepEqual([...servis()].sort(), [IPAD_A, IPHONE_A].sort());
+
+  etat.envois = [];
+  const second = await (await planifier(requeteCron())).json();
+  assert.equal(second.campagnes, 0);
+  assert.equal(etat.envois.length, 0, "et une seule fois");
+});
+
+await test("PLANIF5 (CAS E). récurrente : trois cycles, trois occurrences, aucune régression", async () => {
+  reinitialiser();
+  const id = await campagneHebdo("planif-e");
+
+  for (let cycle = 0; cycle < 3; cycle += 1) {
+    // Le temps avance : on ramène l'échéance dans le passé, comme le ferait
+    // le lundi suivant. La règle, elle, ne bouge pas.
+    //
+    // Trois instants EXPLICITEMENT distincts, à une minute d'écart : un
+    // passage du double dure moins d'une milliseconde, et deux `PASSE()`
+    // successifs pouvaient rendre la même chaîne ISO — l'unicité retrouvait
+    // alors l'occurrence du cycle précédent au lieu d'en ouvrir une.
+    campagneEnBase(id).next_run_at = new Date(Date.now() - 60_000 * (3 - cycle)).toISOString();
+    const bilan = await (await planifier(requeteCron())).json();
+    assert.equal(bilan.occurrences, 1, `cycle ${cycle + 1} : l'échéance est traitée`);
+    assert.equal(bilan.bloquees, 0, `cycle ${cycle + 1} : rien n'est bloqué`);
+    const apres = campagneEnBase(id);
+    assert.equal(apres.active, true, "une campagne récurrente reste active");
+    assert.ok(
+      new Date(String(apres.next_run_at)).getTime() > Date.now(),
+      "et son échéance est repoussée dans le futur",
+    );
+    assert.equal(heureParis(new Date(String(apres.next_run_at))), "08:00", "à la même heure locale");
+  }
+
+  assert.equal(etat.base.notification_occurrences.length, 3, "une occurrence par cycle");
+  assert.equal(
+    new Set(etat.base.notification_occurrences.map((o) => o.scheduled_for)).size, 3,
+    "trois échéances distinctes : si elles se confondaient, le test ne prouverait rien",
+  );
+  // `campagneHebdo` vise TOUT LE MONDE : les deux appareils de A et celui de
+  // B, soit trois par cycle. (Mon compte de 6 supposait la cible d'une seule
+  // élève — c'était l'assertion qui avait tort, pas le planificateur.)
+  assert.equal(servis().length, 9, "trois cycles × trois appareils joignables");
+});
+
+await test("PLANIF6 (CAS F). now : comportement inchangé, et la clôture est rapportée", async () => {
+  reinitialiser();
+  const res = await creer(requeteJson({
+    ...MESSAGE, cible: { genre: "students", studentIds: [ELEVE_A] }, quand: { mode: "now" },
+  }));
+  const corps = await res.json();
+  assert.equal(res.status, 200, JSON.stringify(corps));
+  assert.equal(corps.envoyes, 2);
+  assert.equal(corps.cloturee, true, "la clôture est confirmée, pas supposée");
+
+  const camp = etat.base.notification_campaigns[0];
+  assert.equal(camp.active, false);
+  // `now` est le SEUL genre pour lequel la base autorise l'échéance nulle.
+  assert.equal(camp.next_run_at, null);
+
+  const bilan = await (await planifier(requeteCron())).json();
+  assert.equal(bilan.campagnes, 0, "un envoi immédiat ne laisse rien derrière lui");
+});
+
+await test("PLANIF7 (CAS G). une campagne incohérente n'empêche pas les autres de partir", async () => {
+  reinitialiser();
+  // Une campagne qu'AUCUNE écriture ne peut réparer : `recurring` sans règle
+  // viole déjà `notification_campaigns_recurrence_coherente`, donc tout
+  // `update` de cette ligne est refusé. Placée PLUS TÔT pour être vue la
+  // première — si elle interrompait la boucle, la suivante ne partirait pas.
+  etat.base.notification_campaigns.push({
+    id: "planif-g-cassee", created_by: ADMIN, title: "Cassée", body: "Corps", destination: "/profil",
+    target_kind: "all", schedule_kind: "recurring", timezone: "Europe/Paris", recurrence: null,
+    next_run_at: new Date(Date.now() - 600_000).toISOString(), active: true, status: "programmee",
+    created_at: "2026-08-10T00:00:00.000Z",
+  });
+  const saine = campagnePonctuelle("planif-g-saine");
+
+  const bilan = await (await planifier(requeteCron())).json();
+  assert.equal(bilan.campagnes, 2);
+  assert.equal(bilan.bloquees, 1, "l'incohérente est comptée, et nommée comme telle");
+  assert.equal(bilan.occurrences, 1, "la saine est traitée quand même");
+  assert.deepEqual([...servis()].sort(), [IPAD_A, IPHONE_A].sort());
+  assert.equal(campagneEnBase(saine).active, false, "et close normalement");
+  assert.equal(campagneEnBase("planif-g-cassee").active, true, "l'autre n'a pas bougé d'un pouce");
+  assert.equal(
+    etat.base.notification_occurrences.length, 1,
+    "aucune occurrence ouverte pour la campagne bloquée",
+  );
+});
+
+await test("PLANIF8 (CAS H). cinq passages successifs : une campagne once part UNE fois", async () => {
+  reinitialiser();
+  campagnePonctuelle("planif-h");
+  const vues: number[] = [];
+
+  for (let cycle = 0; cycle < 5; cycle += 1) {
+    vues.push((await (await planifier(requeteCron())).json()).campagnes);
+  }
+
+  assert.deepEqual(vues, [1, 0, 0, 0, 0], "sélectionnée au premier passage, plus jamais ensuite");
+  assert.equal(servis().length, 2, "deux appareils, deux pushs, au total");
+  assert.equal(etat.base.notification_occurrences.length, 1);
+  assert.equal(etat.base.notification_deliveries.length, 2);
+});
+
+await test("PLANIF9 (CAS I). base indisponible : le planificateur ne prétend pas avoir fini", async () => {
+  reinitialiser();
+  const id = campagnePonctuelle("planif-i");
+  // L'occurrence ne peut ni être créée ni être relue : la base est muette.
+  etat.pannes.push({ table: "notification_occurrences", operation: "insert" });
+  etat.pannes.push({ table: "notification_occurrences", operation: "select" });
+
+  const bilan = await (await planifier(requeteCron())).json();
+  assert.notEqual(bilan.erreurs, undefined, "le champ existe : une panne muette n'en serait pas une");
+  assert.equal(bilan.erreurs, 1, "l'échec est compté comme une ERREUR");
+  assert.equal(bilan.dejaTraitees, 0, "et pas confondu avec une occurrence déjà servie");
+  assert.equal(bilan.occurrences, 0, "aucune occurrence n'est déclarée traitée");
+  assert.equal(etat.envois.length, 0, "et rien n'est envoyé");
+
+  // L'avance, elle, avait réussi : la campagne ne repartira pas en boucle.
+  // C'est le contrat at-most-once — mieux vaut un rappel manquant qu'un double.
+  assert.equal(campagneEnBase(id).active, false);
+});
+
+/* ════════════════════════════ SABOTAGE1-7 : CE QUI DOIT ROUGIR ════════════════════════════ */
+
+/**
+ * SEPT SABOTAGES, SEPT ROUGES.
+ *
+ * Chaque test échoue si quelqu'un défait une des sept protections posées par
+ * le correctif. Ils ne vérifient pas que le code est joli : ils vérifient
+ * qu'un comportement métier précis tient encore debout.
+ */
+
+await test("SABOTAGE1. réécrire `next_run_at = null` dans un état interdit", async () => {
+  const { retraitDuPlanificateur } = await import(moduleUrl("lib/notifications/depot.ts"));
+
+  // L'invariant, genre par genre.
+  assert.deepEqual(
+    retraitDuPlanificateur("now", "2026-08-10T06:00:00.000Z"),
+    { active: false, prochaineEcheance: null },
+    "`now` est le seul genre pour lequel la base autorise le nul",
+  );
+  assert.deepEqual(
+    retraitDuPlanificateur("once", "2026-08-10T06:00:00.000Z"),
+    { active: false, prochaineEcheance: "2026-08-10T06:00:00.000Z" },
+  );
+  assert.deepEqual(
+    retraitDuPlanificateur("recurring", "2026-08-10T06:00:00.000Z"),
+    { active: false, prochaineEcheance: "2026-08-10T06:00:00.000Z" },
+  );
+  // Échéance inconnue : on ne touche pas au champ plutôt que d'écrire un nul.
+  assert.deepEqual(retraitDuPlanificateur("once", null), { active: false });
+
+  // Les trois appelants passent par l'invariant partagé, aucun ne le refait.
+  for (const f of [
+    "app/api/cron/notifications/route.ts",
+    "app/api/admin/notifications/campaigns/route.ts",
+    "app/api/admin/notifications/campaigns/[id]/route.ts",
+  ]) {
+    assert.ok(
+      lire(f).includes("retraitDuPlanificateur"),
+      `${f} doit retirer une campagne par l'invariant partagé, pas à la main`,
+    );
+  }
+
+  // Et le double refuse ce que Postgres refuse — sans quoi rien de tout ceci
+  // ne serait vérifiable. C'est ce trou qui a laissé passer le bug.
+  const harnais = lire("scripts/tests/admin-notifications.mts");
+  assert.ok(
+    harnais.includes("notification_campaigns_echeance_coherente"),
+    "le double doit porter la contrainte check, sinon les tests mentent",
+  );
+  assert.ok(
+    /for \(const l of touchees\)[\s\S]{0,400}violation\(/.test(harnais),
+    "et la valider sur les UPDATE, pas seulement sur les INSERT",
+  );
+});
+
+await test("SABOTAGE2. ignorer le résultat de majCampagne", () => {
+  // Règle mécanique : `majCampagne` n'est JAMAIS appelée comme une
+  // instruction nue. Son résultat est toujours reçu par quelqu'un.
+  for (const f of [
+    "app/api/cron/notifications/route.ts",
+    "app/api/admin/notifications/campaigns/route.ts",
+    "app/api/admin/notifications/campaigns/[id]/route.ts",
+  ]) {
+    const nues = lire(f)
+      .split("\n")
+      .map((l, i) => `${i + 1}`.padStart(4) + l)
+      .filter((l) => /^\s*\d+\s*await\s+majCampagne\s*\(/.test(l));
+    assert.deepEqual(nues, [], `${f} : le résultat de majCampagne est jeté`);
+  }
+  // Et le contrat HTTP porte le compteur qui rend le refus visible.
+  assert.ok(lire("app/api/cron/notifications/route.ts").includes("bloquees"));
+});
+
+await test("SABOTAGE3. désactiver l'idempotence des occurrences", async () => {
+  const migration = lire("supabase/migrations/20260828090000_web_push_notifications.sql");
+  assert.ok(
+    /unique\s*\(\s*campaign_id\s*,\s*scheduled_for\s*\)/.test(migration),
+    "unique (campaign_id, scheduled_for) est ce qui rend deux passages inoffensifs",
+  );
+  const depot = lire("lib/notifications/depot.ts");
+  assert.ok(
+    /\.eq\("campaign_id", campaignId\)[\s\S]{0,200}\.eq\("scheduled_for", echeance\)/.test(depot),
+    "un conflit doit rendre l'occurrence EXISTANTE, pas null",
+  );
+
+  // Deux passages simultanés : une occurrence, un envoi par appareil.
+  reinitialiser();
+  campagnePonctuelle("sab3");
+  await Promise.all([planifier(requeteCron()), planifier(requeteCron())]);
+  assert.equal(etat.base.notification_occurrences.length, 1);
+  assert.equal(etat.base.notification_deliveries.length, 2);
+});
+
+await test("SABOTAGE4. retirer `active` du filtrage du planificateur", async () => {
+  assert.ok(
+    /campagnesAEcheance[\s\S]{0,400}\.eq\("active", true\)/.test(lire("lib/notifications/depot.ts")),
+    "le planificateur ne lit que les campagnes actives",
+  );
+
+  reinitialiser();
+  const id = campagnePonctuelle("sab4");
+  campagneEnBase(id).active = false;
+  const bilan = await (await planifier(requeteCron())).json();
+  assert.equal(bilan.campagnes, 0, "une campagne inactive à échéance passée n'est jamais reprise");
+  assert.equal(etat.envois.length, 0);
+});
+
+await test("SABOTAGE5. ne plus traiter le doublon d'occurrence", async () => {
+  reinitialiser();
+  const id = campagnePonctuelle("sab5");
+  const echeance = String(campagneEnBase(id).next_run_at);
+  etat.base.notification_occurrences.push({
+    id: "occ-sab5", campaign_id: id, scheduled_for: echeance,
+    status: "envoyee", claimed_at: echeance, finished_at: echeance, created_at: echeance,
+  });
+
+  const res = await planifier(requeteCron());
+  assert.equal(res.status, 200, "un doublon n'est pas une erreur de route");
+  const bilan = await res.json();
+  assert.equal(bilan.dejaTraitees, 1, "il est nommé pour ce qu'il est");
+  assert.equal(bilan.erreurs, 0, "et n'est pas compté comme une panne");
+  assert.equal(etat.base.notification_occurrences.length, 1, "aucune ligne ajoutée");
+  assert.equal(etat.envois.length, 0, "aucun renvoi");
+});
+
+await test("SABOTAGE6. rendre une panne de base invisible", async () => {
+  reinitialiser();
+  campagnePonctuelle("sab6");
+  etat.pannes.push({ table: "notification_occurrences", operation: "insert" });
+  etat.pannes.push({ table: "notification_occurrences", operation: "select" });
+
+  const bilan = await (await planifier(requeteCron())).json();
+  for (const champ of ["bloquees", "erreurs", "dejaTraitees"]) {
+    assert.notEqual(bilan[champ], undefined, `le contrat doit porter « ${champ} »`);
+  }
+  assert.ok(bilan.erreurs > 0, "une base muette ne doit pas ressembler à un passage au repos");
+  assert.equal(bilan.occurrences, 0, "et ne doit pas être comptée comme un succès");
+});
+
+await test("SABOTAGE7. laisser une campagne once être retraitée à chaque cycle", async () => {
+  reinitialiser();
+  const id = campagnePonctuelle("sab7");
+
+  const vues: number[] = [];
+  for (let cycle = 0; cycle < 10; cycle += 1) {
+    vues.push((await (await planifier(requeteCron())).json()).campagnes);
+  }
+
+  assert.equal(vues[0], 1, "le premier passage la voit");
+  assert.deepEqual(
+    vues.slice(1), Array(9).fill(0),
+    `neuf passages suivants doivent la laisser tranquille — reçu ${vues.join(",")}`,
+  );
+  assert.equal(servis().length, 2, "et elle n'a été servie qu'une fois");
+  assert.equal(campagneEnBase(id).active, false);
 });
 
 console.log(`\n${réussis} réussis, ${échecs} échecs`);

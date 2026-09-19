@@ -204,6 +204,49 @@ export async function majCampagne(
   return !reponse.error;
 }
 
+/**
+ * RETIRER UNE CAMPAGNE DU PLANIFICATEUR — SANS ÉCRIRE UNE VALEUR INTERDITE.
+ *
+ * ═════════════════════════════════════════════════════════════════════════
+ * L'INVARIANT, EN UN SEUL ENDROIT
+ * ═════════════════════════════════════════════════════════════════════════
+ * `notification_campaigns_echeance_coherente` n'autorise `next_run_at` nul
+ * que pour `schedule_kind = 'now'` :
+ *
+ *     check ( schedule_kind = 'now' or next_run_at is not null )
+ *
+ * Pour les deux autres genres, l'échéance n'est PAS la place dans la file
+ * d'attente : elle fait partie de la DÉFINITION de la campagne, et la liste
+ * d'administration l'affiche comme sa date programmée — « Le <date> » pour
+ * une campagne `once` (`components/admin/NotificationCampaignList.tsx`).
+ *
+ * Ce qui décide du passage au planificateur, c'est `active`. Le schéma le dit
+ * lui-même dans son index partiel :
+ *
+ *     on notification_campaigns (next_run_at) where active and next_run_at is not null
+ *
+ * et `campagnesAEcheance` filtre sur `active` avant tout le reste. On retire
+ * donc par `active = false`, et l'échéance RESTE écrite.
+ *
+ * Écrire nul faisait échouer l'`update` : la campagne restait `active` avec
+ * une échéance passée, et le planificateur la reprenait à chaque minute.
+ * Trois appelants écrivaient cette valeur — le planificateur, la pause et
+ * l'annulation. L'invariant vit maintenant ICI, pas chez eux.
+ *
+ * Quand l'échéance à conserver est inconnue, le champ n'est pas touché du
+ * tout : ne rien écrire vaut toujours mieux qu'écrire une valeur refusée.
+ */
+export function retraitDuPlanificateur(
+  genreProgrammation: GenreProgrammation,
+  echeanceARetenir: string | null,
+): ModificationCampagne {
+  // `now` : l'échéance n'a plus de sens après l'envoi, et la contrainte
+  // l'autorise nulle pour ce genre — pour lui SEUL.
+  if (genreProgrammation === "now") return { active: false, prochaineEcheance: null };
+  if (echeanceARetenir === null) return { active: false };
+  return { active: false, prochaineEcheance: echeanceARetenir };
+}
+
 /* ════════════════════════════ CIBLES ════════════════════════════ */
 
 export async function cibles(client: unknown, campaignId: string): Promise<string[]> {

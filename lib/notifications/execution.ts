@@ -23,9 +23,26 @@ import {
  * désactivation d'un appareil mort. Il n'y en a donc qu'une, ici.
  */
 
+/**
+ * POURQUOI AUCUNE OCCURRENCE N'A ÉTÉ TRAITÉE — ET CE N'EST PAS LA MÊME CHOSE.
+ *
+ *   • `deja-reservee` : l'occurrence existe et n'est plus `en_attente`. C'est
+ *     l'idempotence qui FONCTIONNE — un autre passage s'en est occupé, ou
+ *     elle est terminée. Rien à signaler, rien à réparer.
+ *   • `occurrence-indisponible` : ni l'insertion ni la relecture n'ont abouti.
+ *     La base n'a pas répondu. C'est une PANNE, et elle ne doit pas se
+ *     confondre dans le même compteur que le cas précédent.
+ *
+ * Les deux rendaient `occurrenceId: null` et étaient indistinguables : un
+ * planificateur en panne ressemblait à un planificateur au repos.
+ */
+export type RaisonSansOccurrence = "deja-reservee" | "occurrence-indisponible";
+
 export interface BilanEcheance {
-  /** `null` quand l'occurrence appartenait déjà à quelqu'un d'autre. */
+  /** `null` quand aucune occurrence n'a été traitée — `raison` dit pourquoi. */
   occurrenceId: string | null;
+  /** Renseigné exactement quand `occurrenceId` est `null`. */
+  raison: RaisonSansOccurrence | null;
   appareilsCibles: number;
   envoyes: number;
   echoues: number;
@@ -37,16 +54,17 @@ export async function traiterEcheance(
   campagne: Campagne,
   echeance: string,
 ): Promise<BilanEcheance> {
-  const vide: BilanEcheance = {
-    occurrenceId: null, appareilsCibles: 0, envoyes: 0, echoues: 0, statut: null,
-  };
+  const sansOccurrence = (raison: RaisonSansOccurrence): BilanEcheance => ({
+    occurrenceId: null, raison, appareilsCibles: 0, envoyes: 0, echoues: 0, statut: null,
+  });
 
   const occurrence = await ouvrirOccurrence(admin, campagne.id, echeance);
-  if (!occurrence) return vide;
+  // Ni créée, ni relue : la base n'a pas répondu. Ce n'est PAS un doublon.
+  if (!occurrence) return sansOccurrence("occurrence-indisponible");
 
   // La réservation EST le verrou : `update … where status = 'en_attente'`.
   // Perdre la course n'est pas une erreur — quelqu'un d'autre s'en occupe.
-  if (!(await reserverOccurrence(admin, occurrence.id))) return vide;
+  if (!(await reserverOccurrence(admin, occurrence.id))) return sansOccurrence("deja-reservee");
 
   const comptes = await comptesVises(admin, campagne);
   const appareils = await appareilsJoignables(admin, comptes);
@@ -55,7 +73,7 @@ export async function traiterEcheance(
     // Personne de joignable est un FAIT, pas une panne : l'occurrence est
     // close normalement, et l'historique dira « 0 appareil ».
     await terminerOccurrence(admin, occurrence.id, "envoyee");
-    return { occurrenceId: occurrence.id, appareilsCibles: 0, envoyes: 0, echoues: 0, statut: "envoyee" };
+    return { occurrenceId: occurrence.id, raison: null, appareilsCibles: 0, envoyes: 0, echoues: 0, statut: "envoyee" };
   }
 
   // Les envois sont OUVERTS avant le push : c'est cette ligne `en_cours` qui
@@ -102,6 +120,7 @@ export async function traiterEcheance(
 
   return {
     occurrenceId: occurrence.id,
+    raison: null,
     appareilsCibles: ouverts.length,
     envoyes,
     echoues,
