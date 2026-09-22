@@ -139,6 +139,21 @@ export const MIGRATION_C5_1 = "20260922090000_c5_1_connexions_nolio.sql";
  */
 export const MIGRATION_DEBUT_PROGRAMME = "20260923090000_date_debut_programme.sql";
 
+/**
+ * LA SUPPRESSION DE L'INTÉGRATION NOLIO.
+ *
+ * ⚠️ ELLE DÉFAIT C5.1, ELLE NE LA REMPLACE PAS. `MIGRATION_C5_1` reste
+ * déclarée juste au-dessus, et son fichier reste sur le disque : il a été
+ * appliqué en Production, et une migration appliquée ne se réécrit pas. Deux
+ * entrées coexistent donc ici pour un seul chantier — celle qui a créé les
+ * objets, et celle qui les retire.
+ *
+ * Elle supprime la vue `nolio_connexion_etat` puis la table
+ * `nolio_connections`, sans `cascade`, après une garde qui refuse de
+ * s'exécuter si la table n'est pas vide.
+ */
+export const MIGRATION_SUPPRESSION_NOLIO = "20260924090000_suppression_nolio.sql";
+
 export const MIGRATIONS_COURSES: readonly string[] = [
   MIGRATION_C2,
   MIGRATION_C3,
@@ -161,10 +176,11 @@ export const MIGRATIONS_APRES_C0_1: readonly string[] = [
   MIGRATION_N1_7_1,
   MIGRATION_C5_1,
   MIGRATION_DEBUT_PROGRAMME,
+  MIGRATION_SUPPRESSION_NOLIO,
 ];
 
 /** Le compte attendu — nécessaire, jamais suffisant. */
-export const NOMBRE_DE_MIGRATIONS = 89;
+export const NOMBRE_DE_MIGRATIONS = 90;
 
 /**
  * L'empreinte des 79 migrations ANTÉRIEURES à C0.1, dans l'ordre.
