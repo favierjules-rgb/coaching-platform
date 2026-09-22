@@ -339,6 +339,15 @@ await test("CONTRACT-07. le CONTRACT s'applique en DERNIER — l'ordre de rollou
       //     touchée — le test MIGRATION1 de `calendrier-semaines` rejoue cette
       //     preuve à chaque exécution.
       "20260923090000_date_debut_programme.sql",
+      // ⚠️ LA SUPPRESSION NOLIO — hors de portée du CONTRACT parce qu'elle ne
+      // crée rien et ne lit rien du domaine nutrition. Mesuré sur le fichier,
+      // code dépouillé de sa prose :
+      //   · `preferred_unit` : ZÉRO occurrence, pas même comme clé JSON ;
+      //   · `quantity_unit` et `meal_choice_options` : ABSENTS ;
+      //   · aucun `alter table`, aucune table du domaine nutrition touchée.
+      // Elle ne contient que deux `drop` sur des objets Nolio et une garde
+      // qui refuse d'agir si `nolio_connections` n'est pas vide.
+      "20260924090000_suppression_nolio.sql",
     ],
     "une migration postérieure au CONTRACT n'a pas été déclarée sûre",
   );
