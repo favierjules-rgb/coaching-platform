@@ -197,7 +197,16 @@ await (async () => {
     assert.equal(findPreviousPerformance(idx2, { name: "Squat" }), null);
   });
 
-  await test("6. la DERNIÈRE occurrence antérieure gagne — et la recherche remonte au-delà de la semaine précédente", () => {
+  await test("6. LIGNE « DERNIÈRES PERFS » : la dernière occurrence antérieure gagne, et la recherche remonte au-delà de la semaine précédente", () => {
+    // ⚠️ CE TEST DÉCRIT LE CHEMIN D'AFFICHAGE, PAS LA PROGRESSION AUTOMATIQUE.
+    // Depuis le chantier « progressive overload », la recommandation de charge
+    // se calcule sur l'occurrence programmée identique de la semaine
+    // précédente (voir scripts/tests/progression-automatique.mts) : elle ne
+    // remonte JAMAIS plus loin. La ligne « Dernières perfs », elle, reste
+    // volontairement chronologique — un élève veut y lire ce qu'il a soulevé
+    // la dernière fois, même si c'était il y a trois semaines. Les deux
+    // comportements coexistent par décision, pas par oubli : c'est pourquoi ce
+    // test n'a pas été réécrit, seulement requalifié.
     const idx = index([
       // Semaine 2 : dernière occurrence du soulevé de terre (absent en semaine 3).
       retour({ id: "s2", performedAt: "2026-07-13", entrées: [
@@ -211,6 +220,15 @@ await (async () => {
     ]);
     assert.equal(findPreviousPerformance(idx, { name: "Squat" })!.sets[1].loadUsed, "100 kg", "occurrence la plus récente");
     assert.equal(findPreviousPerformance(idx, { name: "Soulevé de terre" })!.sets[1].loadUsed, "120 kg", "remonte en semaine 2");
+    // Le contre-pied, sur le MÊME index : avec une occurrence cible, la
+    // recherche ne retombe pas sur le chronologique. Les retours de ce test ne
+    // portent pas d'occurrence (day/weekNumber nuls dans leur snapshot), donc
+    // la réponse est « aucune référence » — et non « 100 kg, qui traîne là ».
+    assert.equal(
+      findPreviousPerformance(idx, { name: "Squat" }, { weekNumber: 3, day: "Lundi" }),
+      null,
+      "aucun repli chronologique quand une occurrence est exigée",
+    );
   });
 
   await test("7. correspondance par INDEX : ancienne série 1 → série actuelle 1 (jamais de fusion ni de moyenne)", () => {

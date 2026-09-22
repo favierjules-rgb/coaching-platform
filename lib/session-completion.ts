@@ -88,8 +88,14 @@ function seriesDeMuscu(entries: readonly AdminExerciseFeedbackEntry[]): AdminExe
   );
 }
 
-/** Charge effective d'UNE série, en kg — `null` si elle n'est pas chiffrable. */
-function chargeEffective(loadUsed: string): number | null {
+/**
+ * Charge effective d'UNE série, en kg — `null` si elle n'est pas chiffrable.
+ *
+ * Exportée depuis le chantier progression automatique : le moteur de
+ * recommandation a besoin de la MÊME lecture de charge que le bilan de fin de
+ * séance. Deux analyseurs pour une seule notion finiraient par divergier.
+ */
+export function chargeEffective(loadUsed: string): number | null {
   return getEffectiveLoadKg(parseLoad(loadUsed ?? ""));
 }
 
