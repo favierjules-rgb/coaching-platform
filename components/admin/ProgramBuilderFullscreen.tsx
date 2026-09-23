@@ -20,6 +20,7 @@ import {
 
 import { restDaySession } from "@/components/admin/ProgramBuilder";
 import { SessionBlockPanel } from "@/components/admin/blocks/SessionBlockPanel";
+import { ProgressionReglageProvider } from "@/components/admin/ProgressionAutomatiqueToggle";
 import { BLOCK_COLOR_STYLES, blockCategoryLabel } from "@/components/admin/blocks/block-view-model";
 import { BannerUploadField } from "@/components/admin/BannerUploadField";
 import { CheckboxField, Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
@@ -413,23 +414,30 @@ export function ProgramBuilderFullscreen({
     return "À jour";
   }
 
+  // ══════════════════════════════════════════════════════════════════════
+  // ⚠️ LE BUILDER REMPLIT SON PARENT — IL NE SE REDONNE PAS UNE HAUTEUR
+  // ══════════════════════════════════════════════════════════════════════
+  // Il portait `min-h-dvh` (toutes tailles) plus `lg:h-dvh lg:overflow-hidden`.
+  // Or `AdminShell` le monte déjà dans `<main className="h-dvh w-full
+  // overflow-hidden">` : la hauteur du viewport était donc posée DEUX fois,
+  // et le `min-h-dvh` — sans préfixe — autorisait la croissance sous `lg`,
+  // là où plus rien ne défilait à l'intérieur. `h-full` suit simplement le
+  // parent, à toutes les largeurs.
+  //
+  // ⚠️ ET `relative` N'EST PAS DÉCORATIF. `overflow-hidden` ne rogne un
+  // descendant `position:absolute` que si le bloc conteneur de celui-ci est
+  // DANS le sous-arbre rogné. Sans ancrage positionné, un tel élément se
+  // cale sur le bloc conteneur initial — le document — et allonge
+  // `documentElement.scrollHeight` sans que rien ne soit visible : c'est
+  // exactement la bande noire sous le builder.
+  //
+  // ⚠️ UN SEUL FOURNISSEUR DE RÉGLAGE POUR TOUT LE BUILDER, ET C'EST LA
+  // GARANTIE. Le réglage « progression automatique » est global au couple
+  // (programme, exercice) : en n'ayant qu'une source pour toutes les semaines,
+  // deux boutons du même exercice ne peuvent pas diverger. Voir
+  // components/admin/ProgressionAutomatiqueToggle.tsx.
   return (
-    // ══════════════════════════════════════════════════════════════════════
-    // ⚠️ LE BUILDER REMPLIT SON PARENT — IL NE SE REDONNE PAS UNE HAUTEUR
-    // ══════════════════════════════════════════════════════════════════════
-    // Il portait `min-h-dvh` (toutes tailles) plus `lg:h-dvh lg:overflow-hidden`.
-    // Or `AdminShell` le monte déjà dans `<main className="h-dvh w-full
-    // overflow-hidden">` : la hauteur du viewport était donc posée DEUX fois,
-    // et le `min-h-dvh` — sans préfixe — autorisait la croissance sous `lg`,
-    // là où plus rien ne défilait à l'intérieur. `h-full` suit simplement le
-    // parent, à toutes les largeurs.
-    //
-    // ⚠️ ET `relative` N'EST PAS DÉCORATIF. `overflow-hidden` ne rogne un
-    // descendant `position:absolute` que si le bloc conteneur de celui-ci est
-    // DANS le sous-arbre rogné. Sans ancrage positionné, un tel élément se
-    // cale sur le bloc conteneur initial — le document — et allonge
-    // `documentElement.scrollHeight` sans que rien ne soit visible : c'est
-    // exactement la bande noire sous le builder.
+    <ProgressionReglageProvider programId={program.id || null}>
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-background text-foreground">
       {/* Barre du haut — jamais de sidebar admin ni de menu tableau de bord ici (voir AdminShell). */}
       <div className="flex h-14 flex-shrink-0 items-center justify-between gap-3 border-b border-border bg-card px-4">
@@ -772,5 +780,6 @@ export function ProgramBuilderFullscreen({
         </Modal>
       )}
     </div>
+    </ProgressionReglageProvider>
   );
 }

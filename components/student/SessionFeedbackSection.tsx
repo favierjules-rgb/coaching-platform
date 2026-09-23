@@ -20,6 +20,12 @@ import {
   normalizeExerciseName,
   parseRpeInput,
 } from "@/lib/previous-performance";
+import {
+  indicateursDExercice,
+  referenceDeLOccurrencePrecedente,
+  type Indicateurs,
+} from "@/lib/indicateurs-progression";
+import type { OccurrenceProgrammee } from "@/lib/occurrence-programmee";
 import { formatRpeFr, grilleRpe } from "@/lib/rpe";
 
 import { ExerciseFeedbackCard } from "@/components/student/ExerciseFeedbackCard";
@@ -48,7 +54,7 @@ import {
 import { cardioTypeLabels, formatDistanceMeters, formatDurationSeconds } from "@/lib/cardio";
 import { formaterDuree } from "@/lib/duree";
 import { orderedStrengthExercises, orderedStudentSessionBlocks, type StudentSessionBlockView } from "@/lib/student-session-blocks";
-import { calculatePlannedVsActualMetrics, formatTonnage } from "@/lib/training-metrics";
+import { calculatePlannedVsActualMetrics, formatTonnage, resolveExerciseMuscleGroup } from "@/lib/training-metrics";
 import { construireBilanFinSeance } from "@/lib/session-completion";
 import type {
   ActualSetEntry,
@@ -233,6 +239,28 @@ interface SessionFeedbackSectionProps {
   exercises?: Exercise[];
   cardioBlocks?: AdminCardioBlock[];
   sessionMuscleGroup: string;
+  /**
+   * L'OCCURRENCE PROGRAMMÉE de cette séance — (semaine, jour).
+   *
+   * C'est elle qui permet de retrouver la référence de progression : le MÊME
+   * jour, la semaine précédente. Sans elle, aucun indicateur ne s'affiche —
+   * et c'est le bon comportement : mieux vaut aucune recommandation qu'une
+   * recommandation calculée sur la mauvaise séance. Optionnelle pour que les
+   * appelants de démonstration et d'historique n'aient rien à changer.
+   */
+  occurrence?: OccurrenceProgrammee | null;
+  /**
+   * Le réglage « progression automatique » de chaque exercice — GLOBAL au
+   * couple (programme, exercice). La page de séance le résout depuis
+   * `program_exercise_progression` (voir hooks/useProgressionReglages.ts).
+   *
+   * Absent, la progression est considérée active — mais ce défaut est
+   * INATTEIGNABLE en pratique : le seul appelant qui ne fournit pas ce
+   * résolveur est le chemin de DÉMONSTRATION, qui ne fournit pas non plus
+   * d'`occurrence`. Sans occurrence, il n'y a aucune référence, donc aucun
+   * indicateur, quel que soit ce réglage.
+   */
+  progressionActivePourExercice?: (exercise: Exercise) => boolean;
   /* ══════════════════════════════════════════════════════════════════════
    * BRANCHEMENT HORS LIGNE — TOUT EST OPTIONNEL
    * ══════════════════════════════════════════════════════════════════════
@@ -299,6 +327,8 @@ export function SessionFeedbackSection({
   exercises,
   cardioBlocks,
   sessionMuscleGroup,
+  occurrence = null,
+  progressionActivePourExercice,
   source,
   authUserId = null,
   businessDate,
@@ -398,6 +428,38 @@ export function SessionFeedbackSection({
       }),
     [previousSource, previousStudentId, sessionId],
   );
+
+  /* ══════════════════════════════════════════════════════════════════════
+   * INDICATEURS DE PROGRESSION — la référence est l'OCCURRENCE N-1
+   * ══════════════════════════════════════════════════════════════════════
+   * ⚠️ CE N'EST PAS LA PERFORMANCE LA PLUS RÉCENTE. `previous` (la ligne
+   * « Dernières perfs ») reste chronologique, parce qu'un élève veut voir ce
+   * qu'il a soulevé la dernière fois. Les indicateurs, eux, comparent le
+   * MÊME jour de la semaine précédente : sur un programme
+   * lundi/mercredi/vendredi, le mercredi ne se compare pas au lundi.
+   *
+   * Sans occurrence connue, la table est vide et aucun indicateur ne
+   * s'affiche — le formulaire est alors exactement celui d'avant.
+   */
+  const indicateursParExercice = useMemo(() => {
+    const table = new Map<string, Indicateurs>();
+    for (const exercise of strengthExercises) {
+      const reference = referenceDeLOccurrencePrecedente(previousIndex, exercise, occurrence);
+      const indicateurs = indicateursDExercice({
+        progressionActive: progressionActivePourExercice ? progressionActivePourExercice(exercise) : true,
+        groupe: resolveExerciseMuscleGroup(exercise, sessionMuscleGroup),
+        repsPrescrites: exercise.reps,
+        // Résolution PURE et testée : lib/indicateurs-progression.ts. Elle ne
+        // retombe jamais sur le chronologique — voir son en-tête.
+        reference,
+        // L'unité de saisie voyage avec la référence : elle ne sert qu'à
+        // réécrire la charge recommandée dans la langue de l'élève.
+        unite: reference?.unite,
+      });
+      if (indicateurs.ok) table.set(exercise.id, indicateurs.indicateurs);
+    }
+    return table;
+  }, [occurrence, previousIndex, strengthExercises, progressionActivePourExercice, sessionMuscleGroup]);
 
   const [exerciseFeedback, setExerciseFeedback] = useState(() =>
     buildInitialFeedback(strengthExercises, studentId, sessionId),
@@ -1296,6 +1358,7 @@ export function SessionFeedbackSection({
             index={index}
             feedback={exerciseFeedback[exercise.id]}
             previous={findPreviousPerformance(previousIndex, exercise)}
+            indicateurs={indicateursParExercice.get(exercise.id) ?? null}
             onSetChange={(setNumber, field, value) => handleSetChange(exercise.id, setNumber, field, value)}
             onCommentChange={(value) => handleCommentChange(exercise.id, value)}
             substitute={substitutions[exercise.id] ?? null}

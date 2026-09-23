@@ -9,6 +9,7 @@ import { ActivityFeed } from "@/components/admin/ActivityFeed";
 import { AddCoachNoteModal } from "@/components/admin/AddCoachNoteModal";
 import { AdminOnboardingDetailModal } from "@/components/admin/AdminOnboardingDetailModal";
 import { AdminSection, InfoRow, TagList } from "@/components/admin/AdminSection";
+import { StudentPerformanceSection } from "@/components/admin/StudentPerformanceSection";
 import { AssignContentToStudentModal } from "@/components/admin/AssignContentToStudentModal";
 import { CoachNutritionHistory } from "@/components/admin/CoachNutritionHistory";
 import { EditStudentModal } from "@/components/admin/EditStudentModal";
@@ -1210,6 +1211,17 @@ export default function AdminStudentDetailPage() {
             )}
           </div>
         )}
+      </div>
+
+      {/* ⚠️ SECTION AJOUTÉE, RIEN N'EST DÉPLACÉ. Le profil n'a pas de barre
+          d'onglets : le transformer en onglets aurait déplacé tout le contenu
+          existant, ce que le cahier des charges interdit. « Performances »
+          s'ajoute donc à la pile, comme « Charge d'entraînement » au-dessus.
+          Les données sont celles DÉJÀ chargées par useSupabaseStudentDetail —
+          aucune requête supplémentaire. */}
+      <div className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
+        <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">Performances</h2>
+        <StudentPerformanceSection feedback={studentFeedback} studentId={student.id} />
       </div>
 
       <div className="rounded-card border border-border bg-card p-6 shadow-soft">

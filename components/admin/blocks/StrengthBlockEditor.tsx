@@ -3,6 +3,7 @@
 import { Copy, Plus } from "lucide-react";
 
 import { ExerciseRow, exerciseFromLibrary } from "@/components/admin/ProgramBuilder";
+import { ProgressionAutomatiqueToggle } from "@/components/admin/ProgressionAutomatiqueToggle";
 import { ExerciseSearchPicker } from "@/components/admin/ExerciseSearchPicker";
 import type { AdminExercise, ExerciseLibraryItem, StrengthTrainingBlock } from "@/types";
 
@@ -73,6 +74,12 @@ export function StrengthBlockEditor({
             onDrop={() => {}}
           />
           <div className="flex flex-wrap items-center gap-3 px-1">
+            {/* ⚠️ UN BOUTON PAR CARTE, MAIS UN SEUL RÉGLAGE. Le bouton lit le
+                réglage du couple (programme, exercice) — sans composante de
+                semaine. Toutes les occurrences de cet exercice, dans toutes
+                les semaines, affichent donc le même état et basculent
+                ensemble : voir components/admin/ProgressionAutomatiqueToggle.tsx. */}
+            <ProgressionAutomatiqueToggle exercise={exercise} />
             <button
               type="button"
               onClick={() => onExerciseDuplicate(exercise.id)}

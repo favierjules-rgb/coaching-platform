@@ -32,6 +32,12 @@
  * et la ligne d'affichage.
  */
 import { isCardioResultEntryName } from "@/lib/cardio-feedback";
+import {
+  cleOccurrence,
+  occurrenceDuRetour,
+  type OccurrenceProgrammee,
+  type ResoudreSeance,
+} from "@/lib/occurrence-programmee";
 import { formatRpeFr, lireRpe } from "@/lib/rpe";
 import { isPrescribedSnapshot } from "@/lib/workout-history";
 import type { AdminStudentFeedback } from "@/types";
@@ -85,11 +91,40 @@ export interface PreviousExercisePerf {
   exerciseRpe: number | null;
   performedAt: string | null;
   matchedBy: "library" | "name";
+  /**
+   * L'occurrence PROGRAMMÉE d'où vient cette performance — (semaine, jour).
+   * `null` pour un retour dont l'occurrence n'est pas identifiable (ni
+   * snapshot exploitable, ni séance vivante) : mesuré à 12 retours sur 125.
+   * C'est elle qui permet d'afficher « mercredi dernier » plutôt qu'une date
+   * nue, et de comparer deux occurrences successives du MÊME jour.
+   *
+   * ⚠️ OPTIONNELLE, ET C'EST DÉLIBÉRÉ. `buildPreviousPerformanceIndex` la
+   * renseigne toujours ; la rendre obligatoire aurait forcé la réécriture de
+   * quatre littéraux dans des tests d'affichage hors périmètre, qui décrivent
+   * une performance sans se soucier de son occurrence. « Absente » et
+   * « inconnue » veulent dire la même chose ici : aucune référence de
+   * progression.
+   */
+  occurrence?: OccurrenceProgrammee | null;
 }
 
 export interface PreviousPerformanceIndex {
   byLibraryId: Map<string, PreviousExercisePerf>;
   byName: Map<string, PreviousExercisePerf>;
+  /**
+   * TROISIÈME CARTE — « cet exercice, CE jour-là, CETTE semaine-là ».
+   *
+   * ⚠️ ELLE N'EST PAS UNE OPTIMISATION DES DEUX AUTRES, ELLE RÉPOND À UNE
+   * AUTRE QUESTION. `byLibraryId` et `byName` rendent la performance la plus
+   * RÉCENTE — ce qu'il faut pour la ligne « Dernières perfs ». Celle-ci rend
+   * la performance d'une occurrence PRÉCISE : sans elle, le mercredi se
+   * comparerait au lundi de la même semaine, qui est plus récent mais n'est
+   * pas le bon repère.
+   *
+   * Clé : `cleOccurrence(identité, occurrence)` — l'identité étant
+   * l'`exercise_library_id` ou le nom normalisé, les deux étant indexés.
+   */
+  byOccurrence: Map<string, PreviousExercisePerf>;
 }
 
 /* ─── Construction de l'index ─── */
@@ -141,10 +176,17 @@ export function buildPreviousPerformanceIndex(input: {
   studentId: string;
   currentSessionId: string | null;
   today?: string;
+  /**
+   * Résolveur d'occurrence depuis un identifiant de séance, INJECTÉ. Absent,
+   * seule la photographie du prescrit est lue — ce module reste pur et
+   * testable sans base. Voir `lib/occurrence-programmee.ts`.
+   */
+  resoudreSeance?: ResoudreSeance;
 }): PreviousPerformanceIndex {
   const today = input.today ?? new Date().toISOString().slice(0, 10);
   const byLibraryId = new Map<string, PreviousExercisePerf>();
   const byName = new Map<string, PreviousExercisePerf>();
+  const byOccurrence = new Map<string, PreviousExercisePerf>();
 
   const retenus = input.feedbacks
     .filter((f) => f.studentId === input.studentId)
@@ -155,6 +197,14 @@ export function buildPreviousPerformanceIndex(input: {
     .sort((a, b) => (feedbackSortKey(a) < feedbackSortKey(b) ? 1 : -1));
 
   for (const feedback of retenus) {
+    // L'occurrence de CE retour — (semaine, jour). `null` est un état normal
+    // et non un échec : le retour alimente alors les deux cartes
+    // chronologiques, mais aucune référence de progression.
+    const occurrence = occurrenceDuRetour(
+      { sessionId: feedback.sessionId, prescribedSnapshot: feedback.prescribedSnapshot },
+      input.resoudreSeance,
+    );
+
     // Nom normalisé → exercise_library_id, depuis la photographie du prescrit
     // posée à la soumission (source de l'identité stable). Lecture SEULE —
     // le snapshot n'est jamais modifié ni réécrit ici.
@@ -180,6 +230,7 @@ export function buildPreviousPerformanceIndex(input: {
         exerciseRpe: null,
         performedAt: feedback.performedAt ?? feedback.date ?? null,
         matchedBy: "name" as const,
+        occurrence,
       };
       // Donnée partielle conservée telle quelle : charge, répétitions ou RPE
       // peuvent manquer — on n'invente rien, on ne moyenne rien. `entry.rpe`
@@ -207,10 +258,24 @@ export function buildPreviousPerformanceIndex(input: {
       if (!byName.has(cle)) {
         byName.set(cle, perf);
       }
+      // Carte par occurrence : la même performance, rangée sous son
+      // (semaine, jour). Les deux identités y sont indexées, pour que la
+      // recherche par occurrence dispose des mêmes replis que la recherche
+      // chronologique.
+      if (occurrence) {
+        const cleNom = cleOccurrence(cle, occurrence);
+        if (!byOccurrence.has(cleNom)) byOccurrence.set(cleNom, perf);
+        if (libraryId) {
+          const cleBanque = cleOccurrence(libraryId, occurrence);
+          if (!byOccurrence.has(cleBanque)) {
+            byOccurrence.set(cleBanque, { ...perf, matchedBy: "library" });
+          }
+        }
+      }
     }
   }
 
-  return { byLibraryId, byName };
+  return { byLibraryId, byName, byOccurrence };
 }
 
 /**
@@ -221,7 +286,21 @@ export function buildPreviousPerformanceIndex(input: {
 export function findPreviousPerformance(
   index: PreviousPerformanceIndex,
   exercise: { name: string; libraryExerciseId?: string | null },
+  occurrenceCible?: OccurrenceProgrammee | null,
 ): PreviousExercisePerf | null {
+  // ⚠️ AVEC UNE OCCURRENCE CIBLE, LA RECHERCHE NE RETOMBE JAMAIS SUR LE
+  // CHRONOLOGIQUE. C'est tout l'enjeu : si le mercredi de la semaine
+  // précédente n'a pas été réalisé, la réponse est « aucune référence » — et
+  // non « le lundi de cette semaine, qui traîne dans l'index ». Un repli
+  // silencieux ici recréerait exactement le défaut corrigé.
+  if (occurrenceCible) {
+    if (exercise.libraryExerciseId) {
+      const parBanque = index.byOccurrence.get(cleOccurrence(exercise.libraryExerciseId, occurrenceCible));
+      if (parBanque) return parBanque;
+    }
+    return index.byOccurrence.get(cleOccurrence(normalizeExerciseName(exercise.name), occurrenceCible)) ?? null;
+  }
+
   if (exercise.libraryExerciseId) {
     const parBanque = index.byLibraryId.get(exercise.libraryExerciseId);
     if (parBanque) return parBanque;

@@ -13,6 +13,13 @@ import {
   type ResolveurUrlVideo,
 } from "@/components/student/ExerciseVideoField";
 import {
+  ecartReps,
+  formaterEcartReps,
+  libelleCharge,
+  libelleEcartReps,
+  type Indicateurs,
+} from "@/lib/indicateurs-progression";
+import {
   formatPreviousSetLabel,
   resolveSetPlaceholders,
   type PreviousExercisePerf,
@@ -32,6 +39,19 @@ interface ExerciseFeedbackCardProps {
    * formulaire ni dans le payload. Optionnelle : null/absente = aucun repère.
    */
   previous?: PreviousExercisePerf | null;
+  /**
+   * Indicateurs de progression automatique de CET exercice, déjà calculés
+   * par le moteur du lot A (voir lib/indicateurs-progression.ts).
+   *
+   * ⚠️ LA CARTE NE CALCULE RIEN. Elle reçoit la recommandation et la
+   * référence, elle les affiche. Aucune règle de charge, aucune borne de
+   * plage, aucun incrément ne doit apparaître dans ce fichier.
+   *
+   * `null`/absente = aucun indicateur : progression désactivée, plage
+   * prescrite ambiguë, ou pas de référence à l'occurrence précédente. Le
+   * formulaire reste alors EXACTEMENT celui d'avant ce chantier.
+   */
+  indicateurs?: Indicateurs | null;
   /**
    * Option B : le RPE se saisit PAR SÉRIE (champ `rpe` de chaque ligne).
    * L'ancien sélecteur RPE d'exercice a été retiré — le RPE global
@@ -93,6 +113,7 @@ export function ExerciseFeedbackCard({
   index,
   feedback,
   previous,
+  indicateurs = null,
   onSetChange,
   onCommentChange,
   substitute = null,
@@ -115,6 +136,15 @@ export function ExerciseFeedbackCard({
   const [lecteurOuvert, setLecteurOuvert] = useState(false);
   const champ =
     "w-full min-w-0 rounded-control border border-border bg-background px-3 py-2.5 text-sm text-foreground transition-colors placeholder:text-muted-foreground/60 focus:border-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30";
+  // Badge d'indicateur : COIN SUPÉRIEUR GAUCHE de la cellule, hors du flux,
+  // et `pointer-events-none` pour qu'un pouce qui vise le champ ne tombe
+  // jamais sur le badge. Aucune taille en px figée (invariant vérifié par
+  // scripts/tests/student-training-ui.mts, test 28) : uniquement l'échelle
+  // Tailwind, pour que le zoom 150 % reste utilisable.
+  const badge =
+    "pointer-events-none absolute -left-1 -top-1.5 z-10 rounded-full bg-card px-1 text-xs font-semibold leading-tight";
+  const badgeVert = `${badge} text-emerald-600 dark:text-emerald-400`;
+  const badgeRouge = `${badge} text-red-600 dark:text-red-400`;
 
   return (
     <div className="rounded-card border border-border bg-card p-4 shadow-soft sm:p-6">
@@ -202,6 +232,10 @@ export function ExerciseFeedbackCard({
             const previousSet = previous?.sets[set.setNumber] ?? null;
             const previousLabel = formatPreviousSetLabel(previousSet);
             const placeholders = resolveSetPlaceholders(exercise, previousSet, set.setNumber);
+            // L'écart de CETTE série face à la référence de l'occurrence
+            // précédente. `null` dès qu'il n'y a rien à comparer — ou que
+            // l'écart est nul : un badge « 0 » n'apprendrait rien.
+            const ecart = indicateurs ? ecartReps(set.repsDone, indicateurs.reference.reps) : null;
             return (
               <div key={set.setNumber} className="flex flex-col gap-1">
                 {previousLabel && (
@@ -224,22 +258,47 @@ export function ExerciseFeedbackCard({
                   <span className="col-span-2 text-xs font-medium text-muted-foreground sm:col-span-1">
                     Série {set.setNumber}
                   </span>
-                  <input
-                    value={set.loadUsed}
-                    onChange={(event) =>
-                      onSetChange(set.setNumber, "loadUsed", event.target.value)
-                    }
-                    placeholder={placeholders.load}
-                    className={champ}
-                  />
-                  <input
-                    value={set.repsDone}
-                    onChange={(event) =>
-                      onSetChange(set.setNumber, "repsDone", event.target.value)
-                    }
-                    placeholder={placeholders.reps}
-                    className={champ}
-                  />
+                  {/* CELLULE CHARGE — la flèche de charge vit dans son coin
+                      supérieur gauche. Le `relative` est posé sur un
+                      enveloppe dédiée : l'`input` lui-même reste intact,
+                      mêmes classes, même comportement de saisie. */}
+                  <div className="relative min-w-0">
+                    {indicateurs?.sensCharge && (
+                      <span
+                        aria-label={libelleCharge(indicateurs)}
+                        className={indicateurs.sensCharge === "hausse" ? badgeVert : badgeRouge}
+                      >
+                        {indicateurs.sensCharge === "hausse" ? "↑" : "↓"}
+                      </span>
+                    )}
+                    <input
+                      value={set.loadUsed}
+                      onChange={(event) =>
+                        onSetChange(set.setNumber, "loadUsed", event.target.value)
+                      }
+                      placeholder={placeholders.load}
+                      className={champ}
+                    />
+                  </div>
+                  {/* CELLULE RÉPÉTITIONS — l'écart +N / -N, sans plafond. */}
+                  <div className="relative min-w-0">
+                    {ecart !== null && (
+                      <span
+                        aria-label={libelleEcartReps(ecart, set.setNumber)}
+                        className={ecart > 0 ? badgeVert : badgeRouge}
+                      >
+                        {formaterEcartReps(ecart)}
+                      </span>
+                    )}
+                    <input
+                      value={set.repsDone}
+                      onChange={(event) =>
+                        onSetChange(set.setNumber, "repsDone", event.target.value)
+                      }
+                      placeholder={placeholders.reps}
+                      className={champ}
+                    />
+                  </div>
                   <input
                     value={set.rpe}
                     onChange={(event) =>

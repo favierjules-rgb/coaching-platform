@@ -154,6 +154,20 @@ export const MIGRATION_DEBUT_PROGRAMME = "20260923090000_date_debut_programme.sq
  */
 export const MIGRATION_SUPPRESSION_NOLIO = "20260924090000_suppression_nolio.sql";
 
+/**
+ * PROGRESSION AUTOMATIQUE PAR EXERCICE — le réglage ON/OFF, GLOBAL au couple
+ * (programme, exercice).
+ *
+ * Elle crée `program_exercise_progression` avec DEUX identités d'exercice
+ * mutuellement exclusives (fiche de banque, ou nom normalisé pour un exercice
+ * en texte libre), un CHECK qui impose « exactement une », deux index uniques
+ * partiels, et la RLS calquée sur `program_weeks`. Aucune ligne écrite :
+ * absence de ligne = OFF, donc aucun programme existant ne change de
+ * comportement.
+ */
+export const MIGRATION_PROGRESSION_AUTOMATIQUE =
+  "20260925090000_progression_automatique_par_exercice.sql";
+
 export const MIGRATIONS_COURSES: readonly string[] = [
   MIGRATION_C2,
   MIGRATION_C3,
@@ -177,10 +191,11 @@ export const MIGRATIONS_APRES_C0_1: readonly string[] = [
   MIGRATION_C5_1,
   MIGRATION_DEBUT_PROGRAMME,
   MIGRATION_SUPPRESSION_NOLIO,
+  MIGRATION_PROGRESSION_AUTOMATIQUE,
 ];
 
 /** Le compte attendu — nécessaire, jamais suffisant. */
-export const NOMBRE_DE_MIGRATIONS = 90;
+export const NOMBRE_DE_MIGRATIONS = 91;
 
 /**
  * L'empreinte des 79 migrations ANTÉRIEURES à C0.1, dans l'ordre.

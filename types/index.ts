@@ -152,6 +152,19 @@ export interface WorkoutSession {
   id: string;
   programId: string;
   day: string;
+  /**
+   * Numéro de semaine de la séance dans le programme — identique à
+   * `program_weeks.week_number` et à `AdminWorkoutSession.weekNumber`.
+   *
+   * Avec `day`, il forme l'OCCURRENCE PROGRAMMÉE de la séance, qui est la
+   * clé de la progression automatique : la référence de charge est le même
+   * jour, la semaine précédente (voir lib/occurrence-programmee.ts).
+   *
+   * OPTIONNEL : les séances de démonstration et les snapshots hors ligne
+   * écrits avant ce chantier ne le portent pas. Absent, aucun indicateur de
+   * progression ne s'affiche — jamais une occurrence devinée.
+   */
+  weekNumber?: number;
   name: string;
   muscleGroups: string;
   durationMinutes: number;
