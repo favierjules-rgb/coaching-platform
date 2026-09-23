@@ -37,7 +37,7 @@ import {
 import { occurrencePrecedente, type OccurrenceProgrammee } from "@/lib/occurrence-programmee";
 import {
   lirePlageReps,
-  referenceDeProgression,
+  referenceDeSurcharge,
   type MotifPlageRefusee,
   type PlageReps,
   type SerieRealisee,
@@ -136,7 +136,12 @@ export function referenceDeLOccurrencePrecedente(
   const perf = findPreviousPerformance(index, exercise, precedente);
   if (!perf) return null;
   const series = seriesRealiseesDe(perf);
-  const lue = referenceDeProgression(series);
+  // ⚠️ `referenceDeSurcharge` ET NON `referenceDeProgression` : la charge la
+  // plus lourde réellement tenue, et ce que l'élève a fait à cette charge.
+  // L'autre fonction refuse une séance à charge variable, ce qui est juste
+  // pour tracer un point de courbe et faux pour calculer une progression.
+  // Voir son en-tête dans lib/reference-progression.ts.
+  const lue = referenceDeSurcharge(series);
   if (!lue.ok) return null;
   // L'unité voyage AVEC la référence : c'est la seule façon de savoir, au
   // moment d'afficher, dans quelle langue l'élève a écrit sa charge.
@@ -244,6 +249,233 @@ export function ecartReps(repsSaisies: string | null | undefined, repsReference:
   return ecart === 0 ? null : ecart;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+ * NIVEAU 1 — COMPARAISON IMMÉDIATE À LA PERFORMANCE HISTORIQUE
+ * ═══════════════════════════════════════════════════════════════════════
+ *
+ * ⚠️ DEUX NIVEAUX DISTINCTS, ET C'EST TOUT L'OBJET DE CETTE SECTION.
+ *
+ *   1. CE NIVEAU-CI — « comment cette série se compare-t-elle à la
+ *      référence, et faut-il changer de charge à la suivante ? »
+ *   2. `indicateursDExercice` plus bas — « que faut-il prescrire la
+ *      prochaine fois ? »
+ *
+ * ────────────────────────────────────────────────────────────────────────
+ * ⚠️ CE NIVEAU NE DÉPEND DE RIEN : NI DU RÉGLAGE, NI DU MOTEUR, NI DU GROUPE
+ * ────────────────────────────────────────────────────────────────────────
+ * Règle posée le 23/09/2026, et c'est une CORRECTION explicite d'une version
+ * antérieure de ce module :
+ *
+ *   • pas de `progressionActive` — un coach qui n'a pas activé la surcharge
+ *     automatique doit quand même voir que son élève a mis 2 kg de plus ;
+ *   • pas d'appel à `recommanderProchaineCible` — les indicateurs immédiats
+ *     ne doivent PAS dépendre du moteur de surcharge automatique ;
+ *   • pas de groupe musculaire, d'où son ABSENCE dans `ContexteComparaison`.
+ *     Un exercice sans tarif de progression (cardio, full-body) garde tous
+ *     ses indicateurs immédiats. Cette absence est structurelle : la
+ *     fonction ne peut pas consulter une donnée qu'elle ne reçoit pas.
+ *
+ * La seule entrée est donc la FOURCHETTE PRESCRITE, lue par `lirePlageReps`.
+ * Une version précédente demandait son verdict au moteur ; la conséquence
+ * était qu'un exercice non tarifé n'avait plus ni ✓/✕ ni flèche. C'est
+ * exactement ce que cette version corrige.
+ *
+ * ⚠️ DIVERGENCE ASSUMÉE AVEC LE MOTEUR, À LA BORNE HAUTE. Le moteur monte la
+ * charge dès que la borne haute est ATTEINTE (reps >= max) ; la flèche de
+ * conseil, elle, n'apparaît qu'au-dessus de la fourchette (reps > max) —
+ * règle posée : « 14 reps → ↑ », et 8 à 13 est la fourchette visée, donc
+ * 13 reps n'est pas un débordement. Les deux niveaux répondent à deux
+ * questions différentes et n'ont pas à coïncider.
+ *
+ * ⚠️ AUCUNE DÉCISION DE CHARGE ICI POUR AUTANT : ce niveau ne calcule jamais
+ * un kilogramme à prescrire. Il dit « plus haut », « plus bas », « tenu »,
+ * « pas tenu ». Le combien reste la propriété exclusive de
+ * lib/progression-automatique.ts.
+ */
+
+/** Le sens d'un écart de charge entre la saisie et la référence. */
+export type SensEcartCharge = "hausse" | "baisse" | "identique";
+
+/** Le verdict ✓/✕ — n'a de sens que lorsque la charge MONTE. */
+export type TenueDeLaCharge = "tenue" | "insuffisante";
+
+export interface ComparaisonImmediate {
+  readonly sens: SensEcartCharge;
+  /**
+   * Écart de charge EFFECTIF, signé, en kg. `0` quand les charges sont
+   * égales, et TOUJOURS renseigné dès que la charge a bougé : une charge
+   * modifiée affiche son écart factuel, hausse comme baisse. À afficher via
+   * `formaterEcartChargeKg`, qui le remet dans l'unité de saisie.
+   */
+  readonly ecartChargeKg: number;
+  /**
+   * Écart de répétitions — RENSEIGNÉ UNIQUEMENT À CHARGE ÉGALE.
+   *
+   * ⚠️ `null` DÈS QUE LA CHARGE A BOUGÉ, et ce n'est pas une omission.
+   * Comparer les 10 répétitions faites à 47 kg aux 13 faites à 45 kg
+   * afficherait « −3 » alors que l'élève a progressé. C'est exactement le
+   * faux négatif que cette règle interdit. Même raison à la baisse : « +4 »
+   * sur une charge allégée de 5 kg n'est pas une progression.
+   *
+   * `null` aussi quand l'écart est NUL, règle inchangée depuis le lot B : un
+   * badge « 0 » n'apprend rien. C'est `ecartReps` — la primitive déjà
+   * validée — qui est appelée, et non une seconde soustraction.
+   */
+  readonly ecartReps: number | null;
+  /**
+   * ✓ ou ✕ — RENSEIGNÉ UNIQUEMENT QUAND LA CHARGE MONTE.
+   *
+   * Règle posée, fourchette 8–13 : charge supérieure → ✓ si les répétitions
+   * atteignent la borne BASSE (reps >= 8), ✕ sinon. À charge égale l'écart de
+   * répétitions dit déjà tout ; à la baisse, rien n'est concluant et aucun
+   * verdict n'est rendu — seul l'écart factuel s'affiche.
+   */
+  readonly tenue: TenueDeLaCharge | null;
+}
+
+/**
+ * TOUT CE QU'IL FAUT POUR COMPARER — et rien de plus.
+ *
+ * ⚠️ AUCUN GROUPE MUSCULAIRE, AUCUN RÉGLAGE. Voir l'en-tête de section : cette
+ * absence est ce qui garantit que les indicateurs immédiats restent
+ * disponibles sur un exercice sans tarif de progression automatique.
+ *
+ * `reference` peut être `null` — semaine 1, occurrence N-1 non réalisée : il
+ * n'y a alors aucun écart à afficher, mais le CONSEIL de série suivante reste
+ * calculable, puisqu'il ne regarde que la prescription.
+ */
+export interface ContexteComparaison {
+  readonly reference: { readonly chargeKg: number; readonly reps: number } | null;
+  readonly plage: PlageReps;
+  /** Unité de SAISIE, pour l'affichage seul. Jamais un calcul. */
+  readonly unite: UniteCharge;
+}
+
+/**
+ * Le contexte de comparaison d'un exercice, ou `null` s'il n'y a rien à
+ * comparer.
+ *
+ * Le seul refus possible est une PLAGE PRESCRITE inexploitable : sans
+ * fourchette lisible, ni ✓/✕ ni conseil n'ont de sens.
+ */
+export function contexteDeComparaison(entree: {
+  readonly repsPrescrites: string | null | undefined;
+  readonly reference: { readonly chargeKg: number; readonly reps: number; readonly unite?: UniteCharge } | null;
+}): ContexteComparaison | null {
+  const plage = lirePlageReps(entree.repsPrescrites);
+  if (!plage.ok) return null;
+  return {
+    reference: entree.reference ? { chargeKg: entree.reference.chargeKg, reps: entree.reference.reps } : null,
+    plage: plage.plage,
+    unite: entree.reference?.unite ?? "totale",
+  };
+}
+
+/** Les répétitions saisies, ou `null` si le champ n'est pas un entier lisible. */
+function repsLues(repsSaisies: string | null | undefined): number | null {
+  const brut = (repsSaisies ?? "").trim();
+  if (brut === "" || !/^\d+$/.test(brut)) return null;
+  return Number(brut);
+}
+
+/**
+ * Compare UNE série saisie à la référence.
+ *
+ * `null` quand il n'y a rien à comparer : pas de référence, ou charge ou
+ * répétitions absentes ou illisibles. Jamais un verdict sur une saisie
+ * incomplète — et en particulier JAMAIS d'écart de répétitions quand la
+ * charge n'est pas saisie : une charge inconnue n'est pas une charge égale.
+ */
+export function comparerALaReference(
+  contexte: ContexteComparaison,
+  serie: { readonly chargeSaisie: string | null | undefined; readonly repsSaisies: string | null | undefined },
+): ComparaisonImmediate | null {
+  const reference = contexte.reference;
+  if (!reference) return null;
+
+  const chargeKg = getEffectiveLoadKg(parseLoad(serie.chargeSaisie ?? ""));
+  if (chargeKg === null || chargeKg <= 0) return null;
+
+  const reps = repsLues(serie.repsSaisies);
+  if (reps === null) return null;
+
+  const ecartChargeKg = Math.round((chargeKg - reference.chargeKg) * 100) / 100;
+  const sens: SensEcartCharge = ecartChargeKg > 0 ? "hausse" : ecartChargeKg < 0 ? "baisse" : "identique";
+
+  return {
+    sens,
+    ecartChargeKg,
+    // À CHARGE ÉGALE SEULEMENT, et via la primitive du lot B.
+    ecartReps: sens === "identique" ? ecartReps(String(reps), reference.reps) : null,
+    // À LA HAUSSE SEULEMENT, jugé sur la borne BASSE prescrite.
+    tenue: sens === "hausse" ? (reps >= contexte.plage.min ? "tenue" : "insuffisante") : null,
+  };
+}
+
+/** Le conseil porté sur la série SUIVANTE, d'après la série qu'on vient de faire. */
+export type ConseilSerieSuivante = "monter" | "baisser";
+
+/**
+ * Faut-il changer la charge à la série suivante ?
+ *
+ * Règle posée, fourchette 8–13 : au-dessus de la fourchette (14) → `monter` ;
+ * en dessous (7) → `baisser` ; DANS la fourchette, bornes comprises (8 à 13)
+ * → `null`, il n'y a rien à conseiller.
+ *
+ * ⚠️ NI HISTORIQUE, NI RÉGLAGE, NI GROUPE, NI MOTEUR. Ce conseil s'affiche dès
+ * la première séance, sans aucune référence passée, et sur un exercice sans
+ * tarif de progression automatique. Il ne dit pas de combien : seulement dans
+ * quel sens.
+ */
+export function conseilSerieSuivante(
+  contexte: ContexteComparaison,
+  repsSaisies: string | null | undefined,
+): ConseilSerieSuivante | null {
+  const reps = repsLues(repsSaisies);
+  if (reps === null) return null;
+  if (reps > contexte.plage.max) return "monter";
+  if (reps < contexte.plage.min) return "baisser";
+  return null;
+}
+
+/** L'écart de charge tel qu'il s'affiche : `+2 kg`, `-2,5 kg`, `+1 kg / haltère`. */
+export function formaterEcartChargeKg(ecartChargeKg: number, unite: UniteCharge): string {
+  if (!Number.isFinite(ecartChargeKg)) return "—";
+  const signe = ecartChargeKg > 0 ? "+" : "-";
+  return `${signe}${formaterChargeUtilisateur(Math.abs(ecartChargeKg), unite)}`;
+}
+
+/** Le badge d'écart de charge, verdict compris : `+2 kg ✓`, `-2,5 kg`. */
+export function texteEcartCharge(comparaison: ComparaisonImmediate, unite: UniteCharge): string {
+  const valeur = formaterEcartChargeKg(comparaison.ecartChargeKg, unite);
+  if (comparaison.tenue === "tenue") return `${valeur} ✓`;
+  if (comparaison.tenue === "insuffisante") return `${valeur} ✕`;
+  return valeur;
+}
+
+/** Le libellé lu pour l'écart de charge d'une série. */
+export function libelleEcartCharge(comparaison: ComparaisonImmediate, unite: UniteCharge, numeroSerie: number): string {
+  const valeur = formaterChargeUtilisateur(Math.abs(comparaison.ecartChargeKg), unite);
+  const sens = comparaison.sens === "hausse" ? "de plus" : "de moins";
+  const base = `Série ${numeroSerie} : ${valeur} ${sens} que la référence`;
+  if (comparaison.tenue === "tenue") return `${base}, charge tenue`;
+  if (comparaison.tenue === "insuffisante") return `${base}, répétitions sous la borne basse prescrite`;
+  return base;
+}
+
+/**
+ * Le libellé lu pour la flèche de conseil.
+ *
+ * ⚠️ IL NOMME LA CELLULE ET LA SÉRIE. La flèche est portée par la cellule
+ * CHARGE de la série SUIVANTE : sans lecteur d'écran, la position le dit ;
+ * avec, c'est ce libellé qui le dit.
+ */
+export function libelleConseilSerieSuivante(conseil: ConseilSerieSuivante, numeroSerie: number): string {
+  return conseil === "monter"
+    ? `Série ${numeroSerie} : augmenter la charge, fourchette dépassée à la série précédente`
+    : `Série ${numeroSerie} : réduire la charge, fourchette non atteinte à la série précédente`;
+}
+
 /* ─── Indicateurs d'un exercice ─── */
 
 /** Sens de la flèche de charge, ou `null` quand la charge ne bouge pas. */
@@ -257,7 +489,16 @@ export interface Indicateurs {
   readonly reference: { readonly chargeKg: number; readonly reps: number };
   /** La recommandation du moteur du lot A, telle quelle. */
   readonly recommandation: Recommandation;
-  /** ↑ / ↓ dans la cellule CHARGE, `null` si la charge est inchangée. */
+  /**
+   * Le SENS de la recommandation, `null` si la charge est maintenue.
+   *
+   * ⚠️ CE N'EST PLUS UN PICTOGRAMME DE CELLULE. Depuis le lot 2, la cellule
+   * CHARGE porte la comparaison immédiate (à gauche) et le conseil de série
+   * suivante (à droite) ; la recommandation, elle, est passée DANS le champ —
+   * placeholder « Reco 47 kg » — et ce sens alimente le libellé accessible
+   * qui l'accompagne (`libelleCharge`). Deux flèches identiques dans la même
+   * cellule ne voulaient plus rien dire.
+   */
   readonly sensCharge: SensCharge | null;
   /** La plage prescrite effectivement lue — utile au libellé accessible. */
   readonly plage: PlageReps;

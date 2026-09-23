@@ -13,10 +13,16 @@ import {
   type ResolveurUrlVideo,
 } from "@/components/student/ExerciseVideoField";
 import {
-  ecartReps,
+  comparerALaReference,
+  conseilSerieSuivante,
+  formaterChargeUtilisateur,
   formaterEcartReps,
   libelleCharge,
+  libelleConseilSerieSuivante,
+  libelleEcartCharge,
   libelleEcartReps,
+  texteEcartCharge,
+  type ContexteComparaison,
   type Indicateurs,
 } from "@/lib/indicateurs-progression";
 import {
@@ -52,6 +58,20 @@ interface ExerciseFeedbackCardProps {
    * formulaire reste alors EXACTEMENT celui d'avant ce chantier.
    */
   indicateurs?: Indicateurs | null;
+  /**
+   * CONTEXTE DE COMPARAISON IMMÉDIATE — indépendant du réglage ON/OFF.
+   *
+   * ⚠️ CE N'EST PAS `indicateurs`, ET LA DIFFÉRENCE EST LE LOT 2. `indicateurs`
+   * porte la RECOMMANDATION (que prescrire la prochaine fois), et n'existe que
+   * si la progression automatique est activée. `comparaison` porte la
+   * COMPARAISON (ce que cette série vaut face à la référence) : elle s'affiche
+   * même progression désactivée, parce qu'un écart de charge constaté n'est pas
+   * une recommandation.
+   *
+   * `null`/absente = aucune comparaison : plage prescrite inexploitable, ou
+   * appelant qui n'a rien à voir avec la progression (récapitulatif, démo).
+   */
+  comparaison?: ContexteComparaison | null;
   /**
    * Option B : le RPE se saisit PAR SÉRIE (champ `rpe` de chaque ligne).
    * L'ancien sélecteur RPE d'exercice a été retiré — le RPE global
@@ -114,6 +134,7 @@ export function ExerciseFeedbackCard({
   feedback,
   previous,
   indicateurs = null,
+  comparaison = null,
   onSetChange,
   onCommentChange,
   substitute = null,
@@ -145,6 +166,18 @@ export function ExerciseFeedbackCard({
     "pointer-events-none absolute -left-1 -top-1.5 z-10 rounded-full bg-card px-1 text-xs font-semibold leading-tight";
   const badgeVert = `${badge} text-emerald-600 dark:text-emerald-400`;
   const badgeRouge = `${badge} text-red-600 dark:text-red-400`;
+  // Un écart de charge à la BAISSE est un FAIT, pas un verdict : il s'affiche
+  // en gris. Le peindre en rouge conclurait « c'est mauvais » alors que
+  // l'élève a peut-être allégé pour tenir la fourchette prescrite — c'est
+  // exactement la conclusion naïve que la règle du lot 2 interdit.
+  const badgeNeutre = `${badge} text-muted-foreground`;
+  // DEUXIÈME EMPLACEMENT, COIN SUPÉRIEUR DROIT de la cellule CHARGE. Il
+  // existe parce que cette cellule porte deux informations de natures
+  // différentes : à gauche ce qui s'est PASSÉ (écart face à la référence), à
+  // droite ce qu'il faut FAIRE à cette série (conseil issu de la précédente).
+  // Les superposer au même coin les rendrait illisibles.
+  const badgeConseil =
+    "pointer-events-none absolute -right-1 -top-1.5 z-10 rounded-full bg-card px-1 text-xs font-semibold leading-tight";
 
   return (
     <div className="rounded-card border border-border bg-card p-4 shadow-soft sm:p-6">
@@ -223,7 +256,7 @@ export function ExerciseFeedbackCard({
         )}
 
         <div className="mb-4 flex flex-col gap-3">
-          {feedback.sets.map((set) => {
+          {feedback.sets.map((set, position) => {
             // Correspondance par INDEX de série (ancienne série N → série N).
             // PRIORITÉ champ par champ inchangée : charge/reps = prescription
             // sinon dernière perf sinon neutre ; RPE = prescription (RPE
@@ -231,11 +264,39 @@ export function ExerciseFeedbackCard({
             // ligne « Dernières perfs ». La saisie réelle (value) masque tout.
             const previousSet = previous?.sets[set.setNumber] ?? null;
             const previousLabel = formatPreviousSetLabel(previousSet);
-            const placeholders = resolveSetPlaceholders(exercise, previousSet, set.setNumber);
-            // L'écart de CETTE série face à la référence de l'occurrence
-            // précédente. `null` dès qu'il n'y a rien à comparer — ou que
-            // l'écart est nul : un badge « 0 » n'apprendrait rien.
-            const ecart = indicateurs ? ecartReps(set.repsDone, indicateurs.reference.reps) : null;
+            // PRIORITÉ DE LA RECOMMANDATION (lot 3) : quand la progression
+            // automatique est active, la cible calculée passe devant la
+            // prescription du coach DANS LES PLACEHOLDERS — jamais dans
+            // `value`, jamais dans l'état, jamais dans le payload. Progression
+            // désactivée : `indicateurs` vaut null, la prescription est
+            // strictement intacte.
+            const placeholders = resolveSetPlaceholders(
+              exercise,
+              previousSet,
+              set.setNumber,
+              indicateurs
+                ? {
+                    load: formaterChargeUtilisateur(indicateurs.recommandation.chargeKg, indicateurs.unite),
+                    reps: String(indicateurs.recommandation.reps),
+                  }
+                : null,
+            );
+            // COMPARAISON IMMÉDIATE de CETTE série (lot 2) — indépendante du
+            // réglage ON/OFF. `null` dès qu'il n'y a rien à comparer : pas de
+            // référence, charge ou répétitions non saisies ou illisibles.
+            const comparee = comparaison
+              ? comparerALaReference(comparaison, { chargeSaisie: set.loadUsed, repsSaisies: set.repsDone })
+              : null;
+            // L'écart de répétitions n'existe QU'À CHARGE ÉGALE — la règle est
+            // portée par `comparerALaReference`, pas par cette carte. Un écart
+            // nul reste masqué : un badge « 0 » n'apprendrait rien.
+            const ecart = comparee?.ecartReps ?? null;
+            // LE CONSEIL EST PORTÉ PAR LA SÉRIE SUIVANTE : celui affiché ici
+            // vient des répétitions de la série PRÉCÉDENTE. La série 1 n'en
+            // porte donc aucun — il n'y a rien avant elle.
+            const precedente = position > 0 ? feedback.sets[position - 1] : null;
+            const conseil =
+              comparaison && precedente ? conseilSerieSuivante(comparaison, precedente.repsDone) : null;
             return (
               <div key={set.setNumber} className="flex flex-col gap-1">
                 {previousLabel && (
@@ -258,17 +319,39 @@ export function ExerciseFeedbackCard({
                   <span className="col-span-2 text-xs font-medium text-muted-foreground sm:col-span-1">
                     Série {set.setNumber}
                   </span>
-                  {/* CELLULE CHARGE — la flèche de charge vit dans son coin
-                      supérieur gauche. Le `relative` est posé sur un
-                      enveloppe dédiée : l'`input` lui-même reste intact,
-                      mêmes classes, même comportement de saisie. */}
+                  {/* CELLULE CHARGE — DEUX INFORMATIONS, DEUX COINS.
+                      À GAUCHE : l'écart de charge face à la référence, verdict
+                      ✓/✕ compris quand il est pertinent.
+                      À DROITE : la flèche de conseil, portée par CETTE série et
+                      déduite de la PRÉCÉDENTE.
+                      Le `relative` est posé sur une enveloppe dédiée :
+                      l'`input` lui-même reste intact, mêmes classes, même
+                      comportement de saisie. */}
                   <div className="relative min-w-0">
-                    {indicateurs?.sensCharge && (
+                    {comparee && comparee.ecartChargeKg !== 0 && (
                       <span
-                        aria-label={libelleCharge(indicateurs)}
-                        className={indicateurs.sensCharge === "hausse" ? badgeVert : badgeRouge}
+                        aria-label={libelleEcartCharge(comparee, comparaison?.unite ?? "totale", set.setNumber)}
+                        className={
+                          comparee.tenue === "tenue"
+                            ? badgeVert
+                            : comparee.tenue === "insuffisante"
+                              ? badgeRouge
+                              : badgeNeutre
+                        }
                       >
-                        {indicateurs.sensCharge === "hausse" ? "↑" : "↓"}
+                        {texteEcartCharge(comparee, comparaison?.unite ?? "totale")}
+                      </span>
+                    )}
+                    {conseil && (
+                      <span
+                        aria-label={libelleConseilSerieSuivante(conseil, set.setNumber)}
+                        className={
+                          conseil === "monter"
+                            ? `${badgeConseil} text-emerald-600 dark:text-emerald-400`
+                            : `${badgeConseil} text-red-600 dark:text-red-400`
+                        }
+                      >
+                        {conseil === "monter" ? "↑" : "↓"}
                       </span>
                     )}
                     <input
@@ -276,6 +359,12 @@ export function ExerciseFeedbackCard({
                       onChange={(event) =>
                         onSetChange(set.setNumber, "loadUsed", event.target.value)
                       }
+                      // Le placeholder montre la cible (« Reco 47 kg ») ; ce
+                      // libellé dit en plus le SENS — ce que la flèche de
+                      // charge disait avant le lot 2, désormais porté par le
+                      // champ lui-même. Sans recommandation, aucun libellé
+                      // n'est posé : le champ est exactement celui d'avant.
+                      {...(indicateurs ? { "aria-label": libelleCharge(indicateurs) } : {})}
                       placeholder={placeholders.load}
                       className={champ}
                     />

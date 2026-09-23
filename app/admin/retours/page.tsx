@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { AlertTriangle, CheckCheck, MessageSquare, RotateCcw } from "lucide-react";
 
 import { FeedbackDetailModal, feedbackTypeDisplayLabel } from "@/components/admin/FeedbackDetailModal";
@@ -11,7 +11,17 @@ import { useSupabaseAdminFeedback } from "@/hooks/useSupabaseAdminFeedback";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { feedbackStatusLabels, formatDate, fullName, matchesTextSearch } from "@/lib/admin";
 import { formatRpeFr } from "@/lib/rpe";
-import type { FeedbackStatus, FeedbackType } from "@/types";
+import type { AdminStudentFeedback, FeedbackStatus, FeedbackType } from "@/types";
+
+/**
+ * L'HISTORIQUE D'UN ÉLÈVE QUI N'EN A PAS — un seul tableau, partagé.
+ *
+ * Un `[]` littéral à chaque rendu changerait d'identité à chaque fois et
+ * invaliderait le mémo de la modale. Le cas ne se produit pas aujourd'hui (tout
+ * retour affiché appartient à un élève présent dans la table), mais un repli
+ * qui recrée un objet est un piège qu'on n'a pas besoin de laisser en place.
+ */
+const AUCUN_HISTORIQUE: readonly AdminStudentFeedback[] = [];
 
 type StatusFilter = "tous" | FeedbackStatus;
 type TypeFilter = "tous" | FeedbackType;
@@ -43,6 +53,33 @@ export default function AdminFeedbackPage() {
   const useSupabase = supabaseFeedback.feedback.length > 0;
   const feedback = useSupabase ? supabaseFeedback.feedback : state.feedback;
   const students = useSupabase ? supabaseStudents.students : state.students;
+
+  /**
+   * L'HISTORIQUE GROUPÉ PAR ÉLÈVE — CALCULÉ UNE FOIS POUR TOUT L'ÉCRAN.
+   *
+   * ⚠️ AVANT, CHAQUE LIGNE RECEVAIT LA LISTE ENTIÈRE. Les indicateurs du coach
+   * n'en retiennent jamais que les retours du même élève
+   * (`buildPreviousPerformanceIndex` filtre sur `studentId`) : chaque modale
+   * reparcourait donc 129 retours pour n'en garder qu'une poignée. Un seul
+   * regroupement, en O(N), remplace N filtrages.
+   *
+   * ⚠️ ET L'INDEX N'EST PAS, LUI, MUTUALISABLE ENTRE LES LIGNES. Il dépend de
+   * trois choses propres au retour relu : l'élève, la séance à exclure
+   * (`currentSessionId`) et la date au-delà de laquelle un retour ne peut pas
+   * servir de référence (`today`). Un index unique partagé par tout l'écran
+   * changerait la RÉFÉRENCE N-1 — ce que ce correctif n'a pas le droit de
+   * faire. Ce qui est mutualisé est donc ce qui peut l'être sans rien changer :
+   * le tri par élève.
+   */
+  const historiqueParEleve = useMemo(() => {
+    const table = new Map<string, AdminStudentFeedback[]>();
+    for (const retour of feedback) {
+      const liste = table.get(retour.studentId);
+      if (liste) liste.push(retour);
+      else table.set(retour.studentId, [retour]);
+    }
+    return table;
+  }, [feedback]);
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("tous");
@@ -136,6 +173,12 @@ export default function AdminFeedbackPage() {
                   <FeedbackDetailModal
                     feedback={f}
                     student={student}
+                    // L'historique déjà chargé par cet écran, réduit à CET
+                    // élève : les indicateurs immédiats du coach en tirent
+                    // l'occurrence N-1 sans AUCUNE requête de plus. Le module
+                    // filtrait déjà sur l'élève du retour — le faire une fois
+                    // ici rend exactement le même index.
+                    historique={historiqueParEleve.get(f.studentId) ?? AUCUN_HISTORIQUE}
                     // Le chemin MOCK ne connaît que le texte : il n'a ni
                     // bucket, ni élève réel à qui adresser une vidéo. On ne
                     // lui invente pas une réponse vidéo qu'il ne saurait ni

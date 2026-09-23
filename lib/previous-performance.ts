@@ -364,28 +364,74 @@ export function prescribedRpeForSet(value: string | null | undefined, setNumber:
 }
 
 /**
+ * LA RECOMMANDATION AUTOMATIQUE, quand elle existe — déjà formatée.
+ *
+ * ⚠️ CE MODULE NE LA CALCULE PAS ET NE SAIT PAS D'OÙ ELLE VIENT. Il reçoit
+ * deux textes prêts à écrire (« 47 kg », « 11 ») et se contente de les placer
+ * en tête de priorité. Toute la règle — quel incrément, quel espace de
+ * charge, quelle référence — reste dans lib/progression-automatique.ts et
+ * lib/indicateurs-progression.ts.
+ */
+export interface RecommandationAffichable {
+  readonly load: string;
+  readonly reps: string;
+}
+
+/**
  * Placeholders d'une série, PRIORITÉ champ par champ (la saisie réelle de
  * l'élève est portée par `value` — un placeholder n'apparaît que dans un
  * champ vide, par construction du DOM) :
- * - charge :      prescription coach > dernière charge passée > « Charge » ;
- * - répétitions : prescription coach > dernières reps passées > « Reps » ;
+ * - charge :      RECOMMANDATION AUTOMATIQUE > prescription coach > dernière
+ *                 charge passée > « Charge » ;
+ * - répétitions : RECOMMANDATION AUTOMATIQUE > prescription coach >
+ *                 dernières reps passées > « Reps » ;
  * - RPE :         prescription coach (RPE CIBLE, par série) > « RPE » —
  *   le RPE PASSÉ n'est JAMAIS un placeholder : il reste cantonné à la
  *   ligne « Dernières perfs » (règle produit du volet builder).
+ *
+ * ────────────────────────────────────────────────────────────────────────
+ * POURQUOI LA RECOMMANDATION PASSE DEVANT LA PRESCRIPTION
+ * ────────────────────────────────────────────────────────────────────────
+ * Règle posée le 23/09/2026 : progression automatique ACTIVÉE → la cible
+ * calculée est prioritaire dans les champs. Sans cette priorité, un
+ * `recommendedLoad` valant « RIR 1 » et un `reps` valant « 8-13 » gagnaient
+ * toujours, et la cible calculée (47 kg × 11) n'atteignait jamais l'écran :
+ * le moteur travaillait pour rien.
+ *
+ * ⚠️ `recommandation` ABSENTE = COMPORTEMENT D'AVANT, À L'IDENTIQUE. C'est
+ * ce qui rend la règle réversible : la progression désactivée ne fournit
+ * aucune recommandation, donc la prescription du coach est intacte. Le
+ * paramètre est optionnel pour que les appelants qui n'ont rien à voir avec
+ * la progression (récapitulatif, démonstration, tests d'historique) ne
+ * changent pas d'un caractère.
+ *
+ * Le libellé « Reco » distingue les deux origines : un coach ne doit jamais
+ * croire qu'il a écrit lui-même une charge que le moteur a calculée.
  */
 export function resolveSetPlaceholders(
   exercise: { recommendedLoad: string; reps: string; recommendedRpe?: string | null },
   previousSet: PreviousSetPerf | null | undefined,
   setNumber: number,
+  recommandation?: RecommandationAffichable | null,
 ): { load: string; reps: string; rpe: string } {
   const prescriptionCharge = exercise.recommendedLoad.trim();
   const prescriptionReps = exercise.reps.trim();
   const prescriptionRpe = prescribedRpeForSet(exercise.recommendedRpe, setNumber);
   const histoCharge = previousSet?.loadUsed.trim() ?? "";
   const histoReps = previousSet?.repsDone.trim() ?? "";
+  const recoCharge = recommandation?.load.trim() ?? "";
+  const recoReps = recommandation?.reps.trim() ?? "";
   return {
-    load: prescriptionCharge ? `Charge (${prescriptionCharge})` : histoCharge || "Charge",
-    reps: prescriptionReps ? `Reps (${prescriptionReps})` : histoReps || "Reps",
+    load: recoCharge
+      ? `Reco ${recoCharge}`
+      : prescriptionCharge
+        ? `Charge (${prescriptionCharge})`
+        : histoCharge || "Charge",
+    reps: recoReps
+      ? `Reco ${recoReps} reps`
+      : prescriptionReps
+        ? `Reps (${prescriptionReps})`
+        : histoReps || "Reps",
     rpe: prescriptionRpe !== null ? `RPE ${formatRpeFr(prescriptionRpe)}` : "RPE",
   };
 }

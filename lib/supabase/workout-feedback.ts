@@ -26,8 +26,20 @@ import { sanitizeDurationMinutes, sanitizePerformedAt } from "@/lib/workout-hist
  *
  * Comme lib/supabase/students.ts, toutes les lectures renvoient un résultat
  * "vide" (jamais d'exception) aussi bien quand Supabase n'a réellement
- * aucune donnée qu'en cas d'erreur (RLS, réseau...) — warning dev
- * uniquement, jamais bloquant, pour préserver le repli mock/localStorage.
+ * aucune donnée qu'en cas d'erreur (RLS, réseau...) — jamais bloquant, pour
+ * préserver le repli mock/localStorage.
+ *
+ * ⚠️ « JAMAIS D'EXCEPTION » N'A JAMAIS VOULU DIRE « JAMAIS UN MOT ». Ce
+ * fichier a pourtant longtemps confondu les deux : l'erreur n'était
+ * journalisée qu'en développement, et une lecture rejetée devenait un
+ * résultat vide indiscernable d'une absence réelle de données. Le contrat est
+ * maintenant explicite en deux points, et c'est le seul changement :
+ *   • une erreur de lecture est journalisée DANS TOUS LES ENVIRONNEMENTS, avec
+ *     `code`, `details` et `hint` (voir `devWarn`) ;
+ *   • une lecture partielle se DÉCLARE partielle — `loadExercisesAndSets` rend
+ *     `complet` et `erreur` à côté de ses deux cartes, et chaque appelant
+ *     nomme la conséquence pour son écran.
+ * Aucune lecture ne lève pour autant : le repli mock/localStorage est intact.
  *
  * Les lignes sont converties vers `AdminStudentFeedback` /
  * `AdminExerciseFeedbackEntry` (déjà utilisés par /admin/retours,
@@ -42,10 +54,41 @@ type WorkoutFeedbackRow = Database["public"]["Tables"]["workout_feedback"]["Row"
 type ExerciseFeedbackRow = Database["public"]["Tables"]["exercise_feedback"]["Row"];
 type ExerciseSetFeedbackRow = Database["public"]["Tables"]["exercise_set_feedback"]["Row"];
 
-function devWarn(context: string, error: { message: string } | null): void {
-  if (error && process.env.NODE_ENV === "development") {
-    console.warn(`[Supabase] ${context} :`, error.message);
-  }
+/**
+ * Une erreur de lecture telle que PostgREST la rend : le message, et les trois
+ * champs qui disent souvent POURQUOI.
+ */
+type ErreurLecture = { message: string; code?: string; details?: string; hint?: string };
+
+/**
+ * Signale une erreur de lecture — DANS TOUS LES ENVIRONNEMENTS.
+ *
+ * ⚠️ CETTE FONCTION A DÉJÀ LAISSÉ PASSER UNE PANNE ENTIÈRE, EN SILENCE. Sa
+ * version précédente ne journalisait que si `NODE_ENV === "development"` et ne
+ * gardait que `message`. Sur Preview comme en production, `NODE_ENV` vaut
+ * "production" : le rejet de la passerelle sur `exercise_set_feedback` (une
+ * URL de 25 847 caractères, mesurée dans `edge_logs`) n'a produit AUCUNE
+ * trace, et la modale du coach s'est affichée sans son détail par exercice
+ * sans que rien, nulle part, ne le dise. Une lecture qui échoue doit se voir
+ * là où elle échoue.
+ *
+ * `code`, `details` et `hint` sont conservés parce que ce sont eux qui
+ * distinguent un refus RLS d'une URL trop longue ou d'une colonne absente.
+ * Même forme que lib/supabase/activity.ts et lib/supabase/appointments.ts — le
+ * nom `devWarn` est gardé pour rester aligné sur ces deux voisins, qui
+ * journalisent eux aussi en production.
+ *
+ * ⚠️ RIEN D'AUTRE N'EST JOURNALISÉ. Ni jeton, ni cookie, ni en-tête, ni URL,
+ * ni identifiant d'élève : uniquement les champs de l'erreur rendue.
+ */
+function devWarn(context: string, error: ErreurLecture | null): void {
+  if (!error) return;
+  console.error(
+    `[Supabase] ${context} : ${error.message}` +
+      (error.code ? ` (code ${error.code})` : "") +
+      (error.details ? ` — ${error.details}` : "") +
+      (error.hint ? ` — ${error.hint}` : ""),
+  );
 }
 
 /* ─── Row -> types Supabase* (camelCase) ─── */
@@ -264,33 +307,171 @@ async function loadSubstituteVideos(
   return videos;
 }
 
-/** Récupère et regroupe les exercices/séries de un ou plusieurs retours en un minimum de requêtes. */
+/* ─── Lecture par lots d'identifiants ─── */
+
+/**
+ * ⚠️ UNE LISTE D'IDENTIFIANTS VOYAGE DANS L'URL, ET UNE URL A UN PLAFOND.
+ *
+ * `.in("colonne", ids)` devient `?colonne=in.(uuid1,uuid2,…)` : la liste
+ * entière part dans la ligne de requête HTTP. Au-delà d'un certain volume, la
+ * passerelle placée devant PostgREST rejette la requête AVANT la base — un 400
+ * qui n'apparaît dans aucun `postgres_logs`.
+ *
+ * PANNE CONSTATÉE SUR CE FICHIER, PAS SUPPOSÉE. Les `edge_logs` du projet, sur
+ * le chemin `/rest/v1/exercise_set_feedback`, séparent parfaitement les deux
+ * régimes : 91 requêtes de 185 à 4 514 caractères d'URL → 200 ; 15 requêtes de
+ * 25 028 à 25 847 caractères → 400, sans une seule ligne entre les deux. Les
+ * 660 identifiants de séries d'une page `/admin/retours` produisent exactement
+ * 25 847 caractères — la valeur mesurée sur le rejet rejoué, à zéro d'écart.
+ *
+ * ⚠️ LE PLAFOND EXACT N'EST PAS CONNU, ET C'EST POURQUOI LA MARGE EST LARGE.
+ * Les journaux ne le bornent qu'à l'intervalle ]4 514 ; 25 028] ; le resserrer
+ * demanderait d'émettre des requêtes-sondes avec la clé du projet. Un lot de
+ * 100 identifiants pèse 4 007 caractères (36 caractères par UUID, plus les
+ * `%2C` de séparation) : il reste dans la zone dont les journaux prouvent
+ * qu'elle passe, et non dans une zone simplement « plus petite que le mur ».
+ *
+ * ⚠️ MÊME RAISON QUE `lireParLots` DE lib/supabase/programs.ts, MAIS PAS LE
+ * MÊME RÉGLAGE. Là-bas les lots valent 200 identifiants et partent tous
+ * ensemble ; ici ils valent 100 et la concurrence est bornée, parce que le
+ * fan-out est plus grand (7 lots pour une page réelle) et qu'une liste de
+ * retours en émet déjà deux vagues, l'une après l'autre.
+ */
+export const TAILLE_DE_LOT_IDS = 100;
+
+/**
+ * Nombre de lots émis SIMULTANÉMENT.
+ *
+ * Borné, et pas seulement « parallèle » : 7 requêtes lâchées d'un coup pour un
+ * seul écran sont 7 connexions prises au même pool, au même instant, pour un
+ * coach parmi d'autres. Trois vagues de 3, 3 et 1 coûtent deux attentes de
+ * plus et rendent la charge prévisible.
+ */
+export const LOTS_EN_PARALLELE = 3;
+
+/** Découpe une liste en lots d'au plus `taille` éléments. Pure, donc testable seule. */
+export function decouperEnLots<T>(valeurs: readonly T[], taille: number): T[][] {
+  if (taille < 1) throw new Error("decouperEnLots : la taille d'un lot doit être au moins 1");
+  const lots: T[][] = [];
+  for (let i = 0; i < valeurs.length; i += taille) {
+    lots.push(valeurs.slice(i, i + taille) as T[]);
+  }
+  return lots;
+}
+
+/** Ce que rend la lecture d'UN lot : les lignes, ou l'erreur qui les remplace. */
+type LotLu<T> = { data: T[] | null; error: ErreurLecture | null };
+
+/**
+ * Lit toutes les lignes correspondant à `ids` en découpant la liste en lots
+ * dont l'URL reste courte, `LOTS_EN_PARALLELE` lots à la fois.
+ *
+ * ⚠️ UN LOT EN ERREUR NE DEVIENT JAMAIS UN LOT VIDE. C'était précisément le
+ * défaut : `(data ?? [])` rendait `[]` indifféremment pour « aucune ligne » et
+ * pour « la requête a été rejetée », et l'écran affichait un retour sans
+ * séries comme s'il n'en avait jamais eu. Ici l'erreur est journalisée telle
+ * quelle, `complet` passe à `false`, et elle est RENDUE à l'appelant : c'est
+ * lui qui décide quoi en dire, pas ce helper.
+ *
+ * ⚠️ ET LES VAGUES SUIVANTES NE PARTENT PAS. Une fois la lecture connue comme
+ * incomplète, les requêtes restantes ne peuvent plus la rendre complète : les
+ * émettre ne ferait que payer, et peut-être insister, sur une panne déjà
+ * établie. Les lignes déjà obtenues sont conservées et rendues avec
+ * `complet: false` — jamais présentées comme le jeu entier.
+ */
+async function lireParLots<T>(
+  contexte: string,
+  ids: readonly string[],
+  lireUnLot: (lot: string[]) => PromiseLike<LotLu<T>>,
+): Promise<{ rows: T[]; complet: boolean; erreur: ErreurLecture | null }> {
+  if (ids.length === 0) return { rows: [], complet: true, erreur: null };
+
+  const lots = decouperEnLots(ids, TAILLE_DE_LOT_IDS);
+  const rows: T[] = [];
+
+  for (let depart = 0; depart < lots.length; depart += LOTS_EN_PARALLELE) {
+    const vague = lots.slice(depart, depart + LOTS_EN_PARALLELE);
+    const resultats = await Promise.all(vague.map((lot) => lireUnLot(lot)));
+
+    let erreur: ErreurLecture | null = null;
+    let rangDuLotFautif = 0;
+    for (let n = 0; n < resultats.length; n += 1) {
+      const resultat = resultats[n] as LotLu<T>;
+      if (resultat.error) {
+        // Le premier échec de la vague est celui qu'on remonte ; les lots
+        // voisins qui ont abouti sont tout de même conservés.
+        if (!erreur) {
+          erreur = resultat.error;
+          rangDuLotFautif = depart + n + 1;
+        }
+        continue;
+      }
+      if (resultat.data) rows.push(...resultat.data);
+    }
+
+    if (erreur) {
+      devWarn(`${contexte} (lot ${rangDuLotFautif}/${lots.length} interrompu)`, erreur);
+      return { rows, complet: false, erreur };
+    }
+  }
+
+  return { rows, complet: true, erreur: null };
+}
+
+/**
+ * Récupère et regroupe les exercices/séries de un ou plusieurs retours, en
+ * lots d'identifiants (voir `TAILLE_DE_LOT_IDS`).
+ *
+ * ⚠️ LES DEUX LECTURES SONT TRAITÉES DE LA MÊME FAÇON. Seule celle des séries
+ * dépassait réellement le plafond (660 identifiants) ; celle des exercices
+ * passait encore avec les 129 retours de production. « Passe encore » n'est pas
+ * une propriété du code mais du volume du jour : le premier écran à porter 700
+ * retours aurait reproduit la même panne, au même endroit, sans rien avoir
+ * changé. Les deux passent donc par le même chemin.
+ *
+ * `complet` vaut `false` dès qu'UN SEUL lot a échoué : les deux cartes rendues
+ * sont alors partielles, et l'appelant doit le savoir avant de les présenter
+ * comme le détail complet d'un retour.
+ */
 async function loadExercisesAndSets(
   supabase: TypedSupabaseClient,
   workoutFeedbackIds: string[],
 ): Promise<{
   exercisesByFeedbackId: Map<string, SupabaseExerciseFeedback[]>;
   setsByExerciseFeedbackId: Map<string, SupabaseExerciseSetFeedback[]>;
+  complet: boolean;
+  erreur: ErreurLecture | null;
 }> {
   if (workoutFeedbackIds.length === 0) {
-    return { exercisesByFeedbackId: new Map(), setsByExerciseFeedbackId: new Map() };
+    return {
+      exercisesByFeedbackId: new Map(),
+      setsByExerciseFeedbackId: new Map(),
+      complet: true,
+      erreur: null,
+    };
   }
 
-  const { data: exerciseRows, error: exerciseError } = await supabase
-    .from("exercise_feedback")
-    .select("*")
-    .in("workout_feedback_id", workoutFeedbackIds);
-  devWarn("loadExercisesAndSets (exercise_feedback)", exerciseError);
-  const exercises = (exerciseRows ?? []).map(mapExerciseFeedbackRow);
+  const lectureExercices = await lireParLots<ExerciseFeedbackRow>(
+    "loadExercisesAndSets (exercise_feedback)",
+    workoutFeedbackIds,
+    (lot) => supabase.from("exercise_feedback").select("*").in("workout_feedback_id", lot),
+  );
+  const exercises = lectureExercices.rows.map(mapExerciseFeedbackRow);
 
   const exerciseIds = exercises.map((exercise) => exercise.id);
-  const { data: setRows, error: setsError } =
-    exerciseIds.length > 0
-      ? await supabase.from("exercise_set_feedback").select("*").in("exercise_feedback_id", exerciseIds)
-      : { data: [] as ExerciseSetFeedbackRow[], error: null };
-  devWarn("loadExercisesAndSets (exercise_set_feedback)", setsError);
-  const sets = (setRows ?? []).map(mapExerciseSetFeedbackRow);
+  const lectureSeries = await lireParLots<ExerciseSetFeedbackRow>(
+    "loadExercisesAndSets (exercise_set_feedback)",
+    exerciseIds,
+    (lot) => supabase.from("exercise_set_feedback").select("*").in("exercise_feedback_id", lot),
+  );
+  const sets = lectureSeries.rows.map(mapExerciseSetFeedbackRow);
 
+  // ⚠️ LES LOTS SONT FUSIONNÉS AVANT LE REGROUPEMENT, ET L'ORDRE NE DÉPEND PAS
+  // DE LA FUSION. Toutes les séries d'un même exercice partagent le même
+  // `exercise_feedback_id` : elles tombent donc toujours dans le même lot, et
+  // `toAdminStudentFeedback` retrie de toute façon par `exerciseOrder` puis par
+  // `setNumber`. L'ordre rendu à l'écran est le même, quel que soit l'ordre
+  // d'arrivée des vagues.
   const exercisesByFeedbackId = new Map<string, SupabaseExerciseFeedback[]>();
   for (const exercise of exercises) {
     const list = exercisesByFeedbackId.get(exercise.workoutFeedbackId) ?? [];
@@ -305,7 +486,15 @@ async function loadExercisesAndSets(
     setsByExerciseFeedbackId.set(set.exerciseFeedbackId, list);
   }
 
-  return { exercisesByFeedbackId, setsByExerciseFeedbackId };
+  // Le rang du lot fautif est déjà journalisé par `lireParLots`. La
+  // CONSÉQUENCE, elle, n'est pas la même selon l'écran : c'est chaque appelant
+  // qui la nomme, avec ses mots, là où elle se produit.
+  return {
+    exercisesByFeedbackId,
+    setsByExerciseFeedbackId,
+    complet: lectureExercices.complet && lectureSeries.complet,
+    erreur: lectureExercices.erreur ?? lectureSeries.erreur,
+  };
 }
 
 /**
@@ -352,7 +541,26 @@ export async function getWorkoutFeedbackBySession(
   }
 
   const feedback = mapWorkoutFeedbackRow(data);
-  const { exercisesByFeedbackId, setsByExerciseFeedbackId } = await loadExercisesAndSets(supabase, [feedback.id]);
+  const { exercisesByFeedbackId, setsByExerciseFeedbackId, complet, erreur } = await loadExercisesAndSets(supabase, [
+    feedback.id,
+  ]);
+  if (!complet) {
+    /*
+     * ⚠️ ICI L'ENJEU N'EST PAS L'AFFICHAGE, C'EST UNE PERTE DE DONNÉES.
+     *
+     * Cet écran PRÉREMPLIT le formulaire, et une resoumission remplace les
+     * séries (delete + reinsert, voir `saveWorkoutFeedback`). Un préremplissage
+     * amputé que l'élève renvoie effacerait donc pour de bon les séries
+     * manquantes.
+     *
+     * Le comportement n'est pas changé dans ce correctif — le rendre bloquant
+     * demanderait de trancher ce que l'écran doit faire à la place, ce qui
+     * dépasse le périmètre. Mais la trace, elle, est désormais lisible en
+     * production : c'est ce qui manquait pour que le problème soit seulement
+     * visible.
+     */
+    devWarn("getWorkoutFeedbackBySession (préremplissage incomplet — resoumission risquée)", erreur);
+  }
   const exercises = exercisesByFeedbackId.get(feedback.id) ?? [];
   // SEULE lecture qui résout les démonstrations : c'est celle qui alimente
   // l'écran où l'élève rouvre son retour pour le modifier.
@@ -379,10 +587,22 @@ export async function getAdminWorkoutFeedbackList(supabase: TypedSupabaseClient)
   }
 
   const feedbacks = data.map(mapWorkoutFeedbackRow);
-  const { exercisesByFeedbackId, setsByExerciseFeedbackId } = await loadExercisesAndSets(
+  const { exercisesByFeedbackId, setsByExerciseFeedbackId, complet, erreur } = await loadExercisesAndSets(
     supabase,
     feedbacks.map((f) => f.id),
   );
+  if (!complet) {
+    /*
+     * ⚠️ ON REND LA LISTE PARTIELLE, ET ON LE DIT — ON NE REND PAS UN TABLEAU
+     * VIDE.
+     *
+     * Rendre `[]` serait pire que silencieux : `useSupabaseAdminFeedback`
+     * retombe alors sur la liste MOCK, et le coach lirait des retours
+     * fabriqués en croyant lire ceux de ses élèves. Entre un détail incomplet
+     * et un détail inventé, il n'y a pas d'hésitation.
+     */
+    devWarn("getAdminWorkoutFeedbackList (détail par exercice incomplet)", erreur);
+  }
   // C'EST CE CHEMIN QUE LE COACH EMPRUNTE. /admin/retours affiche cette
   // liste, et c'est depuis une de ses lignes que FeedbackDetailModal s'ouvre
   // — il n'existe aucun second chargement « de détail ». Les URLs sont donc
@@ -431,10 +651,17 @@ export async function getWorkoutFeedbackForStudent(
   }
 
   const feedbacks = data.map(mapWorkoutFeedbackRow);
-  const { exercisesByFeedbackId, setsByExerciseFeedbackId } = await loadExercisesAndSets(
+  const { exercisesByFeedbackId, setsByExerciseFeedbackId, complet, erreur } = await loadExercisesAndSets(
     supabase,
     feedbacks.map((f) => f.id),
   );
+  if (!complet) {
+    // ⚠️ CETTE LECTURE ALIMENTE AUSSI LES CALCULS DE PROGRESSION
+    // (lib/supabase/progress.ts, référence de l'occurrence N-1). Des séries
+    // manquantes n'y produisent pas une erreur mais un REPÈRE FAUX, ou aucun
+    // repère : c'est le genre de panne qu'on ne voit qu'en la journalisant.
+    devWarn("getWorkoutFeedbackForStudent (détail par exercice incomplet)", erreur);
+  }
   const coachReplyVideoUrls = options.avecReponseVideo
     ? await loadSignedCoachReplyVideoUrls(
         supabase,

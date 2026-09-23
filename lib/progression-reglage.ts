@@ -89,12 +89,32 @@ export function cleReglageDeLExercice(exercice: ExercicePourReglage): string | n
 
 /** Une ligne de `program_exercise_progression`, telle que la base la rend. */
 export interface LigneReglage {
+  /**
+   * Clé primaire de la ligne, quand la lecture l'a ramenée.
+   *
+   * ⚠️ ELLE N'EST PAS DÉCORATIVE : c'est la SEULE cible de conflit utilisable
+   * pour une écriture groupée. Les deux index d'unicité de la table sont
+   * PARTIELS, et `on_conflict` de PostgREST ne transmet qu'une liste de
+   * colonnes — jamais le prédicat `WHERE` qu'un index partiel exige pour être
+   * inféré, d'où l'erreur 42P10. La clé primaire, elle, s'infère toujours.
+   */
+  readonly id?: string;
   readonly exerciseLibraryId: string | null;
   readonly exerciseNameNormalized: string | null;
   readonly progressionActive: boolean;
 }
 
 export type IndexReglages = ReadonlyMap<string, boolean>;
+
+/**
+ * Clé d'exercice → identifiant de la ligne qui porte son réglage.
+ *
+ * Séparée de `IndexReglages` à dessein : l'état affiché (« actif ou non ») est
+ * consommé partout, y compris côté élève, tandis que l'identifiant ne sert
+ * qu'à l'écriture groupée du builder. Les mêler aurait imposé une nouvelle
+ * forme à tous les appelants pour le bénéfice d'un seul.
+ */
+export type IdentifiantsReglages = ReadonlyMap<string, string>;
 
 /**
  * Indexe les lignes d'un programme par clé d'exercice.
@@ -112,6 +132,27 @@ export function indexerReglages(lignes: readonly LigneReglage[]): IndexReglages 
     if (banque !== "" && nom !== "") continue;
     if (banque !== "") index.set(cleReglage({ genre: "banque", exerciseLibraryId: banque }), ligne.progressionActive);
     else if (nom !== "") index.set(cleReglage({ genre: "nom", exerciseNameNormalized: nom }), ligne.progressionActive);
+  }
+  return index;
+}
+
+/**
+ * Les identifiants de ligne, indexés par la MÊME clé que `indexerReglages`.
+ *
+ * Une ligne sans `id` (jeu de test, réponse partielle) est simplement absente :
+ * l'écriture la traitera comme neuve, donc par un `insert`. Jamais une écriture
+ * visant un identifiant inventé.
+ */
+export function indexerIdentifiants(lignes: readonly LigneReglage[]): IdentifiantsReglages {
+  const index = new Map<string, string>();
+  for (const ligne of lignes) {
+    const banque = (ligne.exerciseLibraryId ?? "").trim();
+    const nom = (ligne.exerciseNameNormalized ?? "").trim();
+    const id = (ligne.id ?? "").trim();
+    if (id === "") continue;
+    if (banque !== "" && nom !== "") continue;
+    if (banque !== "") index.set(cleReglage({ genre: "banque", exerciseLibraryId: banque }), id);
+    else if (nom !== "") index.set(cleReglage({ genre: "nom", exerciseNameNormalized: nom }), id);
   }
   return index;
 }
@@ -156,6 +197,61 @@ export function ecritureDuReglage(
     exerciseNameNormalized: identite.genre === "nom" ? identite.exerciseNameNormalized : null,
     progressionActive,
   };
+}
+
+/* ─── Écriture GROUPÉE ─── */
+
+/**
+ * Les deux lots d'une écriture groupée : ce qui existe déjà et se met à jour,
+ * ce qui est neuf et s'insère.
+ *
+ * ⚠️ DEUX REQUÊTES POUR N RÉGLAGES, ET C'EST TOUT L'OBJET.
+ * Le premier jet écrivait un réglage à la fois, en tir sans attente : régler
+ * 50 exercices lançait 50 à 100 requêtes en rafale, qui restaient en vol et
+ * faisaient la queue devant les 59 allers-retours séquentiels de la
+ * sauvegarde du programme. C'est la cause mesurée du passage de 15 s à
+ * plusieurs minutes — pas le calcul de progression, qui n'a aucune empreinte
+ * dans le chemin de sauvegarde.
+ */
+export interface LotsDEcriture {
+  /** Lignes existantes, identifiées par leur clé primaire — un seul `upsert`. */
+  readonly aMettreAJour: readonly {
+    readonly id: string;
+    readonly programId: string;
+    readonly exerciseLibraryId: string | null;
+    readonly exerciseNameNormalized: string | null;
+    readonly progressionActive: boolean;
+  }[];
+  /** Lignes neuves — un seul `insert`. */
+  readonly aInserer: readonly EcritureReglage[];
+}
+
+/**
+ * Répartit des bascules en attente entre mise à jour et insertion.
+ *
+ * `bascules` est indexé par clé d'exercice, comme tout le reste du module :
+ * deux bascules successives du même exercice ne produisent donc qu'UNE
+ * écriture, celle de son état final. C'est ce qui rend un aller-retour du
+ * coach (activer, puis désactiver) gratuit côté réseau.
+ *
+ * Un exercice sans identité est ignoré : il n'y a rien à persister, et
+ * `ecritureDuReglage` le refusait déjà un par un.
+ */
+export function lotsDEcriture(
+  programId: string,
+  bascules: ReadonlyMap<string, { readonly exercice: ExercicePourReglage; readonly progressionActive: boolean }>,
+  identifiants: IdentifiantsReglages,
+): LotsDEcriture {
+  const aMettreAJour: LotsDEcriture["aMettreAJour"][number][] = [];
+  const aInserer: EcritureReglage[] = [];
+  for (const [cle, bascule] of bascules) {
+    const ecriture = ecritureDuReglage(programId, bascule.exercice, bascule.progressionActive);
+    if (!ecriture) continue;
+    const id = identifiants.get(cle);
+    if (id) aMettreAJour.push({ ...ecriture, id });
+    else aInserer.push(ecriture);
+  }
+  return { aMettreAJour, aInserer };
 }
 
 /**

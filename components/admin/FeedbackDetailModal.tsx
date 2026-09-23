@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { CheckCircle, Eye, Repeat2, Video } from "lucide-react";
 
 import { TextareaField } from "@/components/admin/AdminFormFields";
@@ -11,10 +11,76 @@ import { feedbackStatusLabels, feedbackTypeLabels, formatDate, fullName } from "
 import { isCardioResultEntryName, parseCardioResults, type CardioBlockResult } from "@/lib/cardio-feedback";
 import { formatDistanceMeters, formatDurationSeconds } from "@/lib/cardio";
 import type { ReponseCoach } from "@/lib/coach-reply-video";
+import { cleDeSerie, comparaisonsDuRetour, type ComparaisonDeSerie } from "@/lib/comparaison-retour-coach";
+import {
+  formaterEcartReps,
+  libelleEcartCharge,
+  libelleEcartReps,
+  texteEcartCharge,
+  type ComparaisonImmediate,
+  type UniteCharge,
+} from "@/lib/indicateurs-progression";
 import { exerciseGlobalRpeMentions } from "@/lib/previous-performance";
 import { formatRpeFr } from "@/lib/rpe";
 import { parseAnnotations, type Annotation } from "@/lib/video-annotations";
 import type { AdminStudent, AdminStudentFeedback } from "@/types";
+
+/**
+ * LA TABLE VIDE DES MODALES FERMÉES — une seule, partagée.
+ *
+ * Une `new Map()` fabriquée à chaque rendu rendrait une identité différente à
+ * chaque fois, et relancerait tout ce qui en dépend. Celle-ci ne change jamais,
+ * et elle est vide : aucun badge n'est calculé sur rien.
+ */
+const AUCUNE_COMPARAISON: ReadonlyMap<string, ComparaisonDeSerie> = new Map();
+
+/**
+ * LES BADGES D'UNE SÉRIE, POUR LE COACH.
+ *
+ * ⚠️ TROIS INDICATEURS DE CONSTAT, ET PAS LA FLÈCHE DE CONSEIL. ↑/↓ dit
+ * « change la charge à la série suivante » : sur une séance terminée, la série
+ * suivante a déjà eu lieu et ce conseil ne s'adresse à personne. Voir
+ * lib/comparaison-retour-coach.ts.
+ *
+ * Les couleurs suivent celles de l'écran élève, et pour la même raison : une
+ * charge en BAISSE est un FAIT, pas un échec — elle reste neutre. Peindre en
+ * rouge un élève qui a allégé pour tenir sa fourchette serait une conclusion
+ * naïve.
+ *
+ * ⚠️ AUCUNE COULEUR DANS LES LIBELLÉS ACCESSIBLES : ils disent la VALEUR.
+ */
+function IndicateursDeSerie({
+  comparaison,
+  numeroSerie,
+}: {
+  comparaison: { comparaison: ComparaisonImmediate; unite: UniteCharge } | null;
+  numeroSerie: number;
+}) {
+  if (!comparaison) return null;
+  const { comparaison: lue, unite } = comparaison;
+  const badge = "rounded-full border px-1.5 py-0.5 text-[0.6875rem] font-semibold leading-tight";
+  const vert = `${badge} border-emerald-600/30 text-emerald-600 dark:text-emerald-400`;
+  const rouge = `${badge} border-red-600/30 text-red-600 dark:text-red-400`;
+  const neutre = `${badge} border-border text-muted-foreground`;
+  const ecartReps = lue.ecartReps;
+  return (
+    <>
+      {lue.ecartChargeKg !== 0 && (
+        <span
+          aria-label={libelleEcartCharge(lue, unite, numeroSerie)}
+          className={lue.tenue === "tenue" ? vert : lue.tenue === "insuffisante" ? rouge : neutre}
+        >
+          {texteEcartCharge(lue, unite)}
+        </span>
+      )}
+      {ecartReps !== null && (
+        <span aria-label={libelleEcartReps(ecartReps, numeroSerie)} className={ecartReps > 0 ? vert : rouge}>
+          {formaterEcartReps(ecartReps)} reps
+        </span>
+      )}
+    </>
+  );
+}
 
 /** Ligne prévu/réalisé d'une métrique d'un bloc cardio (valeurs absentes masquées proprement). */
 function metricLine(label: string, prescribed: string | null, realized: string | null): string | null {
@@ -81,12 +147,33 @@ export function FeedbackDetailModal({
   feedback,
   student,
   onReply,
+  historique = [],
+  ouvertInitialement = false,
 }: {
   feedback: AdminStudentFeedback;
   student: AdminStudent | undefined;
   onReply: (reponse: ReponseCoach) => void;
+  /**
+   * L'HISTORIQUE DE L'ÉLÈVE, déjà chargé par l'écran — aucune requête de plus.
+   *
+   * Il sert à retrouver l'occurrence N-1 du même jour, c'est-à-dire le SEUL
+   * repère dont les indicateurs immédiats ont besoin. Absent (chemin de
+   * démonstration, appelant qui ne l'a pas), la modale est EXACTEMENT celle
+   * d'avant : aucun badge, et surtout aucun badge calculé sur rien.
+   */
+  historique?: readonly AdminStudentFeedback[];
+  /**
+   * COUTURE DE TEST — l'état d'ouverture initial.
+   *
+   * ⚠️ ELLE EXISTE PARCE QUE `renderToString` N'EXÉCUTE AUCUN EFFET ET AUCUN
+   * CLIC : sans elle, le détail d'un retour ne serait jamais rendu en SSR et
+   * aucun test ne pourrait vérifier ce que le coach voit. Même motif que la
+   * couture `indexInitial` du bouton de progression. La production ne la
+   * fournit jamais : la modale s'ouvre au clic, comme avant.
+   */
+  ouvertInitialement?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(ouvertInitialement);
   const [reply, setReply] = useState("");
   const [sent, setSent] = useState(false);
   // F5 : la réponse vidéo suit exactement le même cycle que le texte — un
@@ -132,6 +219,34 @@ export function FeedbackDetailModal({
   // « Cardio · Résultats » sont retirées du détail par exercice pour ne pas
   // s'afficher comme une fausse série de musculation, et aucune structure
   // technique (JSON, blockId) n'est jamais rendue.
+  /**
+   * LES INDICATEURS IMMÉDIATS DU COACH — même règle, même référence que côté
+   * élève (lib/comparaison-retour-coach.ts).
+   *
+   * ⚠️ AUCUN CALCUL ICI. Cette modale affiche ; elle ne décide d'aucun seuil,
+   * d'aucune borne et d'aucun kilogramme. La table est vide quand il n'y a rien
+   * d'honnête à dire — voir l'en-tête du module.
+   */
+  const comparaisons = useMemo(
+    /*
+     * ⚠️ RIEN N'EST CALCULÉ TANT QUE LA MODALE EST FERMÉE, ET C'EST UNE
+     * CORRECTION, PAS UNE MICRO-OPTIMISATION.
+     *
+     * `/admin/retours` rend UNE modale par ligne — 129 en production. Ce
+     * `useMemo` s'exécute au rendu, avant et indépendamment du `{open && …}`
+     * plus bas : chacune des 129 lignes construisait donc son index sur
+     * l'historique entier, soit 129 × 129 parcours de retours pour un écran où
+     * le coach n'ouvre qu'un seul détail. Conditionné à `open`, le compte tombe
+     * à zéro au rendu de la liste, et à UN à l'ouverture.
+     *
+     * ⚠️ AUCUNE RÈGLE N'EST TOUCHÉE. Même appel, mêmes entrées, même table.
+     * Ce qui change, c'est QUAND il a lieu — jamais ce qu'il rend. Une modale
+     * ouverte affiche exactement les badges qu'elle affichait avant.
+     */
+    () => (open ? comparaisonsDuRetour({ retour: feedback, historique }) : AUCUNE_COMPARAISON),
+    [open, feedback, historique],
+  );
+
   const parsedCardio = parseCardioResults(feedback.exerciseEntries);
   const strengthEntries = feedback.exerciseEntries.filter((entry) => !isCardioResultEntryName(entry.exerciseName));
 
@@ -294,9 +409,15 @@ export function FeedbackDetailModal({
                         </span>
                         {entry.rpe !== null && <span className="text-muted-foreground">RPE {formatRpeFr(entry.rpe)}</span>}
                       </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {entry.loadUsed} · {entry.repsDone} reps
-                        {entry.comment && ` · ${entry.comment}`}
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                        <span>
+                          {entry.loadUsed} · {entry.repsDone} reps
+                          {entry.comment && ` · ${entry.comment}`}
+                        </span>
+                        <IndicateursDeSerie
+                          comparaison={comparaisons.get(cleDeSerie(entry.exerciseName, entry.setNumber)) ?? null}
+                          numeroSerie={entry.setNumber}
+                        />
                       </div>
                     </div>
                   ))}

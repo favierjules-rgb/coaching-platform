@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -20,13 +20,14 @@ import {
 
 import { restDaySession } from "@/components/admin/ProgramBuilder";
 import { SessionBlockPanel } from "@/components/admin/blocks/SessionBlockPanel";
-import { ProgressionReglageProvider } from "@/components/admin/ProgressionAutomatiqueToggle";
+import { ProgressionReglageProvider, type EnregistrerReglages } from "@/components/admin/ProgressionAutomatiqueToggle";
 import { BLOCK_COLOR_STYLES, blockCategoryLabel } from "@/components/admin/blocks/block-view-model";
 import { BannerUploadField } from "@/components/admin/BannerUploadField";
 import { CheckboxField, Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
 import { Modal, PrimaryButton } from "@/components/admin/Modal";
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
 import { contentStatusLabels, generateId, weekDays } from "@/lib/admin";
+import { creerGardeDeSauvegarde } from "@/lib/garde-sauvegarde";
 import {
   echangerJoursDeSeance,
   supprimerSemaine,
@@ -204,6 +205,37 @@ export function ProgramBuilderFullscreen({
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  /**
+   * ⚠️ UNE SEULE SAUVEGARDE À LA FOIS — ET CE N'EST PAS `saveStatus` QUI LE
+   * GARANTIT. Le bouton est désactivé pendant `"saving"`, mais Cmd/Ctrl+S ne
+   * passait par aucune condition : K appuis lançaient K sauvegardes complètes,
+   * chacune à `7·N + 12` requêtes dont `7·N + 3` séquentielles, toutes en
+   * concurrence sur la même file. Voir lib/garde-sauvegarde.ts pour les deux
+   * raisons qui interdisent de fonder cette garde sur l'état React (mise à
+   * jour asynchrone, et fermeture périmée dans l'écouteur clavier).
+   *
+   * Le `useRef` est indispensable : une garde recréée à chaque rendu ne
+   * garderait rien.
+   */
+  const gardeDeSauvegarde = useRef(creerGardeDeSauvegarde());
+  /**
+   * LA PERSISTANCE DES RÉGLAGES DE PROGRESSION, déclenchée par « Enregistrer ».
+   *
+   * ⚠️ LE CLIC SUR UN TOGGLE N'ÉCRIT PLUS RIEN. Il ne change que l'état local
+   * du fournisseur, exactement comme n'importe quel autre champ du builder ;
+   * c'est cette poignée qui persiste le tampon entier, en au plus deux
+   * requêtes, au moment de la sauvegarde. Voir ProgressionAutomatiqueToggle.
+   *
+   * `null` tant que le fournisseur n'est pas monté — la sauvegarde d'un
+   * programme sans aucun réglage ne dépend donc de rien.
+   */
+  const enregistrerReglages = useRef<EnregistrerReglages | null>(null);
+  /**
+   * Un toggle modifié rend le programme « non enregistré », au même titre
+   * qu'un changement de nom ou de séance. Stable, pour ne pas recréer le
+   * contexte de progression à chaque rendu.
+   */
+  const marquerModifieParReglage = useCallback(() => setSaveStatus("dirty"), []);
 
   // Raccourci clavier Cmd/Ctrl+S pour sauvegarder sans quitter le clavier,
   // et "[" pour basculer les deux panneaux latéraux (voir spec V3 —
@@ -242,33 +274,54 @@ export function ProgramBuilderFullscreen({
     setSaveStatus("dirty");
   }
 
+  /**
+   * L'UNIQUE point d'entrée de la sauvegarde — bouton, Cmd/Ctrl+S et
+   * « Enregistrer et fermer » passent tous par ici, donc tous par la garde.
+   *
+   * ⚠️ UN APPEL PENDANT UNE SAUVEGARDE EST IGNORÉ, PAS MIS EN FILE. Il ne
+   * touche ni `saveStatus`, ni le message d'erreur : l'écran continue
+   * d'afficher « Enregistrement… », ce qui est la vérité.
+   */
   async function handleSave() {
-    setSaveStatus("saving");
-    setSaveErrorMessage(null);
-    const résultat = await onSave({
-      name,
-      goal,
-      level,
-      durationWeeks,
-      description,
-      status,
-      bannerUrl,
-      programMode,
-      groupStartDate,
-      isPublic,
-      publicSubscriptionTemplateId,
-      sessions,
+    await gardeDeSauvegarde.current.executer(async () => {
+      setSaveStatus("saving");
+      setSaveErrorMessage(null);
+      /* ⚠️ LES RÉGLAGES D'ABORD, ET SÉQUENTIELLEMENT.
+         Deux requêtes au plus, émises AVANT les 56 RPC de la structure plutôt
+         qu'au milieu : c'est précisément la contention qu'on supprime. Le
+         faire après aurait exposé à une course au démontage — une sauvegarde
+         réussie change la `key` du builder et démonte ce fournisseur.
+         Un échec d'écriture des réglages n'interrompt PAS la sauvegarde du
+         programme : les deux sont indépendants (la table n'est référencée par
+         aucun chemin de structure), et le fournisseur affiche déjà sa propre
+         erreur. Les bascules non écrites restent dans son tampon. */
+      await enregistrerReglages.current?.();
+      const résultat = await onSave({
+        name,
+        goal,
+        level,
+        durationWeeks,
+        description,
+        status,
+        bannerUrl,
+        programMode,
+        groupStartDate,
+        isPublic,
+        publicSubscriptionTemplateId,
+        sessions,
+      });
+      const ok = typeof résultat === "boolean" ? résultat : résultat.ok;
+      if (ok) {
+        setSaveStatus("saved");
+        setSavedAt(new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }));
+      } else {
+        // Incident du 02/08 : jamais un échec générique quand une cause
+        // actionnable est connue (session sans droits coach, séance STALE…).
+        setSaveStatus("error");
+        setSaveErrorMessage(typeof résultat === "boolean" ? null : (résultat.userMessage ?? null));
+      }
+      return ok;
     });
-    const ok = typeof résultat === "boolean" ? résultat : résultat.ok;
-    if (ok) {
-      setSaveStatus("saved");
-      setSavedAt(new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }));
-    } else {
-      // Incident du 02/08 : jamais un échec générique quand une cause
-      // actionnable est connue (session sans droits coach, séance STALE…).
-      setSaveStatus("error");
-      setSaveErrorMessage(typeof résultat === "boolean" ? null : (résultat.userMessage ?? null));
-    }
   }
 
   function cloneWeekSessions(sourceWeek: number, targetWeek: number): BuilderWorkoutSession[] {
@@ -437,7 +490,11 @@ export function ProgramBuilderFullscreen({
   // deux boutons du même exercice ne peuvent pas diverger. Voir
   // components/admin/ProgressionAutomatiqueToggle.tsx.
   return (
-    <ProgressionReglageProvider programId={program.id || null}>
+    <ProgressionReglageProvider
+      programId={program.id || null}
+      enregistrerRef={enregistrerReglages}
+      onModificationLocale={marquerModifieParReglage}
+    >
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-background text-foreground">
       {/* Barre du haut — jamais de sidebar admin ni de menu tableau de bord ici (voir AdminShell). */}
       <div className="flex h-14 flex-shrink-0 items-center justify-between gap-3 border-b border-border bg-card px-4">
