@@ -183,6 +183,10 @@ export function toEleveWorkoutSession(session: AdminWorkoutSession): WorkoutSess
     id: session.id,
     programId: session.programId,
     day: session.day,
+    // Occurrence programmée : `day` seul ne suffit pas, il faut la semaine.
+    // Sans elle, la progression automatique n'a aucune référence (voir
+    // lib/occurrence-programmee.ts).
+    weekNumber: session.weekNumber,
     name: session.name,
     muscleGroups: session.muscleGroup,
     durationMinutes: session.durationMinutes,

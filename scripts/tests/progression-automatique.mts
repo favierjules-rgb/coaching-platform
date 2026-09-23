@@ -428,14 +428,118 @@ await (async () => {
     assert.ok(dos.ok);
     assert.equal(dos.recommandation.chargeKg, 52.5, "gros groupe : +2,5 kg");
 
-    const biceps = recommanderProchaineCible({
+    // PETITS GROUPES — tous à +1 kg, `avant-bras` compris depuis le 23/09/2026.
+    for (const groupe of [
+      "biceps",
+      "mollets",
+      "triceps",
+      "épaules",
+      "abdos",
+      "lombaires",
+      "autre",
+      "avant-bras",
+    ] as MuscleGroup[]) {
+      assert.equal(incrementDeMontee(groupe), 1, `${groupe} : incrément de 1 kg`);
+      const reco = recommanderProchaineCible({
+        progressionActive: true,
+        groupe,
+        plage: { min: 8, max: 13 },
+        reference: { chargeKg: 12, reps: 13 },
+      });
+      assert.ok(reco.ok, `recommandation pour ${groupe}`);
+      assert.equal(reco.recommandation.chargeKg, 13, `${groupe} : petit groupe, +1 kg`);
+      assert.equal(reco.recommandation.reps, 8, `${groupe} : retour borne basse`);
+    }
+  });
+
+  await test("13bis. LE TABLEAU COMPLET des incréments — aucune régression, aucun groupe oublié", () => {
+    // Les 15 valeurs canoniques de `MuscleGroup`, chacune avec son incrément
+    // attendu ou `null`. Un groupe ajouté au type sans décision produit fera
+    // échouer ce test, ce qui est le but : il ne doit pas hériter d'un
+    // incrément par accident.
+    const attendu: Record<MuscleGroup, number | null> = {
+      dos: 2.5,
+      quadriceps: 2.5,
+      ischios: 2.5,
+      fessiers: 2.5,
+      pectoraux: 2,
+      biceps: 1,
+      mollets: 1,
+      triceps: 1,
+      "épaules": 1,
+      abdos: 1,
+      lombaires: 1,
+      autre: 1,
+      "avant-bras": 1,
+      cardio: null,
+      "full-body": null,
+    };
+    for (const [groupe, increment] of Object.entries(attendu) as [MuscleGroup, number | null][]) {
+      assert.equal(incrementDeMontee(groupe), increment, `${groupe} : incrément ${increment}`);
+    }
+    assert.equal(Object.keys(attendu).length, 15, "les 15 groupes canoniques sont couverts");
+  });
+
+  await test("13ter. CARDIO n'a AUCUNE progression automatique de charge", () => {
+    assert.equal(incrementDeMontee("cardio"), null, "aucun incrément défini");
+    // Même avec une référence parfaitement exploitable : le refus vient du
+    // groupe, pas d'un manque de données.
+    const reco = recommanderProchaineCible({
       progressionActive: true,
-      groupe: "biceps",
+      groupe: "cardio",
       plage: { min: 8, max: 13 },
-      reference: { chargeKg: 12, reps: 13 },
+      reference: { chargeKg: 50, reps: 13 },
     });
-    assert.ok(biceps.ok);
-    assert.equal(biceps.recommandation.chargeKg, 13, "petit groupe : +1 kg");
+    assert.equal(reco.ok, false, "aucune recommandation");
+    assert.equal(reco.ok === false && reco.motif, "groupe-non-tarife");
+    // Et dans les trois autres cas de figure du moteur, même refus.
+    for (const reps of [6, 10, 18]) {
+      const autre = recommanderProchaineCible({
+        progressionActive: true,
+        groupe: "cardio",
+        plage: { min: 8, max: 13 },
+        reference: { chargeKg: 50, reps },
+      });
+      assert.equal(autre.ok === false && autre.motif, "groupe-non-tarife", `cardio refusé aussi à ${reps} reps`);
+    }
+    // Sans historique non plus.
+    const premiere = conseilPremiereSerie({
+      progressionActive: true,
+      groupe: "cardio",
+      plage: { min: 8, max: 13 },
+      chargeKg: 50,
+      reps: 18,
+    });
+    assert.equal(premiere.ok === false && premiere.motif, "groupe-non-tarife");
+  });
+
+  await test("13quater. FULL-BODY n'a AUCUNE progression automatique de charge", () => {
+    assert.equal(incrementDeMontee("full-body"), null, "aucun incrément défini");
+    const reco = recommanderProchaineCible({
+      progressionActive: true,
+      groupe: "full-body",
+      plage: { min: 8, max: 13 },
+      reference: { chargeKg: 50, reps: 13 },
+    });
+    assert.equal(reco.ok, false, "aucune recommandation");
+    assert.equal(reco.ok === false && reco.motif, "groupe-non-tarife");
+    for (const reps of [6, 10, 18]) {
+      const autre = recommanderProchaineCible({
+        progressionActive: true,
+        groupe: "full-body",
+        plage: { min: 8, max: 13 },
+        reference: { chargeKg: 50, reps },
+      });
+      assert.equal(autre.ok === false && autre.motif, "groupe-non-tarife", `full-body refusé aussi à ${reps} reps`);
+    }
+    const premiere = conseilPremiereSerie({
+      progressionActive: true,
+      groupe: "full-body",
+      plage: { min: 8, max: 13 },
+      chargeKg: 50,
+      reps: 18,
+    });
+    assert.equal(premiere.ok === false && premiere.motif, "groupe-non-tarife");
   });
 
   await test("14. AU-DESSUS DE LA BORNE HAUTE : traitement identique, le dépassement ne change rien", () => {
@@ -459,7 +563,7 @@ await (async () => {
 
   await test("15. SOUS LA BORNE BASSE : −1 kg quel que soit le groupe, retour borne basse", () => {
     assert.equal(BAISSE_KG, 1, "la baisse est de 1 kg, jamais l'incrément de montée");
-    for (const groupe of ["pectoraux", "dos", "biceps", "autre"] as MuscleGroup[]) {
+    for (const groupe of ["pectoraux", "dos", "biceps", "autre", "avant-bras"] as MuscleGroup[]) {
       const reco = recommanderProchaineCible({
         progressionActive: true,
         groupe,
@@ -560,7 +664,11 @@ await (async () => {
     assert.equal(sansRef.ok === false && sansRef.motif, "aucune-reference");
 
     // Groupes canoniques sans incrément défini par la règle produit.
-    for (const groupe of ["avant-bras", "cardio", "full-body"] as MuscleGroup[]) {
+    // ⚠️ `avant-bras` N'EN FAIT PLUS PARTIE depuis le 23/09/2026 : il est
+    // devenu un petit groupe à +1 kg (voir le test 13). Ce test verrouillait
+    // l'ancienne règle, il a été adapté — pas supprimé — et `avant-bras` est
+    // désormais vérifié du côté des groupes tarifés.
+    for (const groupe of ["cardio", "full-body"] as MuscleGroup[]) {
       assert.equal(incrementDeMontee(groupe), null, `${groupe} n'a pas d'incrément`);
       const reco = recommanderProchaineCible({
         progressionActive: true,

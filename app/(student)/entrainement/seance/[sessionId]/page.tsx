@@ -15,6 +15,8 @@ import {
 } from "@/data/student";
 import { formaterDureeMinutes } from "@/lib/duree";
 import { useSeanceHorsLigne } from "@/hooks/useSeanceHorsLigne";
+import { useProgressionReglages } from "@/hooks/useProgressionReglages";
+import { progressionActivePour } from "@/lib/progression-reglage";
 import { Loader } from "@/components/ui/Loader";
 
 /**
@@ -54,6 +56,12 @@ function CadreSeance({ titre, message }: { titre: string; message: string }) {
 export default function SessionDetailPage() {
   const params = useParams<{ sessionId: string }>();
   const seance = useSeanceHorsLigne(params.sessionId);
+  // ⚠️ APPELÉ AVANT TOUT RETOUR ANTICIPÉ. Les hooks ne se conditionnent pas :
+  // l'identifiant de programme peut être `null` (états sans données), le hook
+  // rend alors un index vide sans requête.
+  const reglagesProgression = useProgressionReglages(
+    seance.etat === "online" || seance.etat === "offline" ? (seance.contenu?.programId ?? null) : null,
+  );
 
   if (seance.etat === "chargement") {
     return <Loader libelle="Chargement…" variante="ligne" />;
@@ -190,6 +198,19 @@ export default function SessionDetailPage() {
           exercises={realSession.exercises}
           cardioBlocks={realSession.cardioBlocks}
           sessionMuscleGroup={realSession.muscleGroups}
+          // L'occurrence programmée de la séance — (semaine, jour). Les deux
+          // sont exigés : une semaine sans jour ne désigne aucune séance, et
+          // un jour sans semaine ne distingue pas deux mercredis. Absente,
+          // aucun indicateur de progression ne s'affiche.
+          occurrence={
+            typeof realSession.weekNumber === "number" && realSession.day
+              ? { weekNumber: realSession.weekNumber, day: realSession.day }
+              : null
+          }
+          // Réglage ON/OFF, lu UNE fois pour tout le programme. Absent (hors
+          // ligne, ou programme sans réglage) : la progression est OFF, donc
+          // aucun indicateur — l'historique reste lisible dans tous les cas.
+          progressionActivePourExercice={(exercice) => progressionActivePour(reglagesProgression, exercice)}
           source={seance.etat === "offline" ? "offline" : "supabase"}
           authUserId={seance.identite?.userId ?? null}
           businessDate={seance.businessDate}

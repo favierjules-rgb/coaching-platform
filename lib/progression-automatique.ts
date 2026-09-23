@@ -41,12 +41,19 @@
  *   +2 kg    pectoraux                                        401 exercices
  *   +1 kg    biceps · mollets · triceps · épaules ·
  *            abdos · lombaires · autre                      1 344 exercices
+ *   +1 kg    avant-bras                                         0 exercice
  *
- * ⚠️ `avant-bras`, `cardio` ET `full-body` N'ONT AUCUN INCRÉMENT DÉFINI. Ils
- * sont absents des données actuelles mais le type les autorise. Leur donner
- * un incrément « au jugé » serait inventer une règle métier : ils rendent
- * donc `groupe-non-tarife`, et aucune recommandation n'est affichée. À
- * trancher avec le coach avant qu'un exercice ne les utilise.
+ * `avant-bras` a rejoint les petits groupes le 23/09/2026, sur décision du
+ * propriétaire du projet : c'est un petit groupe, il prend donc +1 kg comme
+ * ses voisins. Il n'apparaît dans aucun exercice des données actuelles — la
+ * règle est posée avant qu'un exercice ne l'utilise, pas après.
+ *
+ * ⚠️ `cardio` ET `full-body` N'ONT TOUJOURS AUCUN INCRÉMENT, ET C'EST UNE
+ * DÉCISION, PAS UN OUBLI. Ils ne bénéficient d'AUCUNE progression automatique
+ * de charge : un bloc cardio n'a pas de charge à monter, et « full-body »
+ * désigne un exercice global dont la charge ne suit aucun des paliers
+ * ci-dessus. Ils rendent `groupe-non-tarife`, donc aucune recommandation.
+ * NE JAMAIS leur donner d'incrément « pour compléter le tableau ».
  */
 import type { MuscleGroup } from "@/types";
 
@@ -69,7 +76,9 @@ const INCREMENT_PAR_GROUPE: Partial<Record<MuscleGroup, number>> = {
   abdos: 1,
   lombaires: 1,
   autre: 1,
-  // avant-bras, cardio, full-body : VOLONTAIREMENT ABSENTS. Voir l'en-tête.
+  "avant-bras": 1,
+  // ⚠️ cardio ET full-body : VOLONTAIREMENT ABSENTS, décision explicite du
+  // 23/09/2026 — aucune progression automatique de charge. Voir l'en-tête.
 };
 
 /** Baisse appliquée sous la borne basse — la même pour tous les groupes. */

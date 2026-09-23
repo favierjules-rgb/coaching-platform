@@ -1343,6 +1343,49 @@ export interface Database {
         };
         Relationships: [];
       };
+      /**
+       * Réglage « progression automatique » d'un exercice DANS un programme
+       * (migration 20260925090000).
+       *
+       * ⚠️ UNE SEULE LIGNE PAR (programme, exercice), et AUCUNE colonne de
+       * semaine : le réglage est global à toutes les semaines du programme
+       * par construction. Les deux colonnes d'identité sont mutuellement
+       * exclusives (CHECK `program_exercise_progression_identite_exclusive`)
+       * — la fiche de banque quand elle existe, sinon le nom NORMALISÉ pour
+       * un exercice saisi en texte libre.
+       *
+       * Absence de ligne = progression désactivée.
+       */
+      program_exercise_progression: {
+        Row: {
+          id: string;
+          program_id: string;
+          exercise_library_id: string | null;
+          exercise_name_normalized: string | null;
+          progression_active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          program_id: string;
+          exercise_library_id?: string | null;
+          exercise_name_normalized?: string | null;
+          progression_active: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          program_id?: string;
+          exercise_library_id?: string | null;
+          exercise_name_normalized?: string | null;
+          progression_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       exercise_library: {
         Row: {
           id: string;
