@@ -440,9 +440,23 @@ await (async () => {
   await test("14. AUCUNE REQUÊTE — le module est pur", () => {
     const code = lire("../../lib/comparaison-retour-coach.ts");
     assert.ok(!/supabase|createSupabase|fetch\(/i.test(sansCommentaires(code)), "aucun accès réseau");
-    // Et l'écran passe l'historique QU'IL A DÉJÀ, sans le recharger.
+    /*
+     * Et l'écran passe l'historique QU'IL A DÉJÀ, sans le recharger.
+     *
+     * ⚠️ LA PROPRIÉTÉ N'A PAS CHANGÉ, SEULE SON ÉCRITURE A CHANGÉ. L'écran
+     * passait `historique={feedback}` — la liste entière à chacune de ses
+     * lignes. Depuis le correctif pré-merge, il passe la tranche de l'élève du
+     * retour, regroupée une seule fois pour tout l'écran. L'index construit est
+     * le même (`buildPreviousPerformanceIndex` filtrait déjà sur `studentId`),
+     * et c'est prouvé par scripts/tests/retours-index-unique.mts, test 6.
+     * Ce qui compte ici reste : AUCUNE lecture de plus.
+     */
     const page = sansCommentaires(lire("../../app/admin/retours/page.tsx"));
-    assert.ok(page.includes("historique={feedback}"), "l'historique déjà chargé est passé tel quel");
+    assert.ok(
+      /historique=\{historiqueParEleve\.get\(f\.studentId\)/.test(page),
+      "l'historique déjà chargé n'est plus passé à la modale",
+    );
+    assert.ok(!/\.from\(|getWorkoutFeedbackForStudent/.test(page), "l'écran recharge l'historique au lieu de le réutiliser");
     assert.equal((page.match(/useSupabaseAdminFeedback\(/g) ?? []).length, 1, "une seule lecture, comme avant");
   });
 })();

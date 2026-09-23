@@ -11,7 +11,7 @@ import { feedbackStatusLabels, feedbackTypeLabels, formatDate, fullName } from "
 import { isCardioResultEntryName, parseCardioResults, type CardioBlockResult } from "@/lib/cardio-feedback";
 import { formatDistanceMeters, formatDurationSeconds } from "@/lib/cardio";
 import type { ReponseCoach } from "@/lib/coach-reply-video";
-import { cleDeSerie, comparaisonsDuRetour } from "@/lib/comparaison-retour-coach";
+import { cleDeSerie, comparaisonsDuRetour, type ComparaisonDeSerie } from "@/lib/comparaison-retour-coach";
 import {
   formaterEcartReps,
   libelleEcartCharge,
@@ -24,6 +24,15 @@ import { exerciseGlobalRpeMentions } from "@/lib/previous-performance";
 import { formatRpeFr } from "@/lib/rpe";
 import { parseAnnotations, type Annotation } from "@/lib/video-annotations";
 import type { AdminStudent, AdminStudentFeedback } from "@/types";
+
+/**
+ * LA TABLE VIDE DES MODALES FERMÉES — une seule, partagée.
+ *
+ * Une `new Map()` fabriquée à chaque rendu rendrait une identité différente à
+ * chaque fois, et relancerait tout ce qui en dépend. Celle-ci ne change jamais,
+ * et elle est vide : aucun badge n'est calculé sur rien.
+ */
+const AUCUNE_COMPARAISON: ReadonlyMap<string, ComparaisonDeSerie> = new Map();
 
 /**
  * LES BADGES D'UNE SÉRIE, POUR LE COACH.
@@ -219,8 +228,23 @@ export function FeedbackDetailModal({
    * d'honnête à dire — voir l'en-tête du module.
    */
   const comparaisons = useMemo(
-    () => comparaisonsDuRetour({ retour: feedback, historique }),
-    [feedback, historique],
+    /*
+     * ⚠️ RIEN N'EST CALCULÉ TANT QUE LA MODALE EST FERMÉE, ET C'EST UNE
+     * CORRECTION, PAS UNE MICRO-OPTIMISATION.
+     *
+     * `/admin/retours` rend UNE modale par ligne — 129 en production. Ce
+     * `useMemo` s'exécute au rendu, avant et indépendamment du `{open && …}`
+     * plus bas : chacune des 129 lignes construisait donc son index sur
+     * l'historique entier, soit 129 × 129 parcours de retours pour un écran où
+     * le coach n'ouvre qu'un seul détail. Conditionné à `open`, le compte tombe
+     * à zéro au rendu de la liste, et à UN à l'ouverture.
+     *
+     * ⚠️ AUCUNE RÈGLE N'EST TOUCHÉE. Même appel, mêmes entrées, même table.
+     * Ce qui change, c'est QUAND il a lieu — jamais ce qu'il rend. Une modale
+     * ouverte affiche exactement les badges qu'elle affichait avant.
+     */
+    () => (open ? comparaisonsDuRetour({ retour: feedback, historique }) : AUCUNE_COMPARAISON),
+    [open, feedback, historique],
   );
 
   const parsedCardio = parseCardioResults(feedback.exerciseEntries);

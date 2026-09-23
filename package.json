@@ -144,7 +144,9 @@
     "test:lecture-programmes-legere": "npx tsx scripts/tests/lecture-programmes-legere.mts",
     "test:lots-identifiants": "npx tsx scripts/tests/lots-identifiants.mts",
     "test:duree-format": "npx tsx scripts/tests/duree-format.mts",
-    "test:chronometre-seance": "npx tsx scripts/tests/chronometre-seance.mts"
+    "test:chronometre-seance": "npx tsx scripts/tests/chronometre-seance.mts",
+    "test:retours-lots": "npx tsx scripts/tests/retours-lots-identifiants.mts",
+    "test:retours-index": "npx tsx scripts/tests/retours-index-unique.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",
