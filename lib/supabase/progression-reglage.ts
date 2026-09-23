@@ -1,10 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
+  indexerIdentifiants,
   indexerReglages,
   type EcritureReglage,
+  type IdentifiantsReglages,
   type IndexReglages,
   type LigneReglage,
+  type LotsDEcriture,
 } from "@/lib/progression-reglage";
 import type { Database } from "@/types/supabase";
 
@@ -29,23 +32,92 @@ type TypedSupabaseClient = SupabaseClient<Database>;
 
 const TABLE = "program_exercise_progression" as const;
 
-/** Tous les réglages d'un programme, indexés par identité d'exercice. */
+/** Ce qu'une lecture rend : l'état affiché, et les identifiants pour écrire. */
+export interface ReglagesLus {
+  readonly index: IndexReglages;
+  readonly identifiants: IdentifiantsReglages;
+}
+
+/**
+ * Tous les réglages d'un programme — UNE requête, index et identifiants.
+ *
+ * `id` est sélectionné en plus de l'état : c'est la seule cible de conflit
+ * utilisable pour l'écriture groupée (voir `LigneReglage.id`). Une colonne de
+ * plus dans un `select` ne coûte rien ; la redemander à l'écriture aurait
+ * coûté un aller-retour.
+ */
 export async function getProgressionReglages(
   supabase: TypedSupabaseClient,
   programId: string,
-): Promise<IndexReglages> {
-  if (!programId) return indexerReglages([]);
+): Promise<ReglagesLus> {
+  const vide = { index: indexerReglages([]), identifiants: indexerIdentifiants([]) };
+  if (!programId) return vide;
   const { data, error } = await supabase
     .from(TABLE)
-    .select("exercise_library_id, exercise_name_normalized, progression_active")
+    .select("id, exercise_library_id, exercise_name_normalized, progression_active")
     .eq("program_id", programId);
-  if (error || !data) return indexerReglages([]);
+  if (error || !data) return vide;
   const lignes: LigneReglage[] = data.map((ligne) => ({
+    id: ligne.id,
     exerciseLibraryId: ligne.exercise_library_id,
     exerciseNameNormalized: ligne.exercise_name_normalized,
     progressionActive: ligne.progression_active === true,
   }));
-  return indexerReglages(lignes);
+  return { index: indexerReglages(lignes), identifiants: indexerIdentifiants(lignes) };
+}
+
+/**
+ * Écrit N réglages en AU PLUS DEUX requêtes.
+ *
+ * ⚠️ `upsert` SUR LA CLÉ PRIMAIRE, PAS SUR L'IDENTITÉ D'EXERCICE.
+ * Les deux index d'unicité de la table sont PARTIELS. PostgREST transmet
+ * `on_conflict` comme une simple liste de colonnes en paramètre d'URL et
+ * n'émet jamais le prédicat `WHERE` qu'un index partiel exige pour être
+ * inféré : viser `(program_id, exercise_library_id)` échouerait en 42P10. La
+ * clé primaire s'infère toujours — d'où la lecture qui ramène les `id`.
+ *
+ * Les lignes neuves partent en un `insert` groupé : aucune n'existe encore
+ * pour son identité, donc aucun conflit à arbitrer.
+ *
+ * Deux coachs qui règlent le MÊME exercice à la même seconde peuvent encore
+ * faire échouer l'insertion du second sur un index partiel. Comme avant, cela
+ * rend une erreur plutôt qu'un réglage silencieusement perdu.
+ */
+export async function setProgressionReglagesEnLot(
+  supabase: TypedSupabaseClient,
+  lots: LotsDEcriture,
+): Promise<{ ok: true; requetes: number } | { ok: false; message: string; requetes: number }> {
+  let requetes = 0;
+
+  if (lots.aMettreAJour.length > 0) {
+    requetes += 1;
+    const { error } = await supabase.from(TABLE).upsert(
+      lots.aMettreAJour.map((ligne) => ({
+        id: ligne.id,
+        program_id: ligne.programId,
+        exercise_library_id: ligne.exerciseLibraryId,
+        exercise_name_normalized: ligne.exerciseNameNormalized,
+        progression_active: ligne.progressionActive,
+      })),
+      { onConflict: "id" },
+    );
+    if (error) return { ok: false, message: error.message, requetes };
+  }
+
+  if (lots.aInserer.length > 0) {
+    requetes += 1;
+    const { error } = await supabase.from(TABLE).insert(
+      lots.aInserer.map((ligne) => ({
+        program_id: ligne.programId,
+        exercise_library_id: ligne.exerciseLibraryId,
+        exercise_name_normalized: ligne.exerciseNameNormalized,
+        progression_active: ligne.progressionActive,
+      })),
+    );
+    if (error) return { ok: false, message: error.message, requetes };
+  }
+
+  return { ok: true, requetes };
 }
 
 /**

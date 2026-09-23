@@ -18,6 +18,8 @@ import { renderToString } from "react-dom/server";
 import {
   PROGRESSION_ACTIVE_PAR_DEFAUT,
   cleReglageDeLExercice,
+  indexerIdentifiants,
+  lotsDEcriture,
   ecritureDuReglage,
   identiteReglage,
   indexApresBascule,
@@ -90,8 +92,8 @@ function rendreBoutons(
         // connu avant le premier rendu, sinon aucun bouton ne pourrait
         // jamais apparaître allumé dans un test de rendu.
         indexInitial: indexerReglages(lignes),
-        lire: async () => indexerReglages(lignes),
-        ecrire: async () => ({ ok: true as const }),
+        lire: async () => ({ index: indexerReglages(lignes), identifiants: indexerIdentifiants(lignes) }),
+        ecrire: async () => ({ ok: true as const, requetes: 0 }),
       },
       ...exercices.map((exercice, i) => createElement(ProgressionAutomatiqueToggle, { key: i, exercise: exercice })),
     ),
@@ -406,9 +408,19 @@ await (async () => {
     assert.ok(acces.includes(".update("), "update émis");
     assert.ok(acces.includes(".insert("), "insert émis");
     assert.ok(!acces.includes(".delete("), "aucun delete émis : le privilège manquant ne peut pas gêner");
-    // Pas d'`upsert` : deux index uniques partiels, PostgREST ne sait viser
-    // qu'une contrainte nommée à la fois.
-    assert.ok(!acces.includes(".upsert("), "aucun upsert, donc aucun onConflict à choisir de travers");
+    // ⚠️ L'`upsert` EXISTE DÉSORMAIS, ET SA CIBLE DE CONFLIT EST LA CLÉ
+    // PRIMAIRE. Ce test interdisait tout `upsert`, ce qui verrouillait l'ancien
+    // chemin « une requête par bascule ». La propriété qui compte n'est pas
+    // l'absence d'upsert, c'est que `onConflict` ne vise JAMAIS un index
+    // PARTIEL : PostgREST transmet `on_conflict` comme une liste de colonnes
+    // sans le prédicat `WHERE` qu'un index partiel exige, d'où 42P10.
+    assert.ok(acces.includes('onConflict: "id"'), "le conflit est arbitré sur la clé primaire");
+    for (const partiel of ["exercise_library_id", "exercise_name_normalized", "program_id,"]) {
+      assert.ok(
+        !new RegExp(`onConflict:\\s*"[^"]*${partiel.replace(",", ",")}`).test(acces),
+        `onConflict ne vise jamais ${partiel} : ces index sont PARTIELS`,
+      );
+    }
   });
 
   await test("21ter. les POLICIES correspondent aux rôles réels des deux chemins", () => {
@@ -508,6 +520,98 @@ await (async () => {
     // Et le hook filtre lui-même l'identifiant vide avant toute requête.
     const hook = sansCommentaires(lire("../../hooks/useProgressionReglages.ts"));
     assert.ok(hook.includes("if (!programId) return;"), "aucune requête sans programme");
+  });
+
+  await test("21sexies. N RÉGLAGES = AU PLUS DEUX REQUÊTES — aucun N+1 réseau", () => {
+    // ⚠️ C'EST LA CORRECTION DE PERFORMANCE, ET ELLE SE MESURE.
+    // L'ancien chemin écrivait 1 à 2 requêtes PAR BASCULE, en tir sans
+    // attente : 50 exercices lançaient 50 à 100 requêtes en rafale, qui
+    // faisaient la queue devant les 59 allers-retours de la sauvegarde du
+    // programme. C'est la cause mesurée des ~3 minutes.
+    const bascules = new Map<string, { exercice: ExercicePourReglage; progressionActive: boolean }>();
+    const identifiants = new Map<string, string>();
+    for (let i = 0; i < 50; i += 1) {
+      const exercice = { name: `Exercice ${i}`, libraryExerciseId: `lib-${i}` };
+      bascules.set(cleReglageDeLExercice(exercice)!, { exercice, progressionActive: true });
+      // La moitié existe déjà en base, l'autre est neuve : les deux lots sont
+      // réellement peuplés.
+      if (i % 2 === 0) identifiants.set(cleReglageDeLExercice(exercice)!, `ligne-${i}`);
+    }
+    const lots = lotsDEcriture(PROGRAMME, bascules, identifiants);
+    assert.equal(lots.aMettreAJour.length, 25, "25 lignes existantes en un upsert");
+    assert.equal(lots.aInserer.length, 25, "25 lignes neuves en un insert");
+    // La promesse chiffrée : DEUX lots, quel que soit le nombre de réglages.
+    assert.equal(
+      (lots.aMettreAJour.length > 0 ? 1 : 0) + (lots.aInserer.length > 0 ? 1 : 0),
+      2,
+      "au plus deux requêtes pour 50 réglages",
+    );
+    // Et 500 réglages ne coûtent pas plus de lots que 50.
+    for (let i = 50; i < 500; i += 1) {
+      const exercice = { name: `Exercice ${i}`, libraryExerciseId: `lib-${i}` };
+      bascules.set(cleReglageDeLExercice(exercice)!, { exercice, progressionActive: true });
+    }
+    const gros = lotsDEcriture(PROGRAMME, bascules, identifiants);
+    assert.equal(gros.aMettreAJour.length + gros.aInserer.length, 500, "les 500 réglages sont bien tous écrits");
+    assert.equal(
+      (gros.aMettreAJour.length > 0 ? 1 : 0) + (gros.aInserer.length > 0 ? 1 : 0),
+      2,
+      "toujours deux requêtes : le coût réseau ne suit PAS le nombre d'exercices",
+    );
+  });
+
+  await test("21septies. deux bascules du MÊME exercice n'écrivent que son état final", () => {
+    // Le tampon est indexé par exercice : activer puis désactiver ne coûte pas
+    // deux écritures, et surtout n'écrit pas un état intermédiaire.
+    const exercice = { name: "Élévations latérales", libraryExerciseId: LIB_ELEV };
+    const cle = cleReglageDeLExercice(exercice)!;
+    const bascules = new Map<string, { exercice: ExercicePourReglage; progressionActive: boolean }>();
+    bascules.set(cle, { exercice, progressionActive: true });
+    bascules.set(cle, { exercice, progressionActive: false });
+    const lots = lotsDEcriture(PROGRAMME, bascules, new Map());
+    assert.equal(lots.aInserer.length, 1, "une seule écriture");
+    assert.equal(lots.aInserer[0].progressionActive, false, "et c'est l'état final");
+    // Un exercice sans identité n'entre dans aucun lot.
+    const sansNom = new Map<string, { exercice: ExercicePourReglage; progressionActive: boolean }>();
+    sansNom.set("bidon", { exercice: { name: "" }, progressionActive: true });
+    const rien = lotsDEcriture(PROGRAMME, sansNom, new Map());
+    assert.equal(rien.aMettreAJour.length + rien.aInserer.length, 0, "rien à persister");
+  });
+
+  /**
+   * ⚠️ TEST RÉÉCRIT LE 23/09/2026 — CHANGEMENT D'ARCHITECTURE, SIGNALÉ.
+   *
+   * Il affirmait deux mécanismes de DÉCLENCHEMENT : un `setTimeout` de
+   * regroupement, et un vidage au démontage. Les deux ont disparu, sur
+   * consigne explicite : le clic ne doit plus écrire du tout, et la
+   * persistance appartient à « Enregistrer ».
+   *
+   * L'invariant défendu ici est donc PLUS FORT qu'avant : non plus « l'écriture
+   * est différée », mais « le clic n'émet AUCUNE requête, à aucun moment ».
+   * L'ancienne version passait avec une minuterie ; celle-ci échoue si on en
+   * réintroduit une.
+   */
+  await test("21octies. LE CLIC N'ÉCRIT RIEN — la persistance appartient à « Enregistrer »", () => {
+    const code = sansCommentaires(sourceToggle);
+    assert.ok(code.includes("enAttente"), "un tampon de bascules existe");
+    assert.ok(code.includes("setProgressionReglagesEnLot") || code.includes("ecrire(lots)"), "écriture groupée");
+    // ⚠️ AUCUNE MINUTERIE, NULLE PART : plus rien ne part « tout seul ».
+    assert.ok(!/setTimeout\(|setInterval\(/.test(code), "aucune écriture programmée dans le temps");
+    // Le clic ne déclenche aucune écriture : `basculer` ne connaît ni le
+    // réseau ni la fonction de persistance.
+    const debutBascule = code.indexOf("const basculer = useCallback");
+    assert.ok(debutBascule > 0, "le clic est bien géré par `basculer`");
+    const corpsBascule = code.slice(debutBascule, code.indexOf("[programId],", debutBascule));
+    for (const interdit of ["ecrire(", "enregistrerLesReglages", "await "]) {
+      assert.ok(!corpsBascule.includes(interdit), `le clic ne fait pas « ${interdit} »`);
+    }
+    // Et il signale au builder qu'il y a des modifications non enregistrées.
+    assert.ok(corpsBascule.includes("signalerModification.current?.()"), "le clic signale l'état « modifié »");
+    // La persistance est exposée au builder par une poignée, posée dans un effet.
+    assert.ok(code.includes("enregistrerRef.current = enregistrerLesReglages"), "la poignée est posée");
+    // ⚠️ L'ANCIEN CHEMIN EST RÉELLEMENT PARTI : plus aucune écriture unitaire.
+    assert.ok(!code.includes("setProgressionReglage("), "plus d'écriture réglage par réglage");
+    assert.ok(!code.includes("ecritureDuReglage("), "le fournisseur ne fabrique plus une écriture unitaire");
   });
 
   /* ══════════════════════════════════════════════════════════════════════

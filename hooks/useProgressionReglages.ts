@@ -33,7 +33,9 @@ export function useProgressionReglages(programId: string | null): IndexReglages 
     if (!client) return;
     let annule = false;
     void getProgressionReglages(client, programId).then((lus) => {
-      if (!annule) setIndex(lus);
+      // Seul l'état affiché intéresse la page de séance ; les identifiants de
+      // ligne ne servent qu'à l'écriture groupée du builder.
+      if (!annule) setIndex(lus.index);
     });
     return () => {
       annule = true;

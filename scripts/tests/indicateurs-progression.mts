@@ -20,6 +20,7 @@ import { renderToString } from "react-dom/server";
 
 import { ExerciseFeedbackCard } from "../../components/student/ExerciseFeedbackCard";
 import {
+  contexteDeComparaison,
   ecartReps,
   formaterChargeKg,
   formaterChargeUtilisateur,
@@ -32,6 +33,7 @@ import {
   uniteDeLaReference,
   versChargeEffective,
   versEspaceDeProgression,
+  type ContexteComparaison,
   type Indicateurs,
 } from "../../lib/indicateurs-progression";
 import { referenceDeProgression } from "../../lib/reference-progression";
@@ -163,12 +165,47 @@ function indicateurs(options: {
   return lue.indicateurs;
 }
 
+/**
+ * LE CONTEXTE DE COMPARAISON IMMÉDIATE — indépendant du réglage ON/OFF.
+ *
+ * ⚠️ IL NE VIENT PAS DE `indicateurs()`. C'est tout l'objet du lot 2 : la
+ * comparaison existe même quand la progression automatique est désactivée, et
+ * même quand le groupe n'est pas tarifé. Un harnais qui la dériverait des
+ * indicateurs ne pourrait pas tester cette indépendance.
+ */
+function comparaisonDe(options: {
+  chargeKg?: number;
+  reps?: number;
+  reps_prescrites?: string;
+  sansReference?: boolean;
+  unite?: "totale" | "par-haltere";
+}): ContexteComparaison {
+  const contexte = contexteDeComparaison({
+    repsPrescrites: options.reps_prescrites ?? "8-13",
+    reference: options.sansReference
+      ? null
+      : { chargeKg: options.chargeKg ?? 50, reps: options.reps ?? 10, unite: options.unite ?? "totale" },
+  });
+  assert.ok(contexte, `contexte de comparaison attendu (${JSON.stringify(options)})`);
+  return contexte;
+}
+
 function rendreCarte(options: {
   repsSaisies?: string[];
+  /**
+   * LES CHARGES SAISIES. Depuis le lot 2, l'écart de répétitions n'existe
+   * QU'À CHARGE ÉGALE : sans charge saisie, la carte ne peut pas savoir que la
+   * charge est égale, et n'affiche donc aucun écart. Par défaut, ce harnais
+   * saisit la charge de référence sur chaque série — le cas nominal d'un écart
+   * de répétitions.
+   */
+  chargesSaisies?: string[];
   indicateurs?: Indicateurs | null;
+  comparaison?: ContexteComparaison | null;
   reps?: string;
 }): string {
   const saisies = options.repsSaisies ?? ["", "", ""];
+  const charges = options.chargesSaisies ?? saisies.map(() => "50 kg");
   const exercice: Exercise = {
     id: "ex-1",
     name: "Développé couché",
@@ -190,7 +227,7 @@ function rendreCarte(options: {
       sessionId: "s",
       exerciseId: "ex-1",
       setNumber: i + 1,
-      loadUsed: "",
+      loadUsed: charges[i] ?? "",
       repsDone: reps,
       rpe: "",
     })),
@@ -204,6 +241,7 @@ function rendreCarte(options: {
       feedback: saisie,
       previous: null,
       indicateurs: options.indicateurs ?? null,
+      comparaison: options.comparaison ?? null,
       onSetChange: () => {},
       onCommentChange: () => {},
     }),
@@ -228,7 +266,11 @@ await (async () => {
   await test("3. +10 : DIX répétitions de plus — aucun plafond à +3", () => {
     assert.equal(ecartReps("20", 10), 10, "référence 10, actuel 20 → +10");
     assert.equal(formaterEcartReps(10), "+10");
-    const html = rendreCarte({ repsSaisies: ["20"], indicateurs: indicateurs({ reps: 10 }) });
+    const html = rendreCarte({
+      repsSaisies: ["20"],
+      indicateurs: indicateurs({ reps: 10 }),
+      comparaison: comparaisonDe({ reps: 10 }),
+    });
     assert.ok(html.includes("+10"), "l'écart +10 est rendu");
     assert.ok(!html.includes("+3<"), "aucun +3 plafonné à l'écran");
   });
@@ -241,7 +283,11 @@ await (async () => {
   await test("5. -5 : cinq répétitions de moins — aucun plancher à -3", () => {
     assert.equal(ecartReps("5", 10), -5);
     assert.equal(formaterEcartReps(-5), "-5");
-    const html = rendreCarte({ repsSaisies: ["5"], indicateurs: indicateurs({ reps: 10 }) });
+    const html = rendreCarte({
+      repsSaisies: ["5"],
+      indicateurs: indicateurs({ reps: 10 }),
+      comparaison: comparaisonDe({ reps: 10 }),
+    });
     assert.ok(html.includes("-5"), "l'écart -5 est rendu");
     assert.ok(!html.includes(">-3<"), "aucun -3 plafonné à l'écran");
   });
@@ -261,7 +307,11 @@ await (async () => {
 
   await test("7. un écart NUL n'affiche aucun badge — « 0 » n'apprend rien", () => {
     assert.equal(ecartReps("10", 10), null);
-    const html = rendreCarte({ repsSaisies: ["10"], indicateurs: indicateurs({ reps: 10 }) });
+    const html = rendreCarte({
+      repsSaisies: ["10"],
+      indicateurs: indicateurs({ reps: 10 }),
+      comparaison: comparaisonDe({ reps: 10 }),
+    });
     assert.ok(!/>[+-]?0</.test(html), "aucun badge « 0 » rendu");
   });
 
@@ -271,12 +321,20 @@ await (async () => {
     assert.equal(ecartReps("AMRAP", 10), null);
     assert.equal(ecartReps(null, 10), null);
     assert.equal(ecartReps(undefined, 10), null);
-    const html = rendreCarte({ repsSaisies: ["", "AMRAP"], indicateurs: indicateurs({ reps: 10 }) });
+    const html = rendreCarte({
+      repsSaisies: ["", "AMRAP"],
+      indicateurs: indicateurs({ reps: 10 }),
+      comparaison: comparaisonDe({ reps: 10 }),
+    });
     assert.ok(!/aria-label="Série \d+ : /.test(html), "aucun libellé d'écart sans saisie lisible");
   });
 
   await test("9. l'écart est calculé SÉRIE PAR SÉRIE, pas une fois pour l'exercice", () => {
-    const html = rendreCarte({ repsSaisies: ["13", "10", "7"], indicateurs: indicateurs({ reps: 10 }) });
+    const html = rendreCarte({
+      repsSaisies: ["13", "10", "7"],
+      indicateurs: indicateurs({ reps: 10 }),
+      comparaison: comparaisonDe({ reps: 10 }),
+    });
     assert.ok(html.includes("+3"), "série 1 : +3");
     assert.ok(html.includes("-3"), "série 3 : -3");
     assert.ok(html.includes("Série 1 : 3 répétitions de plus que la référence"));
@@ -288,10 +346,18 @@ await (async () => {
    * ══════════════════════════════════════════════════════════════════════ */
 
   await test("10. positif = vert, négatif = rouge", () => {
-    const vert = rendreCarte({ repsSaisies: ["13"], indicateurs: indicateurs({ reps: 10 }) });
+    const vert = rendreCarte({
+      repsSaisies: ["13"],
+      indicateurs: indicateurs({ reps: 10 }),
+      comparaison: comparaisonDe({ reps: 10 }),
+    });
     assert.ok(/text-emerald-600[^"]*"[^>]*>\+3</.test(vert) || vert.includes("text-emerald-600"), "écart positif en vert");
     assert.ok(!vert.includes("text-red-600"), "aucun rouge quand tout est positif");
-    const rouge = rendreCarte({ repsSaisies: ["7"], indicateurs: indicateurs({ reps: 10 }) });
+    const rouge = rendreCarte({
+      repsSaisies: ["7"],
+      indicateurs: indicateurs({ reps: 10 }),
+      comparaison: comparaisonDe({ reps: 10 }),
+    });
     assert.ok(rouge.includes("text-red-600"), "écart négatif en rouge");
   });
 
@@ -329,34 +395,52 @@ await (async () => {
    * FLÈCHES DE CHARGE
    * ══════════════════════════════════════════════════════════════════════ */
 
-  await test("13. ↑ vert quand le moteur recommande une hausse de charge", () => {
+  /**
+   * ⚠️ CHANGEMENT DE MÉDIUM ASSUMÉ (lot 2/3, 23/09/2026) — SIGNALÉ.
+   *
+   * Jusqu'ici, la recommandation se lisait comme une FLÈCHE ↑/↓ dans la
+   * cellule CHARGE, identique sur toutes les séries. La flèche de cette
+   * cellule porte désormais le CONSEIL DE SÉRIE SUIVANTE, qui change d'une
+   * série à l'autre — deux flèches du même glyphe au même endroit ne
+   * voulaient plus rien dire.
+   *
+   * La recommandation n'a pas disparu : elle est passée DANS LE CHAMP, en
+   * placeholder (« Reco 52 kg », « Reco 8 reps »), ce que le lot 3 demandait
+   * explicitement, et son SENS reste lisible par un lecteur d'écran via le
+   * libellé du champ. Ces tests vérifient donc le même fait — la
+   * recommandation du moteur atteint l'écran — à l'endroit où elle est
+   * désormais rendue. La RÈGLE de charge, elle, est strictement inchangée :
+   * c'est ce que continuent d'affirmer les assertions sur `ind`.
+   */
+  await test("13. hausse de charge : la recommandation atteint le champ, sens compris", () => {
     const ind = indicateurs({ chargeKg: 50, reps: 13 }); // borne haute atteinte
     assert.equal(ind.sensCharge, "hausse");
     assert.equal(ind.recommandation.chargeKg, 52, "pectoraux : +2 kg");
     const html = rendreCarte({ indicateurs: ind });
-    assert.ok(html.includes("↑"), "flèche montante rendue");
-    assert.ok(!html.includes("↓"), "aucune flèche descendante");
-    assert.ok(html.includes("text-emerald-600"), "hausse en vert");
-    assert.ok(html.includes("Charge recommandée en hausse : 52 kg"));
+    assert.ok(html.includes('placeholder="Reco 52 kg"'), "la charge recommandée est le placeholder du champ");
+    assert.ok(html.includes('placeholder="Reco 8 reps"'), "et les répétitions cibles aussi");
+    assert.ok(html.includes('aria-label="Charge recommandée en hausse : 52 kg"'), "le sens reste annoncé");
+    // Aucune flèche : sans saisie, aucune série ne peut conseiller la suivante.
+    assert.ok(!html.includes("↑") && !html.includes("↓"), "aucune flèche de conseil sans saisie");
   });
 
-  await test("14. ↓ rouge quand le moteur recommande une baisse de charge", () => {
+  await test("14. baisse de charge : la recommandation atteint le champ, sens compris", () => {
     const ind = indicateurs({ chargeKg: 50, reps: 6 }); // sous la borne basse
     assert.equal(ind.sensCharge, "baisse");
     assert.equal(ind.recommandation.chargeKg, 49, "−1 kg");
     const html = rendreCarte({ indicateurs: ind });
-    assert.ok(html.includes("↓"), "flèche descendante rendue");
-    assert.ok(!html.includes("↑"), "aucune flèche montante");
-    assert.ok(html.includes("text-red-600"), "baisse en rouge");
-    assert.ok(html.includes("Charge recommandée en baisse : 49 kg"));
+    assert.ok(html.includes('placeholder="Reco 49 kg"'));
+    assert.ok(html.includes('aria-label="Charge recommandée en baisse : 49 kg"'), "le sens reste annoncé");
+    assert.ok(!html.includes("↑") && !html.includes("↓"), "aucune flèche de conseil sans saisie");
   });
 
-  await test("15. AUCUNE flèche quand la charge est maintenue (dans la plage)", () => {
+  await test("15. AUCUN sens annoncé quand la charge est maintenue (dans la plage)", () => {
     const ind = indicateurs({ chargeKg: 50, reps: 10 });
     assert.equal(ind.sensCharge, null, "dans la plage : charge inchangée");
     assert.equal(ind.recommandation.motif, "dans-la-plage");
     const html = rendreCarte({ indicateurs: ind });
     assert.ok(!html.includes("↑") && !html.includes("↓"), "aucune flèche");
+    assert.ok(html.includes("Charge recommandée maintenue : 50 kg"), "maintien annoncé, jamais une hausse");
   });
 
   await test("16. la flèche suit les incréments du lot A, groupe par groupe", () => {
@@ -388,10 +472,15 @@ await (async () => {
     assert.equal(ind.recommandation.chargeKg, 11, "10 kg + 1 kg");
     assert.equal(ind.recommandation.reps, 8, "retour borne basse");
     assert.equal(ind.sensCharge, "hausse");
-    const html = rendreCarte({ repsSaisies: ["15"], indicateurs: ind });
-    assert.ok(html.includes("↑"), "la flèche est rendue");
+    const html = rendreCarte({
+      repsSaisies: ["15"],
+      chargesSaisies: ["10 kg"],
+      indicateurs: ind,
+      comparaison: comparaisonDe({ chargeKg: 10, reps: 13 }),
+    });
+    assert.ok(html.includes('placeholder="Reco 11 kg"'), "la charge recommandée atteint le champ");
     assert.ok(html.includes("Charge recommandée en hausse : 11 kg"));
-    assert.ok(html.includes("+2"), "et l'écart de reps aussi (15 − 13)");
+    assert.ok(html.includes("+2"), "et l'écart de reps aussi (15 − 13), à charge égale");
     // Sous la borne basse, il baisse de 1 kg comme les autres.
     const baisse = indicateurs({ chargeKg: 10, reps: 5, groupe: "avant-bras" });
     assert.equal(baisse.recommandation.chargeKg, 9);
@@ -733,28 +822,65 @@ await (async () => {
    * PAS DE LOGIQUE PARALLÈLE
    * ══════════════════════════════════════════════════════════════════════ */
 
-  await test("21. AUCUN second moteur : la règle de charge n'est écrite qu'une fois", () => {
+  /**
+   * ⚠️ INVARIANT REFORMULÉ LE 23/09/2026, ET LE CHANGEMENT EST DÉLIBÉRÉ.
+   *
+   * Version d'origine : « aucun fichier hors du moteur ne compare des
+   * répétitions à une borne de plage ». Elle était juste tant que le seul
+   * consommateur de la plage était la recommandation.
+   *
+   * Règle posée depuis : les INDICATEURS IMMÉDIATS (✓/✕ et flèche de conseil)
+   * ne doivent PAS dépendre du moteur de surcharge automatique — sinon un
+   * exercice sans tarif (cardio, full-body) perd tous ses indicateurs. Ils
+   * lisent donc la fourchette prescrite directement, et c'est voulu.
+   *
+   * Ce que l'invariant défend désormais, et qui est le vrai enjeu :
+   *   • AUCUN KILOGRAMME n'est décidé hors de lib/progression-automatique.ts —
+   *     pas d'incrément, pas de palier, pas de plancher ;
+   *   • la RECOMMANDATION (`indicateursDExercice`) délègue toujours au moteur ;
+   *   • la CARTE et la SECTION, elles, ne lisent toujours aucune plage et
+   *     n'appellent aucun moteur : elles affichent ce qu'on leur donne.
+   */
+  await test("21. AUCUN SECOND MOTEUR DE CHARGE : le kilogramme n'est décidé qu'une fois", () => {
     const codeIndicateurs = sansCommentaires(sourceIndicateurs);
     const codeCarte = sansCommentaires(sourceCarte);
     const codeSection = sansCommentaires(sourceSection);
-    // Les constantes et les bornes du moteur n'apparaissent nulle part ailleurs.
     for (const [nom, code] of [
       ["lib/indicateurs-progression.ts", codeIndicateurs],
       ["ExerciseFeedbackCard.tsx", codeCarte],
       ["SessionFeedbackSection.tsx", codeSection],
     ] as const) {
-      assert.ok(!/reps\s*>=\s*max|reps\s*<\s*min/.test(code), `${nom} ne rejoue pas les bornes de plage`);
       assert.ok(!/BAISSE_KG|PLANCHER_KG|INCREMENT_PAR_GROUPE/.test(code), `${nom} ne rejoue pas les incréments`);
       assert.ok(!/2\.5|\+\s*2\b/.test(code) || nom !== "lib/indicateurs-progression.ts", `${nom} sans incrément en dur`);
     }
-    // Et l'unique source de décision est bien appelée.
+    // La carte et la section ne lisent AUCUNE borne : c'est inchangé.
+    for (const [nom, code] of [
+      ["ExerciseFeedbackCard.tsx", codeCarte],
+      ["SessionFeedbackSection.tsx", codeSection],
+    ] as const) {
+      assert.ok(!/plage\.(min|max)/.test(code), `${nom} ne lit aucune borne de plage`);
+      assert.ok(!code.includes("lirePlageReps"), `${nom} ne lit aucune plage`);
+      assert.ok(!code.includes("recommanderProchaineCible"), `${nom} n'appelle aucun moteur`);
+    }
+    // Et l'unique source de décision de CHARGE est bien appelée.
     assert.ok(
       codeIndicateurs.includes("recommanderProchaineCible("),
-      "les indicateurs délèguent la décision au moteur du lot A",
+      "la recommandation délègue la décision au moteur du lot A",
     );
-    // La carte, elle, ne connaît ni le moteur ni la plage : elle affiche.
-    assert.ok(!codeCarte.includes("recommanderProchaineCible"), "la carte n'appelle aucun moteur");
-    assert.ok(!codeCarte.includes("lirePlageReps"), "la carte ne lit aucune plage");
+    // Les bornes ne sont lues QUE par les indicateurs immédiats — jamais pour
+    // en déduire un kilogramme. Les deux seules comparaisons autorisées sont
+    // celles du verdict et du conseil ; toute troisième serait une règle de
+    // plus, écrite au mauvais endroit.
+    const comparaisonsDeBorne = codeIndicateurs.match(/reps\s*[<>]=?\s*[\w.]*plage\.(min|max)/g) ?? [];
+    assert.equal(comparaisonsDeBorne.length, 3, "verdict (borne basse) + conseil (haute puis basse), et rien d'autre");
+    const niveau1 = codeIndicateurs.slice(
+      codeIndicateurs.indexOf("export type SensEcartCharge"),
+      codeIndicateurs.indexOf("export type SensCharge"),
+    );
+    for (const comparaison of comparaisonsDeBorne) {
+      assert.ok(niveau1.includes(comparaison), `« ${comparaison} » vit dans le niveau 1, pas ailleurs`);
+    }
+    assert.ok(!/plage\.(min|max)/.test(codeIndicateurs.replace(niveau1, "")), "aucune borne lue hors du niveau 1");
   });
 
   await test("22. COMPORTEMENTAL — la référence est l'occurrence N-1, et il n'y a AUCUN repli chronologique", () => {
@@ -840,7 +966,11 @@ await (async () => {
     assert.equal(libelleEcartReps(-1, 2), "Série 2 : 1 répétition de moins que la référence");
     assert.equal(libelleEcartReps(10, 1), "Série 1 : 10 répétitions de plus que la référence");
     // Et à l'écran, chaque badge porte son libellé.
-    const html = rendreCarte({ repsSaisies: ["20"], indicateurs: indicateurs({ chargeKg: 50, reps: 10 }) });
+    const html = rendreCarte({
+      repsSaisies: ["20"],
+      indicateurs: indicateurs({ chargeKg: 50, reps: 10 }),
+      comparaison: comparaisonDe({ chargeKg: 50, reps: 10 }),
+    });
     assert.ok(html.includes('aria-label="Série 1 : 10 répétitions de plus que la référence"'));
   });
 
@@ -856,7 +986,11 @@ await (async () => {
     assert.equal(ecartReps("20", 10), 10);
     assert.equal(ecartReps("6", 10), -4);
     assert.equal(ecartReps("3", 10), -7);
-    const html = rendreCarte({ repsSaisies: ["14", "17", "20"], indicateurs: indicateurs({ reps: 10 }) });
+    const html = rendreCarte({
+      repsSaisies: ["14", "17", "20"],
+      indicateurs: indicateurs({ reps: 10 }),
+      comparaison: comparaisonDe({ reps: 10 }),
+    });
     for (const attendu of ["+4", "+7", "+10"]) {
       assert.ok(html.includes(attendu), `${attendu} rendu tel quel`);
     }

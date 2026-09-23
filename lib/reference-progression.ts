@@ -196,6 +196,73 @@ export type ReferenceLue =
   | { readonly ok: true; readonly reference: ReferenceDeProgression }
   | { readonly ok: false; readonly motif: MotifReferenceRefusee };
 
+/* ═══════════════════════════════════════════════════════════════════════
+ * RÉFÉRENCE DE SURCHARGE — la charge la plus lourde réellement utilisée
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+/**
+ * LA RÉFÉRENCE QUI SERT À CALCULER LA PROCHAINE SÉANCE.
+ *
+ * ⚠️ CE N'EST PAS `referenceDeProgression`, ET LES DEUX DOIVENT COEXISTER.
+ * `referenceDeProgression` répond à « quelle charge cette séance a-t-elle
+ * porté ? » — une question qui n'a pas de réponse quand les séries ne
+ * partagent pas la même charge, d'où son refus `charge-non-constante`. C'est
+ * ce qu'il faut pour tracer un point sur une courbe. Celle-ci répond à
+ * « sur quoi faire progresser l'élève ? », et cette question a une réponse
+ * même quand la charge varie : la charge la plus LOURDE qu'il a réellement
+ * tenue, et ce qu'il a fait à cette charge.
+ *
+ * Règle verrouillée le 23/09/2026 sur le cas de référence du propriétaire du
+ * projet, prescription 8–13 :
+ *
+ *     série 1 : 45 kg × 13
+ *     série 2 : 45 kg × 14
+ *     série 3 : 47 kg × 10
+ *
+ * La charge la plus lourde est 47 kg ; à cette charge, 10 répétitions ; 10 est
+ * dans la plage, donc le moteur rend 47 kg × 11 — exactement le résultat
+ * attendu, appliqué ensuite à TOUTES les séries.
+ *
+ * ⚠️ ELLE GÉNÉRALISE L'ANCIENNE RÈGLE PLUTÔT QUE DE LA CONTREDIRE. Quand la
+ * charge est constante, « la plus lourde » est cette charge unique et les
+ * séries retenues sont toutes les séries : le résultat est identique à la
+ * moyenne de toutes les séries. Mesuré sur 50 kg × 12 / 10 / 8 : les deux
+ * règles rendent 50 kg × 10. Aucun comportement validé ne change.
+ *
+ * ⚠️ LA MOYENNE DE TOUTES LES SÉRIES AURAIT DONNÉ 12 — (13+14+10)/3 = 12,33.
+ * Ce n'est pas la règle retenue : une moyenne mélange une performance à 45 kg
+ * avec une performance à 47 kg, et fait croire à 12 répétitions sur une charge
+ * que l'élève n'a jamais tenue 12 fois.
+ */
+export function referenceDeSurcharge(series: readonly SerieRealisee[]): ReferenceLue {
+  let plusLourde: number | null = null;
+  for (const serie of series) {
+    const kg = getEffectiveLoadKg(parseLoad(serie.loadUsed ?? ""));
+    if (kg === null || kg <= 0) continue;
+    if (plusLourde === null || kg > plusLourde) plusLourde = kg;
+  }
+  if (plusLourde === null) return { ok: false, motif: "charge-non-chiffrable" };
+
+  // Les séries faites À CETTE CHARGE, et elles seules. Une série plus légère
+  // ne dit rien de ce que l'élève peut tenir à la charge la plus lourde.
+  const aLaPlusLourde = series.filter((serie) => {
+    const kg = getEffectiveLoadKg(parseLoad(serie.loadUsed ?? ""));
+    return kg !== null && kg === plusLourde;
+  });
+  const moyenne = moyenneRepsRealisees(aLaPlusLourde);
+  if (!moyenne) return { ok: false, motif: "aucune-serie-chiffrable" };
+
+  return {
+    ok: true,
+    reference: {
+      chargeKg: plusLourde,
+      reps: moyenne.reps,
+      seriesRetenues: moyenne.seriesRetenues,
+      seriesIgnorees: moyenne.seriesIgnorees,
+    },
+  };
+}
+
 /**
  * La référence complète d'un exercice sur la séance de référence :
  * « 10 kg × 12 », charge constante et moyenne arrondie des répétitions.

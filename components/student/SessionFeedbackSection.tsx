@@ -21,8 +21,10 @@ import {
   parseRpeInput,
 } from "@/lib/previous-performance";
 import {
+  contexteDeComparaison,
   indicateursDExercice,
   referenceDeLOccurrencePrecedente,
+  type ContexteComparaison,
   type Indicateurs,
 } from "@/lib/indicateurs-progression";
 import type { OccurrenceProgrammee } from "@/lib/occurrence-programmee";
@@ -460,6 +462,38 @@ export function SessionFeedbackSection({
     }
     return table;
   }, [occurrence, previousIndex, strengthExercises, progressionActivePourExercice, sessionMuscleGroup]);
+
+  /* ══════════════════════════════════════════════════════════════════════
+   * COMPARAISON IMMÉDIATE — LA MÊME RÉFÉRENCE, ET AUCUNE AUTRE CONDITION
+   * ══════════════════════════════════════════════════════════════════════
+   * ⚠️ CETTE TABLE NE CONSULTE NI `progressionActivePourExercice` NI LE GROUPE
+   * MUSCULAIRE, ET C'EST VOLONTAIRE. Un coach qui n'a pas activé la surcharge
+   * automatique doit quand même voir que son élève a mis 2 kg de plus et tenu
+   * la fourchette ; un exercice sans tarif de progression (cardio, full-body)
+   * garde lui aussi tous ses indicateurs immédiats. Constater n'est pas
+   * recommander. C'est la correction du défaut relevé — aucun indicateur
+   * n'apparaissait tant que le réglage était sur OFF, puis aucun verdict ne
+   * s'affichait sur un exercice non tarifé.
+   *
+   * Elle est donc BEAUCOUP plus permissive que `indicateursParExercice`
+   * ci-dessus : tout exercice de musculation dont la fourchette de
+   * répétitions est lisible y entre.
+   *
+   * La RÉFÉRENCE est exactement la même que ci-dessus (occurrence N-1 du même
+   * jour, aucun repli chronologique) : les deux niveaux ne doivent jamais
+   * comparer à deux séances différentes.
+   */
+  const comparaisonsParExercice = useMemo(() => {
+    const table = new Map<string, ContexteComparaison>();
+    for (const exercise of strengthExercises) {
+      const contexte = contexteDeComparaison({
+        repsPrescrites: exercise.reps,
+        reference: referenceDeLOccurrencePrecedente(previousIndex, exercise, occurrence),
+      });
+      if (contexte) table.set(exercise.id, contexte);
+    }
+    return table;
+  }, [occurrence, previousIndex, strengthExercises]);
 
   const [exerciseFeedback, setExerciseFeedback] = useState(() =>
     buildInitialFeedback(strengthExercises, studentId, sessionId),
@@ -1359,6 +1393,7 @@ export function SessionFeedbackSection({
             feedback={exerciseFeedback[exercise.id]}
             previous={findPreviousPerformance(previousIndex, exercise)}
             indicateurs={indicateursParExercice.get(exercise.id) ?? null}
+            comparaison={comparaisonsParExercice.get(exercise.id) ?? null}
             onSetChange={(setNumber, field, value) => handleSetChange(exercise.id, setNumber, field, value)}
             onCommentChange={(value) => handleCommentChange(exercise.id, value)}
             substitute={substitutions[exercise.id] ?? null}

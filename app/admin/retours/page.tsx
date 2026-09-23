@@ -136,6 +136,11 @@ export default function AdminFeedbackPage() {
                   <FeedbackDetailModal
                     feedback={f}
                     student={student}
+                    // L'historique déjà chargé par cet écran, passé tel quel :
+                    // les indicateurs immédiats du coach en tirent l'occurrence
+                    // N-1 sans AUCUNE requête de plus. Le module filtre
+                    // lui-même sur l'élève du retour.
+                    historique={feedback}
                     // Le chemin MOCK ne connaît que le texte : il n'a ni
                     // bucket, ni élève réel à qui adresser une vidéo. On ne
                     // lui invente pas une réponse vidéo qu'il ne saurait ni
