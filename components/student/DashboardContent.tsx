@@ -162,7 +162,9 @@ export function DashboardContent({
   // upcomingSession/activeProgram, dès que Supabase a la priorité.
   const realActiveProgram = useSupabase ? supabaseTraining.activeProgram : null;
   const realWeekNumber = realActiveProgram ? computeCurrentWeekNumber(realActiveProgram, supabaseTraining.student) : 1;
-  const realEleveProgram = realActiveProgram ? toEleveTrainingProgram(realActiveProgram, realWeekNumber) : null;
+  const realEleveProgram = realActiveProgram
+    ? toEleveTrainingProgram(realActiveProgram, realWeekNumber, undefined, supabaseTraining.seancesTerminees)
+    : null;
   const realWeekSessions = realActiveProgram
     ? realActiveProgram.sessions.filter((s) => s.weekNumber === realWeekNumber).map(toEleveWorkoutSession)
     : [];

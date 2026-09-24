@@ -51,6 +51,24 @@ async function autorisee(id: string) {
   if (!campagne) {
     return { refus: NextResponse.json({ error: "Campagne introuvable." }, { status: 404 }) };
   }
+  /*
+   * ⚠️ UNE CAMPAGNE SYSTÈME NE SE MODIFIE PAS PAR CETTE PORTE — NI PAR UN ADMIN.
+   *
+   * Les rappels automatiques (`rappel_auto`) sont des rails : un seul par genre,
+   * réglés élève par élève depuis la fiche de l'élève. Les laisser passer ici
+   * autoriserait, d'un seul PATCH, à changer l'heure ou le texte des rappels de
+   * TOUS les élèves — et d'un seul DELETE, à les couper tous en croyant annuler
+   * un message. Le refus est AVANT le contrôle de propriété, parce qu'il ne
+   * dépend pas de qui demande.
+   */
+  if (campagne.rappelAuto !== null) {
+    return {
+      refus: NextResponse.json(
+        { error: "Campagne système : les rappels automatiques se règlent depuis la fiche de l'élève." },
+        { status: 403 },
+      ),
+    };
+  }
   // Un coach n'agit que sur ce qu'il a créé. Même code qu'une campagne
   // inexistante n'aurait rien apporté : ici la campagne est nommée par
   // quelqu'un qui a déjà le droit d'en lister.

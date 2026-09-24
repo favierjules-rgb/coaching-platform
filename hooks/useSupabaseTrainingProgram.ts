@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { getCurrentStudentId, getCurrentStudentProfile } from "@/lib/supabase/current-student";
 import { getAssignedProgramsForStudent } from "@/lib/supabase/programs";
+import { seancesTermineesDeLEleve } from "@/lib/supabase/workout-feedback";
 import type { AdminProgram, AdminStudent } from "@/types";
 
 /**
@@ -35,6 +36,20 @@ export function useSupabaseTrainingProgram() {
   const [studentId, setStudentId] = useState<string | null>(null);
   const [student, setStudent] = useState<AdminStudent | null>(null);
   const [programs, setPrograms] = useState<AdminProgram[]>([]);
+  /*
+   * LES SÉANCES QUE L'ÉLÈVE A VALIDÉES — l'entrée de sa barre de progression.
+   *
+   * ⚠️ `null` VEUT DIRE « PAS ENCORE SU », ET CE N'EST PAS « AUCUNE ». La
+   * différence se voit à l'écran : un ensemble vide afficherait 0 % à un élève
+   * qui a tout fait, tant que la requête n'a pas répondu. `null` fait
+   * simplement disparaître la barre — voir `progressionConnue`.
+   *
+   * ⚠️ LA LECTURE EST MINUSCULE ET VOLONTAIREMENT SÉPARÉE des programmes : une
+   * colonne (`session_id`), filtrée sur `completed`, bornée par la RLS à
+   * l'élève connecté. Réutiliser `getWorkoutFeedbackForStudent` aurait chargé
+   * exercices, séries et URLs signées pour afficher un pourcentage.
+   */
+  const [seancesTerminees, setSeancesTerminees] = useState<ReadonlySet<string> | null>(null);
 
   const load = useCallback(async () => {
     const supabase = createSupabaseBrowserClient();
@@ -47,13 +62,17 @@ export function useSupabaseTrainingProgram() {
       setReady(true);
       return;
     }
-    const [studentProfile, assignedPrograms] = await Promise.all([
+    const [studentProfile, assignedPrograms, validees] = await Promise.all([
       getCurrentStudentProfile(supabase),
       getAssignedProgramsForStudent(supabase, id),
+      seancesTermineesDeLEleve(supabase, id),
     ]);
     setStudentId(id);
     setStudent(studentProfile);
     setPrograms(assignedPrograms);
+    // Une lecture interrompue laisse la progression INCONNUE plutôt que de la
+    // déclarer nulle : mieux vaut pas de barre qu'une barre à zéro.
+    setSeancesTerminees(validees.complet ? validees.seances : null);
     setReady(true);
   }, []);
 
@@ -128,5 +147,14 @@ export function useSupabaseTrainingProgram() {
 
   const activeProgram = programs.find((p) => p.status === "actif") ?? programs[0] ?? null;
 
-  return { ready, active: ready && studentId !== null, studentId, student, programs, activeProgram, refetch: load };
+  return {
+    ready,
+    active: ready && studentId !== null,
+    studentId,
+    student,
+    programs,
+    activeProgram,
+    seancesTerminees,
+    refetch: load,
+  };
 }

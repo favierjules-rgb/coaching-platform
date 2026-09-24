@@ -1,5 +1,6 @@
 import { daysBetween, weekDays } from "@/lib/admin";
 import { currentDate } from "@/lib/clock";
+import { progressionDuProgramme } from "@/lib/progression-programme";
 import type {
   AdminContentStatus,
   AdminProgram,
@@ -206,16 +207,34 @@ export function toEleveWorkoutSession(session: AdminWorkoutSession): WorkoutSess
   };
 }
 
+/**
+ * ⚠️ LA PROGRESSION NE SE COMPTE PLUS EN SEMAINES — voir
+ * lib/progression-programme.ts.
+ *
+ * Jusqu'au 24/09/2026, `progressPercent` valait
+ * `min(weekNumber, durationWeeks) / durationWeeks`, c'est-à-dire le TEMPS
+ * ÉCOULÉ : la barre avançait toute seule, sans qu'aucune séance soit faite. Un
+ * élève qui n'avait rien ouvert depuis six semaines lisait « 50 % ».
+ *
+ * `seancesTerminees` est l'ensemble des identifiants de séances que l'élève a
+ * VALIDÉES. Il est optionnel, et son absence ne fait pas revenir l'ancienne
+ * formule : elle met `progressionConnue` à `false`, et l'écran se tait. Une
+ * barre à zéro et une barre inconnue ne disent pas la même chose.
+ */
 export function toEleveTrainingProgram(
   program: AdminProgram,
   weekNumber: number,
   reference: Date = currentDate(),
+  seancesTerminees?: ReadonlySet<string> | null,
 ): TrainingProgram {
   const weekNumbers = Array.from(new Set(program.sessions.map((s) => s.weekNumber))).sort((a, b) => a - b);
   const referenceWeek = weekNumbers.includes(weekNumber) ? weekNumber : (weekNumbers[0] ?? weekNumber);
   const sessionsPerWeek = program.sessions.filter((s) => s.weekNumber === referenceWeek && !s.isRestDay).length;
-  const progressPercent =
-    program.durationWeeks > 0 ? Math.round((Math.min(weekNumber, program.durationWeeks) / program.durationWeeks) * 100) : 0;
+  const progressionConnue = seancesTerminees !== undefined && seancesTerminees !== null;
+  const progressPercent = progressionDuProgramme({
+    seances: program.sessions,
+    seancesTerminees: seancesTerminees ?? new Set<string>(),
+  }).pourcentage;
 
   return {
     id: program.id,
@@ -225,8 +244,12 @@ export function toEleveTrainingProgram(
     durationWeeks: program.durationWeeks,
     status: STATUS_ADMIN_TO_STUDENT[program.status],
     sessionsPerWeek,
+    // ⚠️ `currentWeek` RESTE LA SEMAINE CALENDAIRE. Elle décide quelles séances
+    // afficher aujourd'hui, et `computeCurrentWeekNumber` n'est pas touché. La
+    // semaine de PROGRESSION est une autre question, posée ailleurs.
     currentWeek: weekNumber,
     progressPercent,
+    progressionConnue,
     schedule: buildScheduleForWeek(program, weekNumber, reference),
     bannerUrl: program.bannerUrl,
   };

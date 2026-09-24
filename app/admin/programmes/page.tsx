@@ -7,14 +7,19 @@ import { Copy, Dumbbell, Loader2, Plus, Trash2 } from "lucide-react";
 
 import { AssignStudentsModal } from "@/components/admin/AssignStudentsModal";
 import { ExerciseLibraryManager } from "@/components/admin/ExerciseLibraryManager";
+import { PilluleVerification } from "@/components/admin/PilluleVerification";
+import { ProgressionElevesProgramme } from "@/components/admin/ProgressionElevesProgramme";
 import { FilterButtons, SearchInput } from "@/components/admin/SearchAndFilters";
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
 import { useContentAssignment } from "@/hooks/useContentAssignment";
 import { useSupabaseExerciseLibrary } from "@/hooks/useSupabaseExerciseLibrary";
+import { useSeancesTerminees } from "@/hooks/useSeancesTerminees";
+import { useVerificationsProgrammes } from "@/hooks/useVerificationsProgrammes";
 import { useSupabaseProgramsSummary } from "@/hooks/useSupabaseProgramsSummary";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { contentStatusLabels, matchesTextSearch, totalSessions, totalWeeks } from "@/lib/admin";
+import { cleDeSemaine, dateDuJour } from "@/lib/verification-programme";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import {
@@ -66,6 +71,29 @@ export default function AdminProgramsPage() {
   const supabaseActive = isSupabaseConfigured();
   const supabasePrograms = useSupabaseProgramsSummary();
   const programs = supabaseActive ? supabasePrograms.programs : state.programs;
+  /*
+   * LA PROGRESSION DES ÉLÈVES — une lecture À PART, et une seule pour la page.
+   *
+   * ⚠️ ELLE NE BLOQUE PAS L'AFFICHAGE DE LA LISTE. Les programmes s'affichent
+   * dès que le résumé arrive ; l'avancement apparaît quand il arrive. Attendre
+   * les deux rendrait la page plus lente pour une information secondaire.
+   *
+   * Le hook ne dépend que des identifiants de séances, pas de l'identité du
+   * tableau : une assignation ou une duplication ne relance donc pas la lecture
+   * sans raison (voir hooks/useSeancesTerminees.ts).
+   */
+  const seancesTerminees = useSeancesTerminees(programs);
+  /*
+   * LE PENSE-BÊTE DE VÉRIFICATION — indépendant de tout le reste.
+   *
+   * Il ne touche ni au programme, ni aux séances, ni à la progression : il ne
+   * lit et n'écrit que `program_review_flags`. `aujourdhui` est calculé UNE
+   * fois pour la page, pour que toutes les pastilles comparent la même
+   * semaine.
+   */
+  const verifications = useVerificationsProgrammes(useMemo(() => programs.map((p) => p.id), [programs]));
+  const aujourdhui = dateDuJour();
+  const semaineCourante = cleDeSemaine(aujourdhui);
   // Duplication (V3 étape 4) : Supabase uniquement, pas de repli mock — voir
   // lib/supabase/programs.ts#duplicateProgram. `duplicatingId` retient le
   // programme en cours de duplication pour désactiver son bouton le temps de
@@ -287,7 +315,21 @@ export default function AdminProgramsPage() {
                   <h2 className="font-heading text-lg font-bold uppercase text-foreground">{program.name}</h2>
                   <p className="text-sm text-muted-foreground">{program.goal}</p>
                 </div>
-                <StatusBadge label={contentStatusLabels[program.status]} tone={contentStatusTone(program.status)} />
+                <div className="flex flex-col items-end gap-1.5">
+                  <StatusBadge label={contentStatusLabels[program.status]} tone={contentStatusTone(program.status)} />
+                  {supabaseActive && (
+                    <PilluleVerification
+                      semaineValidee={verifications.parProgramme.get(program.id) ?? null}
+                      aujourdhui={aujourdhui}
+                      semaineCourante={semaineCourante}
+                      onBasculer={(versEtat) =>
+                        semaineCourante === null
+                          ? undefined
+                          : verifications.basculer(program.id, versEtat, semaineCourante)
+                      }
+                    />
+                  )}
+                </div>
               </div>
               <div className="grid grid-cols-3 gap-3 text-sm text-foreground">
                 <div>
@@ -307,14 +349,13 @@ export default function AdminProgramsPage() {
                 <span className="block text-xs uppercase tracking-wide text-muted-foreground">
                   Élèves assignés ({program.assignedStudentIds.length})
                 </span>
-                <span className="text-sm text-muted-foreground">
-                  {program.assignedStudentIds.length === 0
-                    ? "Aucun"
-                    : students
-                        .filter((s) => program.assignedStudentIds.includes(s.id))
-                        .map((s) => `${s.firstName} ${s.lastName}`)
-                        .join(", ")}
-                </span>
+                <ProgressionElevesProgramme
+                  sessions={program.sessions}
+                  eleves={students.filter((s) => program.assignedStudentIds.includes(s.id))}
+                  seancesParEleve={seancesTerminees.parEleve}
+                  complet={seancesTerminees.complet}
+                  chargement={seancesTerminees.chargement}
+                />
               </div>
               <div className="flex flex-wrap gap-2">
                 <Link

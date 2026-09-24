@@ -61,7 +61,13 @@ export default function EntrainementPage() {
     }
 
     const weekNumber = computeCurrentWeekNumber(realActiveProgram, student);
-    const eleveActiveProgram = toEleveTrainingProgram(realActiveProgram, weekNumber);
+    const eleveActiveProgram = toEleveTrainingProgram(
+      realActiveProgram,
+      weekNumber,
+      undefined,
+      // Déjà lues par le hook, avec les programmes : aucune requête de plus ici.
+      supabaseTraining.seancesTerminees,
+    );
     const weekSessions = realActiveProgram.sessions
       .filter((s) => s.weekNumber === weekNumber)
       .map(toEleveWorkoutSession);
@@ -108,6 +114,8 @@ export default function EntrainementPage() {
                 program={toEleveTrainingProgram(
                   program,
                   computeCurrentWeekNumber(program, student),
+                  undefined,
+                  supabaseTraining.seancesTerminees,
                 )}
               />
             ))}
