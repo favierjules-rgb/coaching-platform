@@ -102,6 +102,18 @@ export interface TrainingProgram {
   sessionsPerWeek: number;
   currentWeek: number;
   progressPercent: number;
+  /**
+   * `false` = la progression n'est PAS connue, et l'écran ne doit pas
+   * l'afficher.
+   *
+   * ⚠️ POURQUOI UN DRAPEAU PLUTÔT QU'UN `number | null`. Les programmes de
+   * démonstration (data/student.ts) portent un `progressPercent` écrit à la
+   * main ; rendre le champ nullable aurait obligé à réécrire ces littéraux et
+   * tous les composants qui les lisent. Absent = comportement d'avant,
+   * `false` = on se tait. Un 0 % affiché par défaut annoncerait « tu n'as rien
+   * fait » à quelqu'un dont on n'a simplement pas encore lu les séances.
+   */
+  progressionConnue?: boolean;
   schedule: ProgramScheduleDay[];
   /** Photo bannière (V3, chantier module Programmation étape 4) — voir AdminProgram.bannerUrl. */
   bannerUrl?: string | null;
@@ -1150,6 +1162,17 @@ export interface SessionTemplate {
  * TypeScript : un résumé ne peut jamais servir là où le détail est requis.
  */
 export interface AdminProgramSummarySession {
+  /**
+   * L'identifiant de la séance.
+   *
+   * ⚠️ IL NE COÛTE RIEN, ET IL EST INDISPENSABLE. `loadProgramsSummary`
+   * sélectionnait déjà `id` dans sa requête `workout_sessions` et le jetait au
+   * mapping : l'exposer n'ajoute ni requête, ni colonne lue. Sans lui, la
+   * progression d'un élève ne pourrait pas être calculée depuis une liste de
+   * programmes — il faudrait recharger les programmes complets pour afficher
+   * « Sem. 3 / 8 », c'est-à-dire annuler le gain de la lecture légère.
+   */
+  id: string;
   weekNumber: number;
   isRestDay: boolean;
 }

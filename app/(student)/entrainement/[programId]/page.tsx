@@ -57,7 +57,12 @@ export default function ProgramDetailPage() {
     }
 
     const weekNumber = computeCurrentWeekNumber(realProgram, supabaseTraining.student);
-    const program = toEleveTrainingProgram(realProgram, weekNumber);
+    const program = toEleveTrainingProgram(
+      realProgram,
+      weekNumber,
+      undefined,
+      supabaseTraining.seancesTerminees,
+    );
     const weekNumbers = Array.from(new Set(realProgram.sessions.map((s) => s.weekNumber))).sort((a, b) => a - b);
     const currentWeekSessions = realProgram.sessions
       .filter((s) => s.weekNumber === weekNumber)
@@ -110,13 +115,16 @@ export default function ProgramDetailPage() {
           </div>
         </div>
 
-        <div className="mb-8 border border-border bg-card p-6">
-          <div className="mb-3 flex items-center justify-between text-xs text-muted-foreground">
-            <span className="uppercase tracking-wide">Progression du programme</span>
-            <span>{program.progressPercent}%</span>
+        {/* Même règle que TrainingProgramCard : inconnue ⇒ rien, jamais 0 %. */}
+        {program.progressionConnue !== false && (
+          <div className="mb-8 border border-border bg-card p-6">
+            <div className="mb-3 flex items-center justify-between text-xs text-muted-foreground">
+              <span className="uppercase tracking-wide">Progression du programme</span>
+              <span>{program.progressPercent}%</span>
+            </div>
+            <ProgressBar percent={program.progressPercent} />
           </div>
-          <ProgressBar percent={program.progressPercent} />
-        </div>
+        )}
 
         {metricsSessions.length > 0 && <WeekAnalysisSection sessions={metricsSessions} />}
 

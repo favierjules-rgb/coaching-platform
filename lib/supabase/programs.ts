@@ -882,6 +882,10 @@ async function loadProgramsSummary(
     const weeksForProgram = weeksByProgram.get(programRow.id) ?? [];
     const sessions: AdminProgramSummarySession[] = weeksForProgram.flatMap((week) =>
       (sessionsByWeek.get(week.id) ?? []).map((s) => ({
+        // `id` était déjà lu par la requête ci-dessus et jeté ici : il sert
+        // maintenant à rattacher les complétions de l'élève (voir
+        // lib/progression-programme.ts). Aucune requête de plus.
+        id: s.id,
         weekNumber: week.week_number,
         isRestDay: s.is_rest_day,
       })),

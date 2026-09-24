@@ -146,7 +146,10 @@
     "test:duree-format": "npx tsx scripts/tests/duree-format.mts",
     "test:chronometre-seance": "npx tsx scripts/tests/chronometre-seance.mts",
     "test:retours-lots": "npx tsx scripts/tests/retours-lots-identifiants.mts",
-    "test:retours-index": "npx tsx scripts/tests/retours-index-unique.mts"
+    "test:retours-index": "npx tsx scripts/tests/retours-index-unique.mts",
+    "test:progression-programme": "npx tsx scripts/tests/progression-programme.mts",
+    "test:verification-programme": "npx tsx scripts/tests/verification-programme.mts",
+    "test:rappels-automatiques": "NODE_OPTIONS=\"--conditions=react-server --no-warnings\" npx tsx --experimental-test-module-mocks scripts/tests/rappels-automatiques.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

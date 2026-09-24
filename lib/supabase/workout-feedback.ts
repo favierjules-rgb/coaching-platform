@@ -58,7 +58,7 @@ type ExerciseSetFeedbackRow = Database["public"]["Tables"]["exercise_set_feedbac
  * Une erreur de lecture telle que PostgREST la rend : le message, et les trois
  * champs qui disent souvent POURQUOI.
  */
-type ErreurLecture = { message: string; code?: string; details?: string; hint?: string };
+export type ErreurLecture = { message: string; code?: string; details?: string; hint?: string };
 
 /**
  * Signale une erreur de lecture — DANS TOUS LES ENVIRONNEMENTS.
@@ -673,6 +673,98 @@ export async function getWorkoutFeedbackForStudent(
       coachReplyVideoUrls,
     }),
   );
+}
+
+/* ─── Séances terminées (progression) ─── */
+
+/**
+ * LES SÉANCES QU'UN ÉLÈVE A VALIDÉES — l'ensemble minimal, pour la progression.
+ *
+ * ════════════════════════════════════════════════════════════════════════
+ * POURQUOI PAS `getWorkoutFeedbackForStudent`
+ * ════════════════════════════════════════════════════════════════════════
+ * Parce qu'elle charge les exercices, les séries, et signe au besoin des URLs
+ * de vidéos — pour afficher un pourcentage. Ici on ne lit QUE `session_id`, sur
+ * les lignes `completed`. Une colonne, une requête par lot.
+ *
+ * ⚠️ LE FILTRE PORTE SUR `session_id`, PAS SUR `program_id`, et c'est le point
+ * qui rend le compte exact. `program_id` est `ON DELETE SET NULL` comme
+ * `session_id` : 50 des 88 retours complets de production portent encore un
+ * `program_id`, mais seulement 48 un `session_id`. Filtrer par programme
+ * ramènerait des lignes qu'on ne saurait rattacher à aucune séance, et en
+ * manquerait d'autres. Partir des identifiants de séances RÉELS ne peut rendre
+ * que des complétions attribuables.
+ *
+ * ⚠️ LES COMPLÉTIONS ORPHELINES NE SONT PAS RÉCUPÉRÉES. Mesuré le 24/09/2026 :
+ * 40 retours complets ont `session_id` nul et un `session_key` qui ne
+ * correspond à AUCUNE séance existante — leur séance a été supprimée. Les
+ * repêcher par `session_key` fabriquerait des complétions sur des séances
+ * disparues. Elles restent hors du calcul, et c'est un choix, pas un oubli.
+ */
+export async function seancesTermineesParEleve(
+  supabase: TypedSupabaseClient,
+  sessionIds: readonly string[],
+): Promise<{ parEleve: Map<string, Set<string>>; complet: boolean; erreur: ErreurLecture | null }> {
+  const parEleve = new Map<string, Set<string>>();
+  if (sessionIds.length === 0) return { parEleve, complet: true, erreur: null };
+
+  const lecture = await lireParLots<{ student_id: string; session_id: string | null }>(
+    "seancesTermineesParEleve",
+    sessionIds,
+    (lot) =>
+      supabase
+        .from("workout_feedback")
+        .select("student_id, session_id")
+        .eq("completed", true)
+        .in("session_id", lot),
+  );
+
+  for (const ligne of lecture.rows) {
+    if (!ligne.session_id) continue;
+    const deja = parEleve.get(ligne.student_id);
+    if (deja) deja.add(ligne.session_id);
+    else parEleve.set(ligne.student_id, new Set([ligne.session_id]));
+  }
+
+  if (!lecture.complet) {
+    // ⚠️ UNE LECTURE PARTIELLE DONNE UNE PROGRESSION SOUS-ÉVALUÉE, pas une
+    // erreur visible : le coach lirait « Sem. 2 / 8 » pour un élève à la
+    // semaine 5. L'appelant reçoit `complet` pour pouvoir se taire plutôt que
+    // d'afficher un chiffre faux.
+    devWarn("seancesTermineesParEleve (progression incomplète)", lecture.erreur);
+  }
+
+  return { parEleve, complet: lecture.complet, erreur: lecture.erreur };
+}
+
+/**
+ * Les séances que CET élève a validées — la version à un seul élève, pour ses
+ * propres écrans.
+ *
+ * Une seule requête : la liste des séances n'est pas connue côté élève, et la
+ * RLS (`student_id = current_student_id()`) borne déjà la lecture à lui. Rendre
+ * un ensemble vide en cas d'erreur serait indiscernable de « aucune séance
+ * faite » — d'où `complet`, que l'écran utilise pour ne pas afficher 0 % à
+ * quelqu'un qui a tout fait.
+ */
+export async function seancesTermineesDeLEleve(
+  supabase: TypedSupabaseClient,
+  studentId: string,
+): Promise<{ seances: Set<string>; complet: boolean }> {
+  const { data, error } = await supabase
+    .from("workout_feedback")
+    .select("session_id")
+    .eq("student_id", studentId)
+    .eq("completed", true)
+    .not("session_id", "is", null);
+  devWarn("seancesTermineesDeLEleve", error);
+
+  const seances = new Set<string>();
+  if (error) return { seances, complet: false };
+  for (const ligne of data ?? []) {
+    if (ligne.session_id) seances.add(ligne.session_id);
+  }
+  return { seances, complet: true };
 }
 
 /* ─── Écriture ─── */
