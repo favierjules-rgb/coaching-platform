@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CheckCircle, Info, UserPlus } from "lucide-react";
 
 import {
+  dateProposeeParLaModale,
+  datesAReecrireDepuisLaModale,
   filterAssignableProgramModels,
   initialContentSelection,
   terminerAssignation,
@@ -11,7 +13,10 @@ import {
   toggleSingleSelection,
   toggleStudentSelection,
   type ContentSelection,
+  type MotifAssignation,
 } from "@/lib/assignment-selection";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { cleAffectation, debutsDesAffectations } from "@/lib/supabase/programs";
 import { CheckboxField } from "@/components/admin/AdminFormFields";
 import { Modal, PrimaryButton } from "@/components/admin/Modal";
 import type { AdminDocument, AdminNutritionPlan, AdminProgramSummary, AdminStudent, AssignableContentType } from "@/types";
@@ -43,6 +48,8 @@ interface AssignContentToStudentModalProps {
     assigned: boolean,
     /** Programmes uniquement — la date de début saisie dans la modale. */
     programStartDate?: string | null,
+    /** `"date"` = correction d'une affectation existante, donc aucun email. */
+    motif?: MotifAssignation,
   ) => void | boolean | Promise<boolean | void>;
   /** true si l'élève affiché est lui-même réel (Supabase). */
   isSupabaseStudent?: boolean;
@@ -101,6 +108,65 @@ export function AssignContentToStudentModal({
    * Voir `AssignStudentsModal` : même champ, même raison, même défaut évité.
    */
   const [dateDebut, setDateDebut] = useState<string>("");
+  /**
+   * Dates réellement stockées, indexées par PROGRAMME (l'élève est fixe ici).
+   * Une clé absente = « pas lu », jamais « pas de date » — voir
+   * `affectationsDontLaDateChange`.
+   */
+  const [debutsStockes, setDebutsStockes] = useState<ReadonlyMap<string, string | null>>(new Map());
+  const [lectureDates, setLectureDates] = useState<"inutile" | "chargement" | "prete" | "erreur">("inutile");
+  const [datesDivergentes, setDatesDivergentes] = useState(false);
+  /**
+   * `true` seulement quand le coach a modifié le champ À LA MAIN — même garde
+   * que dans `AssignStudentsModal`, même raison : un champ vide par DIVERGENCE
+   * n'est pas un champ vidé par DÉCISION. Voir `datesAReecrireDepuisLaModale`.
+   */
+  const [champDateTouche, setChampDateTouche] = useState(false);
+
+  /*
+   * Même lecture que dans `AssignStudentsModal`, l'axe inversé : là-bas un
+   * contenu et plusieurs élèves, ici un élève et plusieurs programmes. La
+   * fonction de lecture prend des COUPLES précisément pour servir les deux sans
+   * se dédoubler.
+   */
+  const cleProgrammes = initial.programme.join(",");
+  useEffect(() => {
+    if (!open || lectureDates !== "chargement") return;
+    let annule = false;
+    async function lire() {
+      const supabase = createSupabaseBrowserClient();
+      if (!supabase) {
+        if (!annule) setLectureDates("erreur");
+        return;
+      }
+      const dejaAffectes = cleProgrammes === "" ? [] : cleProgrammes.split(",");
+      const table = await debutsDesAffectations(
+        supabase,
+        dejaAffectes.map((programId) => ({ studentId: student.id, programId })),
+      );
+      if (annule) return;
+      const parProgramme = new Map<string, string | null>();
+      for (const programId of dejaAffectes) {
+        const cle = cleAffectation(student.id, programId);
+        if (table.has(cle)) parProgramme.set(programId, table.get(cle) ?? null);
+      }
+      const proposition = dateProposeeParLaModale({
+        dejaAffectes,
+        debutsStockes: parProgramme,
+        dateDuJour: dateDuJourLocale(),
+      });
+      setDebutsStockes(parProgramme);
+      setDateDebut(proposition.valeur);
+      setDatesDivergentes(proposition.divergentes);
+      // Une valeur LUE n'est pas une valeur SAISIE.
+      setChampDateTouche(false);
+      setLectureDates("prete");
+    }
+    void lire();
+    return () => {
+      annule = true;
+    };
+  }, [open, lectureDates, student.id, cleProgrammes]);
 
   // Seuls les MODÈLES sont proposables — jamais les copies individuelles
   // (elles dupliqueraient la ligne du modèle, et attribuer la copie d'un
@@ -108,12 +174,22 @@ export function AssignContentToStudentModal({
   const modeles = filterAssignableProgramModels(programs);
 
   function ouvrir() {
-    setDateDebut(dateDuJourLocale());
     const état = initialContentSelection(student, {
       programs,
       nutritionPlanIds: nutritionPlans.map((p) => p.id),
       documentIds: documents.map((d) => d.id),
     });
+    /*
+     * ⚠️ PLUS DE « AUJOURD'HUI » QUAND UN PROGRAMME EST DÉJÀ ATTRIBUÉ. Le champ
+     * reste vide le temps de lire la valeur stockée, puis la porte. Voir
+     * `dateProposeeParLaModale` pour les cinq cas et ce qui les distingue.
+     */
+    const aDejaDesProgrammes = état.programme.length > 0;
+    setDebutsStockes(new Map());
+    setDatesDivergentes(false);
+    setChampDateTouche(false);
+    setDateDebut(aDejaDesProgrammes ? "" : dateDuJourLocale());
+    setLectureDates(aDejaDesProgrammes ? "chargement" : "inutile");
     setInitial(état);
     setSelection(état);
     setConfirmed(false);
@@ -156,17 +232,39 @@ export function AssignContentToStudentModal({
     void Promise.all(
       (["programme", "nutrition", "document"] as const).map((type) => {
         const terminerType = type === "nutrition" ? terminerAssignationUnique : terminerAssignation;
-        return terminerType(initial[type], selection[type], (contentId, assigned) =>
-          // ⚠️ LA DATE NE CONCERNE QUE LES PROGRAMMES, ET QUE L'ATTRIBUTION.
-          // `undefined` partout ailleurs : nutrition et documents traversent
-          // ce point exactement comme avant.
-          onSetAssignment(
-            student.id,
-            type,
-            contentId,
-            assigned,
-            assigned && type === "programme" ? dateDebut || null : undefined,
-          ),
+        /*
+         * ⚠️ LES PROGRAMMES INCHANGÉS DONT LA DATE A CHANGÉ SONT RÉÉMIS — et
+         * seulement eux. Sans cela, corriger la date d'un programme déjà
+         * attribué n'écrivait rien tout en confirmant. La liste est vide pour la
+         * nutrition et les documents, qui n'ont pas de date de début : leur
+         * parcours est inchangé, appel pour appel.
+         */
+        const aReappliquer =
+          type === "programme"
+            ? datesAReecrireDepuisLaModale({
+                dejaAffectes: initial.programme,
+                debutsStockes,
+                dateSaisie: dateDebut || null,
+                champDateTouche,
+                datesDivergentes,
+              })
+            : [];
+        return terminerType(
+          initial[type],
+          selection[type],
+          (contentId, assigned, motif) =>
+            // ⚠️ LA DATE NE CONCERNE QUE LES PROGRAMMES, ET QUE L'ATTRIBUTION OU
+            // LA CORRECTION. `undefined` partout ailleurs : nutrition et
+            // documents traversent ce point exactement comme avant.
+            onSetAssignment(
+              student.id,
+              type,
+              contentId,
+              assigned,
+              assigned && type === "programme" ? dateDebut || null : undefined,
+              motif,
+            ),
+          aReappliquer,
         );
       }),
     ).then((résultats) => {
@@ -232,17 +330,46 @@ export function AssignContentToStudentModal({
                     >
                       Date de début du programme
                     </label>
+                    {/* Verrouillé quand les dates divergent — option C, voir
+                        AssignStudentsModal. Ici l'axe est inversé : plusieurs
+                        PROGRAMMES du même élève, aux dates différentes. */}
                     <input
                       id="date-debut-programme-eleve"
                       type="date"
                       value={dateDebut}
-                      onChange={(event) => setDateDebut(event.target.value)}
-                      className="min-h-[44px] rounded-control border border-border bg-card px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                      disabled={datesDivergentes}
+                      onChange={(event) => {
+                        setDateDebut(event.target.value);
+                        setChampDateTouche(true);
+                      }}
+                      className="min-h-[44px] rounded-control border border-border bg-card px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
                     />
                     <p className="text-xs leading-relaxed text-muted-foreground">
                       C&apos;est elle qui détermine la semaine affichée à l&apos;élève, et non sa date
                       d&apos;inscription.
                     </p>
+                    {/* Même raison que dans AssignStudentsModal : un champ de date
+                        ne distingue pas « lu et vide » de « en cours de lecture »
+                        ni de « plusieurs valeurs ». Ces phrases le font. */}
+                    {lectureDates === "chargement" && (
+                      <p className="text-xs text-muted-foreground">Lecture de la date enregistrée…</p>
+                    )}
+                    {lectureDates === "erreur" && (
+                      <p className="text-xs text-destructive">
+                        Impossible de lire la date enregistrée. Corrige-la depuis le champ « Date de
+                        début du programme » de la fiche.
+                      </p>
+                    )}
+                    {lectureDates === "prete" && datesDivergentes && (
+                      <p className="text-xs text-warning">
+                        Les programmes sélectionnés ont des dates de début différentes. Pour modifier
+                        la date d&apos;un programme, utilise le champ « Date de début du programme »
+                        ci-dessous, sur la fiche.
+                      </p>
+                    )}
+                    {lectureDates === "prete" && !datesDivergentes && dateDebut === "" && (
+                      <p className="text-xs text-warning">Aucune date enregistrée.</p>
+                    )}
                   </div>
                 )}
               </div>

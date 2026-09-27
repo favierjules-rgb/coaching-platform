@@ -167,6 +167,37 @@ await (async () => {
     assert.deepEqual(aucunAppel, []);
   });
 
+  /**
+ * Les corps des `useEffect(...)` d'un source, grossièrement découpés par
+ * équilibrage d'accolades. Suffisant pour ce qu'on garde : la PRÉSENCE d'un
+ * `setSelection(` à l'intérieur d'un effet, pas une analyse syntaxique.
+ */
+function corpsDesEffets(source: string): string[] {
+  const corps: string[] = [];
+  let index = source.indexOf("useEffect(");
+  while (index !== -1) {
+    let profondeur = 0;
+    let debut = -1;
+    for (let i = index; i < source.length; i += 1) {
+      const c = source[i];
+      if (c === "{") {
+        if (profondeur === 0) debut = i;
+        profondeur += 1;
+      } else if (c === "}") {
+        profondeur -= 1;
+        if (profondeur === 0 && debut !== -1) {
+          corps.push(source.slice(debut, i + 1));
+          break;
+        }
+      } else if (c === ")" && profondeur === 0 && debut === -1) {
+        break;
+      }
+    }
+    index = source.indexOf("useEffect(", index + 1);
+  }
+  return corps;
+}
+
   await test("6. aucune assignation avant « Terminer » (la sélection n'écrit jamais)", () => {
     // Le clic ne fait QUE mettre à jour la sélection locale — jamais
     // d'écriture. Depuis fix/nutrition-single-assigned-plan, la bascule
@@ -179,8 +210,29 @@ await (async () => {
     // onSetAssignment n'apparaît que DANS le handler du bouton Terminer.
     const occurrences = sourceModale.match(/onSetAssignment\(/g) ?? [];
     assert.equal(occurrences.length, 1, "un seul point d'écriture");
-    assert.ok(/terminerType\(assignedStudentIds, selection, \(studentId, assigned\) =>\s*onSetAssignment\(/.test(codeModale),
-      "l'écriture vit dans le diff attendu par Terminer");
+    /*
+     * ⚠️ LA FORME DE L'APPEL A CHANGÉ LE 27/09/2026, SON INVARIANT NON. Le diff
+     * reçoit maintenant un MOTIF (`ajout` / `retrait` / `date`) et une liste
+     * d'identifiants à réappliquer — les élèves inchangés dont la date de début
+     * a été modifiée, qui ne produisaient auparavant AUCUNE écriture. Ce qui est
+     * gardé reste ce qui comptait : l'unique `onSetAssignment` est appelé DEPUIS
+     * le callback de `terminerType`, et depuis nulle part ailleurs.
+     */
+    assert.ok(
+      /terminerType\(\s*assignedStudentIds,\s*selection,\s*\(studentId, assigned, motif\) =>[\s\S]{0,400}?onSetAssignment\(/.test(
+        codeModale,
+      ),
+      "l'écriture vit dans le diff attendu par Terminer",
+    );
+    // Et la liste des réapplications est bien celle des dates modifiées, pas
+    // « tous les élèves déjà cochés » — sinon chaque « Terminer » réécrirait tout.
+    // ⚠️ LA FONCTION A ÉTÉ RENOMMÉE LE 27/09/2026 : elle porte désormais les DEUX
+    // gardes (champ touché, dates non divergentes) en plus de la comparaison des
+    // valeurs. Le contrôle suit, et pointe les deux gardes nommément.
+    assert.ok(/datesAReecrireDepuisLaModale\(\{/.test(codeModale),
+      "les réapplications ne passent plus par le garde-fou complet");
+    assert.ok(/champDateTouche,/.test(codeModale) && /datesDivergentes,/.test(codeModale),
+      "les deux gardes ne sont plus transmises au garde-fou");
     assert.ok(/contentType === "nutrition" \? terminerAssignationUnique : terminerAssignation/.test(sourceModale),
       "seule la nutrition passe par le diff à choix unique");
   });
@@ -219,8 +271,26 @@ await (async () => {
   });
 
   await test("8. la sélection ne se réinitialise pas après le clic", () => {
-    // Pas de useEffect qui réécrirait la sélection après un re-render parent.
-    assert.ok(!/useEffect/.test(sourceModale), "aucun useEffect ne réinitialise la sélection");
+    /*
+     * ⚠️ L'INTERDICTION PORTAIT SUR `useEffect` TOUT COURT, ET C'ÉTAIT UN
+     * RACCOURCI. Ce qu'il fallait interdire, c'est qu'un effet RÉÉCRIVE LA
+     * SÉLECTION après un re-rendu du parent — le bug d'origine. Depuis le
+     * 27/09/2026, la modale porte un effet qui lit les dates de début
+     * enregistrées ; il ne touche pas à `selection`, et l'interdiction globale
+     * l'aurait refusé sans rien protéger de plus.
+     *
+     * Le contrôle est donc reporté sur la propriété réelle, et il est PLUS
+     * strict : aucun `setSelection(` ne doit apparaître dans un corps d'effet,
+     * et les seuls `setSelection(` du fichier sont ceux de l'ouverture et de la
+     * bascule. Réintroduire l'effet fautif échoue ici.
+     */
+    for (const corps of corpsDesEffets(codeModale)) {
+      assert.ok(!/setSelection\(/.test(corps), "un useEffect réécrit la sélection");
+      assert.ok(!/setDateDebut\(dateDuJourLocale\(\)\)/.test(corps),
+        "un useEffect repose la date du jour : le champ cesserait de montrer la valeur stockée");
+    }
+    assert.equal((codeModale.match(/setSelection\(/g) ?? []).length, 2,
+      "seules l'ouverture et la bascule touchent la sélection");
     // Et la bascule conserve les autres cases (jamais d'écrasement global).
     const sélection = toggleStudentSelection(["eleve-gaelle"], "eleve-jules", true);
     assert.ok(sélection.includes("eleve-gaelle") && sélection.includes("eleve-jules"));

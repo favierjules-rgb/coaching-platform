@@ -787,13 +787,17 @@ async function loadProgramsSummary(
           .order("id")
           .range(debut, fin),
     ),
-    lireParLots<{ content_id: string; student_id: string }>(
+    lireParLots<{ content_id: string; student_id: string; program_start_date: string | null }>(
       "loadProgramsSummary (assignments)",
       programIds,
       (lot, debut, fin, compter) =>
         supabase
           .from("assignments")
-          .select("content_id, student_id", optionsDePage(compter))
+          // ⚠️ `program_start_date` EST LU ICI DEPUIS LE 27/09/2026 — la carte
+          // admin affiche « Sem. X / Y » depuis le calendrier INDIVIDUEL de
+          // chaque élève, et cette colonne en est la seule source. Une colonne
+          // de plus sur une requête déjà émise : aucune requête ajoutée.
+          .select("content_id, student_id, program_start_date", optionsDePage(compter))
           .eq("content_type", "programme")
           .in("content_id", lot)
           .order("id")
@@ -879,6 +883,31 @@ async function loadProgramsSummary(
   const copyOwnersByTemplate = groupBy(copyRows, (c) => c.source_template_id);
 
   return programRows.map((programRow) => {
+    /*
+     * LE CALENDRIER INDIVIDUEL, PAR ÉLÈVE — et la liste de ceux pour qui la
+     * carte doit se TAIRE.
+     *
+     * ⚠️ DEUX POPULATIONS SE MÉLANGENT DANS `assignedStudentIds`, ET ELLES N'ONT
+     * PAS LES MÊMES SÉANCES. Les affectations DIRECTES portent sur CE programme :
+     * leurs séances sont celles qu'on vient de lire, et leur date de début vit
+     * sur leur ligne `assignments`. Les propriétaires de COPIE, eux, sont
+     * rattachés à la carte du MODÈLE par `mergeAssignedStudentIds` alors qu'ils
+     * s'entraînent sur une autre structure : leurs complétions ne portent pas sur
+     * les identifiants lus ici, et croiser les deux produit un avancement qui ne
+     * décrit personne. Mesuré le 27/09/2026 sur un même élève et un même
+     * programme : 2 complétions sur les séances du modèle, 4 sur celles de sa
+     * copie. La carte du modèle les NOMME donc sans avancement ; leur avancement
+     * vit sur la carte de leur copie, où il est exact.
+     */
+    const affectationsDirectes = assignmentsByProgram.get(programRow.id) ?? [];
+    const elevesDirects = new Set(affectationsDirectes.map((a) => a.student_id));
+    const debutParEleve = new Map<string, string | null>(
+      affectationsDirectes.map((a) => [a.student_id, a.program_start_date ?? null] as const),
+    );
+    const assignedViaCopyStudentIds = (copyOwnersByTemplate.get(programRow.id) ?? [])
+      .map((c) => c.owner_student_id)
+      .filter((studentId) => !elevesDirects.has(studentId));
+
     const weeksForProgram = weeksByProgram.get(programRow.id) ?? [];
     const sessions: AdminProgramSummarySession[] = weeksForProgram.flatMap((week) =>
       (sessionsByWeek.get(week.id) ?? []).map((s) => ({
@@ -902,6 +931,8 @@ async function loadProgramsSummary(
         (copyOwnersByTemplate.get(programRow.id) ?? []).map((c) => c.owner_student_id),
       ),
       sessions,
+      debutParEleve,
+      assignedViaCopyStudentIds,
       bannerUrl: programRow.banner_url ?? null,
       programMode: programRow.program_mode ?? "individuel",
       groupStartDate: programRow.group_start_date ?? null,
@@ -1044,6 +1075,85 @@ export async function getProgramStartDate(
 }
 
 /**
+ * LA CLÉ D'UN COUPLE (ÉLÈVE, PROGRAMME) dans les tables rendues ci-dessous.
+ * Exportée parce que l'appelant doit la fabriquer pour lire la table.
+ */
+export function cleAffectation(studentId: string, programId: string): string {
+  return `${studentId}::${programId}`;
+}
+
+/**
+ * LES DATES DE DÉBUT RÉELLEMENT STOCKÉES, pour une liste de couples
+ * (élève, programme) — ce que les modales d'affectation doivent AFFICHER.
+ *
+ * ════════════════════════════════════════════════════════════════════════
+ * POURQUOI CETTE FONCTION EXISTE
+ * ════════════════════════════════════════════════════════════════════════
+ * Les deux modales proposaient la DATE DU JOUR dans leur champ « Date de début
+ * du programme », y compris pour un élève déjà affecté depuis trois semaines.
+ * Le coach lisait donc une proposition en croyant lire un enregistrement, et
+ * repartait persuadé d'avoir vu la valeur en base. Un champ ne peut pas se
+ * corriger s'il ne se lit pas d'abord.
+ *
+ * ⚠️ L'AFFECTATION NE VIT PAS TOUJOURS SUR L'IDENTIFIANT DEMANDÉ. En mode
+ * individualisé, la ligne `assignments` pointe la COPIE de l'élève, pas le
+ * modèle sur lequel la modale est ouverte. Interroger le seul `programId`
+ * rendrait « aucune date » pour les 19 affectations de production, qui sont
+ * toutes des copies. La résolution modèle → copie est donc faite ici, une fois,
+ * plutôt que répétée dans chaque appelant.
+ *
+ * ⚠️ UNE COPIE L'EMPORTE SUR UN LIEN DIRECT. Un élève peut porter les deux
+ * (héritage du mode groupe, puis individualisation) ; c'est sur sa copie qu'il
+ * s'entraîne, donc c'est la date de sa copie qui fait foi.
+ */
+export async function debutsDesAffectations(
+  supabase: TypedSupabaseClient,
+  couples: ReadonlyArray<{ studentId: string; programId: string }>,
+): Promise<Map<string, string | null>> {
+  const resultat = new Map<string, string | null>();
+  if (couples.length === 0) return resultat;
+
+  const studentIds = [...new Set(couples.map((c) => c.studentId))];
+  const programIds = [...new Set(couples.map((c) => c.programId))];
+
+  const { data: copieRows, error: copieError } = await supabase
+    .from("programs")
+    .select("id, owner_student_id, source_template_id")
+    .in("source_template_id", programIds)
+    .in("owner_student_id", studentIds);
+  devWarn("debutsDesAffectations (copies)", copieError);
+
+  // `content_id` de la copie → identifiant du MODÈLE, pour reposer la réponse
+  // sur le programme que l'appelant a demandé.
+  const modeleParCopie = new Map<string, string>();
+  for (const copie of copieRows ?? []) {
+    if (copie.id && copie.source_template_id) modeleParCopie.set(copie.id, copie.source_template_id);
+  }
+
+  const cibles = [...new Set([...programIds, ...modeleParCopie.keys()])];
+  const { data: affectationRows, error: affectationError } = await supabase
+    .from("assignments")
+    .select("student_id, content_id, program_start_date")
+    .eq("content_type", "programme")
+    .in("content_id", cibles)
+    .in("student_id", studentIds);
+  devWarn("debutsDesAffectations (affectations)", affectationError);
+
+  // Liens directs d'abord, copies ensuite : la seconde passe écrase la
+  // première, ce qui applique la priorité annoncée sans la tester ligne à ligne.
+  for (const ligne of affectationRows ?? []) {
+    if (modeleParCopie.has(ligne.content_id)) continue;
+    resultat.set(cleAffectation(ligne.student_id, ligne.content_id), ligne.program_start_date ?? null);
+  }
+  for (const ligne of affectationRows ?? []) {
+    const modele = modeleParCopie.get(ligne.content_id);
+    if (!modele) continue;
+    resultat.set(cleAffectation(ligne.student_id, modele), ligne.program_start_date ?? null);
+  }
+  return resultat;
+}
+
+/**
  * Régularise (ou corrige) la date de début d'un programme déjà affecté.
  *
  * ⚠️ `null` EST UNE VALEUR LÉGITIME : le coach doit pouvoir RETIRER une date
@@ -1057,14 +1167,37 @@ export async function setProgramStartDate(
   programId: string,
   programStartDate: string | null,
 ): Promise<boolean> {
-  const { error } = await supabase
+  /*
+   * ⚠️ `.select("id")` N'EST PAS DÉCORATIF — C'EST CE QUI DISTINGUE
+   * « ENREGISTRÉ » DE « AUCUNE LIGNE TOUCHÉE ».
+   *
+   * Un UPDATE PostgREST qui ne rencontre AUCUNE ligne ne rend pas d'erreur. La
+   * version précédente rendait `!error`, donc `true` : l'interface confirmait
+   * une écriture qui n'avait jamais eu lieu. Il suffisait d'un `programId`
+   * visant le MODÈLE au lieu de la copie — où vit réellement l'affectation —
+   * pour que le coach corrige une date dans le vide, avec un message de succès.
+   * Les lignes rendues sont la seule preuve qu'il y avait quelque chose à
+   * mettre à jour.
+   */
+  const { data, error } = await supabase
     .from("assignments")
     .update({ program_start_date: programStartDate } as never)
     .eq("student_id", studentId)
     .eq("content_type", "programme")
-    .eq("content_id", programId);
+    .eq("content_id", programId)
+    .select("id");
   devWarn("setProgramStartDate", error);
-  return !error;
+  if (error) return false;
+  const lignes = (data as { id: string }[] | null) ?? [];
+  if (lignes.length === 0) {
+    devWarn("setProgramStartDate", {
+      message:
+        `aucune affectation (élève ${studentId}, programme ${programId}) : ` +
+        "la date n'a PAS été enregistrée",
+    });
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -2163,7 +2296,26 @@ export async function setProgramAssignment(
     .maybeSingle();
   devWarn("setProgramAssignment (lookup)", lookupError);
   if (existing) {
-    return true;
+    /*
+     * ⚠️ « L'AFFECTATION EXISTE » N'EST PAS « IL N'Y A RIEN À FAIRE ».
+     *
+     * C'était le troisième filet du bug de persistance : cette sortie rendait
+     * `true` sans regarder `programStartDate`. Un coach qui corrigeait la date
+     * de début d'un élève DÉJÀ affecté voyait « Assignation mise à jour » et
+     * repartait avec l'ancienne date en base — mesuré le 27/09/2026 sur
+     * l'affectation 8c869365, dont `updated_at` n'avait jamais bougé depuis sa
+     * création alors qu'un trigger `set_updated_at` veille sur la table.
+     *
+     * ⚠️ `undefined` RESTE UNE SORTIE SÈCHE, et c'est ce qui protège les deux
+     * autres parcours. Nutrition et documents ne passent jamais de 5ᵉ argument ;
+     * un retrait non plus. Seul un appel qui PORTE une intention de date —
+     * `null` compris, « retirer la date » étant une décision légitime — déclenche
+     * l'écriture.
+     */
+    if (programStartDate === undefined) {
+      return true;
+    }
+    return setProgramStartDate(supabase, studentId, effectiveProgramId, programStartDate);
   }
 
   const { error: insertError } = await supabase.from("assignments").insert({

@@ -150,7 +150,9 @@
     "test:progression-programme": "npx tsx scripts/tests/progression-programme.mts",
     "test:verification-programme": "npx tsx scripts/tests/verification-programme.mts",
     "test:correctifs-pre-merge": "NODE_OPTIONS=\"--conditions=react-server --no-warnings\" npx tsx scripts/tests/correctifs-privileges-et-rappels.mts",
-    "test:rappels-automatiques": "NODE_OPTIONS=\"--conditions=react-server --no-warnings\" npx tsx --experimental-test-module-mocks scripts/tests/rappels-automatiques.mts"
+    "test:rappels-automatiques": "NODE_OPTIONS=\"--conditions=react-server --no-warnings\" npx tsx --experimental-test-module-mocks scripts/tests/rappels-automatiques.mts",
+    "test:semaine-individuelle": "TZ=Europe/Paris npx tsx scripts/tests/semaine-individuelle.mts",
+    "test:persistance-date-debut": "npx tsx scripts/tests/persistance-date-debut.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

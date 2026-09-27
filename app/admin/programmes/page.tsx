@@ -19,6 +19,7 @@ import { useVerificationsProgrammes } from "@/hooks/useVerificationsProgrammes";
 import { useSupabaseProgramsSummary } from "@/hooks/useSupabaseProgramsSummary";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { contentStatusLabels, matchesTextSearch, totalSessions, totalWeeks } from "@/lib/admin";
+import { currentDate } from "@/lib/clock";
 import { cleDeSemaine, dateDuJour } from "@/lib/verification-programme";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
@@ -94,6 +95,16 @@ export default function AdminProgramsPage() {
   const verifications = useVerificationsProgrammes(useMemo(() => programs.map((p) => p.id), [programs]));
   const aujourdhui = dateDuJour();
   const semaineCourante = cleDeSemaine(aujourdhui);
+  /*
+   * « MAINTENANT », FIGÉ POUR LA DURÉE DU MONTAGE.
+   *
+   * ⚠️ UNE SEULE RÉFÉRENCE POUR TOUTE LA PAGE, comme `aujourdhui` juste au-
+   * dessus. Appeler `currentDate()` à chaque ligne d'élève ferait comparer des
+   * instants différents dans un même écran : deux élèves de même date de début
+   * pourraient afficher deux semaines différentes si le rendu chevauchait
+   * minuit. La page se recharge assez souvent pour que la valeur reste juste.
+   */
+  const reference = useMemo(() => currentDate(), []);
   // Duplication (V3 étape 4) : Supabase uniquement, pas de repli mock — voir
   // lib/supabase/programs.ts#duplicateProgram. `duplicatingId` retient le
   // programme en cours de duplication pour désactiver son bouton le temps de
@@ -355,6 +366,17 @@ export default function AdminProgramsPage() {
                   seancesParEleve={seancesTerminees.parEleve}
                   complet={seancesTerminees.complet}
                   chargement={seancesTerminees.chargement}
+                  durationWeeks={program.durationWeeks}
+                  /* ⚠️ `?? new Map()` N'EST PAS UN DÉFAUT COMMODE : les
+                     programmes de DÉMONSTRATION (Supabase non configuré) n'ont
+                     aucune affectation réelle, donc aucune date. Une table vide
+                     rend « — / Y », c'est-à-dire la vérité, plutôt qu'une
+                     semaine inventée. */
+                  debutParEleve={"debutParEleve" in program ? (program.debutParEleve ?? new Map()) : new Map()}
+                  elevesSansSeancesIndividuelles={
+                    "assignedViaCopyStudentIds" in program ? (program.assignedViaCopyStudentIds ?? []) : []
+                  }
+                  reference={reference}
                 />
               </div>
               <div className="flex flex-wrap gap-2">

@@ -1,6 +1,7 @@
-import { daysBetween, weekDays } from "@/lib/admin";
+import { weekDays } from "@/lib/admin";
 import { currentDate } from "@/lib/clock";
 import { progressionDuProgramme } from "@/lib/progression-programme";
+import { semaineDepuis } from "@/lib/semaine-individuelle";
 import type {
   AdminContentStatus,
   AdminProgram,
@@ -90,7 +91,9 @@ export function ancreDeSemaine(program: AdminProgram, student: AdminStudent | nu
  * 11 cas sur 15 en production : elle ne dit rien du programme. La date de
  * début vit désormais sur l'AFFECTATION — voir `ancreDeSemaine`.
  *
- * La formule, elle, était juste et ne change pas : `floor(jours / 7) + 1`.
+ * La formule, elle, était juste et ne change pas : `floor(jours / 7) + 1`. Elle
+ * vit désormais dans `semaineDepuis` (lib/semaine-individuelle.ts), partagée
+ * avec la carte admin — voir le commentaire dans le corps ci-dessous.
  */
 export function computeCurrentWeekNumber(
   program: AdminProgram,
@@ -106,18 +109,25 @@ export function computeCurrentWeekNumber(
     return 1;
   }
 
-  const daysSinceStart = daysBetween(referenceDate, reference);
-  // ⚠️ `daysSinceStart < 0` EST REDONDANT AVEC LE `Math.max(1, …)` FINAL, et
-  // le sabotage l'a montré : le retirer ne rougit aucun test, parce qu'une
-  // date antérieure donne `floor(-7/7)+1 = 0`, que la borne ramène à 1. Il
-  // reste pour DIRE l'intention — « une date future n'est pas une semaine 0 »
-  // — au lieu de la laisser dépendre d'un effet de bord arithmétique deux
-  // lignes plus bas. `Number.isFinite`, lui, est indispensable : il attrape le
-  // NaN d'une date illisible, que `Math.max` propagerait.
-  if (!Number.isFinite(daysSinceStart) || daysSinceStart < 0) {
+  /*
+   * ⚠️ LA FORMULE N'EST PLUS ÉCRITE ICI — ELLE VIT DANS
+   * lib/semaine-individuelle.ts, ET NULLE PART AILLEURS.
+   *
+   * La carte admin doit calculer la même semaine à partir d'un résumé de
+   * programme, sans `AdminProgram` ni `AdminStudent`. La recopier là-bas aurait
+   * reproduit exactement le défaut que ce chantier a fermé : la fiche élève
+   * refaisait `floor(jours/7)+1` à la main pendant que l'élève passait par
+   * cette fonction, et les deux ont divergé. `semaineDepuis` porte les deux
+   * gardes (NaN, date future) et la formule ; ce qui reste ici est la seule
+   * chose qui dépende du PROGRAMME : sa borne haute.
+   *
+   * `null` couvre les deux cas sans réponse — date illisible et début futur —
+   * et rend 1, à l'identique du comportement d'avant l'extraction.
+   */
+  const weekNumber = semaineDepuis(referenceDate, reference);
+  if (weekNumber === null) {
     return 1;
   }
-  const weekNumber = Math.floor(daysSinceStart / 7) + 1;
   return Math.min(Math.max(program.durationWeeks, 1), Math.max(1, weekNumber));
 }
 
