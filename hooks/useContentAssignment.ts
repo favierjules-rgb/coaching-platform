@@ -5,6 +5,7 @@ import { useCallback } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { setDocumentAssignment } from "@/lib/supabase/documents";
 import { setNutritionAssignment } from "@/lib/supabase/nutrition";
+import type { MotifAssignation } from "@/lib/assignment-selection";
 import { setProgramAssignment } from "@/lib/supabase/programs";
 import type { AssignableContentType } from "@/types";
 
@@ -34,6 +35,16 @@ type AwaitableSetAssignmentFn = (
    * pixel les deux autres parcours d'affectation.
    */
   programStartDate?: string | null,
+  /**
+   * Pourquoi cette écriture part — voir `MotifAssignation`.
+   *
+   * ⚠️ `"date"` EST CE QUI EMPÊCHE UN EMAIL À CHAQUE RECTIFICATION. Corriger la
+   * date de début d'une affectation existante n'attribue rien : l'élève a déjà
+   * son programme, et recevoir « un nouveau contenu vous a été attribué » parce
+   * que son coach a rectifié une saisie serait faux. Omis, le comportement est
+   * celui d'avant ce lot, à l'identique.
+   */
+  motif?: MotifAssignation,
 ) => Promise<boolean>;
 
 /**
@@ -74,7 +85,7 @@ export function useContentAssignment(
 ): AwaitableSetAssignmentFn {
   const notifyByEmail = options?.notifyByEmail ?? true;
   return useCallback(
-    (studentId, contentType, contentId, assigned, programStartDate) => {
+    (studentId, contentType, contentId, assigned, programStartDate, motif) => {
       const write = WRITERS[contentType];
       if (active[contentType] && write) {
         const supabase = createSupabaseBrowserClient();
@@ -96,7 +107,9 @@ export function useContentAssignment(
             // Email envoyé uniquement lors d'une vraie nouvelle attribution
             // (jamais au retrait, "assigned" ci-dessus) — best-effort, ne
             // bloque jamais l'action d'attribution elle-même.
-            if (ok && assigned && notifyByEmail) {
+            // ⚠️ `motif !== "date"` : une correction de date n'est pas une
+            // attribution. Voir le commentaire sur `motif` ci-dessus.
+            if (ok && assigned && notifyByEmail && motif !== "date") {
               fetch("/api/email/content-assigned", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },

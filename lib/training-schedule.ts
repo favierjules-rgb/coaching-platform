@@ -1,5 +1,7 @@
-import { daysBetween, weekDays } from "@/lib/admin";
+import { weekDays } from "@/lib/admin";
 import { currentDate } from "@/lib/clock";
+import { progressionDuProgramme } from "@/lib/progression-programme";
+import { semaineDepuis } from "@/lib/semaine-individuelle";
 import type {
   AdminContentStatus,
   AdminProgram,
@@ -89,7 +91,9 @@ export function ancreDeSemaine(program: AdminProgram, student: AdminStudent | nu
  * 11 cas sur 15 en production : elle ne dit rien du programme. La date de
  * début vit désormais sur l'AFFECTATION — voir `ancreDeSemaine`.
  *
- * La formule, elle, était juste et ne change pas : `floor(jours / 7) + 1`.
+ * La formule, elle, était juste et ne change pas : `floor(jours / 7) + 1`. Elle
+ * vit désormais dans `semaineDepuis` (lib/semaine-individuelle.ts), partagée
+ * avec la carte admin — voir le commentaire dans le corps ci-dessous.
  */
 export function computeCurrentWeekNumber(
   program: AdminProgram,
@@ -105,18 +109,25 @@ export function computeCurrentWeekNumber(
     return 1;
   }
 
-  const daysSinceStart = daysBetween(referenceDate, reference);
-  // ⚠️ `daysSinceStart < 0` EST REDONDANT AVEC LE `Math.max(1, …)` FINAL, et
-  // le sabotage l'a montré : le retirer ne rougit aucun test, parce qu'une
-  // date antérieure donne `floor(-7/7)+1 = 0`, que la borne ramène à 1. Il
-  // reste pour DIRE l'intention — « une date future n'est pas une semaine 0 »
-  // — au lieu de la laisser dépendre d'un effet de bord arithmétique deux
-  // lignes plus bas. `Number.isFinite`, lui, est indispensable : il attrape le
-  // NaN d'une date illisible, que `Math.max` propagerait.
-  if (!Number.isFinite(daysSinceStart) || daysSinceStart < 0) {
+  /*
+   * ⚠️ LA FORMULE N'EST PLUS ÉCRITE ICI — ELLE VIT DANS
+   * lib/semaine-individuelle.ts, ET NULLE PART AILLEURS.
+   *
+   * La carte admin doit calculer la même semaine à partir d'un résumé de
+   * programme, sans `AdminProgram` ni `AdminStudent`. La recopier là-bas aurait
+   * reproduit exactement le défaut que ce chantier a fermé : la fiche élève
+   * refaisait `floor(jours/7)+1` à la main pendant que l'élève passait par
+   * cette fonction, et les deux ont divergé. `semaineDepuis` porte les deux
+   * gardes (NaN, date future) et la formule ; ce qui reste ici est la seule
+   * chose qui dépende du PROGRAMME : sa borne haute.
+   *
+   * `null` couvre les deux cas sans réponse — date illisible et début futur —
+   * et rend 1, à l'identique du comportement d'avant l'extraction.
+   */
+  const weekNumber = semaineDepuis(referenceDate, reference);
+  if (weekNumber === null) {
     return 1;
   }
-  const weekNumber = Math.floor(daysSinceStart / 7) + 1;
   return Math.min(Math.max(program.durationWeeks, 1), Math.max(1, weekNumber));
 }
 
@@ -206,16 +217,34 @@ export function toEleveWorkoutSession(session: AdminWorkoutSession): WorkoutSess
   };
 }
 
+/**
+ * ⚠️ LA PROGRESSION NE SE COMPTE PLUS EN SEMAINES — voir
+ * lib/progression-programme.ts.
+ *
+ * Jusqu'au 24/09/2026, `progressPercent` valait
+ * `min(weekNumber, durationWeeks) / durationWeeks`, c'est-à-dire le TEMPS
+ * ÉCOULÉ : la barre avançait toute seule, sans qu'aucune séance soit faite. Un
+ * élève qui n'avait rien ouvert depuis six semaines lisait « 50 % ».
+ *
+ * `seancesTerminees` est l'ensemble des identifiants de séances que l'élève a
+ * VALIDÉES. Il est optionnel, et son absence ne fait pas revenir l'ancienne
+ * formule : elle met `progressionConnue` à `false`, et l'écran se tait. Une
+ * barre à zéro et une barre inconnue ne disent pas la même chose.
+ */
 export function toEleveTrainingProgram(
   program: AdminProgram,
   weekNumber: number,
   reference: Date = currentDate(),
+  seancesTerminees?: ReadonlySet<string> | null,
 ): TrainingProgram {
   const weekNumbers = Array.from(new Set(program.sessions.map((s) => s.weekNumber))).sort((a, b) => a - b);
   const referenceWeek = weekNumbers.includes(weekNumber) ? weekNumber : (weekNumbers[0] ?? weekNumber);
   const sessionsPerWeek = program.sessions.filter((s) => s.weekNumber === referenceWeek && !s.isRestDay).length;
-  const progressPercent =
-    program.durationWeeks > 0 ? Math.round((Math.min(weekNumber, program.durationWeeks) / program.durationWeeks) * 100) : 0;
+  const progressionConnue = seancesTerminees !== undefined && seancesTerminees !== null;
+  const progressPercent = progressionDuProgramme({
+    seances: program.sessions,
+    seancesTerminees: seancesTerminees ?? new Set<string>(),
+  }).pourcentage;
 
   return {
     id: program.id,
@@ -225,8 +254,12 @@ export function toEleveTrainingProgram(
     durationWeeks: program.durationWeeks,
     status: STATUS_ADMIN_TO_STUDENT[program.status],
     sessionsPerWeek,
+    // ⚠️ `currentWeek` RESTE LA SEMAINE CALENDAIRE. Elle décide quelles séances
+    // afficher aujourd'hui, et `computeCurrentWeekNumber` n'est pas touché. La
+    // semaine de PROGRESSION est une autre question, posée ailleurs.
     currentWeek: weekNumber,
     progressPercent,
+    progressionConnue,
     schedule: buildScheduleForWeek(program, weekNumber, reference),
     bannerUrl: program.bannerUrl,
   };

@@ -430,7 +430,22 @@ await (async () => {
     // Depuis fix/nutrition-single-assigned-plan, le diff dépend du type :
     // `terminerAssignationUnique` pour la nutrition (aucun retrait émis quand
     // un plan est choisi — la RPC s'en charge), `terminerAssignation` sinon.
-    assert.ok(source.includes("terminerType(initial[type], selection[type]"));
+    /*
+     * ⚠️ L'APPEL EST PASSÉ SUR PLUSIEURS LIGNES LE 27/09/2026 : il porte
+     * désormais un MOTIF et la liste des programmes dont la DATE a changé (les
+     * inchangés ne produisaient aucune écriture, donc la date saisie n'était
+     * jamais enregistrée). L'invariant gardé est le même : le diff est appelé
+     * avec l'état initial et la sélection, par type.
+     */
+    assert.match(
+      source,
+      /terminerType\(\s*initial\[type\],\s*selection\[type\],/,
+      "le diff n'est plus appelé avec (initial, sélection) par type",
+    );
+    // Renommée le 27/09/2026 en `datesAReecrireDepuisLaModale`, qui porte en plus
+    // les gardes « champ touché » et « dates non divergentes ».
+    assert.ok(source.includes("datesAReecrireDepuisLaModale({"),
+      "les programmes dont la date a changé ne passent plus par le garde-fou complet");
     assert.ok(source.includes('type === "nutrition" ? terminerAssignationUnique : terminerAssignation'));
     assert.ok(source.includes('type === "nutrition" ? toggleSingleSelection : toggleStudentSelection'));
     assert.ok(source.includes("if (saving) return;"));
@@ -447,13 +462,21 @@ await (async () => {
   await test("20. hook : email désactivable et coupé pour la fiche élève ; modale programmes intacte", () => {
     const hook = sansCommentaires(sourceHook);
     assert.ok(hook.includes("notifyByEmail?: boolean"), "option exposée");
-    assert.ok(hook.includes("ok && assigned && notifyByEmail"), "email conditionné à l'option");
+    assert.ok(
+      hook.includes('ok && assigned && notifyByEmail && motif !== "date"'),
+      "email conditionné à l'option ET jamais envoyé pour une simple correction de date",
+    );
     const page = sansCommentaires(sourcePageEleve);
     assert.ok(page.includes("notifyByEmail: false"), "la fiche élève ne déclenche AUCUN email");
     // Non-régression : la modale « Assigner » de /admin/programmes garde son
     // pattern validé (sélection locale + terminerAssignation) — non cassée.
     const programmes = sansCommentaires(sourceModaleProgrammes);
-    assert.ok(programmes.includes("terminerType(assignedStudentIds, selection"));
+    // Même raison : l'appel est multi-ligne depuis le lot « calendrier individuel ».
+    assert.match(
+      programmes,
+      /terminerType\(\s*assignedStudentIds,\s*selection,/,
+      "la modale programmes n'appelle plus le diff avec (assignedStudentIds, selection)",
+    );
     assert.ok(programmes.includes('contentType === "nutrition" ? terminerAssignationUnique : terminerAssignation'));
     assert.ok(programmes.includes("toggleStudentSelection(prev, studentId, checked)"));
   });

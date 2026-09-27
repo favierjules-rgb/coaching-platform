@@ -27,13 +27,22 @@ export function TrainingProgramCard({ program }: { program: TrainingProgram }) {
           <span>{program.sessionsPerWeek} séances / semaine</span>
         </div>
 
-        <div className="mt-auto flex flex-col gap-2">
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span className="uppercase tracking-wide">Progression</span>
-            <span>{program.progressPercent}%</span>
+        {/*
+          ⚠️ PAS DE BARRE QUAND LA PROGRESSION N'EST PAS CONNUE.
+          `progressionConnue === false` veut dire « les séances validées n'ont
+          pas pu être lues » — pas « aucune séance validée ». Afficher 0 %
+          annoncerait à l'élève qu'il n'a rien fait. Absent (programmes de
+          démonstration) = affiché comme avant.
+        */}
+        {program.progressionConnue !== false && (
+          <div className="mt-auto flex flex-col gap-2">
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span className="uppercase tracking-wide">Progression</span>
+              <span>{program.progressPercent}%</span>
+            </div>
+            <ProgressBar percent={program.progressPercent} />
           </div>
-          <ProgressBar percent={program.progressPercent} />
-        </div>
+        )}
 
         <Link
           href={`/entrainement/${program.id}`}

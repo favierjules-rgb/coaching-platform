@@ -19,6 +19,18 @@ export type StatutCampagne = "programmee" | "envoyee" | "partielle" | "echouee" 
 export type StatutOccurrence = "en_attente" | "en_cours" | "envoyee" | "partielle" | "echouee";
 export type StatutEnvoi = "en_attente" | "en_cours" | "envoyee" | "echouee" | "interrompue";
 
+/**
+ * LE GENRE D'UN RAPPEL AUTOMATIQUE — ce qui fait d'une campagne un RAIL SYSTÈME.
+ *
+ * ⚠️ UNE CAMPAGNE DE RAPPEL N'EST PAS UNE CAMPAGNE DU COACH. Elle n'est pas
+ * écrite à la main, elle n'apparaît pas dans sa liste, elle ne se modifie pas
+ * comme un message ponctuel — et surtout elle n'envoie qu'à ceux dont la
+ * CONDITION du jour est remplie (séance prévue et non faite, journée
+ * alimentaire incomplète). `null` = campagne ordinaire, envoyée à toute sa
+ * cible, comme avant.
+ */
+export type GenreRappelAuto = "entrainement" | "nutrition";
+
 export interface Campagne {
   id: string;
   createdBy: string | null;
@@ -33,6 +45,8 @@ export interface Campagne {
   active: boolean;
   statut: StatutCampagne;
   creeeLe: string;
+  /** `null` pour une campagne ordinaire. Voir `GenreRappelAuto`. */
+  rappelAuto: GenreRappelAuto | null;
 }
 
 export interface Occurrence {
@@ -104,11 +118,26 @@ function versCampagne(l: Record<string, unknown>): Campagne {
     active: l.active === true,
     statut: texte(l.status) as StatutCampagne,
     creeeLe: texte(l.created_at),
+    rappelAuto: lireGenreRappel(l.rappel_auto),
   };
 }
 
+/**
+ * Le genre de rappel, ou `null`.
+ *
+ * ⚠️ TOUTE VALEUR INATTENDUE DEVIENT `null`, donc « campagne ordinaire ». Ce
+ * n'est pas un repli complaisant : la contrainte CHECK de la base n'accepte que
+ * les deux genres connus, donc une autre valeur ne peut venir que d'un schéma
+ * plus récent que ce code. La traiter comme un rappel dont on ignore la
+ * condition ferait envoyer un rappel à tout le monde sans condition — l'inverse
+ * exact de ce que la colonne sert à garantir.
+ */
+function lireGenreRappel(valeur: unknown): GenreRappelAuto | null {
+  return valeur === "entrainement" || valeur === "nutrition" ? valeur : null;
+}
+
 const COLONNES_CAMPAGNE =
-  "id, created_by, title, body, destination, target_kind, schedule_kind, timezone, recurrence, next_run_at, active, status, created_at";
+  "id, created_by, title, body, destination, target_kind, schedule_kind, timezone, recurrence, next_run_at, active, status, created_at, rappel_auto";
 
 /* ════════════════════════════ CAMPAGNES ════════════════════════════ */
 
@@ -154,12 +183,37 @@ export async function lireCampagne(client: unknown, id: string): Promise<Campagn
   return versCampagne(reponse.data as Record<string, unknown>);
 }
 
+/**
+ * Les campagnes du COACH — les rails système en sont exclus.
+ *
+ * ⚠️ LE FILTRE EST DANS LA REQUÊTE, PAS DANS L'ÉCRAN. Un rappel automatique n'a
+ * ni titre choisi, ni cible choisie à la main, et sa « modification » n'aurait
+ * aucun sens : il se règle élève par élève, depuis la fiche de l'élève. Le
+ * laisser apparaître dans la liste inviterait à le modifier ou à l'annuler
+ * comme un message ponctuel — et un coach qui l'annule couperait les rappels de
+ * TOUS ses élèves sans le savoir.
+ */
 export async function listerCampagnes(client: unknown): Promise<Campagne[]> {
   const reponse = await tables(client)
     .from("notification_campaigns")
     .select(COLONNES_CAMPAGNE)
+    .is("rappel_auto", null)
     .order("created_at", { ascending: false });
   return lignes(reponse).map(versCampagne);
+}
+
+/** La campagne système d'un genre de rappel, ou `null` si elle n'existe pas. */
+export async function campagneDeRappel(
+  client: unknown,
+  genre: GenreRappelAuto,
+): Promise<Campagne | null> {
+  const reponse = await tables(client)
+    .from("notification_campaigns")
+    .select(COLONNES_CAMPAGNE)
+    .eq("rappel_auto", genre)
+    .maybeSingle();
+  if (reponse.error || !reponse.data) return null;
+  return versCampagne(reponse.data as Record<string, unknown>);
 }
 
 /** Les campagnes dont l'échéance est atteinte. Le planificateur ne lit rien d'autre. */
@@ -276,20 +330,41 @@ export async function remplacerCibles(
  * Un élève sans compte d'authentification (`user_id` nul) n'est joignable
  * par aucun canal : il est écarté ici, silencieusement et à dessein.
  */
-export async function comptesVises(client: unknown, campagne: Campagne): Promise<string[]> {
+/** Un élève visé, et le compte auquel ses appareils sont rattachés. */
+export interface EleveVise {
+  readonly studentId: string;
+  readonly userId: string;
+}
+
+/**
+ * Les élèves visés par une campagne, AVEC leur identifiant d'élève.
+ *
+ * ⚠️ ELLE REMPLACE `comptesVises`, QUI PERDAIT CE LIEN. Une liste de `user_id`
+ * ne dit pas de QUI il s'agit : impossible alors de demander « celui-là a-t-il
+ * une séance aujourd'hui ? ». L'ancienne fonction n'est pas gardée en
+ * adaptateur — un second chemin vers les mêmes lignes, dont l'un oublie
+ * l'identifiant d'élève, finirait par être appelé là où la condition compte.
+ * La résolution de la cible (`target_kind`, `cibles`) est IDENTIQUE, au filtre
+ * `user_id is not null` près.
+ */
+export async function elevesVises(client: unknown, campagne: Campagne): Promise<EleveVise[]> {
+  const versEleves = (reponse: Reponse): EleveVise[] =>
+    lignes(reponse)
+      .map((l) => ({ studentId: texte(l.id), userId: texte(l.user_id) }))
+      .filter((e) => e.studentId !== "" && e.userId !== "");
+
   if (campagne.genreCible === "all") {
-    const reponse = await tables(client).from("students").select("user_id").not("user_id", "is", null);
-    return lignes(reponse).map((l) => texte(l.user_id)).filter(Boolean);
+    return versEleves(
+      await tables(client).from("students").select("id, user_id").not("user_id", "is", null),
+    );
   }
   const ids = await cibles(client, campagne.id);
   if (ids.length === 0) return [];
-  const reponse = await tables(client)
-    .from("students")
-    .select("user_id")
-    .in("id", ids)
-    .not("user_id", "is", null);
-  return lignes(reponse).map((l) => texte(l.user_id)).filter(Boolean);
+  return versEleves(
+    await tables(client).from("students").select("id, user_id").in("id", ids).not("user_id", "is", null),
+  );
 }
+
 
 /* ════════════════════════════ OCCURRENCES ════════════════════════════ */
 

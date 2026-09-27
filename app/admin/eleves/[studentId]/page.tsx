@@ -9,6 +9,7 @@ import { ActivityFeed } from "@/components/admin/ActivityFeed";
 import { AddCoachNoteModal } from "@/components/admin/AddCoachNoteModal";
 import { AdminOnboardingDetailModal } from "@/components/admin/AdminOnboardingDetailModal";
 import { AdminSection, InfoRow, TagList } from "@/components/admin/AdminSection";
+import { RappelsEleveSection } from "@/components/admin/RappelsEleveSection";
 import { StudentPerformanceSection } from "@/components/admin/StudentPerformanceSection";
 import { AssignContentToStudentModal } from "@/components/admin/AssignContentToStudentModal";
 import { CoachNutritionHistory } from "@/components/admin/CoachNutritionHistory";
@@ -981,6 +982,17 @@ export default function AdminStudentDetailPage() {
             <p className="text-sm text-muted-foreground">Aucun plan attribué.</p>
           )}
         </AdminSection>
+        {/*
+          ⚠️ RÉSERVÉ À UN ÉLÈVE RÉEL. Les rappels ciblent un `student_id` en
+          base ; sur une fiche de démonstration il n'y a rien à cibler, et
+          afficher deux interrupteurs inopérants inviterait à cliquer dans le
+          vide.
+        */}
+        {isSupabaseStudent && (
+          <AdminSection title="Notifications">
+            <RappelsEleveSection studentId={student.id} />
+          </AdminSection>
+        )}
         <AdminSection
           title="Documents"
           action={

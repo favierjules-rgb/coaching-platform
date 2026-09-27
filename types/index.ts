@@ -102,6 +102,18 @@ export interface TrainingProgram {
   sessionsPerWeek: number;
   currentWeek: number;
   progressPercent: number;
+  /**
+   * `false` = la progression n'est PAS connue, et l'écran ne doit pas
+   * l'afficher.
+   *
+   * ⚠️ POURQUOI UN DRAPEAU PLUTÔT QU'UN `number | null`. Les programmes de
+   * démonstration (data/student.ts) portent un `progressPercent` écrit à la
+   * main ; rendre le champ nullable aurait obligé à réécrire ces littéraux et
+   * tous les composants qui les lisent. Absent = comportement d'avant,
+   * `false` = on se tait. Un 0 % affiché par défaut annoncerait « tu n'as rien
+   * fait » à quelqu'un dont on n'a simplement pas encore lu les séances.
+   */
+  progressionConnue?: boolean;
   schedule: ProgramScheduleDay[];
   /** Photo bannière (V3, chantier module Programmation étape 4) — voir AdminProgram.bannerUrl. */
   bannerUrl?: string | null;
@@ -1150,6 +1162,17 @@ export interface SessionTemplate {
  * TypeScript : un résumé ne peut jamais servir là où le détail est requis.
  */
 export interface AdminProgramSummarySession {
+  /**
+   * L'identifiant de la séance.
+   *
+   * ⚠️ IL NE COÛTE RIEN, ET IL EST INDISPENSABLE. `loadProgramsSummary`
+   * sélectionnait déjà `id` dans sa requête `workout_sessions` et le jetait au
+   * mapping : l'exposer n'ajoute ni requête, ni colonne lue. Sans lui, la
+   * progression d'un élève ne pourrait pas être calculée depuis une liste de
+   * programmes — il faudrait recharger les programmes complets pour afficher
+   * « Sem. 3 / 8 », c'est-à-dire annuler le gain de la lecture légère.
+   */
+  id: string;
   weekNumber: number;
   isRestDay: boolean;
 }
@@ -1164,6 +1187,30 @@ export interface AdminProgramSummary {
   assignedStudentIds: string[];
   /** Uniquement de quoi calculer `totalSessions` et `totalWeeks`. */
   sessions: AdminProgramSummarySession[];
+  /**
+   * `studentId` → `assignments.program_start_date`, pour les élèves affectés
+   * DIRECTEMENT à ce programme.
+   *
+   * ⚠️ C'EST LA SEULE SOURCE DU « SEM. X / Y » DE LA CARTE ADMIN, et elle est
+   * volontairement incomplète : un élève rattaché à cette carte parce qu'il
+   * possède une COPIE n'y figure pas (voir `assignedViaCopyStudentIds`). Une
+   * entrée absente ne veut donc pas dire « pas de date » — elle veut dire « pas
+   * de calendrier calculable sur CETTE carte », et l'écran se tait.
+   *
+   * ⚠️ UNE ENTRÉE À `null` EST, ELLE, UNE VRAIE ABSENCE DE DATE. 12 des 19
+   * affectations de production sont dans ce cas. Elle ne doit JAMAIS être
+   * remplacée par `students.start_date` : la carte affiche « — / Y ».
+   *
+   * Optionnelle : les programmes de démonstration (mock) n'en portent pas.
+   */
+  debutParEleve?: ReadonlyMap<string, string | null>;
+  /**
+   * Élèves listés sur cette carte au seul titre de propriétaires d'une COPIE de
+   * ce programme — donc ceux dont les séances ne sont PAS celles lues ici.
+   * La carte les nomme sans avancement ; leur avancement vit sur la carte de
+   * leur copie. Voir `loadProgramsSummary`.
+   */
+  assignedViaCopyStudentIds?: readonly string[];
   bannerUrl?: string | null;
   programMode?: "individuel" | "groupe";
   groupStartDate?: string | null;

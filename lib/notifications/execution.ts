@@ -4,8 +4,8 @@ import { desactiverAbonnement } from "@/lib/push/depot-abonnements";
 import { envoyerNotifications } from "@/lib/push/envoyer";
 import {
   appareilsJoignables,
-  comptesVises,
   conclureEnvoi,
+  elevesVises,
   ouvrirEnvoi,
   ouvrirOccurrence,
   reserverOccurrence,
@@ -13,6 +13,7 @@ import {
   type Campagne,
   type StatutOccurrence,
 } from "@/lib/notifications/depot";
+import { elevesAAvertir } from "@/lib/notifications/rappels";
 
 /**
  * TRAITER UNE ÉCHÉANCE — LE MÊME CHEMIN POUR « MAINTENANT » ET POUR LE CRON.
@@ -66,12 +67,32 @@ export async function traiterEcheance(
   // Perdre la course n'est pas une erreur — quelqu'un d'autre s'en occupe.
   if (!(await reserverOccurrence(admin, occurrence.id))) return sansOccurrence("deja-reservee");
 
-  const comptes = await comptesVises(admin, campagne);
-  const appareils = await appareilsJoignables(admin, comptes);
+  const vises = await elevesVises(admin, campagne);
+  /*
+   * ⚠️ LE FILTRE EST ICI, PAS EN OPTION — ET C'EST DÉLIBÉRÉ.
+   *
+   * Une campagne de rappel automatique n'envoie qu'aux élèves dont la CONDITION
+   * du jour est remplie : séance prévue et non terminée, ou journée alimentaire
+   * incomplète. Rendre ce filtre optionnel (un paramètre que l'appelant passe)
+   * aurait fait qu'un appelant l'oubliant enverrait le rappel à TOUS les élèves
+   * abonnés, sans condition — exactement la panne que ce chantier existe pour
+   * éviter. Une campagne ordinaire (`rappelAuto === null`) n'est pas filtrée du
+   * tout : son comportement est celui d'avant, à la ligne près.
+   */
+  const retenus =
+    campagne.rappelAuto === null
+      ? vises
+      : await elevesAAvertir(admin, campagne.rappelAuto, vises, new Date(echeance));
+  const appareils = await appareilsJoignables(
+    admin,
+    retenus.map((e) => e.userId),
+  );
 
   if (appareils.length === 0) {
     // Personne de joignable est un FAIT, pas une panne : l'occurrence est
-    // close normalement, et l'historique dira « 0 appareil ».
+    // close normalement, et l'historique dira « 0 appareil ». Pour un rappel
+    // automatique, c'est même le cas le plus fréquent — aucun élève n'avait de
+    // séance à faire aujourd'hui, ou tous avaient déjà complété leur journée.
     await terminerOccurrence(admin, occurrence.id, "envoyee");
     return { occurrenceId: occurrence.id, raison: null, appareilsCibles: 0, envoyes: 0, echoues: 0, statut: "envoyee" };
   }

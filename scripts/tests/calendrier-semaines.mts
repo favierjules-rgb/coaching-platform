@@ -341,8 +341,26 @@ test("GARDES. les deux gardes REDONDANTES sont présentes, et assumées comme te
   // précision : les commentaires qui EXPLIQUENT ces gardes contiennent leur
   // texte. Sans dépouillement, retirer la garde laissait le test vert —
   // il gardait sa propre documentation.
+  /*
+   * ⚠️ LA GARDE A CHANGÉ DE FICHIER, PAS DE NATURE — ET ELLE A CESSÉ D'ÊTRE
+   * INATTEIGNABLE. Depuis l'extraction de `semaineDepuis`
+   * (lib/semaine-individuelle.ts, 27/09/2026), `daysSinceStart < 0` vit là-bas.
+   * Elle y est devenue UTILE en plus d'être intentionnelle :
+   * `etatSemaineIndividuelle` s'en sert pour distinguer « à venir » de
+   * « semaine 1 », deux états que la carte admin affiche différemment. Ce test
+   * garde donc sa présence à son nouvel endroit ; le comportement, lui, est
+   * gardé par le test À-VENIR ci-dessous et par CAL-AVANT ci-dessus.
+   */
+  const semaine = sansCommentaires(lireSource("../../lib/semaine-individuelle.ts"));
+  assert.match(semaine, /daysSinceStart < 0/, "garde d'intention retirée du code");
+  // Et `computeCurrentWeekNumber` ne doit PAS l'avoir recopiée : une seule
+  // formule, un seul endroit (voir SOURCE-UNIQUE dans semaine-individuelle.mts).
   const schedule = sansCommentaires(lireSource("../../lib/training-schedule.ts"));
-  assert.match(schedule, /daysSinceStart < 0/, "garde d'intention retirée du code");
+  assert.ok(
+    !/Math\.floor\([^)]*\/ 7\)/.test(schedule),
+    "la formule a été recopiée dans training-schedule : deux implémentations vont diverger",
+  );
+  assert.match(schedule, /semaineDepuis\(referenceDate, reference\)/, "la source unique n'est plus appelée");
   const admin = sansCommentaires(lireSource("../../lib/admin.ts"));
   assert.match(admin, /Math\.round\(\(fin - debut\) \/ 86_400_000\)/);
 });
