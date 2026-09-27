@@ -29,6 +29,7 @@ interface Reponse {
 interface Chaine {
   select: (colonnes?: string) => Chaine;
   insert: (valeurs: unknown) => Chaine;
+  upsert: (valeurs: unknown, options?: unknown) => Chaine;
   delete: () => Chaine;
   eq: (colonne: string, valeur: unknown) => Chaine;
   in: (colonne: string, valeurs: unknown[]) => Chaine;
@@ -126,11 +127,41 @@ export async function definirRappelEleve(
 
   const table = (client as ClientMinimal).from("notification_campaign_targets");
   if (actif) {
-    // La clé primaire est `(campaign_id, student_id)` : une seconde activation
-    // est refusée par la base, ce qui est le bon comportement — pas un doublon.
-    const reponse = await table.insert({ campaign_id: campaignId, student_id: studentId });
+    /*
+     * ⚠️ ACTIVER DEUX FOIS N'EST PAS UNE ERREUR — ET UN `insert` LE PRÉTENDAIT.
+     *
+     * La clé primaire est `(campaign_id, student_id)`. Un `insert` sur une ligne
+     * déjà présente rend `23505`, donc `false`, donc l'interface remettait
+     * l'interrupteur sur OFF et affichait « le réglage n'a pas pu être
+     * enregistré » — alors que le rappel était bel et bien ACTIF. Il suffisait
+     * d'un double-clic, d'un second onglet, ou d'un état local d'une seconde de
+     * retard. Le coach lisait OFF et croyait son élève sans rappel.
+     *
+     * ⚠️ `ignoreDuplicates` N'EST PAS UN DÉTAIL, C'EST CE QUI REND L'OPÉRATION
+     * COMPATIBLE AVEC SES PRIVILÈGES. PostgREST traduit cette forme en
+     * `insert … on conflict (campaign_id, student_id) do nothing` : aucune ligne
+     * n'est modifiée, donc `insert` suffit. La forme par défaut
+     * (`resolution=merge-duplicates`) ferait un `do update`, qui exigerait le
+     * privilège `update` que la migration 20260929090000 n'accorde
+     * délibérément PAS — il ne pourrait servir qu'à déplacer un réglage d'un
+     * élève vers un autre.
+     *
+     * ⚠️ `onConflict` ÉNUMÈRE DES COLONNES, PAS LE NOM DE LA CONTRAINTE.
+     * PostgREST le passe tel quel dans l'URL : `notification_campaign_targets_pkey`
+     * y serait refusé. Les deux colonnes sont exactement celles de la clé
+     * primaire déclarée par la migration 20260828090000 (ligne 126).
+     */
+    const reponse = await table.upsert(
+      { campaign_id: campaignId, student_id: studentId },
+      { onConflict: "campaign_id,student_id", ignoreDuplicates: true },
+    );
     return !reponse.error;
   }
+  /*
+   * OFF est inchangé : la ligne de CET élève et de CE genre, et rien d'autre.
+   * Couper le rappel de Bruno ne peut pas couper celui d'Alice, et un second
+   * OFF sur une ligne déjà absente ne supprime rien sans échouer.
+   */
   const reponse = await table.delete().eq("campaign_id", campaignId).eq("student_id", studentId);
   return !reponse.error;
 }

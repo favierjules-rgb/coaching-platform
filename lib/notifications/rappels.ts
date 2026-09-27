@@ -19,10 +19,14 @@ import type { Database } from "@/types/supabase";
  * retire de cette liste ceux pour qui la condition du jour n'est pas remplie —
  * et il ne fait que ça : il ne planifie rien, n'écrit rien, n'envoie rien.
  *
- * ⚠️ IL ÉCHOUE FERMÉ. Une lecture qui ne répond pas retire l'élève de la liste
- * au lieu de le garder : un rappel manquant est un désagrément, un rappel faux
- * (« ta séance t'attend » alors qu'elle est faite, ou qu'il n'y en a pas) est
- * la raison pour laquelle on coupe les notifications d'une application.
+ * ⚠️ IL ÉCHOUE FERMÉ, EXCEPTIONS COMPRISES. Une lecture qui ne répond pas
+ * retire l'élève de la liste au lieu de le garder : un rappel manquant est un
+ * désagrément, un rappel faux (« ta séance t'attend » alors qu'elle est faite,
+ * ou qu'il n'y en a pas) est la raison pour laquelle on coupe les notifications
+ * d'une application. Les lectures internes rendent `[]` sur erreur ; la seule
+ * qui LÈVE — `getAssignedProgramsForStudent` — est isolée PAR ÉLÈVE dans
+ * `doitRappelerEntrainement`, pour qu'un élève en défaut ne prive pas les
+ * autres de leur rappel.
  *
  * ⚠️ AUCUNE RÈGLE N'EST ÉCRITE ICI. Les deux conditions vivent dans
  * lib/rappels-automatiques.ts, pur et testé seul ; la semaine du programme
@@ -118,7 +122,47 @@ async function doitRappelerEntrainement(
   dateDeSuivi: string | null,
   maintenant: Date,
 ): Promise<boolean> {
-  const programmes = await getAssignedProgramsForStudent(admin as ClientType, eleve.studentId);
+  /*
+   * ⚠️ CETTE LECTURE-LÀ LÈVE, ET ELLE EST LA SEULE — D'OÙ UN `try` QUI NE
+   * COUVRE QU'ELLE.
+   *
+   * `getAssignedProgramsForStudent` passe par `loadPrograms`, qui LÈVE sur une
+   * lecture incomplète (« Programmes non rendus pour ne pas risquer un
+   * écrasement à l'enregistrement. ») — un refus délibéré, et parfaitement
+   * justifié là où il a été écrit : le builder ne doit jamais enregistrer un
+   * programme amputé.
+   *
+   * Mais ici l'appelant est le planificateur, et il n'écrit aucun programme.
+   * Sans ce `catch`, l'exception traversait `traiterEcheance` puis la route
+   * `app/api/cron/notifications/route.ts`, qui n'a aucun `try` : l'échéance
+   * venait d'être avancée à demain, l'occurrence restait `en_cours` puis
+   * devenait `interrompue` — état TERMINAL, sans réessai — et le rappel du jour
+   * était perdu POUR TOUS LES ÉLÈVES à cause d'un seul. La route rendait 500.
+   *
+   * ⚠️ CE `catch` N'ISOLE QU'UN ÉLÈVE, ET NE MASQUE RIEN D'AUTRE. Il n'entoure
+   * ni la boucle des campagnes, ni l'ouverture de l'occurrence, ni l'envoi :
+   * une panne du moteur de notifications reste une panne visible. Le reste de
+   * cette fonction ne lève pas — `seancesValidees` et les autres lectures
+   * rendent `[]` sur erreur, ce qui est déjà un échec fermé.
+   *
+   * ⚠️ ET L'ÉCHEC VAUT « PAS DE RAPPEL », JAMAIS « RAPPEL PAR DÉFAUT ». On ne
+   * sait pas si une séance est prévue, donc on se taît : un rappel manquant est
+   * un désagrément, un rappel faux fait couper les notifications.
+   */
+  let programmes;
+  try {
+    programmes = await getAssignedProgramsForStudent(admin as ClientType, eleve.studentId);
+  } catch (erreur) {
+    // La trace nomme l'élève concerné et le message, et rien de plus : c'est ce
+    // qu'il faut pour diagnostiquer, sans recopier un objet d'erreur entier.
+    console.error(
+      `[Rappels] entraînement — élève ${eleve.studentId} ignoré : ${
+        erreur instanceof Error ? erreur.message : String(erreur)
+      }`,
+    );
+    return false;
+  }
+
   const actifs = programmes.filter((p) => p.status === "actif");
   if (actifs.length === 0) return false;
 
