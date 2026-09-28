@@ -45,13 +45,48 @@ function devWarn(contexte: string, erreur: { message: string; code?: string } | 
  * PostgREST répond `PGRST204` avec « Could not find the 'scheduled_date' column
  * of 'workout_sessions' in the schema cache ». Remonter ce texte tel quel
  * laisserait le coach devant un code d'erreur.
+ *
+ * ⚠️ LA CONSÉQUENCE EST DITE PAR L'APPELANT, ET CE N'EST PAS DÉCORATIF. « Rien
+ * n'a été enregistré » ne renseigne pas quelqu'un qui vient de DÉPLACER une
+ * séance : il doit lire « Aucune séance n'a été déplacée ». Un message unique
+ * pour trois opérations différentes laisserait le coach deviner laquelle a
+ * échoué.
  */
-export function messageDeColonneAbsente(message: string): string {
-  if (/scheduled_date/.test(message) && /(could not find|does not exist|schema cache)/i.test(message)) {
-    return "La colonne `scheduled_date` n'existe pas encore en base : la migration 20260930100000 n'est pas appliquée. Aucune séance n'a été déplacée.";
+export function messageDeColonneAbsente(message: string, consequence = "Rien n'a été enregistré."): string {
+  const colonne = /Could not find the '([^']+)' column/i.exec(message)?.[1];
+  if (!colonne) return message;
+  const migration = COLONNES_EN_ATTENTE[colonne];
+  if (!migration) {
+    return `La colonne \`${colonne}\` n'existe pas en base. ${consequence}`;
   }
-  return message;
+  return `La colonne \`${colonne}\` n'existe pas encore en base : la migration ${migration} n'est pas appliquée. ${consequence}`;
 }
+
+/**
+ * Les colonnes que ce chantier ajoute, et la migration qui les pose.
+ *
+ * ⚠️ TANT QUE CES MIGRATIONS DORMENT, L'ÉCRAN DOIT LE DIRE EN FRANÇAIS. Remonter
+ * « Could not find the 'zone_settings' column … in the schema cache » laisse le
+ * coach devant un message PostgREST qui ne lui dit ni ce qui a échoué, ni quoi
+ * faire.
+ */
+const COLONNES_EN_ATTENTE: Readonly<Record<string, string>> = {
+  scheduled_date: "20260930100000",
+  sport: "20260930100000",
+  target_zone: "20260930100000",
+  target_power_percentage: "20260930100000",
+  zone_settings: "20260930090000",
+  physio_sources: "20260930090000",
+  physio_updated_at: "20260930090000",
+  birth_date: "20260930090000",
+  hr_threshold: "20260930090000",
+  vo2max: "20260930090000",
+  pma_watts: "20260930090000",
+  hr_max_run: "20260930090000",
+  hr_max_bike: "20260930090000",
+  hr_max_swim: "20260930090000",
+  vma_swim_kmh: "20260930090000",
+};
 
 export interface SeanceDuCalendrier {
   readonly id: string;
@@ -173,7 +208,7 @@ export async function deplacerSeance(
     .select("id");
   if (error) {
     devWarn("deplacerSeance", error);
-    return { ok: false, erreur: messageDeColonneAbsente(error.message) };
+    return { ok: false, erreur: messageDeColonneAbsente(error.message, "Aucune séance n'a été déplacée.") };
   }
   const lignes = (data as { id: string }[] | null) ?? [];
   if (lignes.length === 0) {
@@ -210,7 +245,7 @@ export async function supprimerSeance(
   return { ok: true, erreur: null };
 }
 
-export interface NouvelleSeanceCardio {
+export interface NouvelleSeanceCalendrier {
   readonly programId: string;
   readonly weekNumber: number;
   readonly day: string;
@@ -219,6 +254,14 @@ export interface NouvelleSeanceCardio {
   readonly coachNotes: string;
   /** Date réelle. `null` = la séance suit le calcul historique. */
   readonly scheduledDate: string | null;
+  /**
+   * Les blocs de la séance — musculation, cardio, ou les deux dans l'ordre voulu.
+   *
+   * ⚠️ LE CALENDRIER N'EST PAS UN OUTIL CARDIO. Une séance posée sur une date
+   * peut être de la musculation seule, du cardio seul, ou mixte : c'est le même
+   * modèle de données que le builder de programme, et le type de séance en est
+   * DÉRIVÉ (jamais saisi).
+   */
   readonly blocks: TrainingBlock[];
 }
 
@@ -234,9 +277,9 @@ export interface NouvelleSeanceCardio {
  * déposée sur une semaine que le programme ne contient pas ne peut pas être
  * créée. On le dit, on n'invente pas une semaine.
  */
-export async function creerSeanceCardio(
+export async function creerSeanceCalendrier(
   supabase: TypedSupabaseClient,
-  nouvelle: NouvelleSeanceCardio,
+  nouvelle: NouvelleSeanceCalendrier,
 ): Promise<{ ok: boolean; sessionId: string | null; erreur: string | null }> {
   const { data: semaine, error: erreurSemaine } = await supabase
     .from("program_weeks")
@@ -245,7 +288,7 @@ export async function creerSeanceCardio(
     .eq("week_number", nouvelle.weekNumber)
     .maybeSingle();
   if (erreurSemaine) {
-    devWarn("creerSeanceCardio (program_weeks)", erreurSemaine);
+    devWarn("creerSeanceCalendrier (program_weeks)", erreurSemaine);
     return { ok: false, sessionId: null, erreur: erreurSemaine.message };
   }
   const weekId = (semaine as { id: string } | null)?.id;
@@ -267,7 +310,13 @@ export async function creerSeanceCardio(
     duration_minutes: nouvelle.durationMinutes,
     warmup: "",
     coach_notes: nouvelle.coachNotes,
-    session_type: deriveSessionType(nouvelle.blocks) === "rest" ? "cardio" : deriveSessionType(nouvelle.blocks),
+    /*
+     * ⚠️ TYPE DÉRIVÉ DES BLOCS, avec un repli « strength » pour une séance
+     * encore vide — c'est la valeur que la colonne porte historiquement pour
+     * une séance sans bloc, et la RPC la recalculera dès le premier
+     * enregistrement.
+     */
+    session_type: deriveSessionType(nouvelle.blocks) === "rest" ? "strength" : deriveSessionType(nouvelle.blocks),
   };
   // La date n'est envoyée que si le coach en a posé une : ainsi la création
   // fonctionne AVANT la migration, tant qu'aucune date n'est demandée.
@@ -279,10 +328,20 @@ export async function creerSeanceCardio(
     .select("id, updated_at")
     .single();
   if (error || !creee) {
-    devWarn("creerSeanceCardio (insert)", error);
-    return { ok: false, sessionId: null, erreur: messageDeColonneAbsente(error?.message ?? "insertion refusée") };
+    devWarn("creerSeanceCalendrier (insert)", error);
+    return {
+      ok: false,
+      sessionId: null,
+      erreur: messageDeColonneAbsente(error?.message ?? "insertion refusée", "Aucune séance n'a été créée."),
+    };
   }
   const { id, updated_at } = creee as { id: string; updated_at: string };
+
+  if (nouvelle.blocks.length === 0) {
+    // Séance créée VIDE (musculation à remplir dans le builder) : aucun bloc à
+    // écrire, et appeler la RPC pour rien exposerait au verrou optimiste.
+    return { ok: true, sessionId: id, erreur: null };
+  }
 
   try {
     /*

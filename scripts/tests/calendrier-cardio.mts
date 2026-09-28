@@ -27,7 +27,7 @@ import {
   seanceSyntheticPourModele,
 } from "../../lib/bibliotheque-cardio";
 import {
-  creerSeanceCardio,
+  creerSeanceCalendrier,
   deplacerSeance,
   messageDeColonneAbsente,
   seancesDuCalendrier,
@@ -359,7 +359,7 @@ const NOUVELLE = {
 await test("CREER1. la séance est insérée dans SA semaine, puis ses blocs écrits par la RPC", async () => {
   const base = creerBase();
   base.table("program_weeks").push({ id: "semaine-3", program_id: "copie-jules", week_number: 3 });
-  const resultat = await creerSeanceCardio(base.client, NOUVELLE);
+  const resultat = await creerSeanceCalendrier(base.client, NOUVELLE);
   assert.equal(resultat.ok, true, String(resultat.erreur));
   const ligne = base.table("workout_sessions")[0];
   assert.equal(ligne.program_week_id, "semaine-3");
@@ -376,7 +376,7 @@ await test("CREER1. la séance est insérée dans SA semaine, puis ses blocs éc
 await test("CREER2. une semaine inexistante n'est PAS inventée", async () => {
   const base = creerBase();
   base.table("program_weeks").push({ id: "semaine-1", program_id: "copie-jules", week_number: 1 });
-  const resultat = await creerSeanceCardio(base.client, NOUVELLE);
+  const resultat = await creerSeanceCalendrier(base.client, NOUVELLE);
   assert.equal(resultat.ok, false);
   assert.match(String(resultat.erreur), /la semaine 3 n'existe pas/);
   assert.equal(base.table("workout_sessions").length, 0, "aucune séance orpheline");
@@ -386,7 +386,7 @@ await test("CREER2. une semaine inexistante n'est PAS inventée", async () => {
 await test("CREER3. la semaine visée est celle DU PROGRAMME DE L'ÉLÈVE, pas un homonyme", async () => {
   const base = creerBase();
   base.table("program_weeks").push({ id: "semaine-3-marco", program_id: "copie-marco", week_number: 3 });
-  const resultat = await creerSeanceCardio(base.client, NOUVELLE);
+  const resultat = await creerSeanceCalendrier(base.client, NOUVELLE);
   assert.equal(resultat.ok, false, "la semaine 3 d'un AUTRE programme ne doit pas servir");
   assert.equal(base.table("workout_sessions").length, 0);
 });
@@ -394,7 +394,7 @@ await test("CREER3. la semaine visée est celle DU PROGRAMME DE L'ÉLÈVE, pas u
 await test("CREER4. sans date demandée, la clé `scheduled_date` n'est PAS envoyée", async () => {
   const base = creerBase(COLONNES_AVANT_MIGRATION);
   base.table("program_weeks").push({ id: "semaine-3", program_id: "copie-jules", week_number: 3 });
-  const resultat = await creerSeanceCardio(base.client, { ...NOUVELLE, scheduledDate: null });
+  const resultat = await creerSeanceCalendrier(base.client, { ...NOUVELLE, scheduledDate: null });
   assert.equal(resultat.ok, true, `la création doit fonctionner AVANT la migration : ${String(resultat.erreur)}`);
   const insertion = base.ordres.find((o) => o.table === "workout_sessions" && o.op === "insert");
   assert.ok(insertion && !("scheduled_date" in insertion.valeurs));
@@ -403,7 +403,7 @@ await test("CREER4. sans date demandée, la clé `scheduled_date` n'est PAS envo
 await test("CREER5. AVANT la migration, une date demandée fait échouer la création — et le dit", async () => {
   const base = creerBase(COLONNES_AVANT_MIGRATION);
   base.table("program_weeks").push({ id: "semaine-3", program_id: "copie-jules", week_number: 3 });
-  const resultat = await creerSeanceCardio(base.client, NOUVELLE);
+  const resultat = await creerSeanceCalendrier(base.client, NOUVELLE);
   assert.equal(resultat.ok, false);
   assert.match(String(resultat.erreur), /migration 20260930100000/);
 });

@@ -1,12 +1,14 @@
 "use client";
 
 import { useRef, useState, type DragEvent } from "react";
-import { ArrowDown, ArrowUp, GripVertical, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, ChevronUp, Copy, GripVertical, Plus, Trash2 } from "lucide-react";
 
 import { Field, SelectField } from "@/components/admin/AdminFormFields";
+import { generateId } from "@/lib/admin";
 import { ColorKeyPicker } from "@/components/ui/ColorKeyPicker";
 import type { ColorKey } from "@/lib/ui/color-keys";
 import { cibleDuSegment } from "@/lib/cardio-zones";
+import { formatMinutesSecondes, secondesDepuisMinutesSecondes } from "@/lib/physiologie";
 import { ZONES, type ReferencesAthlete, type ReglagesZones } from "@/lib/zones-physiologiques";
 import {
   blankCardioSegment,
@@ -65,41 +67,268 @@ const OPTIONS_SPORT: readonly { readonly value: string; readonly label: string }
  * d'autre ne change côté musculation.
  */
 
-/**
- * La consigne d'un segment, traduite pour UN athlète.
+/* ════════════════════════════════════════════════════════════════════════
+ * LA LIGNE DE SEGMENT — COMPACTE PAR DÉFAUT, COMPLÈTE AU BESOIN
+ * ════════════════════════════════════════════════════════════════════════
  *
- * ⚠️ IL NE CALCULE RIEN LUI-MÊME. Tout vient de `cibleDuSegment`
- * (lib/cardio-zones.ts), donc des mêmes fonctions que l'écran de l'athlète :
- * ce que le coach voit en construisant est EXACTEMENT ce que l'athlète lira.
+ * ⚠️ AUCUN CHAMP N'A ÉTÉ SUPPRIMÉ POUR GAGNER DE LA PLACE. Le formulaire
+ * précédent affichait en permanence quatorze champs sur quatre rangées, ce qui
+ * rendait une séance de six segments illisible. Ce qui change est la HIÉRARCHIE,
+ * pas le contenu : la ligne montre ce qu'on lit en construisant (type, durée ou
+ * distance, intensité, et ce que ça donne pour l'athlète) ; tout le reste —
+ * titre, récupération, dénivelé, inclinaison, cadence, notes — vit dans le
+ * dépliant, à un clic. Supprimer une donnée pour simplifier l'écran ferait
+ * perdre des prescriptions déjà saisies.
  */
-function CibleResolueApercu({
+
+/** Champ de saisie minuscule — pas de label au-dessus, la ligne le porte. */
+function ChampCompact({
+  valeur,
+  onChange,
+  placeholder,
+  largeur = "w-20",
+  aria,
+  type = "text",
+  pas,
+  invalide = false,
+}: {
+  readonly valeur: string;
+  readonly onChange: (valeur: string) => void;
+  readonly placeholder?: string;
+  readonly largeur?: string;
+  readonly aria: string;
+  readonly type?: string;
+  readonly pas?: string;
+  readonly invalide?: boolean;
+}) {
+  return (
+    <input
+      aria-label={aria}
+      type={type}
+      step={pas}
+      value={valeur}
+      placeholder={placeholder}
+      onChange={(event) => onChange(event.target.value)}
+      className={`h-9 ${largeur} rounded-control border bg-background px-2 text-xs tabular-nums text-foreground placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none ${
+        invalide ? "border-red-500/70" : "border-border"
+      }`}
+    />
+  );
+}
+
+/** Sélecteur minuscule — même gabarit que `ChampCompact`. */
+function SelectCompact({
+  valeur,
+  onChange,
+  options,
+  aria,
+  largeur = "w-36",
+}: {
+  readonly valeur: string;
+  readonly onChange: (valeur: string) => void;
+  readonly options: readonly { readonly value: string; readonly label: string }[];
+  readonly aria: string;
+  readonly largeur?: string;
+}) {
+  return (
+    <select
+      aria-label={aria}
+      value={valeur}
+      onChange={(event) => onChange(event.target.value)}
+      className={`h-9 ${largeur} rounded-control border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none`}
+    >
+      {options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/**
+ * Le contrôle de valeur qui accompagne le type d'intensité.
+ *
+ * ⚠️ UN SEUL CONTRÔLE À LA FOIS, ET C'EST CE QUI TIENT SUR UNE LIGNE. Chaque
+ * type d'intensité a sa donnée propre : la zone va dans `targetZone`, le RPE
+ * dans `intensityMin`, le pourcentage de puissance dans
+ * `targetPowerPercentage`… Afficher les huit en permanence était le principal
+ * coût de hauteur de l'ancien formulaire.
+ */
+function ValeurIntensite({
   segment,
-  sport,
-  references,
-  reglagesZones,
+  onChange,
 }: {
   readonly segment: AdminCardioSegment;
-  readonly sport?: SportCardio;
-  readonly references: ReferencesAthlete;
-  readonly reglagesZones?: ReglagesZones;
+  readonly onChange: (partial: Partial<AdminCardioSegment>) => void;
 }) {
-  const cible = cibleDuSegment(segment, sport, references, reglagesZones);
-  if (segment.intensityTargetType === "free") return null;
+  const nombre = (valeur: string) => (valeur.trim() === "" ? undefined : Number(valeur.replace(",", ".")));
+
+  switch (segment.intensityTargetType) {
+    case "zone":
+      return (
+        <SelectCompact
+          aria="Zone d'intensité"
+          largeur="w-24"
+          valeur={segment.targetZone !== undefined ? String(segment.targetZone) : ""}
+          onChange={(v) => onChange({ targetZone: v ? Number(v) : undefined })}
+          options={[{ value: "", label: "— zone —" }, ...ZONES.map((zone) => ({ value: String(zone), label: `Z${zone}` }))]}
+        />
+      );
+    case "vma_percentage":
+      return (
+        <ChampCompact
+          aria="Pourcentage de VMA"
+          largeur="w-20"
+          placeholder="% VMA"
+          valeur={segment.targetVmaPercentage !== undefined ? String(segment.targetVmaPercentage) : ""}
+          onChange={(v) => onChange({ targetVmaPercentage: nombre(v) })}
+        />
+      );
+    case "ftp_percentage":
+    case "pma_percentage":
+      return (
+        <ChampCompact
+          aria={segment.intensityTargetType === "ftp_percentage" ? "Pourcentage de FTP" : "Pourcentage de PMA"}
+          largeur="w-20"
+          placeholder={segment.intensityTargetType === "ftp_percentage" ? "% FTP" : "% PMA"}
+          valeur={segment.targetPowerPercentage !== undefined ? String(segment.targetPowerPercentage) : ""}
+          onChange={(v) => onChange({ targetPowerPercentage: nombre(v) })}
+        />
+      );
+    case "heart_rate_percentage":
+      return (
+        <ChampCompact
+          aria="Pourcentage de FC max"
+          largeur="w-20"
+          placeholder="% FCmax"
+          valeur={segment.targetHrPercentage !== undefined ? String(segment.targetHrPercentage) : ""}
+          onChange={(v) => onChange({ targetHrPercentage: nombre(v) })}
+        />
+      );
+    case "heart_rate_zone":
+      return (
+        <ChampCompact
+          aria="Zone de fréquence cardiaque"
+          largeur="w-24"
+          placeholder="Zone 2"
+          valeur={segment.targetHrZone ?? ""}
+          onChange={(v) => onChange({ targetHrZone: v || undefined })}
+        />
+      );
+    case "speed_kmh":
+      return (
+        <ChampCompact
+          aria="Vitesse cible en km/h"
+          largeur="w-20"
+          placeholder="km/h"
+          pas="0.1"
+          valeur={segment.targetSpeedKmh !== undefined ? String(segment.targetSpeedKmh) : ""}
+          onChange={(v) => onChange({ targetSpeedKmh: nombre(v) })}
+        />
+      );
+    case "pace":
+      return (
+        <ChampAllure
+          secondes={segment.targetPaceSecondsPerKm}
+          onChange={(secondes) => onChange({ targetPaceSecondsPerKm: secondes })}
+        />
+      );
+    case "power":
+      return (
+        <ChampCompact
+          aria="Puissance cible en watts"
+          largeur="w-20"
+          placeholder="W"
+          valeur={segment.targetPowerWatts !== undefined ? String(segment.targetPowerWatts) : ""}
+          onChange={(v) => onChange({ targetPowerWatts: nombre(v) })}
+        />
+      );
+    case "rpe":
+      return (
+        <ChampCompact
+          /*
+           * ⚠️ LE RPE CARDIO VIT DANS `intensityMin`, décision du 28/09/2026.
+           * `target_rpe` existe en base mais n'est ni écrite ni lue par
+           * l'application : y basculer ici créerait une seconde convention et
+           * rendrait illisibles les prescriptions déjà posées.
+           */
+          aria="RPE cible"
+          largeur="w-20"
+          placeholder="RPE"
+          pas="0.5"
+          valeur={segment.intensityMin !== undefined ? String(segment.intensityMin) : ""}
+          onChange={(v) => onChange({ intensityMin: nombre(v) })}
+        />
+      );
+    default:
+      return null;
+  }
+}
+
+/** Allure saisie en mm:ss, stockée en secondes par km. */
+function ChampAllure({
+  secondes,
+  onChange,
+}: {
+  readonly secondes?: number;
+  readonly onChange: (secondes: number | undefined) => void;
+}) {
+  const [texte, setTexte] = useState(() => (secondes === undefined ? "" : formatMinutesSecondes(secondes)));
+  const lu = secondesDepuisMinutesSecondes(texte);
   return (
-    <p className="mt-2 text-xs text-muted-foreground">
-      <span className="text-foreground">{cible.consigne}</span>
-      {cible.valeurs.length > 0 ? ` — ${cible.valeurs.join(" · ")}` : ""}
-      {cible.sportManquant && (
-        <span className="ml-1 text-amber-300">
-          — sport du bloc non renseigné : aucune conversion n&apos;est faite.
-        </span>
-      )}
-      {cible.referenceManquante && !cible.sportManquant && (
-        <span className="ml-1 text-amber-300">
-          — référence physiologique absente chez cet athlète : rien n&apos;est déduit.
-        </span>
-      )}
-    </p>
+    <ChampCompact
+      aria="Allure cible (mm:ss par km)"
+      largeur="w-20"
+      placeholder="5:00"
+      valeur={texte}
+      invalide={texte.trim() !== "" && lu === null}
+      onChange={(valeur) => {
+        setTexte(valeur);
+        if (valeur.trim() === "") onChange(undefined);
+        else {
+          const parse = secondesDepuisMinutesSecondes(valeur);
+          if (parse !== null) onChange(parse);
+        }
+      }}
+    />
+  );
+}
+
+/**
+ * Durée saisie en `mm:ss` (ou en secondes si on tape un nombre nu).
+ *
+ * ⚠️ « 600 » RESTE 600 SECONDES. Le parseur accepte les deux écritures : une
+ * prescription déjà saisie en secondes ne change pas de sens parce que l'écran
+ * l'affiche désormais « 10:00 ».
+ */
+function ChampDuree({
+  secondes,
+  onChange,
+  aria,
+}: {
+  readonly secondes?: number;
+  readonly onChange: (secondes: number | undefined) => void;
+  readonly aria: string;
+}) {
+  const [texte, setTexte] = useState(() => (secondes === undefined ? "" : formatMinutesSecondes(secondes)));
+  const lu = secondesDepuisMinutesSecondes(texte);
+  return (
+    <ChampCompact
+      aria={aria}
+      largeur="w-20"
+      placeholder="mm:ss"
+      valeur={texte}
+      invalide={texte.trim() !== "" && lu === null}
+      onChange={(valeur) => {
+        setTexte(valeur);
+        if (valeur.trim() === "") onChange(undefined);
+        else {
+          const parse = secondesDepuisMinutesSecondes(valeur);
+          if (parse !== null) onChange(parse);
+        }
+      }}
+    />
   );
 }
 
@@ -112,6 +341,7 @@ export function CardioSegmentRow({
   onChange,
   onRemove,
   onMove,
+  onDuplicate,
   isFirst,
   isLast,
   onDragStart,
@@ -126,16 +356,17 @@ export function CardioSegmentRow({
   sport?: SportCardio;
   /**
    * Références physiologiques de L'ATHLÈTE, quand le bloc est édité pour un
-   * athlète précis (builder cardio, calendrier). Absentes dans le builder de
-   * programme MODÈLE : il n'y a alors pas d'athlète, donc rien à convertir, et
-   * inventer une VMA « moyenne » afficherait des allures qui n'appartiennent à
-   * personne.
+   * athlète précis (calendrier). Absentes dans le builder de programme MODÈLE :
+   * il n'y a alors pas d'athlète, donc rien à convertir, et inventer une VMA
+   * « moyenne » afficherait des allures qui n'appartiennent à personne.
    */
   references?: ReferencesAthlete;
   reglagesZones?: ReglagesZones;
   onChange: (partial: Partial<AdminCardioSegment>) => void;
   onRemove: () => void;
   onMove: (direction: "up" | "down") => void;
+  /** Duplique le segment juste après celui-ci. */
+  onDuplicate?: () => void;
   isFirst: boolean;
   isLast: boolean;
   onDragStart: () => void;
@@ -145,39 +376,141 @@ export function CardioSegmentRow({
   onDragEnd?: () => void;
   isDropTarget?: boolean;
 }) {
+  const [deplie, setDeplie] = useState(false);
   const isRepeat = segment.segmentType === "repeat_group";
   const preview = segmentIntensityPreview(segment, referenceVmaKmh);
   const showPreview =
     segment.intensityTargetType === "vma_percentage" ||
     segment.intensityTargetType === "speed_kmh" ||
     segment.intensityTargetType === "pace";
+  const cible = references ? cibleDuSegment(segment, sport, references, reglagesZones) : null;
+
+  /**
+   * ⚠️ LE DÉPLIANT S'OUVRE TOUT SEUL QUAND IL PORTE UNE DONNÉE. Un champ rempli
+   * mais caché derrière un chevron fermé est une prescription qu'on croit avoir
+   * perdue — et qu'on ressaisit.
+   */
+  const detailRenseigne =
+    Boolean(segment.title) ||
+    segment.recoveryDurationSeconds !== undefined ||
+    segment.recoveryDistanceMeters !== undefined ||
+    segment.elevationGainMeters !== undefined ||
+    segment.inclinePercentage !== undefined ||
+    segment.targetCadence !== undefined ||
+    Boolean(segment.coachNotes);
+  const detailOuvert = deplie || detailRenseigne;
 
   return (
     <div
-      className={`border bg-background/30 p-3 transition-colors ${isDropTarget ? "border-dashed border-primary/70" : "border-border/60"}`}
+      className={`rounded-panel border bg-background/30 transition-colors ${
+        isDropTarget ? "border-dashed border-primary/70" : "border-border/60"
+      }`}
       onDragOver={onDragOver}
       onDrop={onDrop}
       onDragEnd={onDragEnd}
     >
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <span className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
-          <span
-            draggable
-            onDragStart={onDragStart}
-            title="Glisser pour réordonner"
-            className="cursor-grab text-muted-foreground hover:text-foreground"
-          >
-            <GripVertical size={12} />
-          </span>
-          Segment #{segment.order}
+      {/* ── LA LIGNE ────────────────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-2 px-2 py-2">
+        <span
+          draggable
+          onDragStart={onDragStart}
+          title="Glisser pour réordonner"
+          className="cursor-grab px-0.5 text-muted-foreground hover:text-foreground"
+        >
+          <GripVertical size={13} />
         </span>
-        <div className="flex items-center gap-2">
+
+        <SelectCompact
+          aria="Type de segment"
+          largeur="w-32"
+          valeur={segment.segmentType}
+          onChange={(v) => onChange({ segmentType: v as CardioSegmentType })}
+          options={Object.entries(cardioSegmentTypeLabels).map(([value, label]) => ({ value, label }))}
+        />
+
+        {isRepeat && (
+          <span className="flex items-center gap-1 text-xs text-muted-foreground">
+            ×
+            <ChampCompact
+              aria="Nombre de répétitions"
+              largeur="w-12"
+              placeholder="4"
+              valeur={segment.repetitions !== undefined ? String(segment.repetitions) : ""}
+              onChange={(v) => onChange({ repetitions: v ? Number(v) : undefined })}
+            />
+          </span>
+        )}
+
+        <ChampDuree
+          aria={isRepeat ? "Durée de l'effort" : "Durée du segment"}
+          secondes={segment.durationSeconds}
+          onChange={(secondes) => onChange({ durationSeconds: secondes })}
+        />
+        <ChampCompact
+          aria={isRepeat ? "Distance de l'effort en mètres" : "Distance du segment en mètres"}
+          largeur="w-20"
+          placeholder="m"
+          valeur={segment.distanceMeters !== undefined ? String(segment.distanceMeters) : ""}
+          onChange={(v) => onChange({ distanceMeters: v ? Number(v) : undefined })}
+        />
+
+        <span className="mx-1 h-5 w-px bg-border" aria-hidden="true" />
+
+        <SelectCompact
+          aria="Type d'intensité ciblée"
+          largeur="w-32"
+          valeur={segment.intensityTargetType}
+          onChange={(v) => onChange({ intensityTargetType: v as IntensityTargetType })}
+          options={Object.entries(intensityTargetTypeLabels).map(([value, label]) => ({ value, label }))}
+        />
+        <ValeurIntensite segment={segment} onChange={onChange} />
+
+        {/* Ce que ça donne pour l'athlète — la colonne de droite d'iDO. */}
+        <span className="min-w-0 flex-1 truncate text-[11px] italic text-muted-foreground">
+          {cible ? (
+            <>
+              {cible.valeurs.length > 0 ? cible.valeurs.join(" · ") : null}
+              {cible.sportManquant && <span className="text-amber-300">sport du bloc non renseigné</span>}
+              {cible.referenceManquante && !cible.sportManquant && (
+                <span className="text-amber-300">référence indisponible</span>
+              )}
+            </>
+          ) : showPreview ? (
+            <>
+              VMA réf. {referenceVmaKmh} km/h : {formatSpeed(preview.speedKmh)}
+              {preview.paceLabel ? ` — ${preview.paceLabel}` : ""}
+            </>
+          ) : null}
+        </span>
+
+        <div className="flex items-center gap-0.5">
+          <button
+            type="button"
+            onClick={() => setDeplie((precedent) => !precedent)}
+            aria-label={detailOuvert ? "Masquer les détails du segment" : "Afficher les détails du segment"}
+            aria-expanded={detailOuvert}
+            className={`inline-flex h-9 w-9 items-center justify-center rounded-md hover:text-foreground ${
+              detailRenseigne ? "text-primary" : "text-muted-foreground"
+            }`}
+          >
+            {detailOuvert ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
+          {onDuplicate && (
+            <button
+              type="button"
+              onClick={onDuplicate}
+              aria-label="Dupliquer le segment"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
+            >
+              <Copy size={13} />
+            </button>
+          )}
           <button
             type="button"
             onClick={() => onMove("up")}
             disabled={isFirst}
             aria-label="Déplacer le segment vers le haut"
-            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-30"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:text-foreground disabled:opacity-30"
           >
             <ArrowUp size={13} />
           </button>
@@ -186,198 +519,89 @@ export function CardioSegmentRow({
             onClick={() => onMove("down")}
             disabled={isLast}
             aria-label="Déplacer le segment vers le bas"
-            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-30"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:text-foreground disabled:opacity-30"
           >
             <ArrowDown size={13} />
           </button>
-          <button type="button" onClick={onRemove} aria-label="Supprimer le segment" className="text-red-400 hover:text-red-300">
+          <button
+            type="button"
+            onClick={onRemove}
+            aria-label="Supprimer le segment"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-red-400 hover:text-red-300"
+          >
             <Trash2 size={13} />
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Field label="Titre (optionnel)" value={segment.title} onChange={(v) => onChange({ title: v })} placeholder="Ex : Corps de séance" />
-        <SelectField
-          label="Type"
-          value={segment.segmentType}
-          onChange={(v) => onChange({ segmentType: v as CardioSegmentType })}
-          options={Object.entries(cardioSegmentTypeLabels).map(([value, label]) => ({ value, label }))}
-        />
-
-        {isRepeat && (
-          <Field
-            label="Répétitions"
-            type="number"
-            value={String(segment.repetitions ?? 1)}
-            onChange={(v) => onChange({ repetitions: Number(v) || 1 })}
-          />
-        )}
-
-        <Field
-          label={isRepeat ? "Durée effort (s)" : "Durée (s)"}
-          type="number"
-          value={segment.durationSeconds !== undefined ? String(segment.durationSeconds) : ""}
-          onChange={(v) => onChange({ durationSeconds: v ? Number(v) : undefined })}
-        />
-        <Field
-          label={isRepeat ? "Distance effort (m)" : "Distance (m)"}
-          type="number"
-          value={segment.distanceMeters !== undefined ? String(segment.distanceMeters) : ""}
-          onChange={(v) => onChange({ distanceMeters: v ? Number(v) : undefined })}
-        />
-
-        {isRepeat && (
-          <>
+      {/* ── LE DÉPLIANT : tout ce que la ligne ne montre pas ─────────────── */}
+      {detailOuvert && (
+        <div className="border-t border-border/60 px-2 pb-3 pt-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Field
-              label="Durée récup (s)"
+              label="Titre (optionnel)"
+              value={segment.title}
+              onChange={(v) => onChange({ title: v })}
+              placeholder="Ex : Corps de séance"
+            />
+            {isRepeat && (
+              <>
+                <Field
+                  label="Durée récup (s)"
+                  type="number"
+                  value={segment.recoveryDurationSeconds !== undefined ? String(segment.recoveryDurationSeconds) : ""}
+                  onChange={(v) => onChange({ recoveryDurationSeconds: v ? Number(v) : undefined })}
+                />
+                <Field
+                  label="Distance récup (m)"
+                  type="number"
+                  value={segment.recoveryDistanceMeters !== undefined ? String(segment.recoveryDistanceMeters) : ""}
+                  onChange={(v) => onChange({ recoveryDistanceMeters: v ? Number(v) : undefined })}
+                />
+              </>
+            )}
+            <Field
+              label="Dénivelé + (m)"
               type="number"
-              value={segment.recoveryDurationSeconds !== undefined ? String(segment.recoveryDurationSeconds) : ""}
-              onChange={(v) => onChange({ recoveryDurationSeconds: v ? Number(v) : undefined })}
+              value={segment.elevationGainMeters !== undefined ? String(segment.elevationGainMeters) : ""}
+              onChange={(v) => onChange({ elevationGainMeters: v ? Number(v) : undefined })}
             />
             <Field
-              label="Distance récup (m)"
+              label="Inclinaison (%)"
               type="number"
-              value={segment.recoveryDistanceMeters !== undefined ? String(segment.recoveryDistanceMeters) : ""}
-              onChange={(v) => onChange({ recoveryDistanceMeters: v ? Number(v) : undefined })}
+              value={segment.inclinePercentage !== undefined ? String(segment.inclinePercentage) : ""}
+              onChange={(v) => onChange({ inclinePercentage: v ? Number(v) : undefined })}
             />
-          </>
-        )}
-
-        <Field
-          label="Dénivelé + (m)"
-          type="number"
-          value={segment.elevationGainMeters !== undefined ? String(segment.elevationGainMeters) : ""}
-          onChange={(v) => onChange({ elevationGainMeters: v ? Number(v) : undefined })}
-        />
-        <Field
-          label="Inclinaison (%)"
-          type="number"
-          value={segment.inclinePercentage !== undefined ? String(segment.inclinePercentage) : ""}
-          onChange={(v) => onChange({ inclinePercentage: v ? Number(v) : undefined })}
-        />
-      </div>
-
-      <div className="mt-3 border-t border-border/60 pt-3">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <SelectField
-            label="Intensité ciblée"
-            value={segment.intensityTargetType}
-            onChange={(v) => onChange({ intensityTargetType: v as IntensityTargetType })}
-            options={Object.entries(intensityTargetTypeLabels).map(([value, label]) => ({ value, label }))}
-          />
-
-          {segment.intensityTargetType === "vma_percentage" && (
             <Field
-              label="% VMA"
+              label="Cadence cible (spm)"
               type="number"
-              value={segment.targetVmaPercentage !== undefined ? String(segment.targetVmaPercentage) : ""}
-              onChange={(v) => onChange({ targetVmaPercentage: v ? Number(v) : undefined })}
+              value={segment.targetCadence !== undefined ? String(segment.targetCadence) : ""}
+              onChange={(v) => onChange({ targetCadence: v ? Number(v) : undefined })}
             />
-          )}
-          {segment.intensityTargetType === "speed_kmh" && (
             <Field
-              label="Vitesse (km/h)"
-              type="number"
-              step="0.1"
-              value={segment.targetSpeedKmh !== undefined ? String(segment.targetSpeedKmh) : ""}
-              onChange={(v) => onChange({ targetSpeedKmh: v ? Number(v) : undefined })}
+              label="Notes"
+              value={segment.coachNotes ?? ""}
+              onChange={(v) => onChange({ coachNotes: v || undefined })}
             />
-          )}
-          {segment.intensityTargetType === "pace" && (
-            <Field
-              label="Allure (s/km)"
-              type="number"
-              value={segment.targetPaceSecondsPerKm !== undefined ? String(segment.targetPaceSecondsPerKm) : ""}
-              onChange={(v) => onChange({ targetPaceSecondsPerKm: v ? Number(v) : undefined })}
-            />
-          )}
-          {segment.intensityTargetType === "heart_rate_percentage" && (
-            <Field
-              label="% FC max"
-              type="number"
-              value={segment.targetHrPercentage !== undefined ? String(segment.targetHrPercentage) : ""}
-              onChange={(v) => onChange({ targetHrPercentage: v ? Number(v) : undefined })}
-            />
-          )}
-          {segment.intensityTargetType === "heart_rate_zone" && (
-            <Field label="Zone FC (ex : Z2)" value={segment.targetHrZone ?? ""} onChange={(v) => onChange({ targetHrZone: v || undefined })} />
-          )}
-          {segment.intensityTargetType === "power" && (
-            <Field
-              label="Puissance (W)"
-              type="number"
-              value={segment.targetPowerWatts !== undefined ? String(segment.targetPowerWatts) : ""}
-              onChange={(v) => onChange({ targetPowerWatts: v ? Number(v) : undefined })}
-            />
-          )}
-          {segment.intensityTargetType === "rpe" && (
-            <Field
-              // Borne 0-10 CONSERVÉE : celle de
-              // training_prescriptions_target_rpe_check, où 0 veut dire « au
-              // repos » pour un segment cardio. Seul le pas change.
-              label="RPE (0-10, pas de 0,5)"
-              type="number"
-              step="0.5"
-              value={segment.intensityMin !== undefined ? String(segment.intensityMin) : ""}
-              onChange={(v) => onChange({ intensityMin: v ? Number(v) : undefined })}
-            />
-          )}
-          {segment.intensityTargetType === "zone" && (
-            <SelectField
-              label="Zone"
-              value={segment.targetZone !== undefined ? String(segment.targetZone) : ""}
-              onChange={(v) => onChange({ targetZone: v ? Number(v) : undefined })}
-              options={[
-                { value: "", label: "— choisir —" },
-                ...ZONES.map((zone) => ({ value: String(zone), label: `Z${zone}` })),
-              ]}
-            />
-          )}
-          {(segment.intensityTargetType === "ftp_percentage" || segment.intensityTargetType === "pma_percentage") && (
-            <Field
-              label={segment.intensityTargetType === "ftp_percentage" ? "% FTP" : "% PMA"}
-              type="number"
-              value={segment.targetPowerPercentage !== undefined ? String(segment.targetPowerPercentage) : ""}
-              onChange={(v) => onChange({ targetPowerPercentage: v ? Number(v) : undefined })}
-            />
+          </div>
+          {cible && (
+            <p className="mt-3 text-[11px] text-muted-foreground">
+              <span className="text-foreground">{cible.consigne}</span>
+              {cible.valeurs.length > 0 ? ` — ${cible.valeurs.join(" · ")}` : ""}
+              {cible.sportManquant && (
+                <span className="ml-1 text-amber-300">
+                  — sport du bloc non renseigné : aucune conversion n&apos;est faite.
+                </span>
+              )}
+              {cible.referenceManquante && !cible.sportManquant && (
+                <span className="ml-1 text-amber-300">
+                  — référence physiologique indisponible chez cet athlète : rien n&apos;est déduit.
+                </span>
+              )}
+            </p>
           )}
         </div>
-
-        {/*
-          ⚠️ DEUX APERÇUS, ET ILS NE DISENT PAS LA MÊME CHOSE.
-          · Avec les références d'un ATHLÈTE (builder cardio, calendrier), la
-            consigne est traduite en valeurs qui lui appartiennent — et l'absence
-            de sport ou de référence est DITE, jamais comblée.
-          · Sans athlète (builder de programme MODÈLE), l'aperçu historique reste
-            affiché tel quel, avec sa VMA de référence explicitement nommée.
-        */}
-        {references ? (
-          <CibleResolueApercu
-            segment={segment}
-            sport={sport}
-            references={references}
-            reglagesZones={reglagesZones}
-          />
-        ) : (
-          showPreview && (
-            <p className="mt-2 text-xs text-muted-foreground">
-              Aperçu (VMA réf. {referenceVmaKmh} km/h) : {formatSpeed(preview.speedKmh)}
-              {preview.paceLabel ? ` — ${preview.paceLabel}` : ""}
-            </p>
-          )
-        )}
-      </div>
-
-      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Field
-          label="Cadence cible (spm, optionnel)"
-          type="number"
-          value={segment.targetCadence !== undefined ? String(segment.targetCadence) : ""}
-          onChange={(v) => onChange({ targetCadence: v ? Number(v) : undefined })}
-        />
-        <Field label="Notes" value={segment.coachNotes ?? ""} onChange={(v) => onChange({ coachNotes: v || undefined })} />
-      </div>
+      )}
     </div>
   );
 }
@@ -425,6 +649,19 @@ export function CardioBlockRow({
   function updateSegment(index: number, partial: Partial<AdminCardioSegment>) {
     const segments = block.segments.map((s, i) => (i === index ? { ...s, ...partial } : s));
     onChange({ ...block, segments });
+  }
+
+  function duplicateSegment(index: number) {
+    /*
+     * ⚠️ UN NOUVEL IDENTIFIANT, SINON CE N'EST PAS UNE COPIE. Deux segments
+     * partageant un id se confondraient à la sauvegarde comme au rendu (clé
+     * React), et le second écraserait le premier.
+     */
+    const source = block.segments[index];
+    const copie = { ...source, id: generateId("seg") };
+    const segments = [...block.segments];
+    segments.splice(index + 1, 0, copie);
+    onChange({ ...block, segments: segments.map((s, i) => ({ ...s, order: i + 1 })) });
   }
 
   function removeSegment(index: number) {
@@ -548,6 +785,7 @@ export function CardioBlockRow({
             onChange={(partial) => updateSegment(i, partial)}
             onRemove={() => removeSegment(i)}
             onMove={(dir) => moveSegment(i, dir)}
+            onDuplicate={() => duplicateSegment(i)}
             isFirst={i === 0}
             isLast={i === block.segments.length - 1}
             isDropTarget={dragOverSegmentIndex === i}

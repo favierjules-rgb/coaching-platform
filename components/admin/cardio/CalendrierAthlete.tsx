@@ -1,16 +1,25 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { AlertTriangle, CalendarDays, ChevronLeft, ChevronRight, Loader2, Plus, Trash2 } from "lucide-react";
+import { Activity, AlertTriangle, CalendarDays, ChevronLeft, ChevronRight, Dumbbell, Layers, Library, Loader2, Plus, Trash2 } from "lucide-react";
 
 import { AdminSection } from "@/components/admin/AdminSection";
 import { Field } from "@/components/admin/AdminFormFields";
 import { Modal } from "@/components/admin/Modal";
 import { EditeurBlocsCardio, type EnregistrementCardio } from "@/components/admin/cardio/EditeurBlocsCardio";
+import { EditeurSeanceCalendrier, type EnregistrementSeance } from "@/components/admin/cardio/EditeurSeanceCalendrier";
 import { Loader } from "@/components/ui/Loader";
 import { useCalendrierAthlete } from "@/hooks/useCalendrierAthlete";
 import { usePhysiologieEleve } from "@/hooks/usePhysiologieEleve";
-import { modelesCardio, resumeDuModeleCardio } from "@/lib/bibliotheque-cardio";
+import { useSupabaseExerciseLibrary } from "@/hooks/useSupabaseExerciseLibrary";
+import { modelesDuCalendrier, resumeDuModele } from "@/lib/bibliotheque-cardio";
+import {
+  blocsDeDepart,
+  blocsDepuisModele,
+  CHOIX_DAJOUT,
+  LIBELLE_TYPE,
+  type GenreDeSeance,
+} from "@/lib/calendrier-composition";
 import {
   grilleDuMois,
   JOURS_COURTS,
@@ -20,7 +29,7 @@ import {
 import { cibleDuSegment } from "@/lib/cardio-zones";
 import { formatDurationSeconds } from "@/lib/cardio";
 import type { SeanceDuCalendrier } from "@/lib/supabase/calendrier-seances";
-import type { CardioTrainingBlock, SessionTemplate, TrainingBlock } from "@/types";
+import type { CardioTrainingBlock, ExerciseLibraryItem, SessionTemplate, StrengthTrainingBlock, TrainingBlock } from "@/types";
 
 /**
  * LE CALENDRIER D'UN ATHLÈTE — ce qu'il fait, et quel jour.
@@ -69,9 +78,16 @@ function blocsCardio(blocks: readonly TrainingBlock[]): CardioTrainingBlock[] {
 }
 
 export function CalendrierAthlete({ studentId, nomEleve }: { readonly studentId: string; readonly nomEleve: string }) {
-  const { etat, deplacer, supprimer, enregistrerSeance, creer, enregistrerDansLaBibliotheque, blocsDuModelePourApplication } =
+  const { etat, deplacer, supprimer, enregistrerSeance, enregistrerSeanceComplete, creer, enregistrerDansLaBibliotheque } =
     useCalendrierAthlete(studentId);
   const physio = usePhysiologieEleve(studentId);
+  /*
+   * ⚠️ LA BANQUE D'EXERCICES EST INDISPENSABLE ICI. Éditer la musculation d'une
+   * séance du calendrier passe par `SessionBlockList`, qui ne peut proposer un
+   * exercice que s'il existe dans `exercise_library`. Sans elle, la modale
+   * afficherait des blocs de musculation qu'on ne pourrait pas remplir.
+   */
+  const banqueExercices = useSupabaseExerciseLibrary();
 
   const aujourdhui = aujourdhuiIso();
   const [mois, setMois] = useState(() => {
@@ -197,7 +213,15 @@ export function CalendrierAthlete({ studentId, nomEleve }: { readonly studentId:
                         >
                           <span className="block truncate font-semibold">{seance.name || "Séance"}</span>
                           <span className="block truncate opacity-80">
-                            {seance.sports.map((sport) => LIBELLE_SPORT[sport] ?? sport).join(" · ") || "—"}
+                            {/*
+                             * ⚠️ UNE SÉANCE DE MUSCULATION N'A PAS DE SPORT, ET
+                             * AFFICHAIT « — ». Le type dérivé dit ce qu'elle est
+                             * plutôt que de laisser un tiret : le calendrier
+                             * n'est plus réservé au cardio.
+                             */}
+                            {seance.sports.length > 0
+                              ? seance.sports.map((sport) => LIBELLE_SPORT[sport] ?? sport).join(" · ")
+                              : LIBELLE_TYPE[seance.typeDerive]}
                             {seance.durationMinutes > 0 ? ` · ${seance.durationMinutes} min` : ""}
                           </span>
                           {seance.origineDate === "planifiee" && <span className="block opacity-70">déplacée</span>}
@@ -248,6 +272,7 @@ export function CalendrierAthlete({ studentId, nomEleve }: { readonly studentId:
         <ModaleSeance
           seance={ouverte}
           debut={etat.calendrier.debut}
+          library={banqueExercices.items}
           references={physio.etat.references}
           reglagesZones={physio.etat.reglages}
           enCours={enCours}
@@ -274,6 +299,22 @@ export function CalendrierAthlete({ studentId, nomEleve }: { readonly studentId:
             }
             if (resultat.ok) setOuverte(null);
           }}
+          onEnregistrerLaSeance={async (enregistrement) => {
+            const resultat = await agir(() =>
+              enregistrerSeanceComplete(ouverte, enregistrement.blocks, enregistrement.meta),
+            );
+            if (resultat.ok && enregistrement.dansLaBibliotheque) {
+              await agir(() =>
+                enregistrerDansLaBibliotheque({
+                  name: enregistrement.meta.name,
+                  durationMinutes: enregistrement.meta.durationMinutes,
+                  coachNotes: enregistrement.meta.coachNotes,
+                  blocks: enregistrement.blocks,
+                }),
+              );
+            }
+            if (resultat.ok) setOuverte(null);
+          }}
         />
       )}
 
@@ -281,7 +322,8 @@ export function CalendrierAthlete({ studentId, nomEleve }: { readonly studentId:
         <ModaleAjout
           date={ajoutSurLeJour}
           debut={etat.calendrier.debut}
-          modeles={modelesCardio(etat.modeles)}
+          modeles={modelesDuCalendrier(etat.modeles)}
+          library={banqueExercices.items}
           references={physio.etat.references}
           reglagesZones={physio.etat.reglages}
           enCours={enCours}
@@ -303,7 +345,7 @@ export function CalendrierAthlete({ studentId, nomEleve }: { readonly studentId:
                 durationMinutes: entree.meta.durationMinutes,
                 coachNotes: entree.meta.coachNotes,
                 scheduledDate: ajoutSurLeJour,
-                blocks: entree.blocksCardio,
+                blocks: entree.blocks,
               });
               return { ok: creation.ok, erreur: creation.erreur };
             });
@@ -313,13 +355,12 @@ export function CalendrierAthlete({ studentId, nomEleve }: { readonly studentId:
                   name: entree.meta.name,
                   durationMinutes: entree.meta.durationMinutes,
                   coachNotes: entree.meta.coachNotes,
-                  blocks: entree.blocksCardio,
+                  blocks: entree.blocks,
                 }),
               );
             }
             if (resultat.ok) setAjoutSurLeJour(null);
           }}
-          blocsDuModele={blocsDuModelePourApplication}
         />
       )}
     </AdminSection>
@@ -330,9 +371,29 @@ export function CalendrierAthlete({ studentId, nomEleve }: { readonly studentId:
  * OUVRIR UNE SÉANCE : lire, modifier, déplacer, supprimer
  * ════════════════════════════════════════════════════════════════════════ */
 
+type Onglet = "apercu" | "cardio" | "complete";
+
+/**
+ * LES TROIS ONGLETS D'UNE SÉANCE, ET POURQUOI IL EN FAUT DEUX POUR MODIFIER.
+ *
+ * ⚠️ « CARDIO » ET « SÉANCE COMPLÈTE » N'ONT PAS LA MÊME PORTÉE D'ÉCRITURE.
+ * L'onglet cardio enregistre en portée « cardio » : la musculation n'est PAS dans
+ * le payload, donc la RPC n'a structurellement pas de quoi la supprimer. L'onglet
+ * séance complète enregistre en portée « all » : c'est légitime parce que le
+ * payload contient TOUS les blocs. Fusionner les deux obligerait un écran à
+ * promettre de recopier fidèlement la musculation — exactement la confiance que
+ * `SaveScope` a remplacée par une garantie côté base.
+ */
+const ONGLETS: readonly { cle: Onglet; libelle: string }[] = [
+  { cle: "apercu", libelle: "Aperçu" },
+  { cle: "cardio", libelle: "Modifier le cardio" },
+  { cle: "complete", libelle: "Modifier la séance" },
+];
+
 function ModaleSeance({
   seance,
   debut,
+  library,
   references,
   reglagesZones,
   enCours,
@@ -340,22 +401,28 @@ function ModaleSeance({
   onDeplacer,
   onSupprimer,
   onEnregistrer,
+  onEnregistrerLaSeance,
 }: {
   readonly seance: SeanceDuCalendrier;
   readonly debut: string | null;
+  readonly library: ExerciseLibraryItem[];
   readonly references: Parameters<typeof cibleDuSegment>[2];
   readonly reglagesZones: Parameters<typeof cibleDuSegment>[3];
   readonly enCours: boolean;
   readonly onFermer: () => void;
   readonly onDeplacer: (date: string | null) => void;
   readonly onSupprimer: () => void;
+  /** Portée « cardio » : la musculation n'est pas dans le payload. */
   readonly onEnregistrer: (enregistrement: EnregistrementCardio) => void;
+  /** Portée « all » : le payload contient la séance ENTIÈRE. */
+  readonly onEnregistrerLaSeance: (enregistrement: EnregistrementSeance) => void;
 }) {
-  const [onglet, setOnglet] = useState<"apercu" | "edition">("apercu");
+  const [onglet, setOnglet] = useState<Onglet>("apercu");
   const [nouvelleDate, setNouvelleDate] = useState(seance.date ?? "");
   const [confirmation, setConfirmation] = useState(false);
 
   const cardio = blocsCardio(seance.blocks);
+  const muscu = seance.blocks.filter((bloc): bloc is StrengthTrainingBlock => bloc.category === "strength");
   const position = seance.date ? positionDansLeProgramme(seance.date, debut) : null;
 
   return (
@@ -377,27 +444,50 @@ function ModaleSeance({
           )}
         </div>
 
-        <div className="flex gap-2">
-          {(["apercu", "edition"] as const).map((valeur) => (
+        <div className="flex flex-wrap gap-2">
+          {ONGLETS.map(({ cle, libelle }) => (
             <button
-              key={valeur}
+              key={cle}
               type="button"
-              onClick={() => setOnglet(valeur)}
+              onClick={() => setOnglet(cle)}
               className={`inline-flex min-h-11 items-center rounded-control border px-4 py-2 text-[11px] uppercase tracking-widest ${
-                onglet === valeur ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:border-primary hover:text-primary"
+                onglet === cle ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:border-primary hover:text-primary"
               }`}
             >
-              {valeur === "apercu" ? "Aperçu" : "Modifier"}
+              {libelle}
             </button>
           ))}
         </div>
 
         {onglet === "apercu" ? (
           <div className="flex flex-col gap-4">
-            {cardio.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Cette séance ne contient aucun bloc cardio.</p>
+            {seance.blocks.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Cette séance ne contient aucun bloc.</p>
             ) : (
-              cardio.map((bloc) => (
+              muscu.map((bloc) => (
+                <div key={bloc.id} className="rounded-card border border-border p-4">
+                  <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <Dumbbell size={13} className="flex-shrink-0" />
+                    <span className="text-sm font-semibold text-foreground">{bloc.title ?? "Bloc de musculation"}</span>
+                  </div>
+                  {bloc.exercises.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">Aucun exercice — à remplir dans « Modifier la séance ».</p>
+                  ) : (
+                    <ul className="flex flex-col gap-1.5">
+                      {bloc.exercises.map((exercice) => (
+                        <li key={exercice.id} className="text-xs text-muted-foreground">
+                          <span className="text-foreground">{exercice.name || "Exercice"}</span>
+                          {exercice.sets ? ` · ${exercice.sets} séries` : ""}
+                          {exercice.reps ? ` × ${exercice.reps}` : ""}
+                          {exercice.restSeconds ? ` · ${exercice.restSeconds} s de repos` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ))
+            )}
+            {cardio.map((bloc) => (
                 <div key={bloc.id} className="rounded-card border border-border p-4">
                   <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     <span className="text-sm font-semibold text-foreground">{bloc.title ?? "Bloc cardio"}</span>
@@ -420,8 +510,7 @@ function ModaleSeance({
                     })}
                   </ul>
                 </div>
-              ))
-            )}
+              ))}
 
             <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-end">
               <div className="sm:w-56">
@@ -484,15 +573,27 @@ function ModaleSeance({
               )}
             </div>
           </div>
-        ) : (
+        ) : onglet === "cardio" ? (
           <EditeurBlocsCardio
             meta={{ name: seance.name, durationMinutes: seance.durationMinutes || null, coachNotes: seance.coachNotes }}
             blocks={seance.blocks}
             references={references}
             reglagesZones={reglagesZones}
             enCours={enCours}
-            libelleAction="Enregistrer les modifications"
+            libelleAction="Enregistrer le cardio"
             onEnregistrer={onEnregistrer}
+            onAnnuler={() => setOnglet("apercu")}
+          />
+        ) : (
+          <EditeurSeanceCalendrier
+            meta={{ name: seance.name, durationMinutes: seance.durationMinutes || null, coachNotes: seance.coachNotes }}
+            blocks={seance.blocks}
+            library={library}
+            references={references}
+            reglagesZones={reglagesZones}
+            enCours={enCours}
+            libelleAction="Enregistrer la séance"
+            onEnregistrer={onEnregistrerLaSeance}
             onAnnuler={() => setOnglet("apercu")}
           />
         )}
@@ -502,35 +603,75 @@ function ModaleSeance({
 }
 
 /* ════════════════════════════════════════════════════════════════════════
- * AJOUTER UNE SÉANCE : depuis la bibliothèque, ou neuve
+ * AJOUTER UNE SÉANCE : musculation, cardio, mixte, ou depuis la bibliothèque
  * ════════════════════════════════════════════════════════════════════════ */
 
+const ICONE_CHOIX: Readonly<Record<GenreDeSeance, typeof Dumbbell>> = {
+  musculation: Dumbbell,
+  cardio: Activity,
+  mixte: Layers,
+  bibliotheque: Library,
+};
+
+/**
+ * LE BOUTON « + » D'UNE JOURNÉE.
+ *
+ * ⚠️ IL NE PROPOSE PLUS SEULEMENT DU CARDIO. Une journée peut recevoir de la
+ * musculation, du cardio, un mélange des deux, ou n'importe quelle séance
+ * enregistrée — et la bibliothèque n'est PLUS filtrée sur le cardio : une séance
+ * de musculation existante doit pouvoir être posée sur une date.
+ *
+ * ⚠️ CE QUI EST POSÉ EST UNE COPIE INDIVIDUELLE. Les blocs viennent de
+ * `blocsDepuisModele`, qui régénère tous les identifiants : la séance créée
+ * appartient au programme de CET élève, et la modifier ensuite ne peut pas
+ * atteindre le modèle de la bibliothèque, ni la séance d'un autre élève.
+ */
 function ModaleAjout({
   date,
   debut,
   modeles,
+  library,
   references,
   reglagesZones,
   enCours,
   onFermer,
   onCreer,
-  blocsDuModele,
 }: {
   readonly date: string;
   readonly debut: string | null;
   readonly modeles: readonly SessionTemplate[];
+  readonly library: ExerciseLibraryItem[];
   readonly references: Parameters<typeof cibleDuSegment>[2];
   readonly reglagesZones: Parameters<typeof cibleDuSegment>[3];
   readonly enCours: boolean;
   readonly onFermer: () => void;
-  readonly onCreer: (entree: EnregistrementCardio) => void;
-  readonly blocsDuModele: (template: SessionTemplate) => TrainingBlock[];
+  readonly onCreer: (entree: EnregistrementSeance) => void;
 }) {
-  const [depart, setDepart] = useState<{ meta: { name: string; durationMinutes: number | null; coachNotes: string }; blocks: TrainingBlock[] } | null>(null);
+  const [genre, setGenre] = useState<GenreDeSeance | null>(null);
+  const [depart, setDepart] = useState<{
+    meta: { name: string; durationMinutes: number | null; coachNotes: string };
+    blocks: TrainingBlock[];
+  } | null>(null);
   const position = positionDansLeProgramme(date, debut);
 
+  const catalogue = useMemo(() => modeles.map((modele) => ({ modele, resume: resumeDuModele(modele) })), [modeles]);
+
+  function choisir(cle: GenreDeSeance) {
+    if (cle === "bibliotheque") {
+      setGenre("bibliotheque");
+      return;
+    }
+    setGenre(cle);
+    setDepart({ meta: { name: "", durationMinutes: null, coachNotes: "" }, blocks: blocsDeDepart(cle) });
+  }
+
+  function revenir() {
+    setDepart(null);
+    setGenre(null);
+  }
+
   return (
-    <Modal title={`Ajouter une séance — ${date}`} onClose={onFermer} maxWidth="max-w-4xl">
+    <Modal title={`Ajouter une séance — ${date}`} onClose={onFermer} maxWidth="max-w-5xl">
       <div className="flex flex-col gap-5">
         {position ? (
           <p className="text-xs text-muted-foreground">
@@ -545,71 +686,100 @@ function ModaleAjout({
           </p>
         )}
 
-        {depart === null ? (
-          <div className="flex flex-col gap-4">
-            <button
-              type="button"
-              disabled={!position}
-              onClick={() => setDepart({ meta: { name: "", durationMinutes: null, coachNotes: "" }, blocks: [] })}
-              className="flex min-h-11 items-center justify-center gap-2 rounded-control border border-dashed border-border py-3 text-xs uppercase tracking-widest text-muted-foreground hover:border-primary hover:text-primary disabled:opacity-40"
-            >
-              <Plus size={13} />
-              Nouvelle séance cardio
-            </button>
-
-            <div className="flex flex-col gap-2">
-              <h4 className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-                Depuis ma bibliothèque ({modeles.length})
-              </h4>
-              {modeles.length === 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  Aucun modèle cardio pour l&apos;instant. Coche « Enregistrer également dans ma bibliothèque » en
-                  construisant une séance pour en créer un.
-                </p>
-              ) : (
-                <ul className="flex flex-col gap-2">
-                  {modeles.map((modele) => {
-                    const resume = resumeDuModeleCardio(modele);
-                    return (
-                      <li key={modele.id}>
-                        <button
-                          type="button"
-                          disabled={!position}
-                          onClick={() =>
-                            setDepart({
-                              meta: { name: modele.name, durationMinutes: modele.durationMinutes, coachNotes: "" },
-                              blocks: blocsDuModele(modele),
-                            })
-                          }
-                          className="w-full rounded-card border border-border p-3 text-left transition-colors hover:border-primary disabled:opacity-40"
-                        >
-                          <span className="block text-sm text-foreground">{resume.nom}</span>
-                          <span className="block text-[11px] text-muted-foreground">
-                            {resume.nombreDeBlocs} bloc{resume.nombreDeBlocs > 1 ? "s" : ""} · {resume.nombreDeSegments}{" "}
-                            segment{resume.nombreDeSegments > 1 ? "s" : ""}
-                            {resume.sports.length > 0 ? ` · ${resume.sports.map((s) => LIBELLE_SPORT[s] ?? s).join(", ")}` : ""}
-                            {resume.dureeMinutes ? ` · ${resume.dureeMinutes} min` : ""}
-                            {resume.avecMusculation ? " · contient aussi de la musculation" : ""}
-                          </span>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-          </div>
-        ) : (
-          <EditeurBlocsCardio
+        {depart !== null ? (
+          <EditeurSeanceCalendrier
             meta={depart.meta}
             blocks={depart.blocks}
+            library={library}
             references={references}
             reglagesZones={reglagesZones}
             enCours={enCours}
             libelleAction="Créer la séance"
             onEnregistrer={onCreer}
-            onAnnuler={() => setDepart(null)}
+            onAnnuler={revenir}
           />
+        ) : genre === "bibliotheque" ? (
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-2">
+              <h4 className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                Depuis ma bibliothèque ({catalogue.length})
+              </h4>
+              <button
+                type="button"
+                onClick={revenir}
+                className="text-[11px] uppercase tracking-widest text-muted-foreground hover:text-foreground"
+              >
+                Retour
+              </button>
+            </div>
+            {catalogue.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                Aucune séance enregistrée pour l&apos;instant. Coche « Enregistrer également dans ma bibliothèque » en
+                construisant une séance pour en créer une.
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {catalogue.map(({ modele, resume }) => (
+                  <li key={modele.id}>
+                    <button
+                      type="button"
+                      disabled={!position}
+                      onClick={() =>
+                        setDepart({
+                          meta: { name: modele.name, durationMinutes: modele.durationMinutes, coachNotes: "" },
+                          blocks: blocsDepuisModele(modele),
+                        })
+                      }
+                      className="w-full rounded-card border border-border p-3 text-left transition-colors hover:border-primary disabled:opacity-40"
+                    >
+                      <span className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm text-foreground">{resume.nom}</span>
+                        <span className="rounded-full border border-border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                          {resume.categorie}
+                        </span>
+                      </span>
+                      <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                        {resume.nombreDExercices > 0
+                          ? `${resume.nombreDExercices} exercice${resume.nombreDExercices > 1 ? "s" : ""}`
+                          : ""}
+                        {resume.nombreDExercices > 0 && resume.nombreDeBlocsCardio > 0 ? " · " : ""}
+                        {resume.nombreDeBlocsCardio > 0
+                          ? `${resume.nombreDeBlocsCardio} bloc${resume.nombreDeBlocsCardio > 1 ? "s" : ""} cardio · ${
+                              resume.nombreDeSegments
+                            } segment${resume.nombreDeSegments > 1 ? "s" : ""}`
+                          : ""}
+                        {resume.sports.length > 0
+                          ? ` · ${resume.sports.map((sport) => LIBELLE_SPORT[sport] ?? sport).join(", ")}`
+                          : ""}
+                        {resume.dureeMinutes ? ` · ${resume.dureeMinutes} min` : ""}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {CHOIX_DAJOUT.map((choix) => {
+              const Icone = ICONE_CHOIX[choix.cle];
+              return (
+                <button
+                  key={choix.cle}
+                  type="button"
+                  disabled={!position}
+                  onClick={() => choisir(choix.cle)}
+                  className="flex flex-col gap-1 rounded-card border border-border p-4 text-left transition-colors hover:border-primary disabled:opacity-40"
+                >
+                  <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                    <Icone size={15} className="text-muted-foreground" aria-hidden="true" />
+                    {choix.libelle}
+                  </span>
+                  <span className="text-[11px] text-muted-foreground">{choix.description}</span>
+                </button>
+              );
+            })}
+          </div>
         )}
       </div>
     </Modal>

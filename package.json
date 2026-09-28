@@ -158,7 +158,9 @@
     "test:cardio-builder": "TZ=Europe/Paris npx tsx scripts/tests/cardio-builder.mts",
     "test:cardio-ui-render": "npx tsx scripts/tests/cardio-ui-render.mts",
     "test:calendrier-cardio": "TZ=Europe/Paris npx tsx scripts/tests/calendrier-cardio.mts",
-    "test:cardio-mixte": "npx tsx scripts/tests/cardio-mixte.mts"
+    "test:cardio-mixte": "npx tsx scripts/tests/cardio-mixte.mts",
+    "test:calendrier-seances-completes": "npx tsx scripts/tests/calendrier-seances-completes.mts",
+    "test:cardio-builder-compact": "npx tsx scripts/tests/cardio-builder-compact.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

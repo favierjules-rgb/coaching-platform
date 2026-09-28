@@ -41,6 +41,65 @@ export function estModeleCardio(template: SessionTemplate): boolean {
   return blocsCardioDuModele(template).length > 0;
 }
 
+/**
+ * Le résumé d'un modèle QUELCONQUE de la banque — musculation, cardio ou mixte.
+ *
+ * ⚠️ LE CALENDRIER N'EST PAS RÉSERVÉ AU CARDIO. Le coach doit pouvoir poser
+ * une séance de musculation existante sur une date : filtrer la banque sur le
+ * cardio lui cacherait la moitié de ses séances, et l'obligerait à repasser par
+ * le builder de programme pour une opération de calendrier.
+ */
+export interface ResumeModele {
+  readonly id: string;
+  readonly nom: string;
+  readonly description: string;
+  readonly dureeMinutes: number | null;
+  /** « Musculation », « Cardio », « Mixte » — dérivé des BLOCS, jamais saisi. */
+  readonly categorie: "Musculation" | "Cardio" | "Mixte" | "Vide";
+  readonly nombreDeBlocsCardio: number;
+  readonly nombreDeSegments: number;
+  readonly nombreDExercices: number;
+  readonly sports: readonly SportCardio[];
+}
+
+export function resumeDuModele(template: SessionTemplate): ResumeModele {
+  const cardio = blocsCardioDuModele(template);
+  const muscu = template.blocks.filter((bloc) => bloc.category === "strength");
+  const sports: SportCardio[] = [];
+  for (const bloc of cardio) {
+    if (bloc.sport && !sports.includes(bloc.sport)) sports.push(bloc.sport);
+  }
+  const categorie =
+    cardio.length > 0 && muscu.length > 0
+      ? "Mixte"
+      : cardio.length > 0
+        ? "Cardio"
+        : muscu.length > 0
+          ? "Musculation"
+          : "Vide";
+  return {
+    id: template.id,
+    nom: template.name,
+    description: template.description,
+    dureeMinutes: template.durationMinutes,
+    categorie,
+    nombreDeBlocsCardio: cardio.length,
+    nombreDeSegments: cardio.reduce((total, bloc) => total + bloc.prescriptions.length, 0),
+    nombreDExercices: muscu.reduce((total, bloc) => total + (bloc.category === "strength" ? bloc.exercises.length : 0), 0),
+    sports,
+  };
+}
+
+/**
+ * TOUS les modèles de la banque, triés par nom.
+ *
+ * ⚠️ AUCUN FILTRE. `modelesCardio` reste disponible là où seul le cardio a du
+ * sens ; le calendrier, lui, pose n'importe quelle séance.
+ */
+export function modelesDuCalendrier(templates: readonly SessionTemplate[]): SessionTemplate[] {
+  return templates.slice().sort((a, b) => a.name.localeCompare(b.name, "fr"));
+}
+
 export interface ResumeModeleCardio {
   readonly id: string;
   readonly nom: string;

@@ -22,6 +22,7 @@ import {
   type BlockColorKey,
   type BuilderWorkoutSession,
 } from "@/lib/training-block-editing";
+import type { ReferencesAthlete, ReglagesZones } from "@/lib/zones-physiologiques";
 import type { AdminExercise, CardioTrainingBlock, ExerciseLibraryItem, StrengthTrainingBlock, TrainingBlockCategory } from "@/types";
 import { AddTrainingBlockMenu } from "@/components/admin/blocks/AddTrainingBlockMenu";
 import { TrainingBlockCard } from "@/components/admin/blocks/TrainingBlockCard";
@@ -46,10 +47,15 @@ export function SessionBlockList({
   session,
   library,
   onSessionChange,
+  references,
+  reglagesZones,
 }: {
   session: BuilderWorkoutSession;
   library: ExerciseLibraryItem[];
   onSessionChange: (next: BuilderWorkoutSession) => void;
+  /** Références de l'athlète — fournies UNIQUEMENT depuis son calendrier. */
+  references?: ReferencesAthlete;
+  reglagesZones?: ReglagesZones;
 }) {
   const [focusBlockId, setFocusBlockId] = useState<string | null>(null);
   const [draggedBlockId, setDraggedBlockId] = useState<string | null>(null);
@@ -184,6 +190,9 @@ export function SessionBlockList({
                 if (targetBlock) setAnnouncement(describeExerciseMovedToBlock(exerciseName, targetBlock));
               }}
               onCardioChange={(next: CardioTrainingBlock) => onSessionChange(replaceTrainingBlock(session, block.id, next))}
+              references={references}
+              reglagesZones={reglagesZones}
+
             />
           );
         })

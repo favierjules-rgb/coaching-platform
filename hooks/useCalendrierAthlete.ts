@@ -4,8 +4,9 @@ import { useCallback, useEffect, useState } from "react";
 
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { blocsDuModelePourApplication, seanceSyntheticPourModele } from "@/lib/bibliotheque-cardio";
+import { LIBELLE_TYPE, typeAffiche } from "@/lib/calendrier-composition";
 import {
-  creerSeanceCardio,
+  creerSeanceCalendrier,
   deplacerSeance,
   lireCalendrierDeLEleve,
   supprimerSeance,
@@ -120,7 +121,7 @@ export function useCalendrierAthlete(studentId: string) {
         return { ok: false, erreur: "Version de la séance inconnue : rechargez la page avant d'enregistrer." };
       }
       try {
-        // Même raison que dans `creerSeanceCardio` : les blocs ajoutés dans le
+        // Même raison que dans `creerSeanceCalendrier` : les blocs ajoutés dans le
         // builder portent des identifiants clients, que seul cet adaptateur sait
         // traduire pour la RPC.
         await saveTrainingSessionBlocks(
@@ -130,6 +131,53 @@ export function useCalendrierAthlete(studentId: string) {
             expectedUpdatedAt: seance.updatedAt,
             blocks: blocksCardio,
             scope: "cardio",
+            sessionPatch: {
+              name: meta.name,
+              durationMinutes: meta.durationMinutes,
+              coachNotes: meta.coachNotes,
+            },
+          }),
+        );
+      } catch (erreurRpc) {
+        const message = erreurRpc instanceof Error ? erreurRpc.message : String(erreurRpc);
+        setErreur(message);
+        return { ok: false, erreur: message };
+      }
+      relire();
+      return { ok: true, erreur: null };
+    },
+    [relire],
+  );
+
+  /**
+   * Enregistre LA SÉANCE ENTIÈRE — musculation et cardio.
+   *
+   * ⚠️ PORTÉE « all », ET LE PAYLOAD CONTIENT TOUT. C'est la seule condition qui
+   * rend cette portée légitime : la séance complète est envoyée, donc aucun bloc
+   * ne peut disparaître par omission. Appeler ceci avec une liste partielle
+   * supprimerait ce qui manque — c'est exactement le défaut que `SaveScope`
+   * ferme, et c'est pourquoi l'éditeur cardio a son propre chemin en portée
+   * « cardio » plutôt que de réutiliser celui-ci.
+   */
+  const enregistrerSeanceComplete = useCallback(
+    async (
+      seance: SeanceDuCalendrier,
+      blocks: TrainingBlock[],
+      meta: { name: string; durationMinutes: number | null; coachNotes: string },
+    ) => {
+      const supabase = createSupabaseBrowserClient();
+      if (!supabase) return { ok: false, erreur: "Supabase n'est pas configuré." };
+      if (!seance.updatedAt) {
+        return { ok: false, erreur: "Version de la séance inconnue : rechargez la page avant d'enregistrer." };
+      }
+      try {
+        await saveTrainingSessionBlocks(
+          supabase,
+          buildCanonicalSessionBlocksInput({
+            sessionId: seance.id,
+            expectedUpdatedAt: seance.updatedAt,
+            blocks,
+            scope: "all",
             sessionPatch: {
               name: meta.name,
               durationMinutes: meta.durationMinutes,
@@ -161,7 +209,7 @@ export function useCalendrierAthlete(studentId: string) {
     }) => {
       const supabase = createSupabaseBrowserClient();
       if (!supabase) return { ok: false, sessionId: null, erreur: "Supabase n'est pas configuré." };
-      const resultat = await creerSeanceCardio(supabase, nouvelle);
+      const resultat = await creerSeanceCalendrier(supabase, nouvelle);
       setErreur(resultat.erreur);
       if (resultat.ok) relire();
       return resultat;
@@ -183,7 +231,7 @@ export function useCalendrierAthlete(studentId: string) {
         supabase,
         seanceSyntheticPourModele(entree),
         entree.name,
-        "Séance cardio enregistrée depuis le calendrier.",
+        `Séance ${LIBELLE_TYPE[typeAffiche(entree.blocks)].toLowerCase()} enregistrée depuis le calendrier.`,
       );
       if (!id) {
         const message = "Le modèle n'a pas pu être enregistré dans la bibliothèque.";
@@ -197,5 +245,15 @@ export function useCalendrierAthlete(studentId: string) {
   );
 
   const etat: EtatCalendrier = { calendrier, modeles, disponible, chargement, erreur };
-  return { etat, deplacer, supprimer, enregistrerSeance, creer, enregistrerDansLaBibliotheque, blocsDuModelePourApplication, relire };
+  return {
+    etat,
+    deplacer,
+    supprimer,
+    enregistrerSeance,
+    enregistrerSeanceComplete,
+    creer,
+    enregistrerDansLaBibliotheque,
+    blocsDuModelePourApplication,
+    relire,
+  };
 }

@@ -488,7 +488,41 @@ await test("BUILDER2. l'éditeur cardio n'expose aucun champ de musculation", ()
 await test("BUILDER3. l'enregistrement d'un bloc cardio part en portée « cardio »", () => {
   const hook = sansCommentaires(lireSource("hooks/useCalendrierAthlete.ts"));
   assert.match(hook, /scope: "cardio"/, "la sauvegarde cardio doit déclarer sa portée");
-  assert.ok(!/scope: "all"/.test(hook), "aucun chemin du calendrier ne doit enregistrer du cardio en portée complète");
+
+  /*
+   * ⚠️ LA PORTÉE EST VÉRIFIÉE PAR FONCTION, PLUS PAR FICHIER — ET C'EST UN
+   * RESSERREMENT, PAS UN CONTOURNEMENT.
+   *
+   * Ce test interdisait `scope: "all"` DANS TOUT LE FICHIER, à une époque où le
+   * hook n'avait qu'un seul chemin d'écriture. Le calendrier accepte désormais
+   * des séances de musculation et mixtes : `enregistrerSeanceComplete` envoie la
+   * séance ENTIÈRE, et doit donc écrire en portée « all » — une portée « cardio »
+   * n'écrirait jamais la musculation qu'il vient d'éditer.
+   *
+   * L'interdiction de fichier ne distinguait pas les deux chemins ; découpée par
+   * fonction, elle vérifie DAVANTAGE : chaque chemin doit porter SA portée, et
+   * une portée qui se glisserait dans le mauvais chemin est maintenant détectée
+   * dans les deux sens (l'ancienne version ne voyait pas un `scope: "cardio"`
+   * posé par erreur sur la sauvegarde complète).
+   */
+  const debutCardio = hook.indexOf("const enregistrerSeance ");
+  const debutComplet = hook.indexOf("const enregistrerSeanceComplete ");
+  assert.ok(debutCardio !== -1 && debutComplet !== -1, "les deux chemins doivent exister séparément");
+  const [premier, second] = debutCardio < debutComplet ? [debutCardio, debutComplet] : [debutComplet, debutCardio];
+  const portee = (bloc: string) => /scope:\s*"(\w+)"/.exec(bloc)?.[1];
+  const porteePremier = portee(hook.slice(premier, second));
+  const porteeSecond = portee(hook.slice(second));
+
+  assert.equal(
+    debutCardio < debutComplet ? porteePremier : porteeSecond,
+    "cardio",
+    "un enregistrement cardio en portée complète supprimerait la musculation de la séance",
+  );
+  assert.equal(
+    debutCardio < debutComplet ? porteeSecond : porteePremier,
+    "all",
+    "un enregistrement de séance complète en portée cardio n'écrirait jamais sa musculation",
+  );
 });
 
 await test("RPC3. le chemin legacy envoie aussi les deux familles", () => {
