@@ -18,7 +18,7 @@
  * sortie de ce helper. Aucune mutation des props (copies systématiques).
  */
 
-import type { AdminCardioBlock, AdminCardioSegment, CardioType, Exercise, MachineType, TrainingBlock } from "@/types";
+import type { AdminCardioBlock, AdminCardioSegment, CardioType, Exercise, MachineType, SportCardio, TrainingBlock } from "@/types";
 
 export interface StudentStrengthBlockView {
   kind: "strength";
@@ -37,6 +37,18 @@ export interface StudentCardioBlockView {
   title: string | null;
   cardioType: CardioType;
   machineType?: MachineType;
+  /**
+   * Sport du bloc, quand le coach l'a renseigné.
+   *
+   * ⚠️ `undefined` SUR TOUS LES BLOCS ANTÉRIEURS À CE CHANTIER, et rien ne le
+   * remplit après coup. Sans sport, l'écran affiche la consigne telle qu'elle a
+   * été saisie (« Z4 », « 105% VMA ») sans la convertir : convertir contre une
+   * VMA de course un bloc qui était peut-être du vélo afficherait une allure
+   * fausse présentée comme une consigne.
+   */
+  sport?: SportCardio;
+  /** Séries du bloc, quand elles sont renseignées. */
+  rounds?: number;
   segments: AdminCardioSegment[];
 }
 
@@ -73,6 +85,8 @@ export function orderedStudentSessionBlocks(session: StudentSessionBlockSource):
               title: block.title,
               cardioType: block.cardioType,
               machineType: block.machineType,
+              sport: block.sport,
+              rounds: block.rounds,
               segments: block.prescriptions,
             },
       );
@@ -99,6 +113,8 @@ export function orderedStudentSessionBlocks(session: StudentSessionBlockSource):
       title: cardio.title,
       cardioType: cardio.cardioType,
       machineType: cardio.machineType,
+      sport: cardio.sport,
+      rounds: cardio.rounds,
       segments: cardio.segments,
     });
   }

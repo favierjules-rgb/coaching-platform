@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type DragEvent } from "react";
 import { Activity, ArrowDown, ArrowUp, ChevronDown, ChevronRight, Copy, Dumbbell, GripVertical, Trash2 } from "lucide-react";
 
 import type { BlockColorKey } from "@/lib/training-block-editing";
+import type { ReferencesAthlete, ReglagesZones } from "@/lib/zones-physiologiques";
 import { normalizeColorKey } from "@/lib/training-block-editing";
 import type { AdminExercise, CardioTrainingBlock, ExerciseLibraryItem, TrainingBlock } from "@/types";
 import { BlockColorPicker } from "@/components/admin/blocks/BlockColorPicker";
@@ -51,6 +52,16 @@ export interface TrainingBlockCardProps {
   onExerciseDuplicate: (exerciseId: string) => void;
   onMoveExerciseToBlock: (exerciseId: string, targetBlockId: string) => void;
   onCardioChange: (next: CardioTrainingBlock) => void;
+  /**
+   * Références physiologiques de l'athlète, quand il y en a un.
+   *
+   * ⚠️ ABSENTES DANS LE BUILDER DE PROGRAMME, ET CE N'EST PAS UN OUBLI. Un
+   * programme MODÈLE n'appartient à personne : il n'existe aucune VMA, aucune
+   * FC max à appliquer. Elles n'arrivent que depuis le calendrier d'un élève
+   * nommé, où les valeurs calculées affichées sont les SIENNES.
+   */
+  references?: ReferencesAthlete;
+  reglagesZones?: ReglagesZones;
 }
 
 export function TrainingBlockCard(props: TrainingBlockCardProps) {
@@ -235,7 +246,12 @@ export function TrainingBlockCard(props: TrainingBlockCardProps) {
                 onMoveExerciseToBlock={props.onMoveExerciseToBlock}
               />
             ) : (
-              <CardioBlockEditor block={block} onChange={props.onCardioChange} />
+              <CardioBlockEditor
+                block={block}
+                onChange={props.onCardioChange}
+                references={props.references}
+                reglagesZones={props.reglagesZones}
+              />
             )}
           </div>
         )}

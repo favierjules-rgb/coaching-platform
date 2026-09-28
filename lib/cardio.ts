@@ -57,6 +57,13 @@ export const cardioSegmentTypeLabels: Record<CardioSegmentType, string> = {
   repeat_group: "Fractionné (répétitions)",
   ramp_up: "Progressif (montée)",
   ramp_down: "Progressif (descente)",
+  // ⚠️ `work` et `recovery` sont l'EFFORT et le CONTRE-EFFORT du vocabulaire
+  // déjà en base depuis la V3 cardio — pas de nouveaux types, juste leurs noms
+  // français. `warmup` et `cooldown` arrivent avec la migration 20260930100000.
+  warmup: "Échauffement",
+  work: "Effort",
+  recovery: "Contre-effort",
+  cooldown: "Retour au calme",
 };
 
 export const intensityTargetTypeLabels: Record<IntensityTargetType, string> = {
@@ -70,6 +77,9 @@ export const intensityTargetTypeLabels: Record<IntensityTargetType, string> = {
   race_pace: "Allure course",
   free: "Libre",
   custom: "Personnalisé",
+  zone: "Zone (Z1-Z7)",
+  ftp_percentage: "% FTP",
+  pma_percentage: "% PMA",
 };
 
 export function blankCardioSegment(order: number): AdminCardioSegment {
@@ -184,6 +194,8 @@ export function formatIntensityTargetRaw(
     | "targetHrZone"
     | "targetPowerWatts"
     | "intensityMin"
+    | "targetZone"
+    | "targetPowerPercentage"
   >,
 ): string {
   switch (segment.intensityTargetType) {
@@ -209,6 +221,18 @@ export function formatIntensityTargetRaw(
       return "Libre";
     case "custom":
       return "Personnalisé";
+    /*
+     * ⚠️ LES TROIS INTENSITÉS DU NOUVEAU BUILDER DOIVENT ÊTRE ICI, SINON ELLES
+     * TOMBENT DANS `default` ET L'ÉLÈVE LIT « — » À LA PLACE DE SA CONSIGNE.
+     * C'est ce qui arrivait avant : `zone`, `ftp_percentage` et `pma_percentage`
+     * n'existaient pas quand cette fonction a été écrite.
+     */
+    case "zone":
+      return segment.targetZone ? `Z${segment.targetZone}` : "—";
+    case "ftp_percentage":
+      return segment.targetPowerPercentage ? `${segment.targetPowerPercentage}% FTP` : "—";
+    case "pma_percentage":
+      return segment.targetPowerPercentage ? `${segment.targetPowerPercentage}% PMA` : "—";
     default:
       return "—";
   }

@@ -914,7 +914,36 @@ export type MachineType = "treadmill" | "bike" | "rower" | "skierg" | "elliptica
  * récupération) plutôt que des lignes enfants "work"/"recovery" séparées,
  * pour un formulaire simple à éditer côté coach.
  */
-export type CardioSegmentType = "single" | "repeat_group" | "ramp_up" | "ramp_down";
+export type CardioSegmentType =
+  | "single"
+  | "repeat_group"
+  | "ramp_up"
+  | "ramp_down"
+  /*
+   * ⚠️ `work` ET `recovery` NE SONT PAS NOUVEAUX. Ils existent dans
+   * `training_prescriptions.segment_type` depuis la migration V3 cardio
+   * (20260716075715) et portent « effort » et « contre-effort » — les tests SQL
+   * du dépôt les écrivent déjà. Le builder cardio les EXPOSE au lieu d'inventer
+   * `effort`/`counter_effort`, ce qui aurait donné deux noms à une seule notion.
+   *
+   * `warmup` et `cooldown`, eux, manquaient : ils sont ajoutés au CHECK par la
+   * migration 20260930100000 (NON APPLIQUÉE).
+   */
+  | "work"
+  | "recovery"
+  | "warmup"
+  | "cooldown";
+
+/**
+ * Sport d'un bloc cardio (`training_blocks.sport`, migration 20260930100000 —
+ * NON APPLIQUÉE).
+ *
+ * ⚠️ INDISPENSABLE DÈS QU'UNE INTENSITÉ EST EXPRIMÉE EN ZONE OU EN POURCENTAGE.
+ * « Z3 » se convertit contre la VMA en course, le FTP ou la PMA à vélo, la VMA
+ * natation à la nage : sans sport, la conversion serait arbitraire. Absent
+ * (`undefined`), aucune conversion n'est tentée et l'écran le dit.
+ */
+export type SportCardio = "course" | "velo" | "natation" | "autre";
 
 /** Type d'intensité ciblée d'un segment (training_prescriptions.intensity_target_type). */
 export type IntensityTargetType =
@@ -927,7 +956,13 @@ export type IntensityTargetType =
   | "power"
   | "race_pace"
   | "free"
-  | "custom";
+  | "custom"
+  /** Zone d'intensité 1 à 7 du barème iDO (`target_zone`). */
+  | "zone"
+  /** Pourcentage du FTP (`target_power_percentage`). */
+  | "ftp_percentage"
+  /** Pourcentage de la PMA (`target_power_percentage`). */
+  | "pma_percentage";
 
 /**
  * Segment d'un bloc cardio (training_prescriptions avec block_id renseigné
@@ -957,6 +992,21 @@ export interface AdminCardioSegment {
   targetHrZone?: string;
   targetPowerWatts?: number;
   targetCadence?: number;
+  /**
+   * Zone d'intensité prescrite, 1 à 7 (`training_prescriptions.target_zone`).
+   * Distincte de `targetHrZone`, qui est le TEXTE LIBRE historique
+   * (« Zone 3 », « 1-2 ») et que 343 lignes de production utilisent encore.
+   */
+  targetZone?: number;
+  /** % FTP ou % PMA selon `intensityTargetType` (`target_power_percentage`). */
+  targetPowerPercentage?: number;
+  /**
+   * ⚠️ PORTE LE RPE DANS LE BUILDER EXISTANT, et pas une borne d'intensité.
+   * `training_prescriptions.target_rpe` existe (CHECK 0-10, demi-points) mais
+   * n'est ni écrite ni lue par l'application, et la RPC ne la connaît pas :
+   * changer de colonne demanderait de réécrire la RPC ET de reprendre les
+   * lignes déjà posées. L'incohérence est SIGNALÉE, pas corrigée en silence.
+   */
   intensityMin?: number;
   intensityMax?: number;
   surface?: string;
@@ -972,6 +1022,17 @@ export interface AdminCardioBlock {
   title: string;
   cardioType: CardioType;
   machineType?: MachineType;
+  /** Sport du bloc — voir `SportCardio`. Absent = aucune conversion tentée. */
+  sport?: SportCardio;
+  /**
+   * Nombre de séries du bloc (`training_blocks.rounds`).
+   *
+   * ⚠️ LA COLONNE EXISTAIT DÉJÀ, VIDE. `rounds` est posée depuis
+   * 20260716075715 pour les formats AMRAP/EMOM et porte 0 ligne : les séries
+   * d'un bloc cardio y vont, plutôt que dans une colonne `cardio_rounds`
+   * jumelle.
+   */
+  rounds?: number;
   segments: AdminCardioSegment[];
 }
 
@@ -1029,6 +1090,10 @@ export interface CardioTrainingBlock {
   colorKey: string;
   cardioType: CardioType;
   machineType?: MachineType;
+  /** Sport du bloc — voir `SportCardio`. */
+  sport?: SportCardio;
+  /** Séries du bloc (`training_blocks.rounds`, colonne existante et vide). */
+  rounds?: number;
   prescriptions: CardioPrescription[];
 }
 
@@ -1091,6 +1156,16 @@ export interface AdminWorkoutSession {
    * pour une séance nouvellement créée dans le builder (pas encore persistée).
    */
   updatedAt?: string;
+  /**
+   * Date réelle de la séance (`workout_sessions.scheduled_date`, migration
+   * 20260930100000 — NON APPLIQUÉE).
+   *
+   * ⚠️ `null`/absent VEUT DIRE « DATE CALCULÉE », JAMAIS « PAS DE DATE ». Les
+   * 847 séances de production n'en ont aucune : la date se déduit de
+   * `assignments.program_start_date` (voir lib/calendrier-athlete.ts). La
+   * colonne est une SURCHARGE, posée quand le coach déplace une séance.
+   */
+  scheduledDate?: string | null;
 }
 
 /**

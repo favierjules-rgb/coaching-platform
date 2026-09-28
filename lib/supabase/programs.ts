@@ -25,6 +25,7 @@ import type {
   IntensityTargetType,
   MachineType,
   SessionType,
+  SportCardio,
   StrengthTrainingBlock,
   TrainingBlock,
 } from "@/types";
@@ -381,6 +382,32 @@ function mapExerciseRow(row: WorkoutExerciseRow): AdminExercise {
   };
 }
 
+/**
+ * Lit une colonne QUI N'EXISTE PEUT-ÊTRE PAS ENCORE en base.
+ *
+ * ⚠️ POURQUOI UN ACCÈS NON TYPÉ, ET POURQUOI IL EST SÛR. `sport`, `target_zone`
+ * et `target_power_percentage` sont posées par la migration 20260930100000, qui
+ * N'EST PAS APPLIQUÉE : `types/supabase.ts` est généré depuis la base distante
+ * et ne peut donc pas les connaître. Les lectures de ce module utilisent
+ * `select("*")`, qui rend ce qui existe : avant la migration la clé est absente
+ * (→ `undefined`), après elle porte la valeur. Aucune requête ne NOMME ces
+ * colonnes, donc rien ne casse dans l'intervalle.
+ *
+ * ⚠️ CE N'EST PAS UNE PORTE DÉROBÉE POUR LIRE N'IMPORTE QUOI. Elle ne sert
+ * qu'aux colonnes listées dans cette migration ; toute autre lecture passe par
+ * les types générés, qui doivent échouer à la compilation quand une colonne
+ * n'existe pas.
+ */
+function colonneEnAttenteDeMigration(ligne: object, cle: string): unknown {
+  return (ligne as Record<string, unknown>)[cle];
+}
+
+function nombreOuIndefini(valeur: unknown): number | undefined {
+  if (valeur === null || valeur === undefined) return undefined;
+  const nombre = typeof valeur === "number" ? valeur : Number(valeur);
+  return Number.isFinite(nombre) ? nombre : undefined;
+}
+
 /** Segment cardio (training_prescriptions avec block_id renseigné et exercise_id nul) -> AdminCardioSegment. */
 function mapCardioSegmentRow(row: TrainingPrescriptionRow): AdminCardioSegment {
   return {
@@ -405,6 +432,8 @@ function mapCardioSegmentRow(row: TrainingPrescriptionRow): AdminCardioSegment {
     targetCadence: row.target_cadence ?? undefined,
     intensityMin: row.intensity_min ?? undefined,
     intensityMax: row.intensity_max ?? undefined,
+    targetZone: nombreOuIndefini(colonneEnAttenteDeMigration(row, "target_zone")),
+    targetPowerPercentage: nombreOuIndefini(colonneEnAttenteDeMigration(row, "target_power_percentage")),
     surface: row.surface ?? undefined,
     terrain: row.terrain ?? undefined,
     equipmentType: row.equipment_type ?? undefined,
@@ -420,6 +449,8 @@ function mapCardioBlockRow(row: TrainingBlockRow, segments: AdminCardioSegment[]
     title: row.title ?? "",
     cardioType: (row.cardio_type ?? "custom_cardio") as CardioType,
     machineType: (row.machine_type ?? undefined) as MachineType | undefined,
+    sport: (colonneEnAttenteDeMigration(row, "sport") ?? undefined) as SportCardio | undefined,
+    rounds: row.rounds ?? undefined,
     segments: segments.slice().sort((a, b) => a.order - b.order),
   };
 }
@@ -477,6 +508,8 @@ function composeSessionBlocks(
         colorKey: row.color_key ?? "gray",
         cardioType: (row.cardio_type ?? "custom_cardio") as CardioType,
         machineType: (row.machine_type ?? undefined) as MachineType | undefined,
+        sport: (colonneEnAttenteDeMigration(row, "sport") ?? undefined) as SportCardio | undefined,
+        rounds: row.rounds ?? undefined,
         prescriptions: segmentRows
           .filter((s) => s.block_id === row.id)
           .map(mapCardioSegmentRow)
@@ -525,6 +558,7 @@ function mapSessionRow(
     bannerUrl: row.banner_url ?? null,
     blocks,
     updatedAt: row.updated_at,
+    scheduledDate: (colonneEnAttenteDeMigration(row, "scheduled_date") ?? null) as string | null,
   };
 }
 

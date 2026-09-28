@@ -9,9 +9,18 @@ import {
   formatIntensityTargetRaw,
   machineTypeLabels,
 } from "@/lib/cardio";
+import { cibleDuSegment } from "@/lib/cardio-zones";
 import type { StudentCardioBlockView } from "@/lib/student-session-blocks";
 import { normalizeColorKey } from "@/lib/training-block-editing";
-import type { AdminCardioSegment } from "@/types";
+import type { ReferencesAthlete, ReglagesZones } from "@/lib/zones-physiologiques";
+import type { AdminCardioSegment, SportCardio } from "@/types";
+
+const LIBELLE_SPORT: Readonly<Record<string, string>> = {
+  course: "Course",
+  velo: "Vélo",
+  natation: "Natation",
+  autre: "Autre",
+};
 
 /**
  * Carte d'un bloc CARDIO dans le détail d'une séance élève, rendue EXACTEMENT
@@ -19,7 +28,30 @@ import type { AdminCardioSegment } from "@/types";
  * systématiquement avant/après les exercices). Lecture seule : mêmes valeurs
  * qu'authored par le coach (durée, distance, D+, intensité…).
  */
-export function StudentCardioBlockCard({ block }: { block: StudentCardioBlockView }) {
+/**
+ * ⚠️ CE QUE L'ÉLÈVE NE DOIT JAMAIS LIRE ICI : un identifiant, un nom de colonne,
+ * un `intensity_target_type`, un `target_zone`, un `segment_type`. Il lit ce
+ * qu'il doit faire, dans quel ordre, combien de temps, sur quelle distance, à
+ * quelle intensité et avec quelle récupération — en français. Un test de rendu
+ * (scripts/tests/cardio-ui-render.mts, famille ATHLETE) échoue si un terme
+ * interne réapparaît à l'écran.
+ */
+export function StudentCardioBlockCard({
+  block,
+  references,
+  reglagesZones,
+}: {
+  block: StudentCardioBlockView;
+  /**
+   * Références physiologiques DE CET ÉLÈVE, quand elles sont chargées.
+   *
+   * ⚠️ ABSENTES, RIEN N'EST CONVERTI. La consigne s'affiche telle que le coach
+   * l'a saisie (« Z4 », « 105% VMA ») : inventer une vitesse depuis une VMA
+   * qu'on n'a pas lue donnerait un chiffre faux avec l'autorité d'une consigne.
+   */
+  references?: ReferencesAthlete;
+  reglagesZones?: ReglagesZones;
+}) {
   const color = BLOCK_COLOR_STYLES[normalizeColorKey(block.colorKey, "blue")];
   return (
     <section className={`rounded-card border border-l-4 border-border ${color.borderLeft} ${color.softBg} p-5 shadow-soft`}>
@@ -33,20 +65,45 @@ export function StudentCardioBlockCard({ block }: { block: StudentCardioBlockVie
       </div>
       <p className="mb-4 text-xs uppercase tracking-wide text-muted-foreground">
         {cardioTypeLabels[block.cardioType]}
+        {block.sport ? ` · ${LIBELLE_SPORT[block.sport] ?? block.sport}` : ""}
         {block.machineType ? ` · ${machineTypeLabels[block.machineType]}` : ""}
+        {block.rounds && block.rounds > 1 ? ` · ${block.rounds} séries` : ""}
       </p>
       <div className="flex flex-col gap-3">
         {block.segments.map((segment) => (
-          <CardioSegmentRow key={segment.id} segment={segment} />
+          <CardioSegmentRow
+            key={segment.id}
+            segment={segment}
+            sport={block.sport}
+            references={references}
+            reglagesZones={reglagesZones}
+          />
         ))}
       </div>
     </section>
   );
 }
 
-function CardioSegmentRow({ segment }: { segment: AdminCardioSegment }) {
+function CardioSegmentRow({
+  segment,
+  sport,
+  references,
+  reglagesZones,
+}: {
+  segment: AdminCardioSegment;
+  sport?: SportCardio;
+  references?: ReferencesAthlete;
+  reglagesZones?: ReglagesZones;
+}) {
   const isRepeat = segment.segmentType === "repeat_group";
   const intensityLabel = formatIntensityTargetRaw(segment);
+  /*
+   * Les valeurs concrètes de CET élève, quand on les a. Même fonction que
+   * l'aperçu du coach (`cibleDuSegment`) : ce que le coach voit en construisant
+   * est exactement ce que l'élève lit.
+   */
+  const cible = references ? cibleDuSegment(segment, sport, references, reglagesZones) : null;
+  const valeurs = cible && cible.valeurs.length > 0 ? cible.valeurs.join(" · ") : null;
 
   return (
     <div className="rounded-panel border border-border/60 bg-surface-soft/40 p-3">
@@ -83,7 +140,10 @@ function CardioSegmentRow({ segment }: { segment: AdminCardioSegment }) {
         {segment.targetCadence ? <span>Cadence {segment.targetCadence} spm</span> : null}
       </div>
 
-      <p className="mt-2 text-sm font-medium text-primary">Intensité : {intensityLabel}</p>
+      <p className="mt-2 text-sm font-medium text-primary">
+        Intensité : {intensityLabel}
+        {valeurs ? <span className="text-foreground"> — {valeurs}</span> : null}
+      </p>
 
       {segment.coachNotes ? <p className="mt-1 text-xs text-muted-foreground">{segment.coachNotes}</p> : null}
     </div>

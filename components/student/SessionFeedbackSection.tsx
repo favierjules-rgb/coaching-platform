@@ -34,6 +34,7 @@ import { ExerciseFeedbackCard } from "@/components/student/ExerciseFeedbackCard"
 import { SessionCompletionCard } from "@/components/student/SessionCompletionCard";
 import { SessionCarousel } from "@/components/student/SessionCarousel";
 import { StudentCardioBlockCard } from "@/components/student/StudentCardioBlockCard";
+import { usePhysiologieEleve } from "@/hooks/usePhysiologieEleve";
 import { TrainingStatCards } from "@/components/shared/TrainingMetricsSummary";
 import { useAdminData } from "@/hooks/useAdminData";
 import { useSupabaseWorkoutFeedback } from "@/hooks/useSupabaseWorkoutFeedback";
@@ -340,6 +341,23 @@ export function SessionFeedbackSection({
   transport,
 }: SessionFeedbackSectionProps) {
   const horsLigne = source === "offline";
+  /*
+   * LES RÉFÉRENCES PHYSIOLOGIQUES DE L'ÉLÈVE — deux usages, une seule lecture.
+   *
+   *   · l'affichage : « Z4 » devient « Z4 — 9.35 - 10.12 km/h — 175 - 182 bpm »,
+   *     avec SES valeurs à lui ;
+   *   · l'archivage : à l'enregistrement du retour, ces consignes résolues
+   *     partent dans le snapshot prescrit, pour que la séance TERMINÉE garde ce
+   *     qui avait été demandé ce jour-là (la prescription, elle, reste
+   *     dynamique — décision du 28/09/2026).
+   *
+   * ⚠️ ABSENTES, RIEN N'EST INVENTÉ. Hors ligne, ou si le profil est vide, la
+   * consigne s'affiche telle que le coach l'a saisie et le snapshot ne porte pas
+   * de valeurs résolues.
+   */
+  const physiologie = usePhysiologieEleve(studentId);
+  const referencesEleve = physiologie.etat.disponible ? physiologie.etat.references : undefined;
+  const reglagesZonesEleve = physiologie.etat.disponible ? physiologie.etat.reglages : undefined;
   // Normalisation UNIQUE à la frontière : `blocks[]` si présent, sinon legacy.
   // Le rendu (liste ordonnée + état de retour + analyse) ne manipule ensuite
   // QUE `blockViews` / `strengthExercises`.
@@ -841,7 +859,7 @@ export function SessionFeedbackSection({
           order: item.order,
           title: item.label,
           // Même source que les repères affichés sous CE bloc (helper unique).
-          prescribed: cardioBlockPrescribedSnapshot(item.view),
+          prescribed: cardioBlockPrescribedSnapshot(item.view, referencesEleve, reglagesZonesEleve),
           ...conversion.realized,
         };
         cardioPayloads.push(serializeCardioBlockResult(result));
@@ -1427,7 +1445,9 @@ export function SessionFeedbackSection({
               : {})}
           />
         )}
-        renderCardioPrescription={(block) => <StudentCardioBlockCard block={block} />}
+        renderCardioPrescription={(block) => (
+          <StudentCardioBlockCard block={block} references={referencesEleve} reglagesZones={reglagesZonesEleve} />
+        )}
         // La validation d'un bloc cardio est une CARTE DU PARCOURS, plus un
         // pied de page sous la séance entière. Le formulaire est le même,
         // identifié par le même UUID de bloc, alimenté par le même
@@ -1439,7 +1459,7 @@ export function SessionFeedbackSection({
             <CardioBlockFeedbackForm
               blockId={block.id}
               blockLabel={item.label}
-              prescribed={cardioBlockPrescribedSnapshot(block)}
+              prescribed={cardioBlockPrescribedSnapshot(block, referencesEleve, reglagesZonesEleve)}
               draft={draftFor(block.id)}
               error={blockErrors[block.id] ?? null}
               onChange={(next) => patchBlockDraft(block.id, next)}

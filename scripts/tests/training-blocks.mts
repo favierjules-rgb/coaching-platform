@@ -1129,10 +1129,24 @@ async function runAsync() {
     const client = new ThisBoundRpcClient(RPC_OK);
     await saveTrainingSessionBlocks(client as unknown as SupabaseClient<Database>, rpcBindInput);
     assert.equal(client.received?.fn, "save_training_session_blocks");
+    /*
+     * ⚠️ DEUX CLÉS AJOUTÉES LE 28/09/2026, PAR DÉCISION EXPLICITE — ce n'est pas
+     * un test « adapté pour passer ».
+     *   · `scope` : la portée de l'écriture. « all » est le défaut et le
+     *     comportement historique ; la déclarer rend impossible qu'un
+     *     enregistrement cardio supprime la musculation de la séance (voir
+     *     `SaveScope`, lib/supabase/training-session-blocks.ts).
+     *   · `position` : la position du bloc, envoyée systématiquement. Elle est
+     *     IGNORÉE en portée « all » (la RPC dérive la position de l'index du
+     *     tableau, comme avant) et OBLIGATOIRE hors « all ».
+     * Ce que ce test garde intact : le payload n'est pas autrement remanié —
+     * aucun renommage, aucun tri, aucune valeur inventée.
+     */
     assert.deepEqual(client.received?.payload, {
       session_id: SESSION_UUID,
       expected_updated_at: "2026-07-22T10:00:00.000Z",
-      blocks: [{ id: `new-block:${CLIENT_UUID}`, category: "strength", title: null, color_key: "gray", exercises: [] }],
+      scope: "all",
+      blocks: [{ id: `new-block:${CLIENT_UUID}`, category: "strength", title: null, color_key: "gray", position: 0, exercises: [] }],
     });
   });
 
