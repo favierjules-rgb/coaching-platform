@@ -12,6 +12,7 @@ import { AdminSection, InfoRow, TagList } from "@/components/admin/AdminSection"
 import { RappelsEleveSection } from "@/components/admin/RappelsEleveSection";
 import { ProfilPhysiologiqueSection } from "@/components/admin/physio/ProfilPhysiologiqueSection";
 import { StudentPerformanceSection } from "@/components/admin/StudentPerformanceSection";
+import { StudentProfilePanel, StudentProfileTabs } from "@/components/admin/StudentProfileTabs";
 import { AssignContentToStudentModal } from "@/components/admin/AssignContentToStudentModal";
 import { CoachNutritionHistory } from "@/components/admin/CoachNutritionHistory";
 import { EditStudentModal } from "@/components/admin/EditStudentModal";
@@ -39,6 +40,7 @@ import {
   weightHistory as elveWeightHistory,
 } from "@/data/student";
 import { useAdminData } from "@/hooks/useAdminData";
+import { CATEGORIE_PAR_DEFAUT, type CategorieProfil } from "@/lib/student-profile-sections";
 import { computeCurrentWeekNumber } from "@/lib/training-schedule";
 import { ProgramStartDateField } from "@/components/admin/ProgramStartDateField";
 import { useContentAssignment } from "@/hooks/useContentAssignment";
@@ -96,6 +98,15 @@ export default function AdminStudentDetailPage() {
   const { state, updateStudent, addCoachNote, setAssignment, unlockDocumentForStudent, unlockAllDocumentsForStudent } =
     useAdminData();
   const { students, feedback, manualDocumentUnlocks } = state;
+  /*
+   * L'onglet ouvert.
+   *
+   * ⚠️ UN ÉTAT LOCAL, PAS UN PARAMÈTRE D'URL. `useSearchParams` impose une
+   * frontière `<Suspense>` en Next 16 (voir app/reinitialiser-mot-de-passe) :
+   * beaucoup de risque architectural pour une commodité, dans un chantier qui ne
+   * doit rien changer d'autre que le rangement.
+   */
+  const [ongletActif, setOngletActif] = useState<CategorieProfil>(CATEGORIE_PAR_DEFAUT);
   const [selectedMuscleGroup, setSelectedMuscleGroup] = useState<MuscleGroupFilter>("tous");
   const [statusActionError, setStatusActionError] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -710,573 +721,619 @@ export default function AdminStudentDetailPage() {
         )}
       </div>
 
-      <div className="mb-6">
-        <WeightEvolutionCard
-          profile={weightProfile}
-          history={weightHistory}
-          onUpdateWeight={handleUpdateWeight}
-          onUpdateTarget={handleUpdateTarget}
-        />
-      </div>
+      {/* ══════════════════════════════════════════════════════════════════
+          LE RANGEMENT DE LA FICHE — SIX ONGLETS, AUCUNE FONCTION DÉPLACÉE
+          ══════════════════════════════════════════════════════════════════
+          ⚠️ LE COMMENTAIRE PRÉCÉDENT DISAIT « LE PROFIL N'A PAS DE BARRE
+          D'ONGLETS », ET CE N'EST PLUS VRAI. Il datait du chantier
+          « Performances », dont le cahier des charges interdisait de déplacer
+          l'existant — d'où une simple pile qui s'allongeait à chaque ajout. Le
+          chantier de rangement lève cette interdiction : les sections sont
+          RANGÉES, jamais modifiées.
 
-      <div className="mb-6">
-        <ProgressPhotoGallerySection
-          studentId={student.id}
-          photos={photos}
-          defaultWeightKg={student.currentWeightKg}
-          onAdd={handleAddPhoto}
-          onDelete={handleDeletePhoto}
-        />
-      </div>
+          ⚠️ LES SIX PANNEAUX RESTENT MONTÉS. Les panneaux inactifs portent
+          `hidden` : ils sont masqués, pas démontés. Six composants enfants lisent
+          Supabase à leur montée (`RappelsEleveSection`, `CoachNutritionHistory`,
+          `ProfilPhysiologiqueSection`, `NutritionWeekSummaryCard`,
+          `StudentSubscriptionSection`, `ProgramStartDateField`) : un
+          `{actif && …}` déplacerait l'instant de ces requêtes vers l'ouverture de
+          l'onglet. Ce chantier ne range que l'affichage.
 
-      <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <AdminSection title="Informations personnelles">
-          <InfoRow label="Téléphone" value={formatTextOrEmpty(student.phone)} />
-          <InfoRow label="Âge" value={formatNumberOrEmpty(student.age, " ans")} />
-          <InfoRow label="Taille" value={formatNumberOrEmpty(student.heightCm, " cm")} />
-          <InfoRow label="Poids actuel" value={formatNumberOrEmpty(student.currentWeightKg, " kg")} />
-          <InfoRow label="Poids de départ" value={formatNumberOrEmpty(student.startWeightKg, " kg")} />
-          <InfoRow label="Objectif de poids" value={formatNumberOrEmpty(student.targetWeightKg, " kg")} />
-          <InfoRow label="Objectif principal" value={formatTextOrEmpty(student.goal)} />
-          <InfoRow label="Niveau sportif" value={formatTextOrEmpty(student.level)} />
-          <InfoRow
-            label="Fréquence d'entraînement"
-            value={formatNumberOrEmpty(student.trainingFrequencyPerWeek, "x / semaine")}
-          />
-          <InfoRow label="Lieu" value={formatTextOrEmpty(student.trainingLocation)} />
-          <InfoRow label="Dernière connexion" value={student.lastLoginAt ? formatDateTime(student.lastLoginAt) : "Jamais"} />
-        </AdminSection>
+          ⚠️ L'EN-TÊTE ET LA BARRE D'ACTIONS RESTENT AU-DESSUS DES ONGLETS.
+          Modifier, Attribuer un contenu, Ajouter une note, le questionnaire, la
+          pause, l'archivage, la suppression, Progression et Calendrier doivent
+          rester atteignables depuis n'importe quel onglet : les enfermer dans un
+          panneau les rendrait plus difficiles à trouver qu'avant le rangement.
 
-        <MeasurementsSection
-          measurements={measurements}
-          customMeasurements={customMeasurements}
-          measurementHistory={measurementHistory}
-          onSave={handleUpdateMeasurements}
-        />
-      </div>
+          ⚠️ AUCUN HOOK N'A BOUGÉ. Les 34 appels de hooks et tous les
+          gestionnaires restent en tête de ce composant, inchangés : aucune
+          requête Supabase n'est ajoutée, retirée ni déplacée. */}
+      <StudentProfileTabs selected={ongletActif} onSelect={setOngletActif} />
 
-      <div className="mb-6">
-        {isSupabaseStudent ? (
-          <StudentSubscriptionSection studentId={student.id} profile={student.paymentProfile} onUpdatePayment={handleUpdatePayment} />
-        ) : (
-          <PaymentSection studentId={student.id} profile={student.paymentProfile} onUpdate={handleUpdatePayment} />
-        )}
-      </div>
+      <div>
+        <StudentProfilePanel categorie="profil" selected={ongletActif}>
+          <div className="mb-6">
+          <AdminSection title="Informations personnelles">
+            <InfoRow label="Téléphone" value={formatTextOrEmpty(student.phone)} />
+            <InfoRow label="Âge" value={formatNumberOrEmpty(student.age, " ans")} />
+            <InfoRow label="Taille" value={formatNumberOrEmpty(student.heightCm, " cm")} />
+            <InfoRow label="Poids actuel" value={formatNumberOrEmpty(student.currentWeightKg, " kg")} />
+            <InfoRow label="Poids de départ" value={formatNumberOrEmpty(student.startWeightKg, " kg")} />
+            <InfoRow label="Objectif de poids" value={formatNumberOrEmpty(student.targetWeightKg, " kg")} />
+            <InfoRow label="Objectif principal" value={formatTextOrEmpty(student.goal)} />
+            <InfoRow label="Niveau sportif" value={formatTextOrEmpty(student.level)} />
+            <InfoRow
+              label="Fréquence d'entraînement"
+              value={formatNumberOrEmpty(student.trainingFrequencyPerWeek, "x / semaine")}
+            />
+            <InfoRow label="Lieu" value={formatTextOrEmpty(student.trainingLocation)} />
+            <InfoRow label="Dernière connexion" value={student.lastLoginAt ? formatDateTime(student.lastLoginAt) : "Jamais"} />
+          </AdminSection>
+          </div>
 
-      {onboardingProfile ? (
-        <>
-          <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <AdminSection title="Préférences alimentaires">
-              <div className="flex flex-col gap-4">
-                <InfoRow label="Régime particulier" value={formatTextOrEmpty(onboardingProfile.dietType)} />
-                <InfoRow
-                  label="Repas par jour"
-                  value={formatNumberOrEmpty(onboardingProfile.preferredMealCount ?? 0, "")}
-                />
-                <div>
-                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Aliments aimés</span>
-                  <TagList items={onboardingProfile.foodPreferences.liked} />
-                </div>
-                <div>
-                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Aliments à éviter</span>
-                  <TagList items={onboardingProfile.dislikedFoods} />
-                </div>
-                <div>
-                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Allergies</span>
-                  <TagList items={onboardingProfile.allergies} />
-                </div>
-                <div>
-                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Intolérances</span>
-                  <TagList items={onboardingProfile.intolerances} />
-                </div>
-                <InfoRow label="Horaires de repas" value={formatTextOrEmpty(onboardingProfile.mealTimingNotes)} />
-                <InfoRow label="Contraintes travail / sociales" value={formatTextOrEmpty(onboardingProfile.workScheduleNotes)} />
-                <InfoRow label="Notes nutrition" value={formatTextOrEmpty(onboardingProfile.nutritionNotes)} />
+          {onboardingProfile ? (
+            <>
+              <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+                <AdminSection title="Préférences alimentaires">
+                  <div className="flex flex-col gap-4">
+                    <InfoRow label="Régime particulier" value={formatTextOrEmpty(onboardingProfile.dietType)} />
+                    <InfoRow
+                      label="Repas par jour"
+                      value={formatNumberOrEmpty(onboardingProfile.preferredMealCount ?? 0, "")}
+                    />
+                    <div>
+                      <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Aliments aimés</span>
+                      <TagList items={onboardingProfile.foodPreferences.liked} />
+                    </div>
+                    <div>
+                      <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Aliments à éviter</span>
+                      <TagList items={onboardingProfile.dislikedFoods} />
+                    </div>
+                    <div>
+                      <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Allergies</span>
+                      <TagList items={onboardingProfile.allergies} />
+                    </div>
+                    <div>
+                      <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Intolérances</span>
+                      <TagList items={onboardingProfile.intolerances} />
+                    </div>
+                    <InfoRow label="Horaires de repas" value={formatTextOrEmpty(onboardingProfile.mealTimingNotes)} />
+                    <InfoRow label="Contraintes travail / sociales" value={formatTextOrEmpty(onboardingProfile.workScheduleNotes)} />
+                    <InfoRow label="Notes nutrition" value={formatTextOrEmpty(onboardingProfile.nutritionNotes)} />
+                  </div>
+                </AdminSection>
+
+                <AdminSection title="Préférences sportives">
+                  <div className="flex flex-col gap-4">
+                    <InfoRow label="Objectif principal" value={formatTextOrEmpty(onboardingProfile.mainGoal)} />
+                    <InfoRow label="Niveau sportif" value={formatTextOrEmpty(student.level)} />
+                    <InfoRow
+                      label="Fréquence d'entraînement"
+                      value={formatNumberOrEmpty(student.trainingFrequencyPerWeek, "x / semaine")}
+                    />
+                    <InfoRow label="Lieu" value={formatTextOrEmpty(student.trainingLocation)} />
+                    <InfoRow label="Niveau d'activité / NEAT" value={formatTextOrEmpty(onboardingProfile.neatLevel)} />
+                    <div>
+                      <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Sports pratiqués</span>
+                      <TagList items={onboardingProfile.sportsPracticed} />
+                    </div>
+                    <div>
+                      <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Autres activités</span>
+                      <TagList items={onboardingProfile.otherActivities} />
+                    </div>
+                    <div>
+                      <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Matériel disponible</span>
+                      <TagList items={onboardingProfile.availableEquipment} />
+                    </div>
+                    <div>
+                      <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Exercices préférés</span>
+                      <TagList items={onboardingProfile.favoriteExercises} />
+                    </div>
+                    <div>
+                      <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Exercices préférés à la salle</span>
+                      <TagList items={onboardingProfile.favoriteGymExercises} />
+                    </div>
+                    <div>
+                      <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Exercices à éviter</span>
+                      <TagList items={onboardingProfile.avoidedExercises} />
+                    </div>
+                  </div>
+                </AdminSection>
               </div>
-            </AdminSection>
 
-            <AdminSection title="Préférences sportives">
-              <div className="flex flex-col gap-4">
-                <InfoRow label="Objectif principal" value={formatTextOrEmpty(onboardingProfile.mainGoal)} />
-                <InfoRow label="Niveau sportif" value={formatTextOrEmpty(student.level)} />
-                <InfoRow
-                  label="Fréquence d'entraînement"
-                  value={formatNumberOrEmpty(student.trainingFrequencyPerWeek, "x / semaine")}
-                />
-                <InfoRow label="Lieu" value={formatTextOrEmpty(student.trainingLocation)} />
-                <InfoRow label="Niveau d'activité / NEAT" value={formatTextOrEmpty(onboardingProfile.neatLevel)} />
-                <div>
-                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Sports pratiqués</span>
-                  <TagList items={onboardingProfile.sportsPracticed} />
-                </div>
-                <div>
-                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Autres activités</span>
-                  <TagList items={onboardingProfile.otherActivities} />
-                </div>
-                <div>
-                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Matériel disponible</span>
-                  <TagList items={onboardingProfile.availableEquipment} />
-                </div>
-                <div>
-                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Exercices préférés</span>
-                  <TagList items={onboardingProfile.favoriteExercises} />
-                </div>
-                <div>
-                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Exercices préférés à la salle</span>
-                  <TagList items={onboardingProfile.favoriteGymExercises} />
-                </div>
-                <div>
-                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Exercices à éviter</span>
-                  <TagList items={onboardingProfile.avoidedExercises} />
+              <div className="mb-6">
+                <AdminSection title="Objectifs">
+                  <div className="flex flex-col gap-4">
+                    <InfoRow label="Objectif principal" value={formatTextOrEmpty(onboardingProfile.mainGoal)} />
+                    <div>
+                      <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Objectifs secondaires</span>
+                      <TagList items={onboardingProfile.secondaryGoals} />
+                    </div>
+                    <InfoRow label="Date cible" value={formatTextOrEmpty(onboardingProfile.targetDate ?? "")} />
+                    <InfoRow label="Délai souhaité" value={formatTextOrEmpty(onboardingProfile.targetTimeframe)} />
+                    <div>
+                      <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Indicateurs suivis</span>
+                      <TagList items={onboardingProfile.trackedIndicators} />
+                    </div>
+                  </div>
+                </AdminSection>
+              </div>
+
+              <div className="mb-6 rounded-card border border-warning/40 bg-warning/10 p-6">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle size={18} className="mt-0.5 flex-shrink-0 text-warning" />
+                  <div className="flex-1">
+                    <h2 className="mb-3 font-heading text-sm font-bold uppercase text-warning">
+                      Blessures et contraintes
+                    </h2>
+                    <div className="flex flex-col gap-3 text-sm text-foreground/90">
+                      <p>
+                        <span className="mr-2 text-xs uppercase tracking-wide text-warning/80">Blessures :</span>
+                        {formatTextOrEmpty(onboardingProfile.onboardingInjuries)}
+                      </p>
+                      <div>
+                        <span className="mb-2 block text-xs uppercase tracking-wide text-warning/80">Exercices à éviter</span>
+                        <TagList items={onboardingProfile.avoidedExercises} />
+                      </div>
+                      <p>
+                        <span className="mr-2 text-xs uppercase tracking-wide text-warning/80">Notes santé :</span>
+                        {formatTextOrEmpty(onboardingProfile.healthNotes)}
+                      </p>
+                      <p>
+                        <span className="mr-2 text-xs uppercase tracking-wide text-warning/80">Traitements :</span>
+                        {formatTextOrEmpty(onboardingProfile.medicalTreatments)}
+                      </p>
+                      <p>
+                        <span className="mr-2 text-xs uppercase tracking-wide text-warning/80">Médicaments :</span>
+                        {formatTextOrEmpty(onboardingProfile.medications)}
+                      </p>
+                      <p>
+                        <span className="mr-2 text-xs uppercase tracking-wide text-warning/80">Notes coach :</span>
+                        {formatTextOrEmpty(onboardingProfile.trainingNotes)}
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </AdminSection>
+            </>
+          ) : (
+            <>
+              <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+                <AdminSection title="Préférences alimentaires">
+                  <div className="flex flex-col gap-4">
+                    <InfoRow label="Régime" value={formatTextOrEmpty(student.foodPreferences.diet)} />
+                    <div>
+                      <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Aimés</span>
+                      <TagList items={student.foodPreferences.liked} />
+                    </div>
+                    <div>
+                      <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Non aimés</span>
+                      <TagList items={student.foodPreferences.disliked} />
+                    </div>
+                    <div>
+                      <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Intolérances</span>
+                      <TagList items={student.foodPreferences.intolerances} />
+                    </div>
+                  </div>
+                </AdminSection>
+
+                <AdminSection title="Préférences sportives">
+                  <div className="flex flex-col gap-4">
+                    <div>
+                      <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Sports</span>
+                      <TagList items={student.sportPreferences.sports} />
+                    </div>
+                    <div>
+                      <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Matériel</span>
+                      <TagList items={student.sportPreferences.equipment} />
+                    </div>
+                    <div>
+                      <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Exercices préférés</span>
+                      <TagList items={student.sportPreferences.preferredExercises} />
+                    </div>
+                    <div>
+                      <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Exercices à éviter</span>
+                      <TagList items={student.sportPreferences.exercisesToAvoid} />
+                    </div>
+                  </div>
+                </AdminSection>
+              </div>
+
+              <div className="mb-6 rounded-card border border-warning/40 bg-warning/10 p-6">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle size={18} className="mt-0.5 flex-shrink-0 text-warning" />
+                  <div>
+                    <h2 className="mb-1 font-heading text-sm font-bold uppercase text-warning">
+                      Blessures et contraintes
+                    </h2>
+                    <p className="text-sm text-foreground/90">
+                      {student.injuries.trim() ? student.injuries : "Aucune information renseignée."}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </StudentProfilePanel>
+
+        <StudentProfilePanel categorie="corps" selected={ongletActif}>
+          <div className="mb-6">
+            <WeightEvolutionCard
+              profile={weightProfile}
+              history={weightHistory}
+              onUpdateWeight={handleUpdateWeight}
+              onUpdateTarget={handleUpdateTarget}
+            />
           </div>
 
           <div className="mb-6">
-            <AdminSection title="Objectifs">
-              <div className="flex flex-col gap-4">
-                <InfoRow label="Objectif principal" value={formatTextOrEmpty(onboardingProfile.mainGoal)} />
-                <div>
-                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Objectifs secondaires</span>
-                  <TagList items={onboardingProfile.secondaryGoals} />
-                </div>
-                <InfoRow label="Date cible" value={formatTextOrEmpty(onboardingProfile.targetDate ?? "")} />
-                <InfoRow label="Délai souhaité" value={formatTextOrEmpty(onboardingProfile.targetTimeframe)} />
-                <div>
-                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Indicateurs suivis</span>
-                  <TagList items={onboardingProfile.trackedIndicators} />
-                </div>
-              </div>
-            </AdminSection>
+            <ProgressPhotoGallerySection
+              studentId={student.id}
+              photos={photos}
+              defaultWeightKg={student.currentWeightKg}
+              onAdd={handleAddPhoto}
+              onDelete={handleDeletePhoto}
+            />
           </div>
 
-          <div className="mb-6 rounded-card border border-warning/40 bg-warning/10 p-6">
-            <div className="flex items-start gap-3">
-              <AlertTriangle size={18} className="mt-0.5 flex-shrink-0 text-warning" />
-              <div className="flex-1">
-                <h2 className="mb-3 font-heading text-sm font-bold uppercase text-warning">
-                  Blessures et contraintes
-                </h2>
-                <div className="flex flex-col gap-3 text-sm text-foreground/90">
-                  <p>
-                    <span className="mr-2 text-xs uppercase tracking-wide text-warning/80">Blessures :</span>
-                    {formatTextOrEmpty(onboardingProfile.onboardingInjuries)}
-                  </p>
-                  <div>
-                    <span className="mb-2 block text-xs uppercase tracking-wide text-warning/80">Exercices à éviter</span>
-                    <TagList items={onboardingProfile.avoidedExercises} />
-                  </div>
-                  <p>
-                    <span className="mr-2 text-xs uppercase tracking-wide text-warning/80">Notes santé :</span>
-                    {formatTextOrEmpty(onboardingProfile.healthNotes)}
-                  </p>
-                  <p>
-                    <span className="mr-2 text-xs uppercase tracking-wide text-warning/80">Traitements :</span>
-                    {formatTextOrEmpty(onboardingProfile.medicalTreatments)}
-                  </p>
-                  <p>
-                    <span className="mr-2 text-xs uppercase tracking-wide text-warning/80">Médicaments :</span>
-                    {formatTextOrEmpty(onboardingProfile.medications)}
-                  </p>
-                  <p>
-                    <span className="mr-2 text-xs uppercase tracking-wide text-warning/80">Notes coach :</span>
-                    {formatTextOrEmpty(onboardingProfile.trainingNotes)}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <AdminSection title="Préférences alimentaires">
-              <div className="flex flex-col gap-4">
-                <InfoRow label="Régime" value={formatTextOrEmpty(student.foodPreferences.diet)} />
-                <div>
-                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Aimés</span>
-                  <TagList items={student.foodPreferences.liked} />
-                </div>
-                <div>
-                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Non aimés</span>
-                  <TagList items={student.foodPreferences.disliked} />
-                </div>
-                <div>
-                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Intolérances</span>
-                  <TagList items={student.foodPreferences.intolerances} />
-                </div>
-              </div>
-            </AdminSection>
-
-            <AdminSection title="Préférences sportives">
-              <div className="flex flex-col gap-4">
-                <div>
-                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Sports</span>
-                  <TagList items={student.sportPreferences.sports} />
-                </div>
-                <div>
-                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Matériel</span>
-                  <TagList items={student.sportPreferences.equipment} />
-                </div>
-                <div>
-                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Exercices préférés</span>
-                  <TagList items={student.sportPreferences.preferredExercises} />
-                </div>
-                <div>
-                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">Exercices à éviter</span>
-                  <TagList items={student.sportPreferences.exercisesToAvoid} />
-                </div>
-              </div>
-            </AdminSection>
-          </div>
-
-          <div className="mb-6 rounded-card border border-warning/40 bg-warning/10 p-6">
-            <div className="flex items-start gap-3">
-              <AlertTriangle size={18} className="mt-0.5 flex-shrink-0 text-warning" />
-              <div>
-                <h2 className="mb-1 font-heading text-sm font-bold uppercase text-warning">
-                  Blessures et contraintes
-                </h2>
-                <p className="text-sm text-foreground/90">
-                  {student.injuries.trim() ? student.injuries : "Aucune information renseignée."}
-                </p>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
-
-      {/*
-        ⚠️ RÉSERVÉ À UN ÉLÈVE RÉEL, comme les rappels. La fiche physiologique lit
-        et écrit `student_profiles` par `student_id` : sur une fiche de
-        démonstration il n'y a aucune ligne à lire, et une modale qui échouerait
-        à chaque enregistrement ferait croire à une panne.
-      */}
-      {isSupabaseStudent && (
-        <div className="mb-6">
-          <ProfilPhysiologiqueSection studentId={student.id} />
-        </div>
-      )}
-
-      <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <AdminSection title="Programme actif">
-          {assignedProgram ? (
-            <div>
-              <Link href={`/admin/programmes/${assignedProgram.id}`} className="text-sm text-primary hover:underline">
-                {assignedProgram.name}
-              </Link>
-              <p className="mt-1 text-xs text-muted-foreground">{assignedProgram.goal}</p>
-              <button
-                type="button"
-                onClick={() => handleSetAssignment(student.id, "programme", assignedProgram.id, false)}
-                className="mt-2 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary"
-              >
-                Retirer
-              </button>
-              <ProgramStartDateField
-                studentId={student.id}
-                programId={assignedProgram.id}
-                actif={isSupabaseStudent}
-                onChargee={setDebutProgrammeActif}
-              />
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">Aucun programme attribué.</p>
-          )}
-        </AdminSection>
-        <AdminSection title="Plan nutrition actif">
-          {assignedPlan ? (
-            <div>
-              <Link href={`/admin/nutrition/${assignedPlan.id}`} className="text-sm text-primary hover:underline">
-                {assignedPlan.name}
-              </Link>
-              <p className="mt-1 text-xs text-muted-foreground">{assignedPlan.caloriesPerDay} kcal/jour</p>
-              <button
-                type="button"
-                onClick={() => handleSetAssignment(student.id, "nutrition", assignedPlan.id, false)}
-                className="mt-2 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary"
-              >
-                Retirer
-              </button>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">Aucun plan attribué.</p>
-          )}
-        </AdminSection>
-        {/*
-          ⚠️ RÉSERVÉ À UN ÉLÈVE RÉEL. Les rappels ciblent un `student_id` en
-          base ; sur une fiche de démonstration il n'y a rien à cibler, et
-          afficher deux interrupteurs inopérants inviterait à cliquer dans le
-          vide.
-        */}
-        {isSupabaseStudent && (
-          <AdminSection title="Notifications">
-            <RappelsEleveSection studentId={student.id} />
-          </AdminSection>
-        )}
-        <AdminSection
-          title="Documents"
-          action={
-            lockedDocuments.length > 0 ? (
-              <button
-                type="button"
-                onClick={() => void handleUnlockAllDocuments()}
-                className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-primary px-3 py-1.5 text-[11px] uppercase tracking-widest text-primary hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-              >
-                <Unlock size={12} />
-                Tout débloquer
-              </button>
-            ) : undefined
-          }
-        >
-          <div className="flex flex-col gap-3">
-            <div>
-              <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
-                Disponibles ({availableDocuments.length})
-              </span>
-              {availableDocuments.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Aucun document disponible.</p>
-              ) : (
-                <ul className="flex flex-col gap-1.5">
-                  {availableDocuments.map(({ document }) => (
-                    <li key={document.id} className="flex items-center justify-between gap-2 text-sm text-foreground">
-                      {document.title}
-                      {isSupabaseStudent && (
-                        <button
-                          type="button"
-                          onClick={() => handleSetAssignment(student.id, "document", document.id, false)}
-                          className="flex-shrink-0 rounded-control px-1 py-0.5 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                        >
-                          Retirer
-                        </button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-            {lockedDocuments.length > 0 && (
-              <div>
-                <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
-                  Verrouillés ({lockedDocuments.length})
-                </span>
-                <ul className="flex flex-col gap-2">
-                  {lockedDocuments.map(({ document, availability }) => (
-                    <li key={document.id} className="flex items-center justify-between gap-2 text-sm text-muted-foreground">
-                      <span className="flex items-center gap-1.5">
-                        <Lock size={12} />
-                        {document.title}
-                        {availability.unlockDate && ` · dès le ${formatDate(availability.unlockDate)}`}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => void handleUnlockDocument(document.id)}
-                        className="flex-shrink-0 rounded-control px-1 py-0.5 text-[11px] uppercase tracking-widest text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                      >
-                        Débloquer
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        </AdminSection>
-      </div>
-
-      {isSupabaseStudent && assignedPlan && (
-        <div className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
-          <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
-            Suivi nutrition
-          </h2>
-          <NutritionWeekSummaryCard
-            studentId={student.id}
-            planId={assignedPlan.id}
-            target={{
-              calories: assignedPlan.caloriesPerDay,
-              protein: assignedPlan.protein,
-              carbs: assignedPlan.carbs,
-              fat: assignedPlan.fat,
-              weeklyTargetCalories: assignedPlan.weeklyTargetCalories,
-            }}
+          <div className="mb-6">
+          <MeasurementsSection
+            measurements={measurements}
+            customMeasurements={customMeasurements}
+            measurementHistory={measurementHistory}
+            onSave={handleUpdateMeasurements}
           />
-        </div>
-      )}
-
-      {/* NUTRITION → HISTORIQUE (A5.8).
-          ⚠️ CE BLOC N'EST PAS CONDITIONNÉ AU PLAN ASSIGNÉ, contrairement au
-          « Suivi nutrition » ci-dessus. Un élève peut avoir mangé — et noté ce
-          qu'il a mangé — sans qu'aucun plan ne lui soit assigné, ou après qu'un
-          plan lui a été retiré. Exiger `assignedPlan` ferait disparaître un
-          historique qui existe bel et bien. */}
-      {isSupabaseStudent && (
-        <div className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
-          <h2 className="mb-1 font-heading text-lg font-bold uppercase text-foreground">
-            Historique alimentaire
-          </h2>
-          <p className="mb-4 text-xs text-muted-foreground">
-            Ce que l&apos;élève a réellement consommé, semaine par semaine. Lecture seule.
-          </p>
-          <CoachNutritionHistory
-            studentId={student.id}
-            nomEleve={fullName(student)}
-            aujourdHui={aujourdHui}
-          />
-        </div>
-      )}
-
-      <div className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
-        <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
-          Retours récents
-        </h2>
-        {studentFeedback.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Aucun retour pour le moment.</p>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {studentFeedback.slice(0, 5).map((f) => (
-              <div key={f.id} className="rounded-panel border border-border p-4">
-                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-sm font-bold text-foreground">
-                    {feedbackTypeLabels[f.type]} · {f.refLabel}
-                  </span>
-                  <StatusBadge label={feedbackStatusLabels[f.status]} tone={feedbackStatusTone(f.status)} />
-                </div>
-                <p className="text-xs text-muted-foreground">{formatDate(f.date)}</p>
-                {f.comment && <p className="mt-2 text-sm text-foreground">{f.comment}</p>}
-              </div>
-            ))}
           </div>
-        )}
-      </div>
 
-      {isSupabaseStudent && (
-        <div className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
-          <h2 className="mb-4 flex items-center gap-2 font-heading text-lg font-bold uppercase text-foreground">
-            <History size={18} className="text-primary" />
-            Historique récent
-          </h2>
-          <ActivityFeed events={supabaseDetail.activityEvents} emptyLabel="Aucune activité récente pour cet élève." />
-        </div>
-      )}
-
-      <div className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
-        <h2 className="mb-4 flex items-center gap-2 font-heading text-lg font-bold uppercase text-foreground">
-          <Activity size={18} className="text-primary" />
-          Charge d&apos;entraînement de l&apos;élève
-        </h2>
-        {!assignedProgram || !currentWeekMetrics ? (
-          <p className="text-sm text-muted-foreground">Aucun programme attribué — pas de données de charge à afficher.</p>
-        ) : (
-          <div className="flex flex-col gap-6">
-            <MuscleGroupFilterSelect value={selectedMuscleGroup} onChange={setSelectedMuscleGroup} />
-            <UntaggedExercisesAlert show={currentWeekMetrics.hasUntaggedExercises} />
-            <AnalysisFilterLabel selected={selectedMuscleGroup} />
-
-            <div>
-              <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-muted-foreground">
-                Semaine {currentWeekNumber} (actuelle)
-              </h3>
-              <TrainingStatCards
-                totalSets={currentWeekMetrics.totalSets}
-                totalVolume={currentWeekMetrics.totalVolume}
-                totalTonnageKg={currentWeekMetrics.totalTonnageKg}
-              />
+          {/*
+            ⚠️ RÉSERVÉ À UN ÉLÈVE RÉEL, comme les rappels. La fiche physiologique lit
+            et écrit `student_profiles` par `student_id` : sur une fiche de
+            démonstration il n'y a aucune ligne à lire, et une modale qui échouerait
+            à chaque enregistrement ferait croire à une panne.
+          */}
+          {isSupabaseStudent && (
+            <div className="mb-6">
+              <ProfilPhysiologiqueSection studentId={student.id} />
             </div>
+          )}
+        </StudentProfilePanel>
 
-            {selectedMuscleGroup === "tous" ? (
+        <StudentProfilePanel categorie="entrainement" selected={ongletActif}>
+          <div className="mb-6">
+          <AdminSection title="Programme actif">
+            {assignedProgram ? (
               <div>
-                <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-muted-foreground">
-                  Séries par groupe musculaire (semaine actuelle)
-                </h3>
-                <MuscleGroupBars breakdown={currentWeekMetrics.muscleGroupBreakdown} />
+                <Link href={`/admin/programmes/${assignedProgram.id}`} className="text-sm text-primary hover:underline">
+                  {assignedProgram.name}
+                </Link>
+                <p className="mt-1 text-xs text-muted-foreground">{assignedProgram.goal}</p>
+                <button
+                  type="button"
+                  onClick={() => handleSetAssignment(student.id, "programme", assignedProgram.id, false)}
+                  className="mt-2 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary"
+                >
+                  Retirer
+                </button>
+                <ProgramStartDateField
+                  studentId={student.id}
+                  programId={assignedProgram.id}
+                  actif={isSupabaseStudent}
+                  onChargee={setDebutProgrammeActif}
+                />
               </div>
             ) : (
-              <FilteredExerciseList exercises={currentWeekMetrics.exercises} />
+              <p className="text-sm text-muted-foreground">Aucun programme attribué.</p>
             )}
+          </AdminSection>
+          </div>
 
-            <div>
-              <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-muted-foreground">
-                Dernière séance réalisée
-              </h3>
-              {lastCompletedSession ? (
-                <p className="text-sm text-foreground">
-                  {lastCompletedSession.refLabel} · {formatDate(lastCompletedSession.date)}
-                </p>
-              ) : (
-                <p className="text-sm text-muted-foreground">Aucun retour d&apos;entraînement enregistré pour le moment.</p>
-              )}
-            </div>
+          <div className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
+            <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
+              Retours récents
+            </h2>
+            {studentFeedback.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Aucun retour pour le moment.</p>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {studentFeedback.slice(0, 5).map((f) => (
+                  <div key={f.id} className="rounded-panel border border-border p-4">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-sm font-bold text-foreground">
+                        {feedbackTypeLabels[f.type]} · {f.refLabel}
+                      </span>
+                      <StatusBadge label={feedbackStatusLabels[f.status]} tone={feedbackStatusTone(f.status)} />
+                    </div>
+                    <p className="text-xs text-muted-foreground">{formatDate(f.date)}</p>
+                    {f.comment && <p className="mt-2 text-sm text-foreground">{f.comment}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
-            {plannedVsActual?.actual && (
-              <div>
-                <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-muted-foreground">
-                  Prévu vs réalisé — {lastCompletedSession?.refLabel}
-                </h3>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div className="rounded-panel border border-border p-4">
-                    <span className="mb-2 block text-[11px] uppercase tracking-widest text-muted-foreground">Prévu</span>
-                    <TrainingStatCards
-                      totalSets={plannedVsActual.planned.totalSets}
-                      totalVolume={plannedVsActual.planned.totalVolume}
-                      totalTonnageKg={plannedVsActual.planned.totalTonnageKg}
-                    />
-                  </div>
-                  <div className="rounded-panel border border-primary/40 p-4">
-                    <span className="mb-2 block text-[11px] uppercase tracking-widest text-primary">Réalisé</span>
-                    <TrainingStatCards
-                      totalSets={plannedVsActual.actual.totalSets}
-                      totalVolume={plannedVsActual.actual.totalVolume}
-                      totalTonnageKg={plannedVsActual.actual.totalTonnageKg}
-                    />
-                  </div>
+          <div className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
+            <h2 className="mb-4 flex items-center gap-2 font-heading text-lg font-bold uppercase text-foreground">
+              <Activity size={18} className="text-primary" />
+              Charge d&apos;entraînement de l&apos;élève
+            </h2>
+            {!assignedProgram || !currentWeekMetrics ? (
+              <p className="text-sm text-muted-foreground">Aucun programme attribué — pas de données de charge à afficher.</p>
+            ) : (
+              <div className="flex flex-col gap-6">
+                <MuscleGroupFilterSelect value={selectedMuscleGroup} onChange={setSelectedMuscleGroup} />
+                <UntaggedExercisesAlert show={currentWeekMetrics.hasUntaggedExercises} />
+                <AnalysisFilterLabel selected={selectedMuscleGroup} />
+
+                <div>
+                  <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                    Semaine {currentWeekNumber} (actuelle)
+                  </h3>
+                  <TrainingStatCards
+                    totalSets={currentWeekMetrics.totalSets}
+                    totalVolume={currentWeekMetrics.totalVolume}
+                    totalTonnageKg={currentWeekMetrics.totalTonnageKg}
+                  />
                 </div>
-                {plannedVsActual.tonnageDeltaKg !== null && (
-                  <p className="mt-3 text-sm text-foreground">
-                    Tonnage réalisé : {formatTonnage(plannedVsActual.actual.totalTonnageKg)} / prévu :{" "}
-                    {formatTonnage(plannedVsActual.planned.totalTonnageKg)}{" "}
-                    <span className={plannedVsActual.tonnageDeltaKg >= 0 ? "text-success" : "text-destructive"}>
-                      ({plannedVsActual.tonnageDeltaKg >= 0 ? "+" : ""}
-                      {Math.round(plannedVsActual.tonnageDeltaKg).toLocaleString("fr-FR")} kg)
-                    </span>
-                  </p>
+
+                {selectedMuscleGroup === "tous" ? (
+                  <div>
+                    <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                      Séries par groupe musculaire (semaine actuelle)
+                    </h3>
+                    <MuscleGroupBars breakdown={currentWeekMetrics.muscleGroupBreakdown} />
+                  </div>
+                ) : (
+                  <FilteredExerciseList exercises={currentWeekMetrics.exercises} />
+                )}
+
+                <div>
+                  <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                    Dernière séance réalisée
+                  </h3>
+                  {lastCompletedSession ? (
+                    <p className="text-sm text-foreground">
+                      {lastCompletedSession.refLabel} · {formatDate(lastCompletedSession.date)}
+                    </p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Aucun retour d&apos;entraînement enregistré pour le moment.</p>
+                  )}
+                </div>
+
+                {plannedVsActual?.actual && (
+                  <div>
+                    <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                      Prévu vs réalisé — {lastCompletedSession?.refLabel}
+                    </h3>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="rounded-panel border border-border p-4">
+                        <span className="mb-2 block text-[11px] uppercase tracking-widest text-muted-foreground">Prévu</span>
+                        <TrainingStatCards
+                          totalSets={plannedVsActual.planned.totalSets}
+                          totalVolume={plannedVsActual.planned.totalVolume}
+                          totalTonnageKg={plannedVsActual.planned.totalTonnageKg}
+                        />
+                      </div>
+                      <div className="rounded-panel border border-primary/40 p-4">
+                        <span className="mb-2 block text-[11px] uppercase tracking-widest text-primary">Réalisé</span>
+                        <TrainingStatCards
+                          totalSets={plannedVsActual.actual.totalSets}
+                          totalVolume={plannedVsActual.actual.totalVolume}
+                          totalTonnageKg={plannedVsActual.actual.totalTonnageKg}
+                        />
+                      </div>
+                    </div>
+                    {plannedVsActual.tonnageDeltaKg !== null && (
+                      <p className="mt-3 text-sm text-foreground">
+                        Tonnage réalisé : {formatTonnage(plannedVsActual.actual.totalTonnageKg)} / prévu :{" "}
+                        {formatTonnage(plannedVsActual.planned.totalTonnageKg)}{" "}
+                        <span className={plannedVsActual.tonnageDeltaKg >= 0 ? "text-success" : "text-destructive"}>
+                          ({plannedVsActual.tonnageDeltaKg >= 0 ? "+" : ""}
+                          {Math.round(plannedVsActual.tonnageDeltaKg).toLocaleString("fr-FR")} kg)
+                        </span>
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             )}
           </div>
-        )}
-      </div>
 
-      {/* ⚠️ SECTION AJOUTÉE, RIEN N'EST DÉPLACÉ. Le profil n'a pas de barre
-          d'onglets : le transformer en onglets aurait déplacé tout le contenu
-          existant, ce que le cahier des charges interdit. « Performances »
-          s'ajoute donc à la pile, comme « Charge d'entraînement » au-dessus.
-          Les données sont celles DÉJÀ chargées par useSupabaseStudentDetail —
-          aucune requête supplémentaire. */}
-      <div className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
-        <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">Performances</h2>
-        <StudentPerformanceSection feedback={studentFeedback} studentId={student.id} />
-      </div>
-
-      <div className="rounded-card border border-border bg-card p-6 shadow-soft">
-        <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
-          Notes privées du coach
-        </h2>
-        {student.coachNotes.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Aucune note pour le moment.</p>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {student.coachNotes
-              .slice()
-              .reverse()
-              .map((note) => (
-                <div key={note.id} className="border-l-2 border-primary bg-background/40 p-4">
-                  <p className="text-sm text-foreground">{note.text}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">{formatDateTime(note.createdAt)}</p>
-                </div>
-              ))}
+          <div className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
+            <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">Performances</h2>
+            <StudentPerformanceSection feedback={studentFeedback} studentId={student.id} />
           </div>
-        )}
+        </StudentProfilePanel>
+
+        <StudentProfilePanel categorie="nutrition" selected={ongletActif}>
+          <div className="mb-6">
+          <AdminSection title="Plan nutrition actif">
+            {assignedPlan ? (
+              <div>
+                <Link href={`/admin/nutrition/${assignedPlan.id}`} className="text-sm text-primary hover:underline">
+                  {assignedPlan.name}
+                </Link>
+                <p className="mt-1 text-xs text-muted-foreground">{assignedPlan.caloriesPerDay} kcal/jour</p>
+                <button
+                  type="button"
+                  onClick={() => handleSetAssignment(student.id, "nutrition", assignedPlan.id, false)}
+                  className="mt-2 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary"
+                >
+                  Retirer
+                </button>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">Aucun plan attribué.</p>
+            )}
+          </AdminSection>
+          </div>
+
+          {isSupabaseStudent && assignedPlan && (
+            <div className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
+              <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
+                Suivi nutrition
+              </h2>
+              <NutritionWeekSummaryCard
+                studentId={student.id}
+                planId={assignedPlan.id}
+                target={{
+                  calories: assignedPlan.caloriesPerDay,
+                  protein: assignedPlan.protein,
+                  carbs: assignedPlan.carbs,
+                  fat: assignedPlan.fat,
+                  weeklyTargetCalories: assignedPlan.weeklyTargetCalories,
+                }}
+              />
+            </div>
+          )}
+
+          {/* NUTRITION → HISTORIQUE (A5.8).
+              ⚠️ CE BLOC N'EST PAS CONDITIONNÉ AU PLAN ASSIGNÉ, contrairement au
+              « Suivi nutrition » ci-dessus. Un élève peut avoir mangé — et noté ce
+              qu'il a mangé — sans qu'aucun plan ne lui soit assigné, ou après qu'un
+              plan lui a été retiré. Exiger `assignedPlan` ferait disparaître un
+              historique qui existe bel et bien. */}
+          {isSupabaseStudent && (
+            <div className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
+              <h2 className="mb-1 font-heading text-lg font-bold uppercase text-foreground">
+                Historique alimentaire
+              </h2>
+              <p className="mb-4 text-xs text-muted-foreground">
+                Ce que l&apos;élève a réellement consommé, semaine par semaine. Lecture seule.
+              </p>
+              <CoachNutritionHistory
+                studentId={student.id}
+                nomEleve={fullName(student)}
+                aujourdHui={aujourdHui}
+              />
+            </div>
+          )}
+        </StudentProfilePanel>
+
+        <StudentProfilePanel categorie="administration" selected={ongletActif}>
+          <div className="mb-6">
+            {isSupabaseStudent ? (
+              <StudentSubscriptionSection studentId={student.id} profile={student.paymentProfile} onUpdatePayment={handleUpdatePayment} />
+            ) : (
+              <PaymentSection studentId={student.id} profile={student.paymentProfile} onUpdate={handleUpdatePayment} />
+            )}
+          </div>
+
+          {/*
+            ⚠️ RÉSERVÉ À UN ÉLÈVE RÉEL. Les rappels ciblent un `student_id` en
+            base ; sur une fiche de démonstration il n'y a rien à cibler, et
+            afficher deux interrupteurs inopérants inviterait à cliquer dans le
+            vide.
+          */}
+          {isSupabaseStudent && (
+            <AdminSection title="Notifications">
+              <RappelsEleveSection studentId={student.id} />
+            </AdminSection>
+          )}
+
+          <div className="mb-6">
+          <AdminSection
+            title="Documents"
+            action={
+              lockedDocuments.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => void handleUnlockAllDocuments()}
+                  className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-primary px-3 py-1.5 text-[11px] uppercase tracking-widest text-primary hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                >
+                  <Unlock size={12} />
+                  Tout débloquer
+                </button>
+              ) : undefined
+            }
+          >
+            <div className="flex flex-col gap-3">
+              <div>
+                <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                  Disponibles ({availableDocuments.length})
+                </span>
+                {availableDocuments.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Aucun document disponible.</p>
+                ) : (
+                  <ul className="flex flex-col gap-1.5">
+                    {availableDocuments.map(({ document }) => (
+                      <li key={document.id} className="flex items-center justify-between gap-2 text-sm text-foreground">
+                        {document.title}
+                        {isSupabaseStudent && (
+                          <button
+                            type="button"
+                            onClick={() => handleSetAssignment(student.id, "document", document.id, false)}
+                            className="flex-shrink-0 rounded-control px-1 py-0.5 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                          >
+                            Retirer
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              {lockedDocuments.length > 0 && (
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                    Verrouillés ({lockedDocuments.length})
+                  </span>
+                  <ul className="flex flex-col gap-2">
+                    {lockedDocuments.map(({ document, availability }) => (
+                      <li key={document.id} className="flex items-center justify-between gap-2 text-sm text-muted-foreground">
+                        <span className="flex items-center gap-1.5">
+                          <Lock size={12} />
+                          {document.title}
+                          {availability.unlockDate && ` · dès le ${formatDate(availability.unlockDate)}`}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => void handleUnlockDocument(document.id)}
+                          className="flex-shrink-0 rounded-control px-1 py-0.5 text-[11px] uppercase tracking-widest text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                        >
+                          Débloquer
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </AdminSection>
+          </div>
+        </StudentProfilePanel>
+
+        <StudentProfilePanel categorie="notes" selected={ongletActif}>
+          {isSupabaseStudent && (
+            <div className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
+              <h2 className="mb-4 flex items-center gap-2 font-heading text-lg font-bold uppercase text-foreground">
+                <History size={18} className="text-primary" />
+                Historique récent
+              </h2>
+              <ActivityFeed events={supabaseDetail.activityEvents} emptyLabel="Aucune activité récente pour cet élève." />
+            </div>
+          )}
+
+          <div className="rounded-card border border-border bg-card p-6 shadow-soft">
+            <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
+              Notes privées du coach
+            </h2>
+            {student.coachNotes.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Aucune note pour le moment.</p>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {student.coachNotes
+                  .slice()
+                  .reverse()
+                  .map((note) => (
+                    <div key={note.id} className="border-l-2 border-primary bg-background/40 p-4">
+                      <p className="text-sm text-foreground">{note.text}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{formatDateTime(note.createdAt)}</p>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+        </StudentProfilePanel>
       </div>
     </div>
   );

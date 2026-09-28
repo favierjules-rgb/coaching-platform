@@ -560,11 +560,34 @@ await (async () => {
     }
   });
 
-  await test("24. le reste du profil élève n'est PAS modifié", () => {
-    // La section est AJOUTÉE : aucune barre d'onglets n'a été introduite, et
-    // les sections existantes gardent leurs titres.
+  await test("24. les sections du profil élève sont toutes RANGÉES, aucune n'est perdue", () => {
+    /*
+     * ════════════════════════════════════════════════════════════════════════
+     * POURQUOI CE TEST N'INTERDIT PLUS LES ONGLETS
+     * ════════════════════════════════════════════════════════════════════════
+     * Il vérifiait `!/role="tab(list)?"/` — « aucun système d'onglets introduit ».
+     * Ce n'était PAS une règle de conception : c'était la contrainte du chantier
+     * « Performances », dont le cahier des charges interdisait de DÉPLACER
+     * l'existant. La section avait donc été ajoutée en bas d'une pile qui
+     * s'allongeait, et l'interdiction gardait cette promesse-là.
+     *
+     * Le chantier « rangement ergonomique du profil élève » lève explicitement
+     * cette contrainte : les 21 sections sont RANGÉES en six onglets (Profil,
+     * Suivi corporel, Entraînement, Nutrition, Administration, Notes &
+     * historique), et aucune n'est modifiée. L'interdiction est donc devenue
+     * fausse — la garder aurait rendu ce test rouge pour une raison périmée.
+     *
+     * ⚠️ ELLE N'EST PAS SIMPLEMENT SUPPRIMÉE, ELLE EST REMPLACÉE PAR PLUS FORT.
+     * Ce que l'interdiction protégeait réellement, c'était « rien n'a disparu ».
+     * On le vérifie maintenant DIRECTEMENT, et on ajoute ce qu'elle ne voyait
+     * pas : que les six onglets existent, que « Performances » est rangée dans
+     * « Entraînement », et qu'elle n'y est pas dupliquée. La couverture complète
+     * du rangement (aucun onglet vide, ARIA, panneaux montés, actions hors
+     * onglets) vit dans scripts/tests/profil-eleve-onglets.mts.
+     */
     const profil = sansCommentaires(sourceProfil);
-    assert.ok(!/role="tab(list)?"/.test(profil), "aucun système d'onglets introduit");
+
+    // 1. Les sections existantes gardent leurs titres — inchangé.
     for (const titre of [
       "Charge d&apos;entraînement de l&apos;élève",
       "Notes privées du coach",
@@ -573,7 +596,35 @@ await (async () => {
     ]) {
       assert.ok(profil.includes(titre), `la section « ${titre} » est intacte`);
     }
-    assert.ok(profil.includes(">Performances<"), "la nouvelle section est titrée « Performances »");
+    assert.ok(profil.includes(">Performances<"), "la section est titrée « Performances »");
+
+    // 2. Le rangement est bien un rangement : six onglets, pas moins.
+    for (const categorie of ["profil", "corps", "entrainement", "nutrition", "administration", "notes"]) {
+      assert.ok(
+        profil.includes(`<StudentProfilePanel categorie="${categorie}"`),
+        `l'onglet « ${categorie} » a disparu de la fiche`,
+      );
+    }
+
+    // 3. « Performances » est rangée dans « Entraînement », et une seule fois.
+    assert.equal(
+      profil.split("<StudentPerformanceSection").length - 1,
+      1,
+      "la section Performances est rendue deux fois : le rangement l'a dédoublée",
+    );
+    const entrainement = profil.indexOf('<StudentProfilePanel categorie="entrainement"');
+    const nutrition = profil.indexOf('<StudentProfilePanel categorie="nutrition"');
+    const performances = profil.indexOf("<StudentPerformanceSection");
+    assert.ok(
+      entrainement < performances && performances < nutrition,
+      "« Performances » doit être rangée dans l'onglet « Entraînement »",
+    );
+
+    // 4. Et elle lit toujours les MÊMES données, sans requête supplémentaire.
+    assert.ok(
+      profil.includes("<StudentPerformanceSection feedback={studentFeedback} studentId={student.id} />"),
+      "les props de la section Performances ont changé : ranger ne doit rien recâbler",
+    );
   });
 
   /* ══════════════════════════════════════════════════════════════════════
