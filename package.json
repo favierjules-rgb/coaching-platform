@@ -152,7 +152,13 @@
     "test:correctifs-pre-merge": "NODE_OPTIONS=\"--conditions=react-server --no-warnings\" npx tsx scripts/tests/correctifs-privileges-et-rappels.mts",
     "test:rappels-automatiques": "NODE_OPTIONS=\"--conditions=react-server --no-warnings\" npx tsx --experimental-test-module-mocks scripts/tests/rappels-automatiques.mts",
     "test:semaine-individuelle": "TZ=Europe/Paris npx tsx scripts/tests/semaine-individuelle.mts",
-    "test:persistance-date-debut": "npx tsx scripts/tests/persistance-date-debut.mts"
+    "test:persistance-date-debut": "npx tsx scripts/tests/persistance-date-debut.mts",
+    "test:physiologie-zones": "npx tsx scripts/tests/physiologie-zones.mts",
+    "test:profil-physiologique": "npx tsx scripts/tests/profil-physiologique.mts",
+    "test:cardio-builder": "TZ=Europe/Paris npx tsx scripts/tests/cardio-builder.mts",
+    "test:cardio-ui-render": "npx tsx scripts/tests/cardio-ui-render.mts",
+    "test:calendrier-cardio": "TZ=Europe/Paris npx tsx scripts/tests/calendrier-cardio.mts",
+    "test:cardio-mixte": "npx tsx scripts/tests/cardio-mixte.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",
@@ -180,6 +186,7 @@
     "eslint-config-next": "16.2.10",
     "playwright-core": "^1.62.1",
     "tailwindcss": "^4",
+    "tsx": "4.23.15",
     "typescript": "^5"
   },
   "overrides": {

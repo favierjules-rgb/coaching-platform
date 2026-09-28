@@ -181,6 +181,10 @@ function cardioBlockToTrainingBlock(block: AdminCardioBlock, position: number): 
     colorKey: DEFAULT_BLOCK_COLOR_KEY,
     cardioType: block.cardioType,
     machineType: block.machineType,
+    // Sport et séries traversent la conversion : les perdre ici viderait la
+    // colonne `sport` à chaque enregistrement passant par le chemin legacy.
+    sport: block.sport,
+    rounds: block.rounds,
     prescriptions: block.segments.slice().sort((a, b) => a.order - b.order),
   };
 }

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { CardioBlockRow } from "@/components/admin/ProgramBuilder";
+import { CardioBlockRow } from "@/components/admin/cardio/CardioBlockRow";
 import { Field } from "@/components/admin/AdminFormFields";
 import type { AdminCardioBlock, CardioTrainingBlock } from "@/types";
 

@@ -3,13 +3,14 @@
 import { useState, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { Activity, AlertTriangle, ArrowLeft, Archive, History, Lock, Pause, Play, Trash2, TrendingUp, Unlock } from "lucide-react";
+import { Activity, AlertTriangle, ArrowLeft, Archive, CalendarDays, History, Lock, Pause, Play, Trash2, TrendingUp, Unlock } from "lucide-react";
 
 import { ActivityFeed } from "@/components/admin/ActivityFeed";
 import { AddCoachNoteModal } from "@/components/admin/AddCoachNoteModal";
 import { AdminOnboardingDetailModal } from "@/components/admin/AdminOnboardingDetailModal";
 import { AdminSection, InfoRow, TagList } from "@/components/admin/AdminSection";
 import { RappelsEleveSection } from "@/components/admin/RappelsEleveSection";
+import { ProfilPhysiologiqueSection } from "@/components/admin/physio/ProfilPhysiologiqueSection";
 import { StudentPerformanceSection } from "@/components/admin/StudentPerformanceSection";
 import { AssignContentToStudentModal } from "@/components/admin/AssignContentToStudentModal";
 import { CoachNutritionHistory } from "@/components/admin/CoachNutritionHistory";
@@ -622,6 +623,15 @@ export default function AdminStudentDetailPage() {
               Progression
             </Link>
           )}
+          {isSupabaseStudent && (
+            <Link
+              href={`/admin/eleves/${student.id}/calendrier`}
+              className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-primary px-4 py-2 text-xs uppercase tracking-widest text-primary hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            >
+              <CalendarDays size={14} />
+              Calendrier
+            </Link>
+          )}
           <EditStudentModal student={student} onSave={applyStudentUpdate} />
           {guardedNutrition.refusal && (
             <p className="mb-4 w-full rounded-panel border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive" role="alert">
@@ -935,6 +945,18 @@ export default function AdminStudentDetailPage() {
             </div>
           </div>
         </>
+      )}
+
+      {/*
+        ⚠️ RÉSERVÉ À UN ÉLÈVE RÉEL, comme les rappels. La fiche physiologique lit
+        et écrit `student_profiles` par `student_id` : sur une fiche de
+        démonstration il n'y a aucune ligne à lire, et une modale qui échouerait
+        à chaque enregistrement ferait croire à une panne.
+      */}
+      {isSupabaseStudent && (
+        <div className="mb-6">
+          <ProfilPhysiologiqueSection studentId={student.id} />
+        </div>
       )}
 
       <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-3">

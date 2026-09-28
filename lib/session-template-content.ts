@@ -114,6 +114,8 @@ export function cardioBlocksFromBlocks(blocks: readonly TrainingBlock[]): AdminC
             title: block.title ?? "",
             cardioType: block.cardioType,
             machineType: block.machineType,
+            sport: block.sport,
+            rounds: block.rounds,
             segments: block.prescriptions,
           } satisfies AdminCardioBlock,
         ]

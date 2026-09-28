@@ -36,6 +36,14 @@ type TypedSupabaseClient = SupabaseClient<Database>;
  */
 export interface SessionPatch {
   day?: string;
+  /**
+   * Date réelle de la séance (`workout_sessions.scheduled_date`).
+   *
+   * ⚠️ ABSENTE DU PATCH = DATE INCHANGÉE, jamais effacée. La RPC ne touche la
+   * colonne que si la clé est présente : un enregistrement de blocs ne peut pas
+   * faire disparaître la date d'une séance déjà déplacée.
+   */
+  scheduledDate?: string | null;
   name?: string;
   muscleGroup?: string;
   durationMinutes?: number | null;
@@ -44,12 +52,47 @@ export interface SessionPatch {
   bannerUrl?: string | null;
 }
 
+/**
+ * PORTÉE D'UNE SAUVEGARDE — la garantie d'isolation entre catégories.
+ *
+ * ════════════════════════════════════════════════════════════════════════
+ * POURQUOI ELLE EXISTE
+ * ════════════════════════════════════════════════════════════════════════
+ * `save_training_session_blocks` remplaçait TOUJOURS la séance entière :
+ * mesuré sur PostgreSQL 16, un payload ne portant que le bloc cardio faisait
+ * passer `workout_exercises` de 1 à 0. Un enregistrement cardio avait donc le
+ * pouvoir IMPLICITE de supprimer la musculation, et seule la bonne tenue du
+ * client l'en empêchait.
+ *
+ * Désormais la portée est DÉCLARÉE et le serveur l'applique :
+ *   · `"all"` (défaut) — remplacement complet. C'est ce que fait le builder de
+ *     séance, qui détient bien la séance entière, et rien ne change pour lui ;
+ *   · `"cardio"` — seuls les blocs cardio sont créés, modifiés et supprimés ;
+ *     la RPC REFUSE tout bloc `strength` et tout UUID qui n'est pas déjà un bloc
+ *     cardio de la séance, ne construit aucune liste d'exercices à supprimer, et
+ *     borne ses suppressions à `block_type = 'cardio'` ;
+ *   · `"strength"` — l'exact symétrique.
+ *
+ * ⚠️ HORS `"all"`, LA POSITION DE CHAQUE BLOC EST OBLIGATOIRE. Le payload ne
+ * porte qu'une catégorie : l'ordre complet de la séance n'en est pas déductible,
+ * et le déduire de l'index du tableau écraserait l'entrelacement
+ * musculation / cardio / musculation.
+ *
+ * ⚠️ RÉORDONNER À TRAVERS LES CATÉGORIES RESTE UN ENREGISTREMENT `"all"`. Glisser
+ * un bloc cardio entre deux blocs de musculation change la position des deux
+ * catégories : c'est la seule opération qui a légitimement besoin d'écrire les
+ * deux, et elle doit le dire.
+ */
+export type SaveScope = "all" | "cardio" | "strength";
+
 export interface SaveTrainingSessionBlocksInput {
   sessionId: string;
   /** Version attendue de la séance (optimistic lock). Obligatoire. */
   expectedUpdatedAt: string;
   /** Liste ORDONNÉE des blocs ; la position est dérivée de l'ordre du tableau. */
   blocks: TrainingBlock[];
+  /** Portée de l'écriture — voir `SaveScope`. Absente = `"all"`. */
+  scope?: SaveScope;
   /** Métadonnées de séance à écrire atomiquement (update d'une séance existante). */
   sessionPatch?: SessionPatch;
 }
@@ -66,6 +109,8 @@ export interface SaveTrainingSessionBlocksResult {
    * sert de résumé/vérification, pas de source à caster en TrainingBlock[].
    */
   blocks: unknown[];
+  /** Date réelle de la séance après écriture (NULL = date calculée). */
+  scheduledDate: string | null;
   /** Correspondance identifiants temporaires → UUID serveur réels. */
   idMapping: { blocks: Record<string, string>; exercises: Record<string, string> };
   warnings: { detachedExerciseFeedbackCount: number };
@@ -78,6 +123,14 @@ function serializeBlock(block: TrainingBlock): Record<string, unknown> {
     category: block.category,
     title: block.title,
     color_key: block.colorKey,
+    /*
+     * ⚠️ TOUJOURS ENVOYÉE, LUE SEULEMENT HORS PORTÉE « all ». En portée « all »
+     * la RPC dérive la position de l'index du tableau (comportement historique
+     * inchangé) et ignore cette clé ; hors « all » elle l'EXIGE. L'envoyer
+     * systématiquement évite au client de savoir laquelle des deux règles
+     * s'applique — une condition de plus qui se désynchroniserait.
+     */
+    position: block.position,
   };
   if (block.category === "strength") {
     return {
@@ -103,6 +156,14 @@ function serializeBlock(block: TrainingBlock): Record<string, unknown> {
     ...base,
     cardio_type: block.cardioType,
     machine_type: block.machineType ?? null,
+    /*
+     * ⚠️ `sport` ET `rounds` PARTENT MÊME AVANT LA MIGRATION, et c'est sans
+     * danger : la RPC actuelle ne lit pas ces clés du payload, elle les ignore
+     * simplement. Les retirer conditionnellement demanderait à l'application de
+     * connaître l'état des migrations — un drapeau de version qui se périme.
+     */
+    sport: block.sport ?? null,
+    rounds: block.rounds ?? null,
     prescriptions: block.prescriptions.map((seg) => ({
       segment_type: seg.segmentType,
       title: seg.title,
@@ -123,6 +184,8 @@ function serializeBlock(block: TrainingBlock): Record<string, unknown> {
       target_cadence: seg.targetCadence ?? null,
       intensity_min: seg.intensityMin ?? null,
       intensity_max: seg.intensityMax ?? null,
+      target_zone: seg.targetZone ?? null,
+      target_power_percentage: seg.targetPowerPercentage ?? null,
       surface: seg.surface ?? null,
       terrain: seg.terrain ?? null,
       equipment_type: seg.equipmentType ?? null,
@@ -142,12 +205,28 @@ export async function saveTrainingSessionBlocks(
   input: SaveTrainingSessionBlocksInput,
 ): Promise<SaveTrainingSessionBlocksResult> {
   const { sessionId, expectedUpdatedAt, blocks, sessionPatch } = input;
+  const scope: SaveScope = input.scope ?? "all";
 
   if (!isUuid(sessionId)) {
     throw new Error(`saveTrainingSessionBlocks : sessionId invalide "${sessionId}".`);
   }
   if (!expectedUpdatedAt) {
     throw new Error("saveTrainingSessionBlocks : expectedUpdatedAt est obligatoire (optimistic lock).");
+  }
+  /*
+   * ⚠️ LE REFUS EST DOUBLE, ET CE N'EST PAS DE LA REDONDANCE INUTILE. La RPC
+   * refuse (`SCOPE_VIOLATION`) et c'est ELLE qui garantit ; ce contrôle-ci
+   * échoue AVANT le réseau, avec un message qui nomme le bloc fautif — utile
+   * quand un appelant se trompe de portée, et sans lequel le diagnostic serait
+   * un code d'erreur PostgreSQL.
+   */
+  if (scope !== "all") {
+    const horsPortee = blocks.find((block) => block.category !== scope);
+    if (horsPortee) {
+      throw new Error(
+        `saveTrainingSessionBlocks : portée "${scope}" mais le payload contient un bloc "${horsPortee.category}" (${horsPortee.id}).`,
+      );
+    }
   }
 
   // Validation stricte des ids + unicité des ids temporaires, côté client,
@@ -174,6 +253,7 @@ export async function saveTrainingSessionBlocks(
   const payload: Record<string, unknown> = {
     session_id: sessionId,
     expected_updated_at: expectedUpdatedAt,
+    scope,
     blocks: blocks.map(serializeBlock),
   };
   if (sessionPatch) {
@@ -186,6 +266,11 @@ export async function saveTrainingSessionBlocks(
       coach_notes: sessionPatch.coachNotes,
       banner_url: sessionPatch.bannerUrl,
     };
+    // `undefined` est retiré par la sérialisation JSON : la clé n'existe donc
+    // dans le payload QUE si l'appelant l'a explicitement fournie.
+    if (sessionPatch.scheduledDate !== undefined) {
+      (payload.session_patch as Record<string, unknown>).scheduled_date = sessionPatch.scheduledDate;
+    }
   }
 
   // UN SEUL appel réseau de mutation. La RPC n'est pas déclarée dans les types
@@ -231,6 +316,7 @@ function parseRpcResult(data: unknown): SaveTrainingSessionBlocksResult {
     updatedAt: String(r.updated_at),
     sessionType,
     blocks: Array.isArray(r.blocks) ? r.blocks : [],
+    scheduledDate: typeof r.scheduled_date === "string" ? r.scheduled_date : null,
     idMapping: {
       blocks: (idMapping.blocks ?? {}) as Record<string, string>,
       exercises: (idMapping.exercises ?? {}) as Record<string, string>,
@@ -293,12 +379,15 @@ export function buildCanonicalSessionBlocksInput(args: {
   expectedUpdatedAt: string;
   blocks: TrainingBlock[];
   sessionPatch?: SessionPatch;
+  /** Portée de l'écriture — voir `SaveScope`. Absente = `"all"`. */
+  scope?: SaveScope;
 }): SaveTrainingSessionBlocksInput {
   return {
     sessionId: args.sessionId,
     expectedUpdatedAt: args.expectedUpdatedAt,
     blocks: args.blocks.map(normalizeBlockIds),
     sessionPatch: args.sessionPatch,
+    scope: args.scope,
   };
 }
 

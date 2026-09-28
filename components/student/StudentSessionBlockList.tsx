@@ -1,6 +1,7 @@
 import { Fragment, type ReactNode } from "react";
 
 import { StudentCardioBlockCard } from "@/components/student/StudentCardioBlockCard";
+import type { ReferencesAthlete, ReglagesZones } from "@/lib/zones-physiologiques";
 import { StudentStrengthBlockCard } from "@/components/student/StudentStrengthBlockCard";
 import type { StudentSessionBlockView } from "@/lib/student-session-blocks";
 import type { Exercise } from "@/types";
@@ -14,11 +15,16 @@ import type { Exercise } from "@/types";
  * un index global stable pour la numérotation.
  */
 export function StudentSessionBlockList({
+  references,
+  reglagesZones,
   blocks,
   renderStrengthExercise,
   renderCardioFooter,
 }: {
   blocks: StudentSessionBlockView[];
+  /** Références physiologiques de l'élève — voir StudentCardioBlockCard. Absentes, rien n'est converti. */
+  references?: ReferencesAthlete;
+  reglagesZones?: ReglagesZones;
   renderStrengthExercise: (exercise: Exercise, globalIndex: number) => ReactNode;
   /** Rendu OPTIONNEL sous chaque bloc cardio (retour élève bloc par bloc) — visuellement rattaché à la carte du bloc. */
   renderCardioFooter?: (block: Extract<StudentSessionBlockView, { kind: "cardio" }>, blockIndex: number) => ReactNode;
@@ -45,7 +51,7 @@ export function StudentSessionBlockList({
           </StudentStrengthBlockCard>
         ) : (
           <div key={block.id} className="flex flex-col gap-3">
-            <StudentCardioBlockCard block={block} />
+            <StudentCardioBlockCard block={block} references={references} reglagesZones={reglagesZones} />
             {renderCardioFooter?.(block, blockIndex)}
           </div>
         ),

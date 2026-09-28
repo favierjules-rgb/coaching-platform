@@ -1,4 +1,6 @@
-import { formatDistanceMeters, formatDurationSeconds } from "@/lib/cardio";
+import { cardioSegmentTypeLabels, formatDistanceMeters, formatDurationSeconds } from "@/lib/cardio";
+import { cibleDuSegment } from "@/lib/cardio-zones";
+import type { ReferencesAthlete, ReglagesZones } from "@/lib/zones-physiologiques";
 import { formatRpeFr } from "@/lib/rpe";
 import type { AdminExerciseFeedbackEntry, ExerciseFeedbackPayload } from "@/types";
 import type { StudentSessionBlockView } from "@/lib/student-session-blocks";
@@ -236,12 +238,56 @@ export function readCardioRealizedSummary(
 
 export const CARDIO_BLOCK_RESULT_VERSION = 2 as const;
 
+/**
+ * Une consigne de segment, TELLE QU'ELLE A ÉTÉ LUE PAR L'ATHLÈTE.
+ *
+ * ⚠️ C'EST LA PHOTOGRAPHIE DEMANDÉE, ET ELLE EST PRISE À LA COMPLÉTION. La
+ * prescription reste DYNAMIQUE : « 105 % VMA » suivra la VMA de l'athlète, et une
+ * séance de mars se relira avec la VMA de juin. Ce qui ne doit PAS bouger, c'est
+ * ce qui a été demandé le jour où l'athlète l'a fait — et c'est enregistré ici,
+ * dans le retour de séance, pas dans `training_prescriptions`.
+ *
+ * ⚠️ AUCUNE COLONNE NOUVELLE. Ce champ voyage dans le jsonb déjà existant
+ * (`exercise_feedback.comment`, format des retours cardio par bloc) : le
+ * mécanisme d'historique est celui qui existait, on ne lui ajoute que ce qui
+ * manquait.
+ */
+export interface ConsignePrescrite {
+  /** Ce que l'athlète devait faire : « Échauffement », « 800 m »… */
+  titre: string;
+  /** La consigne, en français : « Z4 — Seuil », « 105 % VMA », « RPE 7 ». */
+  consigne: string;
+  /** Les valeurs concrètes affichées ce jour-là : « 9.35 - 10.12 km/h », « 175 - 182 bpm ». */
+  valeurs: string[];
+}
+
 export interface CardioBlockPrescribedSnapshot {
   durationSeconds: number | null;
   distanceMeters: number | null;
   elevationGainMeters: number | null;
   /** Répétitions prescrites (somme des repeat_group), null si aucun intervalle. */
   repetitions: number | null;
+  /**
+   * Les consignes lues par l'athlète au moment de l'enregistrement.
+   *
+   * Absent sur les retours antérieurs à ce chantier, et sur un retour envoyé
+   * sans références physiologiques chargées (hors ligne, profil vide) : dans ce
+   * cas rien n'est inventé, le champ n'existe simplement pas.
+   */
+  consignes?: ConsignePrescrite[];
+  /**
+   * Les références de l'athlète utilisées pour ces valeurs. Sans elles, une
+   * consigne archivée « 9.35 - 10.12 km/h » ne serait pas relisible : on ne
+   * saurait pas de quelle VMA elle venait.
+   */
+  references?: {
+    vmaCourseKmh?: number;
+    vmaNatationKmh?: number;
+    ftpWatts?: number;
+    pmaWatts?: number;
+    fcMax?: number;
+    fcRepos?: number;
+  };
 }
 
 export interface CardioBlockRealizedInput {
@@ -272,13 +318,47 @@ export interface CardioBlockResult extends CardioBlockRealizedInput {
  * diverger, et chaque bloc (même homonyme) a son propre objet, dérivé de SES
  * segments uniquement.
  */
-export function cardioBlockPrescribedSnapshot(block: StudentSessionBlockView): CardioBlockPrescribedSnapshot {
+export function cardioBlockPrescribedSnapshot(
+  block: StudentSessionBlockView,
+  /**
+   * Références de l'athlète, quand elles sont chargées. Fournies, les consignes
+   * résolues sont archivées avec le retour ; absentes, elles ne le sont pas —
+   * jamais remplacées par une valeur par défaut.
+   */
+  references?: ReferencesAthlete,
+  reglagesZones?: ReglagesZones,
+): CardioBlockPrescribedSnapshot {
   const totals = cardioPrescribedTotals([block]);
-  return {
+  const base: CardioBlockPrescribedSnapshot = {
     durationSeconds: totals.durationSeconds,
     distanceMeters: totals.distanceMeters,
     elevationGainMeters: totals.elevationGainMeters,
     repetitions: prescribedRepetitions(block),
+  };
+  if (!references || block.kind !== "cardio") return base;
+
+  const consignes: ConsignePrescrite[] = block.segments.map((segment) => {
+    const cible = cibleDuSegment(segment, block.sport, references, reglagesZones);
+    return {
+      titre: segment.title || cardioSegmentTypeLabels[segment.segmentType],
+      consigne: cible.consigne,
+      valeurs: [...cible.valeurs],
+    };
+  });
+  const exploitable = (valeur: { valeur: number | null } | undefined) =>
+    valeur && valeur.valeur !== null && valeur.valeur > 0 ? valeur.valeur : undefined;
+
+  return {
+    ...base,
+    consignes,
+    references: {
+      vmaCourseKmh: exploitable(references.vmaCourseKmh),
+      vmaNatationKmh: exploitable(references.vmaNatationKmh),
+      ftpWatts: exploitable(references.ftpWatts),
+      pmaWatts: exploitable(references.pmaWatts),
+      fcMax: exploitable(references.fcMax),
+      fcRepos: exploitable(references.fcRepos),
+    },
   };
 }
 
