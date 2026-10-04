@@ -144,7 +144,16 @@ export default function AdminProgramsPage() {
   );
 
   const supabaseExerciseLibrary = useSupabaseExerciseLibrary();
-  const isLibrarySupabaseActive = supabaseExerciseLibrary.items.length > 0;
+  /*
+   * ⚠️ LA BANQUE D'EXERCICES AVAIT ÉTÉ OUBLIÉE PAR LE CORRECTIF DU DESSUS.
+   * Les programmes et les élèves de cette page suivent la configuration depuis
+   * le lot « chargement mock » ; cet onglet-ci, lui, est resté sur
+   * `items.length > 0`. Il porte donc exactement les deux mêmes défauts :
+   * l'onglet « Banque d'exercices » affichait les exercices de démonstration
+   * pendant la requête, et les trois gestionnaires ci-dessous (créer,
+   * modifier, archiver) écrivaient alors dans localStorage.
+   */
+  const isLibrarySupabaseActive = supabaseActive;
   const exerciseLibrary = isLibrarySupabaseActive ? supabaseExerciseLibrary.items : state.exerciseLibrary;
 
   async function handleCreateExercise(data: Omit<ExerciseLibraryItem, "id" | "createdAt" | "updatedAt">) {
@@ -228,7 +237,15 @@ export default function AdminProgramsPage() {
    * sauterait le `useMemo` ci-dessus au premier rendu puis l'exécuterait au
    * second : React interdit qu'un hook change de position entre deux rendus.
    */
-  if (supabaseActive && (supabasePrograms.loading || supabaseStudents.loading)) {
+  /*
+   * ⚠️ LA BANQUE D'EXERCICES ENTRE DANS LA GARDE. L'onglet « Banque » affiche
+   * `exerciseLibrary` et ses trois boutons écrivent : la laisser hors de la
+   * garde rouvrait la fenêtre exacte que cette garde ferme pour les programmes.
+   */
+  if (
+    supabaseActive &&
+    (supabasePrograms.loading || supabaseStudents.loading || supabaseExerciseLibrary.loading)
+  ) {
     return <Loader libelle="Chargement…" variante="ligne" />;
   }
 

@@ -29,6 +29,8 @@ import { useSupabaseNutritionPlans } from "@/hooks/useSupabaseNutritionPlans";
 import { useSupabaseProgramsSummary } from "@/hooks/useSupabaseProgramsSummary";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { useSupabaseAdminFeedback } from "@/hooks/useSupabaseAdminFeedback";
+import { isSupabaseConfigured } from "@/lib/supabase/env";
+import { Loader } from "@/components/ui/Loader";
 import { formatAmountCents } from "@/lib/stripe/status";
 import {
   fullName,
@@ -84,26 +86,67 @@ export default function AdminDashboardPage() {
   const { state } = useAdminData();
   const { documents } = state;
 
-  // Élèves, retours entraînement, programmes, plans alimentaires et
-  // documents : priorité Supabase dès qu'il y a au moins une ligne réelle,
-  // sinon repli sur les données mock — même pattern que /admin/eleves,
-  // /admin/retours, /admin/programmes, /admin/nutrition et /admin/documents.
+  /*
+   * ════════════════════════════════════════════════════════════════════
+   * LA SOURCE DÉPEND DE LA CONFIGURATION, PLUS DU NOMBRE DE LIGNES
+   * ════════════════════════════════════════════════════════════════════
+   * Les CINQ listes de ce tableau de bord choisissaient leur source sur le
+   * nombre de lignes chargées. Au premier rendu elles sont toutes vides :
+   * le dashboard annonçait donc les compteurs des fixtures de
+   * `data/admin.ts` — 7 élèves `@mail.mock`, 3 programmes, 7 retours — à
+   * chaque ouverture, avant de se corriger. Et un compteur réellement à
+   * zéro restait sur la valeur mock, définitivement.
+   *
+   * ⚠️ « SUPABASE EST-IL CONFIGURÉ » EST LA BONNE QUESTION. Après
+   * chargement, une liste vide veut dire « aucune donnée », pas « montre-moi
+   * des faux ». Même contrat que /admin/eleves, /admin/programmes,
+   * /admin/nutrition, /admin/documents et /admin/retours.
+   *
+   * ⚠️ LES TROIS DRAPEAUX « (exemple) » SUIVENT LA SOURCE, et c'est leur
+   * sens exact : l'étiquette ne doit dire « exemple » que lorsque ce qui est
+   * compté EST un exemple. Les laisser sur le nombre de lignes afficherait
+   * « Programmes actifs (exemple) » sur des programmes bien réels d'un coach
+   * qui n'en a aucun d'actif.
+   *
+   * Le repli mock survit pour le seul cas où il a un sens : Supabase non
+   * configuré — développement local, démonstration.
+   */
+  const supabaseActive = isSupabaseConfigured();
   const supabaseStudents = useSupabaseStudents();
-  const students = supabaseStudents.students.length > 0 ? supabaseStudents.students : state.students;
+  const students = supabaseActive ? supabaseStudents.students : state.students;
   const supabaseFeedback = useSupabaseAdminFeedback();
-  const feedback = supabaseFeedback.feedback.length > 0 ? supabaseFeedback.feedback : state.feedback;
+  const feedback = supabaseActive ? supabaseFeedback.feedback : state.feedback;
   const supabasePrograms = useSupabaseProgramsSummary();
-  const programs = supabasePrograms.programs.length > 0 ? supabasePrograms.programs : state.programs;
-  const programsAreReal = supabasePrograms.programs.length > 0;
+  const programs = supabaseActive ? supabasePrograms.programs : state.programs;
+  const programsAreReal = supabaseActive;
   const supabaseNutritionPlans = useSupabaseNutritionPlans();
-  const nutritionPlans = supabaseNutritionPlans.plans.length > 0 ? supabaseNutritionPlans.plans : state.nutritionPlans;
-  const nutritionPlansAreReal = supabaseNutritionPlans.plans.length > 0;
+  const nutritionPlans = supabaseActive ? supabaseNutritionPlans.plans : state.nutritionPlans;
+  const nutritionPlansAreReal = supabaseActive;
   const supabaseDocuments = useSupabaseDocuments();
-  const realDocuments = supabaseDocuments.documents.length > 0 ? supabaseDocuments.documents : documents;
-  const documentsAreReal = supabaseDocuments.documents.length > 0;
+  const realDocuments = supabaseActive ? supabaseDocuments.documents : documents;
+  const documentsAreReal = supabaseActive;
   const supabaseAppointments = useSupabaseAppointments();
   const supabaseActivity = useSupabaseActivity();
   const supabaseBilling = useSupabaseAdminBilling();
+
+  /*
+   * ⚠️ AUCUN COMPTEUR N'EST AFFICHÉ AVANT D'ÊTRE VRAI. Les cinq listes
+   * alimentent des chiffres (« 26 élèves », « 16 programmes ») : les rendre
+   * à zéro puis les corriger donnerait l'impression d'une base vide. La
+   * garde est APRÈS tous les hooks (règle des hooks), et ne couvre QUE les
+   * cinq listes qui pilotent la source — les rendez-vous, l'activité et la
+   * facturation ont leurs propres états de chargement, inchangés.
+   */
+  if (
+    supabaseActive &&
+    (supabaseStudents.loading ||
+      supabaseFeedback.loading ||
+      supabasePrograms.loading ||
+      supabaseNutritionPlans.loading ||
+      supabaseDocuments.loading)
+  ) {
+    return <Loader libelle="Chargement du tableau de bord…" variante="ligne" />;
+  }
 
   const activeStudents = students.filter((s) => s.status === "actif");
   const pausedStudents = students.filter((s) => s.status === "pause");

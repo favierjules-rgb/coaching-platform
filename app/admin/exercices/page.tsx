@@ -4,10 +4,12 @@ import { useMemo, useState } from "react";
 import { Library } from "lucide-react";
 
 import { ExerciseLibraryManager } from "@/components/admin/ExerciseLibraryManager";
+import { Loader } from "@/components/ui/Loader";
 import { useAdminData } from "@/hooks/useAdminData";
 import { useSupabaseExerciseLibrary } from "@/hooks/useSupabaseExerciseLibrary";
 import { exerciseCategoryLabels, exerciseEquipmentLabels, exerciseLevelLabels } from "@/lib/admin";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { isSupabaseConfigured } from "@/lib/supabase/env";
 import {
   createExerciseLibraryItem,
   deleteExerciseLibraryItem,
@@ -21,8 +23,23 @@ type StatusFilter = "tous" | ExerciseLibraryStatus;
 
 export default function AdminExercicesPage() {
   const { state, createLibraryExercise, updateLibraryExercise } = useAdminData();
+  /*
+   * ⚠️ PAGE TROUVÉE PAR LA RECHERCHE EXHAUSTIVE, PAS PAR L'AUDIT. Elle portait
+   * exactement le même défaut que les six autres : `items.length > 0`
+   * décidait si Supabase était actif. Pendant la requête initiale, la
+   * bibliothèque affichait les exercices de démonstration de `data/admin.ts`
+   * avec la mention « (démo) » — et les boutons Créer / Modifier / Archiver
+   * écrivaient alors dans localStorage.
+   *
+   * ⚠️ `isLibrarySupabaseActive` COMMANDE AUSSI LES ÉCRITURES (plus bas) :
+   * l'aligner sur la configuration ferme le même faux succès que sur les
+   * autres pages.
+   *
+   * Le repli mock survit pour le seul cas où il a un sens : Supabase non
+   * configuré.
+   */
+  const isLibrarySupabaseActive = isSupabaseConfigured();
   const supabaseExerciseLibrary = useSupabaseExerciseLibrary();
-  const isLibrarySupabaseActive = supabaseExerciseLibrary.items.length > 0;
   const exerciseLibrary = isLibrarySupabaseActive ? supabaseExerciseLibrary.items : state.exerciseLibrary;
 
   const [muscleFilter, setMuscleFilter] = useState<MuscleGroup | "tous">("tous");
@@ -89,6 +106,15 @@ export default function AdminExercicesPage() {
         return;
       }
     }
+  }
+
+  /*
+   * ⚠️ RIEN N'EST RENDU PENDANT LE CHARGEMENT. La garde est APRÈS tous les
+   * hooks (règle des hooks) et après les gestionnaires, comme sur les autres
+   * pages admin.
+   */
+  if (isLibrarySupabaseActive && supabaseExerciseLibrary.loading) {
+    return <Loader libelle="Chargement de la bibliothèque…" variante="ligne" />;
   }
 
   return (

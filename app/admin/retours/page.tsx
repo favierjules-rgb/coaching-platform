@@ -9,9 +9,11 @@ import { StatusBadge, feedbackStatusTone } from "@/components/admin/StatusBadge"
 import { useAdminData } from "@/hooks/useAdminData";
 import { useSupabaseAdminFeedback } from "@/hooks/useSupabaseAdminFeedback";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
+import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { feedbackStatusLabels, formatDate, fullName, matchesTextSearch } from "@/lib/admin";
 import { formatRpeFr } from "@/lib/rpe";
 import type { AdminStudentFeedback, FeedbackStatus, FeedbackType } from "@/types";
+import { Loader } from "@/components/ui/Loader";
 
 /**
  * L'HISTORIQUE D'UN ÉLÈVE QUI N'EN A PAS — un seul tableau, partagé.
@@ -43,16 +45,41 @@ const typeFilters: { value: TypeFilter; label: string }[] = [
 export default function AdminFeedbackPage() {
   const { state, setFeedbackStatus, addCoachReply } = useAdminData();
 
-  // Supabase a la priorité dès qu'il a au moins un retour réel ; sinon on
-  // retombe sur la liste mock (localStorage) — même logique que
-  // /admin/eleves (voir hooks/useSupabaseStudents.ts). Les élèves viennent
-  // de la même source que les retours affichés, pour que les noms/emails se
-  // résolvent correctement des deux côtés.
+  /*
+   * ════════════════════════════════════════════════════════════════════
+   * LA SOURCE DÉPEND DE LA CONFIGURATION, PLUS DU NOMBRE DE LIGNES
+   * ════════════════════════════════════════════════════════════════════
+   * La règle était `supabaseFeedback.feedback.length > 0`. Elle a l'air
+   * prudente et elle est fausse DEUX FOIS :
+   *
+   *   1. au PREMIER rendu la requête n'a pas répondu, la liste est donc
+   *      vide, et la page affichait les 7 fixtures `fb-1` … `fb-7` de
+   *      `data/admin.ts` — des retours de Camille Dubois et Thomas Nguyen
+   *      sur des séances qui n'existent pas — pendant toute la durée du
+   *      chargement, à chaque ouverture ;
+   *   2. et SURTOUT : un coach dont la base contient réellement ZÉRO retour
+   *      voyait ces sept faux retours EN PERMANENCE. « Pas encore chargé »
+   *      et « aucun retour » étaient indiscernables.
+   *
+   * ⚠️ « SUPABASE EST-IL CONFIGURÉ » EST LA BONNE QUESTION. Une liste vide
+   * après chargement veut dire « aucun retour », pas « montre-moi des
+   * faux ». C'est déjà le contrat de /admin/eleves, /admin/programmes,
+   * /admin/nutrition et /admin/documents ; cette page en était restée à
+   * l'ancienne règle.
+   *
+   * ⚠️ LES ÉLÈVES SUIVENT LA MÊME SOURCE, ET CE N'EST PAS COSMÉTIQUE : les
+   * noms, emails et l'historique par élève se résolvent contre cette liste.
+   * Mélanger des retours réels et des élèves mock afficherait « élève
+   * inconnu » sur chaque ligne.
+   *
+   * Le repli mock survit pour le seul cas où il a un sens : Supabase non
+   * configuré — développement local, démonstration.
+   */
+  const supabaseActive = isSupabaseConfigured();
   const supabaseFeedback = useSupabaseAdminFeedback();
   const supabaseStudents = useSupabaseStudents();
-  const useSupabase = supabaseFeedback.feedback.length > 0;
-  const feedback = useSupabase ? supabaseFeedback.feedback : state.feedback;
-  const students = useSupabase ? supabaseStudents.students : state.students;
+  const feedback = supabaseActive ? supabaseFeedback.feedback : state.feedback;
+  const students = supabaseActive ? supabaseStudents.students : state.students;
 
   /**
    * L'HISTORIQUE GROUPÉ PAR ÉLÈVE — CALCULÉ UNE FOIS POUR TOUT L'ÉCRAN.
@@ -97,6 +124,17 @@ export default function AdminFeedbackPage() {
       );
     })
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  /*
+   * ⚠️ RIEN N'EST RENDU PENDANT LE CHARGEMENT, et la garde est APRÈS tous les
+   * hooks (règle des hooks). Sans elle, la page afficherait « 0 retours au
+   * total » puis les vrais chiffres — un clignotement qui ressemble à une
+   * perte de données. Les deux listes comptent : un retour réel attribué à un
+   * élève encore en vol s'afficherait sans nom.
+   */
+  if (supabaseActive && (supabaseFeedback.loading || supabaseStudents.loading)) {
+    return <Loader libelle="Chargement des retours…" variante="ligne" />;
+  }
 
   return (
     <div>
@@ -183,15 +221,21 @@ export default function AdminFeedbackPage() {
                     // bucket, ni élève réel à qui adresser une vidéo. On ne
                     // lui invente pas une réponse vidéo qu'il ne saurait ni
                     // stocker ni relire.
+                    //
+                    // ⚠️ L'ÉCRITURE SUIT LA MÊME SOURCE QUE L'AFFICHAGE. Elle
+                    // était commandée par le NOMBRE de retours chargés : un
+                    // changement de statut fait pendant le chargement partait
+                    // dans localStorage ET annonçait un succès — la ligne
+                    // repassait « à traiter » au rechargement suivant.
                     onReply={(reponse) =>
-                      useSupabase ? supabaseFeedback.addReply(f.id, reponse) : addCoachReply(f.id, reponse.texte)
+                      supabaseActive ? supabaseFeedback.addReply(f.id, reponse) : addCoachReply(f.id, reponse.texte)
                     }
                   />
                   {f.status !== "important" && (
                     <button
                       type="button"
                       onClick={() =>
-                        useSupabase ? supabaseFeedback.updateStatus(f.id, "important") : setFeedbackStatus(f.id, "important")
+                        supabaseActive ? supabaseFeedback.updateStatus(f.id, "important") : setFeedbackStatus(f.id, "important")
                       }
                       className="pressable flex min-h-[44px] items-center justify-center gap-1.5 rounded-control border border-warning/50 px-4 py-2 text-xs uppercase tracking-widest text-warning transition-colors hover:bg-warning/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning/40 sm:justify-start"
                     >
@@ -203,7 +247,7 @@ export default function AdminFeedbackPage() {
                     <button
                       type="button"
                       onClick={() =>
-                        useSupabase ? supabaseFeedback.updateStatus(f.id, "traité") : setFeedbackStatus(f.id, "traité")
+                        supabaseActive ? supabaseFeedback.updateStatus(f.id, "traité") : setFeedbackStatus(f.id, "traité")
                       }
                       className="pressable flex min-h-[44px] items-center justify-center gap-1.5 rounded-control border border-success/50 px-4 py-2 text-xs uppercase tracking-widest text-success transition-colors hover:bg-success/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-success/40 sm:justify-start"
                     >
@@ -215,7 +259,7 @@ export default function AdminFeedbackPage() {
                     <button
                       type="button"
                       onClick={() =>
-                        useSupabase
+                        supabaseActive
                           ? supabaseFeedback.updateStatus(f.id, "a-traiter")
                           : setFeedbackStatus(f.id, "a-traiter")
                       }

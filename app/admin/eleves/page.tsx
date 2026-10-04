@@ -199,13 +199,23 @@ export default function AdminStudentsPage() {
                       {guardedNutrition.refusal}
                     </p>
                   )}
+                  {/*
+                    ⚠️ `isSupabaseStudent` SE LIT SUR LA CONFIGURATION, PAS SUR
+                    LE NOMBRE DE LIGNES. Cette prop commande l'écriture RÉELLE
+                    de la modale : la lire sur la liste chargée est la forme
+                    exacte du défaut que cette page a corrigé plus haut pour les
+                    programmes et les élèves, et elle avait survécu ici. Le
+                    comportement est identique — une ligne n'existe que si la
+                    liste n'est pas vide — mais la règle est désormais la même
+                    partout, et aucune variante du défaut ne subsiste.
+                  */}
                   <AssignContentToStudentModal
                     student={student}
                     programs={programs}
                     nutritionPlans={nutritionPlans}
                     documents={documents}
                     onSetAssignment={handleSetAssignment}
-                    isSupabaseStudent={supabaseStudents.students.length > 0}
+                    isSupabaseStudent={supabaseActive}
                     canAssignRealPrograms={canAssignRealPrograms}
                     canAssignRealNutrition={canAssignRealNutrition}
                   />

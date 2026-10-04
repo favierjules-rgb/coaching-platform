@@ -112,8 +112,6 @@ export default function AdminStudentDetailPage() {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState(false);
 
-  // Priorité Supabase dès qu'au moins un programme/plan réel existe — même
-  // pattern que /admin/programmes, /admin/nutrition et /admin/eleves.
   // L'assignation réelle n'est activée que si l'élève affiché est lui-même
   // réel (isSupabaseStudent, défini plus bas).
   // ⚠️ DEUX BESOINS DISTINCTS, DEUX LECTURES DISTINCTES.
@@ -129,8 +127,19 @@ export default function AdminStudentDetailPage() {
   // usages. C'est cette lecture globale qui gonflait la liste d'identifiants
   // envoyée dans l'URL PostgREST jusqu'au rejet par la passerelle (voir
   // `lireParLots` dans lib/supabase/programs.ts).
+  const supabaseProgramsActive = isSupabaseConfigured();
   const supabaseProgramsSummary = useSupabaseProgramsSummary();
-  const programs = supabaseProgramsSummary.programs.length > 0 ? supabaseProgramsSummary.programs : state.programs;
+  /*
+   * ⚠️ LA SOURCE DÉPEND DE LA CONFIGURATION, PLUS DU NOMBRE DE LIGNES. Le
+   * commentaire juste au-dessus disait « priorité Supabase dès qu'au moins un
+   * programme réel existe » : c'était la règle `programs.length > 0`, et elle
+   * est fausse au premier rendu, où la liste est vide parce que la requête est
+   * en vol. La modale « Attribuer un contenu » offrait alors les programmes de
+   * démonstration de `data/admin.ts` — à l'endroit précis où un clic écrit une
+   * affectation. La nutrition et les documents, deux lignes plus bas, posaient
+   * déjà la bonne question.
+   */
+  const programs = supabaseProgramsActive ? supabaseProgramsSummary.programs : state.programs;
   // Nutrition : dès que Supabase est configuré, jamais de repli mock (voir
   // /admin/nutrition) — un élève réel sans plan réel affiche "Aucun plan
   // attribué", jamais un plan mock.
@@ -167,7 +176,18 @@ export default function AdminStudentDetailPage() {
    */
   const [debutProgrammeActif, setDebutProgrammeActif] = useState<string | null>(null);
   const isSupabaseStudent = supabaseDetail.student !== null;
-  const canAssignRealPrograms = isSupabaseStudent && supabaseProgramsSummary.programs.length > 0;
+  /*
+   * ⚠️ CES TROIS DRAPEAUX DÉCIDENT « VRAIE ÉCRITURE OU localStorage », et c'est
+   * la conséquence la plus grave du défaut corrigé ici. Tant qu'ils se lisaient
+   * sur le NOMBRE de lignes chargées, un coach qui cliquait « Attribuer » avant
+   * la fin des requêtes voyait « Assignation mise à jour » sans qu'aucune ligne
+   * n'atteigne `assignments` — un faux succès, exactement celui que
+   * scripts/tests/admin-chargement-mock.mts rejoue sur le hook.
+   *
+   * Ils gardent leur garde `isSupabaseStudent` : une fiche de démonstration ne
+   * doit pas écrire en base, même avec Supabase configuré.
+   */
+  const canAssignRealPrograms = isSupabaseStudent && supabaseProgramsActive;
   // Identifiant du programme assigné, déterminé EXACTEMENT comme avant (premier
   // programme du catalogue figurant dans les assignations de l'élève) — seule
   // la source change : le résumé au lieu du catalogue complet. Le hook est
@@ -177,8 +197,8 @@ export default function AdminStudentDetailPage() {
     (supabaseDetail.student?.assignedProgramIds ?? []).includes(p.id),
   )?.id;
   const programmeAssigneComplet = useSupabaseProgram(idProgrammeAssigne);
-  const canAssignRealNutrition = isSupabaseStudent && supabaseNutritionActive && supabaseNutritionPlans.plans.length > 0;
-  const canAssignRealDocuments = isSupabaseStudent && supabaseDocumentsActive && supabaseDocuments.documents.length > 0;
+  const canAssignRealNutrition = isSupabaseStudent && supabaseNutritionActive;
+  const canAssignRealDocuments = isSupabaseStudent && supabaseDocumentsActive;
 
   // Documents réellement accessibles à cet élève précis (disponibilité
   // incluse) — hook toujours monté (règle des hooks), no-op si l'élève
@@ -240,6 +260,24 @@ export default function AdminStudentDetailPage() {
         <p className="text-sm text-muted-foreground">Élève introuvable.</p>
       </div>
     );
+  }
+
+  /*
+   * ⚠️ LA MODALE « ATTRIBUER UN CONTENU » NE DOIT PAS S'OUVRIR SUR DES
+   * FIXTURES. Les trois catalogues (programmes, plans, documents) la
+   * remplissent ; la fiche elle-même est déjà chargée à ce point (garde
+   * `!rawStudent` ci-dessus), mais ces trois listes peuvent encore être en
+   * vol. Sans cette garde, la source serait bien Supabase — donc vide — mais
+   * les drapeaux d'écriture, eux, seraient déjà vrais : un clic partirait
+   * contre un catalogue incomplet.
+   *
+   * La garde est APRÈS tous les hooks (règle des hooks).
+   */
+  if (
+    supabaseProgramsActive &&
+    (supabaseProgramsSummary.loading || supabaseNutritionPlans.loading || supabaseDocuments.loading)
+  ) {
+    return <Loader libelle="Chargement de la fiche élève…" variante="ligne" />;
   }
 
   // Un enregistrement élève admin peut dater d'avant l'ajout de certains
