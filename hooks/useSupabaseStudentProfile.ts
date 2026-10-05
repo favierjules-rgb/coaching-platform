@@ -9,10 +9,17 @@ import {
   getCurrentStudentProfile,
   updateCurrentStudentWeight,
 } from "@/lib/supabase/current-student";
+import { getStudentOnboardingDetails } from "@/lib/supabase/onboarding";
 import { deleteProgressPhotoSupabase, updateStudentFields } from "@/lib/supabase/students";
 import type { StudentProfileState } from "@/hooks/useStudentProfile";
 import type { CustomMeasurementInput } from "@/components/student/UpdateMeasurementsModal";
-import type { AdminStudent, BodyMeasurementType, ProgressPhoto, StudentProfile } from "@/types";
+import type {
+  AdminStudent,
+  BodyMeasurementType,
+  ProgressPhoto,
+  StudentProfile,
+  SupabaseStudentProfile,
+} from "@/types";
 
 function toProfileState(student: AdminStudent): StudentProfileState {
   const profile: StudentProfile = {
@@ -64,23 +71,47 @@ export function useSupabaseStudentProfile() {
   // auto. 6 mois).
   const [accessType, setAccessType] = useState<"coaching" | "programme_seul">("coaching");
   const [email, setEmail] = useState("");
+  /*
+   * LA FICHE `student_profiles` BRUTE — P8, et la SYMÉTRIE avec le coach.
+   *
+   * `useSupabaseStudentDetail` (côté coach) porte déjà exactement ce champ, et
+   * lui aussi appelle `getFullAdminStudent` ET `getStudentProfile` : les quatre
+   * blocs résumé — préférences alimentaires, sportives, blessures, objectifs —
+   * ne peuvent pas être rendus depuis `AdminStudent`, qui n'en porte qu'un
+   * sous-ensemble ancien dont trois colonnes sont mortes (voir
+   * lib/profil-eleve-onboarding.ts).
+   *
+   * ⚠️ `null` VEUT DIRE « PAS DE FICHE », JAMAIS « PAS DE RÉPONSES ». L'écran
+   * doit le dire, et ne JAMAIS retomber sur `data/student.ts` pour autant.
+   *
+   * ⚠️ UNE REQUÊTE DE PLUS, ASSUMÉE. `getFullAdminStudent` lit déjà cette
+   * ligne mais ne la rend pas ; la lui faire rendre changerait sa signature et
+   * tous ses appelants. C'est le même arbitrage, et la même duplication, que
+   * côté coach depuis l'origine.
+   */
+  const [onboardingProfile, setOnboardingProfile] = useState<SupabaseStudentProfile | null>(null);
 
-  const applyFetchResult = useCallback((student: AdminStudent | null) => {
-    setStudentId(student?.id ?? null);
-    setState(student ? toProfileState(student) : null);
-    setAccessType(student?.accessType ?? "coaching");
-    setEmail(student?.email ?? "");
-    setReady(true);
-  }, []);
+  const applyFetchResult = useCallback(
+    (student: AdminStudent | null, profile: SupabaseStudentProfile | null) => {
+      setStudentId(student?.id ?? null);
+      setState(student ? toProfileState(student) : null);
+      setAccessType(student?.accessType ?? "coaching");
+      setEmail(student?.email ?? "");
+      setOnboardingProfile(profile);
+      setReady(true);
+    },
+    [],
+  );
 
   const refetch = useCallback(async () => {
     const supabase = createSupabaseBrowserClient();
     if (!supabase) {
-      applyFetchResult(null);
+      applyFetchResult(null, null);
       return;
     }
     const student = await getCurrentStudentProfile(supabase);
-    applyFetchResult(student);
+    const profile = student ? await getStudentOnboardingDetails(supabase, student.id) : null;
+    applyFetchResult(student, profile);
   }, [applyFetchResult]);
 
   // Chargement initial isolé de `refetch` (appelé plus bas par les
@@ -92,11 +123,12 @@ export function useSupabaseStudentProfile() {
     async function load() {
       const supabase = createSupabaseBrowserClient();
       if (!supabase) {
-        if (!cancelled) applyFetchResult(null);
+        if (!cancelled) applyFetchResult(null, null);
         return;
       }
       const student = await getCurrentStudentProfile(supabase);
-      if (!cancelled) applyFetchResult(student);
+      const profile = student ? await getStudentOnboardingDetails(supabase, student.id) : null;
+      if (!cancelled) applyFetchResult(student, profile);
     }
     load();
     return () => {
@@ -169,5 +201,16 @@ export function useSupabaseStudentProfile() {
     [refetch],
   );
 
-  return { ready, state, accessType, email, updateProfile, updateWeight, updateMeasurements, addPhoto, removePhoto };
+  return {
+    ready,
+    state,
+    accessType,
+    email,
+    onboardingProfile,
+    updateProfile,
+    updateWeight,
+    updateMeasurements,
+    addPhoto,
+    removePhoto,
+  };
 }

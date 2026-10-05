@@ -20,16 +20,32 @@ import { NotificationsSection } from "@/components/student/NotificationsSection"
 import { useEtatOfflineEleve } from "@/hooks/useEtatOfflineEleve";
 import { useStudentProfile, type StudentProfileState } from "@/hooks/useStudentProfile";
 import { useSupabaseStudentProfile } from "@/hooks/useSupabaseStudentProfile";
+import { vuesProfilOnboarding } from "@/lib/profil-eleve-onboarding";
 import type { FoodPreferences, InjuryNote, SportPreferences, StudentGoal } from "@/types";
 import { Loader } from "@/components/ui/Loader";
 
-interface ProfilPageContentProps {
-  studentId: string;
-  seed: StudentProfileState;
+/**
+ * LES QUATRE BLOCS DE DÉMONSTRATION, NOMMÉS COMME TELS (P8).
+ *
+ * ⚠️ CES VALEURS VIENNENT DE `data/student.ts`, ET LE TYPE LE DIT. Elles
+ * étaient passées en quatre props anonymes, que rien ne distinguait d'une
+ * donnée réelle : il fallait lire la page pour savoir d'où elles sortaient.
+ * Regroupées sous `demonstration`, leur rôle est lisible à l'appel.
+ *
+ * Elles ne sont rendues QUE dans la branche de démonstration — celle qu'on
+ * n'atteint que si Supabase n'est pas configuré.
+ */
+export interface ProfilDemonstration {
   foodPreferences: FoodPreferences;
   sportPreferences: SportPreferences;
   injuryNote: InjuryNote;
   studentGoal: StudentGoal;
+}
+
+interface ProfilPageContentProps {
+  studentId: string;
+  seed: StudentProfileState;
+  demonstration: ProfilDemonstration;
 }
 
 /**
@@ -39,14 +55,7 @@ interface ProfilPageContentProps {
  * mensurations, photo) soit immédiatement visible partout sur la page et
  * persiste après rechargement (localStorage).
  */
-export function ProfilPageContent({
-  studentId,
-  seed,
-  foodPreferences,
-  sportPreferences,
-  injuryNote,
-  studentGoal,
-}: ProfilPageContentProps) {
+export function ProfilPageContent({ studentId, seed, demonstration }: ProfilPageContentProps) {
   // Toujours montés tous les deux (règle des hooks) : useSupabaseStudentProfile
   // vérifie si l'utilisateur connecté a une vraie fiche élève Supabase, et
   // seul le résultat correspondant est réellement utilisé plus bas. Tant
@@ -72,6 +81,22 @@ export function ProfilPageContent({
   const addPhoto = useSupabase ? supabaseProfile.addPhoto : mockProfile.addPhoto;
   const removePhoto = useSupabase ? supabaseProfile.removePhoto : mockProfile.removePhoto;
   const { profile, weightHistory, measurements, customMeasurements, measurementHistory, photos } = state;
+  /*
+   * LES QUATRE BLOCS DE L'ÉLÈVE RÉEL — MÊME SOURCE QUE LE COACH (P8).
+   *
+   * `vuesProfilOnboarding` est le module partagé ; il ne lit que les colonnes
+   * vivantes de `student_profiles` et ne fabrique aucun champ absent du schéma
+   * (voir lib/profil-eleve-onboarding.ts).
+   *
+   * ⚠️ DÉRIVÉ À CHAQUE RENDU, ET PAS MÉMORISÉ. La fonction est pure et
+   * minuscule ; un `useMemo` ici n'économiserait rien et ajouterait une
+   * dépendance à tenir à jour.
+   *
+   * ⚠️ `onboardingProfile` PEUT ÊTRE ABSENT sans que le profil soit absent :
+   * la fiche `student_profiles` n'existe pas encore pour un élève tout juste
+   * créé. `ficheDisponible` porte cette distinction jusqu'à l'écran.
+   */
+  const vues = vuesProfilOnboarding(supabaseProfile.onboardingProfile ?? null);
 
   function handleReset() {
     if (window.confirm("Réinitialiser le profil de test ? Toutes les modifications locales seront perdues.")) {
@@ -234,12 +259,168 @@ export function ProfilPageContent({
         />
       </div>
 
-      {/* Ces 4 sections viennent de data/student.ts (données d'exemple statiques,
-          jamais de Supabase) — voir app/(student)/profil/page.tsx. Pour un
-          élève Supabase, ces mêmes informations (et bien plus) sont déjà
-          disponibles via "Voir mes informations complètes" ci-dessus ; les
-          afficher ici aussi les ferait passer pour de vraies réponses. */}
-      {!useSupabase && (
+      {/* ══════════════════════════════════════════════════════════════════
+          LES QUATRE BLOCS DU PROFIL — DEUX SOURCES, JAMAIS DE MÉLANGE (P8)
+          ══════════════════════════════════════════════════════════════════
+          Jusqu'au 05/10/2026, ces quatre sections n'existaient QUE dans la
+          branche de démonstration : un élève Supabase n'en voyait aucune, et
+          ses réponses — que le coach lit tous les jours — ne lui étaient
+          rendues que derrière « Voir mes informations complètes ».
+
+          ⚠️ AUCUN REPLI D'UNE SOURCE SUR L'AUTRE. Sous Supabase, une fiche
+          absente ou vide se DIT (`ficheDisponible`, tirets) ; elle ne fait
+          jamais apparaître `data/student.ts`. C'est tout l'objet du lot.
+
+          ⚠️ RIEN N'EST RENDU PENDANT LE CHARGEMENT : la sortie anticipée
+          `!supabaseProfile.ready` plus haut précède ce bloc. */}
+      {useSupabase ? (
+        <>
+          {!vues.ficheDisponible && (
+            <div className="mb-6 rounded-card border border-dashed border-border bg-surface-soft/40 p-6">
+              <p className="text-sm text-muted-foreground">
+                Ton questionnaire n&apos;est pas encore enregistr&eacute;. Compl&egrave;te-le depuis
+                &laquo;&nbsp;Voir mes informations compl&egrave;tes&nbsp;&raquo; pour que ton coach
+                en tienne compte.
+              </p>
+            </div>
+          )}
+
+          <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <ProfileSection title="Préférences alimentaires">
+              <div className="flex flex-col gap-4">
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                    Aliments aimés
+                  </span>
+                  <TagList items={[...vues.alimentaire.alimentsAimes]} />
+                </div>
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                    Aliments à éviter
+                  </span>
+                  <TagList items={[...vues.alimentaire.alimentsEvites]} />
+                </div>
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                    Allergies
+                  </span>
+                  <TagList items={[...vues.alimentaire.allergies]} />
+                </div>
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                    Intolérances
+                  </span>
+                  <TagList items={[...vues.alimentaire.intolerances]} />
+                </div>
+                <InfoRow label="Régime alimentaire" value={vues.alimentaire.regime} />
+                <InfoRow label="Repas par jour" value={vues.alimentaire.repasParJour} />
+                <InfoRow label="Horaires habituels" value={vues.alimentaire.horairesDeRepas} />
+                <InfoRow
+                  label="Contraintes sociales / pro"
+                  value={vues.alimentaire.contraintesTravailOuSociales}
+                />
+                <InfoRow label="Notes nutrition" value={vues.alimentaire.notes} />
+              </div>
+            </ProfileSection>
+
+            <ProfileSection title="Préférences sportives">
+              <div className="flex flex-col gap-4">
+                <InfoRow label="Objectif sportif" value={vues.objectifs.objectifPrincipal} />
+                <InfoRow label="Niveau sportif" value={profile.level} />
+                <InfoRow label="Niveau d'activité / NEAT" value={vues.sportive.niveauActivite} />
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                    Sports pratiqués
+                  </span>
+                  <TagList items={[...vues.sportive.sportsPratiques]} />
+                </div>
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                    Autres activités
+                  </span>
+                  <TagList items={[...vues.sportive.autresActivites]} />
+                </div>
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                    Matériel disponible
+                  </span>
+                  <TagList items={[...vues.sportive.materielDisponible]} />
+                </div>
+                <InfoRow label="Lieu d'entraînement" value={vues.sportive.lieuDEntrainement} />
+                <InfoRow label="Séances par semaine" value={vues.sportive.seancesParSemaine} />
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                    Exercices préférés (salle)
+                  </span>
+                  <TagList items={[...vues.sportive.exercicesPreferesEnSalle]} />
+                </div>
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                    Exercices préférés
+                  </span>
+                  <TagList items={[...vues.sportive.exercicesPreferes]} />
+                </div>
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                    Exercices à éviter
+                  </span>
+                  <TagList items={[...vues.sportive.exercicesAEviter]} />
+                </div>
+              </div>
+            </ProfileSection>
+          </div>
+
+          <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <ProfileSection title="Blessures et contraintes">
+              <div className="flex flex-col gap-4">
+                {/* ⚠️ UN SEUL CHAMP DE BLESSURES, parce que la base n'en a
+                    qu'un (`student_profiles.injuries`). Les quatre listes du
+                    type de démonstration — anciennes blessures, douleurs
+                    récurrentes, mouvements à éviter, remarques du coach — n'ont
+                    AUCUNE colonne : les afficher ici reviendrait à inventer. */}
+                <InfoRow label="Douleurs / blessures" value={vues.blessures.douleursEtBlessures} />
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                    Exercices à éviter
+                  </span>
+                  <TagList items={[...vues.blessures.exercicesAEviter]} />
+                </div>
+                <InfoRow label="Notes santé" value={vues.blessures.notesSante} />
+                <InfoRow label="Traitements" value={vues.blessures.traitements} />
+                <InfoRow label="Médicaments" value={vues.blessures.medicaments} />
+                <InfoRow label="Notes pour le coach" value={vues.blessures.notesPourLeCoach} />
+              </div>
+            </ProfileSection>
+
+            <ProfileSection title="Objectifs">
+              <div className="flex flex-col gap-4">
+                {/* ⚠️ AUCUNE « PRIORITÉ ACTUELLE ». `student_profiles.priority`
+                    est `null` sur les 32 profils de production et n'est écrit
+                    nulle part ; l'afficher indexerait une table de libellés
+                    avec `null` et rendrait `undefined`. */}
+                <InfoRow label="Objectif principal" value={vues.objectifs.objectifPrincipal} />
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                    Objectifs secondaires
+                  </span>
+                  <TagList items={[...vues.objectifs.objectifsSecondaires]} />
+                </div>
+                <InfoRow label="Date cible" value={vues.objectifs.dateCible} />
+                <InfoRow label="Délai souhaité" value={vues.objectifs.delaiSouhaite} />
+                <div>
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
+                    Indicateurs suivis
+                  </span>
+                  <TagList items={[...vues.objectifs.indicateursSuivis]} />
+                </div>
+              </div>
+            </ProfileSection>
+          </div>
+        </>
+      ) : (
+        /* ── DÉMONSTRATION ────────────────────────────────────────────────
+           Inchangé : mêmes fixtures, mêmes composants, même rendu qu'avant
+           ce lot. On ajoute une branche, on n'en retire aucune. */
         <>
           <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
             <ProfileSection title="Préférences alimentaires">
@@ -248,90 +429,93 @@ export function ProfilPageContent({
                   <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
                     Aliments aimés
                   </span>
-                  <TagList items={foodPreferences.liked} />
+                  <TagList items={demonstration.foodPreferences.liked} />
                 </div>
                 <div>
                   <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
                     Aliments non aimés
                   </span>
-                  <TagList items={foodPreferences.disliked} />
+                  <TagList items={demonstration.foodPreferences.disliked} />
                 </div>
                 <div>
                   <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
                     Intolérances
                   </span>
-                  <TagList items={foodPreferences.intolerances} />
+                  <TagList items={demonstration.foodPreferences.intolerances} />
                 </div>
                 <div>
                   <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
                     Allergies
                   </span>
-                  <TagList items={foodPreferences.allergies} />
+                  <TagList items={demonstration.foodPreferences.allergies} />
                 </div>
-                <InfoRow label="Régime alimentaire" value={foodPreferences.diet} />
+                <InfoRow label="Régime alimentaire" value={demonstration.foodPreferences.diet} />
                 <InfoRow
                   label="Repas par jour"
-                  value={`${foodPreferences.mealsPerDay}`}
+                  value={`${demonstration.foodPreferences.mealsPerDay}`}
                 />
                 <div>
                   <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
                     Horaires habituels
                   </span>
-                  <TagList items={foodPreferences.mealTimes} />
+                  <TagList items={demonstration.foodPreferences.mealTimes} />
                 </div>
                 <InfoRow
                   label="Contraintes sociales / pro"
-                  value={foodPreferences.socialConstraints}
+                  value={demonstration.foodPreferences.socialConstraints}
                 />
               </div>
             </ProfileSection>
 
             <ProfileSection title="Préférences sportives">
               <div className="flex flex-col gap-4">
-                <InfoRow label="Objectif sportif" value={sportPreferences.mainGoal} />
+                <InfoRow label="Objectif sportif" value={demonstration.sportPreferences.mainGoal} />
                 <InfoRow label="Niveau sportif" value={profile.level} />
                 <div>
                   <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
                     Sports pratiqués
                   </span>
-                  <TagList items={sportPreferences.sports} />
+                  <TagList items={demonstration.sportPreferences.sports} />
                 </div>
                 <div>
                   <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
                     Matériel disponible
                   </span>
-                  <TagList items={sportPreferences.equipment} />
+                  <TagList items={demonstration.sportPreferences.equipment} />
                 </div>
-                <InfoRow label="Lieu d'entraînement" value={sportPreferences.location} />
+                <InfoRow
+                  label="Lieu d'entraînement"
+                  value={demonstration.sportPreferences.location}
+                />
                 <InfoRow
                   label="Séances par semaine"
-                  value={`${sportPreferences.sessionsPerWeek}`}
+                  value={`${demonstration.sportPreferences.sessionsPerWeek}`}
                 />
                 <div>
                   <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
                     Exercices préférés
                   </span>
-                  <TagList items={sportPreferences.preferredExercises} />
+                  <TagList items={demonstration.sportPreferences.preferredExercises} />
                 </div>
                 <div>
                   <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
                     Exercices à éviter
                   </span>
-                  <TagList items={sportPreferences.exercisesToAvoid} />
+                  <TagList items={demonstration.sportPreferences.exercisesToAvoid} />
                 </div>
                 <div>
                   <span className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
                     Disponibilité hebdomadaire
                   </span>
-                  <TagList items={sportPreferences.weeklyAvailability} />
+                  <TagList items={demonstration.sportPreferences.weeklyAvailability} />
                 </div>
               </div>
             </ProfileSection>
           </div>
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <InjurySection injury={injuryNote} />
-            <GoalsSection goal={studentGoal} />
+            <InjurySection injury={demonstration.injuryNote} />
+            <GoalsSection goal={demonstration.studentGoal} />
           </div>
         </>
       )}
