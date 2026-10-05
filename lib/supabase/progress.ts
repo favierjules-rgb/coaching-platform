@@ -3,12 +3,14 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getActivityEventsForStudent } from "@/lib/supabase/activity";
 import { getAppointmentsForStudent } from "@/lib/supabase/appointments";
 import { getAssignedNutritionPlanForStudent } from "@/lib/supabase/nutrition";
+import { derniereJourneeConsommee, lireJournalNutrition } from "@/lib/supabase/nutrition-journal";
 import { getNutritionLogsForDates } from "@/lib/supabase/nutrition-logs";
 import { getAssignedProgramForStudent } from "@/lib/supabase/programs";
 import { getFullAdminStudent } from "@/lib/supabase/students";
 import { getWorkoutFeedbackForStudent } from "@/lib/supabase/workout-feedback";
 import { getAverageReps, getEffectiveLoadKg, parseLoad } from "@/lib/training-metrics";
 import { getCurrentWeekDates, type DailyNutritionLog } from "@/lib/nutrition-weekly";
+import { dateLaPlusRecente, fusionnerJournalEtHistorique } from "@/lib/nutrition/statut-journee";
 import type {
   ActivityEvent,
   AdminAppointment,
@@ -312,13 +314,49 @@ export interface StudentNutritionAnalytics {
   weekLogs: DailyNutritionLog[];
 }
 
+/**
+ * ⚠️ LA SOURCE PRIMAIRE EST `consumed_meals`, PLUS `nutrition_daily_logs` (P7).
+ *
+ * ════════════════════════════════════════════════════════════════════════
+ * CE QUI A CHANGÉ, ET CE QUI N'A PAS CHANGÉ
+ * ════════════════════════════════════════════════════════════════════════
+ * Mesuré en production le 05/10/2026 : `nutrition_daily_logs` compte 9 lignes
+ * pour 4 élèves, dernière écriture le 22/08/2026 — la table n'est plus
+ * alimentée, son seul chemin d'écriture (`upsertNutritionDailyLog` via
+ * `saveDay`) n'a aucun appelant. Pendant ce temps `consumed_meals` compte
+ * 407 lignes et `meal_entries` 1 217. Cet écran affichait donc « Aucun log
+ * nutrition rempli cette semaine » à des élèves qui déclarent leurs repas
+ * tous les jours.
+ *
+ * Les CALCULS ne changent pas d'un iota : moyennes sur les seuls jours
+ * remplis, écart en pourcentage, graphique calories/jour. Seule la SOURCE
+ * change. `daysFilledThisWeek` reste `logs.filter(calories !== null).length`,
+ * et la dérivation garantit qu'une journée sans aliment n'émet aucun log —
+ * voir `logsDepuisJournal`.
+ *
+ * ⚠️ L'HISTORIQUE N'EST PAS JETÉ. `getNutritionLogsForDates` est toujours
+ * appelée, et ses lignes servent pour les dates que `consumed_meals` ne
+ * couvre pas (`fusionnerJournalEtHistorique`, fusion à sens unique). Aucune
+ * écriture n'est ajoutée sur `nutrition_daily_logs` : cette fonction ne fait
+ * que lire, ici comme avant.
+ */
 export async function getStudentNutritionAnalytics(
   supabase: TypedSupabaseClient,
   studentId: string,
 ): Promise<StudentNutritionAnalytics> {
   const plan = await getAssignedNutritionPlanForStudent(supabase, studentId);
-  const lastLogAt = await getLatestNutritionLogDate(supabase, studentId);
   const weekDates = getCurrentWeekDates();
+  /*
+   * « Dernier log » = la plus récente des DEUX sources. L'ancienne seule
+   * annonçait « dernier log le 22/08 » à un élève qui avait mangé la veille ;
+   * la nouvelle seule effacerait l'historique d'août des comptes qui n'ont
+   * jamais utilisé le journal.
+   */
+  const [ancienneDate, derniereConsommee] = await Promise.all([
+    getLatestNutritionLogDate(supabase, studentId),
+    derniereJourneeConsommee(supabase, { portee: "eleve", studentId }),
+  ]);
+  const lastLogAt = dateLaPlusRecente(ancienneDate, derniereConsommee);
 
   if (!plan) {
     return {
@@ -338,7 +376,11 @@ export async function getStudentNutritionAnalytics(
     };
   }
 
-  const logs = await getNutritionLogsForDates(supabase, studentId, plan.id, weekDates);
+  const [journal, historique] = await Promise.all([
+    lireJournalNutrition(supabase, weekDates, { portee: "eleve", studentId }),
+    getNutritionLogsForDates(supabase, studentId, plan.id, weekDates),
+  ]);
+  const logs = fusionnerJournalEtHistorique(weekDates, journal.logs, historique);
   const filled = logs.filter((l) => l.calories !== null);
 
   const sum = (key: "calories" | "proteinG" | "carbsG" | "fatG") =>
