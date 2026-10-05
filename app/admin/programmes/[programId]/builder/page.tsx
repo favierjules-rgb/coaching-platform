@@ -54,7 +54,16 @@ export default function ProgramBuilderPage() {
   const activeProgram = savedProgram && savedProgram.id === params.programId ? savedProgram : derivedProgram;
 
   const supabaseExerciseLibrary = useSupabaseExerciseLibrary();
-  const library = supabaseExerciseLibrary.items.length > 0 ? supabaseExerciseLibrary.items : state.exerciseLibrary;
+  /*
+   * ⚠️ LA BANQUE D'EXERCICES SUIT LA CONFIGURATION, PLUS SON NOMBRE DE
+   * LIGNES. `isSupabaseActive` commandait déjà la lecture du programme
+   * (ligne 38) ; la banque, elle, basculait encore sur `items.length > 0`.
+   * Pendant la requête initiale, le picker du builder proposait donc les
+   * exercices de démonstration de `data/admin.ts` — et un exercice choisi là
+   * entre dans une séance qui part en base avec un `exercise_library_id` qui
+   * n'existe pas.
+   */
+  const library = isSupabaseActive ? supabaseExerciseLibrary.items : state.exerciseLibrary;
 
   const sessionTemplates = useSupabaseSessionTemplates();
 
@@ -94,6 +103,16 @@ export default function ProgramBuilderPage() {
     // (session sans droits coach, séance STALE, rechargement raté).
     console.error("[builder] échec d'enregistrement", outcome);
     return { ok: false, userMessage: builderSaveUserMessage(outcome) };
+  }
+
+  /*
+   * ⚠️ LA BANQUE ENTRE DANS LA GARDE. Ouvrir le builder sur un picker vide
+   * puis le voir se remplir est acceptable ; l'ouvrir sur des exercices de
+   * démonstration ne l'est pas, parce qu'on peut en poser un dans une séance
+   * avant que la vraie banque arrive.
+   */
+  if (isSupabaseActive && supabaseExerciseLibrary.loading) {
+    return <Loader libelle="Chargement du builder…" className="h-dvh" />;
   }
 
   if (supabaseProgram.loading && !activeProgram) {

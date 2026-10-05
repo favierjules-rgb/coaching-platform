@@ -4,10 +4,19 @@
  * ════════════════════════════════════════════════════════════════════════
  * CE QUE CE FICHIER PROUVE
  * ════════════════════════════════════════════════════════════════════════
- * Que `/admin/programmes` et `/admin/eleves` ne rendent rien tant que les
- * listes Supabase sont en vol ; qu'une liste vide après chargement veut dire
- * « aucune donnée » et non « montre les fixtures » ; et qu'une affectation
- * ne peut plus être déclarée réussie sans avoir atteint Supabase.
+ * Que AUCUNE page sous `app/admin` ne rende de fixtures tant que les listes
+ * Supabase sont en vol ; qu'une liste vide après chargement veut dire « aucune
+ * donnée » et non « montre les fixtures » ; et qu'une affectation ne peut plus
+ * être déclarée réussie sans avoir atteint Supabase.
+ *
+ * ⚠️ LA COUVERTURE EST PASSÉE DE 4 PAGES À TOUT `app/admin`, et c'est la leçon
+ * du lot « anti-mock ». Ce fichier énonçait le bon contrat depuis le 08/09/2026,
+ * mais sa liste `PAGES` n'avait jamais été étendue : `/admin/retours`,
+ * `/admin` (tableau de bord), `/admin/notifications`, `/admin/exercices`,
+ * `/admin/programmes/[programId]`, son builder, la fiche élève — et jusqu'à
+ * l'onglet « Banque d'exercices » de `/admin/programmes`, pourtant déjà
+ * « corrigée » — portaient encore le défaut. Le contrôle BALAYAGE ci-dessous
+ * ne se fie plus à une liste écrite à la main : il PARCOURT le dossier.
  *
  * ════════════════════════════════════════════════════════════════════════
  * LE DÉFAUT D'ORIGINE, MESURÉ
@@ -33,6 +42,9 @@
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { readdir, readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -47,6 +59,37 @@ const PROGRAMMES = lire("../../app/admin/programmes/page.tsx");
 const ELEVES = lire("../../app/admin/eleves/page.tsx");
 const NUTRITION = lire("../../app/admin/nutrition/page.tsx");
 const DOCUMENTS = lire("../../app/admin/documents/page.tsx");
+const RETOURS = lire("../../app/admin/retours/page.tsx");
+const DASHBOARD = lire("../../app/admin/page.tsx");
+const NOTIFICATIONS = lire("../../app/admin/notifications/page.tsx");
+const EXERCICES = lire("../../app/admin/exercices/page.tsx");
+const PROGRAMME_DETAIL = lire("../../app/admin/programmes/[programId]/page.tsx");
+const PROGRAMME_BUILDER = lire("../../app/admin/programmes/[programId]/builder/page.tsx");
+const FICHE_ELEVE = lire("../../app/admin/eleves/[studentId]/page.tsx");
+const FIXTURES = lire("../../data/admin.ts");
+
+/**
+ * Les pages admin qui choisissent une source, et le drapeau qui la commande.
+ *
+ * ⚠️ DEUX NOMS DE DRAPEAU, ET CE N'EST PAS DU LAXISME. Les pages « programme »
+ * nommaient déjà le leur `isSupabaseProgramsActive` / `isSupabaseActive` avant
+ * ce lot, et le renommer aurait brassé du code hors périmètre. Ce qui compte
+ * est qu'il vienne de `isSupabaseConfigured()`, et c'est ce que CONTRAT1
+ * vérifie.
+ */
+const PAGES_A_SOURCE = [
+  ["/admin/retours", RETOURS, "supabaseActive"],
+  ["/admin", DASHBOARD, "supabaseActive"],
+  ["/admin/notifications", NOTIFICATIONS, "supabaseActive"],
+  ["/admin/exercices", EXERCICES, "isLibrarySupabaseActive"],
+  ["/admin/programmes", PROGRAMMES, "supabaseActive"],
+  ["/admin/programmes/[programId]", PROGRAMME_DETAIL, "isSupabaseProgramsActive"],
+  ["/admin/programmes/[programId]/builder", PROGRAMME_BUILDER, "isSupabaseActive"],
+  ["/admin/eleves", ELEVES, "supabaseActive"],
+  ["/admin/eleves/[studentId]", FICHE_ELEVE, "supabaseProgramsActive"],
+  ["/admin/nutrition", NUTRITION, "supabaseActive"],
+  ["/admin/documents", DOCUMENTS, "supabaseActive"],
+] as const;
 
 let réussis = 0;
 let échecs = 0;
@@ -152,19 +195,84 @@ await test("PAGE1. les deux pages refusent de rendre pendant le chargement", asy
   }
 });
 
+/**
+ * Le corps de la garde de chargement d'une page, quel que soit son FORMATAGE.
+ *
+ * ⚠️ L'EXTRACTION PAR `indexOf("if (supabaseActive &&")` ÉPINGLAIT LA MISE EN
+ * PAGE, et c'est ce qui a rendu ce test rouge au lot « anti-mock » : ajouter une
+ * troisième liste à la garde de /admin/programmes l'a fait passer sur plusieurs
+ * lignes, `indexOf` a rendu -1, la fenêtre est devenue VIDE — et le test
+ * signalait « programmes non couverts » alors qu'ils l'étaient. Un test qui se
+ * casse sur un retour à la ligne ne protège pas la propriété qu'il annonce.
+ * On cherche donc le `if` qui mène à un `<Loader`, sans rien supposer de sa
+ * forme.
+ */
+function corpsDeLaGarde(source: string, drapeau: string): string {
+  const net = sansCommentaires(source);
+  const motif = new RegExp(`if \\(\\s*${drapeau} &&[\\s\\S]{0,400}?\\)\\s*\\{\\s*return <Loader[\\s\\S]{0,200}?\\}`);
+  const trouve = motif.exec(net);
+  assert.ok(trouve, `garde de chargement introuvable (drapeau ${drapeau})`);
+  return trouve[0];
+}
+
 await test("PAGE2. la garde couvre TOUTES les listes que la page et sa modale affichent", async () => {
-  const prog = sansCommentaires(PROGRAMMES);
-  const garde = prog.slice(prog.indexOf("if (supabaseActive &&"), prog.indexOf("const filtered = programs.filter("));
   // ⚠️ LES ÉLÈVES COMPTENT AUTANT QUE LES PROGRAMMES : la modale « Assigner »
   // les liste, et une liste d'élèves encore vide y ferait apparaître les 7
   // fixtures `@mail.mock` — à l'endroit précis où un clic écrit.
-  assert.match(garde, /supabasePrograms\.loading/, "/admin/programmes : programmes non couverts");
-  assert.match(garde, /supabaseStudents\.loading/, "/admin/programmes : élèves non couverts");
+  //
+  // ⚠️ ET LA BANQUE D'EXERCICES AUSSI, depuis le lot « anti-mock » : l'onglet
+  // « Banque » de cette page affiche `exerciseLibrary` et ses trois boutons
+  // écrivent. Elle avait échappé au premier correctif.
+  const garde = corpsDeLaGarde(PROGRAMMES, "supabaseActive");
+  for (const liste of ["supabasePrograms.loading", "supabaseStudents.loading", "supabaseExerciseLibrary.loading"]) {
+    assert.ok(garde.includes(liste), `/admin/programmes : ${liste} non couvert`);
+  }
 
-  const eleves = sansCommentaires(ELEVES);
-  const gardeE = eleves.slice(eleves.indexOf("if (\n    supabaseActive &&"), eleves.indexOf("const filtered = students.filter("));
+  const gardeE = corpsDeLaGarde(ELEVES, "supabaseActive");
   for (const liste of ["supabaseStudents.loading", "supabasePrograms.loading", "supabaseNutritionPlans.loading"]) {
     assert.ok(gardeE.includes(liste), `/admin/eleves : ${liste} non couvert`);
+  }
+
+  /*
+   * Les pages ajoutées par le lot « anti-mock » : chaque liste qui DÉCIDE d'une
+   * source, ou qui remplit un sélecteur où un clic écrit, doit être dans la
+   * garde de sa page.
+   */
+  const COUVERTURE_ATTENDUE: readonly (readonly [string, string, string, readonly string[]])[] = [
+    ["/admin/retours", RETOURS, "supabaseActive", ["supabaseFeedback.loading", "supabaseStudents.loading"]],
+    [
+      "/admin",
+      DASHBOARD,
+      "supabaseActive",
+      [
+        "supabaseStudents.loading",
+        "supabaseFeedback.loading",
+        "supabasePrograms.loading",
+        "supabaseNutritionPlans.loading",
+        "supabaseDocuments.loading",
+      ],
+    ],
+    ["/admin/notifications", NOTIFICATIONS, "supabaseActive", ["supabaseStudents.loading"]],
+    ["/admin/exercices", EXERCICES, "isLibrarySupabaseActive", ["supabaseExerciseLibrary.loading"]],
+    [
+      "/admin/programmes/[programId]",
+      PROGRAMME_DETAIL,
+      "isSupabaseProgramsActive",
+      ["supabaseProgram.loading", "supabaseStudents.loading"],
+    ],
+    ["/admin/programmes/[programId]/builder", PROGRAMME_BUILDER, "isSupabaseActive", ["supabaseExerciseLibrary.loading"]],
+    [
+      "/admin/eleves/[studentId]",
+      FICHE_ELEVE,
+      "supabaseProgramsActive",
+      ["supabaseProgramsSummary.loading", "supabaseNutritionPlans.loading", "supabaseDocuments.loading"],
+    ],
+  ];
+  for (const [nom, source, drapeau, listes] of COUVERTURE_ATTENDUE) {
+    const corps = corpsDeLaGarde(source, drapeau);
+    for (const liste of listes) {
+      assert.ok(corps.includes(liste), `${nom} : ${liste} non couvert par la garde`);
+    }
   }
 });
 
@@ -302,6 +410,225 @@ await test("GARDE3. le tri des programmes n'a pas été touché", async () => {
 await test("GARDE4. nutrition et documents sont inchangées", async () => {
   assert.match(NUTRITION, /if \(supabaseActive && supabaseNutritionPlans\.loading\) \{/);
   assert.match(DOCUMENTS, /if \(supabaseActive && supabaseDocuments\.loading\) \{/);
+});
+
+/* ════════════════════════════════════════════════════════════════════════
+ * IV. LE CONTRAT, SUR TOUTES LES PAGES ADMIN — lot « anti-mock »
+ * ════════════════════════════════════════════════════════════════════════ */
+
+await test("CONTRAT1. chaque page à source lit la CONFIGURATION, et nulle part ailleurs", () => {
+  for (const [nom, source, drapeau] of PAGES_A_SOURCE) {
+    const code = sansCommentaires(source);
+    assert.match(
+      code,
+      new RegExp(`const ${drapeau.replace(/[$]/g, "\\$&")} = isSupabaseConfigured\\(\\)`),
+      `${nom} : le drapeau de source ne vient pas de isSupabaseConfigured()`,
+    );
+  }
+});
+
+await test("CONTRAT2. CAS « chargement » — chaque page refuse de rendre, donc aucun mock", () => {
+  /*
+   * ⚠️ C'EST LE CAS 1 DU CAHIER DES CHARGES. Supabase configuré + requête en
+   * vol ⇒ Loader. Sans cette garde, la page rend quelque chose : soit des
+   * fixtures (l'ancien défaut), soit des zéros qui ressemblent à une base vide.
+   */
+  for (const [nom, source, drapeau] of PAGES_A_SOURCE) {
+    const code = sansCommentaires(source);
+    const motif = new RegExp(`if \\(\\s*${drapeau} &&[\\s\\S]{0,400}?\\.loading[\\s\\S]{0,400}?\\)\\s*\\{\\s*return <Loader`);
+    assert.match(code, motif, `${nom} : aucune garde de chargement rendant un <Loader>`);
+  }
+});
+
+await test("CONTRAT3. CAS « données » et CAS « 0 résultat » — la source est le ternaire, jamais un compte", () => {
+  /*
+   * ⚠️ UN SEUL CONTRÔLE COUVRE LES CAS 2 ET 3, et c'est volontaire : la forme
+   * `drapeau ? supabase : state` rend MÉCANIQUEMENT la liste Supabase dès que
+   * le drapeau est vrai — qu'elle contienne 26 lignes ou zéro. C'est
+   * précisément ce que l'ancien ternaire ne faisait pas.
+   */
+  for (const [nom, source, drapeau] of PAGES_A_SOURCE) {
+    const code = sansCommentaires(source);
+    assert.match(
+      code,
+      new RegExp(`${drapeau} \\? [\\w.]+ : (state\\.|documents)`),
+      `${nom} : la source n'est plus choisie par le drapeau de configuration`,
+    );
+  }
+});
+
+await test("CONTRAT4. CAS « Supabase non configuré » — les fixtures restent atteignables", () => {
+  // ⚠️ ON NE SUPPRIME PAS LE MODE DÉMO. La branche `else` du ternaire EST ce
+  // mode : si elle disparaissait, un développement local sans `.env`
+  // afficherait une application vide.
+  assert.ok(FIXTURES.includes("@mail.mock"), "les fixtures élèves ont disparu");
+  assert.ok(FIXTURES.includes('id: "fb-1"'), "les fixtures de retours ont disparu");
+  for (const [nom, source] of PAGES_A_SOURCE) {
+    /*
+     * ⚠️ APPELÉ, PAS SEULEMENT IMPORTÉ. `source.includes("useAdminData")` était
+     * satisfait par la seule ligne d'import : on pouvait remplacer l'appel par
+     * un objet vide — donc arracher le mode démonstration — sans que ce test
+     * bronche. On exige l'APPEL du hook, et une lecture réelle de son état.
+     */
+    assert.match(
+      sansCommentaires(source),
+      /useAdminData\(\)/,
+      `${nom} : \`useAdminData()\` n'est plus appelé — le mode démonstration a été arraché`,
+    );
+    assert.match(
+      sansCommentaires(source),
+      /: (state\.[\w.]+|documents\b)/,
+      `${nom} : plus aucune branche de repli vers l'état de démonstration`,
+    );
+  }
+});
+
+/* ════════════════════════════════════════════════════════════════════════
+ * V. TESTS NÉGATIFS — la forme exacte du défaut, partout sous app/admin
+ * ════════════════════════════════════════════════════════════════════════ */
+
+/** Toutes les pages sous `app/admin`, trouvées en PARCOURANT le dossier. */
+async function pagesAdmin(): Promise<{ chemin: string; code: string }[]> {
+  const racine = fileURLToPath(new URL("../../app/admin", import.meta.url));
+  const trouvees: { chemin: string; code: string }[] = [];
+  async function parcourir(dossier: string) {
+    for (const entree of await readdir(dossier, { withFileTypes: true })) {
+      const complet = join(dossier, entree.name);
+      if (entree.isDirectory()) await parcourir(complet);
+      else if (entree.name.endsWith(".tsx")) {
+        trouvees.push({ chemin: complet.slice(complet.indexOf("app/admin")), code: await readFile(complet, "utf8") });
+      }
+    }
+  }
+  await parcourir(racine);
+  return trouvees;
+}
+
+await test("BALAYAGE. NÉGATIF — aucune page admin ne choisit sa source sur le NOMBRE DE LIGNES", async () => {
+  /*
+   * ⚠️ CE CONTRÔLE NE SE FIE À AUCUNE LISTE ÉCRITE À LA MAIN, et c'est la seule
+   * leçon qui compte de ce lot. Le contrat était juste depuis un mois ; ce qui
+   * a laissé le défaut vivre, c'est que `PAGES` ne listait que 4 pages sur 11.
+   * Un balayage du dossier attrape la page suivante avant qu'elle n'existe.
+   */
+  const motifs: readonly { readonly regex: RegExp; readonly quoi: string }[] = [
+    {
+      regex: /\.length > 0\s*\?\s*[\w.]+\s*:\s*(state\.|documents\b)/,
+      quoi: "choisit sa source sur le nombre de lignes (`xxx.length > 0 ? supabase : state`)",
+    },
+    {
+      regex: /(const|let)\s+\w*[Aa]ctive\w*\s*=\s*[\w.]+\.(length|items|plans|programs|students|feedback|documents)[\w.]*\.length > 0/,
+      quoi: "déduit « Supabase est actif » d'un nombre de lignes",
+    },
+    {
+      regex: /(programme|nutrition|document)\s*:\s*[^,}\n]*\.length > 0/,
+      quoi: "commande une écriture réelle sur un nombre de lignes (clé de `useContentAssignment`)",
+    },
+    {
+      /*
+       * ⚠️ LE MÊME DÉFAUT SOUS UN AUTRE NOM, et il avait survécu à ce balayage.
+       * La fiche élève ne passe pas d'objet littéral à `useContentAssignment` :
+       * elle nomme ses drapeaux (`canAssignRealPrograms`, …) et les passe en
+       * props. Ne chercher que la forme `nutrition: …` laissait donc intact
+       * `canAssignRealNutrition = … && plans.length > 0` — exactement le faux
+       * succès d'écriture que DANGER1 rejoue.
+       */
+      regex: /(can[A-Z]\w*|\w*[Aa]ssignReal\w*|\w*[Pp]eut\w*)\s*=\s*[^;\n]*\.length > 0/,
+      quoi: "nomme un drapeau d'écriture déduit d'un nombre de lignes",
+    },
+    {
+      regex: /isSupabaseStudent=\{[\w.]+\.length > 0\}/,
+      quoi: "passe un drapeau d'écriture déduit d'un nombre de lignes",
+    },
+  ];
+  const pages = await pagesAdmin();
+  assert.ok(pages.length >= 25, `balayage suspect : seulement ${pages.length} fichiers trouvés sous app/admin`);
+  for (const { chemin, code } of pages) {
+    const net = sansCommentaires(code);
+    for (const { regex, quoi } of motifs) {
+      assert.ok(!regex.test(net), `${chemin} ${quoi}`);
+    }
+  }
+});
+
+await test("BALAYAGE2. NÉGATIF — `adminFeedback` n'est jamais atteignable quand Supabase est configuré", async () => {
+  /*
+   * ⚠️ LE SYMPTÔME SIGNALÉ PAR L'UTILISATEUR, VÉRIFIÉ À LA SOURCE. Les sept
+   * retours `fb-1` … `fb-7` n'arrivent dans une page que par `state.feedback`
+   * (useAdminData → data/admin.ts::adminFeedback). Toute page qui lit
+   * `state.feedback` doit donc le faire derrière un drapeau de configuration.
+   */
+  for (const { chemin, code } of await pagesAdmin()) {
+    const net = sansCommentaires(code);
+    if (!net.includes("state.feedback")) continue;
+    for (const lecture of net.match(/[\w.]*\s*\?\s*[\w.]+\s*:\s*state\.feedback/g) ?? []) {
+      assert.match(
+        lecture,
+        /^(supabaseActive|isSupabase\w*Active)\s*\?/,
+        `${chemin} : \`state.feedback\` est atteint autrement que par un drapeau de configuration (${lecture})`,
+      );
+    }
+    assert.ok(
+      /(supabaseActive|isSupabase\w*Active) \? \w+[\w.]* : state\.feedback/.test(net),
+      `${chemin} : lit state.feedback sans drapeau de configuration`,
+    );
+  }
+});
+
+await test("BALAYAGE3. NÉGATIF — aucune fixture `fb-1 … fb-7` ne peut atteindre le chemin Supabase", () => {
+  /*
+   * ⚠️ ON REMONTE JUSQU'AU SEUL PRODUCTEUR. `adminFeedback` est exporté par
+   * `data/admin.ts` et consommé par `useAdminData` seul : si une page voulait
+   * ces fixtures par un autre chemin, elle devrait importer l'un des deux.
+   */
+  const retours = sansCommentaires(RETOURS);
+  assert.ok(!retours.includes("adminFeedback"), "/admin/retours importe les fixtures directement");
+  assert.ok(!retours.includes("data/admin"), "/admin/retours importe data/admin directement");
+  for (const marque of ["fb-1", "fb-2", "fb-7"]) {
+    assert.ok(!retours.includes(marque), `/admin/retours cite la fixture ${marque}`);
+  }
+  // Et l'unique porte restante est bien derrière la configuration.
+  assert.match(
+    retours,
+    /const feedback = supabaseActive \? supabaseFeedback\.feedback : state\.feedback;/,
+    "/admin/retours : la porte des fixtures n'est pas celle attendue",
+  );
+  // L'ÉCRITURE suit la même source — sinon un changement de statut part dans
+  // localStorage en annonçant un succès (voir DANGER1).
+  assert.ok(
+    !/\buseSupabase\b/.test(retours),
+    "/admin/retours garde un second drapeau `useSupabase`, distinct de la source",
+  );
+  assert.equal(
+    (retours.match(/supabaseActive \? supabaseFeedback\./g) ?? []).length,
+    4,
+    "/admin/retours : les 4 écritures (réponse + 3 statuts) doivent suivre le drapeau de configuration",
+  );
+});
+
+await test("BALAYAGE4. NÉGATIF — la liste PAGES_A_SOURCE ne peut pas se vider en silence", () => {
+  /*
+   * ⚠️ UNE LISTE QUI RÉTRÉCIT EST UN TEST QUI S'ÉTEINT. C'est exactement
+   * comment ce fichier a cessé de protéger 7 pages sur 11 : rien ne disait
+   * combien il devait en couvrir.
+   */
+  assert.equal(PAGES_A_SOURCE.length, 11, "une page à source a été retirée de la couverture");
+  const chemins = new Set<string>(PAGES_A_SOURCE.map(([nom]) => nom));
+  for (const attendu of [
+    "/admin",
+    "/admin/retours",
+    "/admin/notifications",
+    "/admin/exercices",
+    "/admin/eleves",
+    "/admin/eleves/[studentId]",
+    "/admin/programmes",
+    "/admin/programmes/[programId]",
+    "/admin/programmes/[programId]/builder",
+    "/admin/nutrition",
+    "/admin/documents",
+  ]) {
+    assert.ok(chemins.has(attendu), `${attendu} n'est plus couvert`);
+  }
 });
 
 /* ── Verdict ─────────────────────────────────────────────────────────────── */

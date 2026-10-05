@@ -191,6 +191,18 @@ export default function AdminDocumentsPage() {
                     Élèves ayant accès
                   </span>
                   <span className="text-sm text-foreground">{doc.assignedStudentIds.length}</span>
+                  {/* ⚠️ DEUX NOMBRES, PAS UN (A). Au-dessus : les élèves
+                      ASSIGNÉS. Ici : ceux qui ont réellement OUVERT le
+                      document, comptés sur `document_assignments.viewed_at`
+                      — jamais sur `assignedStudentIds.length`, jamais sur
+                      `localStorage`. Le dénominateur vient des mêmes
+                      assignations que le numérateur, pour que « 4 / 7 » ne
+                      mélange pas deux sources. */}
+                  <span className="mt-1 block text-xs text-muted-foreground" data-consultation={doc.id}>
+                    {supabaseActive
+                      ? `Consulté : ${supabaseDocuments.viewStats.get(doc.id)?.viewedCount ?? 0} / ${supabaseDocuments.viewStats.get(doc.id)?.assignedCount ?? 0}`
+                      : "Consultation suivie une fois Supabase configuré."}
+                  </span>
                 </div>
               </div>
               <div className="flex flex-shrink-0 flex-wrap gap-2">

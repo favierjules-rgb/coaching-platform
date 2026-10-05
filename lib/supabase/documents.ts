@@ -158,6 +158,20 @@ function computeRealDocumentAvailability(
 export interface StudentDocumentWithAvailability {
   document: AdminDocument;
   availability: DocumentAvailability;
+  /**
+   * DATE DE PREMIÈRE CONSULTATION, OU `null` — LA SOURCE DE VÉRITÉ (A).
+   *
+   * Vient de `document_assignments.viewed_at`, jamais de `localStorage`. Le
+   * `select("*")` de `getStudentDocumentsWithAvailability` RAPPORTAIT DÉJÀ
+   * cette colonne et la jetait : aucune requête n'est ajoutée pour l'exposer.
+   *
+   * ⚠️ `null` SIGNIFIE DEUX CHOSES DIFFÉRENTES, et c'est assumé :
+   *   · un document assigné jamais consulté → badge « Nouveau » ;
+   *   · un document GLOBAL sans ligne d'assignation → non suivi, faute de
+   *     ligne où écrire. On ne fabrique pas cette ligne (voir
+   *     `markDocumentViewed`), donc il restera à « Nouveau ».
+   */
+  viewedAt: string | null;
 }
 
 /**
@@ -198,17 +212,159 @@ export async function getStudentDocumentsWithAvailability(
       { manuallyUnlocked: assignment.manually_unlocked, unlockAt: assignment.unlock_at },
       reference,
     );
-    composed.push({ document, availability });
+    // `viewed_at` arrive dans le même `select("*")` que `manually_unlocked` et
+    // `unlock_at` : le lire ne coûte aucune requête supplémentaire.
+    composed.push({ document, availability, viewedAt: assignment.viewed_at });
   }
   for (const docRow of globalResult.data ?? []) {
     if (seenIds.has(docRow.id)) continue;
     seenIds.add(docRow.id);
     const document = mapDocumentRow(docRow, []);
     const availability = computeRealDocumentAvailability(student, document, null, reference);
-    composed.push({ document, availability });
+    // Un document global atteint par CE chemin n'a PAS de ligne
+    // d'assignation : il n'existe aucun `viewed_at` à lire, et on n'en
+    // invente pas. Un global ÉGALEMENT assigné est déjà passé par la boucle
+    // ci-dessus (`seenIds`) avec son vrai `viewed_at`.
+    composed.push({ document, availability, viewedAt: null });
   }
 
   return composed;
+}
+
+/* ─── Consultation (A) ─── */
+
+/**
+ * LA PREMIÈRE CONSULTATION SE MARQUE EN BASE, ET NULLE PART AILLEURS (A).
+ *
+ * ═══════════════════════════════════════════════════════════════════════
+ * LE DÉFAUT CORRIGÉ
+ * ═══════════════════════════════════════════════════════════════════════
+ * `document_assignments.viewed_at` existait, était exposé dans les types
+ * générés, et n'était écrit par aucune ligne de code : 0 des 69 assignations
+ * portaient une date. Le statut « consulté / nouveau » vivait dans
+ * `localStorage["seth-document-access:<id>"]` (hooks/useDocumentAccess.ts),
+ * alimenté par un seed de DÉMONSTRATION, et produit par un seul composant
+ * monté par une seule page — `/documents/[documentId]`, que l'élève Supabase
+ * ne peut pas atteindre. Le coach ne voyait donc jamais rien.
+ *
+ * ═══════════════════════════════════════════════════════════════════════
+ * POURQUOI UNE RPC, ET PAS UN `.update()` DEPUIS LE NAVIGATEUR
+ * ═══════════════════════════════════════════════════════════════════════
+ * Parce que la policy qui l'aurait permis était une faille (A0). Une policy ne
+ * restreint pas les COLONNES : autoriser l'élève à écrire `viewed_at` sur sa
+ * ligne l'autorisait aussi à écrire `manually_unlocked` (contournement du
+ * déblocage progressif) et `document_id` (accès à un document jamais
+ * assigné, fichier compris). L'élève n'a donc plus AUCUN UPDATE sur cette
+ * table, et `mark_document_viewed` est la seule écriture qui lui reste — voir
+ * supabase/migrations/20261001090000_documents_consultation_securisee.sql.
+ *
+ * ═══════════════════════════════════════════════════════════════════════
+ * LE BOOLÉEN DE RETOUR N'EST PAS UN « OK »
+ * ═══════════════════════════════════════════════════════════════════════
+ * `true` veut dire « `viewed_at` VIENT d'être posé », c'est-à-dire « c'était
+ * la première fois ». C'est ce qui permet de produire `document_viewed` une
+ * seule fois sans relire la ligne et sans course entre deux onglets : la
+ * clause `viewed_at is null` est évaluée par Postgres, pas par nous.
+ *
+ * `false` couvre indistinctement : déjà consulté, non assigné, document global
+ * sans assignation, aucun élève courant. Cette indistinction est voulue — elle
+ * ne divulgue pas l'existence d'un document que l'élève ne doit pas connaître.
+ */
+export interface MarkDocumentViewedInput {
+  documentId: string;
+  /**
+   * ⚠️ POUR LE JOURNAL D'ACTIVITÉ UNIQUEMENT, JAMAIS POUR LE MARQUAGE.
+   *
+   * `mark_document_viewed` dérive l'élève de `current_student_id()` côté
+   * serveur : cette valeur ne peut pas influencer QUELLE ligne est horodatée.
+   * Elle ne sert qu'à nommer l'élève dans `activity_events`, et la policy
+   * `activity_events_insert_own_student` (`student_id = current_student_id()`)
+   * refuserait de toute façon une valeur falsifiée.
+   */
+  studentId: string;
+  /** Titre déjà connu de l'appelant — évite une relecture pour le journal. */
+  documentTitle?: string;
+}
+
+export async function markDocumentViewed(
+  supabase: TypedSupabaseClient,
+  input: MarkDocumentViewedInput,
+): Promise<boolean> {
+  // @ts-expect-error — RPC ajoutée par la migration 20261001090000, pas encore dans les types générés (`Functions: Record<string, never>`). Même convention que `createCoachUnavailability` (lib/supabase/appointments.ts) : la directive tombera d'elle-même quand `supabase gen types` sera rejoué après le db push, ce qui FORCERA sa suppression au lieu de la laisser pourrir.
+  const { data, error } = await supabase.rpc("mark_document_viewed", {
+    p_document_id: input.documentId,
+  });
+  devWarn("markDocumentViewed", error as { message: string; code?: string } | null);
+  if (error) {
+    return false;
+  }
+  const premiereConsultation = data === true;
+
+  // ⚠️ L'ÉVÈNEMENT SUIT LE BOOLÉEN, PAS L'APPEL. Un second clic renvoie
+  // `false` (la clause `viewed_at is null` n'a rien trouvé) et ne produit donc
+  // rien : `document_viewed` existe au plus une fois par couple
+  // (élève, document), sans relecture et sans course entre deux onglets.
+  if (premiereConsultation) {
+    await logActivityEvent(supabase, {
+      studentId: input.studentId,
+      actorType: "student",
+      eventType: "document_viewed",
+      title: "Document consulté",
+      description: input.documentTitle
+        ? `"${input.documentTitle}" ouvert pour la première fois.`
+        : "Un document a été ouvert pour la première fois.",
+      metadata: buildStudentActivityLink(input.studentId),
+    });
+  }
+
+  return premiereConsultation;
+}
+
+export interface DocumentViewStats {
+  /** Nombre d'élèves à qui le document est assigné. */
+  assignedCount: number;
+  /** Nombre d'entre eux qui l'ont réellement ouvert (`viewed_at` non nul). */
+  viewedCount: number;
+  /** `viewed_at` par élève — pour la fiche élève côté coach. */
+  viewedByStudentId: Map<string, string | null>;
+}
+
+/**
+ * STATISTIQUES DE CONSULTATION POUR LE COACH — DEUX NOMBRES DISTINCTS.
+ *
+ * ⚠️ `assignedCount` ET `viewedCount` NE SONT PAS LE MÊME NOMBRE, et les
+ * confondre est précisément le défaut d'avant : `/admin/documents` affichait
+ * « Élèves ayant accès » = `assignedStudentIds.length`, un compte
+ * d'ASSIGNATIONS présenté là où le coach cherche une LECTURE.
+ *
+ * Une seule requête pour tous les documents demandés (`.in()`), jamais une par
+ * document.
+ */
+export async function getDocumentViewStats(
+  supabase: TypedSupabaseClient,
+  documentIds: string[],
+): Promise<Map<string, DocumentViewStats>> {
+  const stats = new Map<string, DocumentViewStats>();
+  if (documentIds.length === 0) {
+    return stats;
+  }
+  const { data, error } = await supabase
+    .from("document_assignments")
+    .select("document_id, student_id, viewed_at")
+    .in("document_id", documentIds);
+  devWarn("getDocumentViewStats", error);
+  for (const row of data ?? []) {
+    const courant =
+      stats.get(row.document_id) ??
+      { assignedCount: 0, viewedCount: 0, viewedByStudentId: new Map<string, string | null>() };
+    courant.assignedCount += 1;
+    if (row.viewed_at) {
+      courant.viewedCount += 1;
+    }
+    courant.viewedByStudentId.set(row.student_id, row.viewed_at);
+    stats.set(row.document_id, courant);
+  }
+  return stats;
 }
 
 /* ─── Écriture ─── */

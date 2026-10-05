@@ -2,16 +2,46 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 
+import { isSupabaseConfigured } from "@/lib/supabase/env";
 import type { ActualDailyIntake, NutritionDay, NutritionPlan } from "@/types";
 
 /**
- * Suivi nutrition partagé entre /nutrition et /nutrition/[planId].
+ * SUIVI NUTRITION DE LA DÉMONSTRATION — ET DE RIEN D'AUTRE (P6).
  *
- * Tant que Supabase n'est pas branché, les journées validées sont
- * persistées dans localStorage (par plan) afin que les deux pages lisent
- * le même état et qu'il survive à un rechargement. Le format stocké est
- * volontairement plat (dayId -> statut + macros réelles) pour se
- * transposer facilement en lignes `actual_daily_intake` plus tard.
+ * ════════════════════════════════════════════════════════════════════════
+ * LE LOCALSTORAGE N'EST PLUS UNE SOURCE DE VÉRITÉ, ET C'EST STRUCTUREL
+ * ════════════════════════════════════════════════════════════════════════
+ * Ce hook persistait les journées validées dans
+ * `localStorage["seth-nutrition-tracking:<planId>"]`. Audit du 05/10/2026 :
+ * ses trois consommateurs — `NutritionPlanWorkspace`,
+ * `NutritionWeekStatusClient`, `NutritionPlanCardLive` — ne sont montés que
+ * dans la branche de DÉMONSTRATION de `/nutrition` et `/nutrition/[planId]`,
+ * atteinte uniquement quand `local.etat === "mock"`, c'est-à-dire quand
+ * Supabase n'est pas configuré. La clé ne pouvait donc être écrite que par
+ * une session de démonstration — et le plan qu'elle annote vient de
+ * `data/student.ts`.
+ *
+ * ⚠️ LA GARDE CI-DESSOUS REND CELA VÉRIFIABLE PLUTÔT QUE SUPPOSÉ. Dès que
+ * Supabase est configuré, la clé n'est NI lue NI écrite, et `validateDay` /
+ * `resetWeek` ne font rien. Un écran réel branché par erreur sur ce hook
+ * n'obtiendrait donc pas un état local : il obtiendrait le plan tel quel.
+ * S'en remettre à « de toute façon ce composant n'est monté qu'en
+ * démonstration » serait fonder une règle de données sur une arborescence de
+ * rendu, que le prochain lot déplacerait sans le savoir.
+ *
+ * ⚠️ LE STATUT RÉEL EST AILLEURS, ET IL EST DÉRIVÉ. Pour un élève Supabase,
+ * « cette journée est remplie » se lit dans `consumed_meals` /
+ * `meal_entries` — voir `lib/nutrition/statut-journee.ts` et
+ * `lib/supabase/nutrition-journal.ts`. Aucune écriture n'est ajoutée ici : le
+ * statut n'est pas stocké, il est dérivé des repas, qui SONT la persistance.
+ *
+ * ⚠️ LA CLÉ EXISTANTE N'EST PAS EFFACÉE. Les validations déjà posées dans un
+ * navigateur restent lisibles dans ce même navigateur quand Supabase est
+ * absent : le parcours de démonstration continue de fonctionner à
+ * l'identique. Elles ne sont PAS migrables vers Supabase — `dayId` est un
+ * identifiant de `data/student.ts` sans date, et `hunger` / `energy` /
+ * `digestion` / `comment` n'ont aucune colonne d'accueil. Les convertir
+ * demanderait d'inventer des dates.
  *
  * Implémenté avec useSyncExternalStore (plutôt qu'un useState + useEffect)
  * pour éviter tout risque de désynchronisation entre plusieurs instances
@@ -121,25 +151,47 @@ function subscribe(planId: string, onStoreChange: () => void) {
   };
 }
 
+/** Aucun abonnement : utilisé quand le localStorage est hors jeu. */
+function neRienEcouter(): () => void {
+  return () => {};
+}
+
 export function useNutritionTracking(plan: NutritionPlan) {
+  /*
+   * ⚠️ LA GARDE. Lue à chaque rendu, et non mémorisée : la valeur dépend de
+   * variables d'environnement `NEXT_PUBLIC_*`, donc elle est stable pour une
+   * session, mais la figer dans un `useRef` rendrait le hook impossible à
+   * éprouver avec et sans Supabase dans le même harnais de test.
+   */
+  const supabaseActif = isSupabaseConfigured();
+
   const days = useSyncExternalStore(
-    (onStoreChange) => subscribe(plan.id, onStoreChange),
-    () => getSnapshot(plan),
+    (onStoreChange) => (supabaseActif ? neRienEcouter() : subscribe(plan.id, onStoreChange)),
+    () => (supabaseActif ? plan.days : getSnapshot(plan)),
     () => plan.days,
   );
 
   const validateDay = useCallback(
     (dayId: string, actual: ActualDailyIntake) => {
+      /*
+       * ⚠️ INERTE SOUS SUPABASE, ET SILENCIEUSEMENT — pas une exception. Ce
+       * hook n'est atteint que par la démonstration ; lever ici ferait planter
+       * un écran si un lot futur l'y branchait par erreur, au lieu de
+       * simplement ne rien persister localement. Le statut réel se dérive des
+       * repas (lib/nutrition/statut-journee.ts).
+       */
+      if (supabaseActif) return;
       const overrides = parseOverrides(readRaw(plan.id));
       overrides[dayId] = { status: "valide", actual };
       writeOverrides(plan.id, overrides);
     },
-    [plan.id],
+    [plan.id, supabaseActif],
   );
 
   const resetWeek = useCallback(() => {
+    if (supabaseActif) return;
     writeOverrides(plan.id, {});
-  }, [plan.id]);
+  }, [plan.id, supabaseActif]);
 
   return { days, validateDay, resetWeek };
 }

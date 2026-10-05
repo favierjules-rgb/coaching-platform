@@ -33,7 +33,17 @@ export interface UploadedDocumentFile {
   storagePath: string;
   fileName: string;
   fileSizeBytes: number;
-  fileMimeType: string;
+  /**
+   * `null` QUAND LE MIME EST INCONNU, JAMAIS `""` (B).
+   *
+   * `uploadDocumentFile` renvoie toujours une valeur (au pire
+   * `"application/octet-stream"`, le marqueur « MIME inconnu » reconnu par
+   * `documentKind`). Mais ce type sert AUSSI à décrire un fichier DÉJÀ
+   * en base, relu à l'édition : là, `documents.file_mime_type` peut être nul
+   * (7 des 17 lignes actuelles), et le ramener à `""` réécrivait une absence
+   * en chaîne vide à chaque enregistrement.
+   */
+  fileMimeType: string | null;
 }
 
 /** Catégorie de validation à partir du type de document — "guide"/"lien"/"texte" passent par "autre" (pas de contrainte MIME). */

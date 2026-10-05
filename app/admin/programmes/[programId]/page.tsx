@@ -53,9 +53,17 @@ export default function ProgramDetailPage() {
   const isSupabaseProgramsActive = isSupabaseConfigured();
   const supabaseProgram = useSupabaseProgram(params.programId);
   const supabaseStudents = useSupabaseStudents();
-  const students = supabaseStudents.students.length > 0 ? supabaseStudents.students : state.students;
+  /*
+   * ⚠️ LA MÊME QUESTION POUR LES ÉLÈVES QUE POUR LE PROGRAMME. Le commentaire
+   * ci-dessus disait déjà « Supabase est-il actif se lit dans la
+   * CONFIGURATION » — mais seule la lecture du programme l'appliquait. La
+   * liste d'élèves, elle, basculait encore sur son nombre de lignes : la
+   * modale « Assigner » offrait donc les 7 fixtures `@mail.mock` pendant la
+   * requête, et le drapeau d'écriture restait faux au même instant.
+   */
+  const students = isSupabaseProgramsActive ? supabaseStudents.students : state.students;
   const handleSetAssignment = useContentAssignment(
-    { programme: isSupabaseProgramsActive && supabaseStudents.students.length > 0 },
+    { programme: isSupabaseProgramsActive },
     setAssignment,
     supabaseProgram.refetch,
   );
@@ -68,7 +76,12 @@ export default function ProgramDetailPage() {
   // initiale (mock encore affiché le temps que la vraie liste arrive, dont
   // les ids ne correspondent jamais à un vrai programme) — même garde que
   // /admin/programmes/[programId]/builder/page.tsx.
-  if (isSupabaseProgramsActive && supabaseProgram.loading) {
+  /*
+   * ⚠️ LES ÉLÈVES ENTRENT DANS LA GARDE. La modale « Assigner » les liste, et
+   * une liste encore vide y ferait apparaître les fixtures — à l'endroit
+   * précis où un clic écrit. Même raison que la garde de /admin/programmes.
+   */
+  if (isSupabaseProgramsActive && (supabaseProgram.loading || supabaseStudents.loading)) {
     return <Loader libelle="Chargement…" variante="ligne" />;
   }
 

@@ -161,7 +161,12 @@
     "test:cardio-mixte": "npx tsx scripts/tests/cardio-mixte.mts",
     "test:calendrier-seances-completes": "npx tsx scripts/tests/calendrier-seances-completes.mts",
     "test:cardio-builder-compact": "npx tsx scripts/tests/cardio-builder-compact.mts",
-    "test:profil-eleve-onglets": "npx tsx scripts/tests/profil-eleve-onglets.mts"
+    "test:profil-eleve-onglets": "npx tsx scripts/tests/profil-eleve-onglets.mts",
+    "test:nutrition-journal": "npx tsx scripts/tests/nutrition-journal-p6-p7.mts",
+    "test:profil-eleve-sync": "npx tsx scripts/tests/profil-eleve-synchronisation-p8.mts",
+    "test:photos-progression": "npx tsx scripts/tests/photos-progression-p1-p3.mts",
+    "test:documents-consultation": "npx tsx scripts/tests/documents-consultation-lot-a.mts",
+    "test:documents-apercu": "npx tsx scripts/tests/documents-apercu-lot-b.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

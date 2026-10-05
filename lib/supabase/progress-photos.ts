@@ -6,7 +6,7 @@ import {
   getSignedProgressPhotoUrl,
   uploadProgressPhotoFile,
 } from "@/lib/supabase/storage-progress-photos";
-import type { ProgressPhoto, ProgressPhotoAngle } from "@/types";
+import type { ProgressPhoto, ProgressPhotoAngle, ProgressPhotoType } from "@/types";
 import type { Database } from "@/types/supabase";
 
 /**
@@ -101,6 +101,17 @@ export interface CreateProgressPhotoInput {
   uploadedBy: string | null;
   /** "student" pour un upload depuis /progression, "coach" pour un upload depuis /admin/eleves/[studentId]/progression. */
   actorType: "student" | "coach";
+  /**
+   * RÔLE de la photo (`progress_photos.type`) — « mensuelle » par défaut.
+   *
+   * ⚠️ DISTINCT DE `photoType`, QUI EST L'ANGLE. P3A : l'ancien formulaire de
+   * `/profil` et de la fiche coach fait choisir ce rôle (avant / actuelle /
+   * objectif / mensuelle) et c'est lui que `ProgressPhotos` lit pour composer
+   * ses trois vignettes « Avant / Actuelle / Objectif ». Le brancher sur cet
+   * upload sans transporter le rôle l'aurait forcé à « mensuelle » et aurait
+   * vidé ces trois vignettes.
+   */
+  type?: ProgressPhotoType;
 }
 
 /** Upload Storage + insertion de la ligne + journal d'activité (best-effort). */
@@ -119,7 +130,7 @@ export async function createProgressPhotoWithUpload(
     .from("progress_photos")
     .insert({
       student_id: studentId,
-      type: "mensuelle",
+      type: input.type ?? "mensuelle",
       date: input.date,
       weight_kg: input.weightKg,
       note: input.note,
@@ -190,18 +201,82 @@ export async function restoreProgressPhoto(supabase: TypedSupabaseClient, photoI
   return !error;
 }
 
-/** Supprime la ligne et le fichier Storage associé (best-effort sur le fichier). */
+/**
+ * LE CHEMIN STORAGE SE RELIT EN BASE, IL NE SE FAIT PLUS PASSER (P2).
+ *
+ * ════════════════════════════════════════════════════════════════════════
+ * LE DÉFAUT CORRIGÉ
+ * ════════════════════════════════════════════════════════════════════════
+ * `storagePath` arrivait de l'appelant, et `useProgressPhotosGallery` le
+ * prenait dans son ÉTAT REACT (`photos.find(p => p.id === photoId)`). Une
+ * liste pas encore chargée, un identifiant venu d'ailleurs, et l'argument
+ * valait `null` : la ligne partait, le fichier restait, et rien ne le
+ * signalait. La seule source fiable est la ligne elle-même.
+ *
+ * ⚠️ LE TROISIÈME PARAMÈTRE A ÉTÉ SUPPRIMÉ, PAS RÉTROGRADÉ EN REPLI. Un
+ * `storage_path` relu en base PUIS rattrapé par `?? cheminConnu` laisse
+ * revenir l'état React par la porte de service : il suffit que la base
+ * réponde NULL — photo base64, lecture refusée par la RLS — pour que la
+ * valeur de l'appelant reprenne la main et désigne un fichier qui peut
+ * appartenir à une AUTRE photo (liste périmée, identifiant réutilisé).
+ * Supprimer le fichier d'une photo qu'on ne supprimait pas est un défaut
+ * pire que celui qu'on corrige. Les trois appelants
+ * (`useProgressPhotosGallery`, `deleteProgressPhotoSupabase`, et par lui les
+ * deux hooks élève/coach) ne passaient déjà que `(supabase, photoId)` : la
+ * signature a donc été réduite à ce qu'elle doit être.
+ *
+ * `storage_path` à NULL en base ⇒ AUCUN appel Storage. Ce n'est pas un
+ * abandon silencieux : une photo sans `storage_path` est une photo dont le
+ * fichier n'est pas dans le bucket (les 8 lignes base64 historiques, P3B).
+ *
+ * ════════════════════════════════════════════════════════════════════════
+ * L'ORDRE DES OPÉRATIONS N'EST PAS INVERSÉ, ET C'EST DÉLIBÉRÉ
+ * ════════════════════════════════════════════════════════════════════════
+ * ⚠️ LIRE → SUPPRIMER LA LIGNE → SUPPRIMER LE FICHIER. Jamais l'inverse.
+ *
+ * Il n'existe aucune transaction couvrant Postgres ET Storage : l'un des deux
+ * échecs partiels est inévitable, et les deux ne coûtent pas la même chose.
+ *
+ *   · fichier supprimé, ligne conservée → une ligne qui pointe vers un
+ *     fichier mort : image cassée définitive, donnée PERDUE côté élève ;
+ *   · ligne supprimée, fichier conservé → un orphelin : quelques octets
+ *     facturés, invisible, et RATTRAPABLE par un nettoyage ultérieur.
+ *
+ * On garde donc l'ordre qui, en cas d'échec, perd de l'espace disque plutôt
+ * que des photos. Fermer complètement la fenêtre demanderait une file de
+ * suppressions différées (table + tâche de purge) : c'est une architecture
+ * supplémentaire, pas une correction de ce lot, et elle est signalée comme
+ * telle plutôt qu'improvisée ici.
+ */
 export async function deleteProgressPhotoPermanently(
   supabase: TypedSupabaseClient,
   photoId: string,
-  storagePath: string | null,
 ): Promise<boolean> {
+  // 1. LIRE avant de supprimer : après le DELETE, la ligne n'existe plus.
+  const { data: ligne, error: lectureError } = await supabase
+    .from("progress_photos")
+    .select("storage_path")
+    .eq("id", photoId)
+    .maybeSingle();
+  devWarn("deleteProgressPhotoPermanently (lecture storage_path)", lectureError);
+  // SEULE SOURCE DE VÉRITÉ. Pas de `??` après ce point : `storage_path` à NULL
+  // en base signifie « aucun fichier à supprimer », pas « demander ailleurs ».
+  const chemin = (ligne as { storage_path: string | null } | null)?.storage_path ?? null;
+
+  // 2. SUPPRIMER LA LIGNE.
   const { error } = await supabase.from("progress_photos").delete().eq("id", photoId);
   devWarn("deleteProgressPhotoPermanently", error);
-  if (!error && storagePath) {
-    await deleteProgressPhotoFile(supabase, storagePath);
+  if (error) {
+    // ⚠️ AUCUN FICHIER N'EST TOUCHÉ. Supprimer l'image d'une ligne toujours
+    // présente la transformerait en vignette cassée irréparable.
+    return false;
   }
-  return !error;
+
+  // 3. SUPPRIMER LE FICHIER — best-effort, comme avant.
+  if (chemin) {
+    await deleteProgressPhotoFile(supabase, chemin);
+  }
+  return true;
 }
 
 /** Ne garde qu'une seule photo "avant" à la fois pour l'élève : désélectionne les autres avant de sélectionner celle-ci. */

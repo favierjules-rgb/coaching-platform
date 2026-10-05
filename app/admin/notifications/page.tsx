@@ -8,6 +8,8 @@ import { NotificationComposer } from "@/components/admin/NotificationComposer";
 import { NotificationTestButton } from "@/components/admin/NotificationTestButton";
 import { useAdminData } from "@/hooks/useAdminData";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
+import { isSupabaseConfigured } from "@/lib/supabase/env";
+import { Loader } from "@/components/ui/Loader";
 
 /**
  * LE CENTRE DE NOTIFICATIONS.
@@ -18,9 +20,29 @@ import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
  */
 export default function AdminNotificationsPage() {
   const { state } = useAdminData();
+  /*
+   * ⚠️ LA SOURCE DÉPEND DE LA CONFIGURATION, PLUS DU NOMBRE DE LIGNES. Cette
+   * liste remplit le SÉLECTEUR DE DESTINATAIRES du compositeur : pendant la
+   * requête initiale, elle offrait les 7 élèves `@mail.mock` de
+   * `data/admin.ts`. Choisir l'un d'eux et envoyer visait un identifiant qui
+   * n'existe pas en base — un envoi dans le vide, à l'endroit précis où un
+   * clic part vers de vraies personnes.
+   *
+   * Le repli mock survit pour le seul cas où il a un sens : Supabase non
+   * configuré.
+   */
+  const supabaseActive = isSupabaseConfigured();
   const supabaseStudents = useSupabaseStudents();
-  const students = supabaseStudents.students.length > 0 ? supabaseStudents.students : state.students;
+  const students = supabaseActive ? supabaseStudents.students : state.students;
   const [rafraichir, setRafraichir] = useState(0);
+
+  /*
+   * ⚠️ AUCUN DESTINATAIRE N'EST PROPOSÉ AVANT D'ÊTRE RÉEL. La garde est APRÈS
+   * tous les hooks (règle des hooks).
+   */
+  if (supabaseActive && supabaseStudents.loading) {
+    return <Loader libelle="Chargement des élèves…" variante="ligne" />;
+  }
 
   return (
     <div>

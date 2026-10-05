@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { getCurrentStudentProfile } from "@/lib/supabase/current-student";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -48,5 +48,25 @@ export function useSupabaseStudentDocuments() {
     };
   }, []);
 
-  return { ready, active: ready && studentId !== null, studentId, documents };
+  /**
+   * RECHARGEMENT APRÈS UN MARQUAGE DE CONSULTATION (A).
+   *
+   * ⚠️ IL NE RÉSOUT PAS L'ÉLÈVE À NOUVEAU. `getCurrentStudentProfile` n'est
+   * appelé qu'au montage ; ce `refetch` réutilise l'id déjà connu et
+   * s'abstient tant qu'il est nul. Il ne touche pas à `ready` : un
+   * rechargement ne doit pas faire clignoter la page en état de chargement.
+   *
+   * Il n'est appelé que lorsque `markDocumentViewed` a renvoyé `true`, donc
+   * au plus une fois par document et par élève — jamais à chaque clic.
+   */
+  const refetch = useCallback(async () => {
+    if (!studentId) return;
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) return;
+    const student = await getCurrentStudentProfile(supabase);
+    if (!student) return;
+    setDocuments(await getStudentDocumentsWithAvailability(supabase, student.id, student.startDate));
+  }, [studentId]);
+
+  return { ready, active: ready && studentId !== null, studentId, documents, refetch };
 }

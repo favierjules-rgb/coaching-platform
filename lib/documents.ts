@@ -31,6 +31,67 @@ export function computeStudentDocumentAvailability(
   };
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   CLASSIFICATION DU FICHIER (B) — LE MIME DÉCIDE, PAS LA DÉCLARATION
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/** Ce qu'on sait RENDRE — distinct de `DocumentType`, qui est ce que le coach déclare. */
+export type DocumentKind = "image" | "pdf" | "video" | "autre";
+
+/**
+ * ⚠️ LE MIME RÉEL PASSE AVANT `document.type`, ET CE N'EST PAS UN DÉTAIL.
+ *
+ * `documents.type` est un `<select>` rempli à la main par le coach, modifiable
+ * APRÈS l'upload et sans aucune revalidation du fichier déjà présent : passer
+ * un document de `pdf` à `image` laisse `storage_path` sur le PDF. Un
+ * aiguillage sur `type` rendait donc un PDF comme une image, et inversement,
+ * sur la seule foi d'une déclaration.
+ *
+ * `file_mime_type` est un FAIT : il vient de `file.type` au moment de l'upload
+ * (lib/supabase/storage-documents.ts) et il est aussi le `contentType` de
+ * l'objet Storage. Il décide.
+ *
+ * `type` ne sert plus que de REPLI, pour les lignes antérieures au champ
+ * `file_mime_type` (7 des 17 documents actuels l'ont à `null`).
+ *
+ * « Absent » couvre TROIS valeurs, et il faut les trois :
+ *   · `null`                      — ligne antérieure au champ ;
+ *   · `""`                        — une édition a transformé l'absence en chaîne
+ *                                   vide (corrigé par ailleurs dans ce lot,
+ *                                   mais les lignes déjà écrites restent) ;
+ *   · `"application/octet-stream"` — c'est le marqueur que pose
+ *                                   `uploadDocumentFile` quand `file.type`
+ *                                   est vide : il dit « MIME inconnu », pas
+ *                                   « fichier binaire à ne pas afficher ».
+ */
+export function documentKind(document: {
+  type: DocumentType;
+  fileMimeType: string | null;
+}): DocumentKind {
+  const mime = (document.fileMimeType ?? "").trim().toLowerCase();
+  const mimeInconnu = mime === "" || mime === "application/octet-stream";
+
+  if (!mimeInconnu) {
+    if (mime.startsWith("image/")) return "image";
+    if (mime === "application/pdf") return "pdf";
+    if (mime.startsWith("video/")) return "video";
+    // Un MIME présent mais d'une autre famille (zip, docx…) est un fait, lui
+    // aussi : on ne retombe PAS sur `type` pour le contredire.
+    return "autre";
+  }
+
+  switch (document.type) {
+    case "image":
+      return "image";
+    case "pdf":
+      return "pdf";
+    case "vidéo":
+      return "video";
+    default:
+      return "autre";
+  }
+}
+
 export const documentCategoryLabels: Record<DocumentCategory, string> = {
   nutrition: "Nutrition",
   entrainement: "Entraînement",

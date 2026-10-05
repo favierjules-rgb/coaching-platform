@@ -49,7 +49,14 @@ export default function DocumentsPage() {
     return (
       <div>
         <EnTete />
-        <RealDocumentLibrary documents={supabaseDocuments.documents} />
+        {/* `studentId` est le VRAI `students.id` résolu par le hook, jamais
+            l'identifiant de démonstration de `data/student.ts` : c'est lui que
+            `mark_document_viewed` compare à `current_student_id()`. */}
+        <RealDocumentLibrary
+          documents={supabaseDocuments.documents}
+          studentId={supabaseDocuments.studentId}
+          onConsulte={supabaseDocuments.refetch}
+        />
       </div>
     );
   }

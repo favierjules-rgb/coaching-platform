@@ -16,6 +16,7 @@ import {
   upsertBodyMeasurements,
   upsertCustomMeasurement,
 } from "@/lib/supabase/students";
+import { createProgressPhotoWithUpload } from "@/lib/supabase/progress-photos";
 import { getWorkoutFeedbackForStudent } from "@/lib/supabase/workout-feedback";
 import type { CustomMeasurementInput } from "@/components/student/UpdateMeasurementsModal";
 import type {
@@ -24,6 +25,7 @@ import type {
   AdminStudentFeedback,
   BodyMeasurementType,
   ProgressPhoto,
+  ProgressPhotoType,
   StudentPaymentProfile,
   SupabaseStudentProfile,
 } from "@/types";
@@ -189,6 +191,37 @@ export function useSupabaseStudentDetail(studentId: string | undefined) {
     [studentId, refetch],
   );
 
+  /*
+   * L'UPLOAD RÉEL DEPUIS LA FICHE COACH — P3A.
+   *
+   * Symétrique de `useSupabaseStudentProfile.uploadPhoto`, à deux détails
+   * près : `actorType: "coach"` (le journal d'activité doit dire qui a
+   * déposé), et `studentId` est ici l'élève de la route — déjà un vrai
+   * `students.id`, contrairement au chemin `/profil`.
+   */
+  const uploadPhoto = useCallback(
+    async (
+      file: File,
+      meta: { type: ProgressPhotoType; date: string; weightKg: number | null; note: string },
+    ): Promise<string | null> => {
+      const supabase = createSupabaseBrowserClient();
+      if (!supabase) return "Connexion Supabase indisponible.";
+      if (!studentId) return "Élève non identifié.";
+      const result = await createProgressPhotoWithUpload(supabase, studentId, file, {
+        photoType: "autre",
+        type: meta.type,
+        date: meta.date,
+        weightKg: meta.weightKg,
+        note: meta.note,
+        uploadedBy: null,
+        actorType: "coach",
+      });
+      await refetch();
+      return "error" in result ? result.error : null;
+    },
+    [studentId, refetch],
+  );
+
   const deletePhoto = useCallback(
     async (photoId: string) => {
       const supabase = createSupabaseBrowserClient();
@@ -231,6 +264,7 @@ export function useSupabaseStudentDetail(studentId: string | undefined) {
     updateTarget,
     updateMeasurements,
     addPhoto,
+    uploadPhoto,
     deletePhoto,
     updatePayment,
     addCoachNote,
