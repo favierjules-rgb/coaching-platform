@@ -79,6 +79,7 @@
     "test:pwa-service-worker": "npx tsx scripts/tests/pwa-service-worker.mts",
     "test:pwa-install": "npx tsx scripts/tests/pwa-install.mts",
     "test:pwa-render": "npx tsx scripts/tests/pwa-render.mts",
+    "test:pwa-echelle": "npx tsx scripts/tests/pwa-echelle-affichage.mts",
     "test:pwa-lancement": "NODE_OPTIONS=\"--no-warnings\" npx tsx --experimental-test-module-mocks scripts/tests/pwa-lancement.mts",
     "test:pwa-coquille": "NODE_OPTIONS=\"--no-warnings\" npx tsx --experimental-test-module-mocks scripts/tests/pwa-coquille.mts",
     "test:offline-depot": "npx tsx scripts/tests/offline-depot.mts",

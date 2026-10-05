@@ -156,6 +156,155 @@ body {
 }
 
 /*
+ * ════════════════════════════════════════════════════════════════════════════
+ * ÉCHELLE D'AFFICHAGE — LE ZOOM AU FOCUS D'UN CHAMP N'A PLUS LIEU
+ * ════════════════════════════════════════════════════════════════════════════
+ *
+ * LE DÉFAUT, ET SA CAUSE EXACTE
+ * ────────────────────────────────────────────────────────────────────────────
+ * Toucher un champ « Reps (8–13) » agrandissait toute la page. Ce n'est pas un
+ * bug de l'application : c'est une règle de WebKit, reprise par Chromium
+ * Android — quand un contrôle de formulaire reçoit le focus et que la taille
+ * de son texte est INFÉRIEURE à 16px, le navigateur zoome pour le rendre
+ * lisible. Il ne dézoome jamais tout seul.
+ *
+ * Or les champs du dépôt portaient `text-sm`, c'est-à-dire 0.875rem = 14px.
+ * Repérés à l'audit, cinq variables de classe irriguaient à elles seules
+ * l'essentiel des 170 contrôles de formulaire du projet :
+ *
+ *   components/admin/AdminFormFields.tsx       `inputClass`   (38 fichiers l'importent)
+ *   components/student/ExerciseFeedbackCard.tsx `champ`        (Reps / Charge / RPE)
+ *   components/student/CardioBlockFeedbackForm.tsx `inputClass`
+ *   components/admin/NotificationComposer.tsx  `champ`
+ *   components/ui/ProgressiveQuestions.tsx     `progressiveInputClass`
+ *
+ * ⚠️ ON NE CORRIGE PAS CES CINQ FICHIERS, ET C'EST UN CHOIX. Les retoucher
+ * un par un réglerait le cas du jour et laisserait le 171ᵉ champ réintroduire
+ * le défaut sans que personne ne le voie. La règle ci-dessous est posée sur
+ * les SÉLECTEURS DE BALISE : elle couvre tout champ existant ET tout champ
+ * futur, quelle que soit la classe qu'il porte.
+ *
+ * POURQUOI `16px` ET PAS `1rem`
+ * ────────────────────────────────────────────────────────────────────────────
+ * Le seuil de WebKit est en PIXELS CSS, absolu. `1rem` suit la taille de base
+ * du document : un utilisateur qui réduit la taille de police par défaut de
+ * son navigateur ramènerait `1rem` sous 16px, et le zoom reviendrait. `16px`
+ * est le seuil lui-même, écrit tel quel.
+ *
+ * POURQUOI UN `@media` ET PAS UNE RÈGLE GLOBALE
+ * ────────────────────────────────────────────────────────────────────────────
+ * Le défaut n'existe que là où le navigateur zoome au focus, donc sur les
+ * écrans tactiles. Au-delà de 768px — le `md` de Tailwind — le design de
+ * bureau garde ses champs à 14px, exactement comme avant : AUCUN pixel ne
+ * bouge sur l'interface d'administration vue au clavier et à la souris.
+ *
+ * `(hover: none) and (pointer: coarse)` ne suffirait pas : un iPad avec
+ * clavier et trackpad se déclare `pointer: fine` tout en gardant le zoom au
+ * focus de WebKit. La largeur est le critère fiable ici.
+ *
+ * CE QUI EST PRÉSERVÉ, ET C'EST L'ESSENTIEL
+ * ────────────────────────────────────────────────────────────────────────────
+ * Seule la TAILLE DU TEXTE change. `padding`, `border`, `border-radius`,
+ * `width`, `min-height`, les couleurs, la grille et le responsive ne sont pas
+ * nommés ici, donc pas touchés. Les champs gagnent 2px de texte et grandissent
+ * de ce que leur `line-height` en déduit — c'est voulu : un champ de saisie
+ * tactile à 14px était de toute façon en-dessous de ce qui se lit à bout de
+ * bras.
+ *
+ * POURQUOI `!important` ICI, ET NULLE PART AILLEURS
+ * ────────────────────────────────────────────────────────────────────────────
+ * C'est une question de spécificité, et elle est tranchée, pas contournée.
+ * `input` est un sélecteur de TYPE (spécificité 0,0,1) ; `text-sm` est une
+ * CLASSE (0,1,0), et elle gagne toujours — l'ordre de cascade n'y change rien,
+ * et la règle serait purement décorative sans `!important`.
+ *
+ * Les alternatives ont été pesées :
+ *   · retoucher les cinq variables de classe → ne protège pas le champ suivant ;
+ *   · `input[class]` → même spécificité que `text-sm`, gagne par l'ordre de
+ *     cascade, mais l'ordre dépend de l'ordre d'émission de Tailwind v4 : une
+ *     garantie qui tient par accident n'est pas une garantie ;
+ *   · `@layer` → Tailwind v4 n'expose pas de couche post-utilitaires stable.
+ *
+ * `!important` est donc le mécanisme correct pour un plancher de sécurité. Il
+ * est borné à UNE propriété (`font-size`), sur TROIS sélecteurs, dans UN
+ * `@media`. Un composant qui aurait un vrai besoin de texte plus GRAND reste
+ * libre : `16px` est un plancher, et toute valeur supérieure exprimée en
+ * `font-size` inline la dépasserait — ce qui ne réintroduit pas le défaut.
+ */
+@media (max-width: 767px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
+/*
+ * ────────────────────────────────────────────────────────────────────────────
+ * `text-size-adjust` — CE QU'IL FAIT, ET CE QU'IL NE FAIT PAS
+ * ────────────────────────────────────────────────────────────────────────────
+ * ⚠️ IL N'A RIEN À VOIR AVEC LE ZOOM AU FOCUS. Il faut l'écrire, parce que
+ * c'est l'erreur de diagnostic la plus courante sur ce sujet.
+ *
+ * Ce qu'il empêche est autre chose, et réel : l'« inflation automatique du
+ * texte ». WebKit et Chromium Android grossissent d'eux-mêmes la police d'un
+ * bloc de texte qu'ils jugent trop étroit — héritage du web non responsive.
+ * Le résultat est une page dont certains paragraphes ne sont PAS à l'échelle
+ * demandée, notamment après un changement d'orientation.
+ *
+ * `100%` et non `none` : `none` désactive aussi l'agrandissement MANUEL du
+ * texte par l'utilisateur sur certains moteurs, ce qui est un recul
+ * d'accessibilité pur. `100%` dit « n'ajuste pas de toi-même » sans retirer
+ * ce droit.
+ *
+ * La propriété standard est posée en premier, le préfixe `-webkit-` ensuite :
+ * Safari (toutes versions en service) et Chromium Android ne lisent encore que
+ * la seconde ; Chrome/Edge de bureau et Firefox lisent la première. Les deux
+ * disent la même chose, aucune ne contredit l'autre.
+ */
+html {
+  text-size-adjust: 100%;
+  -webkit-text-size-adjust: 100%;
+}
+
+/*
+ * ────────────────────────────────────────────────────────────────────────────
+ * `touch-action: manipulation` — SUR LES CONTRÔLES, JAMAIS SUR LA PAGE
+ * ────────────────────────────────────────────────────────────────────────────
+ * `manipulation` = « défilement et pincement autorisés, double-tap NON ». Il
+ * retire le zoom par double-tap et, accessoirement, le délai de ~300ms que
+ * certains moteurs gardaient pour le détecter.
+ *
+ * ⚠️ IL N'EST SURTOUT PAS POSÉ SUR `html` NI SUR `body`. `touch-action` se
+ * transmet au sous-arbre par le jeu des régions tactiles : le poser à la
+ * racine neutraliserait le pincement sur TOUTE la page — y compris là où il
+ * est légitime, par exemple pour lire une photo de progression ou un PDF dans
+ * la visionneuse. Il est donc posé sur les ÉLÉMENTS OÙ UN DOUBLE-TAP N'A
+ * AUCUN SENS : les boutons, les liens et les champs.
+ *
+ * `manipulation` conserve explicitement `pan-x` et `pan-y` : le défilement
+ * vertical de la page, le défilement d'une modale et le rail horizontal de la
+ * séance continuent de fonctionner. `.rail-seance` garde par ailleurs son
+ * `touch-action: pan-x pan-y` déclaré plus bas, qui n'est pas touché ici.
+ *
+ * Aucun JavaScript n'intervient : pas de `preventDefault` sur `touchstart`,
+ * `touchmove` ou `touchend`, pas d'écouteur global, pas de zoom maison. Le
+ * dépôt n'en contenait aucun avant ce chantier — vérifié à l'audit — et il
+ * n'en contient toujours aucun.
+ */
+button,
+a[href],
+label,
+summary,
+[role="button"],
+input,
+textarea,
+select {
+  touch-action: manipulation;
+}
+
+
+/*
  * Scroll vers les ancres de section (#methode, #transformations,
  * #newsletter — correctif chantier /programmes, juillet 2026). Le décalage
  * sous le header fixe est géré par `scroll-mt-24` directement sur chaque
