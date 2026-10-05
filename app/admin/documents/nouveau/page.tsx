@@ -176,7 +176,8 @@ export default function NewDocumentPage() {
       fileName: uploadedFile?.fileName ?? fileName,
       storagePath: uploadedFile?.storagePath ?? null,
       fileSizeBytes: uploadedFile?.fileSizeBytes ?? null,
-      fileMimeType: uploadedFile?.fileMimeType ?? null,
+      // `||` et non `??` : une chaîne vide ne doit jamais atteindre la base.
+      fileMimeType: uploadedFile?.fileMimeType || null,
       status: publish ? ("publié" as const) : status,
       important,
       distributionMode,

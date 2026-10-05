@@ -115,7 +115,20 @@ export function DocumentModal({
   const [saved, setSaved] = useState(false);
   const [form, setForm] = useState(() => formFromDoc(document));
   const [uploadedFile, setUploadedFile] = useState<UploadedDocumentFile | null>(
-    document.storagePath ? { storagePath: document.storagePath, fileName: document.fileName ?? "", fileSizeBytes: document.fileSizeBytes ?? 0, fileMimeType: document.fileMimeType ?? "" } : null,
+    // ⚠️ `fileMimeType` N'EST PAS RAMENÉ À `""` (B). Un MIME absent vaut `null`,
+    // et doit le rester : ouvrir « Modifier » sur l'un des 7 documents dont
+    // `file_mime_type` est nul, changer un titre et enregistrer écrivait `""`
+    // en base — ni une absence, ni un MIME. `documentKind` traite déjà `""`
+    // comme absent pour rattraper les lignes déjà écrites, mais on cesse d'en
+    // produire de nouvelles.
+    document.storagePath
+      ? {
+          storagePath: document.storagePath,
+          fileName: document.fileName ?? "",
+          fileSizeBytes: document.fileSizeBytes ?? 0,
+          fileMimeType: document.fileMimeType ?? null,
+        }
+      : null,
   );
 
   function setField<K extends keyof ReturnType<typeof formFromDoc>>(key: K, value: (typeof form)[K]) {
@@ -143,7 +156,8 @@ export function DocumentModal({
       fileName: uploadedFile?.fileName || form.fileName || null,
       storagePath: uploadedFile?.storagePath ?? null,
       fileSizeBytes: uploadedFile?.fileSizeBytes ?? null,
-      fileMimeType: uploadedFile?.fileMimeType ?? null,
+      // `||` et non `??` : une chaîne vide héritée doit redevenir `null`.
+      fileMimeType: uploadedFile?.fileMimeType || null,
       status: form.status,
       important: form.important,
       distributionMode: form.distributionMode,

@@ -56,7 +56,17 @@ export function DocumentFileUploadField({ documentId, type, current, onUploaded 
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [uploaded, setUploaded] = useState<UploadedDocumentFile | null>(
-    current ? { storagePath: current.storagePath, fileName: current.fileName ?? "", fileSizeBytes: current.fileSizeBytes ?? 0, fileMimeType: "" } : null,
+    // ⚠️ `fileMimeType: null`, PAS `""` (B). `current` ne porte pas le MIME —
+    // il décrit un fichier déjà en base — et une absence doit rester une
+    // absence : `""` n'est ni un MIME, ni « inconnu » pour `documentKind`.
+    current
+      ? {
+          storagePath: current.storagePath,
+          fileName: current.fileName ?? "",
+          fileSizeBytes: current.fileSizeBytes ?? 0,
+          fileMimeType: null,
+        }
+      : null,
   );
 
   function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {

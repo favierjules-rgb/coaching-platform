@@ -20,6 +20,7 @@ import { NutritionWeekSummaryCard } from "@/components/admin/NutritionWeekSummar
 import { StatusBadge, feedbackStatusTone, studentStatusTone } from "@/components/admin/StatusBadge";
 import { PaymentSection } from "@/components/admin/PaymentSection";
 import { StudentSubscriptionSection } from "@/components/admin/StudentSubscriptionSection";
+import { DocumentStatusBadge } from "@/components/student/DocumentStatusBadge";
 import { MeasurementsSection } from "@/components/student/MeasurementsSection";
 import { ProgressPhotoGallerySection } from "@/components/student/ProgressPhotoGallerySection";
 import { WeightEvolutionCard } from "@/components/student/WeightEvolutionCard";
@@ -545,6 +546,9 @@ export default function AdminStudentDetailPage() {
             d,
             manualDocumentUnlocks.filter((u) => u.studentId === student.id),
           ),
+          // Élève de démonstration : aucune ligne `document_assignments`, donc
+          // aucun `viewed_at` à lire. On n'en fabrique pas (A).
+          viewedAt: null as string | null,
         }));
   const availableDocuments = documentsWithAvailability.filter((d) => d.availability.available);
   const lockedDocuments = documentsWithAvailability.filter((d) => !d.availability.available);
@@ -1298,9 +1302,21 @@ export default function AdminStudentDetailPage() {
                   <p className="text-sm text-muted-foreground">Aucun document disponible.</p>
                 ) : (
                   <ul className="flex flex-col gap-1.5">
-                    {availableDocuments.map(({ document }) => (
+                    {availableDocuments.map(({ document, viewedAt }) => (
                       <li key={document.id} className="flex items-center justify-between gap-2 text-sm text-foreground">
-                        {document.title}
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span className="truncate">{document.title}</span>
+                          {/* ⚠️ LE VRAI STATUT, LU EN BASE (A). `viewedAt` vient de
+                              `document_assignments.viewed_at` via
+                              `getStudentDocumentsWithAvailability` ; le coach n'a
+                              aucun accès au `localStorage` de l'élève, et c'est
+                              exactement pourquoi il ne voyait rien avant ce lot.
+                              Le mécanisme de disponibilité/déblocage n'est pas
+                              touché : on n'ajoute qu'un affichage. */}
+                          {isSupabaseStudent && (
+                            <DocumentStatusBadge status={viewedAt ? "consulté" : "nouveau"} />
+                          )}
+                        </span>
                         {isSupabaseStudent && (
                           <button
                             type="button"

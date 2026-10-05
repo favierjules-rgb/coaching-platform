@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { MediaModal } from "@/components/shared/MediaModal";
+import type { DocumentKind } from "@/lib/documents";
 
 /**
  * LES DOCUMENTS — DANS SETH AUSSI.
@@ -34,6 +35,26 @@ import { MediaModal } from "@/components/shared/MediaModal";
  * `localStorage`, ni IndexedDB, ni Cache Storage. Quand elle expire, on en
  * redemande une par le mécanisme existant — on ne rend jamais le document
  * public pour se simplifier la vie.
+ *
+ * ═════════════════════════════════════════════════════════════════════
+ * UNE IMAGE N'EST PAS UN PDF (B)
+ * ═════════════════════════════════════════════════════════════════════
+ * Jusqu'à ce lot, TOUT passait par l'`<iframe>` ci-dessous. Une image s'y
+ * affiche — le navigateur sait rendre une image seule — mais sur fond blanc
+ * forcé, sans `object-fit`, sans `alt`, et tronquée ou minuscule selon la
+ * taille réelle du fichier. C'était un visualiseur de PDF dans lequel une
+ * image tombait par défaut.
+ *
+ * ⚠️ LA BRANCHE `<iframe>` EST CONSERVÉE À L'IDENTIQUE pour `pdf`, `video` et
+ * `autre`. Le `<img>` est une branche SUPPLÉMENTAIRE, atteinte uniquement sur
+ * `kind === "image"` ; elle ne remplace rien. Les états `hors_ligne`,
+ * `erreur`, « Réessayer » et l'issue « Ouvrir le document » sont communs aux
+ * deux et inchangés — un lien signé expiré produit la même page d'erreur du
+ * Storage dans un `<img>` que dans une `<iframe>`, et la même absence
+ * d'évènement côté JavaScript.
+ *
+ * `kind` est OPTIONNEL : sans lui, le comportement est exactement celui
+ * d'avant. Aucun appelant existant n'a besoin d'être adapté.
  */
 
 interface FileViewerModalProps {
@@ -44,6 +65,11 @@ interface FileViewerModalProps {
   url: string | null;
   /** Redemande une URL fraîche au mécanisme de signature existant. */
   onRafraichir?: () => Promise<string | null> | string | null;
+  /**
+   * Nature RÉELLE du fichier (voir `documentKind`, lib/documents.ts). Omis →
+   * `"autre"`, donc l'`<iframe>` : le comportement d'avant ce lot.
+   */
+  kind?: DocumentKind;
 }
 
 type Etat = "affichage" | "erreur" | "hors_ligne";
@@ -52,7 +78,7 @@ function enLigne(): boolean {
   return typeof navigator === "undefined" || navigator.onLine !== false;
 }
 
-export function FileViewerModal({ ouvert, onFermer, titre, url, onRafraichir }: FileViewerModalProps) {
+export function FileViewerModal({ ouvert, onFermer, titre, url, onRafraichir, kind = "autre" }: FileViewerModalProps) {
   const [urlCourante, setUrlCourante] = useState<string | null>(url);
   const [etat, setEtat] = useState<Etat>("affichage");
   const [enCours, setEnCours] = useState(false);
@@ -113,12 +139,25 @@ export function FileViewerModal({ ouvert, onFermer, titre, url, onRafraichir }: 
         </div>
       ) : (
         <div className="flex h-full flex-col bg-card">
-          <iframe
-            src={urlCourante}
-            title={titre}
-            className="h-[70vh] w-full border-0 bg-white"
-            data-visionneuse="document"
-          />
+          {kind === "image" ? (
+            /* Une image, rendue comme une image : jamais recadrée
+               (`object-contain`), bornée en hauteur comme l'iframe, et
+               décrite pour les lecteurs d'écran. */
+            // eslint-disable-next-line @next/next/no-img-element -- URL signée temporaire, hors next/image (pas de domaine stable à autoriser)
+            <img
+              src={urlCourante}
+              alt={titre}
+              className="max-h-[70vh] w-full bg-surface-soft object-contain"
+              data-visionneuse="image"
+            />
+          ) : (
+            <iframe
+              src={urlCourante}
+              title={titre}
+              className="h-[70vh] w-full border-0 bg-white"
+              data-visionneuse="document"
+            />
+          )}
           <div className="flex flex-wrap items-center justify-center gap-2 border-t border-border px-4 py-3">
             {/* « Réessayer » est présent MÊME quand le document s'affiche.
                 Ce n'est pas une redondance : un lien signé qui a expiré

@@ -1,17 +1,31 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Download, ExternalLink, FileText, Loader2, Lock, PlayCircle } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, useMemo } from "react";
+import {
+  Download,
+  ExternalLink,
+  FileText,
+  Image as ImageIcon,
+  Link2,
+  Loader2,
+  Lock,
+  PlayCircle,
+  StickyNote,
+  Video,
+  type LucideIcon,
+} from "lucide-react";
 
 import { ImportantMark } from "@/components/admin/ImportantMark";
 import { FileViewerModal } from "@/components/shared/FileViewerModal";
 import { VideoPlayerModal } from "@/components/shared/VideoPlayerModal";
+import { DocumentStatusBadge } from "@/components/student/DocumentStatusBadge";
 import { documentCategoryLabels, documentTypeLabels, formatDate, matchesTextSearch } from "@/lib/admin";
+import { documentKind, type DocumentKind } from "@/lib/documents";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
-import type { StudentDocumentWithAvailability } from "@/lib/supabase/documents";
+import { markDocumentViewed, type StudentDocumentWithAvailability } from "@/lib/supabase/documents";
 import { getSignedDocumentFileUrl } from "@/lib/supabase/storage-documents";
 import { videoLisible } from "@/lib/video/source";
-import type { AdminDocumentStatus, DocumentCategory } from "@/types";
+import type { DocumentCategory, DocumentType } from "@/types";
 
 type FilterKey = "tous" | DocumentCategory | "vidéo" | "guide" | "verrouilles";
 
@@ -42,10 +56,25 @@ function unlockLabel(unlockDate: string | null): string {
   return `Disponible le ${formatDate(unlockDate)}`;
 }
 
-const statusDotTone: Record<AdminDocumentStatus, string> = {
-  brouillon: "bg-muted-foreground",
-  publié: "bg-success",
-  archivé: "bg-destructive",
+/**
+ * ⚠️ LE POINT DE COULEUR ÉDITORIAL A ÉTÉ RETIRÉ (A), PAS DÉPLACÉ.
+ *
+ * Il affichait `document.status` — brouillon / publié / archivé — c'est-à-dire
+ * une information de COACH, sur la carte d'un ÉLÈVE. La RLS ne renvoyant que
+ * les documents publiés, il était toujours vert : un pixel qui ne disait rien,
+ * et qui aurait affiché un point rouge inexpliqué le jour où un document
+ * archivé serait passé. Sa place est prise par le statut de CONSULTATION, qui
+ * est l'information que l'élève cherche à cet endroit.
+ */
+
+/** Icône de repli quand il n'y a pas de miniature — même table que la carte de démonstration. */
+const typeIcons: Record<DocumentType, LucideIcon> = {
+  pdf: FileText,
+  "vidéo": Video,
+  guide: FileText,
+  lien: Link2,
+  image: ImageIcon,
+  texte: StickyNote,
 };
 
 /**
@@ -85,6 +114,8 @@ function StorageFileButton({
   icon: Icon,
   genre,
   titre,
+  kind,
+  onConsulte,
 }: {
   storagePath: string;
   label: string;
@@ -92,6 +123,13 @@ function StorageFileButton({
   /** Ce qu'on ouvrira : un lecteur vidéo, ou la visionneuse de document. */
   genre: "video" | "fichier";
   titre: string;
+  /** Nature réelle du fichier (`documentKind`) — transmise à la visionneuse. */
+  kind: DocumentKind;
+  /**
+   * Appelé UNE SEULE FOIS, et seulement APRÈS une signature réussie (A).
+   * `undefined` = pas de suivi possible (pas de chemin Supabase).
+   */
+  onConsulte?: () => void | Promise<void>;
 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
@@ -117,12 +155,21 @@ function StorageFileButton({
     setLoading(false);
     if (!fraiche) {
       setError(true);
+      // ⚠️ ON SORT AVANT TOUT MARQUAGE. Une signature refusée — RLS, réseau,
+      // fichier inaccessible — n'est PAS une consultation. Marquer ici
+      // daterait un document que l'élève n'a jamais vu, et la date de
+      // première consultation ne se réécrit pas : l'erreur serait définitive.
       return;
     }
     setUrl(fraiche);
     // La voie normale, et la seule : la modale SETH. Aucune redirection,
     // aucun nouvel onglet.
     setOuvert(true);
+
+    // ORDRE OBLIGATOIRE : SIGNATURE → SUCCÈS → viewed_at → évènement.
+    // Le marquage vient APRÈS l'ouverture et n'est jamais attendu par elle :
+    // un échec d'écriture ne doit pas empêcher l'élève de lire son document.
+    await onConsulte?.();
   }
 
   return (
@@ -154,25 +201,147 @@ function StorageFileButton({
           titre={titre}
           url={url}
           onRafraichir={signer}
+          kind={kind}
         />
       )}
     </div>
   );
 }
 
-function DocumentCard({ item }: { item: StudentDocumentWithAvailability }) {
-  const { document, availability } = item;
+/**
+ * LA MINIATURE D'UNE IMAGE — UNE SEULE SIGNATURE, ET AUCUNE POUR UN VERROUILLÉ.
+ *
+ * ═════════════════════════════════════════════════════════════════════
+ * AUCUNE INFRASTRUCTURE NOUVELLE, ET C'EST LE POINT
+ * ═════════════════════════════════════════════════════════════════════
+ * Pas de `thumbnail_path`, pas d'Edge Function, pas de worker : le navigateur
+ * redimensionne l'original, borné à 10 Mo par `validateDocumentFile`. La
+ * seule chose dont une vraie miniature Storage nous dispenserait est le
+ * téléchargement de l'original — un coût à mesurer le jour où une
+ * bibliothèque d'images existe, pas à prévoir aujourd'hui.
+ *
+ * ═════════════════════════════════════════════════════════════════════
+ * UN VERROUILLÉ NE SE SIGNE PAS
+ * ═════════════════════════════════════════════════════════════════════
+ * ⚠️ Ce composant n'est MONTÉ que pour un document disponible (voir la
+ * garde dans `DocumentCard`), et il porte en plus sa propre vérification.
+ * Afficher la miniature d'un document à venir en téléchargerait le contenu :
+ * la policy Storage l'autoriserait (elle ne regarde que l'assignation, pas le
+ * déblocage), et l'élève verrait le fichier avant sa date. Une double garde
+ * pour une fuite définitive, c'est le bon compte.
+ *
+ * ═════════════════════════════════════════════════════════════════════
+ * UNE SIGNATURE, PAS UNE BOUCLE
+ * ═════════════════════════════════════════════════════════════════════
+ * L'effet ne dépend que de `storagePath` et de `disponible`. `onError` pose
+ * `echec` et ne redemande RIEN : une image dont l'URL a expiré ou dont le
+ * fichier a disparu retombe sur l'icône de type, définitivement pour cette
+ * carte. Une re-signature dans `onError` produirait exactement la boucle
+ * qu'on refuse — échec, signature, échec, signature.
+ *
+ * L'URL ne quitte jamais cet état React : ni localStorage, ni IndexedDB.
+ */
+function MiniatureImage({
+  storagePath,
+  titre,
+  disponible,
+  Repli,
+}: {
+  storagePath: string;
+  titre: string;
+  disponible: boolean;
+  Repli: LucideIcon;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [echec, setEchec] = useState(false);
+  // Garde anti-double-signature en mode strict (double montage en dév).
+  const demande = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!disponible) return;
+    if (demande.current === storagePath) return;
+    demande.current = storagePath;
+    let annule = false;
+    void (async () => {
+      const supabase = createSupabaseBrowserClient();
+      if (!supabase) return;
+      const signee = await getSignedDocumentFileUrl(supabase, storagePath);
+      if (annule) return;
+      if (signee) {
+        setUrl(signee);
+      } else {
+        setEchec(true);
+      }
+    })();
+    return () => {
+      annule = true;
+    };
+  }, [storagePath, disponible]);
+
+  if (!disponible || echec || !url) {
+    return (
+      <div
+        className="flex h-40 w-full items-center justify-center rounded-panel border border-border bg-surface-soft/40"
+        data-miniature="repli"
+      >
+        <Repli size={28} className="text-muted-foreground" aria-hidden />
+      </div>
+    );
+  }
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- URL signée temporaire, hors next/image (pas de domaine stable à autoriser)
+    <img
+      src={url}
+      alt={`Aperçu de ${titre}`}
+      onError={() => setEchec(true)}
+      loading="lazy"
+      className="h-40 w-full rounded-panel border border-border object-cover"
+      data-miniature="image"
+    />
+  );
+}
+
+function DocumentCard({
+  item,
+  onConsulte,
+}: {
+  item: StudentDocumentWithAvailability;
+  /** Marque ce document comme consulté — voir `RealDocumentLibrary`. */
+  onConsulte?: (documentId: string, titre: string) => void | Promise<void>;
+}) {
+  const { document, availability, viewedAt } = item;
+  // Le MIME décide, jamais `document.type` seul (voir `documentKind`).
+  const kind = documentKind(document);
+  const Repli = typeIcons[document.type] ?? FileText;
+  const marquer = onConsulte ? () => onConsulte(document.id, document.title) : undefined;
 
   return (
     <div className={`flex flex-col gap-3 rounded-card border border-border bg-card p-6 shadow-soft ${!availability.available ? "bg-surface-soft/40" : ""}`}>
       <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <span className={`h-1.5 w-1.5 rounded-full ${statusDotTone[document.status]}`} />
+        <div className="flex min-w-0 items-center gap-2">
           <h3 className="font-heading text-base font-bold uppercase text-foreground">{document.title}</h3>
           {document.important && <ImportantMark />}
         </div>
+        {/* LE STATUT DE CONSULTATION, source de vérité `document_assignments.viewed_at`.
+            Jamais `localStorage`, jamais `document.status`. Un document verrouillé
+            n'affiche rien : « Nouveau » sur un contenu qu'on ne peut pas ouvrir
+            serait un reproche, pas une information. */}
+        {availability.available && (
+          <DocumentStatusBadge status={viewedAt ? "consulté" : "nouveau"} />
+        )}
       </div>
-      <p className="text-xs uppercase tracking-wide text-muted-foreground">
+      {/* La miniature ne concerne QUE les images déjà débloquées et téléversées. */}
+      {kind === "image" && document.storagePath && availability.available && (
+        <MiniatureImage
+          storagePath={document.storagePath}
+          titre={document.title}
+          disponible={availability.available}
+          Repli={Repli}
+        />
+      )}
+      <p className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
+        <Repli size={13} aria-hidden className="flex-shrink-0" />
         {documentTypeLabels[document.type]} · {documentCategoryLabels[document.category]}
       </p>
       {document.shortDescription && <p className="text-sm text-foreground">{document.shortDescription}</p>}
@@ -189,7 +358,7 @@ function DocumentCard({ item }: { item: StudentDocumentWithAvailability }) {
           )}
           {document.type === "vidéo" &&
             (document.storagePath ? (
-              <StorageFileButton storagePath={document.storagePath} label="Voir la vidéo" icon={PlayCircle} genre="video" titre={document.title} />
+              <StorageFileButton storagePath={document.storagePath} label="Voir la vidéo" icon={PlayCircle} genre="video" titre={document.title} kind={kind} onConsulte={marquer} />
             ) : (
               videoLisible(document.videoUrl) && (
                 <VideoLienButton titre={document.title} url={document.videoUrl} />
@@ -197,7 +366,7 @@ function DocumentCard({ item }: { item: StudentDocumentWithAvailability }) {
             ))}
           {document.type === "pdf" &&
             (document.storagePath ? (
-              <StorageFileButton storagePath={document.storagePath} label="Ouvrir le PDF" icon={FileText} genre="fichier" titre={document.title} />
+              <StorageFileButton storagePath={document.storagePath} label="Ouvrir le PDF" icon={FileText} genre="fichier" titre={document.title} kind={kind} onConsulte={marquer} />
             ) : (
               document.externalUrl && (
                 <a
@@ -215,7 +384,7 @@ function DocumentCard({ item }: { item: StudentDocumentWithAvailability }) {
             document.type !== "pdf" &&
             document.type !== "texte" &&
             (document.storagePath ? (
-              <StorageFileButton storagePath={document.storagePath} label="Ouvrir" icon={ExternalLink} genre="fichier" titre={document.title} />
+              <StorageFileButton storagePath={document.storagePath} label="Ouvrir" icon={ExternalLink} genre="fichier" titre={document.title} kind={kind} onConsulte={marquer} />
             ) : (
               document.externalUrl && (
                 <a
@@ -239,9 +408,61 @@ function DocumentCard({ item }: { item: StudentDocumentWithAvailability }) {
   );
 }
 
-export function RealDocumentLibrary({ documents }: { documents: StudentDocumentWithAvailability[] }) {
+/**
+ * LA BIBLIOTHÈQUE RÉELLE — AUCUN ÉTAT LOCAL NE SERT DE SOURCE DE VÉRITÉ (A).
+ *
+ * ⚠️ CE COMPOSANT N'IMPORTE PAS `useDocumentAccess`, ET NE DOIT JAMAIS LE
+ * FAIRE. Ce hook lit et écrit `localStorage["seth-document-access:<id>"]`,
+ * alimenté par un seed de démonstration (`data/student.ts`) : un statut par
+ * navigateur, invisible du coach, absent du second appareil de l'élève, effacé
+ * avec les données du site. Il reste en place pour la DÉMONSTRATION
+ * (`DocumentLibrary`, `/documents/[documentId]`), et sert uniquement elle.
+ *
+ * Ici, le statut vient de `viewedAt`, lu dans `document_assignments` par
+ * `getStudentDocumentsWithAvailability`. Rien d'autre.
+ *
+ * `studentId` et `onConsulte` sont OPTIONNELS : sans eux, la bibliothèque
+ * affiche les statuts lus en base mais ne marque rien. C'est le cas du coach,
+ * qui regarde la bibliothèque d'un élève sans la consulter à sa place.
+ */
+export function RealDocumentLibrary({
+  documents,
+  studentId,
+  onConsulte,
+}: {
+  documents: StudentDocumentWithAvailability[];
+  /** Élève connecté — requis pour marquer une consultation. */
+  studentId?: string | null;
+  /** Rafraîchissement après un marquage réussi (voir le hook appelant). */
+  onConsulte?: () => void | Promise<void>;
+}) {
   const [activeFilter, setActiveFilter] = useState<FilterKey>("tous");
   const [query, setQuery] = useState("");
+
+  /**
+   * ⚠️ LE REFETCH NE SE DÉCLENCHE QUE SUR UNE PREMIÈRE CONSULTATION.
+   *
+   * `markDocumentViewed` renvoie `true` seulement quand `viewed_at` VIENT
+   * d'être posé — c'est la clause `viewed_at is null` de la fonction SQL qui
+   * tranche, pas nous. Un second clic renvoie donc `false` et ne recharge
+   * rien : aucune boucle, et aucune requête identique répétée.
+   */
+  const marquerConsulte = useCallback(
+    async (documentId: string, titre: string) => {
+      if (!studentId) return;
+      const supabase = createSupabaseBrowserClient();
+      if (!supabase) return;
+      const premiere = await markDocumentViewed(supabase, {
+        documentId,
+        studentId,
+        documentTitle: titre,
+      });
+      if (premiere) {
+        await onConsulte?.();
+      }
+    },
+    [studentId, onConsulte],
+  );
 
   const filtered = useMemo(
     () =>
@@ -294,7 +515,11 @@ export function RealDocumentLibrary({ documents }: { documents: StudentDocumentW
       ) : (
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((item) => (
-            <DocumentCard key={item.document.id} item={item} />
+            <DocumentCard
+              key={item.document.id}
+              item={item}
+              onConsulte={studentId ? marquerConsulte : undefined}
+            />
           ))}
         </div>
       )}
