@@ -10,6 +10,7 @@ import {
   updateCurrentStudentWeight,
 } from "@/lib/supabase/current-student";
 import { getStudentOnboardingDetails } from "@/lib/supabase/onboarding";
+import { createProgressPhotoWithUpload } from "@/lib/supabase/progress-photos";
 import { deleteProgressPhotoSupabase, updateStudentFields } from "@/lib/supabase/students";
 import type { StudentProfileState } from "@/hooks/useStudentProfile";
 import type { CustomMeasurementInput } from "@/components/student/UpdateMeasurementsModal";
@@ -17,6 +18,7 @@ import type {
   AdminStudent,
   BodyMeasurementType,
   ProgressPhoto,
+  ProgressPhotoType,
   StudentProfile,
   SupabaseStudentProfile,
 } from "@/types";
@@ -191,6 +193,46 @@ export function useSupabaseStudentProfile() {
     [studentId, refetch],
   );
 
+  /*
+   * L'UPLOAD RÉEL DEPUIS /profil — P3A.
+   *
+   * ⚠️ C'EST LE HOOK QUI CONNAÎT LE VRAI `students.id`, PAS LE FORMULAIRE.
+   * `app/(student)/profil/page.tsx` passe `studentId={student.id}` depuis
+   * `data/student.ts` : la prop reçue par `AddProgressPhotoModal` est un
+   * identifiant de DÉMONSTRATION, même sous Supabase. L'upload doit donc
+   * partir d'ici, où `studentId` vient de `getCurrentStudentProfile`, sinon
+   * le fichier atterrirait sous un dossier Storage qui n'appartient à
+   * personne — et la policy `progress_photos_bucket_student_or_staff`
+   * (premier segment du chemin = current_student_id()) le refuserait.
+   *
+   * ⚠️ `photoType: "autre"` EST LE COMPORTEMENT HISTORIQUE, PAS UN DÉFAUT
+   * CHOISI AU HASARD. Ce formulaire ne demande pas l'angle ; les 8 lignes
+   * déjà en base portent toutes `photo_type = 'autre'`, la valeur par défaut
+   * de la colonne. Le rôle de la photo (`type`), lui, est bien transporté.
+   */
+  const uploadPhoto = useCallback(
+    async (
+      file: File,
+      meta: { type: ProgressPhotoType; date: string; weightKg: number | null; note: string },
+    ): Promise<string | null> => {
+      const supabase = createSupabaseBrowserClient();
+      if (!supabase) return "Connexion Supabase indisponible.";
+      if (!studentId) return "Élève non identifié.";
+      const result = await createProgressPhotoWithUpload(supabase, studentId, file, {
+        photoType: "autre",
+        type: meta.type,
+        date: meta.date,
+        weightKg: meta.weightKg,
+        note: meta.note,
+        uploadedBy: null,
+        actorType: "student",
+      });
+      await refetch();
+      return "error" in result ? result.error : null;
+    },
+    [studentId, refetch],
+  );
+
   const removePhoto = useCallback(
     async (photoId: string) => {
       const supabase = createSupabaseBrowserClient();
@@ -211,6 +253,7 @@ export function useSupabaseStudentProfile() {
     updateWeight,
     updateMeasurements,
     addPhoto,
+    uploadPhoto,
     removePhoto,
   };
 }

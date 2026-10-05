@@ -134,12 +134,24 @@ export function useProgressPhotosGallery(
     async (photoId: string) => {
       const supabase = createSupabaseBrowserClient();
       if (!supabase) return false;
-      const photo = photos.find((p) => p.id === photoId);
-      const ok = await deleteProgressPhotoPermanently(supabase, photoId, photo?.storagePath ?? null);
+      /*
+       * ⚠️ LE CHEMIN STORAGE N'EST PLUS PRIS DANS CET ÉTAT (P2).
+       *
+       * Ce `callback` faisait `photos.find(p => p.id === photoId)?.storagePath`
+       * et passait le résultat à la couche d'accès. Une liste pas encore
+       * chargée, un identifiant venu d'ailleurs, et la valeur était `null` :
+       * la ligne partait, le fichier restait, sans aucune erreur. La ligne
+       * elle-même est la seule source fiable, et c'est
+       * `deleteProgressPhotoPermanently` qui la relit maintenant.
+       *
+       * Effet de bord voulu : `photos` disparaît des dépendances, donc ce
+       * `callback` cesse d'être recréé à chaque rechargement de la galerie.
+       */
+      const ok = await deleteProgressPhotoPermanently(supabase, photoId);
       await refetch();
       return ok;
     },
-    [refetch, photos],
+    [refetch],
   );
 
   const selectBefore = useCallback(

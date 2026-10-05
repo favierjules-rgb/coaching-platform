@@ -1005,11 +1005,16 @@ export default function AdminStudentDetailPage() {
           </div>
 
           <div className="mb-6">
+            {/* P3A — `onUpload` n'est fourni que pour un élève Supabase réel :
+                c'est lui qui fait basculer le formulaire en mode Storage. Les
+                parcours de démonstration (mock, élève lié) gardent leur
+                dataUrl locale, seule forme persistable en localStorage. */}
             <ProgressPhotoGallerySection
               studentId={student.id}
               photos={photos}
               defaultWeightKg={student.currentWeightKg}
               onAdd={handleAddPhoto}
+              onUpload={isSupabaseStudent ? supabaseDetail.uploadPhoto : undefined}
               onDelete={handleDeletePhoto}
             />
           </div>

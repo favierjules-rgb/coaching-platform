@@ -1,6 +1,23 @@
+"use client";
+
 import { Camera, ImageOff, Target, Trash2 } from "lucide-react";
 
 import type { ProgressPhoto, ProgressPhotoType } from "@/types";
+
+/**
+ * LA SUPPRESSION EST DÉFINITIVE : ELLE SE CONFIRME.
+ *
+ * ⚠️ UN SEUL TAP SUFFISAIT. Le bouton corbeille appelait `onDelete(photo.id)`
+ * directement, là où la galerie `/progression` demande confirmation avant la
+ * même action (`ProgressPhotosSection`). Sur mobile, où le bouton apparaît au
+ * `focus`, une photo se perdait sans un mot — et pour les 8 lignes encore
+ * stockées en base64, la ligne EST la seule copie de l'image.
+ *
+ * Le libellé est exactement celui de `/progression` : deux formulations pour
+ * le même geste apprendraient à l'utilisateur que ce ne sont pas les mêmes
+ * conséquences.
+ */
+const CONFIRMATION_SUPPRESSION = "Supprimer définitivement cette photo ?";
 
 const highlightLabels: Record<Exclude<ProgressPhotoType, "mensuelle">, string> = {
   avant: "Avant",
@@ -39,7 +56,11 @@ function PhotoTile({
       {onDelete && (
         <button
           type="button"
-          onClick={() => onDelete(photo.id)}
+          onClick={() => {
+            if (window.confirm(CONFIRMATION_SUPPRESSION)) {
+              onDelete(photo.id);
+            }
+          }}
           aria-label="Supprimer cette photo"
           className="absolute right-2 top-2 z-10 flex h-9 w-9 items-center justify-center rounded-control border border-border bg-foreground/75 text-background opacity-0 transition-opacity hover:border-destructive/60 hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 group-hover:opacity-100"
         >

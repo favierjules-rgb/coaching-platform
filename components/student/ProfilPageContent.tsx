@@ -79,6 +79,22 @@ export function ProfilPageContent({ studentId, seed, demonstration }: ProfilPage
   const updateWeight = useSupabase ? supabaseProfile.updateWeight : mockProfile.updateWeight;
   const updateMeasurements = useSupabase ? supabaseProfile.updateMeasurements : mockProfile.updateMeasurements;
   const addPhoto = useSupabase ? supabaseProfile.addPhoto : mockProfile.addPhoto;
+  /*
+   * LE TÉLÉVERSEUR STORAGE — P3A, et SEULEMENT sous Supabase.
+   *
+   * ⚠️ `undefined` EN DÉMONSTRATION, ET C'EST CE QUI CHOISIT LE MODE.
+   * `AddProgressPhotoModal` bascule en mode Storage dès que cette prop
+   * existe ; la laisser passer hors Supabase enverrait le fichier vers un
+   * bucket qui n'est pas configuré. Le parcours d'exemple garde donc sa
+   * dataUrl locale, qui est la seule à survivre dans `localStorage`.
+   *
+   * ⚠️ IL VIENT DU HOOK, PAS DE LA PAGE. Le `studentId` que cette page reçoit
+   * est celui de `data/student.ts` — un identifiant de démonstration, même
+   * pour un élève réel. Seul `useSupabaseStudentProfile` connaît le vrai
+   * `students.id`, et la policy Storage exige qu'il soit le premier segment
+   * du chemin.
+   */
+  const uploadPhoto = useSupabase ? supabaseProfile.uploadPhoto : undefined;
   const removePhoto = useSupabase ? supabaseProfile.removePhoto : mockProfile.removePhoto;
   const { profile, weightHistory, measurements, customMeasurements, measurementHistory, photos } = state;
   /*
@@ -219,6 +235,7 @@ export function ProfilPageContent({ studentId, seed, demonstration }: ProfilPage
         photos={photos}
         defaultWeightKg={profile.currentWeightKg}
         onAdd={addPhoto}
+        onUpload={uploadPhoto}
         onDelete={removePhoto}
       />
 

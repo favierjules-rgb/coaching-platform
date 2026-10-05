@@ -5,6 +5,7 @@ import { fromSupabaseMeasurementType, toSupabaseMeasurementType } from "@/lib/su
 import { getAssignedDocumentIdsByStudent } from "@/lib/supabase/documents";
 import { getAssignedNutritionPlanIdsByStudent } from "@/lib/supabase/nutrition";
 import { getAssignedProgramIdsByStudent } from "@/lib/supabase/programs";
+import { deleteProgressPhotoPermanently } from "@/lib/supabase/progress-photos";
 import { getSignedProgressPhotoUrl } from "@/lib/supabase/storage-progress-photos";
 import { normalizePaymentProfile } from "@/lib/payments";
 import type { CustomMeasurementInput } from "@/components/student/UpdateMeasurementsModal";
@@ -621,6 +622,63 @@ export async function getStudentMeasurements(
   return { measurements, customMeasurements };
 }
 
+/**
+ * LES PHOTOS ACTIVES — UNE ARCHIVÉE N'EST PLUS RENDUE (P1).
+ *
+ * ════════════════════════════════════════════════════════════════════════
+ * LE DÉFAUT CORRIGÉ
+ * ════════════════════════════════════════════════════════════════════════
+ * Cette lecture n'appliquait AUCUN filtre sur `status`, là où
+ * `listProgressPhotos` (lib/supabase/progress-photos.ts) écarte les
+ * archivées par défaut. Les deux servent les mêmes données à des écrans
+ * différents, et c'est celle-ci qui sert les trois plus accessibles :
+ *
+ *   · `/profil` (élève)                 — via useSupabaseStudentProfile ;
+ *   · `/admin/eleves/[studentId]`       — via useSupabaseStudentDetail ;
+ *   · `/progression` (élève)            — via progress.ts, qui enveloppe
+ *     `getFullAdminStudent`.
+ *
+ * Une photo archivée depuis `/progression` quittait donc la galerie de
+ * l'élève tout en restant affichée, comme une photo ordinaire et avec son
+ * bouton de suppression, sur sa propre fiche `/profil` ET sur celle du
+ * coach. Et réciproquement pour une photo archivée par le coach.
+ *
+ * ⚠️ LA RÈGLE EST « SEUL "archived" EST MASQUÉ », ET ELLE NE S'ÉCRIT PAS `.neq()`.
+ *
+ * La règle fonctionnelle, terme à terme :
+ *
+ *   status = "archived"  → MASQUÉ ;
+ *   status = "active"    → visible ;
+ *   status = NULL        → visible ;
+ *   tout autre statut    → visible.
+ *
+ * Trois formulations sont fausses, chacune à sa façon :
+ *
+ *   · `.eq("status", "active")` ferait disparaître en silence une ligne
+ *     portant une troisième valeur — faire disparaître une photo est le
+ *     défaut qu'on corrige, pas celui qu'on réintroduit à l'envers ;
+ *   · `.eq("status", "archived")` ne garderait QUE les archivées ;
+ *   · `.neq("status", "archived")` SEUL perd les lignes à NULL. C'est de la
+ *     logique ternaire, pas du JavaScript : `status <> 'archived'` s'évalue
+ *     à NULL quand `status` est NULL, donc à faux, et PostgREST n'inclut pas
+ *     la ligne. Un `!==` côté JS aurait gardé la ligne ; la base, non.
+ *
+ * D'où `.or("status.neq.archived,status.is.null")`, qui dit exactement la
+ * règle : « pas archivé » OU « pas de statut du tout ». Le `.eq("student_id")`
+ * reste conjoint au groupe `or` (PostgREST ET-ise les paramètres entre eux),
+ * un élève ne voit donc pas les photos d'un autre.
+ *
+ * À ce jour `progress_photos.status` est `NOT NULL DEFAULT 'active'` — la
+ * branche `is.null` est donc INATTEIGNABLE EN BASE, et c'est voulu : elle
+ * aligne cette lecture sur la doctrine défensive appliquée partout ailleurs
+ * dans le code (`(p.status ?? "active")` dans ProgressPhotosSection et dans
+ * les deux pages `/progression`), pour que le jour où la colonne devient
+ * nullable, ou qu'une vue la rende nullable, personne n'ait à repasser ici.
+ *
+ * ⚠️ LA GALERIE COACH N'EST PAS TOUCHÉE. `/admin/eleves/[studentId]/progression`
+ * passe par `listProgressPhotos(… { includeArchived: true })`, qui garde son
+ * comportement voulu — c'est lui qui alimente le compteur « N archivée(s) ».
+ */
 export async function getStudentProgressPhotos(
   supabase: TypedSupabaseClient,
   studentId: string,
@@ -629,6 +687,7 @@ export async function getStudentProgressPhotos(
     .from("progress_photos")
     .select("*")
     .eq("student_id", studentId)
+    .or("status.neq.archived,status.is.null")
     .order("date", { ascending: true });
   devWarn("getStudentProgressPhotos", error);
   const photos = (data ?? []).map((row) => toMockProgressPhoto(mapProgressPhotoRow(row)));
@@ -1027,15 +1086,47 @@ export async function addCoachNoteSupabase(
 }
 
 /**
- * `photo.imageUrl` peut contenir une URL classique ou une dataUrl base64
- * (aucun Storage Supabase réel branché à cette étape, voir consignes de
- * cette migration) — stockée telle quelle dans `progress_photos.image_url`.
+ * PLUS AUCUNE IMAGE EN BASE64 N'ENTRE EN BASE (P3A).
+ *
+ * ════════════════════════════════════════════════════════════════════════
+ * CE QUI A CHANGÉ, ET POURQUOI LA GARDE EST ICI
+ * ════════════════════════════════════════════════════════════════════════
+ * Cette fonction acceptait n'importe quel `imageUrl`, y compris une dataUrl
+ * `data:image/…;base64,…`, et la stockait telle quelle. Mesuré en production
+ * le 05/10/2026 : 8 lignes sur 10 sont des dataUrl, 24 Mo pour un seul élève,
+ * la dernière écrite le 12/09/2026 — ce chemin n'était pas un résidu, c'était
+ * le plus récemment utilisé.
+ *
+ * ⚠️ LA GARDE VIT DANS LA COUCHE D'ACCÈS, PAS DANS LE FORMULAIRE. Un refus
+ * côté interface serait contournable par le prochain appelant ; ici, aucune
+ * nouvelle base64 ne peut atteindre `progress_photos`, quel que soit l'écran.
+ *
+ * ⚠️ ELLE NE CASSE PAS LA DÉMONSTRATION. Le parcours sans Supabase n'appelle
+ * jamais cette fonction : `ProfilPageContent` et la fiche coach choisissent
+ * `mockProfile.addPhoto` / `updateStudent`, qui écrivent en localStorage. La
+ * dataUrl reste donc le format de l'exemple, et le seul qui y fonctionne.
+ *
+ * ⚠️ LES 8 LIGNES EXISTANTES NE SONT PAS TOUCHÉES. Cette garde ne porte que
+ * sur l'écriture ; leur migration vers Storage est un lot séparé (P3B).
+ *
+ * `photo.imageUrl` reste donc accepté pour une URL http(s) — un cas qui
+ * n'existe sur aucune ligne de production, et qu'on ne retire pas du contrat
+ * sans besoin.
  */
 export async function addProgressPhotoSupabase(
   supabase: TypedSupabaseClient,
   studentId: string,
   photo: Omit<ProgressPhoto, "id" | "studentId">,
 ): Promise<ProgressPhoto | null> {
+  if (typeof photo.imageUrl === "string" && photo.imageUrl.startsWith("data:")) {
+    // Échec EXPLICITE, jamais une écriture silencieuse : l'appelant doit
+    // passer par l'upload Storage (createProgressPhotoWithUpload).
+    devWarn("addProgressPhotoSupabase", {
+      message:
+        "image_url en base64 refusée : une photo de progression doit être téléversée dans le bucket progress-photos (voir createProgressPhotoWithUpload).",
+    });
+    return null;
+  }
   const { data, error } = await supabase
     .from("progress_photos")
     .insert({
@@ -1054,10 +1145,32 @@ export async function addProgressPhotoSupabase(
   return data ? toMockProgressPhoto(mapProgressPhotoRow(data)) : null;
 }
 
+/**
+ * SUPPRESSION UNIFIÉE — LA LIGNE **ET** LE FICHIER (P2).
+ *
+ * ════════════════════════════════════════════════════════════════════════
+ * LE DÉFAUT CORRIGÉ
+ * ════════════════════════════════════════════════════════════════════════
+ * Cette fonction faisait `delete().eq("id", photoId)` et rien d'autre. Elle
+ * est celle que `/profil` (élève) et `/admin/eleves/[studentId]` (fiche
+ * coach) appellent : toute photo portant un `storage_path` supprimée depuis
+ * l'un de ces deux écrans laissait son fichier dans le bucket, définitivement
+ * et sans trace — aucun inventaire, aucune tâche de nettoyage, aucun test.
+ *
+ * ⚠️ ELLE DÉLÈGUE DÉSORMAIS, ELLE NE DUPLIQUE PAS. Deux implémentations de la
+ * même suppression finiraient par divulguer : c'est exactement ce qui s'est
+ * produit ici. `deleteProgressPhotoPermanently` relit `storage_path` en base,
+ * supprime la ligne, puis le fichier — et conserve l'ordre qui, en cas
+ * d'échec partiel, perd de l'espace disque plutôt qu'une photo (voir son
+ * en-tête).
+ *
+ * La signature et la sémantique de retour ne changent pas : `true` si la
+ * ligne a bien été supprimée, `false` sinon. Une suppression de fichier en
+ * échec reste best-effort et ne fait pas échouer l'appel — comportement
+ * inchangé de `deleteProgressPhotoFile`.
+ */
 export async function deleteProgressPhotoSupabase(supabase: TypedSupabaseClient, photoId: string): Promise<boolean> {
-  const { error } = await supabase.from("progress_photos").delete().eq("id", photoId);
-  devWarn("deleteProgressPhotoSupabase", error);
-  return !error;
+  return deleteProgressPhotoPermanently(supabase, photoId);
 }
 
 /**
