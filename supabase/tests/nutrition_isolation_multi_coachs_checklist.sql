@@ -978,21 +978,103 @@ begin
            case when v_liste = '' then '' else ' — trouvées : ' || v_liste end),
     v_n = 0);
 
-  -- Chaque table du cœur porte bien une policy qui oppose une propriété.
-  select count(*) into v_n
-    from (select unnest(array['nutrition_plans','nutrition_days','nutrition_plan_profiles',
-                              'nutrition_meal_slot_targets','meals','meal_choice_slots',
-                              'meal_choice_options','nutrition_daily_logs']) as t) tables
-   where not exists (
-     select 1 from pg_policies p
-      where p.schemaname = 'public' and p.tablename = tables.t
-        and (coalesce(p.qual, '') like '%current_coach_id()%'
-             or coalesce(p.qual, '') like '%is_coach_of_student%'
-             or coalesce(p.qual, '') like '%can_manage_nutrition%'
-             or coalesce(p.qual, '') like '%can_manage_meal%'));
-  perform pg_temp.noter('J',
-    format('J3. les 8 tables du cœur portent une policy de propriété (sans : %s)', v_n),
-    v_n = 0);
+  -- ── J3. UNE VRAIE POLICY DE PROPRIÉTÉ SUR CHACUNE DES HUIT TABLES ───────
+  -- La migration 20261003090000 a reformulé les prédicats : les fonctions
+  -- scalaires `can_manage_*(id)` ont cédé la place à des ensembles SANS
+  -- ARGUMENT (`…_ids_geres()`), pour que PostgreSQL les évalue une fois par
+  -- instruction au lieu d'une fois par ligne. J3 ne connaissait pas ces noms
+  -- et déclarait 7 tables sans propriété — un FAUX NÉGATIF.
+  --
+  -- On ne se contente pas d'allonger la liste des noms acceptés : ce serait
+  -- rendre le contrôle plus bavard sans le rendre plus sûr. On resserre.
+  -- Pour CHAQUE table du cœur, on exige désormais TROIS choses :
+  --   a. au moins une policy dont le prédicat oppose une propriété RÉELLE ;
+  --   b. que cette policy ne soit PAS l'accès administrateur déguisé — un
+  --      prédicat qui se réduirait à `is_admin()` n'oppose aucune propriété ;
+  --   c. qu'une policy administrateur DISTINCTE existe par ailleurs.
+  -- Un `is_admin()` seul ne peut donc plus satisfaire J3, et une table qui
+  -- perdrait sa policy coach serait vue même si l'admin y accède encore.
+  declare
+    c_marqueurs constant text[] := array[
+      -- Forme P13-A : fonctions scalaires par ligne.
+      'can_manage_nutrition_plan', 'can_manage_nutrition_day', 'can_manage_meal',
+      -- Forme 20261003090000 : ensembles sans argument.
+      'nutrition_plan_ids_geres', 'nutrition_day_ids_geres', 'meal_ids_geres',
+      'meal_choice_slot_ids_geres', 'nutrition_plan_profile_ids_geres',
+      'student_ids_geres',
+      -- Primitives de propriété, quelle que soit la forme.
+      'is_coach_of_student', 'current_coach_id'
+    ];
+  begin
+    select coalesce(string_agg(tables.t, ', '), ''), count(*)
+      into v_liste, v_n
+      from (select unnest(array['nutrition_plans','nutrition_days','nutrition_plan_profiles',
+                                'nutrition_meal_slot_targets','meals','meal_choice_slots',
+                                'meal_choice_options','nutrition_daily_logs']) as t) tables
+     where not exists (
+       -- (a) et (b) : une policy qui oppose une propriété, et qui n'est pas
+       -- qu'un accès administrateur.
+       select 1 from pg_policies p
+        where p.schemaname = 'public' and p.tablename = tables.t
+          and exists (select 1 from unnest(c_marqueurs) m
+                       where coalesce(p.qual, '') like '%' || m || '%'
+                          or coalesce(p.with_check, '') like '%' || m || '%')
+          and coalesce(p.qual, '') not in ('is_admin()', '(SELECT is_admin() AS is_admin)'));
+    perform pg_temp.noter('J',
+      format('J3. les 8 tables du cœur portent une policy de propriété réelle%s',
+             case when v_liste = '' then '' else ' — sans : ' || v_liste end),
+      v_n = 0);
+
+    -- (c) L'accès ADMINISTRATEUR est porté par une policy À PART. S'il était
+    -- fondu dans la policy de propriété, resserrer l'une resserrerait l'autre,
+    -- et l'administrateur perdrait son accès global sans que rien ne le dise.
+    select coalesce(string_agg(tables.t, ', '), ''), count(*)
+      into v_liste, v_n
+      from (select unnest(array['nutrition_plans','nutrition_days','nutrition_plan_profiles',
+                                'nutrition_meal_slot_targets','meals','meal_choice_slots',
+                                'meal_choice_options','nutrition_daily_logs']) as t) tables
+     where not exists (
+       select 1 from pg_policies p
+        where p.schemaname = 'public' and p.tablename = tables.t
+          and p.policyname = tables.t || '_manage_admin'
+          and coalesce(p.qual, '') like '%is_admin()%');
+    perform pg_temp.noter('J',
+      format('J3b. chaque table du cœur a une policy administrateur DISTINCTE%s',
+             case when v_liste = '' then '' else ' — sans : ' || v_liste end),
+      v_n = 0);
+
+    -- (d) ADMIN ET ÉLÈVE NE SE MÉLANGENT PAS. Avant P13-A,
+    -- `nutrition_daily_logs_student_or_staff` fondait les deux dans un seul OU :
+    -- resserrer le staff aurait rogné l'élève. Aucune policy ne doit plus citer
+    -- `is_admin()` et `current_student_id()` dans le même prédicat.
+    select coalesce(string_agg(tablename || '.' || policyname, ', '), ''), count(*)
+      into v_liste, v_n
+      from pg_policies
+     where schemaname = 'public'
+       and tablename in ('nutrition_plans','nutrition_days','nutrition_plan_profiles',
+                         'nutrition_meal_slot_targets','meals','meal_choice_slots',
+                         'meal_choice_options','nutrition_daily_logs')
+       and coalesce(qual, '') like '%is_admin()%'
+       and coalesce(qual, '') like '%current_student_id()%';
+    perform pg_temp.noter('J',
+      format('J3c. aucune policy ne fond l''accès admin et l''accès élève dans un même prédicat%s',
+             case when v_liste = '' then '' else ' — trouvées : ' || v_liste end),
+      v_n = 0);
+
+    -- (e) CONTRÔLE DU CONTRÔLE. Les marqueurs ci-dessus doivent correspondre à
+    -- des fonctions qui EXISTENT vraiment. Sans cela, J3 passerait au vert sur
+    -- une policy citant un nom mal orthographié, qui n'opposerait rien.
+    select coalesce(string_agg(m, ', '), ''), count(*)
+      into v_liste, v_n
+      from unnest(c_marqueurs) m
+     where not exists (
+       select 1 from pg_proc pr join pg_namespace n on n.oid = pr.pronamespace
+        where n.nspname = 'public' and pr.proname = m);
+    perform pg_temp.noter('J',
+      format('J3d. CONTRÔLE — chaque marqueur de propriété correspond à une fonction existante%s',
+             case when v_liste = '' then '' else ' — introuvable(s) : ' || v_liste end),
+      v_n = 0);
+  end;
 
   -- Les trois fonctions de propriété existent, sont SECURITY DEFINER et
   -- figent leur search_path.

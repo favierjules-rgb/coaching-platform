@@ -1000,6 +1000,910 @@ test("CONTRAT 22. ecriture_refusee() ne confond pas une contrainte avec un refus
 });
 
 // ════════════════════════════════════════════════════════════════════════════
+// PERF — LA MIGRATION 20261003090000 REFORMULE LES POLICIES SANS CHANGER LA RÈGLE
+// ════════════════════════════════════════════════════════════════════════════
+//
+// Elle existe parce que la forme retenue par P13-A coûtait trop cher : un
+// prédicat qui DÉPEND DE LA LIGNE (`can_manage_meal(meal_id)`) s'évalue une
+// fois par ligne, là où l'ancien `is_coach_or_admin()` — sans argument — était
+// hissé en « One-Time Filter » et évalué une seule fois. Mesuré en production :
+// 5,6 ms contre 1 786 ms sur les mêmes 3 312 lignes, et 5 311 ms pour lire
+// `meal_choice_options` (25 191 lignes). D'où le 57014 à la sauvegarde.
+//
+// La correction revient à un prédicat SANS ARGUMENT — `x in (select …_geres())`
+// — donc de nouveau hissable. Ces tests vérifient que la REFORMULATION n'a rien
+// cédé : mêmes policies, même règle, mêmes gardes.
+
+const CHEMIN_MIGRATION_PERF =
+  "supabase/migrations/20261003090000_p13a_perf_rls_nutrition.sql";
+const PERF = sansCommentairesSql(lire(CHEMIN_MIGRATION_PERF));
+const PERF_PLAT = PERF.replace(/\s+/g, " ").toLowerCase();
+
+/** Les six ensembles gérables, tous sans argument. */
+const FONCTIONS_ENSEMBLES = [
+  "nutrition_plan_ids_geres",
+  "nutrition_day_ids_geres",
+  "meal_ids_geres",
+  "meal_choice_slot_ids_geres",
+  "nutrition_plan_profile_ids_geres",
+  "student_ids_geres",
+] as const;
+
+/** Extrait les policies d'une migration : nom -> {table, commande, rôle, corps}. */
+function policiesDe(sql: string): Map<string, { table: string; cmd: string; role: string; corps: string }> {
+  const out = new Map<string, { table: string; cmd: string; role: string; corps: string }>();
+  for (const m of sql.matchAll(
+    /create policy\s+"([^"]+)"\s+on\s+public\.(\w+)\s+for\s+(\w+)\s+to\s+(\w+)([\s\S]*?);(?=\s*(?:\n|$))/gi,
+  )) {
+    out.set(m[1], {
+      table: m[2].toLowerCase(),
+      cmd: m[3].toLowerCase(),
+      role: m[4].toLowerCase(),
+      corps: m[5].replace(/\s+/g, " ").trim().toLowerCase(),
+    });
+  }
+  return out;
+}
+
+test("PERF 1. la migration de performance existe et ne touche ni schéma ni droits de table", () => {
+  assert.ok(PERF.length > 2000, "migration suspectement courte");
+  assert.ok(!/alter\s+table/i.test(PERF), "aucun ALTER TABLE attendu");
+  assert.ok(!/create\s+table/i.test(PERF), "aucun CREATE TABLE attendu");
+  assert.ok(!/drop\s+function/i.test(PERF), "aucune fonction supprimée");
+  assert.ok(!/grant\s+[a-z, ]+on\s+table/i.test(PERF), "aucun grant de table");
+  assert.ok(!/revoke\s+[a-z, ]+on\s+table/i.test(PERF), "aucun revoke de table");
+});
+
+test("PERF 2. elle reprend EXACTEMENT les 20 policies de P13-A, même table/commande/rôle", () => {
+  // Le risque d'une réécriture de policies est d'en perdre une en chemin, ou
+  // d'en élargir la portée. On compare les deux migrations terme à terme.
+  const avant = policiesDe(SQL);
+  const apres = policiesDe(PERF);
+  assert.equal(apres.size, avant.size, `${avant.size} policies dans P13-A, ${apres.size} ici`);
+  for (const [nom, a] of avant) {
+    const b = apres.get(nom);
+    assert.ok(b, `la policy ${nom} de P13-A n'est pas reprise`);
+    assert.equal(b!.table, a.table, `${nom} : table changée`);
+    assert.equal(b!.cmd, a.cmd, `${nom} : commande changée (${a.cmd} -> ${b!.cmd})`);
+    assert.equal(b!.role, a.role, `${nom} : rôle changé (${a.role} -> ${b!.role})`);
+  }
+  for (const nom of apres.keys()) {
+    assert.ok(avant.has(nom), `policy ${nom} inconnue de P13-A — portée élargie ?`);
+  }
+});
+
+test("PERF 3. aucune policy ne retombe sur is_coach_or_admin() ni sur un prédicat permissif", () => {
+  for (const [nom, p] of policiesDe(PERF)) {
+    assert.ok(!/is_coach_or_admin\s*\(/.test(p.corps), `${nom} repose sur is_coach_or_admin()`);
+    assert.ok(!/using\s*\(\s*true\s*\)/.test(p.corps), `${nom} : USING (true)`);
+    assert.ok(!/with check\s*\(\s*true\s*\)/.test(p.corps), `${nom} : WITH CHECK (true)`);
+  }
+});
+
+test("PERF 4. les six fonctions d'ensemble sont SANS ARGUMENT — c'est tout l'objet du correctif", () => {
+  // Une fonction qui prend un argument dépendant de la ligne ne peut pas être
+  // hissée : elle s'exécute une fois par ligne. C'est précisément ce qui a
+  // causé le timeout. Si quelqu'un leur ajoute un paramètre, le correctif est
+  // annulé en silence — et ce test doit le dire.
+  for (const fn of FONCTIONS_ENSEMBLES) {
+    const i = PERF.indexOf(`create or replace function public.${fn}(`);
+    assert.ok(i !== -1, `fonction ${fn} absente`);
+    const entete = PERF.slice(i, PERF.indexOf("as $$", i));
+    const args = (entete.match(new RegExp(`${fn}\\(([^)]*)\\)`)) ?? ["", "?"])[1].trim();
+    assert.equal(args, "", `${fn} prend un argument « ${args} » : le prédicat redeviendrait évalué par ligne`);
+    assert.ok(/returns setof uuid/i.test(entete), `${fn} doit rendre un ensemble d'uuid`);
+    assert.ok(/\bstable\b/i.test(entete), `${fn} doit être STABLE`);
+    assert.ok(/security definer/i.test(entete), `${fn} doit être SECURITY DEFINER`);
+  }
+});
+
+test("PERF 5. leur search_path nomme pg_temp, en dernier", () => {
+  for (const fn of FONCTIONS_ENSEMBLES) {
+    const i = PERF.indexOf(`create or replace function public.${fn}(`);
+    const entete = PERF.slice(i, PERF.indexOf("as $$", i));
+    const m = entete.match(/set\s+search_path\s*=\s*([^\n]+)/i);
+    assert.ok(m, `${fn} : pas de search_path`);
+    const chemin = m![1].trim().split(",").map((e) => e.trim().replace(/^'|'$/g, "").toLowerCase());
+    assert.ok(chemin.includes("pg_temp"), `${fn} : pg_temp non nommé — il serait cherché EN PREMIER`);
+    assert.equal(chemin[chemin.length - 1], "pg_temp", `${fn} : pg_temp doit être en dernier`);
+  }
+});
+
+test("PERF 6. leur droit d'exécution est retiré à public et anon", () => {
+  // La migration les traite en boucle : on vérifie que la liste de la boucle
+  // contient bien les six noms, et que les trois ordres y figurent.
+  for (const fn of FONCTIONS_ENSEMBLES) {
+    assert.ok(PERF_PLAT.includes(`'${fn}'`), `${fn} absente de la boucle de droits`);
+  }
+  for (const ordre of ["revoke all on function public.%i() from public",
+                       "revoke all on function public.%i() from anon",
+                       "grant execute on function public.%i() to authenticated"]) {
+    assert.ok(PERF_PLAT.includes(ordre), `ordre manquant : ${ordre}`);
+  }
+});
+
+test("PERF 7. la règle de propriété est la MÊME : élève d'abord, coach_id gardé", () => {
+  // `student_ids_geres()` doit être la forme ensembliste de is_coach_of_student :
+  // même garde `coach_id is not null`, même égalité avec current_coach_id().
+  const i = PERF.indexOf("create or replace function public.student_ids_geres(");
+  const corps = PERF.slice(i, PERF.indexOf("$$;", i));
+  assert.ok(/s\.coach_id is not null/i.test(corps), "student_ids_geres : garde IS NOT NULL absente");
+  assert.ok(/s\.coach_id = public\.current_coach_id\(\)/i.test(corps), "student_ids_geres : égalité absente");
+
+  // Et le plan : élève d'abord, branche modèle gardée par student_id is null.
+  const j = PERF.indexOf("create or replace function public.nutrition_plan_ids_geres(");
+  const plan = PERF.slice(j, PERF.indexOf("$$;", j)).replace(/\s+/g, " ").toLowerCase();
+  assert.ok(
+    /p\.student_id is not null and public\.is_coach_of_student\(p\.student_id\)/.test(plan),
+    "nutrition_plan_ids_geres : branche « élève d'abord » absente",
+  );
+  const modele = (plan.match(/p\.student_id is null and p\.coach_id is not null and p\.coach_id = public\.current_coach_id\(\)/g) ?? []).length;
+  const comparaisons = (plan.match(/p\.coach_id = public\.current_coach_id\(\)/g) ?? []).length;
+  assert.equal(modele, comparaisons,
+    "nutrition_plan_ids_geres : coach_id comparé sans la garde « student_id is null »");
+});
+
+test("PERF 8. nutrition_plans garde ses quatre commandes, et le DELETE reste le plus strict", () => {
+  const ps = policiesDe(PERF);
+  for (const cmd of ["select", "insert", "update", "delete"]) {
+    const p = ps.get(`nutrition_plans_${cmd}_own_coach`);
+    assert.ok(p, `nutrition_plans_${cmd}_own_coach absente`);
+    assert.equal(p!.cmd, cmd);
+  }
+  const del = ps.get("nutrition_plans_delete_own_coach")!;
+  assert.ok(/student_id is null/.test(del.corps), "le DELETE perd la garde « aucun élève affecté »");
+  assert.ok(/coach_id is not null/.test(del.corps), "le DELETE perd la garde de propriété");
+  // INSERT et UPDATE doivent conserver un WITH CHECK.
+  for (const cmd of ["insert", "update"]) {
+    assert.ok(/with check/.test(ps.get(`nutrition_plans_${cmd}_own_coach`)!.corps),
+      `nutrition_plans_${cmd}_own_coach : WITH CHECK absent`);
+  }
+});
+
+test("PERF 9. chaque policy coach des tables filles garde un WITH CHECK", () => {
+  // Sans WITH CHECK, un UPDATE n'est jugé que sur la ligne de départ : on
+  // pourrait déplacer une ligne vers le plan d'un autre coach.
+  for (const [nom, p] of policiesDe(PERF)) {
+    if (!nom.endsWith("_own_coach") && !nom.endsWith("_own_student")) continue;
+    if (nom === "nutrition_plans_select_own_coach" || nom === "nutrition_plans_delete_own_coach") continue;
+    assert.ok(/with check/.test(p.corps), `${nom} : WITH CHECK absent`);
+  }
+});
+
+test("PERF 10. is_admin() est hissé par (select …) dans les huit policies admin", () => {
+  for (const table of TABLES_COEUR) {
+    const p = policiesDe(PERF).get(`${table}_manage_admin`);
+    assert.ok(p, `${table}_manage_admin absente`);
+    assert.ok(
+      /\(\s*select public\.is_admin\(\)\s*\)/.test(p!.corps),
+      `${table}_manage_admin : is_admin() non hissé — il serait appelé une fois par ligne`,
+    );
+  }
+});
+
+test("PERF 11. la garde source_list_id de meal_choice_slots est conservée", () => {
+  const p = policiesDe(PERF).get("meal_choice_slots_manage_own_coach")!;
+  assert.ok(/source_list_id is null/.test(p.corps), "la garde a disparu");
+  assert.ok(/food_lists/.test(p.corps) && /fl\.coach_id = \(\s*select public\.current_coach_id\(\)\s*\)/.test(p.corps),
+    "la garde ne compare plus la liste au coach courant");
+});
+
+test("PERF 12. aucune policy de lecture élève n'est touchée", () => {
+  for (const policy of POLICIES_ELEVE_INTOUCHABLES) {
+    assert.ok(!PERF_PLAT.includes(`drop policy if exists "${policy.toLowerCase()}"`),
+      `la migration de perf ne doit pas toucher ${policy}`);
+    assert.ok(!PERF_PLAT.includes(`create policy "${policy.toLowerCase()}"`),
+      `la migration de perf ne doit pas recréer ${policy}`);
+  }
+});
+
+test("PERF 13. la migration est rejouable : tout CREATE POLICY est précédé d'un DROP", () => {
+  const crees = [...PERF.matchAll(/create policy\s+"([^"]+)"/gi)].map((m) => m[1]);
+  assert.equal(crees.length, 20, `${crees.length} policies créées au lieu de 20`);
+  for (const nom of crees) {
+    assert.ok(PERF_PLAT.includes(`drop policy if exists "${nom.toLowerCase()}"`),
+      `${nom} créée sans DROP IF EXISTS préalable`);
+  }
+});
+
+test("PERF 14. le statement_timeout manuel est retiré, et SEULEMENT lui", () => {
+  assert.ok(
+    /alter function public\.save_nutrition_plan_v2\(jsonb\) reset statement_timeout/i.test(PERF),
+    "le reset du statement_timeout posé à la main est absent",
+  );
+  assert.ok(!/reset\s+all/i.test(PERF),
+    "RESET ALL effacerait aussi le search_path='' de save_nutrition_plan_v2");
+  assert.ok(!/alter function public\.save_nutrition_plan_v2\(jsonb\)\s+set\s+search_path/i.test(PERF),
+    "le search_path de save_nutrition_plan_v2 ne doit pas être modifié");
+  // `\b` AVANT « set » est indispensable : sans lui, le motif retrouve le
+  // « set » de « re-set » et l'assertion échoue sur le reset qu'elle est
+  // justement censée approuver.
+  assert.ok(!/\bset\s+statement_timeout/i.test(PERF),
+    "aucun délai ne doit être POSÉ par cette migration (seul un reset est permis)");
+});
+
+test("PERF 15. les fonctions can_manage_* de P13-A ne sont ni supprimées ni réécrites", () => {
+  for (const fn of FONCTIONS_PROPRIETE) {
+    assert.ok(!new RegExp(`create or replace function public\\.${fn}\\(`, "i").test(PERF),
+      `${fn} ne doit pas être réécrite par la migration de perf`);
+  }
+  assert.ok(!/drop function/i.test(PERF), "aucune fonction supprimée");
+});
+
+test("PERF 16. la checklist reconnaît les fonctions ensemblistes comme propriété", () => {
+  // J3 listait les marqueurs de propriété en dur. La reformulation du
+  // 20261003090000 a introduit six noms qu'il ne connaissait pas : il
+  // déclarait 7 tables « sans propriété » alors qu'elles en avaient une.
+  // Un FAUX NÉGATIF — le contrôle accusait du vide.
+  const checklist = sansCommentairesSql(
+    lire("supabase/tests/nutrition_isolation_multi_coachs_checklist.sql"),
+  );
+  for (const fn of FONCTIONS_ENSEMBLES) {
+    assert.ok(
+      checklist.includes(`'${fn}'`),
+      `J3 ne reconnaît pas ${fn} comme marqueur de propriété`,
+    );
+  }
+  // Et les marqueurs de P13-A restent reconnus : la checklist doit valider les
+  // DEUX formes, pour qu'une base non encore migrée passe aussi.
+  for (const fn of FONCTIONS_PROPRIETE) {
+    assert.ok(checklist.includes(`'${fn}'`), `J3 ne reconnaît plus ${fn}`);
+  }
+});
+
+test("PERF 17. J3 n'est pas devenu plus permissif : il exige une propriété RÉELLE", () => {
+  // Le risque, en allongeant une liste de noms acceptés, est de transformer un
+  // contrôle en formalité. On vérifie que J3 refuse explicitement qu'un
+  // `is_admin()` seul tienne lieu de policy de propriété, et qu'il reste
+  // conditionnel (un `v_n = 0` à satisfaire, pas un `true` constant).
+  const checklist = sansCommentairesSql(
+    lire("supabase/tests/nutrition_isolation_multi_coachs_checklist.sql"),
+  );
+  const i = checklist.indexOf("J3. les 8 tables du cœur portent une policy de propriété");
+  assert.ok(i !== -1, "le contrôle J3 a disparu");
+  // Le bloc J3 va de la déclaration des marqueurs au noter() qui le conclut.
+  const debut = checklist.lastIndexOf("c_marqueurs constant text[]", i);
+  assert.ok(debut !== -1 && debut < i, "J3 ne déclare plus de liste de marqueurs");
+  const bloc = checklist.slice(debut, checklist.indexOf("v_n = 0);", i) + 9);
+
+  assert.ok(/not in \('is_admin\(\)'/.test(bloc.replace(/\s+/g, " ")),
+    "J3 n'exclut plus la policy administrateur : un is_admin() seul le satisferait");
+  assert.ok(/v_n = 0\)/.test(bloc), "J3 n'est plus conditionnel");
+  assert.ok(!/noter\('J',\s*format\([^)]*\),\s*true\)/.test(bloc.replace(/\s+/g, " ")),
+    "J3 est devenu inconditionnel (passé à true)");
+});
+
+test("PERF 18. la checklist sépare accès admin, accès coach et accès élève", () => {
+  const checklist = sansCommentairesSql(
+    lire("supabase/tests/nutrition_isolation_multi_coachs_checklist.sql"),
+  );
+  // J3b : une policy admin DISTINCTE par table.
+  assert.ok(checklist.includes("J3b."), "le contrôle J3b (policy admin distincte) est absent");
+  assert.ok(/_manage_admin/.test(checklist.slice(checklist.indexOf("J3b.") - 900, checklist.indexOf("J3b."))),
+    "J3b ne vérifie pas la policy _manage_admin");
+  // J3c : admin et élève jamais fondus dans un même prédicat.
+  assert.ok(checklist.includes("J3c."), "le contrôle J3c (admin ≠ élève) est absent");
+  const j3c = checklist.slice(checklist.indexOf("J3c.") - 900, checklist.indexOf("J3c."));
+  assert.ok(/is_admin\(\)/.test(j3c) && /current_student_id\(\)/.test(j3c),
+    "J3c ne croise pas is_admin() et current_student_id()");
+  // J3d : contrôle du contrôle — les marqueurs doivent exister en base.
+  assert.ok(checklist.includes("J3d."), "le contrôle J3d (marqueurs existants) est absent");
+});
+
+test("PERF 19. le script de mesure exerce la RPC, pas un SELECT, et ne laisse rien", () => {
+  const mesure = lire("supabase/tests/p13a_perf_sauvegarde_mesure.sql");
+  const sansProse = sansCommentairesSql(mesure);
+  // La RPC complète, deux fois : création puis réécriture (le cas qui échouait).
+  const appels = (sansProse.match(/save_nutrition_plan_v2\(/g) ?? []).length;
+  assert.ok(appels >= 2,
+    `la mesure n'appelle la RPC que ${appels} fois : il faut la création ET la réécriture`);
+  // CHAQUE appel de la RPC doit avoir son propre garde-fou 57014, et chacun
+  // doit LEVER. Se contenter de constater que « query_canceled » apparaît
+  // quelque part laisserait passer un gestionnaire vidé sur l'un des deux.
+  const branches = [...sansProse.matchAll(/when\s+query_canceled\s+then([\s\S]*?)(?=\bwhen\s+\w+\s+then\b|\bend\b)/gi)];
+  assert.ok(
+    branches.length >= appels,
+    `${appels} appel(s) à la RPC mais seulement ${branches.length} gestionnaire(s) de 57014`,
+  );
+  for (const b of branches) {
+    assert.ok(
+      /raise\s+exception/i.test(b[1]),
+      "un gestionnaire de 57014 n'échoue pas : un timeout passerait pour un succès",
+    );
+  }
+  assert.ok(/clock_timestamp\(\)/.test(sansProse), "aucun chronométrage");
+  // Identité d'un coach autorisé, pas l'admin.
+  assert.ok(/set local role authenticated/.test(sansProse), "la mesure ne pose pas le rôle");
+  assert.ok(/request\.jwt\.claims/.test(sansProse), "la mesure ne pose pas d'identité");
+  // Tout est annulé, et on le vérifie après coup.
+  assert.ok(/^rollback;/m.test(sansProse), "la mesure ne finit pas par un rollback");
+
+  // Les contrôles de survie se jugent APRÈS le rollback, et chacun doit lever.
+  // Chercher « Perf plan P13-A » dans tout le fichier ne prouverait rien : la
+  // chaîne figure aussi dans la charge utile.
+  const apresRollback = sansProse.slice(sansProse.search(/^rollback;/m));
+  for (const [motif, quoi] of [
+    [/auth\.users[\s\S]*?perf\.%@test\.local/, "les comptes"],
+    [/nutrition_plans[\s\S]*?Perf plan P13-A/, "le plan"],
+    [/food_catalog[\s\S]*?Perf aliment/, "les aliments"],
+  ] as const) {
+    assert.ok(motif.test(apresRollback), `aucun contrôle de survie pour ${quoi} après le ROLLBACK`);
+  }
+  const levees = (apresRollback.match(/raise exception/g) ?? []).length;
+  assert.ok(levees >= 3,
+    `seulement ${levees} contrôle(s) de survie lèvent après le ROLLBACK : il en faut un par famille de données`);
+});
+
+test("PERF 20. le script de mesure vérifie le cloisonnement et l'équivalence des deux formes", () => {
+  const mesure = sansCommentairesSql(lire("supabase/tests/p13a_perf_sauvegarde_mesure.sql"));
+  // Deux coachs + admin réellement endossés.
+  const subs = new Set([...mesure.matchAll(/"sub"\s*:\s*"([0-9a-f-]{36})"/gi)].map((m) => m[1]));
+  assert.ok(subs.size >= 2, `la mesure n'endosse que ${subs.size} identité(s)`);
+  assert.ok(/noter_perf/.test(mesure), "aucun contrôle de cloisonnement n'est consigné");
+  // L'équivalence ancienne forme / nouvelle forme, en différence symétrique.
+  assert.ok(/can_manage_nutrition_plan/.test(mesure) && /nutrition_plan_ids_geres/.test(mesure),
+    "la mesure ne compare pas les deux formes de la règle");
+  // On ne cherche PAS un motif « (select … except … ) union all ( … ) » : les
+  // opérandes contiennent eux-mêmes des parenthèses (appels de fonction), et
+  // une classe `[^()]*` ne peut pas les traverser. On exprime donc l'intention
+  // directement : de part et d'autre de chaque `union all`, l'opérande doit
+  // être PARENTHÉSÉ — sinon `A except B union all B except A` s'associe à
+  // gauche et ne calcule pas une différence symétrique.
+  const plat = mesure.replace(/\s+/g, " ");
+  const unions = [...plat.matchAll(/union all/gi)];
+  assert.ok(unions.length > 0, "aucune comparaison des deux formes");
+  for (const u of unions) {
+    const avantU = plat.slice(0, u.index).trimEnd();
+    const apresU = plat.slice(u.index! + "union all".length).trimStart();
+    assert.ok(
+      avantU.endsWith(")") && apresU.startsWith("("),
+      "la différence symétrique n'est pas parenthésée : `A except B union all B except A` s'associe à gauche et masquerait les écarts",
+    );
+  }
+  // Et le contrôle du contrôle contre un vert par vacuité.
+  assert.ok(/CONTRÔLE VIDE/.test(mesure),
+    "rien n'empêche un « aucun écart » vrai par vacuité");
+});
+
+/** Le script de mesure, commentaires retirés. */
+const MESURE = sansCommentairesSql(lire("supabase/tests/p13a_perf_sauvegarde_mesure.sql"));
+
+test("PERF 21. la comparaison nomme explicitement la colonne de retour des deux côtés", () => {
+  // `…_ids_geres()` est `returns setof uuid` : un type SCALAIRE. Dans un FROM,
+  // PostgreSQL nomme sa colonne d'après LA FONCTION, pas `id`. Écrire
+  // `select id from public.nutrition_plan_ids_geres()` lève « column "id" does
+  // not exist » — ce qui a cassé le contrôle d'équivalence.
+  assert.ok(
+    !/select\s+id\s+from\s+public\.\w*_ids_geres\s*\(\s*\)/i.test(MESURE),
+    "la comparaison lit encore une colonne « id » inexistante sur une fonction setof uuid",
+  );
+  // Chaque lecture dans un FROM doit porter un alias de colonne explicite.
+  for (const m of MESURE.matchAll(/from\s+public\.(\w*_ids_geres)\s*\(\s*\)([^\n]*)/gi)) {
+    assert.ok(
+      /\bas\s+\w+\s*\(\s*\w+\s*\)/i.test(m[2]),
+      `${m[1]}() est lue sans alias de colonne explicite : « ${m[0].trim()} »`,
+    );
+  }
+  // Et les deux directions de l'EXCEPT sont toujours là.
+  assert.equal(
+    (MESURE.match(/\bexcept\b/gi) ?? []).length,
+    2,
+    "la comparaison n'a plus ses deux directions",
+  );
+});
+
+test("PERF 22. la limite de 8 s est imposée au NIVEAU SUPÉRIEUR, hors des blocs do $$", () => {
+  // Même règle que pour l'`alter function … set statement_timeout` : PostgreSQL
+  // arme le minuteur au démarrage d'une instruction de plus haut niveau. Un
+  // `set local` écrit DANS un `do $$` ne protégerait pas ce bloc, puisque le
+  // bloc est lui-même l'instruction déjà armée.
+  const lignes = lire("supabase/tests/p13a_perf_sauvegarde_mesure.sql").split("\n");
+  let dansCorps = false;
+  let trouve = false;
+  for (const l of lignes) {
+    const code = l.includes("--") ? l.slice(0, l.indexOf("--")) : l;
+    const pos = code.search(/set\s+local\s+statement_timeout/i);
+    if (pos !== -1) {
+      // Les `$$` qui PRÉCÈDENT le SET sur la même ligne comptent : un
+      // `do $$ begin set local … end $$;` tient sur une ligne, et tester
+      // l'état d'avant la ligne le déclarerait à tort au niveau supérieur.
+      const ouvertsAvant = (code.slice(0, pos).match(/\$\$/g) ?? []).length;
+      const dedansIci = ouvertsAvant % 2 === 1 ? !dansCorps : dansCorps;
+      assert.ok(!dedansIci,
+        "le SET LOCAL statement_timeout est à l'intérieur d'un corps $$ : il n'armerait pas le minuteur du bloc");
+      assert.ok(/'8s'/.test(code), `la limite posée n'est pas 8s : « ${code.trim()} »`);
+      trouve = true;
+    }
+    for (let i = 0; i < (code.match(/\$\$/g) ?? []).length; i += 1) dansCorps = !dansCorps;
+  }
+  assert.ok(trouve, "la mesure n'impose aucune limite : elle tournerait sans garde-fou");
+
+  // Elle doit être LOCALE — jamais un SET global ni un ALTER ROLE/DATABASE.
+  assert.ok(!/^\s*set\s+statement_timeout/im.test(MESURE),
+    "un SET non-LOCAL fuirait hors de la transaction");
+  assert.ok(!/alter\s+(role|database|system)/i.test(MESURE),
+    "la mesure ne doit toucher ni rôle, ni base, ni configuration serveur");
+
+  // Un garde-fou doit refuser de mesurer si la limite n'a pas pris.
+  assert.ok(/LIMITE NON IMPOSÉE/.test(lire("supabase/tests/p13a_perf_sauvegarde_mesure.sql")),
+    "rien n'empêche de présenter comme valide une mesure faite sans limite");
+
+  // La valeur effective est constatée juste avant CHAQUE appel.
+  const avantAppels = (MESURE.match(/current_setting\('statement_timeout'\)/g) ?? []).length;
+  assert.ok(avantAppels >= 4,
+    `statement_timeout n'est constaté que ${avantAppels} fois : il faut la vérification initiale, puis avant chaque appel`);
+
+  // Chaque appel RPC dans son propre bloc, pour que chacun ait le même budget
+  // qu'en production (un appel PostgREST = une instruction).
+  const blocs = MESURE.split(/\bdo \$\$/).filter((b) => /save_nutrition_plan_v2\(/.test(b));
+  assert.equal(blocs.length, 2,
+    `les deux appels doivent être dans deux blocs distincts (trouvé ${blocs.length})`);
+  // Et UN SEUL appel par bloc : deux appels dans le même bloc partageraient un
+  // unique budget de 8 s, alors qu'en production chacun a le sien.
+  for (const b of blocs) {
+    const n = (b.match(/save_nutrition_plan_v2\(/g) ?? []).length;
+    assert.equal(n, 1,
+      `un bloc contient ${n} appels à la RPC : ils partageraient le même budget de 8 s`);
+  }
+});
+
+test("PERF 23. le compteur de policies ensemblistes attend le bon nombre, pour la bonne raison", () => {
+  const brut = lire("supabase/tests/p13a_perf_sauvegarde_mesure.sql");
+  // Il doit compter qual ET with_check : une policy FOR INSERT n'a pas de
+  // `qual`, PostgreSQL ne lui stocke qu'un `with_check`.
+  const i = brut.indexOf("policies_en_forme_ensembliste");
+  const bloc = brut.slice(Math.max(0, i - 700), i);
+  assert.ok(/coalesce\(qual/.test(bloc) && /coalesce\(with_check/.test(bloc),
+    "le compteur ignore with_check : il manquera nutrition_plans_insert_own_coach");
+
+  // L'attendu affiché doit être 10, calculé — pas un nombre posé au jugé.
+  assert.ok(/Attendu après 20261003090000\s*:\s*6\s*\|\s*10\s*\|/.test(brut),
+    "l'attendu affiché ne vaut pas 10");
+
+  // Et il doit valoir 10 d'après la migration elle-même : on recompte ici.
+  const policies = [...PERF.matchAll(
+    /create policy\s+"([^"]+)"\s+on\s+public\.(\w+)\s+for\s+(\w+)\s+to\s+\w+([\s\S]*?);(?=\s*(?:\n|$))/gi,
+  )];
+  const ensemblistes = policies.filter((m) => /_ids_geres/.test(m[4]));
+  assert.equal(ensemblistes.length, 10,
+    `la migration contient ${ensemblistes.length} policies ensemblistes, l'attendu dit 10`);
+
+  // Les 10 autres ne DOIVENT PAS l'être : les y faire entrer signifierait que
+  // l'accès admin ou l'accès élève passe par la propriété coach.
+  const autres = policies.filter((m) => !/_ids_geres/.test(m[4])).map((m) => m[1]);
+  assert.equal(autres.length, 10, `${autres.length} policies hors forme ensembliste au lieu de 10`);
+  for (const nom of autres) {
+    assert.ok(
+      nom.endsWith("_manage_admin")
+        || nom === "nutrition_plans_delete_own_coach"
+        || nom === "nutrition_daily_logs_manage_own_student",
+      `${nom} n'utilise pas la forme ensembliste sans raison connue`,
+    );
+  }
+});
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// GARDE ADMIN SUR LE CHEMIN D'ÉCRITURE — migration 20261003190000
+// ════════════════════════════════════════════════════════════════════════════
+// 20261003090000 a réglé la LECTURE (ensembles hachés, une évaluation par
+// instruction) mais a laissé l'ÉCRITURE en l'état : pour un INSERT d'une seule
+// ligne, l'ensemble entier est recalculé afin de valider cette ligne — 46 ms
+// mesurés sur la production, soit bien au-delà du budget de 8 s pour le
+// millier de lignes d'un plan complet. La garde `not (select
+// public.is_admin()) and (…)` court-circuite la branche coach pour l'admin :
+// 9,9 ms pour le même INSERT. Ces tests verrouillent cette garde — et surtout
+// verrouillent ce qu'elle NE DOIT PAS toucher.
+
+const CHEMIN_MIGRATION_GARDE =
+  "supabase/migrations/20261003190000_p13a_perf_garde_admin_ecriture.sql";
+const GARDE_BRUTE = lire(CHEMIN_MIGRATION_GARDE);
+const GARDE = sansCommentairesSql(GARDE_BRUTE);
+const GARDE_PLAT = GARDE.replace(/\s+/g, " ").toLowerCase();
+
+/** Les 11 policies coach de P13-A, avec les clauses que chacune possède. */
+const POLICIES_COACH_GARDEES: Record<string, { using: boolean; check: boolean }> = {
+  nutrition_plans_select_own_coach: { using: true, check: false },
+  nutrition_plans_insert_own_coach: { using: false, check: true },
+  nutrition_plans_update_own_coach: { using: true, check: true },
+  nutrition_plans_delete_own_coach: { using: true, check: false },
+  nutrition_days_manage_own_coach: { using: true, check: true },
+  nutrition_plan_profiles_manage_own_coach: { using: true, check: true },
+  nutrition_meal_slot_targets_manage_own_coach: { using: true, check: true },
+  meals_manage_own_coach: { using: true, check: true },
+  meal_choice_slots_manage_own_coach: { using: true, check: true },
+  meal_choice_options_manage_own_coach: { using: true, check: true },
+  nutrition_daily_logs_manage_own_coach: { using: true, check: true },
+};
+
+/** Le prédicat de propriété attendu dans chaque policy, APRÈS la garde. */
+const PROPRIETE_ATTENDUE: Record<string, RegExp> = {
+  nutrition_plans_select_own_coach: /student_ids_geres\(\)[\s\S]*current_coach_id\(\)/,
+  nutrition_plans_insert_own_coach: /student_ids_geres\(\)[\s\S]*current_coach_id\(\)/,
+  nutrition_plans_update_own_coach: /student_ids_geres\(\)[\s\S]*current_coach_id\(\)/,
+  nutrition_plans_delete_own_coach: /student_id is null[\s\S]*current_coach_id\(\)/,
+  nutrition_days_manage_own_coach: /plan_id in \(select public\.nutrition_plan_ids_geres\(\)\)/,
+  nutrition_plan_profiles_manage_own_coach: /plan_id in \(select public\.nutrition_plan_ids_geres\(\)\)/,
+  nutrition_meal_slot_targets_manage_own_coach: /profile_id in \(select public\.nutrition_plan_profile_ids_geres\(\)\)/,
+  meals_manage_own_coach: /nutrition_day_id in \(select public\.nutrition_day_ids_geres\(\)\)/,
+  meal_choice_slots_manage_own_coach: /meal_id in \(select public\.meal_ids_geres\(\)\)/,
+  meal_choice_options_manage_own_coach: /slot_id in \(select public\.meal_choice_slot_ids_geres\(\)\)/,
+  nutrition_daily_logs_manage_own_coach: /student_id in \(select public\.student_ids_geres\(\)\)/,
+};
+
+/**
+ * Extrait l'expression parenthésée qui suit `depuis`, en comptant les
+ * parenthèses. Une recherche par regex gloutonne attraperait la clause
+ * suivante ; une recherche paresseuse s'arrêterait à la première parenthèse
+ * fermante interne, et ces expressions en contiennent plusieurs niveaux.
+ */
+function expressionParenthesee(source: string, depuis: number): string {
+  const debut = source.indexOf("(", depuis);
+  if (debut === -1) throw new Error("aucune parenthèse ouvrante après l'indice donné");
+  let niveau = 0;
+  for (let i = debut; i < source.length; i += 1) {
+    if (source[i] === "(") niveau += 1;
+    else if (source[i] === ")") {
+      niveau -= 1;
+      if (niveau === 0) return source.slice(debut, i + 1);
+    }
+  }
+  throw new Error("parenthèse jamais refermée");
+}
+
+/** Les `alter policy` de la migration, découpés et indexés par nom. */
+const ALTERS_GARDE = (() => {
+  const trouves = new Map<string, { table: string; corps: string }>();
+  const re = /alter policy\s+"([^"]+)"\s+on\s+public\.(\w+)([\s\S]*?);(?=\s*(?:\n|$))/gi;
+  for (const m of GARDE.matchAll(re)) {
+    trouves.set(m[1], { table: m[2], corps: m[3] });
+  }
+  return trouves;
+})();
+
+/** Les clauses d'un corps d'`alter policy`, par type. */
+function clausesDe(corps: string): { using?: string; check?: string } {
+  const out: { using?: string; check?: string } = {};
+  const iCheck = corps.search(/\bwith\s+check\b/i);
+  // `using` doit être cherché HORS de la clause with check : l'expression du
+  // with check peut elle-même contenir le mot dans un sous-select.
+  const zoneUsing = iCheck === -1 ? corps : corps.slice(0, iCheck);
+  const iUsing = zoneUsing.search(/\busing\b/i);
+  if (iUsing !== -1) out.using = expressionParenthesee(zoneUsing, iUsing);
+  if (iCheck !== -1) out.check = expressionParenthesee(corps, iCheck);
+  return out;
+}
+
+test("GARDE 1. la migration de garde admin existe et ne touche ni schéma, ni droits, ni délais", () => {
+  assert.ok(GARDE.trim().length > 0, "la migration de garde est vide");
+  for (const interdit of [
+    "create table", "alter table", "drop table", "add column", "drop column",
+    "grant ", "revoke ", "create or replace function", "drop function",
+    "statement_timeout", "search_path", "alter role", "alter database",
+    "enable row level security", "disable row level security", "force row level security",
+  ]) {
+    assert.ok(!GARDE_PLAT.includes(interdit),
+      `la migration de garde contient « ${interdit} » : elle doit se limiter aux prédicats des policies`);
+  }
+});
+
+test("GARDE 2. c'est un delta pur : 11 ALTER POLICY, aucun CREATE ni DROP de policy", () => {
+  assert.ok(!/\bcreate\s+policy\b/i.test(GARDE),
+    "la migration recrée une policy : un ALTER suffit et évite de perdre une clause en route");
+  assert.ok(!/\bdrop\s+policy\b/i.test(GARDE),
+    "la migration supprime une policy : une fenêtre sans protection s'ouvrirait entre le DROP et le CREATE");
+  assert.equal(ALTERS_GARDE.size, 11,
+    `${ALTERS_GARDE.size} ALTER POLICY au lieu des 11 policies coach de P13-A`);
+  for (const nom of Object.keys(POLICIES_COACH_GARDEES)) {
+    assert.ok(ALTERS_GARDE.has(nom), `${nom} n'est pas gardée : son chemin d'écriture reste lent`);
+  }
+});
+
+test("GARDE 3. chaque clause de chaque policy coach commence par la garde admin", () => {
+  for (const [nom, attendu] of Object.entries(POLICIES_COACH_GARDEES)) {
+    const alt = ALTERS_GARDE.get(nom);
+    assert.ok(alt, `${nom} absente`);
+    const clauses = clausesDe(alt.corps);
+    assert.equal(clauses.using !== undefined, attendu.using,
+      `${nom} : présence de USING inattendue (attendu ${attendu.using})`);
+    assert.equal(clauses.check !== undefined, attendu.check,
+      `${nom} : présence de WITH CHECK inattendue (attendu ${attendu.check})`);
+    for (const [type, expr] of Object.entries(clauses)) {
+      const plat = (expr as string).replace(/\s+/g, " ").toLowerCase();
+      // La garde doit être le PREMIER opérande du `and` : placée après, elle
+      // ne court-circuiterait rien, les sous-plans ayant déjà été évalués.
+      assert.ok(/^\(\s*not \(select public\.is_admin\(\)\)\s+and\b/.test(plat),
+        `${nom} (${type}) ne commence pas par « not (select public.is_admin()) and » : ${plat.slice(0, 90)}`);
+    }
+  }
+});
+
+test("GARDE 4. la garde est hissable : (select …) et non un appel nu par ligne", () => {
+  // `not public.is_admin()` sans sous-select est évalué À CHAQUE LIGNE :
+  // la garde coûterait alors ce qu'elle prétend économiser.
+  const nus = [...GARDE_PLAT.matchAll(/not\s+public\.is_admin\(\)/g)];
+  assert.equal(nus.length, 0,
+    `${nus.length} appel(s) nu(s) à is_admin() : sans (select …) il n'y a pas d'InitPlan, donc pas de court-circuit`);
+  const gardes = [...GARDE_PLAT.matchAll(/not \(select public\.is_admin\(\)\)/g)];
+  assert.equal(gardes.length, 19,
+    `${gardes.length} gardes trouvées au lieu de 19 (11 policies : 9 USING + 10 WITH CHECK)`);
+});
+
+test("GARDE 5. la règle de propriété est AJOUTÉE À, jamais remplacée", () => {
+  for (const [nom, motif] of Object.entries(PROPRIETE_ATTENDUE)) {
+    const alt = ALTERS_GARDE.get(nom);
+    assert.ok(alt, `${nom} absente`);
+    const clauses = clausesDe(alt.corps);
+    for (const [type, expr] of Object.entries(clauses)) {
+      const plat = (expr as string).replace(/\s+/g, " ").toLowerCase();
+      assert.ok(motif.test(plat),
+        `${nom} (${type}) a perdu son prédicat de propriété : la garde doit s'ajouter, pas se substituer`);
+    }
+  }
+});
+
+test("GARDE 6. aucune policy ADMIN n'est gardée — ce serait lui retirer son accès", () => {
+  // `not is_admin() and is_admin()` est toujours faux : appliquer la garde à
+  // une policy `_manage_admin` couperait l'admin de la table.
+  for (const table of TABLES_COEUR) {
+    assert.ok(!ALTERS_GARDE.has(`${table}_manage_admin`),
+      `${table}_manage_admin est modifiée : la garde la rendrait contradictoire`);
+  }
+  assert.ok(!/_manage_admin/.test(GARDE),
+    "une policy _manage_admin est nommée dans le SQL de la migration");
+});
+
+test("GARDE 7. aucune policy ÉLÈVE n'est touchée", () => {
+  assert.ok(!ALTERS_GARDE.has("nutrition_daily_logs_manage_own_student"),
+    "la policy élève du journal est gardée : l'élève n'est pas admin, la garde n'y a aucun sens et ajoute un appel");
+  for (const nom of POLICIES_ELEVE_INTOUCHABLES) {
+    assert.ok(!GARDE.includes(nom), `${nom} est nommée dans la migration de garde`);
+  }
+  assert.ok(!/current_student_id/.test(GARDE),
+    "la migration de garde manipule l'identité élève");
+});
+
+test("GARDE 8. la garde source_list_id de meal_choice_slots survit, DANS la branche coach", () => {
+  const alt = ALTERS_GARDE.get("meal_choice_slots_manage_own_coach");
+  assert.ok(alt, "meal_choice_slots_manage_own_coach absente");
+  const clauses = clausesDe(alt.corps);
+  const plat = (clauses.check ?? "").replace(/\s+/g, " ").toLowerCase();
+  assert.ok(/source_list_id is null/.test(plat) && /food_lists fl/.test(plat)
+    && /fl\.coach_id = \(select public\.current_coach_id\(\)\)/.test(plat),
+    "le WITH CHECK a perdu la garde source_list_id : un coach pourrait pointer la liste d'un autre");
+  // Elle doit rester DANS la branche coach : hors de la garde, elle serait
+  // évaluée pour l'admin aussi, et c'est précisément le coût qu'on retire.
+  assert.ok(/^\(\s*not \(select public\.is_admin\(\)\)\s+and\b/.test(plat),
+    "la garde source_list_id n'est pas sous la garde admin");
+});
+
+test("GARDE 9. CONTRÔLE DU CONTRÔLE — ces tests échouent si la garde disparaît", () => {
+  // Une migration identique dont on retire la garde doit faire tomber GARDE 3.
+  const sansGarde = GARDE.replace(/not \(select public\.is_admin\(\)\)\s+and\s+/gi, "");
+  const re = /alter policy\s+"([^"]+)"\s+on\s+public\.(\w+)([\s\S]*?);(?=\s*(?:\n|$))/gi;
+  let vues = 0;
+  let gardees = 0;
+  for (const m of sansGarde.matchAll(re)) {
+    vues += 1;
+    const clauses = clausesDe(m[3]);
+    for (const expr of Object.values(clauses)) {
+      const plat = (expr as string).replace(/\s+/g, " ").toLowerCase();
+      if (/^\(\s*not \(select public\.is_admin\(\)\)\s+and\b/.test(plat)) gardees += 1;
+    }
+  }
+  assert.equal(vues, 11, `le découpage de contrôle a vu ${vues} policies au lieu de 11`);
+  assert.equal(gardees, 0,
+    "la détection de la garde reste positive sur un texte d'où elle a été retirée : elle ne teste rien");
+});
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// LECTURE ÉLÈVE EN FORME ENSEMBLISTE — migration 20261003200000
+// ════════════════════════════════════════════════════════════════════════════
+// Les policies élève étaient des EXISTS corrélés traversant jusqu'à quatre
+// tables, dont chacune réapplique sa propre RLS : le plan d'un UPDATE de neuf
+// lignes atteignait ~576 nœuds et 107 ms de PLANIFICATION, replanifiés cinq
+// fois par plpgsql avant bascule en plan générique. Comme PostgreSQL exige de
+// pouvoir LIRE une ligne pour la modifier, un administrateur payait ce prix à
+// chacune des ~1 300 instructions d'une réécriture de plan. Ces tests
+// verrouillent la forme ensembliste, et surtout ce qu'elle ne doit pas
+// toucher.
+
+const CHEMIN_MIGRATION_ELEVE =
+  "supabase/migrations/20261003200000_p13a_perf_lecture_eleve_ensembliste.sql";
+const ELEVE_BRUT = lire(CHEMIN_MIGRATION_ELEVE);
+const ELEVE = sansCommentairesSql(ELEVE_BRUT);
+const ELEVE_PLAT = ELEVE.replace(/\s+/g, " ").toLowerCase();
+
+/** Les cinq ensembles élève, tous sans argument. */
+const FONCTIONS_ENSEMBLES_ELEVE = [
+  "nutrition_plan_ids_eleve",
+  "nutrition_day_ids_eleve",
+  "nutrition_plan_profile_ids_eleve",
+  "meal_ids_eleve",
+  "meal_choice_slot_ids_eleve",
+] as const;
+
+/** Les 8 policies élève et le prédicat de propriété attendu dans chacune. */
+const POLICIES_ELEVE_ENSEMBLISTES: Record<string, RegExp> = {
+  // Pas de jointure à faire : le plan porte student_id directement.
+  nutrition_plans_select_self_or_assigned:
+    /student_id = \(select public\.current_student_id\(\)\)[\s\S]*status <> 'prochain'/,
+  nutrition_days_select_self_or_assigned:
+    /plan_id in \(select public\.nutrition_plan_ids_eleve\(\)\)/,
+  nutrition_days_update_self:
+    /plan_id in \(select public\.nutrition_plan_ids_eleve\(\)\)/,
+  nutrition_plan_profiles_select_assigned:
+    /plan_id in \(select public\.nutrition_plan_ids_eleve\(\)\)/,
+  nutrition_meal_slot_targets_select_assigned:
+    /profile_id in \(select public\.nutrition_plan_profile_ids_eleve\(\)\)/,
+  meals_select_self_or_assigned:
+    /nutrition_day_id in \(select public\.nutrition_day_ids_eleve\(\)\)/,
+  meal_choice_slots_select_assigned:
+    /meal_id in \(select public\.meal_ids_eleve\(\)\)/,
+  meal_choice_options_select_assigned:
+    /slot_id in \(select public\.meal_choice_slot_ids_eleve\(\)\)/,
+};
+
+/** Les `alter policy` de la migration élève, indexés par nom. */
+const ALTERS_ELEVE = (() => {
+  const trouves = new Map<string, { table: string; corps: string }>();
+  const re = /alter policy\s+"([^"]+)"\s+on\s+public\.(\w+)([\s\S]*?);(?=\s*(?:\n|$))/gi;
+  for (const m of ELEVE.matchAll(re)) trouves.set(m[1], { table: m[2], corps: m[3] });
+  return trouves;
+})();
+
+test("ÉLÈVE 1. la migration existe et ne touche ni schéma, ni droits de table, ni délais", () => {
+  assert.ok(ELEVE.trim().length > 0, "la migration est vide");
+  for (const interdit of [
+    "create table", "alter table", "drop table", "add column", "drop column",
+    "grant select", "grant insert", "grant update", "grant delete", "grant all",
+    "statement_timeout", "alter role", "alter database",
+    "enable row level security", "disable row level security", "force row level security",
+  ]) {
+    assert.ok(!ELEVE_PLAT.includes(interdit),
+      `la migration contient « ${interdit} » : elle doit se limiter aux fonctions d'ensemble et aux prédicats`);
+  }
+});
+
+test("ÉLÈVE 2. delta pur : 8 ALTER POLICY, aucun CREATE ni DROP de policy", () => {
+  assert.ok(!/\bcreate\s+policy\b/i.test(ELEVE), "la migration recrée une policy");
+  assert.ok(!/\bdrop\s+policy\b/i.test(ELEVE),
+    "la migration supprime une policy : une fenêtre sans protection s'ouvrirait");
+  assert.equal(ALTERS_ELEVE.size, 8,
+    `${ALTERS_ELEVE.size} ALTER POLICY au lieu des 8 policies élève`);
+  for (const nom of Object.keys(POLICIES_ELEVE_ENSEMBLISTES)) {
+    assert.ok(ALTERS_ELEVE.has(nom), `${nom} n'est pas reprise : son chemin reste coûteux`);
+  }
+});
+
+test("ÉLÈVE 3. les cinq ensembles élève sont SANS ARGUMENT — c'est tout l'objet du correctif", () => {
+  for (const f of FONCTIONS_ENSEMBLES_ELEVE) {
+    const re = new RegExp(
+      `create (?:or replace )?function\\s+public\\.${f}\\s*\\(([^)]*)\\)\\s*returns\\s+setof\\s+uuid`, "i");
+    const m = ELEVE.match(re);
+    assert.ok(m, `${f} absente, mal nommée, ou ne renvoie pas setof uuid`);
+    assert.equal(m[1].trim(), "",
+      `${f} prend un argument : elle serait de nouveau évaluée une fois PAR LIGNE`);
+  }
+  assert.equal(
+    [...ELEVE.matchAll(/create (?:or replace )?function\s+public\.(\w+)/gi)].length,
+    FONCTIONS_ENSEMBLES_ELEVE.length,
+    "la migration crée un nombre de fonctions différent des cinq ensembles attendus",
+  );
+});
+
+test("ÉLÈVE 4. elles sont STABLE SECURITY DEFINER et nomment pg_temp EN DERNIER", () => {
+  for (const f of FONCTIONS_ENSEMBLES_ELEVE) {
+    const i = ELEVE.indexOf(`public.${f}()`);
+    assert.ok(i !== -1, `${f} absente`);
+    const entete = ELEVE.slice(i, i + 220).replace(/\s+/g, " ").toLowerCase();
+    assert.ok(/stable security definer/.test(entete),
+      `${f} n'est pas STABLE SECURITY DEFINER : sans DEFINER elle retraverserait la RLS`);
+    const sp = entete.match(/set search_path = ([^a]*?as \$)/);
+    assert.ok(sp, `${f} ne fige pas son search_path`);
+    const chemins = sp[1].replace(/as \$$/, "").trim().split(",").map((x) => x.trim());
+    assert.equal(chemins[chemins.length - 1], "pg_temp",
+      `${f} : pg_temp n'est pas en dernier — non nommé il passe EN TÊTE, et un objet temporaire masquerait les tables`);
+  }
+});
+
+test("ÉLÈVE 5. leur droit d'exécution est retiré à public et anon", () => {
+  // `anon` a le droit TEMP : lui laisser EXECUTE exposerait la liste des
+  // identifiants d'un élève à un appelant non authentifié.
+  assert.ok(/revoke all on function public\.%I\(\) from public/i.test(ELEVE)
+    || FONCTIONS_ENSEMBLES_ELEVE.every((f) => new RegExp(`revoke all on function public\\.${f}\\(\\) from public`, "i").test(ELEVE)),
+    "le droit d'exécution n'est pas retiré à public");
+  assert.ok(/revoke all on function public\.%I\(\) from anon/i.test(ELEVE)
+    || FONCTIONS_ENSEMBLES_ELEVE.every((f) => new RegExp(`revoke all on function public\\.${f}\\(\\) from anon`, "i").test(ELEVE)),
+    "le droit d'exécution n'est pas retiré à anon");
+  const liste = ELEVE.match(/foreach f in array array\[([\s\S]*?)\]/i);
+  if (liste) {
+    for (const f of FONCTIONS_ENSEMBLES_ELEVE) {
+      assert.ok(liste[1].includes(`'${f}'`), `${f} est absente de la boucle de révocation`);
+    }
+  }
+});
+
+test("ÉLÈVE 6. chaque policy élève commence par la garde hissée current_student_id()", () => {
+  for (const nom of Object.keys(POLICIES_ELEVE_ENSEMBLISTES)) {
+    const alt = ALTERS_ELEVE.get(nom);
+    assert.ok(alt, `${nom} absente`);
+    const clauses = clausesDe(alt.corps);
+    assert.ok(clauses.using !== undefined, `${nom} ne réécrit pas son USING`);
+    const plat = clauses.using.replace(/\s+/g, " ").toLowerCase();
+    // La garde doit être le PREMIER opérande : placée après, elle
+    // n'économiserait rien, l'ensemble ayant déjà été construit.
+    assert.ok(/^\(\s*\(select public\.current_student_id\(\)\) is not null\s+and\b/.test(plat),
+      `${nom} ne commence pas par « (select public.current_student_id()) is not null and » : ${plat.slice(0, 100)}`);
+  }
+});
+
+test("ÉLÈVE 7. la règle de propriété élève est PRÉSERVÉE, pas remplacée", () => {
+  for (const [nom, motif] of Object.entries(POLICIES_ELEVE_ENSEMBLISTES)) {
+    const alt = ALTERS_ELEVE.get(nom);
+    assert.ok(alt, `${nom} absente`);
+    const plat = (clausesDe(alt.corps).using ?? "").replace(/\s+/g, " ").toLowerCase();
+    assert.ok(motif.test(plat),
+      `${nom} a perdu son prédicat de propriété élève : ${plat.slice(0, 120)}`);
+  }
+  // Le filtre de statut survit : sans lui, un plan « prochain » deviendrait
+  // lisible par l'élève avant l'heure. Il est désormais DANS les fonctions.
+  const occurrences = [...ELEVE_PLAT.matchAll(/status <> 'prochain'/g)].length;
+  assert.ok(occurrences >= FONCTIONS_ENSEMBLES_ELEVE.length,
+    `« status <> 'prochain' » n'apparaît que ${occurrences} fois : une fonction d'ensemble l'a perdu`);
+  for (const f of FONCTIONS_ENSEMBLES_ELEVE) {
+    const i = ELEVE.indexOf(`public.${f}()`);
+    const corps = ELEVE.slice(i, ELEVE.indexOf("$f$;", i));
+    assert.ok(/current_student_id\(\)/.test(corps) && /status <> 'prochain'/.test(corps),
+      `${f} n'applique pas « élève courant ET statut <> prochain »`);
+  }
+});
+
+test("ÉLÈVE 8. aucune policy ADMIN ni COACH n'est touchée par cette migration", () => {
+  for (const nom of ALTERS_ELEVE.keys()) {
+    assert.ok(!/_manage_admin$/.test(nom), `${nom} est une policy administrateur`);
+    assert.ok(!/_own_coach$/.test(nom), `${nom} est une policy coach`);
+  }
+  assert.ok(!/is_admin/.test(ELEVE),
+    "la migration élève manipule is_admin() : les deux chantiers doivent rester séparables");
+  assert.ok(!/_ids_geres/.test(ELEVE),
+    "la migration élève touche aux ensembles COACH");
+  assert.ok(!ALTERS_ELEVE.has("nutrition_daily_logs_manage_own_student"),
+    "le journal quotidien est repris alors que son prédicat est déjà direct");
+});
+
+test("ÉLÈVE 9. aucun WITH CHECK n'est réécrit — seule la LECTURE est reformulée", () => {
+  // `nutrition_days_update_self` a un WITH CHECK : le réécrire ici, sans le
+  // dire, changerait ce que l'élève a le droit d'écrire.
+  for (const [nom, alt] of ALTERS_ELEVE) {
+    assert.ok(clausesDe(alt.corps).check === undefined,
+      `${nom} réécrit un WITH CHECK : hors périmètre de cette migration`);
+  }
+});
+
+test("ÉLÈVE 10. CONTRÔLE DU CONTRÔLE — ces tests échouent si la forme régresse", () => {
+  // (a) Sans la garde, ÉLÈVE 6 doit tomber.
+  const sansGarde = ELEVE.replace(
+    /\(select public\.current_student_id\(\)\) is not null\s+and\s+/gi, "");
+  const re = /alter policy\s+"([^"]+)"\s+on\s+public\.\w+([\s\S]*?);(?=\s*(?:\n|$))/gi;
+  let gardees = 0;
+  let vues = 0;
+  for (const m of sansGarde.matchAll(re)) {
+    vues += 1;
+    const plat = (clausesDe(m[2]).using ?? "").replace(/\s+/g, " ").toLowerCase();
+    if (/^\(\s*\(select public\.current_student_id\(\)\) is not null\s+and\b/.test(plat)) gardees += 1;
+  }
+  assert.equal(vues, 8, `le découpage de contrôle a vu ${vues} policies au lieu de 8`);
+  assert.equal(gardees, 0, "la détection de la garde reste positive sur un texte d'où elle a été retirée");
+
+  // (b) Le retour à un EXISTS corrélé doit être visible : c'est LA forme que
+  // cette migration supprime, et la seule qui réapplique la RLS traversée.
+  assert.ok(!/\bexists\s*\(/i.test(ELEVE),
+    "un EXISTS corrélé subsiste dans la migration : la chaîne de RLS n'est pas rompue");
+});
+
+// ════════════════════════════════════════════════════════════════════════════
 
 console.log(`\n${passed} réussis, ${failed} échecs`);
 if (failed > 0) process.exit(1);
