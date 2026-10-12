@@ -126,10 +126,25 @@ export function CoachModal({ coach, onSave }: CoachModalProps) {
                 />
               </div>
               <Field label="Spécialité" value={form.speciality} onChange={(v) => setField("speciality", v)} />
+              {/* P13-B : le rôle choisi ici décide du périmètre réel, et plus
+                  seulement d'un libellé. Un « Collaborateur » n'a RIEN par
+                  défaut — ni élève, ni catégorie — jusqu'à ce que
+                  CollaborateurAccesModal lui en accorde. Le dire ici évite de
+                  croire qu'ajouter un collaborateur lui ouvre déjà l'espace. */}
+              {form.role === "collaborateur" ? (
+                <p className="text-xs text-muted-foreground">
+                  Un collaborateur n&apos;accède à aucun élève et à aucune catégorie tant que tu ne lui en as pas
+                  affecté : à l&apos;enregistrement, configure ses droits avec le bouton « Droits ».
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Un coach autonome gère les élèves dont il est le coach principal. L&apos;administrateur a les
+                  droits globaux (comptes, facturation, abonnements).
+                </p>
+              )}
               {!coach && (
                 <p className="text-xs text-muted-foreground">
-                  Un compte réel est créé immédiatement : la personne reçoit un email pour définir son mot de passe
-                  et a alors accès à l&apos;espace admin (mêmes droits que le compte principal).
+                  Un compte réel est créé immédiatement : la personne reçoit un email pour définir son mot de passe.
                 </p>
               )}
               {error && (

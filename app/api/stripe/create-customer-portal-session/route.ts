@@ -44,6 +44,8 @@ export async function POST(request: Request) {
   } else {
     // Correctif H-3 : un coach n'agit que sur les élèves qui lui sont
     // affectés. L'administrateur passe sans condition.
+    // P13-B : aucune catégorie déclarée — facturation Stripe, hors de
+    // toute catégorie accordable. Un collaborateur est refusé.
     const accesEleve = await requireStaffForStudent(studentId);
     if (!accesEleve.ok) return accesEleve.response;
   }

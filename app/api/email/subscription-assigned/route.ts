@@ -37,6 +37,9 @@ export async function POST(request: Request) {
   }
   // Correctif H-3 : un coach n'agit que sur les élèves qui lui sont
   // affectés. L'administrateur passe sans condition.
+  // P13-B : aucune catégorie déclarée — un abonnement attribué relève de
+  // la facturation, hors des quatre catégories accordables. Un
+  // collaborateur est refusé, affectation ou non.
   const accesEleve = await requireStaffForStudent(studentId);
   if (!accesEleve.ok) return accesEleve.response;
 

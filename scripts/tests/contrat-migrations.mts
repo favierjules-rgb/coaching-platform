@@ -168,6 +168,139 @@ export const MIGRATION_SUPPRESSION_NOLIO = "20260924090000_suppression_nolio.sql
 export const MIGRATION_PROGRESSION_AUTOMATIQUE =
   "20260925090000_progression_automatique_par_exercice.sql";
 
+/* ────────────────────────────────────────────────────────────────────────────
+ * LES QUATORZE MIGRATIONS INSCRITES LE 11/10/2026 — ET POURQUOI SI TARD
+ * ────────────────────────────────────────────────────────────────────────────
+ * Le contrat dit « aucune migration n'existe sans avoir été nommée ». Il n'a
+ * pourtant plus été alimenté après `20260925090000` : onze migrations ont été
+ * ajoutées et COMMITTÉES par le propriétaire du dépôt entre le 24/09 et le
+ * 10/10 sans passer ici, puis trois de plus par P13-B. Le contrôle rougissait
+ * donc en permanence, ce qui est exactement ce qu'il devait faire — personne
+ * ne l'avait relancé.
+ *
+ * Les quatorze sont inscrites APRÈS vérification, une par une : commit
+ * d'origine (`git log` sur le fichier), appartenance à un chantier réel du
+ * dépôt, absence de donnée personnelle, de secret et d'identifiant Stripe.
+ * Les onze premières sont déjà APPLIQUÉES en production (la branche part de
+ * `85a76f8`, état exact de la production) ; les trois dernières (P13-B) ne le
+ * sont pas et ne doivent pas l'être sans décision explicite.
+ *
+ * ⚠️ Aucune assertion n'a été modifiée pour masquer l'écart : le compte, les
+ * deux ordres, l'empreinte de l'historique antérieur et le balayage COURSES
+ * sont intacts. Seul l'INVENTAIRE NOMMÉ s'allonge, ce que le contrat exige.
+ */
+
+/** Les drapeaux de relecture d'un programme (commit fb30d98). */
+export const MIGRATION_PROGRAM_REVIEW_FLAGS = "20260926090000_program_review_flags.sql";
+
+/**
+ * Les deux rails de rappel automatique (commit fb30d98).
+ *
+ * ⚠️ SEULE DES QUATORZE À ÉCRIRE DES LIGNES, et ce sont des lignes de
+ * CONFIGURATION, pas des données d'élève : deux campagnes système
+ * (`rappel_auto = 'entrainement' | 'nutrition'`), `created_by` à NULL, insérées
+ * sous `where not exists` donc idempotentes. Aucune donnée personnelle.
+ */
+export const MIGRATION_RAPPELS_AUTOMATIQUES = "20260927090000_rappels_automatiques.sql";
+
+/** Les privilèges manquants des drapeaux de relecture (commit 287e58f). */
+export const MIGRATION_REVIEW_FLAGS_GRANTS = "20260928090000_program_review_flags_grants.sql";
+
+/** Les privilèges manquants des notifications (commit 287e58f). */
+export const MIGRATION_NOTIFICATIONS_GRANTS = "20260929090000_notifications_grants.sql";
+
+/** Le profil physiologique de l'élève (commit 9ea1576). */
+export const MIGRATION_PROFIL_PHYSIOLOGIQUE = "20260930090000_profil_physiologique.sql";
+
+/**
+ * Le builder cardio et le calendrier (commit 9ea1576).
+ *
+ * Ses `insert` sont tous DANS des corps de fonction (RPC atomiques de
+ * rendez-vous et de séance) : la migration elle-même n'écrit aucune ligne.
+ */
+export const MIGRATION_CARDIO_ET_CALENDRIER = "20260930100000_cardio_builder_et_calendrier.sql";
+
+/** La consultation sécurisée des documents (commit 2096095). */
+export const MIGRATION_DOCUMENTS_SECURISES = "20261001090000_documents_consultation_securisee.sql";
+
+/**
+ * P13-A, migration 1/4 — l'isolation RLS du cœur nutrition entre coachs
+ * (commit ec98601). Couverte par
+ * `scripts/tests/rls-nutrition-isolation-multi-coachs.mts` et par
+ * `supabase/tests/nutrition_isolation_multi_coachs_checklist.sql`.
+ */
+export const MIGRATION_P13A_ISOLATION = "20261002090000_rls_nutrition_isolation_multi_coachs.sql";
+
+/** P13-A, migration 2/4 — le coût d'évaluation des policies (commit 85a76f8). */
+export const MIGRATION_P13A_PERF = "20261003090000_p13a_perf_rls_nutrition.sql";
+
+/** P13-A, migration 3/4 — la garde admin du chemin d'écriture (commit 85a76f8). */
+export const MIGRATION_P13A_GARDE_ADMIN = "20261003190000_p13a_perf_garde_admin_ecriture.sql";
+
+/** P13-A, migration 4/4 — la lecture élève ensembliste (commit 85a76f8). */
+export const MIGRATION_P13A_LECTURE_ELEVE = "20261003200000_p13a_perf_lecture_eleve_ensembliste.sql";
+
+/**
+ * P13-B, migration 1/3 — le modèle de droits des collaborateurs.
+ *
+ * ⚠️ PAS ENCORE APPLIQUÉE. Elle ajoute `coaches.role = 'collaborateur'`, les
+ * deux tables `collaborateur_eleves` / `collaborateur_permissions` et 27
+ * fonctions d'accès sans argument. Elle ne touche ni `profiles.role`, ni une
+ * policy existante, ni une donnée.
+ */
+export const MIGRATION_P13B_MODELE = "20261011090000_p13b_modele_droits_collaborateurs.sql";
+
+/**
+ * P13-B, migration 2/3 — la réécriture des 72 policies `is_coach_or_admin()`
+ * en policies cloisonnées par portée et par catégorie. PAS ENCORE APPLIQUÉE.
+ */
+export const MIGRATION_P13B_POLICIES = "20261011100000_p13b_policies_cloisonnees.sql";
+
+/**
+ * P13-B, migration 3/3 — le durcissement des fonctions `SECURITY DEFINER` qui
+ * contournaient la RLS. PAS ENCORE APPLIQUÉE.
+ */
+export const MIGRATION_P13B_FONCTIONS = "20261011110000_p13b_durcissement_fonctions_definer.sql";
+
+/**
+ * P13-B, migration 4/4 — le cœur nutrition entre dans le modèle de
+ * catégories. PAS ENCORE APPLIQUÉE.
+ *
+ * ⚠️ ELLE EXISTE PARCE QUE LES TROIS PREMIÈRES NE SUFFISAIENT PAS, ET C'EST
+ * MESURÉ : un collaborateur `nutrition / ecriture` explicitement affecté
+ * obtenait zéro plan, les huit tables du cœur opposant encore les ensembles de
+ * PROPRIÉTÉ de P13-A (`nutrition_plan_ids_geres()` → `is_coach_of_student()` →
+ * `students.coach_id`), qu'un collaborateur ne vaut jamais.
+ *
+ * Elle n'étend PAS les anciennes fonctions — un ensemble unique opposé en
+ * lecture comme en écriture aurait fait du niveau `lecture` un droit
+ * d'écriture. Elle ajoute dix fonctions de portée PAR NIVEAU et scinde les
+ * policies `FOR ALL` en quatre. Elle corrige au passage le DÉFAUT de
+ * `coaches.role` (`'admin'` → `'assistant'`) et fait suivre les droits
+ * globaux à `public.is_admin()` : sans cela, toute fiche créée sans rôle
+ * explicite devenait administrateur de cabinet sous P13-B.
+ */
+export const MIGRATION_P13B_NUTRITION = "20261011120000_p13b_integration_nutrition.sql";
+
+/**
+ * P13-B, migration 5/5 — la garde de `provision_program_copy`.
+ * PAS ENCORE APPLIQUÉE.
+ *
+ * ⚠️ ELLE FERME LA DERNIÈRE PORTE, ET CELLE-LÀ ÉTAIT MESURÉE. La revue
+ * finale a montré qu'un collaborateur SANS permission ni affectation créait
+ * un programme et une affectation pour n'importe quel élève : la fonction est
+ * `SECURITY DEFINER` (elle écrit hors RLS) et sa garde acceptait
+ * `profiles.role in ('service','admin','coach')` — la bonne règle avant
+ * P13-B, quand `coach` désignait un staff forcément global.
+ *
+ * Elle ne change QUE la garde, par substitution sur la définition en place
+ * (même technique que 20261011110000) : le corps de la copie — semaines,
+ * séances, blocs, exercices, prescriptions, RPE, verrou advisory, idempotence
+ * — est repris octet pour octet, et la substitution échoue si le motif
+ * attendu n'apparaît pas exactement une fois.
+ */
+export const MIGRATION_P13B_PROVISION = "20261011130000_p13b_garde_provision_program_copy.sql";
+
 export const MIGRATIONS_COURSES: readonly string[] = [
   MIGRATION_C2,
   MIGRATION_C3,
@@ -192,10 +325,34 @@ export const MIGRATIONS_APRES_C0_1: readonly string[] = [
   MIGRATION_DEBUT_PROGRAMME,
   MIGRATION_SUPPRESSION_NOLIO,
   MIGRATION_PROGRESSION_AUTOMATIQUE,
+  // Inscrites le 11/10/2026 — voir le bloc de justification ci-dessus.
+  MIGRATION_PROGRAM_REVIEW_FLAGS,
+  MIGRATION_RAPPELS_AUTOMATIQUES,
+  MIGRATION_REVIEW_FLAGS_GRANTS,
+  MIGRATION_NOTIFICATIONS_GRANTS,
+  MIGRATION_PROFIL_PHYSIOLOGIQUE,
+  MIGRATION_CARDIO_ET_CALENDRIER,
+  MIGRATION_DOCUMENTS_SECURISES,
+  MIGRATION_P13A_ISOLATION,
+  MIGRATION_P13A_PERF,
+  MIGRATION_P13A_GARDE_ADMIN,
+  MIGRATION_P13A_LECTURE_ELEVE,
+  MIGRATION_P13B_MODELE,
+  MIGRATION_P13B_POLICIES,
+  MIGRATION_P13B_FONCTIONS,
+  MIGRATION_P13B_NUTRITION,
+  MIGRATION_P13B_PROVISION,
 ];
 
-/** Le compte attendu — nécessaire, jamais suffisant. */
-export const NOMBRE_DE_MIGRATIONS = 91;
+/**
+ * Le compte attendu — nécessaire, jamais suffisant.
+ *
+ * 107 = 84 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 22
+ * migrations nommées dans `MIGRATIONS_APRES_C0_1`. Le point 6 recalcule
+ * l'historique à partir de ce nombre : il ne peut pas être remonté seul sans
+ * qu'une migration soit nommée en face.
+ */
+export const NOMBRE_DE_MIGRATIONS = 107;
 
 /**
  * L'empreinte des 79 migrations ANTÉRIEURES à C0.1, dans l'ordre.

@@ -48,6 +48,8 @@ function sessionTypeForColumn(derived: DerivedSessionType): SessionType {
 import type { Database } from "@/types/supabase";
 import { keepCopiesWithActiveAssignment, mergeAssignedStudentIds } from "@/lib/assignment-selection";
 import { isContradictoryProgramMode, resolveProgramProvisioningMode } from "@/lib/program-provisioning";
+import { estRefusAutorisation, RefusAutorisationAffectation } from "@/lib/assignment-refus";
+import { classerErreur } from "@/lib/offline/source-donnees";
 
 /**
  * Couche d'accès aux programmes Supabase (tables `programs`, `program_weeks`,
@@ -2106,6 +2108,30 @@ async function cloneIndividualProgramCopy(
       return (data as string | null) ?? null;
     }
     if (!isMissingProvisionRpc(error as { code?: string; message: string })) {
+      /*
+       * ⚠️ UN REFUS DE DROITS N'EST PAS UN ÉCHEC TECHNIQUE.
+       *
+       * Depuis P13-B (migration 20261011130000), la RPC refuse en `42501` un
+       * appelant hors portée : collaborateur sans `entrainement / ecriture`,
+       * sans l'affectation de l'élève, ou visant l'élève d'un autre coach.
+       * Rendre `null` comme pour une panne faisait dire à la modale
+       * « réessaie, ou vérifie ta connexion » — un conseil faux, puisque la
+       * base refusera identiquement au second clic.
+       *
+       * On LÈVE donc le refus, et uniquement lui : `classerErreur` est le
+       * lecteur d'erreurs déjà en place (42501 / HTTP 403 → "autorisation"),
+       * et tout le reste — 5xx, contrainte, payload — garde EXACTEMENT le
+       * chemin d'avant : `devWarn` puis `null`.
+       *
+       * ⚠️ AUCUN DÉTAIL NE SORT. Le message de la base n'est pas repris dans
+       * l'exception, et l'identifiant de l'élève visé n'y figure pas : un
+       * collaborateur refusé ne doit rien apprendre de l'élève qu'il n'a pas
+       * le droit de toucher. La trace console, elle, reste sans message SQL.
+       */
+      if (classerErreur(error) === "autorisation") {
+        console.error("[Supabase] cloneIndividualProgramCopy (rpc) : autorisation refusée");
+        throw new RefusAutorisationAffectation("affectation de programme");
+      }
       devWarn("cloneIndividualProgramCopy (rpc)", error as { message: string });
       return null;
     }
@@ -2178,6 +2204,30 @@ export async function provisionPurchasedProgram(
 
   let copieId: string | null = null;
 
+  /*
+   * ⚠️ LE CONTRAT BOOLÉEN DE CE PROVISIONNEMENT NE CHANGE PAS.
+   *
+   * Ce chemin est celui de l'ACHAT (webhook Stripe, cron de régularisation),
+   * exécuté en `service_role` : la garde de `provision_program_copy` le laisse
+   * passer sans condition, donc le refus levé par `cloneIndividualProgramCopy`
+   * ne peut pas s'y produire. Il est néanmoins arrêté ICI, et ramené au `null`
+   * d'avant : un webhook doit rendre un booléen à Stripe, jamais propager une
+   * exception destinée à une modale. Toute autre erreur garde son chemin.
+   */
+  const copier = async (travail: () => Promise<string | null>): Promise<string | null> => {
+    try {
+      return await travail();
+    } catch (erreur) {
+      if (estRefusAutorisation(erreur)) {
+        devWarn("provisionPurchasedProgram (copie)", {
+          message: "autorisation refusée sur la copie individuelle",
+        });
+        return null;
+      }
+      throw erreur;
+    }
+  };
+
   if (checkoutSessionId) {
     const { data: existante, error: lookupError } = await supabase
       .from("programs")
@@ -2187,17 +2237,21 @@ export async function provisionPurchasedProgram(
     devWarn("provisionPurchasedProgram (copie par session)", lookupError);
     copieId = existante?.id ?? null;
   } else {
-    copieId = await individualizeProgramForStudent(supabase, programId, studentId, programAssignmentTestHooks.duplicate);
+    copieId = await copier(() =>
+      individualizeProgramForStudent(supabase, programId, studentId, programAssignmentTestHooks.duplicate),
+    );
   }
 
   if (!copieId && checkoutSessionId) {
-    copieId = await programAssignmentTestHooks.duplicate(supabase, programId, {
-      name: source.name,
-      status: source.status,
-      ownerStudentId: studentId,
-      sourceTemplateId: programId,
-      sourceCheckoutSessionId: checkoutSessionId,
-    });
+    copieId = await copier(() =>
+      programAssignmentTestHooks.duplicate(supabase, programId, {
+        name: source.name,
+        status: source.status,
+        ownerStudentId: studentId,
+        sourceTemplateId: programId,
+        sourceCheckoutSessionId: checkoutSessionId,
+      }),
+    );
   }
 
   if (!copieId) {

@@ -37,7 +37,23 @@ export async function POST(request: Request) {
   }
   // Correctif H-3 : un coach n'agit que sur les élèves qui lui sont
   // affectés. L'administrateur passe sans condition.
-  const accesEleve = await requireStaffForStudent(studentId);
+  //
+  // P13-B : la catégorie exigée suit LE CONTENU attribué, et non la route.
+  // Annoncer un programme relève de `entrainement`, un plan alimentaire de
+  // `nutrition` ; un collaborateur nutrition ne notifie donc pas une
+  // attribution d'entraînement. Un document est rangé sous `suivi_eleve`,
+  // qui est la catégorie des documents administratifs côté RLS — la route ne
+  // connaît que l'identifiant du document, pas sa catégorie, et le choix le
+  // plus strict est le seul qui ne puisse pas élargir un droit.
+  const CATEGORIE_PAR_CONTENU = {
+    programme: "entrainement",
+    nutrition: "nutrition",
+    document: "suivi_eleve",
+  } as const;
+  const accesEleve = await requireStaffForStudent(studentId, {
+    categorie: CATEGORIE_PAR_CONTENU[contentType],
+    niveau: "ecriture",
+  });
   if (!accesEleve.ok) return accesEleve.response;
 
 

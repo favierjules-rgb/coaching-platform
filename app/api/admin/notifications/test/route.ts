@@ -88,7 +88,13 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Élève non précisé." }, { status: 400 });
   }
 
-  const acces = await requireStaffForStudent(studentId);
+  // P13-B : lire l'état des abonnements push d'un élève relève de
+  // `agenda_communication` en lecture. Un collaborateur sans cette catégorie
+  // — ou non affecté à cet élève — reçoit 403.
+  const acces = await requireStaffForStudent(studentId, {
+    categorie: "agenda_communication",
+    niveau: "lecture",
+  });
   if (!acces.ok) return acces.response;
 
   const admin = createSupabaseAdminClient();
@@ -113,7 +119,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Élève non précisé." }, { status: 400 });
   }
 
-  const acces = await requireStaffForStudent(studentId);
+  // P13-B : ENVOYER une notification est une écriture de communication.
+  const acces = await requireStaffForStudent(studentId, {
+    categorie: "agenda_communication",
+    niveau: "ecriture",
+  });
   if (!acces.ok) return acces.response;
 
   const admin = createSupabaseAdminClient();

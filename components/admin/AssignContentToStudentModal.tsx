@@ -20,6 +20,9 @@ import { cleAffectation, debutsDesAffectations } from "@/lib/supabase/programs";
 import { CheckboxField } from "@/components/admin/AdminFormFields";
 import { Modal, PrimaryButton } from "@/components/admin/Modal";
 import type { AdminDocument, AdminNutritionPlan, AdminProgramSummary, AdminStudent, AssignableContentType } from "@/types";
+import { messageEchecAffectation, type NatureEchecAffectation } from "@/lib/assignment-refus";
+import { MESSAGE_LECTURE_SEULE_PROGRAMMES } from "@/lib/droit-affectation";
+import { useDroitEcritureProgrammes } from "@/hooks/useStaffContext";
 
 /** Date du jour `YYYY-MM-DD` en heure LOCALE — voir AssignStudentsModal. */
 function dateDuJourLocale(): string {
@@ -102,7 +105,23 @@ export function AssignContentToStudentModal({
   // Atomicité UI : « Terminer » attend TOUTES les écritures (verrou
   // anti-double-clic), un échec laisse la modale OUVERTE avec un message.
   const [saving, setSaving] = useState(false);
-  const [saveFailed, setSaveFailed] = useState(false);
+  /** POURQUOI le dernier « Terminer » a échoué — voir AssignStudentsModal. */
+  const [echecSauvegarde, setEchecSauvegarde] = useState<NatureEchecAffectation | null>(null);
+  /*
+   * ⚠️ ICI LE DÉCLENCHEUR RESTE ACTIF, ET C'EST DÉLIBÉRÉ.
+   *
+   * « Attribuer contenu » ouvre TROIS sections : programmes, plans
+   * alimentaires, documents. Griser le bouton sur un droit d'entraînement
+   * priverait un collaborateur nutrition de ses deux autres sections, qu'il a
+   * le droit d'écrire. C'est donc la SECTION PROGRAMMES qui est neutralisée,
+   * selon le motif déjà utilisé dans ce fichier pour `canAssignRealPrograms` :
+   * un encart d'explication à la place des cases.
+   *
+   * Indice d'interface uniquement — l'autorité reste la RLS et la garde de
+   * `provision_program_copy`. Voir lib/droit-affectation.ts.
+   */
+  const droitEcriture = useDroitEcritureProgrammes();
+  const ecritureProgrammeRefusee = droitEcriture === "lecture_seule";
   /**
    * Date de début, PROGRAMMES UNIQUEMENT — proposée à aujourd'hui, modifiable.
    * Voir `AssignStudentsModal` : même champ, même raison, même défaut évité.
@@ -194,7 +213,7 @@ export function AssignContentToStudentModal({
     setSelection(état);
     setConfirmed(false);
     setSaving(false);
-    setSaveFailed(false);
+    setEchecSauvegarde(null);
     setOpen(true);
   }
 
@@ -204,7 +223,7 @@ export function AssignContentToStudentModal({
     setOpen(false);
     setConfirmed(false);
     setSaving(false);
-    setSaveFailed(false);
+    setEchecSauvegarde(null);
   }
 
   function basculer(type: AssignableContentType, contentId: string, checked: boolean) {
@@ -219,7 +238,7 @@ export function AssignContentToStudentModal({
   function terminer() {
     if (saving) return;
     setSaving(true);
-    setSaveFailed(false);
+    setEchecSauvegarde(null);
     // SEUL point d'écriture de la modale : un diff par type de contenu,
     // toutes les écritures attendues (terminerAssignation) — un `false` ou
     // un rejet quelconque rend l'ensemble en échec, jamais de faux succès.
@@ -231,6 +250,17 @@ export function AssignContentToStudentModal({
     // pendant laquelle l'élève n'a aucun plan.
     void Promise.all(
       (["programme", "nutrition", "document"] as const).map((type) => {
+        /*
+         * ⚠️ AUCUNE ÉCRITURE DE PROGRAMME NE PART EN LECTURE SEULE. Les cases
+         * ne sont déjà pas rendues, donc le diff serait vide — mais
+         * `aReappliquer` (correction de date) ne vient PAS de la sélection et
+         * pourrait, lui, encore émettre. On sort donc du type entier, en rendant
+         * la forme exacte d'un lot vide : la modale confirme ses deux autres
+         * sections au lieu d'afficher un échec inventé.
+         */
+        if (type === "programme" && ecritureProgrammeRefusee) {
+          return Promise.resolve({ ok: true, echec: null, added: [], removed: [], reappliques: [] });
+        }
         const terminerType = type === "nutrition" ? terminerAssignationUnique : terminerAssignation;
         /*
          * ⚠️ LES PROGRAMMES INCHANGÉS DONT LA DATE A CHANGÉ SONT RÉÉMIS — et
@@ -272,7 +302,11 @@ export function AssignContentToStudentModal({
       if (résultats.every(({ ok }) => ok)) {
         setConfirmed(true);
       } else {
-        setSaveFailed(true);
+        // Trois types traversent cette modale (programme, nutrition, document) :
+        // le refus de droits l'emporte sur une panne, parce qu'il nomme une
+        // cause définitive — voir `echecDominant`.
+        const natures = résultats.filter(({ ok }) => !ok).map(({ echec }) => echec ?? "technique");
+        setEchecSauvegarde(natures.includes("autorisation") ? "autorisation" : "technique");
       }
     });
   }
@@ -299,7 +333,15 @@ export function AssignContentToStudentModal({
             <div className="flex flex-col gap-6">
               <div>
                 <h4 className="mb-3 text-xs uppercase tracking-wide text-muted-foreground">Programmes</h4>
-                {isSupabaseStudent && !canAssignRealPrograms ? (
+                {ecritureProgrammeRefusee ? (
+                  <div
+                    role="note"
+                    className="flex items-start gap-3 rounded-panel border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning"
+                  >
+                    <Info size={18} className="mt-0.5 flex-shrink-0" />
+                    {MESSAGE_LECTURE_SEULE_PROGRAMMES}
+                  </div>
+                ) : isSupabaseStudent && !canAssignRealPrograms ? (
                   <div className="flex items-start gap-3 rounded-panel border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning">
                     <Info size={18} className="mt-0.5 flex-shrink-0" />
                     Crée d&apos;abord un programme réel (Admin &gt; Programmes) pour pouvoir l&apos;attribuer à cet élève.
@@ -424,9 +466,12 @@ export function AssignContentToStudentModal({
                 )}
               </div>
 
-              {saveFailed && (
-                <p className="rounded-panel border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-                  L&apos;enregistrement a échoué. Ta sélection est conservée — réessaie, ou vérifie ta connexion.
+              {echecSauvegarde && (
+                <p
+                  role="alert"
+                  className="rounded-panel border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+                >
+                  {messageEchecAffectation(echecSauvegarde)}
                 </p>
               )}
               <PrimaryButton disabled={saving} onClick={terminer}>

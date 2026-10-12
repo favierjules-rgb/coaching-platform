@@ -47,6 +47,10 @@ export async function POST(request: Request) {
   } else {
     // Correctif H-3 : un coach n'agit que sur les élèves qui lui sont
     // affectés. L'administrateur passe sans condition.
+    // P13-B : aucune catégorie n'est déclarée, volontairement — créer
+    // l'accès d'un élève est de l'administration de compte, qu'aucune des
+    // quatre catégories n'accorde. Un collaborateur reçoit donc 403, même
+    // sur un élève qui lui est affecté.
     const accesEleve = await requireStaffForStudent(studentId);
     if (!accesEleve.ok) return accesEleve.response;
   }

@@ -1288,6 +1288,20 @@ test("PERF 18. la checklist sépare accès admin, accès coach et accès élève
     "J3c ne croise pas is_admin() et current_student_id()");
   // J3d : contrôle du contrôle — les marqueurs doivent exister en base.
   assert.ok(checklist.includes("J3d."), "le contrôle J3d (marqueurs existants) est absent");
+  // J3e : la séparation lecture/écriture, ajoutée par P13-B/4.
+  assert.ok(checklist.includes("J3e."), "le contrôle J3e (lecture ≠ écriture) est absent");
+  const j3e = checklist.slice(checklist.indexOf("J3e.") - 1200, checklist.indexOf("J3e."));
+  assert.ok(/_lecture\(\)/.test(j3e) && /_ecriture\(\)/.test(j3e),
+    "J3e ne compare pas un ensemble de lecture à un ensemble d'écriture");
+
+  // ⚠️ CHAQUE ÉTIQUETTE EST UNIQUE. Deux contrôles nommés pareil rendent le
+  // bilan ambigu, et ce test-ci localise un contrôle PAR SON NOM : un doublon
+  // le ferait inspecter le mauvais bloc. C'est exactement ce qui est arrivé
+  // quand la séparation lecture/écriture a été ajoutée sous le nom « J3c ».
+  for (const etiquette of ["J3.", "J3b.", "J3c.", "J3d.", "J3e."]) {
+    const occurrences = checklist.split(`'${etiquette}`).length - 1 + (checklist.split(`"${etiquette}`).length - 1);
+    assert.equal(occurrences, 1, `l'étiquette ${etiquette} apparaît ${occurrences} fois — chaque contrôle doit être unique`);
+  }
 });
 
 test("PERF 19. le script de mesure exerce la RPC, pas un SELECT, et ne laisse rien", () => {
@@ -1901,6 +1915,1086 @@ test("ÉLÈVE 10. CONTRÔLE DU CONTRÔLE — ces tests échouent si la forme ré
   // cette migration supprime, et la seule qui réapplique la RLS traversée.
   assert.ok(!/\bexists\s*\(/i.test(ELEVE),
     "un EXISTS corrélé subsiste dans la migration : la chaîne de RLS n'est pas rompue");
+});
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// P13-B — CLOISONNEMENT PAR RÔLE ET PAR CATÉGORIE
+// ════════════════════════════════════════════════════════════════════════════
+// P13-A avait cloisonné les 8 tables du cœur nutrition. Il restait 72 policies
+// sur 48 tables opposant `is_coach_or_admin()`, c'est-à-dire aucun
+// cloisonnement : n'importe quel compte du staff lisait, modifiait et
+// supprimait les élèves de tous les coachs. Ces tests verrouillent la fermeture
+// de ce trou — et surtout ce qu'elle ne doit PAS emporter au passage.
+
+const CHEMIN_P13B_MODELE =
+  "supabase/migrations/20261011090000_p13b_modele_droits_collaborateurs.sql";
+const CHEMIN_P13B_POLICIES =
+  "supabase/migrations/20261011100000_p13b_policies_cloisonnees.sql";
+const CHEMIN_P13B_FONCTIONS =
+  "supabase/migrations/20261011110000_p13b_durcissement_fonctions_definer.sql";
+const CHEMIN_P13B_NUTRITION =
+  "supabase/migrations/20261011120000_p13b_integration_nutrition.sql";
+const CHEMIN_P13B_PROVISION =
+  "supabase/migrations/20261011130000_p13b_garde_provision_program_copy.sql";
+
+const P13B_MODELE = sansCommentairesSql(lire(CHEMIN_P13B_MODELE));
+const P13B_POLICIES = sansCommentairesSql(lire(CHEMIN_P13B_POLICIES));
+const P13B_FONCTIONS = sansCommentairesSql(lire(CHEMIN_P13B_FONCTIONS));
+const P13B_NUTRITION = sansCommentairesSql(lire(CHEMIN_P13B_NUTRITION));
+const P13B_PROVISION = sansCommentairesSql(lire(CHEMIN_P13B_PROVISION));
+/** Le texte BRUT de la 5e migration : ses gardes citent l'ancienne règle, commentaires compris. */
+const P13B_PROVISION_BRUT = lire(CHEMIN_P13B_PROVISION);
+
+const CATEGORIES = ["entrainement", "suivi_eleve", "agenda_communication", "nutrition"] as const;
+
+/** Les 48 tables, avec la catégorie qui les gouverne. */
+const CARTE_P13B: Record<string, string> = {
+  activity_events: "suivi_eleve", body_measurements: "suivi_eleve",
+  custom_measurements: "suivi_eleve", legal_consents: "suivi_eleve",
+  progress_photos: "suivi_eleve", student_profiles: "suivi_eleve",
+  weight_entries: "suivi_eleve", coach_notes: "suivi_eleve",
+  students: "suivi_eleve", documents: "documents",
+  document_assignments: "documents", document_levels: "global",
+  assignments: "entrainement", exercise_feedback: "entrainement",
+  exercise_set_feedback: "entrainement", training_change_history: "entrainement",
+  workout_feedback: "entrainement", programs: "entrainement",
+  program_weeks: "entrainement", program_exercise_progression: "entrainement",
+  program_review_flags: "entrainement", workout_sessions: "entrainement",
+  training_blocks: "entrainement", workout_exercises: "entrainement",
+  training_prescriptions: "entrainement", exercise_library: "entrainement",
+  session_templates: "entrainement", appointments: "agenda_communication",
+  notification_campaign_targets: "agenda_communication",
+  coach_availabilities: "agenda_communication",
+  coach_unavailabilities: "agenda_communication",
+  appointment_email_logs: "global", booking_settings: "global",
+  newsletter_subscribers: "global", email_logs: "global",
+  notification_campaigns: "global", notification_occurrences: "global",
+  notification_deliveries: "global", push_subscriptions: "global",
+  billing_customers: "admin_seul", billing_events: "admin_seul",
+  payments: "admin_seul", payment_entries: "admin_seul",
+  stripe_payments: "admin_seul", subscriptions: "admin_seul",
+  subscription_templates: "admin_seul", coaches: "admin_seul",
+  profiles: "admin_seul",
+};
+
+/** Les policies créées par la migration, découpées par commande. */
+interface PolicieP13B { nom: string; table: string; cmd: string; corps: string }
+const POLICIES_P13B: PolicieP13B[] = (() => {
+  const out: PolicieP13B[] = [];
+  const re = /create policy\s+(\S+)\s*\n?\s*on public\.(\w+)\s+for\s+(\w+)\s+to\s+\w+([\s\S]*?);(?=\s*(?:\n|$))/gi;
+  for (const m of P13B_POLICIES.matchAll(re)) {
+    out.push({ nom: m[1], table: m[2], cmd: m[3].toLowerCase(), corps: m[4] });
+  }
+  return out;
+})();
+
+test("P13B 1. les cinq migrations existent et sont ordonnées", () => {
+  for (const [n, s] of [
+    ["modèle", P13B_MODELE],
+    ["policies", P13B_POLICIES],
+    ["fonctions", P13B_FONCTIONS],
+    ["nutrition", P13B_NUTRITION],
+    ["provision", P13B_PROVISION],
+  ] as const) {
+    assert.ok(s.trim().length > 0, `la migration ${n} est vide`);
+  }
+  // L'ordre des horodatages EST la dépendance : les policies appellent les
+  // fonctions d'ensemble du modèle, les fonctions durcies aussi, et
+  // l'intégration nutrition appelle `student_ids_nutrition_<niveau>()` et
+  // `est_staff_global()`, posées par le modèle.
+  assert.ok(CHEMIN_P13B_MODELE < CHEMIN_P13B_POLICIES, "le modèle doit précéder les policies");
+  assert.ok(CHEMIN_P13B_POLICIES < CHEMIN_P13B_FONCTIONS, "les policies doivent précéder le durcissement");
+  assert.ok(CHEMIN_P13B_FONCTIONS < CHEMIN_P13B_NUTRITION, "le durcissement doit précéder l'intégration nutrition");
+  // La 5e appelle `student_ids_entrainement_ecriture()`, posée par le modèle.
+  assert.ok(CHEMIN_P13B_NUTRITION < CHEMIN_P13B_PROVISION, "l'intégration nutrition doit précéder la garde de provision");
+});
+
+test("P13B 2. les 48 tables sont couvertes, sans oubli ni doublon", () => {
+  const touchees = new Set(POLICIES_P13B.map((p) => p.table));
+  const attendues = new Set(Object.keys(CARTE_P13B));
+  const oubliees = [...attendues].filter((t) => !touchees.has(t));
+  const inattendues = [...touchees].filter((t) => !attendues.has(t));
+  assert.deepEqual(oubliees, [], `tables cartographiées sans policy : ${oubliees.join(", ")}`);
+  assert.deepEqual(inattendues, [], `tables touchées hors cartographie : ${inattendues.join(", ")}`);
+  assert.equal(attendues.size, 48, `la cartographie compte ${attendues.size} tables au lieu de 48`);
+});
+
+test("P13B 3. CORRESPONDANCE COMMANDE ↔ NIVEAU : une lecture seule n'écrit jamais", () => {
+  // C'est l'invariant central du modèle. Une policy FOR ALL n'a qu'un USING,
+  // qui gouverne SELECT, UPDATE et DELETE : y mettre l'ensemble de lecture
+  // laissait un collaborateur en lecture seule SUPPRIMER des lignes.
+  const fautes: string[] = [];
+  for (const p of POLICIES_P13B) {
+    const plat = p.corps.replace(/\s+/g, " ").toLowerCase();
+    if (["insert", "update", "delete"].includes(p.cmd) && /_lecture\(\)/.test(plat)) {
+      fautes.push(`${p.table}.${p.nom} [${p.cmd}] oppose un ensemble de LECTURE`);
+    }
+    if (p.cmd === "insert" && /\busing\s*\(/.test(plat)) {
+      fautes.push(`${p.table}.${p.nom} [insert] porte un USING`);
+    }
+    if (p.cmd === "delete" && /with check\s*\(/.test(plat)) {
+      fautes.push(`${p.table}.${p.nom} [delete] porte un WITH CHECK`);
+    }
+    if (p.cmd === "update" && !/\busing\s*\(/.test(plat)) {
+      fautes.push(`${p.table}.${p.nom} [update] sans USING`);
+    }
+    if (p.cmd === "update" && !/with check\s*\(/.test(plat)) {
+      fautes.push(`${p.table}.${p.nom} [update] sans WITH CHECK`);
+    }
+  }
+  assert.deepEqual(fautes, [], fautes.join(" | "));
+});
+
+test("P13B 4. aucune policy ne retombe sur is_coach_or_admin()", () => {
+  const executables = P13B_POLICIES.split("\n").filter(
+    (l) => /is_coach_or_admin/.test(l) && !/like '%is_coach_or_admin%'/.test(l));
+  assert.deepEqual(executables, [],
+    `is_coach_or_admin() subsiste : ${executables.join(" | ")}`);
+  // Et la migration doit refuser de s'appliquer s'il en reste une en base.
+  assert.ok(/raise exception[\s\S]{0,120}policies encore trop larges/i.test(P13B_POLICIES),
+    "la migration ne vérifie pas, à l'application, qu'aucune policy trop large ne subsiste");
+});
+
+test("P13B 5. `coach_id is null` n'autorise JAMAIS un collaborateur", () => {
+  // Relevé en base : coach_id est NUL sur 100 % des lignes de 7 tables. Un
+  // prédicat `coach_id in (…)` aurait valu faux et coupé l'administrateur de
+  // 142 exercices et 25 programmes ; un `coach_id is null or …` aurait fait de
+  // ces lignes une ressource partagée avec tous les collaborateurs.
+  const tablesCoach = ["exercise_library", "session_templates", "coach_availabilities", "coach_unavailabilities"];
+  for (const t of tablesCoach) {
+    const pols = POLICIES_P13B.filter((p) => p.table === t);
+    assert.ok(pols.length > 0, `${t} n'a aucune policy`);
+    for (const p of pols) {
+      const plat = p.corps.replace(/\s+/g, " ").toLowerCase();
+      assert.ok(/est_staff_global\(\)/.test(plat),
+        `${t}.${p.nom} ne réserve pas les lignes sans propriétaire au staff global`);
+      assert.ok(/coach_id is not null/.test(plat),
+        `${t}.${p.nom} n'exige pas un propriétaire EXPLICITE pour la branche collaborateur`);
+      assert.ok(!/coach_id is null\s+or/.test(plat),
+        `${t}.${p.nom} traite coach_id nul comme une autorisation`);
+    }
+  }
+});
+
+test("P13B 6. les tables ADMIN SEUL ne s'ouvrent par aucune catégorie", () => {
+  const adminSeul = Object.entries(CARTE_P13B).filter(([, c]) => c === "admin_seul").map(([t]) => t);
+  assert.equal(adminSeul.length, 9, `${adminSeul.length} tables admin_seul au lieu de 9`);
+  for (const t of adminSeul) {
+    for (const p of POLICIES_P13B.filter((x) => x.table === t)) {
+      const plat = p.corps.replace(/\s+/g, " ").toLowerCase();
+      for (const c of CATEGORIES) {
+        assert.ok(!plat.includes(`'${c}'`),
+          `${t}.${p.nom} cite la catégorie ${c} : la facturation deviendrait accordable`);
+      }
+      assert.ok(!/student_ids_|coach_ids_portee|categories_/.test(plat),
+        `${t}.${p.nom} passe par un ensemble de portée au lieu de is_admin()`);
+      assert.ok(/is_admin\(\)/.test(plat), `${t}.${p.nom} n'oppose pas is_admin()`);
+    }
+  }
+});
+
+test("P13B 7. les tables GLOBALES restent hors de portée d'un collaborateur", () => {
+  const globales = Object.entries(CARTE_P13B).filter(([, c]) => c === "global").map(([t]) => t);
+  assert.equal(globales.length, 9, `${globales.length} tables globales au lieu de 9`);
+  for (const t of globales) {
+    for (const p of POLICIES_P13B.filter((x) => x.table === t)) {
+      const plat = p.corps.replace(/\s+/g, " ").toLowerCase();
+      assert.ok(/est_staff_global\(\)/.test(plat),
+        `${t}.${p.nom} n'est pas réservée à l'administration et aux assistants`);
+      assert.ok(!/categories_(lecture|ecriture)\(\)/.test(plat),
+        `${t}.${p.nom} s'ouvre par une catégorie alors qu'aucun élève ne s'y rattache`);
+    }
+  }
+});
+
+test("P13B 8. les DOCUMENTS sont routés par leur catégorie ET par l'affectation", () => {
+  const i = P13B_MODELE.indexOf("document_ids_");
+  assert.ok(i !== -1, "les ensembles de documents sont absents du modèle");
+  const bloc = P13B_MODELE.slice(i, i + 1400);
+  assert.ok(/join public\.document_assignments/.test(bloc),
+    "un document est atteint sans passer par une affectation d'élève");
+  for (const [cat, ensemble] of [
+    ["nutrition", "student_ids_nutrition"],
+    ["entrainement", "student_ids_entrainement"],
+    ["administratif", "student_ids_suivi_eleve"],
+  ] as const) {
+    assert.ok(new RegExp(`'${cat}'[\\s\\S]{0,120}${ensemble}`).test(bloc),
+      `la catégorie « ${cat} » n'est pas routée vers ${ensemble}`);
+  }
+  // `document_assignments` ne doit pas offrir de voie parallèle : elle
+  // interroge le MÊME ensemble que `documents`.
+  for (const p of POLICIES_P13B.filter((x) => x.table === "document_assignments")) {
+    const plat = p.corps.replace(/\s+/g, " ").toLowerCase();
+    if (/student_id = current_student_id/.test(plat) && p.cmd === "select") continue;
+    assert.ok(/document_ids_(lecture|ecriture)\(\)/.test(plat),
+      `document_assignments.${p.nom} contourne le routage par catégorie`);
+  }
+});
+
+test("P13B 9. `students` : identité lisible dans la portée, écriture derrière suivi_eleve", () => {
+  const sel = POLICIES_P13B.find((p) => p.table === "students" && p.cmd === "select");
+  assert.ok(sel, "students n'a pas de policy SELECT");
+  assert.ok(/student_ids_portee\(\)/.test(sel.corps),
+    "la lecture de l'identité n'est pas ouverte à la simple portée");
+  for (const p of POLICIES_P13B.filter((x) => x.table === "students" && x.cmd !== "select")) {
+    assert.ok(/student_ids_suivi_eleve_ecriture\(\)/.test(p.corps),
+      `students.${p.nom} [${p.cmd}] n'exige pas suivi_eleve en écriture`);
+  }
+});
+
+test("P13B 10. les 10 fonctions SECURITY DEFINER sont durcies, chacune à sa règle", () => {
+  const attendues: Record<string, RegExp> = {
+    protect_students_ownership_columns: /staff_role\(\), ''\) in \('admin', 'assistant'\)/,
+    protect_student_profiles_access_columns: /staff_role\(\), ''\) not in \('admin', 'assistant'\)/,
+    protect_nutrition_days_coach_columns: /'nutrition' in \(select public\.categories_ecriture\(\)\)/,
+    create_appointment_atomic: /student_ids_agenda_communication_ecriture\(\)/,
+    cancel_appointment_atomic: /student_ids_agenda_communication_ecriture\(\)/,
+    reschedule_appointment_atomic: /student_ids_agenda_communication_ecriture\(\)/,
+    create_coach_event_atomic: /'agenda_communication' not in \(select public\.categories_ecriture\(\)\)/,
+    update_coach_event_atomic: /v_coach_id = public\.current_staff_id\(\)/,
+  };
+  for (const [nom, motif] of Object.entries(attendues)) {
+    const i = P13B_FONCTIONS.indexOf(`function public.${nom}(`);
+    assert.ok(i !== -1, `${nom} n'est pas réécrite`);
+    const corps = P13B_FONCTIONS.slice(i, P13B_FONCTIONS.indexOf("$f$;", i));
+    assert.ok(motif.test(corps), `${nom} ne porte pas la règle attendue`);
+    assert.ok(!/is_coach_or_admin/.test(corps), `${nom} oppose encore is_coach_or_admin()`);
+    assert.ok(/set search_path = public, pg_temp/.test(corps),
+      `${nom} ne nomme pas pg_temp en dernier`);
+  }
+  // Les deux enforce_* sont trop longues pour être recopiées : la substitution
+  // est CIBLÉE sur une ligne unique, et gardée.
+  for (const nom of ["enforce_exercise_feedback_write", "enforce_workout_feedback_write"]) {
+    assert.ok(P13B_FONCTIONS.includes(`'${nom}'`), `${nom} n'est pas traitée`);
+  }
+  assert.ok(/v_n <> 1[\s\S]{0,200}raise exception/.test(P13B_FONCTIONS),
+    "la substitution ciblée n'exige pas exactement une occurrence du motif");
+  assert.ok(/raise exception[\s\S]{0,160}SECURITY DEFINER opposant encore/i.test(P13B_FONCTIONS),
+    "la migration ne vérifie pas qu'aucune fonction DEFINER ne reste ouverte");
+
+  // Une indisponibilité créée sans `coach_id` naîtrait SANS PROPRIÉTAIRE et
+  // retomberait dans le lot historique que personne ne peut gérer. C'est le
+  // défaut d'origine de cette fonction : il doit rester fermé.
+  const iCree = P13B_FONCTIONS.indexOf("function public.create_coach_event_atomic(");
+  const corpsCree = P13B_FONCTIONS.slice(iCree, P13B_FONCTIONS.indexOf("$f$;", iCree));
+  assert.ok(/insert into public\.coach_unavailabilities\s*\n?\s*\(coach_id,/.test(corpsCree),
+    "create_coach_event_atomic n'écrit pas coach_id : la ligne naîtrait sans propriétaire");
+  assert.ok(/values\s*\n?\s*\(v_staff,/.test(corpsCree),
+    "create_coach_event_atomic ne pose pas current_staff_id() comme propriétaire");
+});
+
+test("P13B 11. un collaborateur ne peut pas s'approprier un élève", () => {
+  const i = P13B_FONCTIONS.indexOf("function public.protect_students_ownership_columns(");
+  const corps = P13B_FONCTIONS.slice(i, P13B_FONCTIONS.indexOf("$f$;", i));
+  // Les quatre colonnes de rattachement doivent être RESTAURÉES pour qui n'est
+  // ni administrateur ni assistant — un collaborateur comme un élève.
+  for (const col of ["coach_id", "access_type", "status", "user_id"]) {
+    assert.ok(new RegExp(`new\\.${col} := old\\.${col};`).test(corps),
+      `protect_students_ownership_columns ne restaure pas ${col}`);
+  }
+  assert.ok(!/'collaborateur'/.test(corps),
+    "la fonction prévoit une branche collaborateur : le rattachement doit lui être fermé, sans exception");
+});
+
+test("P13B 12. `profiles.role` n'est pas touchée, `coaches.role` accueille le rôle", () => {
+  // Sept gardes applicatives testent `role === 'admin' || role === 'coach'`.
+  // Ajouter une quatrième valeur à profiles.role ferait rejeter le
+  // collaborateur par chacune : il se connecterait et serait renvoyé sur
+  // /acces-refuse.
+  assert.ok(!/alter table public\.profiles[\s\S]{0,200}role/.test(P13B_MODELE),
+    "la migration touche profiles.role");
+  assert.ok(/coaches_role_check[\s\S]{0,160}'collaborateur'/.test(P13B_MODELE),
+    "coaches.role n'accueille pas le rôle collaborateur");
+  assert.ok(/'admin','assistant','collaborateur'/.test(P13B_MODELE.replace(/\s/g, "")),
+    "la contrainte coaches.role ne conserve pas admin et assistant");
+});
+
+test("P13B 13. le niveau n'existe qu'en deux valeurs, l'absence valant refus", () => {
+  assert.ok(/niveau text not null check \(niveau = any \(array\['lecture','ecriture'\]\)\)/
+    .test(P13B_MODELE.replace(/\s+/g, " ")),
+    "le niveau admet autre chose que lecture et ecriture");
+  assert.ok(!/'aucun'/.test(P13B_MODELE),
+    "un niveau « aucun » existe : deux façons de dire la même chose, donc un état divergent possible");
+  assert.ok(/collaborateur_permissions_unique unique \(collaborateur_id, categorie\)/
+    .test(P13B_MODELE.replace(/\s+/g, " ")),
+    "deux lignes de niveaux différents peuvent coexister pour une même catégorie");
+  assert.ok(/collaborateur_eleves_unique unique \(collaborateur_id, student_id\)/
+    .test(P13B_MODELE.replace(/\s+/g, " ")),
+    "une affectation peut être posée deux fois");
+
+  // La liste des catégories accordables doit être EXACTEMENT les quatre.
+  // En ajouter une — « facturation » par exemple — rendrait accordable ce que
+  // la cartographie réserve à l'administration, et aucune policy ne le verrait.
+  const mCat = P13B_MODELE.replace(/\s+/g, " ").match(/categorie text not null\s*check \(categorie = any \(array\[([^\]]*)\]\)\)/);
+  assert.ok(mCat, "la contrainte sur `categorie` est introuvable");
+  const listees = mCat[1].split(",").map((x) => x.trim().replace(/'/g, ""));
+  assert.deepEqual(listees.slice().sort(), [...CATEGORIES].sort(),
+    `catégories accordables : ${listees.join(", ")} — il doit y en avoir exactement quatre`);
+});
+
+test("P13B 14. une catégorie n'ouvre jamais les autres", () => {
+  // Chaque policy ne doit citer QUE la catégorie de sa table. Une policy
+  // d'entraînement qui interrogerait l'ensemble nutrition ferait d'une
+  // permission la clé d'une autre.
+  const fautes: string[] = [];
+  for (const p of POLICIES_P13B) {
+    const cat = CARTE_P13B[p.table];
+    if (!CATEGORIES.includes(cat as typeof CATEGORIES[number])) continue;
+    for (const autre of CATEGORIES) {
+      if (autre === cat) continue;
+      if (new RegExp(`student_ids_${autre}_|'${autre}'`).test(p.corps)) {
+        fautes.push(`${p.table}.${p.nom} (${cat}) cite ${autre}`);
+      }
+    }
+  }
+  assert.deepEqual(fautes, [], fautes.join(" | "));
+});
+
+test("P13B 15. CONTRÔLE DU CONTRÔLE — les tests tombent si la règle régresse", () => {
+  // (a) Si une policy d'écriture reprenait l'ensemble de lecture, P13B 3 doit
+  // le voir. On le vérifie sur un texte fabriqué, pas sur la migration.
+  const faux = `create policy x_delete\n  on public.activity_events for delete to public\n  using (student_id in (select public.student_ids_suivi_eleve_lecture()));`;
+  const m = /create policy\s+(\S+)\s*\n?\s*on public\.(\w+)\s+for\s+(\w+)\s+to\s+\w+([\s\S]*?);/i.exec(faux);
+  assert.ok(m, "le découpage de contrôle ne reconnaît pas une policy");
+  assert.ok(/_lecture\(\)/.test(m[4]) && m[3].toLowerCase() === "delete",
+    "la détection « DELETE sur un ensemble de lecture » ne fonctionne pas");
+
+  // (b) Le découpage doit voir toutes les policies : un compte nul rendrait
+  // P13B 2, 3, 5, 6, 7 et 14 silencieusement verts.
+  assert.ok(POLICIES_P13B.length >= 180,
+    `le découpage n'a vu que ${POLICIES_P13B.length} policies, 180 attendues`);
+  assert.ok(new Set(POLICIES_P13B.map((p) => p.cmd)).size === 4,
+    "le découpage ne distingue pas les quatre commandes");
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// P13B-APP — L'INTÉGRATION APPLICATIVE DU MODÈLE
+//
+// La RLS ne protège que ce qui passe par PostgreSQL. Ces contrôles portent
+// sur la couche API et l'interface : ils échouent si l'application cesse de
+// dire la même chose que la base — par exemple si une garde laisse repasser
+// un collaborateur, ou si l'interface invente un niveau que la contrainte
+// CHECK n'accepte pas.
+// ════════════════════════════════════════════════════════════════════════════
+
+const AUTHZ_APP = lire("lib/api/authz.ts");
+const ACCES_APP = lire("lib/supabase/collaborateurs.ts");
+const MODALE_APP = lire("components/admin/CollaborateurAccesModal.tsx");
+const PAGE_PARAMETRES = lire("app/admin/parametres/page.tsx");
+
+/** Retire commentaires de bloc et de ligne d'un source TypeScript. */
+function sansCommentairesTs(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, "");
+}
+
+test("P13B-APP 1. la garde API lit les deux tables du modèle, et rien d'autre", () => {
+  const code = sansCommentairesTs(AUTHZ_APP);
+  assert.ok(/from\("collaborateur_eleves"\)/.test(code), "l'affectation explicite n'est pas vérifiée côté API");
+  assert.ok(/from\("collaborateur_permissions"\)/.test(code), "la permission de catégorie n'est pas vérifiée côté API");
+  // Aucune autre table de droits inventée côté application.
+  const tables = [...new Set([...code.matchAll(/from\("([a-z_]+)"\)/g)].map((m) => m[1]))].sort();
+  assert.deepEqual(tables, ["coaches", "collaborateur_eleves", "collaborateur_permissions", "profiles", "students"],
+    `tables lues par la garde : ${tables.join(", ")}`);
+});
+
+test("P13B-APP 2. la garde API reproduit la fiche de portée du SQL", () => {
+  // `current_staff_id()` / `staff_role()` prennent la première fiche ACTIVE,
+  // triée par created_at puis id. L'API doit désigner la même, sinon les deux
+  // couches peuvent attribuer deux périmètres différents au même compte.
+  const code = sansCommentairesTs(AUTHZ_APP);
+  const bloc = code.slice(code.indexOf("async function fichesStaff"));
+  const corps = bloc.slice(0, bloc.indexOf("\n}\n"));
+  assert.ok(/status === "actif"/.test(corps), "la fiche de portée doit être l'active, comme en SQL");
+  assert.ok(/order\("created_at", \{ ascending: true \}\)/.test(corps), "le tri created_at doit être le même qu'en SQL");
+  assert.ok(/order\("id", \{ ascending: true \}\)/.test(corps), "le tri de départage par id doit être le même qu'en SQL");
+  const modele = P13B_MODELE.replace(/\s+/g, " ");
+  assert.ok(/where c\.user_id = auth\.uid\(\) and c\.status = 'actif' order by c\.created_at, c\.id limit 1/.test(modele),
+    "la fonction SQL de référence a changé de critère : l'API ne la reflète plus");
+});
+
+test("P13B-APP 3. aucune catégorie accordable n'est administrative", () => {
+  // Les quatre catégories de l'application doivent être EXACTEMENT celles de
+  // la contrainte CHECK. Une cinquième (« facturation », « comptes ») rendrait
+  // accordable ce qui ne doit jamais l'être.
+  const types = lire("types/index.ts");
+  const m = types.match(/export type CategorieDroit =\s*([^;]+);/);
+  assert.ok(m, "CategorieDroit est introuvable");
+  const declarees = [...m[1].matchAll(/"([a-z_]+)"/g)].map((x) => x[1]).sort();
+  assert.deepEqual(declarees, [...CATEGORIES].sort(), `catégories applicatives : ${declarees.join(", ")}`);
+  for (const interdite of ["facturation", "paiement", "abonnement", "coaches", "profiles", "admin"]) {
+    assert.ok(!declarees.some((d) => d === interdite), `catégorie administrative accordable : ${interdite}`);
+  }
+});
+
+test("P13B-APP 4. deux niveaux seulement, et « aucun accès » reste une absence", () => {
+  const types = lire("types/index.ts");
+  assert.ok(/export type NiveauDroit = "lecture" \| "ecriture";/.test(types),
+    "les niveaux applicatifs ne correspondent plus à la contrainte CHECK");
+  // L'interface propose trois choix, mais le troisième ne s'écrit pas : il
+  // supprime la ligne.
+  assert.ok(/if \(niveau === null\)[\s\S]{0,240}\.delete\(\)/.test(ACCES_APP),
+    "retirer une catégorie doit supprimer la ligne, pas écrire un troisième niveau");
+  assert.ok(!/"aucun"|'aucun'/.test(sansCommentairesTs(ACCES_APP) + sansCommentairesTs(MODALE_APP)),
+    "un niveau « aucun » apparaît côté application : la base ne l'accepte pas");
+});
+
+test("P13B-APP 5. l'interface n'écrit jamais students.coach_id", () => {
+  // La règle « un collaborateur ne s'approprie jamais un élève » est portée en
+  // base par le trigger `protect_students_ownership` (réécrit par la migration
+  // de durcissement P13-B). Côté application, aucune écriture ne doit même
+  // tenter de toucher cette colonne.
+  const durcissement = P13B_FONCTIONS.replace(/\s+/g, " ");
+  assert.ok(/new\.coach_id := old\.coach_id;/.test(durcissement),
+    "le trigger ne restaure plus coach_id : un collaborateur pourrait s'approprier un élève");
+  assert.ok(/in \('admin', 'assistant'\)/.test(durcissement),
+    "le trigger doit traiter le collaborateur comme NON propriétaire");
+  // Sans commentaires : les deux fichiers EXPLIQUENT que `students.coach_id`
+  // n'est jamais touché. Échouer parce qu'on l'a documenté serait un mauvais
+  // contrôle — c'est le code qui est vérifié, pas la prose.
+  for (const [nom, source] of [["collaborateurs.ts", ACCES_APP], ["CollaborateurAccesModal.tsx", MODALE_APP]] as const) {
+    assert.ok(!/coach_id/.test(sansCommentairesTs(source)), `${nom} manipule coach_id : l'affectation doit rester explicite`);
+  }
+});
+
+test("P13B-APP 6. l'écriture des droits passe par la RLS, jamais par le service role", () => {
+  assert.ok(!/createSupabaseAdminClient|SERVICE_ROLE/.test(ACCES_APP),
+    "la couche d'accès aux droits contournerait les policies ..._manage_admin");
+  // Les policies qui rendent le verdict existent bien, et sont réservées à
+  // l'administrateur.
+  const modele = P13B_MODELE.replace(/\s+/g, " ");
+  for (const table of ["collaborateur_eleves", "collaborateur_permissions"]) {
+    assert.ok(new RegExp(`create policy "${table}_manage_admin" on public\\.${table} for all to authenticated using \\(\\(select public\\.is_admin\\(\\)\\)\\) with check \\(\\(select public\\.is_admin\\(\\)\\)\\)`)
+      .test(modele), `${table} : la policy d'administration a changé de forme`);
+  }
+});
+
+test("P13B-APP 7. l'interface affiche les droits enregistrés, sans valeur par défaut", () => {
+  // Un dictionnaire pré-rempli ferait croire à un accès non accordé.
+  assert.ok(/const permissions: PermissionsCollaborateur = \{\};/.test(ACCES_APP),
+    "getPermissions doit partir d'un dictionnaire vide");
+  assert.ok(/permissions\[ligne\.categorie\] = ligne\.niveau;/.test(ACCES_APP),
+    "l'affichage doit refléter la ligne telle qu'elle est enregistrée");
+  assert.ok(/permissions\[categorie\] \?\? ""/.test(MODALE_APP),
+    "une catégorie absente doit s'afficher comme « aucun accès », pas comme un niveau");
+  // En cas de refus, l'état est rechargé : l'écran ne montre pas un droit qui
+  // n'a pas été enregistré.
+  const hook = lire("hooks/useCollaborateurAcces.ts");
+  assert.ok(/if \(!resultat\.ok\) \{[\s\S]{0,200}await recharger\(\);/.test(hook),
+    "après un refus, l'interface doit recharger l'état réel");
+});
+
+test("P13B-APP 8. la configuration des droits est réservée aux collaborateurs", () => {
+  // Un admin a les droits globaux, un coach autonome gère ses propres élèves :
+  // ni l'un ni l'autre ne passe par `collaborateur_permissions`.
+  // La garde est cherchée JUSTE AVANT le bouton, et non n'importe où dans le
+  // fichier : la même condition sert aussi à la ligne de résumé, et une
+  // recherche globale resterait verte si seul le bouton perdait sa garde.
+  const iBouton = PAGE_PARAMETRES.indexOf("setDroitsCoachId(coach.id)");
+  assert.ok(iBouton > 0, "le bouton d'ouverture de la modale des droits est introuvable");
+  const avantBouton = PAGE_PARAMETRES.slice(Math.max(0, iBouton - 500), iBouton);
+  assert.ok(/coach\.role === "collaborateur" && \(/.test(avantBouton),
+    "le bouton de configuration des droits doit être conditionné au rôle collaborateur");
+  assert.ok(/CATEGORIES_DROITS\.map/.test(MODALE_APP),
+    "les quatre catégories doivent être réglées une par une, depuis la liste partagée");
+  // Affectation ET révocation explicites.
+  assert.ok(/affecterEleve/.test(lire("hooks/useCollaborateurAcces.ts")), "l'affectation explicite est absente");
+  assert.ok(/revoquerEleve/.test(lire("hooks/useCollaborateurAcces.ts")), "la révocation explicite est absente");
+});
+
+test("P13B-APP 9. l'identité staff de l'appelant passe par les fonctions du modèle", () => {
+  // Un collaborateur ne peut PAS lire sa propre ligne `coaches` : la policy la
+  // réserve à l'administrateur, et le contrôle B6 de la checklist vérifie
+  // qu'il y compte zéro ligne. La seule voie ouverte est
+  // `current_staff_id()` / `staff_role()`, SECURITY DEFINER, qui ne renvoient
+  // que l'identité de l'appelant.
+  const contexte = sansCommentairesTs(lire("hooks/useStaffContext.ts"));
+  assert.ok(/rpc\("staff_role"\)/.test(contexte), "le rôle staff doit venir de la fonction du modèle");
+  assert.ok(/rpc\("current_staff_id"\)/.test(contexte), "l'id de fiche doit venir de la fonction du modèle");
+  assert.ok(!/from\("coaches"\)/.test(contexte), "aucun select sur coaches : il serait vide pour un collaborateur");
+
+  // Et la résolution du coach propriétaire essaie la fonction AVANT le select,
+  // sinon un collaborateur retombe sur un `coaches` vide et ne peut rien créer.
+  const courant = sansCommentairesTs(lire("hooks/useCurrentCoachId.ts"));
+  const iFonction = courant.indexOf('rpc("current_staff_id")');
+  const iSelect = courant.indexOf('from("coaches")');
+  assert.ok(iFonction > 0, "current_staff_id() n'est pas utilisée");
+  assert.ok(iSelect > iFonction, "le select sur coaches doit rester un REPLI, après la fonction");
+
+  // Les deux fonctions sont bien exécutables par `authenticated`, et retirées
+  // à `anon` : un appelant non authentifié ne doit rien pouvoir en tirer.
+  const modele = P13B_MODELE.replace(/\s+/g, " ");
+  assert.ok(/'current_staff_id','staff_role'/.test(modele), "les deux fonctions doivent figurer dans la liste des droits");
+  assert.ok(/revoke all on function public\.%I\(\) from anon/.test(modele), "anon doit perdre execute");
+  assert.ok(/grant execute on function public\.%I\(\) to authenticated/.test(modele), "authenticated doit garder execute");
+});
+
+test("P13B-APP 10. la gestion des coachs reste à l'administrateur, et le doute ne masque rien", () => {
+  // « Le coach ne gère jamais globalement les coachs » (règle H-3, reprise
+  // par P13-B) : la section est masquée dès que le rôle est CONNU et n'est pas
+  // admin. Un rôle inconnu (migrations non appliquées) conserve l'affichage
+  // d'avant — masquer sur un doute cacherait la section au compte principal.
+  assert.ok(/roleStaff === null \|\| roleStaff === "admin"/.test(PAGE_PARAMETRES),
+    "la décision d'affichage doit distinguer « inconnu » de « pas admin »");
+  assert.ok(/\{peutGererLesCoachs && \(/.test(PAGE_PARAMETRES),
+    "la section des coachs doit être conditionnée");
+  // Et cet affichage ne remplace rien : les deux routes restent admin-only.
+  for (const relatif of ["app/api/admin/coaches/route.ts", "app/api/admin/coaches/[coachId]/route.ts"]) {
+    assert.ok(/requireAdmin\(\)/.test(lire(relatif)),
+      `${relatif} : la sécurité réelle doit rester côté serveur`);
+  }
+});
+
+test("P13B-APP 11. la navigation est cloisonnée par une fonction PURE, pas par le composant", () => {
+  // La sidebar ne doit décider de rien elle-même : la règle vit dans
+  // lib/admin-shell-nav.ts, testée sans DOM dans admin-shell-nav.mts.
+  const sidebar = sansCommentairesTs(lire("components/admin/AdminSidebar.tsx"));
+  assert.ok(/sectionAdminVisible\(href, droits\)/.test(sidebar),
+    "la sidebar doit déléguer la décision à sectionAdminVisible");
+  assert.ok(/groupeAdminVisible\(/.test(sidebar),
+    "le groupe Programmation doit disparaître quand aucun enfant ne reste");
+  assert.ok(!/categoriesLecture\.includes|roleStaff === "collaborateur"/.test(sidebar),
+    "aucune règle d'accès ne doit être réimplémentée dans le composant");
+
+  // Et elle lit les droits par les fonctions du modèle, jamais par un select.
+  assert.ok(/useStaffContext\(\)/.test(sidebar), "les droits doivent venir du hook dédié");
+  assert.ok(!/from\("coaches"\)|from\("collaborateur_/.test(sidebar),
+    "la sidebar ne doit lire aucune table de droits directement");
+});
+
+test("P13B-APP 12. la catégorie de chaque section suit les tables que la migration range", () => {
+  const nav = lire("lib/admin-shell-nav.ts");
+  const bloc = nav.slice(nav.indexOf("CATEGORIES_PAR_SECTION_ADMIN"));
+  const table = bloc.slice(0, bloc.indexOf("};"));
+  const lire_section = (href: string): string[] => {
+    const m = new RegExp(`"${href.replace(/\//g, "\\/")}": \\[([^\\]]*)\\]`).exec(table);
+    assert.ok(m, `section non classée : ${href}`);
+    return [...m[1].matchAll(/"([a-z_]+)"/g)].map((x) => x[1]);
+  };
+
+  // Les sections globales : liste VIDE, et c'est vérifié contre la migration —
+  // `est_staff_global()` et `is_admin()` ne sont vrais pour aucun
+  // collaborateur, donc aucune catégorie ne peut les ouvrir.
+  const policies = P13B_POLICIES.replace(/\s+/g, " ");
+  const modele = P13B_MODELE.replace(/\s+/g, " ");
+  const globales: [string, string, string][] = [
+    ["/admin/emails", "email_logs", policies],
+    ["/admin/notifications", "notification_campaigns", policies],
+    ["/admin/newsletter", "newsletter_subscribers", policies],
+    ["/admin/paiements", "payments", policies],
+    ["/admin/abonnements", "subscription_templates", policies],
+    ["/admin/parametres", "coaches", policies],
+  ];
+  for (const [href, table_sql, source] of globales) {
+    assert.deepEqual(lire_section(href), [], `${href} ne doit s'ouvrir par aucune catégorie`);
+    // La propriété réelle : la policy de LECTURE de cette table n'oppose que
+    // `est_staff_global()` / `is_admin()` (plus, parfois, l'élève sur sa
+    // propre ligne), et JAMAIS un ensemble de catégorie. Si elle citait un
+    // `student_ids_<cat>_*` ou un `categories_*`, un collaborateur pourrait y
+    // accéder et la section devrait être reclassée, pas masquée.
+    const m = new RegExp(`on public\\.${table_sql} for select to \\w+ using \\(([\\s\\S]*?)\\);`).exec(source);
+    assert.ok(m, `${href} : policy de lecture de ${table_sql} introuvable`);
+    const condition = m[1];
+    assert.ok(
+      /est_staff_global\(\)|is_admin\(\)/.test(condition),
+      `${href} : ${table_sql} n'est plus réservée au staff global / à l'admin — la cartographie a changé`,
+    );
+    assert.ok(
+      !/student_ids_|coach_ids_portee|categories_(lecture|ecriture)|document_ids_|program_ids_/.test(condition),
+      `${href} : ${table_sql} est devenue accessible par une catégorie — la section doit être reclassée, pas masquée`,
+    );
+  }
+
+  // Les sections catégorisées, vérifiées contre l'ensemble que la policy oppose.
+  const attendus: [string, string, string][] = [
+    ["/admin/eleves", "suivi_eleve", "student_ids_portee"],
+    ["/admin/programmes", "entrainement", "program_ids_lecture"],
+    ["/admin/calendrier", "agenda_communication", "student_ids_agenda_communication_lecture"],
+    // `/admin/nutrition` a longtemps été la section la plus trompeuse : la
+    // catégorie était bien accordée, et la page restait vide. Les huit tables
+    // du cœur opposaient encore `nutrition_plan_ids_geres()` (P13-A), fondée
+    // sur `students.coach_id`. La 4e migration (20261011120000) les fait
+    // opposer `nutrition_plan_ids_<niveau>()`, qui part de
+    // `student_ids_nutrition_<niveau>()` : la section montre enfin ce que la
+    // permission promet. Mesuré sur PostgreSQL 16 local — 0 plan avant, 1
+    // après, pour le même collaborateur affecté.
+    ["/admin/nutrition", "nutrition", "student_ids_nutrition_lecture"],
+    ["/admin/retours", "entrainement", "student_ids_entrainement_lecture"],
+  ];
+  for (const [href, categorie, ensemble] of attendus) {
+    assert.deepEqual(lire_section(href), [categorie], `${href} doit relever de ${categorie}`);
+    // L'ensemble est cherché dans les DEUX migrations : les policies pour la
+    // plupart des tables, le modèle pour les fonctions générées par boucle
+    // (`student_ids_<cat>_<niveau>`), que les policies citent parfois
+    // indirectement via `document_ids_*` ou `program_ids_*`.
+    assert.ok(
+      policies.includes(ensemble) || modele.includes(ensemble) || modele.includes(ensemble.replace(/_(lecture|ecriture)$/, "_%1$s")),
+      `l'ensemble ${ensemble} a disparu des migrations P13-B`,
+    );
+  }
+
+  // `/admin/retours` : la table réellement lue est `workout_feedback`, rangée
+  // sous entrainement. Si la migration la déplaçait, ce contrôle rougirait.
+  assert.ok(
+    /on public\.workout_feedback for select to public using \(\(\(student_id = current_student_id\(\)\) OR student_id in \(select public\.student_ids_entrainement_lecture\(\)\)\)\)/.test(policies),
+    "workout_feedback ne relève plus de entrainement : /admin/retours doit être reclassée",
+  );
+
+  // `/admin/documents` porte TROIS catégories, parce que la migration route
+  // les documents sur `documents.category`.
+  assert.deepEqual(lire_section("/admin/documents").slice().sort(),
+    ["entrainement", "nutrition", "suivi_eleve"], "/admin/documents doit porter les trois catégories routables");
+  assert.ok(/administratif/.test(modele) || /administratif/.test(policies),
+    "le routage des documents par catégorie a disparu");
+});
+
+test("P13B-APP 13. l'espace admin ne lit plus `coaches` dans le navigateur pour un champ mort", () => {
+  // /admin/calendrier appelait getPrimaryCoachInfo depuis le navigateur pour
+  // remplir coachName/coachEmail — jamais affichés, jamais transmis (seul
+  // `appointmentId` quitte le navigateur) et désormais vides pour un
+  // non-admin. La correction est de ne rien lire.
+  const calendrier = sansCommentairesTs(lire("app/admin/calendrier/page.tsx"));
+  assert.ok(!/getPrimaryCoachInfo/.test(calendrier),
+    "le calendrier admin ne doit plus résoudre le coach principal côté navigateur");
+  assert.ok(!/from\("coaches"\)/.test(calendrier), "aucune lecture directe de coaches");
+  assert.ok(!/"Ton coach"/.test(calendrier),
+    "le repli trompeur « Ton coach » ne doit plus exister côté admin");
+
+  // Le serveur reste la seule autorité : la route relit le coach au service role.
+  const route = lire("app/api/email/appointment-notification/route.ts");
+  assert.ok(/getPrimaryCoachInfo\(adminSupabase\)/.test(route),
+    "la route d'envoi doit continuer de résoudre le coach avec le client service role");
+  // Et seul l'identifiant du rendez-vous quitte le navigateur.
+  const emails = lire("lib/email/appointment-emails.ts");
+  assert.ok(/body: JSON\.stringify\(\{ appointmentId \}\)/.test(emails),
+    "le navigateur ne doit envoyer que appointmentId");
+});
+
+test("P13B-APP 14. provisionner sa ligne `coaches` reste réservé à l'administrateur", () => {
+  const coaches = sansCommentairesTs(lire("lib/supabase/coaches.ts"));
+  const corps = coaches.slice(coaches.indexOf("export async function ensureSelfCoachRow"));
+  const posProfil = corps.indexOf('from("profiles")');
+  const posCoaches = corps.indexOf('from("coaches")');
+  assert.ok(posProfil > 0 && posCoaches > posProfil,
+    "le rôle doit être lu AVANT toute requête sur coaches (sinon select vide + insert refusé)");
+  assert.ok(/profile\?\.role !== "admin"/.test(corps),
+    "la garde doit valoir exactement is_admin(), c'est-à-dire profiles.role = 'admin'");
+  assert.ok(!/createSupabaseAdminClient|service_role/.test(coaches),
+    "aucun contournement par service role");
+  // La policy qui justifie cette garde doit toujours être celle-là.
+  assert.ok(/create policy coaches_manage_admin_insert on public\.coaches for insert to public with check \(\(select public\.is_admin\(\)\)\)/
+    .test(P13B_POLICIES.replace(/\s+/g, " ")),
+    "l'écriture de coaches n'est plus réservée à l'admin : la garde applicative doit être revue");
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// P13B/4 — LE CŒUR NUTRITION ENTRE DANS LE MODÈLE
+//
+// La checklist SQL (supabase/tests/p13b_roles_collaborateurs_checklist.sql,
+// section G) prouve le COMPORTEMENT sur une vraie base. Ces contrôles-ci
+// gardent le CONTRAT du texte : ils rougissent si la migration cesse de dire
+// ce qu'elle dit, sans qu'aucune base soit nécessaire.
+// ════════════════════════════════════════════════════════════════════════════
+
+/** Les huit tables du cœur, et la colonne par laquelle chacune est bornée. */
+const COEUR_NUTRITION: Record<string, string> = {
+  nutrition_plans: "id",
+  nutrition_plan_profiles: "plan_id",
+  nutrition_meal_slot_targets: "profile_id",
+  nutrition_days: "plan_id",
+  meals: "nutrition_day_id",
+  meal_choice_slots: "meal_id",
+  meal_choice_options: "slot_id",
+  nutrition_daily_logs: "student_id",
+};
+
+/** Les cinq tables dépendantes : lecture seule pour le staff, toujours. */
+const DEPENDANTES_LECTURE_SEULE = [
+  "consumed_meals",
+  "meal_entries",
+  "planned_meals",
+  "planned_meal_items",
+  "planned_meal_skipped_slots",
+];
+
+/** Découpage des policies de la 4e migration, par table et par commande. */
+const POLICIES_NUTRITION = [
+  ...P13B_NUTRITION.matchAll(
+    /create policy\s+"?([\w]+)"?\s*\n?\s*on public\.(\w+)\s+for\s+(\w+)\s+to\s+\w+([\s\S]*?);/gi,
+  ),
+].map((m) => ({ nom: m[1], table: m[2], cmd: m[3].toUpperCase(), corps: m[4] }));
+
+test("P13B/4 1. dix fonctions de portée, générées par niveau depuis une source unique", () => {
+  const compact = P13B_NUTRITION.replace(/\s+/g, " ");
+  // Boucle sur les deux niveaux : `lecture` et `ecriture` ne peuvent pas
+  // diverger autrement que par le niveau lui-même.
+  assert.ok(/foreach n in array array\['lecture','ecriture'\] loop/.test(compact),
+    "les deux niveaux doivent être générés par une seule boucle");
+  for (const base of [
+    "nutrition_plan_ids",
+    "nutrition_plan_profile_ids",
+    "nutrition_day_ids",
+    "meal_ids",
+    "meal_choice_slot_ids",
+  ]) {
+    assert.ok(new RegExp(`create or replace function public\\.${base}_%1\\$s\\(\\)`).test(compact),
+      `${base}_<niveau>() n'est pas générée`);
+  }
+  // Et les dix noms figurent nommément dans la pose des droits.
+  for (const n of ["lecture", "ecriture"]) {
+    for (const base of ["nutrition_plan_ids", "nutrition_plan_profile_ids", "nutrition_day_ids", "meal_ids", "meal_choice_slot_ids"]) {
+      assert.ok(compact.includes(`'${base}_${n}'`), `${base}_${n} n'est pas dans la liste des droits`);
+    }
+  }
+});
+
+test("P13B/4 2. les fonctions de PROPRIÉTÉ de P13-A ne sont ni modifiées ni supprimées", () => {
+  // C'est le cœur de la décision : étendre `nutrition_plan_ids_geres()` aurait
+  // accordé l'écriture en même temps que la lecture, puisqu'un seul ensemble
+  // était opposé aux deux. Les anciennes restent la définition de la
+  // propriété (food_lists, nutrition_recipes, can_manage_* s'en servent).
+  for (const f of [
+    "nutrition_plan_ids_geres",
+    "nutrition_day_ids_geres",
+    "meal_ids_geres",
+    "meal_choice_slot_ids_geres",
+    "nutrition_plan_profile_ids_geres",
+    "student_ids_geres",
+    "is_coach_of_student",
+    "can_manage_nutrition_plan",
+    "can_manage_nutrition_day",
+    "can_manage_meal",
+  ]) {
+    assert.ok(
+      !new RegExp(`create or replace function public\\.${f}\\s*\\(`).test(P13B_NUTRITION),
+      `${f} est redéfinie par la 4e migration : la propriété P13-A ne doit pas être élargie`,
+    );
+    assert.ok(!new RegExp(`drop function[^;]*${f}`).test(P13B_NUTRITION), `${f} est supprimée`);
+  }
+  // Aucune migration P13-A n'est réécrite : la 4e ne touche à aucun fichier,
+  // elle ne fait que poser de nouveaux objets. Vérifié par l'absence de
+  // `drop policy` visant une policy d'une AUTRE table que le cœur nutrition.
+  const tablesTouchees = new Set(
+    [...P13B_NUTRITION.matchAll(/drop policy if exists[^;]*on public\.(\w+)/gi)].map((m) => m[1]),
+  );
+  const autorisees = new Set([...Object.keys(COEUR_NUTRITION), ...DEPENDANTES_LECTURE_SEULE]);
+  const hors = [...tablesTouchees].filter((t) => !autorisees.has(t));
+  assert.deepEqual(hors, [], `la 4e migration touche des tables hors du cœur nutrition : ${hors.join(", ")}`);
+});
+
+test("P13B/4 3. chaque table du cœur : SELECT sur lecture, écritures sur ecriture", () => {
+  for (const [table, colonne] of Object.entries(COEUR_NUTRITION)) {
+    const dePolicies = POLICIES_NUTRITION.filter((p) => p.table === table);
+    assert.ok(dePolicies.length >= 4, `${table} : ${dePolicies.length} policies au lieu de 4`);
+    assert.deepEqual(
+      [...new Set(dePolicies.map((p) => p.cmd))].sort(),
+      ["DELETE", "INSERT", "SELECT", "UPDATE"],
+      `${table} : les quatre commandes doivent être séparées`,
+    );
+    for (const p of dePolicies) {
+      // ⚠️ UNE SEULE EXEMPTION, ET ELLE EST PLUS STRICTE, PAS PLUS LARGE :
+      // `nutrition_plans` DELETE n'oppose PAS l'ensemble d'écriture, parce que
+      // supprimer le plan d'un élève n'était permis à AUCUN coach avant P13-B
+      // — seul l'administrateur le fait. Lui donner `_ecriture()` aurait
+      // élargi un droit au passage. Le contrôle P13B/4 5 vérifie la règle
+      // réellement appliquée à cette policy.
+      if (table === "nutrition_plans" && p.cmd === "DELETE") {
+        assert.ok(!p.corps.includes("_ecriture()") && !p.corps.includes("_lecture()"),
+          "la suppression d'un plan ne doit suivre aucun ensemble de portée");
+        continue;
+      }
+      const attendu = p.cmd === "SELECT" ? "_lecture()" : "_ecriture()";
+      const interdit = p.cmd === "SELECT" ? "_ecriture()" : "_lecture()";
+      assert.ok(p.corps.includes(attendu), `${table}.${p.nom} (${p.cmd}) doit opposer un ensemble ${attendu}`);
+      assert.ok(!p.corps.includes(interdit), `${table}.${p.nom} (${p.cmd}) oppose ${interdit} : niveaux croisés`);
+      // La colonne de rattachement ne change pas : une policy qui changerait
+      // de colonne changerait d'ensemble sans le dire.
+      if (p.cmd !== "INSERT") {
+        assert.ok(p.corps.includes(colonne), `${table}.${p.nom} doit se borner par ${colonne}`);
+      }
+    }
+    // Et aucune policy FOR ALL ne subsiste côté coach : c'est elle qui
+    // faisait d'une permission `lecture` un droit d'écriture.
+    assert.ok(
+      !new RegExp(`on public\\.${table} for all`, "i").test(P13B_NUTRITION),
+      `${table} : une policy FOR ALL est recréée`,
+    );
+  }
+});
+
+test("P13B/4 4. le plan MODÈLE n'est ouvert par aucune catégorie", () => {
+  // Un plan sans élève n'est atteint par aucune affectation. Sa branche doit
+  // exiger `est_staff_global()` — admin de cabinet ou coach autonome — en plus
+  // de la propriété. Avant la 4e migration, un collaborateur pouvait en créer.
+  const compact = P13B_NUTRITION.replace(/\s+/g, " ");
+  const branches = [...compact.matchAll(/student_id is null and coach_id is not null and coach_id = \(select public\.current_coach_id\(\)\) and public\.est_staff_global\(\)/g)];
+  assert.ok(branches.length >= 3, `la branche du plan modèle doit exiger est_staff_global() partout (vu ${branches.length} fois)`);
+  // Dans la FONCTION d'ensemble aussi, pas seulement dans les policies.
+  assert.ok(/p\.student_id is null and p\.coach_id is not null and p\.coach_id = public\.current_coach_id\(\) and public\.est_staff_global\(\)/
+    .test(compact), "la fonction d'ensemble doit réserver le plan modèle au staff global");
+  // Jamais de `student_ids_nutrition_*` sur la branche modèle : une catégorie
+  // ne doit pas suffire à créer un plan qui n'appartient à aucun élève.
+  const insertPlans = POLICIES_NUTRITION.find((p) => p.table === "nutrition_plans" && p.cmd === "INSERT");
+  assert.ok(insertPlans, "la policy d'insertion des plans est introuvable");
+  const modele = insertPlans.corps.slice(insertPlans.corps.indexOf("student_id is null"));
+  assert.ok(!/student_ids_nutrition/.test(modele), "la branche modèle ne doit pas dépendre d'une catégorie");
+});
+
+test("P13B/4 5. la suppression d'un plan d'élève n'est accordée à personne", () => {
+  const del = POLICIES_NUTRITION.find((p) => p.table === "nutrition_plans" && p.cmd === "DELETE");
+  assert.ok(del, "la policy de suppression des plans est introuvable");
+  // La règle de P13-A est reprise telle quelle : seule la branche du plan
+  // MODÈLE est permise. `ecriture` ne l'élargit pas.
+  assert.ok(/student_id is null/.test(del.corps), "seul un plan sans élève peut être supprimé par un coach");
+  assert.ok(/est_staff_global\(\)/.test(del.corps), "et seulement par le staff global");
+  assert.ok(!/nutrition_plan_ids_ecriture/.test(del.corps),
+    "la suppression ne doit pas suivre l'ensemble d'écriture : elle n'était permise à aucun coach");
+});
+
+test("P13B/4 6. les cinq tables dépendantes restent en LECTURE SEULE", () => {
+  for (const table of DEPENDANTES_LECTURE_SEULE) {
+    const dePolicies = POLICIES_NUTRITION.filter((p) => p.table === table);
+    assert.deepEqual(dePolicies.map((p) => p.cmd), ["SELECT"],
+      `${table} : le niveau ecriture ne doit ouvrir aucune écriture (c'est l'élève qui saisit)`);
+    assert.ok(dePolicies[0].corps.includes("student_ids_nutrition_lecture()"),
+      `${table} : la lecture doit suivre la catégorie nutrition`);
+  }
+});
+
+test("P13B/4 7. le propriétaire d'un plan ne se choisit pas", () => {
+  const compact = P13B_NUTRITION.replace(/\s+/g, " ");
+  // À l'insertion : un appelant non staff global voit `coach_id` forcé à
+  // `students.coach_id` plutôt que refusé — même discipline que
+  // protect_students_ownership_columns.
+  assert.ok(/create or replace function public\.nutrition_plans_fill_coach_id\(\)/.test(compact),
+    "le trigger de remplissage doit être réécrit");
+  assert.ok(/not public\.est_staff_global\(\) and new\.student_id is not null/.test(compact),
+    "un non-staff-global ne doit pas pouvoir désigner le propriétaire d'un plan d'élève");
+  // À la mise à jour : la colonne est restaurée, pas espérée non écrite.
+  assert.ok(/create or replace function public\.protect_nutrition_plans_owner_columns\(\)/.test(compact),
+    "le trigger de protection de coach_id doit exister");
+  assert.ok(/new\.coach_id := old\.coach_id;/.test(compact), "coach_id doit être restauré depuis l'ancienne ligne");
+  assert.ok(/create trigger protect_nutrition_plans_owner before update on public\.nutrition_plans/.test(compact),
+    "le trigger doit être posé sur nutrition_plans");
+  // Le service role et l'admin gardent le comportement d'avant.
+  assert.ok(/auth\.uid\(\) is null or coalesce\(auth\.role\(\), ''\) = 'service_role'/.test(compact),
+    "le service role doit rester libre");
+});
+
+test("P13B/4 8. l'étiquette `coaches.role` ne vaut plus pouvoir global", () => {
+  const compact = P13B_NUTRITION.replace(/\s+/g, " ");
+  // Le défaut 'admin' faisait de toute fiche créée sans rôle un
+  // administrateur de cabinet sous P13-B. Deux correctifs, les deux présents.
+  assert.ok(/alter table public\.coaches alter column role set default 'assistant'/.test(compact),
+    "le défaut de coaches.role doit devenir 'assistant'");
+  assert.ok(/create or replace function public\.student_ids_portee\(\)/.test(compact),
+    "student_ids_portee() doit être redéfinie");
+  const portee = compact.slice(compact.indexOf("create or replace function public.student_ids_portee()"));
+  const corpsPortee = portee.slice(0, portee.indexOf("$$;"));
+  assert.ok(/where public\.is_admin\(\)/.test(corpsPortee),
+    "les droits globaux doivent suivre public.is_admin(), pas staff_role() = 'admin'");
+  assert.ok(/not public\.is_admin\(\) and public\.staff_role\(\) in \('admin','assistant'\)/.test(corpsPortee),
+    "une fiche 'admin' qui n'est pas l'administrateur applicatif doit redevenir un coach autonome");
+  // Aucune donnée n'est réécrite pour contourner une permission.
+  assert.ok(!/^\s*update public\.coaches/im.test(P13B_NUTRITION), "aucune ligne coaches ne doit être réécrite");
+});
+
+test("P13B/4 9. fonctions SECURITY DEFINER : search_path, pg_temp en dernier, anon sans EXECUTE", () => {
+  const definitions = [...P13B_NUTRITION.matchAll(/create or replace function public\.(\w+)\(\)[\s\S]*?\$body\$|create or replace function public\.(\w+)\(\)[\s\S]*?\$\$;/g)];
+  assert.ok(definitions.length > 0, "aucune définition de fonction trouvée");
+  // Chaque définition déclare definer ET search_path = public, pg_temp.
+  const sansSearchPath = definitions.filter((d) => !/set search_path = public, pg_temp/.test(d[0]));
+  assert.deepEqual(sansSearchPath.map((d) => d[1] ?? d[2]), [],
+    "toute fonction definer doit figer search_path avec pg_temp EN DERNIER");
+  const sansDefiner = definitions.filter((d) => !/security definer/.test(d[0]));
+  assert.deepEqual(sansDefiner.map((d) => d[1] ?? d[2]), [], "toute fonction de portée doit être SECURITY DEFINER");
+  // Les droits : retirés à public et anon, accordés au seul authenticated.
+  const compact = P13B_NUTRITION.replace(/\s+/g, " ");
+  assert.ok(/revoke all on function public\.%I\(\) from anon/.test(compact), "anon doit perdre EXECUTE");
+  assert.ok(/grant execute on function public\.%I\(\) to authenticated/.test(compact),
+    "authenticated doit être le seul à garder EXECUTE");
+  // Les deux triggers ne sont appelables par personne : un trigger exécutable
+  // à la main contournerait la RLS qu'il protège.
+  for (const f of ["nutrition_plans_fill_coach_id", "protect_nutrition_plans_owner_columns"]) {
+    assert.ok(new RegExp(`revoke all on function public\\.${f}\\(\\) from authenticated`).test(compact),
+      `${f} ne doit pas être exécutable par authenticated`);
+  }
+});
+
+test("P13B/4 10. la migration refuse de passer pour verte si la règle régresse", () => {
+  const compact = P13B_NUTRITION.replace(/\s+/g, " ");
+  // Garde 1 : plus aucune policy du cœur ne repose sur la propriété P13-A.
+  assert.ok(/policies encore fondées sur la propriété P13-A/.test(compact),
+    "la garde « propriété P13-A résiduelle » a disparu");
+  // Garde 2 : plus aucune policy FOR ALL côté coach.
+  assert.ok(/policies FOR ALL restantes côté coach/.test(compact),
+    "la garde « FOR ALL résiduel » a disparu");
+  assert.ok((compact.match(/raise exception/g) ?? []).length >= 2, "les deux gardes doivent lever");
+});
+
+test("P13B/4 11. CONTRÔLE DU CONTRÔLE — le découpage voit les policies", () => {
+  // Sans ce garde-fou, une regexp cassée rendrait les contrôles 3, 5 et 6
+  // silencieusement verts sur zéro policy.
+  assert.ok(POLICIES_NUTRITION.length >= 37,
+    `le découpage n'a vu que ${POLICIES_NUTRITION.length} policies, 37 attendues (8 tables × 4 + 5 lectures)`);
+  assert.equal(new Set(POLICIES_NUTRITION.map((p) => p.cmd)).size, 4,
+    "le découpage ne distingue pas les quatre commandes");
+  // Et il doit détecter un croisement de niveaux sur un texte fabriqué.
+  const faux = `create policy x_select\n  on public.meals for select to authenticated\n  using (nutrition_day_id in (select public.nutrition_day_ids_ecriture()));`;
+  const m = /create policy\s+"?([\w]+)"?\s*\n?\s*on public\.(\w+)\s+for\s+(\w+)\s+to\s+\w+([\s\S]*?);/i.exec(faux);
+  assert.ok(m && m[3].toUpperCase() === "SELECT" && m[4].includes("_ecriture()"),
+    "la détection « SELECT sur un ensemble d'écriture » ne fonctionne pas");
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// P13B/5 — LA GARDE DE provision_program_copy
+//
+// La section H de supabase/tests/p13b_roles_collaborateurs_checklist.sql
+// prouve le COMPORTEMENT sur une vraie base, effets compris (programmes et
+// affectations réellement créés ou non). Ces contrôles-ci empêchent la
+// RÉINTRODUCTION silencieuse de l'ancienne règle, sans base de données.
+// ════════════════════════════════════════════════════════════════════════════
+
+test("P13B/5 1. l'ancienne garde ne peut pas revenir dans une migration", () => {
+  // `profiles.role in ('admin','coach')` était juste AVANT P13-B : 'coach' y
+  // désignait un staff forcément global. Depuis, c'est la valeur de TOUT le
+  // staff non administrateur — collaborateurs compris. Aucune migration
+  // POSTÉRIEURE à P13-B ne doit rétablir cette règle sur une fonction
+  // `SECURITY DEFINER`.
+  const fichiers = readdirSync(join(RACINE, "supabase/migrations"))
+    .filter((f) => f.endsWith(".sql"))
+    .filter((f) => f >= "20261011090000");
+  assert.ok(fichiers.length >= 5, `seulement ${fichiers.length} migration(s) P13-B vues`);
+  // ⚠️ LA 5e MIGRATION EST EXCLUE DU BALAYAGE, ET C'EST NÉCESSAIRE : elle
+  // CITE le motif qu'elle remplace, dans sa constante de substitution. Son
+  // cas est couvert juste en dessous, et plus sévèrement — par la garde
+  // qu'elle exécute en fin de migration, qui lit la fonction EN BASE.
+  const nomProvision = CHEMIN_P13B_PROVISION.split("/").pop();
+  for (const f of fichiers.filter((x) => x !== nomProvision)) {
+    const code = sansCommentairesSql(readFileSync(join(RACINE, "supabase/migrations", f), "utf8"));
+    assert.ok(
+      !/not in \('service', ?'admin', ?'coach'\)/.test(code),
+      `${f} : l'ancienne garde profiles.role in (service, admin, coach) est réintroduite`,
+    );
+  }
+  assert.ok(fichiers.includes(nomProvision!), "la 5e migration doit être dans le balayage");
+  // Et la 5e migration l'enlève explicitement : elle contient le motif dans
+  // sa CONSTANTE de substitution (donc dans le texte brut), et sa garde
+  // finale refuse de passer si le motif survit en base.
+  assert.ok(/not in \('service', 'admin', 'coach'\)/.test(P13B_PROVISION_BRUT),
+    "la 5e migration doit citer le motif qu'elle remplace");
+  assert.ok(/l''ancienne garde profiles\.role in \(admin, coach\) est encore en place/.test(P13B_PROVISION_BRUT),
+    "la garde de fin de migration doit rougir si l'ancienne règle survit");
+});
+
+test("P13B/5 2. la nouvelle garde : service_role, is_admin(), puis la portée", () => {
+  const compact = P13B_PROVISION.replace(/\s+/g, " ");
+  // Les quatre chemins, dans l'ordre, et aucun autre.
+  assert.ok(/if coalesce\(auth\.role\(\), ''\) = 'service_role' then/.test(compact),
+    "le chemin service_role doit rester en premier et inchangé");
+  assert.ok(/elsif auth\.uid\(\) is null then/.test(compact),
+    "un appelant sans identité doit être refusé explicitement");
+  assert.ok(/elsif coalesce\(public\.is_admin\(\), false\) then/.test(compact),
+    "les droits globaux doivent suivre public.is_admin(), pas profiles.role = 'coach'");
+  assert.ok(/elsif p_student_id is null then/.test(compact),
+    "un identifiant d'élève NULL doit être refusé AVANT le test d'appartenance");
+  assert.ok(/elsif coalesce\( p_student_id in \(select public\.student_ids_entrainement_ecriture\(\)\), false \) then/.test(compact),
+    "l'appartenance doit être testée sur la portée entrainement/ecriture, en fail-closed");
+  // Trois refus explicites : sans identité, élève NULL, et le `else` final.
+  // ⚠️ LE COMPTE SE FAIT DANS LA CONSTANTE DE REMPLACEMENT, et non sur tout
+  // le fichier : le MOTIF retiré contient lui aussi un `raise exception`, et
+  // compter sur l'ensemble en trouvait quatre — un contrôle qui mesure le
+  // mauvais texte.
+  const iNeuf = P13B_PROVISION_BRUT.indexOf("v_neuf  constant text := $neuf$");
+  assert.ok(iNeuf > 0, "la constante de remplacement est introuvable");
+  const neuf = P13B_PROVISION_BRUT.slice(iNeuf, P13B_PROVISION_BRUT.indexOf("$neuf$;", iNeuf));
+  assert.equal((neuf.match(/raise exception 'provision_program_copy : accès refusé'/g) ?? []).length, 3,
+    "la nouvelle garde doit porter exactement trois refus explicites");
+  // Et elle n'accorde que par les trois chemins prévus : un seul `if`, deux
+  // `elsif` autorisants, deux `elsif` refusants, un `else` refusant.
+  assert.equal((neuf.match(/^\s*null;$/gm) ?? []).length, 3,
+    "exactement trois branches autorisantes : service_role, is_admin(), portée");
+  // Aucune branche ne doit lire profiles directement : c'est la faute
+  // d'origine. ⚠️ LE CONTRÔLE PORTE SUR LE CODE, PAS SUR LES COMMENTAIRES :
+  // l'en-tête de la garde CITE l'ancienne règle pour expliquer pourquoi elle
+  // disparaît, et une recherche naïve de « profiles » trouvait ce rappel —
+  // un contrôle qui mesure le mauvais texte. On retire donc les commentaires
+  // SQL avant de mesurer, et on vérifie en plus qu'aucune lecture de table
+  // ne subsiste sous quelque forme que ce soit.
+  const neufCode = neuf
+    .split("\n")
+    .map((l) => l.replace(/--.*$/, ""))
+    .join("\n");
+  assert.ok(/is_admin/.test(neufCode),
+    "le découpage du code doit conserver la garde elle-même");
+  assert.ok(!/profiles/.test(neufCode),
+    "la garde ne doit plus lire profiles directement");
+  assert.ok(!/\bfrom\s+public\.\w+/i.test(neufCode.replace(/select public\.\w+\(\)/g, "")),
+    "la garde ne doit lire aucune table directement : elle appelle les fonctions de portée");
+  assert.ok(!/\brole\b\s*(::|=|in\b)/i.test(neufCode.replace(/auth\.role\(\)/g, "")),
+    "aucune décision ne doit se fonder sur une colonne role lue en direct");
+});
+
+test("P13B/5 3. seule la garde change : le corps de la copie est repris, pas réécrit", () => {
+  // La migration ne recopie pas 200 lignes : elle substitue, et la
+  // substitution est gardée. C'est ce qui évite de perdre au passage les
+  // prescriptions (20260802190000) et le RPE recommandé (20260803190000).
+  const compact = P13B_PROVISION.replace(/\s+/g, " ");
+  assert.ok(/select pg_get_functiondef\(p\.oid\) into v_def/.test(compact),
+    "la définition en place doit être lue, pas retapée");
+  assert.ok(/if v_n <> 1 then/.test(compact), "la substitution doit exiger exactement une occurrence");
+  assert.ok(/execute replace\(v_def, v_motif, v_neuf\)/.test(compact), "la substitution doit être exécutée");
+  // Rejouable : si la garde est déjà posée, la migration ne réécrit rien.
+  assert.ok(/if position\(v_neuf in v_def\) > 0 then/.test(compact), "la migration doit être rejouable");
+  // Elle ne touche à aucun autre objet : pas de create/drop de table, de
+  // policy ni d'autre fonction.
+  for (const interdit of [/create table/i, /drop table/i, /create policy/i, /drop policy/i,
+                          /alter table/i, /create or replace function/i]) {
+    assert.ok(!interdit.test(P13B_PROVISION), `la 5e migration ne doit rien faire d'autre : ${interdit}`);
+  }
+  // Et elle vérifie que le corps a survécu.
+  for (const marqueur of ["pg_advisory_xact_lock", "source_checkout_session_id", "training_prescriptions", "recommended_rpe"]) {
+    assert.ok(compact.includes(marqueur), `la garde finale doit vérifier la présence de ${marqueur}`);
+  }
+});
+
+test("P13B/5 4. les droits EXECUTE sont réaffirmés, et anon reste exclu", () => {
+  const compact = P13B_PROVISION.replace(/\s+/g, " ");
+  assert.ok(/alter function public\.provision_program_copy\(uuid, uuid, text\) owner to postgres/.test(compact),
+    "le propriétaire doit être réaffirmé");
+  assert.ok(/revoke execute on function public\.provision_program_copy\(uuid, uuid, text\) from anon/.test(compact),
+    "anon doit perdre EXECUTE");
+  assert.ok(/grant execute on function public\.provision_program_copy\(uuid, uuid, text\) to authenticated, service_role/.test(compact),
+    "authenticated et service_role doivent garder EXECUTE");
+  assert.ok(/anon peut exécuter provision_program_copy/.test(P13B_PROVISION_BRUT),
+    "la garde finale doit rougir si anon récupère EXECUTE");
+  // La signature ne change pas : les appelants TypeScript passent trois
+  // arguments nommés, et `lib/supabase/programs.ts` n'est pas touché.
+  const programs = lire("lib/supabase/programs.ts");
+  assert.ok(/rpc\("provision_program_copy", \{/.test(programs), "l'appel applicatif doit rester inchangé");
+  for (const arg of ["p_program_id", "p_student_id", "p_checkout_session_id"]) {
+    assert.ok(programs.includes(arg), `l'argument ${arg} doit rester dans l'appel`);
+  }
+});
+
+test("P13B/5 5. la checklist couvre les cas de refus ET le cas autorisé", () => {
+  const checklist = lire("supabase/tests/p13b_roles_collaborateurs_checklist.sql");
+  for (const etiquette of ["H1.", "H2.", "H3.", "H4.", "H5.", "H6.", "H7.", "H8.", "H9.", "H10.", "H11.", "H12.", "H13."]) {
+    assert.ok(checklist.includes(etiquette), `le contrôle ${etiquette} est absent de la checklist`);
+  }
+  // Le cas AUTORISÉ est indispensable : tout fermer rendrait la checklist
+  // verte sans que la fonctionnalité marche.
+  assert.ok(/H5\. entrainement\/ECRITURE \+ affectation : autorisé/.test(checklist),
+    "le cas autorisé doit être testé, sinon fermer tout suffirait");
+  // Et les contrôles mesurent les EFFETS en base, pas le texte de la garde.
+  assert.ok(/select count\(\*\) into v_prog from public\.programs/.test(checklist),
+    "les contrôles doivent compter les programmes réellement créés");
+  assert.ok(/select count\(\*\) into v_aff from public\.assignments/.test(checklist),
+    "les contrôles doivent compter les affectations réellement créées");
+  assert.ok(/v_ok := v_refuse and v_prog = 0 and v_aff = 0/.test(checklist),
+    "un refus doit exiger zéro ligne créée");
+  assert.ok(/v_ok := \(not v_refuse\) and v_id is not null and v_prog = 1 and v_aff = 1/.test(checklist),
+    "une autorisation doit exiger la ligne attendue");
 });
 
 // ════════════════════════════════════════════════════════════════════════════

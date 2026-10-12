@@ -57,7 +57,7 @@ export interface Database {
           user_id: string | null;
           name: string;
           email: string;
-          role: "admin" | "assistant";
+          role: "admin" | "assistant" | "collaborateur";
           status: "actif" | "inactif";
           specialty: string;
           created_at: string;
@@ -68,7 +68,7 @@ export interface Database {
           user_id?: string | null;
           name: string;
           email?: string;
-          role?: "admin" | "assistant";
+          role?: "admin" | "assistant" | "collaborateur";
           status?: "actif" | "inactif";
           specialty?: string;
           created_at?: string;
@@ -79,9 +79,77 @@ export interface Database {
           user_id?: string | null;
           name?: string;
           email?: string;
-          role?: "admin" | "assistant";
+          role?: "admin" | "assistant" | "collaborateur";
           status?: "actif" | "inactif";
           specialty?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      /**
+       * Affectation EXPLICITE d'un élève à un collaborateur (modèle P13-B,
+       * migration 20261011090000). `students.coach_id` n'est jamais touché :
+       * le coach principal reste le coach principal, un collaborateur ne
+       * s'approprie jamais un élève. Écriture réservée à l'administrateur
+       * (policy `collaborateur_eleves_manage_admin`) ; un collaborateur lit
+       * uniquement ses propres lignes (`collaborateur_eleves_select_self`).
+       */
+      collaborateur_eleves: {
+        Row: {
+          id: string;
+          collaborateur_id: string;
+          student_id: string;
+          affecte_par: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          collaborateur_id: string;
+          student_id: string;
+          affecte_par?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          collaborateur_id?: string;
+          student_id?: string;
+          affecte_par?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      /**
+       * Niveau accordé à un collaborateur, CATÉGORIE PAR CATÉGORIE (modèle
+       * P13-B). Une seule ligne par couple (collaborateur, catégorie) —
+       * contrainte `collaborateur_permissions_unique`. L'absence de ligne
+       * vaut « aucun accès » : il n'existe pas de niveau « aucun ».
+       */
+      collaborateur_permissions: {
+        Row: {
+          id: string;
+          collaborateur_id: string;
+          categorie: "entrainement" | "suivi_eleve" | "agenda_communication" | "nutrition";
+          niveau: "lecture" | "ecriture";
+          accorde_par: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          collaborateur_id: string;
+          categorie: "entrainement" | "suivi_eleve" | "agenda_communication" | "nutrition";
+          niveau: "lecture" | "ecriture";
+          accorde_par?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          collaborateur_id?: string;
+          categorie?: "entrainement" | "suivi_eleve" | "agenda_communication" | "nutrition";
+          niveau?: "lecture" | "ecriture";
+          accorde_par?: string | null;
           created_at?: string;
           updated_at?: string;
         };

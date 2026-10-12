@@ -68,7 +68,12 @@ export async function POST(request: Request) {
   } else {
     // Correctif H-3 : un coach ne notifie que les rendez-vous de SES élèves.
     // L'administrateur passe sans condition.
-    const accesEleve = await requireStaffForStudent(appointment.studentId);
+    // P13-B : notifier un rendez-vous relève de `agenda_communication` en
+    // écriture (un email part réellement).
+    const accesEleve = await requireStaffForStudent(appointment.studentId, {
+      categorie: "agenda_communication",
+      niveau: "ecriture",
+    });
     if (!accesEleve.ok) return accesEleve.response;
   }
 

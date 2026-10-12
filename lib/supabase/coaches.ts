@@ -87,22 +87,56 @@ export async function updateCoach(
 }
 
 /**
- * Garantit qu'une ligne `coaches` existe pour l'utilisateur admin/coach
- * actuellement connecté — aucune ligne n'était jamais créée avant ce
- * chantier (table vide en production, y compris pour le compte principal
- * de Jules). Sans cette étape : (a) impossible d'identifier "mon profil"
- * pour le protéger contre l'auto-suppression dans l'UI, (b)
- * getPrimaryCoachInfo (lib/supabase/appointments.ts, utilisé par les emails
- * envoyés aux élèves) retombait sur un nom/email par défaut plutôt que les
- * vraies coordonnées du coach. Non bloquant : erreurs journalisées, jamais
- * levées (RLS `coaches_manage_admin` autorise déjà l'écriture pour
- * is_coach_or_admin(), donc un client de session suffit ici).
+ * Garantit qu'une ligne `coaches` existe pour l'ADMINISTRATEUR actuellement
+ * connecté — aucune ligne n'était jamais créée avant ce chantier (table vide
+ * en production, y compris pour le compte principal de Jules). Sans cette
+ * étape : (a) impossible d'identifier "mon profil" pour le protéger contre
+ * l'auto-suppression dans l'UI, (b) getPrimaryCoachInfo
+ * (lib/supabase/appointments.ts, utilisé par les emails envoyés aux élèves)
+ * retombait sur un nom/email par défaut plutôt que les vraies coordonnées du
+ * coach. Non bloquant : erreurs journalisées, jamais levées.
+ *
+ * ---------------------------------------------------------------------
+ * POURQUOI L'ADMINISTRATEUR, ET LUI SEUL (P13-B, 11/10/2026)
+ * ---------------------------------------------------------------------
+ * Les deux requêtes sur `coaches` sont réservées à l'administrateur par la
+ * RLS : `coaches_manage_admin_select` / `coaches_manage_admin_insert`
+ * opposent `is_admin()`, c'est-à-dire exactement
+ * `profiles.role = 'admin'` (migration 20260726220000). Pour un assistant ou
+ * un collaborateur, la version précédente faisait donc :
+ *
+ *   1. un `select` qui renvoyait zéro ligne — non parce qu'aucune fiche
+ *      n'existe, mais parce qu'il n'a pas le droit de la voir ;
+ *   2. puis, trompée par ce vide, un `insert` refusé (42501), journalisé en
+ *      erreur à CHAQUE chargement de /admin/parametres.
+ *
+ * Le rôle est donc lu D'ABORD, dans `profiles` — la seule table que tout le
+ * monde peut lire pour sa propre ligne — et rien n'est tenté sur `coaches`
+ * si l'appelant n'est pas administrateur. Aucun contournement par service
+ * role : la fonction tourne avec un client de session, et renonce quand elle
+ * n'a pas les droits, au lieu de les emprunter.
+ *
+ * Ce que cela ne casse pas : un assistant ou un collaborateur créé depuis
+ * /admin/parametres a DÉJÀ sa ligne `coaches`, écrite par
+ * `createCoachAccount` (service role, au moment de l'invitation). Cette
+ * fonction ne servait qu'au compte principal historique, antérieur au
+ * remplissage de la table.
  */
 export async function ensureSelfCoachRow(supabase: TypedSupabaseClient): Promise<void> {
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return;
+
+  const { data: profile, error: profileError } = await supabase
+    .from("profiles")
+    .select("first_name, last_name, email, role")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  devWarn("ensureSelfCoachRow (profile)", profileError);
+  // `is_admin()` = `profiles.role = 'admin'`. Tout autre rôle n'a aucun droit
+  // sur `coaches` : ni lecture, ni écriture, pas même pour sa propre ligne.
+  if (profile?.role !== "admin") return;
 
   const { data: existing, error: existingError } = await supabase
     .from("coaches")
@@ -112,14 +146,6 @@ export async function ensureSelfCoachRow(supabase: TypedSupabaseClient): Promise
   devWarn("ensureSelfCoachRow (lookup)", existingError);
   if (existing) return;
 
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("first_name, last_name, email, role")
-    .eq("user_id", user.id)
-    .maybeSingle();
-  devWarn("ensureSelfCoachRow (profile)", profileError);
-  if (!profile || (profile.role !== "admin" && profile.role !== "coach")) return;
-
   const name = [profile.first_name, profile.last_name].filter(Boolean).join(" ").trim() || (user.email ?? "").split("@")[0];
   const email = profile.email || user.email || "";
 
@@ -127,7 +153,7 @@ export async function ensureSelfCoachRow(supabase: TypedSupabaseClient): Promise
     user_id: user.id,
     name: name || "Coach",
     email,
-    role: profile.role === "admin" ? "admin" : "assistant",
+    role: "admin",
     status: "actif",
     specialty: "",
   });

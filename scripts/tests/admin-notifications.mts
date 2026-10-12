@@ -795,15 +795,34 @@ await test("ADMINPUSH22. aucune infrastructure Push parallèle, et le socle vali
   const migrationsNotifications = manifeste.migrations_post_baseline_attendues.filter((f) =>
     /notification|push/i.test(f),
   );
+  // ⚠️ DEUX ENTRÉES DEPUIS LE 11/10/2026, ET LA SECONDE EST NOMMÉE, PAS TOLÉRÉE.
+  // Ce chantier-ci n'a toujours ajouté AUCUNE migration. La seconde vient du
+  // correctif de privilèges du 27/09/2026 (commit 287e58f,
+  // « fix(notifications): sécuriser privilèges et rappels automatiques »),
+  // déjà appliquée en production : elle ne crée aucune table, elle corrige des
+  // GRANT. Elle n'apparaissait pas ici parce que le MANIFESTE lui-même ne la
+  // déclarait pas — onze migrations y manquaient, dont celle-ci. Le manifeste
+  // ayant été complété, l'inventaire attendu doit l'être aussi : la liste
+  // reste EXACTE, elle ne devient pas permissive.
   assert.deepEqual(
     migrationsNotifications,
-    ["20260828090000_web_push_notifications.sql"],
-    "une seule migration de notifications, celle du socle déjà appliquée",
+    ["20260828090000_web_push_notifications.sql", "20260929090000_notifications_grants.sql"],
+    "exactement ces deux migrations de notifications, et aucune autre",
   );
+  // Et la seconde ne crée bien aucune table : c'est ce qui permet de
+  // l'inscrire sans renoncer à la garantie « aucune infrastructure parallèle ».
+  const grants = lire("supabase/migrations/20260929090000_notifications_grants.sql");
+  assert.ok(!/create table/i.test(grants), "la migration de privilèges ne doit créer aucune table");
 
   // La route de test iPhone, validée sur le terrain, est intacte dans son contrat.
   const test = lire("app/api/admin/notifications/test/route.ts");
-  assert.ok(test.includes("requireStaffForStudent(studentId)"));
+  // P13-B : la garde exige désormais une CATÉGORIE en plus de l'affectation.
+  // L'ancienne forme `requireStaffForStudent(studentId)` laissait un
+  // collaborateur sans `agenda_communication` envoyer une notification à un
+  // élève affecté — le contrat est donc resserré, pas relâché.
+  assert.ok(/requireStaffForStudent\(studentId, \{/.test(test), "la garde par élève doit rester en place");
+  assert.ok(/categorie: "agenda_communication"/.test(test), "la catégorie exigée doit être déclarée");
+  assert.ok(/niveau: "ecriture"/.test(test), "envoyer une notification est une écriture de communication");
   assert.ok(test.includes('.from("students").select("user_id")'));
 
   // Le service worker n'a pas été retouché pour ce chantier.

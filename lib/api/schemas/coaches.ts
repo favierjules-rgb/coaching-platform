@@ -8,7 +8,10 @@ export const createCoachBodySchema = z
     firstName: z.string().trim().min(1, "Le prénom est requis.").max(100),
     lastName: z.string().trim().min(1, "Le nom est requis.").max(100),
     email: z.string().trim().min(1, "L'email est requis.").email("Email invalide."),
-    role: z.enum(["admin", "assistant"]),
+    // P13-B : les trois valeurs de `coaches.role` (contrainte
+    // `coaches_role_check`). `profiles.role` reste "coach" dans les trois
+    // cas — voir createCoachAccount.
+    role: z.enum(["admin", "assistant", "collaborateur"]),
     speciality: z.string().trim().max(200).default(""),
   })
   .strict();

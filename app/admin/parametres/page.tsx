@@ -1,19 +1,22 @@
 "use client";
 
 import { useState } from "react";
-import { AlertTriangle, CheckCircle, RotateCcw, Trash2 } from "lucide-react";
+import { AlertTriangle, CheckCircle, RotateCcw, ShieldCheck, Trash2 } from "lucide-react";
 
 import { Field, SelectField } from "@/components/admin/AdminFormFields";
 import { AdminSection } from "@/components/admin/AdminSection";
 import { CoachModal, type CoachSaveResult } from "@/components/admin/CoachModal";
+import { CollaborateurAccesModal } from "@/components/admin/CollaborateurAccesModal";
 import { PrimaryButton } from "@/components/admin/Modal";
 import { StatusBadge } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
+import { useResumesDroits } from "@/hooks/useCollaborateurAcces";
+import { useStaffContext } from "@/hooks/useStaffContext";
 import { useSupabaseCoaches } from "@/hooks/useSupabaseCoaches";
-import { coachRoleLabels, coachStatusLabels, fullName } from "@/lib/admin";
+import { AUCUN_ACCES_LABEL, categorieDroitLabels, coachRoleLabels, coachStatusLabels, fullName, niveauDroitLabels } from "@/lib/admin";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { updateCoach as updateCoachRow } from "@/lib/supabase/coaches";
-import type { AdminCoach } from "@/types";
+import { CATEGORIES_DROITS, type AdminCoach } from "@/types";
 
 const statusOptions = [
   { value: "en ligne", label: "En ligne" },
@@ -24,6 +27,16 @@ export default function AdminSettingsPage() {
   const { state, updateCoachSettings, resetAdminData } = useAdminData();
   const { coachSettings } = state;
   const { coaches, currentUserId, refetch: refetchCoaches } = useSupabaseCoaches();
+  const { resumes: resumesDroits, recharger: rechargerDroits } = useResumesDroits();
+  // P13-B : « le coach ne gère jamais globalement les coachs ». La section
+  // ci-dessous est donc masquée dès que le rôle staff est CONNU et qu'il n'est
+  // pas `admin`. `null` signifie inconnu (migrations non appliquées, ou aucune
+  // fiche active) : on garde alors l'affichage d'avant, car masquer sur un
+  // doute cacherait la section au compte principal. Rien ne repose sur cet
+  // affichage : la création et la suppression passent par `requireAdmin()`, et
+  // les écritures sur les tables de droits par les policies `..._manage_admin`.
+  const { role: roleStaff } = useStaffContext();
+  const peutGererLesCoachs = roleStaff === null || roleStaff === "admin";
 
   const [form, setForm] = useState(coachSettings);
   const [saved, setSaved] = useState(false);
@@ -35,6 +48,14 @@ export default function AdminSettingsPage() {
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteErrorId, setDeleteErrorId] = useState<string | null>(null);
+  /** Collaborateur dont la modale de droits est ouverte (P13-B). */
+  const [droitsCoachId, setDroitsCoachId] = useState<string | null>(null);
+
+  // Fiche `coaches` de l'administrateur connecté : tracée dans `affecte_par`
+  // et `accorde_par` pour savoir qui a accordé quoi. `null` si sa ligne
+  // n'existe pas encore — la colonne est nullable précisément pour ce cas.
+  const ficheAdminId = coaches.find((coach) => coach.userId && coach.userId === currentUserId)?.id ?? null;
+  const collaborateurDroits = coaches.find((coach) => coach.id === droitsCoachId) ?? null;
 
   function setField<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -92,6 +113,21 @@ export default function AdminSettingsPage() {
     await refetchCoaches();
   }
 
+  /**
+   * Libellé du résumé des droits d'un collaborateur. Volontairement explicite
+   * quand il n'a rien : « Aucun accès » dit la vérité du modèle (absence de
+   * ligne = refus), là où une ligne vide laisserait penser à un chargement.
+   */
+  function resumeDroits(coachId: string): string {
+    const resume = resumesDroits[coachId];
+    const categories = CATEGORIES_DROITS.filter((categorie) => resume?.permissions[categorie]).map(
+      (categorie) => `${categorieDroitLabels[categorie]} (${niveauDroitLabels[resume!.permissions[categorie]!].toLowerCase()})`,
+    );
+    const eleves = resume?.nbEleves ?? 0;
+    const partEleves = eleves === 0 ? "aucun élève affecté" : `${eleves} élève${eleves > 1 ? "s" : ""} affecté${eleves > 1 ? "s" : ""}`;
+    return `${categories.length === 0 ? AUCUN_ACCES_LABEL : categories.join(" · ")} — ${partEleves}`;
+  }
+
   function handleReset() {
     if (window.confirm("Réinitialiser toutes les données de test admin (élèves, programmes, plans, documents, retours) ? Cette action efface le localStorage.")) {
       resetAdminData();
@@ -128,6 +164,7 @@ export default function AdminSettingsPage() {
           </div>
         </AdminSection>
 
+        {peutGererLesCoachs && (
         <AdminSection title="Coachs" action={<CoachModal onSave={handleCreateCoach} />}>
           {coaches.length === 0 ? (
             <p className="text-sm text-muted-foreground">Aucun coach enregistré.</p>
@@ -151,9 +188,32 @@ export default function AdminSettingsPage() {
                           {coach.email} · {coachRoleLabels[coach.role]}
                           {coach.speciality && ` · ${coach.speciality}`}
                         </span>
+                        {/* P13-B : affichage FIDÈLE de ce qui est enregistré —
+                            aucune catégorie n'est supposée accordée, et
+                            l'absence de droit est écrite en clair plutôt que
+                            laissée vide. */}
+                        {coach.role === "collaborateur" && (
+                          <span className="mt-1 block text-[11px] text-muted-foreground">
+                            {resumeDroits(coach.id)}
+                          </span>
+                        )}
                       </div>
                       <div className="flex flex-wrap gap-2">
                         <CoachModal coach={coach} onSave={(data) => handleUpdateCoach(coach.id, data)} />
+                        {/* P13-B : seul un collaborateur a des droits à
+                            configurer. Un admin a les droits globaux, un coach
+                            autonome gère ses propres élèves — ni l'un ni
+                            l'autre ne passe par `collaborateur_permissions`. */}
+                        {coach.role === "collaborateur" && (
+                          <button
+                            type="button"
+                            onClick={() => setDroitsCoachId(coach.id)}
+                            className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                          >
+                            <ShieldCheck size={12} aria-hidden="true" />
+                            Droits
+                          </button>
+                        )}
                         {!isSelf && (
                           <button
                             type="button"
@@ -179,6 +239,18 @@ export default function AdminSettingsPage() {
             </div>
           )}
         </AdminSection>
+        )}
+
+        {collaborateurDroits && (
+          <CollaborateurAccesModal
+            collaborateur={collaborateurDroits}
+            accordePar={ficheAdminId}
+            onClose={() => {
+              setDroitsCoachId(null);
+              void rechargerDroits();
+            }}
+          />
+        )}
 
         {/* Zone de test : plus de grand encadré rouge plein cadre (c'était le
             « halo rouge » perçu à côté de la sidebar) — carte au langage

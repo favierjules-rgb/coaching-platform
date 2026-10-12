@@ -692,8 +692,15 @@ export async function rescheduleAppointment(
 export interface EmailRecipientInfo {
   studentFirstName: string;
   studentEmail: string;
-  coachName: string;
-  coachEmail: string;
+  /**
+   * Facultatives : la route d'envoi relit le coach principal en base avec le
+   * service role et ignore ce qui vient du navigateur — voir
+   * `AppointmentEmailContext` dans lib/email/appointment-emails.ts. L'espace
+   * élève les renseigne pour son propre affichage ; l'espace admin ne les
+   * renseigne plus, pour ne pas avoir à lire `coaches` côté navigateur.
+   */
+  coachName?: string;
+  coachEmail?: string;
 }
 
 function emailContextFrom(appointment: AdminAppointment, recipient: EmailRecipientInfo): AppointmentEmailContext {

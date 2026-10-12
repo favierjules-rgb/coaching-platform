@@ -2243,16 +2243,66 @@ export interface SupabaseCoachNote {
 }
 
 /**
- * "admin" = compte principal (jamais attribué via le formulaire d'ajout,
- * réservé au propriétaire du site) ; "assistant" = collaborateur ajouté
- * depuis /admin/parametres. N'a aucune incidence sur les droits réels
- * (voir is_coach_or_admin() : un profil `coach` a le même accès complet
- * qu'un profil `admin`) — purement un libellé d'organisation affiché dans
- * la liste. Doit rester synchronisé avec la contrainte CHECK
- * `coaches_role_check` en base (ANY ['admin','assistant']).
+ * Rôle PORTÉ PAR `coaches.role`, et non par `profiles.role` (qui reste
+ * "admin" | "coach" | "student", inchangé — sept gardes applicatives en
+ * dépendent, voir lib/api/authz.ts et lib/supabase/guards.ts) :
+ *
+ *   - "admin"         : compte principal, droits globaux ;
+ *   - "assistant"     : coach autonome — il gère les élèves dont il est le
+ *                       coach principal (`students.coach_id`) ;
+ *   - "collaborateur" : n'accède QU'AUX élèves explicitement affectés
+ *                       (`collaborateur_eleves`) et QU'AUX catégories qui
+ *                       lui ont été accordées (`collaborateur_permissions`).
+ *
+ * Doit rester synchronisé avec la contrainte CHECK `coaches_role_check`
+ * (migration 20261011090000_p13b_modele_droits_collaborateurs.sql :
+ * ANY ['admin','assistant','collaborateur']).
  */
-export type CoachRole = "admin" | "assistant";
+export type CoachRole = "admin" | "assistant" | "collaborateur";
 export type CoachAccountStatus = "actif" | "inactif";
+
+/**
+ * Les QUATRE catégories de droits accordables à un collaborateur. La liste
+ * est fermée côté base par la contrainte CHECK
+ * `collaborateur_permissions.categorie`. La facturation, les paiements, les
+ * abonnements, `coaches` et `profiles` n'en font PAS partie : aucune
+ * permission ne peut ouvrir une table globale ou administrative.
+ */
+export type CategorieDroit = "entrainement" | "suivi_eleve" | "agenda_communication" | "nutrition";
+
+/**
+ * Deux niveaux seulement. L'ABSENCE de ligne vaut « aucun accès » — c'est
+ * pour cela qu'il n'existe pas de troisième valeur : encoder « aucun »
+ * permettrait à une ligne `aucun` et à une ligne absente de diverger.
+ * `ecriture` implique `lecture` POUR LA MÊME CATÉGORIE, et jamais au-delà.
+ */
+export type NiveauDroit = "lecture" | "ecriture";
+
+/** Niveau EFFECTIF d'une catégorie côté interface : `null` = aucun accès. */
+export type NiveauEffectif = NiveauDroit | null;
+
+/** Les quatre catégories dans l'ordre d'affichage de l'interface. */
+export const CATEGORIES_DROITS: readonly CategorieDroit[] = [
+  "entrainement",
+  "nutrition",
+  "suivi_eleve",
+  "agenda_communication",
+];
+
+/**
+ * Une ligne de `collaborateur_permissions`, telle qu'enregistrée. L'absence
+ * d'entrée pour une catégorie signifie « aucun accès » : l'interface
+ * n'invente jamais une valeur par défaut.
+ */
+export type PermissionsCollaborateur = Partial<Record<CategorieDroit, NiveauDroit>>;
+
+/** Un élève explicitement affecté à un collaborateur (`collaborateur_eleves`). */
+export interface AffectationCollaborateur {
+  studentId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+}
 
 /**
  * Collaborateur admin/coach listé sur /admin/parametres — reflète une ligne
