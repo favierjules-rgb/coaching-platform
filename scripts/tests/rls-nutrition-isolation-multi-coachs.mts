@@ -1937,6 +1937,10 @@ const CHEMIN_P13B_NUTRITION =
   "supabase/migrations/20261011120000_p13b_integration_nutrition.sql";
 const CHEMIN_P13B_PROVISION =
   "supabase/migrations/20261011130000_p13b_garde_provision_program_copy.sql";
+const CHEMIN_P13B_RESERVATION =
+  "supabase/migrations/20261013090000_p13b_cloisonner_surface_reservation.sql";
+const CHEMIN_P13B_ADMIN_REEL =
+  "supabase/migrations/20261013100000_p13b_admin_reel_est_staff_global.sql";
 
 const P13B_MODELE = sansCommentairesSql(lire(CHEMIN_P13B_MODELE));
 const P13B_POLICIES = sansCommentairesSql(lire(CHEMIN_P13B_POLICIES));
@@ -1945,6 +1949,9 @@ const P13B_NUTRITION = sansCommentairesSql(lire(CHEMIN_P13B_NUTRITION));
 const P13B_PROVISION = sansCommentairesSql(lire(CHEMIN_P13B_PROVISION));
 /** Le texte BRUT de la 5e migration : ses gardes citent l'ancienne règle, commentaires compris. */
 const P13B_PROVISION_BRUT = lire(CHEMIN_P13B_PROVISION);
+const P13B_RESERVATION = sansCommentairesSql(lire(CHEMIN_P13B_RESERVATION));
+const P13B_ADMIN_REEL = sansCommentairesSql(lire(CHEMIN_P13B_ADMIN_REEL));
+
 
 const CATEGORIES = ["entrainement", "suivi_eleve", "agenda_communication", "nutrition"] as const;
 
@@ -1989,13 +1996,15 @@ const POLICIES_P13B: PolicieP13B[] = (() => {
   return out;
 })();
 
-test("P13B 1. les cinq migrations existent et sont ordonnées", () => {
+test("P13B 1. les sept migrations existent et sont ordonnées", () => {
   for (const [n, s] of [
     ["modèle", P13B_MODELE],
     ["policies", P13B_POLICIES],
     ["fonctions", P13B_FONCTIONS],
     ["nutrition", P13B_NUTRITION],
     ["provision", P13B_PROVISION],
+    ["réservation", P13B_RESERVATION],
+    ["admin réel", P13B_ADMIN_REEL],
   ] as const) {
     assert.ok(s.trim().length > 0, `la migration ${n} est vide`);
   }
@@ -2998,6 +3007,217 @@ test("P13B/5 5. la checklist couvre les cas de refus ET le cas autorisé", () =>
 });
 
 // ════════════════════════════════════════════════════════════════════════════
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * P13B/6 — LA SURFACE DE RÉSERVATION
+ * ══════════════════════════════════════════════════════════════════════════
+ * Anomalie constatée sur Vercel Preview le 13/10/2026 : avec
+ * `agenda_communication = aucun accès`, un collaborateur lisait les créneaux
+ * de disponibilité, les réglages de réservation et les bornes occupées.
+ *
+ * ⚠️ LA LEÇON QUE CES TESTS GARDENT. Les policies PERMISSIVES de PostgreSQL se
+ * combinent en **OU**. La migration 20261011100000 a ajouté des policies
+ * catégorisées À CÔTÉ des policies héritées du parcours de réservation
+ * (`auth.role() = 'authenticated'`) : ajouter une clause stricte à côté d'une
+ * clause ouverte ne referme RIEN. C'est le trou que la 6e migration ferme, et
+ * le motif que ces contrôles interdisent de réintroduire.
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+test("P13B/6 1. aucune policy SELECT ouverte à tout authentifié ne peut revenir", () => {
+  // Balayage sur TOUTES les migrations P13-B : une policy `auth.role() =
+  // 'authenticated'` sur la surface de réservation rouvrirait le trou.
+  // ⚠️ LA 6e MIGRATION EST EXCLUE DU BALAYAGE : elle CITE la policy ouverte
+  // dans son `drop policy if exists`, c'est précisément son travail.
+  const nomReservation = CHEMIN_P13B_RESERVATION.split("/").pop();
+  const balayees = [
+    CHEMIN_P13B_MODELE, CHEMIN_P13B_POLICIES, CHEMIN_P13B_FONCTIONS,
+    CHEMIN_P13B_NUTRITION, CHEMIN_P13B_PROVISION,
+  ];
+  for (const chemin of balayees) {
+    const sql = sansCommentairesSql(lire(chemin));
+    assert.ok(
+      !/create policy[\s\S]{0,400}?auth\.role\(\)\s*=\s*'authenticated'/i.test(sql),
+      `${chemin} : une policy ouverte à tout authentifié y est créée`,
+    );
+  }
+  assert.ok(nomReservation && nomReservation.length > 0, "la 6e migration doit être nommée");
+  assert.ok(
+    balayees.every((c) => !c.endsWith(nomReservation!)),
+    "la 6e migration ne doit pas figurer dans le balayage : elle cite la policy ouverte pour la retirer",
+  );
+  assert.ok(
+    /drop policy if exists coach_availabilities_select_authenticated/.test(P13B_RESERVATION),
+    "la 6e migration doit retirer la policy ouverte des disponibilités",
+  );
+  assert.ok(
+    /drop policy if exists booking_settings_select_authenticated/.test(P13B_RESERVATION),
+    "la 6e migration doit retirer la policy ouverte des réglages",
+  );
+});
+
+test("P13B/6 2. le parcours élève est préservé, et explicitement", () => {
+  // ⚠️ LA MOITIÉ DU CORRECTIF. Sans les créneaux, les réglages et les bornes
+  // occupées, un élève ne peut plus réserver — ou réserve un créneau déjà
+  // pris par un autre élève (voir getAvailableSlots).
+  const compact = P13B_RESERVATION.replace(/\s+/g, " ");
+  assert.ok(
+    /create policy coach_availabilities_select_eleve on public\.coach_availabilities for select using \(\(select public\.current_student_id\(\)\) is not null\)/.test(compact),
+    "l'élève doit garder les créneaux, par current_student_id()",
+  );
+  assert.ok(
+    /create policy booking_settings_select_eleve on public\.booking_settings for select using \(\(select public\.current_student_id\(\)\) is not null\)/.test(compact),
+    "l'élève doit garder les réglages de réservation",
+  );
+  assert.ok(/public\.current_student_id\(\) is not null/.test(compact),
+    "la fonction gardée doit laisser passer le parcours élève");
+});
+
+test("P13B/6 3. la garde de get_busy_ranges exige la catégorie ET la portée", () => {
+  const compact = P13B_RESERVATION.replace(/\s+/g, " ");
+  assert.ok(/security definer/.test(compact), "la fonction reste SECURITY DEFINER");
+  assert.ok(/set search_path = public, pg_temp/.test(compact),
+    "search_path figé, pg_temp en dernier — convention P13-A/P13-B");
+  assert.ok(
+    /'agenda_communication' in \(select public\.categories_lecture\(\)\)/.test(compact),
+    "la catégorie doit être exigée au niveau lecture",
+  );
+  assert.ok(
+    /and exists \(select 1 from public\.coach_ids_portee\(\)\)/.test(compact),
+    "la permission SEULE ne doit jamais suffire : la portée est exigée en plus",
+  );
+  assert.ok(/coalesce\(/.test(compact), "logique fail-closed sur les NULL");
+  assert.ok(/coalesce\(auth\.role\(\), ''\) = 'service_role'/.test(compact),
+    "service_role (webhook, cron) doit rester inchangé");
+  assert.ok(/coalesce\(public\.est_staff_global\(\), false\)/.test(compact),
+    "l'administrateur et le coach autonome passent par est_staff_global()");
+  // Le corps n'est pas amputé : mêmes tables, mêmes statuts bloquants.
+  assert.ok(/from public\.appointments a/.test(compact) && /from public\.coach_unavailabilities u/.test(compact),
+    "les deux sources de bornes doivent rester");
+  assert.ok(/a\.status in \('pending', 'confirmed'\)/.test(compact),
+    "les statuts bloquants ne doivent pas changer");
+  assert.ok(/revoke execute on function public\.get_busy_ranges\(timestamptz, timestamptz\) from anon/.test(compact),
+    "anon doit perdre execute");
+  assert.ok(/grant execute on function public\.get_busy_ranges\(timestamptz, timestamptz\) to authenticated, service_role/.test(compact),
+    "authenticated et service_role doivent garder execute");
+});
+
+test("P13B/6 4. la clause de portée du collaborateur est gardée par la catégorie", () => {
+  const compact = P13B_RESERVATION.replace(/\s+/g, " ");
+  // Les policies validées exigent `coach_id = current_staff_id()` : un
+  // collaborateur ne possède aucune ligne de disponibilité. Sans cette clause
+  // de portée il perdrait les créneaux du coach dont il gère les élèves.
+  assert.ok(/create policy coach_availabilities_select_portee/.test(compact),
+    "la clause de portée doit exister");
+  assert.ok(
+    /coach_id in \(select public\.coach_ids_portee\(\)\)/.test(compact),
+    "elle doit viser les coachs de la portée, pas tous les coachs",
+  );
+  assert.ok(
+    /create policy coach_availabilities_select_portee[\s\S]{0,300}?categories_lecture/.test(compact),
+    "et rester gardée par la catégorie",
+  );
+  assert.ok(/create policy booking_settings_select_agenda[\s\S]{0,200}?categories_lecture/.test(compact),
+    "les réglages suivent la même règle");
+});
+
+test("P13B/6 5. les cinq migrations déjà appliquées ne sont pas modifiées", () => {
+  // La 6e est ADDITIVE : elle ne doit toucher ni créer aucune des structures
+  // des cinq précédentes, seulement les trois objets en cause.
+  const compact = P13B_RESERVATION.replace(/\s+/g, " ");
+  assert.ok(!/create table|drop table|alter table/i.test(compact),
+    "aucune table ne doit être touchée");
+  assert.ok(!/drop function/i.test(compact), "aucune fonction ne doit être supprimée");
+  for (const garde of ["student_ids_portee", "student_ids_suivi_eleve", "staff_role"]) {
+    assert.ok(!new RegExp(`create or replace function public\\.${garde}`).test(compact),
+      `${garde} ne doit pas être redéfinie par ce correctif`);
+  }
+  // Et elle est rejouable : chaque create policy est précédé d'un drop.
+  const creations = (compact.match(/create policy (\w+)/g) ?? []).map((m) => m.split(" ")[2]);
+  assert.equal(creations.length, 4, "quatre policies sont créées");
+  for (const nom of creations) {
+    assert.ok(new RegExp(`drop policy if exists ${nom} `).test(compact),
+      `${nom} doit être précédée d'un drop if exists — sinon le rejeu échoue`);
+  }
+});
+
+test("P13B/6 6. la checklist mesure les effets en base, et le parcours élève", () => {
+  const checklist = lire("supabase/tests/p13b_roles_collaborateurs_checklist.sql");
+  for (const n of ["I1.", "I2.", "I3.", "I4.", "I5.", "I6.", "I7.", "I8.", "I13.", "I14.", "I15."]) {
+    assert.ok(checklist.includes(n), `le contrôle ${n} manque à la checklist`);
+  }
+  // Les trois surfaces sont mesurées par un COMPTAGE RÉEL, pas par le texte
+  // d'une condition.
+  assert.ok(/select count\(\*\) from public\.coach_availabilities/.test(checklist));
+  assert.ok(/select count\(\*\) from public\.booking_settings/.test(checklist));
+  assert.ok(/select count\(\*\) from public\.get_busy_ranges\(/.test(checklist));
+  // La permission seule et l'affectation seule sont testées séparément.
+  assert.ok(/permission sans élève affecté/.test(checklist));
+  assert.ok(/affectation sans permission/.test(checklist));
+  // Et la lecture se fait dans la session de chaque acteur.
+  assert.ok(/lecture_compte_en_tant_que/.test(checklist),
+    "chaque mesure doit se faire dans la session effective de l'acteur");
+});
+
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * P13B/7 — L'ADMINISTRATEUR RÉEL
+ * ══════════════════════════════════════════════════════════════════════════
+ * Signalé le 13/10/2026 : plus aucune modification de programme ne
+ * s'enregistrait (« Une partie du programme n'a pas pu être enregistrée » =
+ * STRUCTURE_INCOMPLETE). `est_staff_global()` ne lisait que `staff_role()`,
+ * qui exige une fiche `coaches` ACTIVE : un `profiles.role = 'admin'` sans
+ * fiche perdait les programmes modèles, en lecture comme en écriture.
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+test("P13B/7 1. est_staff_global() consulte les DEUX signaux d'administrateur", () => {
+  const compact = P13B_ADMIN_REEL.replace(/\s+/g, " ");
+  assert.ok(/create or replace function public\.est_staff_global\(\)/.test(compact),
+    "la fonction doit être redéfinie");
+  assert.ok(/coalesce\(public\.is_admin\(\), false\)/.test(compact),
+    "l'administrateur RÉEL (profiles.role) doit être reconnu");
+  assert.ok(/coalesce\(public\.staff_role\(\) in \('admin', 'assistant'\), false\)/.test(compact),
+    "et l'étiquette coaches.role doit rester : sinon le coach autonome perd sa portée");
+  // ⚠️ FAIL-CLOSED. `staff_role()` NULL donnait `null in (...)` = NULL, traité
+  // comme un refus par chance et non par écrit.
+  assert.equal((compact.match(/coalesce\(/g) ?? []).length, 2,
+    "les deux branches doivent être enveloppées : aucune ne doit pouvoir rendre NULL");
+  assert.ok(/security definer/.test(compact) && /set search_path = public, pg_temp/.test(compact),
+    "definer à search_path figé, pg_temp en dernier");
+  assert.ok(/revoke execute on function public\.est_staff_global\(\) from anon/.test(compact),
+    "anon doit rester exclu");
+  assert.ok(/grant execute on function public\.est_staff_global\(\) to authenticated, service_role/.test(compact),
+    "authenticated et service_role gardent execute");
+});
+
+test("P13B/7 2. le correctif est MINIMAL : une seule fonction change", () => {
+  const compact = P13B_ADMIN_REEL.replace(/\s+/g, " ");
+  assert.ok(!/create policy|drop policy/i.test(compact), "aucune policy ne doit bouger");
+  assert.ok(!/create table|alter table|drop table/i.test(compact), "aucune table ne doit bouger");
+  // Une seule fonction redéfinie.
+  assert.equal((compact.match(/create or replace function/g) ?? []).length, 1,
+    "exactement une fonction redéfinie");
+  for (const garde of ["staff_role", "is_admin", "student_ids_portee", "categories_lecture"]) {
+    assert.ok(!new RegExp(`create or replace function public\\.${garde}\\(`).test(compact),
+      `${garde}() ne doit pas être redéfinie par ce correctif`);
+  }
+});
+
+test("P13B/7 3. la checklist prouve le déblocage ET la non-régression du collaborateur", () => {
+  const checklist = lire("supabase/tests/p13b_roles_collaborateurs_checklist.sql");
+  for (const n of ["J1.", "J2.", "J3.", "J3b.", "J4.", "J5.", "J6.", "J7."]) {
+    assert.ok(checklist.includes(n), `le contrôle ${n} manque à la checklist`);
+  }
+  // L'écriture est mesurée EN BASE, pas seulement tentée.
+  assert.ok(/J3b\. la semaine est RÉELLEMENT en base/.test(checklist),
+    "l'effet de l'écriture doit être relu en base");
+  // ⚠️ LE CONTRÔLE DU CONTRÔLE : reconnaître l'admin réel ne doit rien donner
+  // à un collaborateur.
+  assert.ok(/le collaborateur n''est toujours PAS staff global/.test(checklist));
+  assert.ok(/il ne voit toujours aucun programme modèle/.test(checklist));
+});
+
 
 console.log(`\n${passed} réussis, ${failed} échecs`);
 if (failed > 0) process.exit(1);

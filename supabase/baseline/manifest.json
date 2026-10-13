@@ -113,7 +113,9 @@
     "20261011100000_p13b_policies_cloisonnees.sql",
     "20261011110000_p13b_durcissement_fonctions_definer.sql",
     "20261011120000_p13b_integration_nutrition.sql",
-    "20261011130000_p13b_garde_provision_program_copy.sql"
+    "20261011130000_p13b_garde_provision_program_copy.sql",
+    "20261013090000_p13b_cloisonner_surface_reservation.sql",
+    "20261013100000_p13b_admin_reel_est_staff_global.sql"
   ],
   "garanties_de_contenu": {
     "insert_de_donnees_metier": 0,

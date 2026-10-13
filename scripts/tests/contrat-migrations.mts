@@ -301,6 +301,51 @@ export const MIGRATION_P13B_NUTRITION = "20261011120000_p13b_integration_nutriti
  */
 export const MIGRATION_P13B_PROVISION = "20261011130000_p13b_garde_provision_program_copy.sql";
 
+/**
+ * P13-B, migration 6/6 — la surface de réservation.
+ * PAS ENCORE APPLIQUÉE. Les cinq précédentes le sont (commit 8fc530f).
+ *
+ * ⚠️ ELLE CORRIGE UNE ANOMALIE MESURÉE SUR PREVIEW, ET LA CAUSE N'EST PAS
+ * CELLE QU'ON CROIT. Un collaborateur dont `agenda_communication` vaut
+ * « aucun accès » lisait les créneaux de disponibilité, les réglages de
+ * réservation et les bornes occupées. Ce n'était ni une permission mal
+ * enregistrée, ni un rôle mal résolu : les policies PERMISSIVES de PostgreSQL
+ * se combinent en **OU**, et la migration 20261011100000 avait ajouté ses
+ * policies catégorisées À CÔTÉ des policies héritées du parcours de
+ * réservation élève (`auth.role() = 'authenticated'`), qui restaient vraies
+ * pour tout compte connecté. `get_busy_ranges()`, SECURITY DEFINER, n'avait
+ * aucune garde du tout.
+ *
+ * ⚠️ ELLE NE REFERME PAS LE PARCOURS ÉLÈVE, et c'est la moitié du correctif :
+ * sans les créneaux, les réglages et les bornes occupées, un élève ne peut
+ * plus réserver — ou réserve un créneau déjà pris. Les contrôles I13 à I15 de
+ * la checklist échouent si on referme trop.
+ */
+export const MIGRATION_P13B_RESERVATION =
+  "20261013090000_p13b_cloisonner_surface_reservation.sql";
+
+/**
+ * P13-B, migration 7/7 — l'administrateur réel et `est_staff_global()`.
+ * PAS ENCORE APPLIQUÉE.
+ *
+ * ⚠️ ELLE DÉBLOQUE UN ENREGISTREMENT, PAS SEULEMENT UNE LECTURE. Signalé le
+ * 13/10/2026 : plus aucune modification de programme ne s'enregistrait, avec
+ * le bandeau « Une partie du programme n'a pas pu être enregistrée » — soit
+ * `STRUCTURE_INCOMPLETE` (lib/admin-builder-save.ts). Reproduit : un compte
+ * `profiles.role = 'admin'` SANS fiche `coaches` active obtenait
+ * `staff_role()` NULL, donc `est_staff_global()` NULL, donc des ensembles
+ * `program_ids_lecture()` / `program_ids_ecriture()` vides sur les programmes
+ * MODÈLES — zéro semaine lue, insertion refusée en 42501.
+ *
+ * `est_staff_global()` ne consultait que `coaches.role` ; elle consulte
+ * désormais AUSSI `is_admin()` (`profiles.role = 'admin'`), la distinction
+ * déjà posée par 20261011130000 pour `provision_program_copy`. Un
+ * collaborateur porte `profiles.role = 'coach'` : il ne gagne rien
+ * (contrôles J5/J6 de la checklist).
+ */
+export const MIGRATION_P13B_ADMIN_REEL =
+  "20261013100000_p13b_admin_reel_est_staff_global.sql";
+
 export const MIGRATIONS_COURSES: readonly string[] = [
   MIGRATION_C2,
   MIGRATION_C3,
@@ -342,17 +387,19 @@ export const MIGRATIONS_APRES_C0_1: readonly string[] = [
   MIGRATION_P13B_FONCTIONS,
   MIGRATION_P13B_NUTRITION,
   MIGRATION_P13B_PROVISION,
+  MIGRATION_P13B_RESERVATION,
+  MIGRATION_P13B_ADMIN_REEL,
 ];
 
 /**
  * Le compte attendu — nécessaire, jamais suffisant.
  *
- * 107 = 84 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 22
+ * 109 = 84 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 24
  * migrations nommées dans `MIGRATIONS_APRES_C0_1`. Le point 6 recalcule
  * l'historique à partir de ce nombre : il ne peut pas être remonté seul sans
  * qu'une migration soit nommée en face.
  */
-export const NOMBRE_DE_MIGRATIONS = 107;
+export const NOMBRE_DE_MIGRATIONS = 109;
 
 /**
  * L'empreinte des 79 migrations ANTÉRIEURES à C0.1, dans l'ordre.

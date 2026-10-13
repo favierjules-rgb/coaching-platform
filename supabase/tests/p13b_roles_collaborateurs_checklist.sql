@@ -53,6 +53,31 @@ returns int language plpgsql as $$
 declare v_n int;
 begin execute p_sql into v_n; return coalesce(v_n, 0); end $$;
 
+/*
+ * Même chose, mais DANS LA SESSION EFFECTIVE d'un utilisateur donné, puis
+ * retour à `postgres`. Ajoutée pour la section I (surface de réservation) :
+ * elle enchaîne plusieurs acteurs dans un seul bloc, et un `reset role`
+ * oublié aurait fait passer les contrôles suivants pour le mauvais compte.
+ *
+ * ⚠️ UN REFUS DE TABLE REND -1, JAMAIS 0. Un `permission denied` et « zéro
+ * ligne visible » sont deux résultats différents : les confondre ferait
+ * passer un contrôle d'absence pour réussi alors que la requête n'a même pas
+ * pu s'exécuter.
+ */
+create or replace function pg_temp.lecture_compte_en_tant_que(p_user uuid, p_sql text)
+returns int language plpgsql as $$
+declare v_n int;
+begin
+  perform pg_temp.devenir(p_user);
+  begin
+    execute p_sql into v_n;
+  exception when others then
+    v_n := -1;
+  end;
+  reset role;
+  return coalesce(v_n, 0);
+end $$;
+
 do $$ declare s text; begin
   s := (select nspname from pg_namespace where oid = pg_my_temp_schema());
   execute format('grant usage on schema %I to authenticated, anon', s);
@@ -1000,6 +1025,233 @@ begin
            from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='provision_program_copy')
     and (select has_function_privilege('service_role', p.oid, 'execute')
            from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='provision_program_copy'));
+end $$;
+
+
+-- ── I. LA SURFACE DE RÉSERVATION N'EST PAS UNE PORTE D'AGENDA ─────────────
+--
+-- ⚠️ ANOMALIE CONSTATÉE SUR VERCEL PREVIEW LE 13/10/2026, puis reproduite
+-- ici. Un collaborateur dont `agenda_communication` vaut « aucun accès » — et
+-- même un collaborateur SANS AUCUNE permission ET SANS AUCUN élève affecté —
+-- lisait les créneaux hebdomadaires (`coach_availabilities`), les réglages de
+-- réservation (`booking_settings`) et les bornes occupées
+-- (`get_busy_ranges()`).
+--
+-- LA CAUSE N'ÉTAIT NI UNE PERMISSION MAL ENREGISTRÉE, NI UN RÔLE MAL RÉSOLU.
+-- Les policies permissives de PostgreSQL se combinent en **OU** : la
+-- migration 20261011100000 a ajouté des policies catégorisées à CÔTÉ des
+-- policies héritées du parcours de réservation élève
+-- (`auth.role() = 'authenticated'`), qui restaient vraies pour tout compte
+-- connecté, staff compris. `get_busy_ranges()`, SECURITY DEFINER, ne portait
+-- aucune garde du tout. Correctif : migration 20261013090000.
+--
+-- ⚠️ CE QUE CES CONTRÔLES PROTÈGENT AUSSI, ET QUI COMPTE AUTANT. Le parcours
+-- élève ne doit RIEN perdre : sans les créneaux, les réglages et les bornes
+-- occupées, un élève ne peut plus réserver — ou réserve un créneau déjà pris.
+-- I6, I7 et I8 échouent si on referme trop.
+do $$
+declare
+  u_coach   constant uuid := '00000000-0000-4000-8000-00000000b001';
+  u_collab  constant uuid := '00000000-0000-4000-8000-00000000b002';
+  u_eleve   constant uuid := '00000000-0000-4000-8000-00000000b011';
+  c_coach   constant uuid := '00000000-0000-4000-8000-00000000b101';
+  c_collab  constant uuid := '00000000-0000-4000-8000-00000000b102';
+  e_un      constant uuid := '00000000-0000-4000-8000-00000000b201';
+  v_n int;
+  v_creneaux constant text := $q$select count(*) from public.coach_availabilities$q$;
+  v_reglages constant text := $q$select count(*) from public.booking_settings$q$;
+  v_bornes   constant text := $q$select count(*) from public.get_busy_ranges(now() - interval '1 day', now() + interval '7 days')$q$;
+begin
+  insert into auth.users (id, email) values
+    (u_coach,'p13b.i.coach@test.local'), (u_collab,'p13b.i.collab@test.local'),
+    (u_eleve,'p13b.i.eleve@test.local');
+  insert into public.profiles (user_id, email, role, first_name, last_name) values
+    (u_coach,'p13b.i.coach@test.local','coach','I','Coach'),
+    (u_collab,'p13b.i.collab@test.local','coach','I','Collab'),
+    (u_eleve,'p13b.i.eleve@test.local','student','I','Eleve');
+  insert into public.coaches (id, user_id, email, name, role, status, specialty) values
+    (c_coach, u_coach,'p13b.i.coach@test.local','I Coach','assistant','actif','-'),
+    (c_collab, u_collab,'p13b.i.collab@test.local','I Collab','collaborateur','actif','-');
+  insert into public.students (id, user_id, coach_id, first_name, last_name, email, status, access_type)
+  values (e_un, u_eleve, c_coach, 'I','Eleve','p13b.i.eleve@test.local','active','coaching');
+
+  -- La surface de réservation du coach principal.
+  insert into public.coach_availabilities (coach_id, weekday, start_time, end_time)
+  values (c_coach, 1, '09:00', '17:00');
+  insert into public.coach_unavailabilities (coach_id, start_at, end_at)
+  values (c_coach, now() + interval '1 day', now() + interval '1 day 2 hours');
+  insert into public.appointments (student_id, coach_id, start_at, end_at, status)
+  values (e_un, c_coach, now(), now() + interval '1 hour', 'confirmed');
+  insert into public.booking_settings default values;
+
+  -- ── Le pire cas : aucune permission, aucun élève affecté. ──────────────
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab, v_creneaux);
+  perform pg_temp.noter('I','I1. agenda/aucun accès : aucun créneau de disponibilité', v_n = 0);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab, v_reglages);
+  perform pg_temp.noter('I','I2. agenda/aucun accès : aucun réglage de réservation', v_n = 0);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab, v_bornes);
+  perform pg_temp.noter('I','I3. agenda/aucun accès : aucune borne occupée (get_busy_ranges)', v_n = 0);
+
+  -- ── La permission SEULE ne suffit pas : portée de coachs vide. ─────────
+  insert into public.collaborateur_permissions (collaborateur_id, categorie, niveau, accorde_par)
+  values (c_collab, 'agenda_communication', 'lecture', c_coach);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab, v_creneaux);
+  perform pg_temp.noter('I','I4. permission sans élève affecté : toujours aucun créneau', v_n = 0);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab, v_bornes);
+  perform pg_temp.noter('I','I5. permission sans élève affecté : toujours aucune borne', v_n = 0);
+
+  -- ── L'affectation SEULE ne suffit pas non plus. ────────────────────────
+  delete from public.collaborateur_permissions where collaborateur_id = c_collab;
+  insert into public.collaborateur_eleves (collaborateur_id, student_id, affecte_par)
+  values (c_collab, e_un, c_coach);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab, v_creneaux);
+  perform pg_temp.noter('I','I6. affectation sans permission : aucun créneau', v_n = 0);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab, v_bornes);
+  perform pg_temp.noter('I','I7. affectation sans permission : aucune borne', v_n = 0);
+
+  -- ── Les DEUX réunies : il travaille. ──────────────────────────────────
+  insert into public.collaborateur_permissions (collaborateur_id, categorie, niveau, accorde_par)
+  values (c_collab, 'agenda_communication', 'lecture', c_coach);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab, v_creneaux);
+  perform pg_temp.noter('I','I8. agenda/lecture + affectation : il voit les créneaux du coach de son élève', v_n = 1);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab, v_reglages);
+  perform pg_temp.noter('I','I9. agenda/lecture + affectation : il lit les réglages de réservation', v_n = 1);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab, v_bornes);
+  perform pg_temp.noter('I','I10. agenda/lecture + affectation : il voit les bornes occupées', v_n = 2);
+
+  -- ── Et l'agenda RÉELLEMENT protégé reste fermé sans la catégorie. ──────
+  delete from public.collaborateur_permissions where collaborateur_id = c_collab;
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab,
+    format($q$select count(*) from public.appointments where student_id = %L$q$, e_un));
+  perform pg_temp.noter('I','I11. agenda/aucun accès : aucun rendez-vous', v_n = 0);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab,
+    $q$select count(*) from public.coach_unavailabilities$q$);
+  perform pg_temp.noter('I','I12. agenda/aucun accès : aucune indisponibilité', v_n = 0);
+
+  -- ── ⚠️ LE PARCOURS ÉLÈVE N'A RIEN PERDU. ──────────────────────────────
+  v_n := pg_temp.lecture_compte_en_tant_que(u_eleve, v_creneaux);
+  perform pg_temp.noter('I','I13. l''élève voit toujours les créneaux (sinon il ne peut plus réserver)', v_n = 1);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_eleve, v_reglages);
+  perform pg_temp.noter('I','I14. l''élève lit toujours les réglages de réservation', v_n = 1);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_eleve, v_bornes);
+  perform pg_temp.noter('I','I15. l''élève voit toujours les bornes occupées (sinon il réserve un créneau pris)', v_n = 2);
+
+  -- ── Le coach autonome (assistant) et l'administrateur gardent tout. ───
+  v_n := pg_temp.lecture_compte_en_tant_que(u_coach, v_creneaux);
+  perform pg_temp.noter('I','I16. l''assistant garde les créneaux', v_n = 1);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_coach, v_bornes);
+  perform pg_temp.noter('I','I17. l''assistant garde les bornes occupées', v_n = 2);
+  v_n := pg_temp.lecture_compte_en_tant_que('00000000-0000-4000-8000-000000000001', v_creneaux);
+  perform pg_temp.noter('I','I18. l''administrateur garde les créneaux', v_n = 1);
+
+  -- ── Contrôle statique : aucune policy ouverte ne peut revenir. ─────────
+  select count(*) into v_n from pg_policies
+   where schemaname = 'public'
+     and tablename in ('coach_availabilities','booking_settings')
+     and cmd = 'SELECT'
+     and coalesce(qual,'') ~ 'auth\.role\(\) = ''authenticated''';
+  perform pg_temp.noter('I','I19. aucune policy SELECT ouverte à tout authentifié sur la surface de réservation', v_n = 0);
+
+  -- ── Contrôle statique : get_busy_ranges porte bien une garde. ─────────
+  select count(*) into v_n from pg_proc p
+   where p.pronamespace = 'public'::regnamespace
+     and p.proname = 'get_busy_ranges'
+     and pg_get_functiondef(p.oid) like '%categories_lecture%'
+     and pg_get_functiondef(p.oid) like '%coach_ids_portee%'
+     and pg_get_functiondef(p.oid) like '%current_student_id%';
+  perform pg_temp.noter('I','I20. get_busy_ranges est gardée (catégorie + portée + parcours élève)', v_n = 1);
+end $$;
+
+
+-- ── J. L'ADMINISTRATEUR RÉEL N'A PAS BESOIN D'UNE FICHE `coaches` ─────────
+--
+-- ⚠️ DÉFAUT SIGNALÉ LE 13/10/2026 : « je n'arrive plus à enregistrer des
+-- modifications sur mes programmes », bandeau « Une partie du programme n'a
+-- pas pu être enregistrée ». Ce message est `STRUCTURE_INCOMPLETE` : le
+-- builder n'a pas pu écrire les semaines.
+--
+-- LA CAUSE. `est_staff_global()` ne lisait que `staff_role()`, qui EXIGE une
+-- fiche `coaches` au statut `actif`. Un compte `profiles.role = 'admin'` sans
+-- fiche — ou dont la fiche est passée à `inactif` — perdait donc
+-- `program_ids_lecture()` et `program_ids_ecriture()` sur les programmes
+-- MODÈLES, lisait zéro semaine, et se faisait refuser l'insertion en 42501.
+-- Correctif : migration 20261013100000.
+--
+-- ⚠️ CE QUE CES CONTRÔLES PROTÈGENT DANS L'AUTRE SENS. Reconnaître
+-- l'administrateur réel ne doit RIEN donner de plus à un collaborateur : son
+-- `profiles.role` vaut 'coach', pas 'admin'. J5 et J6 échouent si la
+-- correction a élargi la portée de quiconque d'autre.
+do $$
+declare
+  u_admin_sf constant uuid := '00000000-0000-4000-8000-00000000c001'; -- admin SANS fiche
+  u_admin_in constant uuid := '00000000-0000-4000-8000-00000000c002'; -- admin fiche INACTIVE
+  u_collab   constant uuid := '00000000-0000-4000-8000-00000000c003';
+  c_admin_in constant uuid := '00000000-0000-4000-8000-00000000c102';
+  c_collab   constant uuid := '00000000-0000-4000-8000-00000000c103';
+  p_modele   constant uuid := '00000000-0000-4000-8000-00000000c201';
+  v_n int; v_ok boolean;
+begin
+  insert into auth.users (id, email) values
+    (u_admin_sf,'p13b.j.adminsf@test.local'),
+    (u_admin_in,'p13b.j.adminin@test.local'),
+    (u_collab,'p13b.j.collab@test.local');
+  insert into public.profiles (user_id, email, role, first_name, last_name) values
+    (u_admin_sf,'p13b.j.adminsf@test.local','admin','J','AdminSansFiche'),
+    (u_admin_in,'p13b.j.adminin@test.local','admin','J','AdminInactif'),
+    (u_collab,'p13b.j.collab@test.local','coach','J','Collab');
+  -- L'admin « sans fiche » n'a VOLONTAIREMENT aucune ligne dans coaches.
+  insert into public.coaches (id, user_id, email, name, role, status, specialty) values
+    (c_admin_in, u_admin_in,'p13b.j.adminin@test.local','J AdminInactif','admin','inactif','-'),
+    (c_collab,  u_collab, 'p13b.j.collab@test.local','J Collab','collaborateur','actif','-');
+  -- Un programme MODÈLE sans propriétaire élève — le cas du builder.
+  insert into public.programs (id, name, program_mode, is_public, status, coach_id, owner_student_id)
+  values (p_modele, 'Modele J', 'individuel', false, 'actif', null, null);
+  insert into public.program_weeks (program_id, week_number) values (p_modele, 1);
+
+  -- J1/J2 — l'administrateur réel SANS fiche retrouve son programme.
+  perform pg_temp.devenir(u_admin_sf);
+  v_ok := coalesce(public.est_staff_global(), false);
+  reset role;
+  perform pg_temp.noter('J','J1. admin sans fiche coaches : est_staff_global() est vrai', v_ok);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_admin_sf,
+    format($q$select count(*) from public.program_weeks where program_id = %L$q$, p_modele));
+  perform pg_temp.noter('J','J2. admin sans fiche : il LIT les semaines du programme modèle', v_n = 1);
+
+  -- J3 — et il ÉCRIT (c'est l'opération qui échouait).
+  perform pg_temp.devenir(u_admin_sf);
+  begin
+    insert into public.program_weeks (program_id, week_number) values (p_modele, 2);
+    v_ok := true;
+  exception when others then v_ok := false;
+  end;
+  reset role;
+  perform pg_temp.noter('J','J3. admin sans fiche : il ÉCRIT une semaine (le défaut du builder)', v_ok);
+  select count(*) into v_n from public.program_weeks where program_id = p_modele;
+  perform pg_temp.noter('J','J3b. la semaine est RÉELLEMENT en base', v_n = 2);
+  delete from public.program_weeks where program_id = p_modele and week_number = 2;
+
+  -- J4 — une fiche INACTIVE ne doit pas davantage le bloquer.
+  v_n := pg_temp.lecture_compte_en_tant_que(u_admin_in,
+    format($q$select count(*) from public.program_weeks where program_id = %L$q$, p_modele));
+  perform pg_temp.noter('J','J4. admin dont la fiche coaches est inactive : il lit quand même', v_n = 1);
+
+  -- ⚠️ J5/J6 — ET LE COLLABORATEUR N'A RIEN GAGNÉ.
+  perform pg_temp.devenir(u_collab);
+  v_ok := coalesce(public.est_staff_global(), false);
+  reset role;
+  perform pg_temp.noter('J','J5. le collaborateur n''est toujours PAS staff global', not v_ok);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab,
+    format($q$select count(*) from public.program_weeks where program_id = %L$q$, p_modele));
+  perform pg_temp.noter('J','J6. il ne voit toujours aucun programme modèle', v_n = 0);
+
+  -- J7 — fail-closed : la fonction ne rend jamais NULL.
+  select count(*) into v_n from pg_proc p
+   where p.pronamespace = 'public'::regnamespace
+     and p.proname = 'est_staff_global'
+     and pg_get_functiondef(p.oid) like '%is_admin%'
+     and pg_get_functiondef(p.oid) like '%staff_role%'
+     and pg_get_functiondef(p.oid) like '%coalesce%';
+  perform pg_temp.noter('J','J7. est_staff_global() consulte les DEUX signaux, en fail-closed', v_n = 1);
 end $$;
 
 
