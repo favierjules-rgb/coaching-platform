@@ -1943,6 +1943,8 @@ const CHEMIN_P13B_ADMIN_REEL =
   "supabase/migrations/20261013100000_p13b_admin_reel_est_staff_global.sql";
 const CHEMIN_P13B_INSERT =
   "supabase/migrations/20261013110000_p13b_corriger_policies_insert.sql";
+const CHEMIN_P13B_AUTOREF =
+  "supabase/migrations/20261013120000_p13b_policies_non_auto_referentielles.sql";
 
 const P13B_MODELE = sansCommentairesSql(lire(CHEMIN_P13B_MODELE));
 const P13B_POLICIES = sansCommentairesSql(lire(CHEMIN_P13B_POLICIES));
@@ -1954,6 +1956,7 @@ const P13B_PROVISION_BRUT = lire(CHEMIN_P13B_PROVISION);
 const P13B_RESERVATION = sansCommentairesSql(lire(CHEMIN_P13B_RESERVATION));
 const P13B_ADMIN_REEL = sansCommentairesSql(lire(CHEMIN_P13B_ADMIN_REEL));
 const P13B_INSERT = sansCommentairesSql(lire(CHEMIN_P13B_INSERT));
+const P13B_AUTOREF = sansCommentairesSql(lire(CHEMIN_P13B_AUTOREF));
 
 
 const CATEGORIES = ["entrainement", "suivi_eleve", "agenda_communication", "nutrition"] as const;
@@ -1999,7 +2002,7 @@ const POLICIES_P13B: PolicieP13B[] = (() => {
   return out;
 })();
 
-test("P13B 1. les huit migrations existent et sont ordonnées", () => {
+test("P13B 1. les neuf migrations existent et sont ordonnées", () => {
   for (const [n, s] of [
     ["modèle", P13B_MODELE],
     ["policies", P13B_POLICIES],
@@ -2009,6 +2012,7 @@ test("P13B 1. les huit migrations existent et sont ordonnées", () => {
     ["réservation", P13B_RESERVATION],
     ["admin réel", P13B_ADMIN_REEL],
     ["insert", P13B_INSERT],
+    ["auto-référence", P13B_AUTOREF],
   ] as const) {
     assert.ok(s.trim().length > 0, `la migration ${n} est vide`);
   }
@@ -3246,6 +3250,7 @@ test("P13B/8 1. aucune migration ne peut écrire une policy INSERT sur `id`", ()
     [CHEMIN_P13B_FONCTIONS, P13B_FONCTIONS], [CHEMIN_P13B_NUTRITION, P13B_NUTRITION],
     [CHEMIN_P13B_PROVISION, P13B_PROVISION], [CHEMIN_P13B_RESERVATION, P13B_RESERVATION],
     [CHEMIN_P13B_ADMIN_REEL, P13B_ADMIN_REEL], [CHEMIN_P13B_INSERT, P13B_INSERT],
+    [CHEMIN_P13B_AUTOREF, P13B_AUTOREF],
   ];
   for (const [chemin, sql] of migrations) {
     const compact = sql.replace(/\s+/g, " ");
@@ -3307,6 +3312,100 @@ test("P13B/8 4. la checklist prouve la création ET la non-régression", () => {
     "la création doit être relue en base, pas seulement tentée");
   assert.ok(/collaborateur sans permission : il ne CRÉE aucune séance/.test(checklist));
   assert.ok(/permission SANS élève affecté : toujours aucune création/.test(checklist));
+});
+
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * P13B/9 — UNE POLICY NE DÉPEND JAMAIS DE LA LIGNE QU'ELLE AUTORISE
+ * ══════════════════════════════════════════════════════════════════════════
+ * Suite directe de P13B/8. `INSERT … RETURNING` exige, en plus du
+ * `with check`, que la ligne satisfasse la policy **SELECT**. Écrite
+ * `id in (select <table>_ids_lecture())` — une fonction STABLE qui lit la même
+ * table — elle était fausse par construction : le snapshot du début de la
+ * commande ne contient pas la ligne qu'on insère.
+ *
+ * ⚠️ ET `RETURNING` EST LA FORME EMPLOYÉE PARTOUT : `returning … into` dans
+ * les RPC, `.insert().select("id").single()` côté client.
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+test("P13B/9 1. aucune policy ne peut tester `id` contre un ensemble de sa propre table", () => {
+  // Le motif fautif, sur les deux faces d'une policy.
+  const tables: Record<string, string> = {
+    programs: "program_ids", workout_sessions: "workout_session_ids",
+    workout_exercises: "workout_exercise_ids", nutrition_plans: "nutrition_plan_ids",
+    documents: "document_ids",
+  };
+  const compact = P13B_AUTOREF.replace(/\s+/g, " ");
+  for (const [table, prefixe] of Object.entries(tables)) {
+    assert.ok(
+      !new RegExp(`on public\\.${table} for (select|update|delete)[\\s\\S]{0,120}?id in \\(select public\\.${prefixe}_`).test(compact),
+      `${table} : la policy réécrite teste encore son propre id`,
+    );
+    assert.ok(new RegExp(`drop policy if exists \\w+ on public\\.${table}`).test(compact),
+      `${table} : ses policies doivent être remplacées — et le drop rend la migration rejouable`);
+  }
+});
+
+test("P13B/9 2. chaque policy est transposée sur les COLONNES, à portée égale", () => {
+  const compact = P13B_AUTOREF.replace(/\s+/g, " ");
+  // La définition de chaque fonction remplacée, retrouvée telle quelle.
+  assert.ok(/on public\.workout_sessions for select using \(program_id in \(select public\.program_ids_lecture\(\)\)\)/.test(compact),
+    "une séance tient sa portée de son PROGRAMME, comme workout_session_ids_lecture()");
+  assert.ok(/session_id in \(select public\.workout_session_ids_lecture\(\)\) or block_id in \(select public\.training_block_ids_lecture\(\)\)/.test(compact),
+    "un exercice tient sa portée de sa SÉANCE ou de son BLOC");
+  assert.ok(/owner_student_id in \(select public\.student_ids_entrainement_lecture\(\)\)/.test(compact),
+    "un programme d'élève suit la portée entrainement/lecture");
+  assert.ok(/student_id in \(select public\.student_ids_nutrition_lecture\(\)\)/.test(compact),
+    "un plan d'élève suit la portée nutrition/lecture");
+  // ⚠️ students : même portée, mais sans relire `students`.
+  assert.ok(/create or replace function public\.student_ids_collaborateur\(\)/.test(compact),
+    "la branche « élèves affectés » doit sortir dans sa propre fonction : student_ids_portee() lit students");
+  assert.ok(/from public\.collaborateur_eleves a/.test(compact),
+    "et cette fonction ne doit lire que la table d'affectation");
+  // Fail-closed partout.
+  assert.ok((compact.match(/coalesce\(/g) ?? []).length >= 15,
+    "les conditions doivent être enveloppées : un NULL ne doit jamais autoriser");
+});
+
+test("P13B/9 3. les deux élargissements sont bornés, et seulement ceux-là", () => {
+  const compact = P13B_AUTOREF.replace(/\s+/g, " ");
+  // La propriété ouvre un document NEUF à son auteur — sinon il ne peut pas
+  // le relire après création. Mais elle reste bornée par la portée de coachs
+  // ET par la catégorie.
+  assert.ok(/on public\.documents for select[\s\S]{0,400}?coach_id in \(select public\.coach_ids_portee\(\)\)/.test(compact),
+    "la branche propriétaire des documents doit être bornée par coach_ids_portee()");
+  assert.ok(/on public\.documents for select[\s\S]{0,600}?categories_lecture/.test(compact),
+    "et par la catégorie");
+  // L'accès par AFFECTATION n'est pas perdu.
+  assert.ok(/from public\.document_assignments da/.test(compact),
+    "l'accès par affectation doit rester");
+  // Aucune fonction de portée n'est redéfinie au passage.
+  for (const f of ["staff_role", "is_admin", "est_staff_global", "student_ids_portee", "categories_lecture"]) {
+    assert.ok(!new RegExp(`create or replace function public\\.${f}\\(`).test(compact),
+      `${f}() ne doit pas être redéfinie par ce correctif`);
+  }
+});
+
+test("P13B/9 4. la checklist teste la forme RÉELLEMENT employée par le code", () => {
+  const checklist = lire("supabase/tests/p13b_roles_collaborateurs_checklist.sql");
+  for (const n of ["L1.", "L2.", "L3.", "L4.", "L5.", "L6.", "L7.", "L7b.", "L8.", "L9.", "L10."]) {
+    assert.ok(checklist.includes(n), `le contrôle ${n} manque à la checklist`);
+  }
+  assert.ok(/returning id into/.test(checklist),
+    "les contrôles doivent employer RETURNING : c'est ce que fait le code applicatif");
+  assert.ok(/save_training_session_blocks/.test(checklist),
+    "la RPC réelle du builder doit être exercée de bout en bout");
+  // ⚠️ L'APOSTROPHE EST DOUBLÉE DANS LE SQL (`l''exercice`) : chercher la
+  // forme française naïve ne trouverait rien, et le contrôle passerait pour
+  // absent alors qu'il est là.
+  assert.ok(/exercice écrit par la RPC est RÉELLEMENT en base/.test(checklist),
+    "et son effet relu en base");
+  // Et le code applicatif emploie bien cette forme — c'est ce qui rend le
+  // défaut bloquant.
+  const programs = lire("lib/supabase/programs.ts");
+  assert.ok(/\.insert\([\s\S]{0,200}?\)\s*\.select\("id"\)\s*\.single\(\)/.test(programs),
+    "le builder insère bien avec .select().single() : la policy SELECT est donc exigée");
 });
 
 

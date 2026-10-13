@@ -1388,6 +1388,156 @@ begin
 end $$;
 
 
+-- ── L. `INSERT … RETURNING` — CE QUE TOUT LE CODE APPLICATIF EMPLOIE ──────
+--
+-- ⚠️ LE DÉFAUT QUE LA SECTION K NE VOYAIT PAS. L'insertion NUE fonctionnait
+-- après la 8e migration, et l'enregistrement restait pourtant bloqué. Mesuré
+-- en instrumentant la RPC réelle `save_training_session_blocks` :
+--
+--     INSERT workout_exercises (…)              → ACCEPTÉE
+--     INSERT workout_exercises (…) RETURNING id → REFUS 42501
+--
+-- Avec la RLS, `INSERT … RETURNING` exige EN PLUS que la ligne produite
+-- satisfasse la policy SELECT. Or celle-ci était écrite
+-- `id in (select <table>_ids_lecture())`, et ces fonctions lisent la table
+-- elle-même : `STABLE`, elles travaillent sur le snapshot du DÉBUT de la
+-- commande, où la ligne n'existe pas encore. Faux par construction, pour tout
+-- le monde. Correctif : migration 20261013120000.
+--
+-- Tout le code applicatif emploie cette forme : `returning id into …` dans les
+-- RPC, `.insert().select("id").single()` côté client. Les contrôles ci-dessous
+-- la testent explicitement, table par table.
+do $$
+declare
+  u_admin  constant uuid := '00000000-0000-4000-8000-00000000e001';
+  u_collab constant uuid := '00000000-0000-4000-8000-00000000e002';
+  c_admin  constant uuid := '00000000-0000-4000-8000-00000000e101';
+  c_collab constant uuid := '00000000-0000-4000-8000-00000000e102';
+  p_prog   constant uuid := '00000000-0000-4000-8000-00000000e301';
+  w_sem    constant uuid := '00000000-0000-4000-8000-00000000e401';
+  s_seance constant uuid := '00000000-0000-4000-8000-00000000e501';
+  b_bloc   constant uuid := '00000000-0000-4000-8000-00000000e601';
+  v_id uuid; v_ok boolean; v_n int;
+begin
+  insert into auth.users (id, email) values
+    (u_admin,'p13b.l.admin@test.local'), (u_collab,'p13b.l.collab@test.local');
+  insert into public.profiles (user_id, email, role, first_name, last_name) values
+    (u_admin,'p13b.l.admin@test.local','admin','L','Admin'),
+    (u_collab,'p13b.l.collab@test.local','coach','L','Collab');
+  insert into public.coaches (id, user_id, email, name, role, status, specialty) values
+    (c_admin, u_admin,'p13b.l.admin@test.local','L Admin','admin','actif','-'),
+    (c_collab,u_collab,'p13b.l.collab@test.local','L Collab','collaborateur','actif','-');
+  insert into public.programs (id, name, program_mode, is_public, status, coach_id, owner_student_id)
+  values (p_prog,'Prog L','individuel',false,'actif',c_admin,null);
+  insert into public.program_weeks (id, program_id, week_number) values (w_sem, p_prog, 1);
+  insert into public.workout_sessions (id, program_id, program_week_id, day, name)
+  values (s_seance, p_prog, w_sem, 'lundi', 'Seance L');
+  insert into public.training_blocks (id, session_id, block_type, position)
+  values (b_bloc, s_seance, 'strength', 1);
+
+  -- ── L1 à L6 : l'administrateur crée ET relit la ligne créée. ───────────
+  perform pg_temp.devenir(u_admin);
+  v_id := null;
+  begin insert into public.workout_exercises (session_id, block_id, order_index, name)
+        values (s_seance, b_bloc, 1, 'Squat') returning id into v_id; v_ok := v_id is not null;
+  exception when others then v_ok := false; end;
+  reset role;
+  perform pg_temp.noter('L','L1. workout_exercises : INSERT … RETURNING accepté', v_ok);
+
+  perform pg_temp.devenir(u_admin);
+  v_id := null;
+  begin insert into public.workout_sessions (program_id, program_week_id, day, name)
+        values (p_prog, w_sem, 'mardi', 'Neuve') returning id into v_id; v_ok := v_id is not null;
+  exception when others then v_ok := false; end;
+  reset role;
+  perform pg_temp.noter('L','L2. workout_sessions : INSERT … RETURNING accepté', v_ok);
+
+  perform pg_temp.devenir(u_admin);
+  v_id := null;
+  begin insert into public.programs (name, program_mode, is_public, status, coach_id)
+        values ('Prog neuf L','individuel',false,'actif',c_admin) returning id into v_id;
+        v_ok := v_id is not null;
+  exception when others then v_ok := false; end;
+  reset role;
+  perform pg_temp.noter('L','L3. programs : INSERT … RETURNING accepté', v_ok);
+
+  perform pg_temp.devenir(u_admin);
+  v_id := null;
+  begin insert into public.students (user_id, coach_id, first_name, last_name, email, status, access_type)
+        values (null, c_admin,'L','Neuf','p13b.l.neuf@test.local','active','coaching') returning id into v_id;
+        v_ok := v_id is not null;
+  exception when others then v_ok := false; end;
+  reset role;
+  perform pg_temp.noter('L','L4. students : INSERT … RETURNING accepté', v_ok);
+
+  perform pg_temp.devenir(u_admin);
+  v_id := null;
+  begin insert into public.documents (coach_id, title, type, category, status)
+        values (c_admin,'Doc L','pdf','entrainement','brouillon') returning id into v_id;
+        v_ok := v_id is not null;
+  exception when others then v_ok := false; end;
+  reset role;
+  perform pg_temp.noter('L','L5. documents : INSERT … RETURNING accepté (et l''auteur le relit)', v_ok);
+
+  perform pg_temp.devenir(u_admin);
+  v_id := null;
+  begin insert into public.nutrition_plans (coach_id, name, status)
+        values (c_admin,'Plan L','prochain') returning id into v_id; v_ok := v_id is not null;
+  exception when others then v_ok := false; end;
+  reset role;
+  perform pg_temp.noter('L','L6. nutrition_plans : INSERT … RETURNING accepté', v_ok);
+
+  -- ── L7 : LE CHEMIN RÉEL DU BUILDER, DE BOUT EN BOUT. ───────────────────
+  -- La RPC `save_training_session_blocks` enchaîne blocs, exercices et
+  -- prescriptions, tous en `returning … into`. C'est elle qui échouait.
+  perform pg_temp.devenir(u_admin);
+  begin
+    perform public.save_training_session_blocks(jsonb_build_object(
+      'session_id', s_seance::text,
+      'expected_updated_at',
+        to_char((select updated_at from public.workout_sessions where id = s_seance)
+                at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.USOF'),
+      'scope','all',
+      'blocks', jsonb_build_array(jsonb_build_object(
+        'id','new-block:11111111-1111-4111-8111-111111111111',
+        'category','strength', 'position', 1,
+        'exercises', jsonb_build_array(jsonb_build_object(
+          'id','new-exercise:22222222-2222-4222-8222-222222222222',
+          'name','Developpe','order_index',1,
+          'prescriptions', jsonb_build_array(jsonb_build_object('set_number',1,'position',1))))))));
+    v_ok := true;
+  exception when others then v_ok := false;
+    raise notice '  (RPC refusée : % — %)', sqlstate, sqlerrm;
+  end;
+  reset role;
+  perform pg_temp.noter('L','L7. la RPC du builder (save_training_session_blocks) aboutit', v_ok);
+  select count(*) into v_n from public.workout_exercises where session_id = s_seance and name = 'Developpe';
+  perform pg_temp.noter('L','L7b. l''exercice écrit par la RPC est RÉELLEMENT en base', v_n = 1);
+
+  -- ── L8/L9 : et le collaborateur n'a toujours rien. ────────────────────
+  perform pg_temp.devenir(u_collab);
+  v_id := null;
+  begin insert into public.workout_exercises (session_id, block_id, order_index, name)
+        values (s_seance, b_bloc, 9, 'Pirate') returning id into v_id; v_ok := v_id is not null;
+  exception when others then v_ok := false; end;
+  reset role;
+  perform pg_temp.noter('L','L8. collaborateur sans permission : toujours refusé', not v_ok);
+
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab,
+    format($q$select count(*) from public.programs where id = %L$q$, p_prog));
+  perform pg_temp.noter('L','L9. collaborateur sans permission : il ne voit aucun programme', v_n = 0);
+
+  -- ── L10 : contrôle statique — plus aucune policy auto-référentielle. ───
+  select count(*) into v_n
+    from pg_policies p
+    join pg_proc f on f.pronamespace = 'public'::regnamespace and f.proname like '%\_ids\_%'
+   where p.schemaname = 'public'
+     and (coalesce(p.qual,'')||' '||coalesce(p.with_check,'')) ~ ('id IN \( SELECT '||f.proname)
+     and f.prosrc ~ ('from public\.'||p.tablename||' ');
+  perform pg_temp.noter('L','L10. aucune policy ne teste `id` contre un ensemble lu dans sa propre table', v_n = 0);
+end $$;
+
+
 -- ── Z. BILAN ET RIEN NE SURVIT ────────────────────────────────────────────
 do $$ begin reset role; end $$;
 

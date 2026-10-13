@@ -371,6 +371,32 @@ export const MIGRATION_P13B_ADMIN_REEL =
 export const MIGRATION_P13B_INSERT =
   "20261013110000_p13b_corriger_policies_insert.sql";
 
+/**
+ * P13-B, migration 9/9 — les policies qui dépendaient de la ligne autorisée.
+ * PAS ENCORE APPLIQUÉE. **CORRECTIF BLOQUANT, suite de la 8e.**
+ *
+ * ⚠️ LA 8e NE SUFFISAIT PAS, ET VOICI POURQUOI. Elle a réparé `with check`, et
+ * l'insertion NUE fonctionne. Mais avec la RLS, `INSERT … RETURNING` exige EN
+ * PLUS que la ligne produite satisfasse la policy **SELECT** — et celle-ci
+ * était écrite `id in (select <table>_ids_lecture())`, une fonction `STABLE`
+ * qui lit la table elle-même. Évaluée sur le snapshot du DÉBUT de la commande,
+ * elle ne peut pas contenir la ligne qu'on vient d'insérer.
+ *
+ * Or `RETURNING` est la forme employée PARTOUT : `returning … into` dans les
+ * RPC, `.insert().select("id").single()` côté client. Mesuré dans la RPC
+ * réelle du builder : INSERT accepté, INSERT … RETURNING refusé en 42501, à
+ * une ligne d'intervalle et avec les mêmes valeurs.
+ *
+ * Les policies sont transposées sur les COLONNES de la ligne (program_id,
+ * session_id, block_id, student_id, coach_id, owner_student_id, category) —
+ * mêmes ensembles, mêmes catégories, mêmes niveaux, une indirection de moins.
+ * Deux élargissements assumés et bornés : la PROPRIÉTÉ (`coach_id`) ouvre un
+ * document et un plan neufs à leur auteur, sans quoi il ne pourrait pas les
+ * relire après création.
+ */
+export const MIGRATION_P13B_AUTOREF =
+  "20261013120000_p13b_policies_non_auto_referentielles.sql";
+
 export const MIGRATIONS_COURSES: readonly string[] = [
   MIGRATION_C2,
   MIGRATION_C3,
@@ -415,17 +441,18 @@ export const MIGRATIONS_APRES_C0_1: readonly string[] = [
   MIGRATION_P13B_RESERVATION,
   MIGRATION_P13B_ADMIN_REEL,
   MIGRATION_P13B_INSERT,
+  MIGRATION_P13B_AUTOREF,
 ];
 
 /**
  * Le compte attendu — nécessaire, jamais suffisant.
  *
- * 110 = 84 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 25
+ * 111 = 84 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 26
  * migrations nommées dans `MIGRATIONS_APRES_C0_1`. Le point 6 recalcule
  * l'historique à partir de ce nombre : il ne peut pas être remonté seul sans
  * qu'une migration soit nommée en face.
  */
-export const NOMBRE_DE_MIGRATIONS = 110;
+export const NOMBRE_DE_MIGRATIONS = 111;
 
 /**
  * L'empreinte des 79 migrations ANTÉRIEURES à C0.1, dans l'ordre.
