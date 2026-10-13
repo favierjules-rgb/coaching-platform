@@ -1941,6 +1941,8 @@ const CHEMIN_P13B_RESERVATION =
   "supabase/migrations/20261013090000_p13b_cloisonner_surface_reservation.sql";
 const CHEMIN_P13B_ADMIN_REEL =
   "supabase/migrations/20261013100000_p13b_admin_reel_est_staff_global.sql";
+const CHEMIN_P13B_INSERT =
+  "supabase/migrations/20261013110000_p13b_corriger_policies_insert.sql";
 
 const P13B_MODELE = sansCommentairesSql(lire(CHEMIN_P13B_MODELE));
 const P13B_POLICIES = sansCommentairesSql(lire(CHEMIN_P13B_POLICIES));
@@ -1951,6 +1953,7 @@ const P13B_PROVISION = sansCommentairesSql(lire(CHEMIN_P13B_PROVISION));
 const P13B_PROVISION_BRUT = lire(CHEMIN_P13B_PROVISION);
 const P13B_RESERVATION = sansCommentairesSql(lire(CHEMIN_P13B_RESERVATION));
 const P13B_ADMIN_REEL = sansCommentairesSql(lire(CHEMIN_P13B_ADMIN_REEL));
+const P13B_INSERT = sansCommentairesSql(lire(CHEMIN_P13B_INSERT));
 
 
 const CATEGORIES = ["entrainement", "suivi_eleve", "agenda_communication", "nutrition"] as const;
@@ -1996,7 +1999,7 @@ const POLICIES_P13B: PolicieP13B[] = (() => {
   return out;
 })();
 
-test("P13B 1. les sept migrations existent et sont ordonnées", () => {
+test("P13B 1. les huit migrations existent et sont ordonnées", () => {
   for (const [n, s] of [
     ["modèle", P13B_MODELE],
     ["policies", P13B_POLICIES],
@@ -2005,6 +2008,7 @@ test("P13B 1. les sept migrations existent et sont ordonnées", () => {
     ["provision", P13B_PROVISION],
     ["réservation", P13B_RESERVATION],
     ["admin réel", P13B_ADMIN_REEL],
+    ["insert", P13B_INSERT],
   ] as const) {
     assert.ok(s.trim().length > 0, `la migration ${n} est vide`);
   }
@@ -3216,6 +3220,93 @@ test("P13B/7 3. la checklist prouve le déblocage ET la non-régression du colla
   // à un collaborateur.
   assert.ok(/le collaborateur n''est toujours PAS staff global/.test(checklist));
   assert.ok(/il ne voit toujours aucun programme modèle/.test(checklist));
+});
+
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * P13B/8 — UNE POLICY `INSERT` NE TESTE JAMAIS SON PROPRE IDENTIFIANT
+ * ══════════════════════════════════════════════════════════════════════════
+ * Défaut BLOQUANT du 13/10/2026 : plus aucune création n'était possible,
+ * administrateur compris. `with check (id in (select <table>_ids_ecriture()))`
+ * compare l'id d'une ligne qu'on crée à un ensemble calculé depuis les lignes
+ * DÉJÀ EXISTANTES de la même table — toujours faux.
+ *
+ * ⚠️ LA LEÇON QUE CES TESTS GARDENT. Une policy INSERT porte sur le PARENT de
+ * la ligne (program_id, session_id, block_id, student_id, document_id), jamais
+ * sur `id`. C'est ce que font les neuf autres policies INSERT du cœur, et ce
+ * que le contrôle 1 ci-dessous impose à toutes les futures.
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+test("P13B/8 1. aucune migration ne peut écrire une policy INSERT sur `id`", () => {
+  // Balayage de TOUTES les migrations P13-B — y compris la 8e, qui ne doit
+  // créer que des règles portant sur un parent.
+  const migrations: Array<[string, string]> = [
+    [CHEMIN_P13B_MODELE, P13B_MODELE], [CHEMIN_P13B_POLICIES, P13B_POLICIES],
+    [CHEMIN_P13B_FONCTIONS, P13B_FONCTIONS], [CHEMIN_P13B_NUTRITION, P13B_NUTRITION],
+    [CHEMIN_P13B_PROVISION, P13B_PROVISION], [CHEMIN_P13B_RESERVATION, P13B_RESERVATION],
+    [CHEMIN_P13B_ADMIN_REEL, P13B_ADMIN_REEL], [CHEMIN_P13B_INSERT, P13B_INSERT],
+  ];
+  for (const [chemin, sql] of migrations) {
+    const compact = sql.replace(/\s+/g, " ");
+    // `for insert ... with check (id in (select …))` : le motif fautif.
+    assert.ok(
+      !/for insert\s+with check\s*\(\s*id in \(select/i.test(compact),
+      `${chemin} : une policy INSERT y teste l'id de la ligne créée — aucune création ne serait possible`,
+    );
+  }
+  // La 8e migration retire bien les cinq règles fautives.
+  const compact = P13B_INSERT.replace(/\s+/g, " ");
+  for (const nom of ["workout_sessions_manage_staff_insert", "workout_exercises_manage_staff_insert",
+                     "programs_manage_staff_insert", "students_manage_staff",
+                     "documents_manage_staff_insert", "training_prescriptions_manage_staff_insert"]) {
+    assert.ok(new RegExp(`drop policy if exists ${nom} `).test(compact),
+      `${nom} doit être remplacée — et le drop rend la migration rejouable`);
+    assert.ok(new RegExp(`create policy ${nom} `).test(compact), `${nom} doit être recréée`);
+  }
+});
+
+test("P13B/8 2. chaque nouvelle règle porte sur le PARENT, avec le même ensemble qu'avant", () => {
+  const compact = P13B_INSERT.replace(/\s+/g, " ");
+  // Les ensembles ne changent pas : seule la colonne testée change.
+  assert.ok(/workout_sessions for insert with check \(program_id in \(select public\.program_ids_ecriture\(\)\)\)/.test(compact),
+    "une séance tient son droit de son PROGRAMME");
+  assert.ok(/session_id in \(select public\.workout_session_ids_ecriture\(\)\)/.test(compact),
+    "un exercice tient son droit de sa SÉANCE");
+  assert.ok(/block_id in \(select public\.training_block_ids_ecriture\(\)\)/.test(compact),
+    "ou de son BLOC");
+  // ⚠️ Prescription PAR EXERCICE : block_id est NULL, `null in (…)` vaut NULL.
+  assert.ok(/exercise_id is not null and exercise_id in \(select public\.workout_exercise_ids_ecriture\(\)\)/.test(compact),
+    "une série rattachée à un exercice doit être possible : block_id y est NULL");
+  // Un programme neuf : transposition de program_ids_ecriture() sur les colonnes.
+  assert.ok(/owner_student_id in \(select public\.student_ids_entrainement_ecriture\(\)\)/.test(compact));
+  assert.ok(/coach_id in \(select public\.coach_ids_portee\(\)\)/.test(compact));
+  assert.ok(/'entrainement' in \(select public\.categories_ecriture\(\)\)/.test(compact));
+  // Fail-closed sur les NULL, comme partout dans P13-B.
+  assert.ok((compact.match(/coalesce\(/g) ?? []).length >= 6,
+    "les conditions doivent être enveloppées : un NULL ne doit jamais autoriser");
+});
+
+test("P13B/8 3. le correctif ne touche QUE la création", () => {
+  const compact = P13B_INSERT.replace(/\s+/g, " ");
+  assert.ok(!/for select|for update|for delete/i.test(compact),
+    "aucune policy de lecture, de modification ou de suppression ne doit bouger");
+  assert.ok(!/create or replace function/i.test(compact), "aucune fonction ne doit être redéfinie");
+  assert.ok(!/create table|alter table|drop table/i.test(compact), "aucune table ne doit bouger");
+  // Et la migration le VÉRIFIE elle-même avant de committer.
+  assert.ok(/les policies SELECT\/UPDATE existantes ont été touchées/.test(P13B_INSERT),
+    "la migration doit refuser de committer si elle a emporté une policy de lecture");
+});
+
+test("P13B/8 4. la checklist prouve la création ET la non-régression", () => {
+  const checklist = lire("supabase/tests/p13b_roles_collaborateurs_checklist.sql");
+  for (const n of ["K1.", "K1b.", "K2.", "K3.", "K4.", "K5.", "K6.", "K7.", "K8.", "K9.", "K10.", "K11."]) {
+    assert.ok(checklist.includes(n), `le contrôle ${n} manque à la checklist`);
+  }
+  assert.ok(/la séance est RÉELLEMENT en base/.test(checklist),
+    "la création doit être relue en base, pas seulement tentée");
+  assert.ok(/collaborateur sans permission : il ne CRÉE aucune séance/.test(checklist));
+  assert.ok(/permission SANS élève affecté : toujours aucune création/.test(checklist));
 });
 
 

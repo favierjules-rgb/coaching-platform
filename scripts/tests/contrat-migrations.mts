@@ -346,6 +346,31 @@ export const MIGRATION_P13B_RESERVATION =
 export const MIGRATION_P13B_ADMIN_REEL =
   "20261013100000_p13b_admin_reel_est_staff_global.sql";
 
+/**
+ * P13-B, migration 8/8 — les policies `INSERT` qui testaient leur propre id.
+ * PAS ENCORE APPLIQUÉE. **CORRECTIF BLOQUANT.**
+ *
+ * ⚠️ CE DÉFAUT NE VISAIT PAS QUE LES COLLABORATEURS : il empêchait TOUTE
+ * CRÉATION, administrateur compris. Cinq policies de 20261011100000 étaient
+ * écrites `with check (id in (select <table>_ids_ecriture()))`, or ces
+ * ensembles sont calculés depuis les lignes DÉJÀ EXISTANTES de la même
+ * table : l'identifiant d'une ligne qu'on crée ne peut jamais y figurer. Une
+ * policy INSERT doit porter sur le PARENT (« ai-je le droit d'écrire DANS ce
+ * programme ? »), jamais sur son propre identifiant — ce que faisaient
+ * correctement les neuf autres policies INSERT du cœur.
+ *
+ * Mesuré pour un ADMIN à fiche active : INSERT sur workout_sessions,
+ * workout_exercises, programs, students et documents → 42501. UPDATE d'une
+ * ligne existante → accepté. D'où « Une partie du programme n'a pas pu être
+ * enregistrée » dès qu'une séance neuve partait.
+ *
+ * ⚠️ UN SIXIÈME CAS, DE MÊME NATURE : `training_prescriptions` ne testait que
+ * `block_id`, NULL pour une prescription rattachée à un EXERCICE — les séries
+ * d'exercice étaient bloquées elles aussi.
+ */
+export const MIGRATION_P13B_INSERT =
+  "20261013110000_p13b_corriger_policies_insert.sql";
+
 export const MIGRATIONS_COURSES: readonly string[] = [
   MIGRATION_C2,
   MIGRATION_C3,
@@ -389,17 +414,18 @@ export const MIGRATIONS_APRES_C0_1: readonly string[] = [
   MIGRATION_P13B_PROVISION,
   MIGRATION_P13B_RESERVATION,
   MIGRATION_P13B_ADMIN_REEL,
+  MIGRATION_P13B_INSERT,
 ];
 
 /**
  * Le compte attendu — nécessaire, jamais suffisant.
  *
- * 109 = 84 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 24
+ * 110 = 84 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 25
  * migrations nommées dans `MIGRATIONS_APRES_C0_1`. Le point 6 recalcule
  * l'historique à partir de ce nombre : il ne peut pas être remonté seul sans
  * qu'une migration soit nommée en face.
  */
-export const NOMBRE_DE_MIGRATIONS = 109;
+export const NOMBRE_DE_MIGRATIONS = 110;
 
 /**
  * L'empreinte des 79 migrations ANTÉRIEURES à C0.1, dans l'ordre.

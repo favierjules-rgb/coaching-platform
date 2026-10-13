@@ -1255,6 +1255,139 @@ begin
 end $$;
 
 
+-- ── K. CRÉER, PAS SEULEMENT MODIFIER ──────────────────────────────────────
+--
+-- ⚠️ DÉFAUT BLOQUANT SIGNALÉ LE 13/10/2026, ET IL NE VISAIT PAS QUE LES
+-- COLLABORATEURS. Cinq policies `INSERT` de la migration 20261011100000
+-- testaient `id in (select <table>_ids_ecriture())` — l'identifiant de la
+-- ligne EN TRAIN D'ÊTRE CRÉÉE, contre un ensemble calculé depuis les lignes
+-- DÉJÀ EXISTANTES de la même table. Un id neuf n'y est jamais : la condition
+-- était fausse pour TOUT LE MONDE, administrateur compris.
+--
+-- Conséquence mesurée : on modifiait ce qui existait, on ne créait plus rien.
+-- Le builder, qui insère les séances neuves, affichait « Une partie du
+-- programme n'a pas pu être enregistrée ». Correctif : 20261013110000.
+--
+-- ⚠️ ET LA MOITIÉ DU TRAVAIL EST DE VÉRIFIER QUE ROUVRIR LA CRÉATION
+-- N'OUVRE RIEN D'AUTRE : K7 à K10 refont les mêmes créations avec un
+-- collaborateur sans permission, et avec un collaborateur hors portée.
+do $$
+declare
+  u_admin  constant uuid := '00000000-0000-4000-8000-00000000d001';
+  u_collab constant uuid := '00000000-0000-4000-8000-00000000d002';
+  c_admin  constant uuid := '00000000-0000-4000-8000-00000000d101';
+  c_collab constant uuid := '00000000-0000-4000-8000-00000000d102';
+  e_un     constant uuid := '00000000-0000-4000-8000-00000000d201';
+  p_prog   constant uuid := '00000000-0000-4000-8000-00000000d301';
+  w_sem    constant uuid := '00000000-0000-4000-8000-00000000d401';
+  s_seance constant uuid := '00000000-0000-4000-8000-00000000d501';
+  v_ok boolean; v_n int;
+begin
+  insert into auth.users (id, email) values
+    (u_admin,'p13b.k.admin@test.local'), (u_collab,'p13b.k.collab@test.local');
+  insert into public.profiles (user_id, email, role, first_name, last_name) values
+    (u_admin,'p13b.k.admin@test.local','admin','K','Admin'),
+    (u_collab,'p13b.k.collab@test.local','coach','K','Collab');
+  insert into public.coaches (id, user_id, email, name, role, status, specialty) values
+    (c_admin, u_admin,'p13b.k.admin@test.local','K Admin','admin','actif','-'),
+    (c_collab,u_collab,'p13b.k.collab@test.local','K Collab','collaborateur','actif','-');
+  insert into public.students (id, user_id, coach_id, first_name, last_name, email, status, access_type)
+  values (e_un, null, c_admin, 'K','Eleve','p13b.k.eleve@test.local','active','coaching');
+  insert into public.programs (id, name, program_mode, is_public, status, coach_id, owner_student_id)
+  values (p_prog,'Prog K','individuel',false,'actif',c_admin,null);
+  insert into public.program_weeks (id, program_id, week_number) values (w_sem, p_prog, 1);
+  insert into public.workout_sessions (id, program_id, program_week_id, day, name)
+  values (s_seance, p_prog, w_sem, 'lundi', 'Seance K');
+
+  -- ── L'ADMINISTRATEUR CRÉE. C'est l'opération qui était bloquée. ────────
+  perform pg_temp.devenir(u_admin);
+  begin insert into public.workout_sessions (program_id, program_week_id, day, name)
+        values (p_prog, w_sem, 'mardi', 'Seance neuve'); v_ok := true;
+  exception when others then v_ok := false; end;
+  reset role;
+  perform pg_temp.noter('K','K1. admin : il CRÉE une séance (l''opération du builder)', v_ok);
+  select count(*) into v_n from public.workout_sessions where program_id = p_prog;
+  perform pg_temp.noter('K','K1b. la séance est RÉELLEMENT en base', v_n = 2);
+
+  perform pg_temp.devenir(u_admin);
+  begin insert into public.workout_exercises (session_id, order_index, name)
+        values (s_seance, 1, 'Squat'); v_ok := true;
+  exception when others then v_ok := false; end;
+  reset role;
+  perform pg_temp.noter('K','K2. admin : il CRÉE un exercice', v_ok);
+
+  -- ⚠️ PRESCRIPTION PAR EXERCICE : `block_id` est NULL, et `null in (…)`
+  -- valait NULL donc refus. Les séries d'un exercice étaient impossibles.
+  perform pg_temp.devenir(u_admin);
+  begin insert into public.training_prescriptions (exercise_id, set_number, position)
+        values ((select id from public.workout_exercises where session_id = s_seance limit 1), 1, 1);
+        v_ok := true;
+  exception when others then v_ok := false; end;
+  reset role;
+  perform pg_temp.noter('K','K3. admin : il CRÉE une série rattachée à un EXERCICE (block_id NULL)', v_ok);
+
+  perform pg_temp.devenir(u_admin);
+  begin insert into public.programs (name, program_mode, is_public, status, coach_id)
+        values ('Prog neuf','individuel',false,'actif',c_admin); v_ok := true;
+  exception when others then v_ok := false; end;
+  reset role;
+  perform pg_temp.noter('K','K4. admin : il CRÉE un programme', v_ok);
+
+  perform pg_temp.devenir(u_admin);
+  begin insert into public.students (user_id, coach_id, first_name, last_name, email, status, access_type)
+        values (null, c_admin, 'K','Neuf','p13b.k.neuf@test.local','active','coaching'); v_ok := true;
+  exception when others then v_ok := false; end;
+  reset role;
+  perform pg_temp.noter('K','K5. admin : il CRÉE un élève', v_ok);
+
+  perform pg_temp.devenir(u_admin);
+  begin insert into public.documents (coach_id, title, type, category, status)
+        values (c_admin,'Doc K','pdf','entrainement','brouillon'); v_ok := true;
+  exception when others then v_ok := false; end;
+  reset role;
+  perform pg_temp.noter('K','K6. admin : il CRÉE un document', v_ok);
+
+  -- ── ET LE COLLABORATEUR N'A RIEN GAGNÉ. ───────────────────────────────
+  -- Aucune permission, aucun élève affecté.
+  perform pg_temp.devenir(u_collab);
+  begin insert into public.workout_sessions (program_id, program_week_id, day, name)
+        values (p_prog, w_sem, 'mercredi', 'Pirate'); v_ok := true;
+  exception when others then v_ok := false; end;
+  reset role;
+  perform pg_temp.noter('K','K7. collaborateur sans permission : il ne CRÉE aucune séance', not v_ok);
+
+  perform pg_temp.devenir(u_collab);
+  begin insert into public.programs (name, program_mode, is_public, status, coach_id)
+        values ('Pirate','individuel',false,'actif',c_admin); v_ok := true;
+  exception when others then v_ok := false; end;
+  reset role;
+  perform pg_temp.noter('K','K8. collaborateur sans permission : il ne CRÉE aucun programme', not v_ok);
+
+  perform pg_temp.devenir(u_collab);
+  begin insert into public.students (user_id, coach_id, first_name, last_name, email, status, access_type)
+        values (null, c_admin,'P','Irate','p13b.k.pirate@test.local','active','coaching'); v_ok := true;
+  exception when others then v_ok := false; end;
+  reset role;
+  perform pg_temp.noter('K','K9. collaborateur : il ne CRÉE jamais d''élève (il en reçoit par affectation)', not v_ok);
+
+  -- Même avec entrainement/ecriture, mais SANS élève affecté : la portée de
+  -- coachs est vide, donc le programme modèle lui reste fermé.
+  insert into public.collaborateur_permissions (collaborateur_id, categorie, niveau, accorde_par)
+  values (c_collab,'entrainement','ecriture', c_admin);
+  perform pg_temp.devenir(u_collab);
+  begin insert into public.workout_sessions (program_id, program_week_id, day, name)
+        values (p_prog, w_sem, 'jeudi', 'Pirate2'); v_ok := true;
+  exception when others then v_ok := false; end;
+  reset role;
+  perform pg_temp.noter('K','K10. permission SANS élève affecté : toujours aucune création', not v_ok);
+
+  -- ── Contrôle statique : plus aucune policy INSERT ne teste son propre id.
+  select count(*) into v_n from pg_policies
+   where schemaname = 'public' and cmd = 'INSERT' and with_check ~ '^\(id IN';
+  perform pg_temp.noter('K','K11. aucune policy INSERT ne teste l''id de la ligne qu''elle crée', v_n = 0);
+end $$;
+
+
 -- ── Z. BILAN ET RIEN NE SURVIT ────────────────────────────────────────────
 do $$ begin reset role; end $$;
 
