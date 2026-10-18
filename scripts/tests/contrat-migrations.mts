@@ -449,6 +449,33 @@ export const MIGRATION_P13B_RUBRIQUES =
 export const MIGRATION_P13B_ADMIN_CATEGORIES =
   "20261019090000_p13b_admin_reel_categories.sql";
 
+/*
+ * 20261020090000 — PROGRAMMES PRIVÉS PAR COACH, PUBLICATION RÉSERVÉE À L'ADMIN.
+ *
+ * ⚠️ DEUX DÉFAUTS SUPERPOSÉS, ET LE SECOND RENDAIT LE PREMIER INCORRIGEABLE.
+ * Les policies de `programs` savaient parler de propriété
+ * (`coach_id in (select coach_ids_portee())`), mais :
+ *   · `est_staff_global()`, placé en PREMIER terme du `or`, est vrai pour tout
+ *     coach autonome — la clause de propriété était décorative. Mesuré : un
+ *     second coach voyait, modifiait et SUPPRIMAIT les programmes du premier ;
+ *   · `coach_id` n'était JAMAIS renseigné — 28 programmes en production,
+ *     NULL sur les 28, parce que `createProgram` ne l'écrit pas. Corriger la
+ *     seule policy aurait rendu chaque coach aveugle à son propre travail.
+ *
+ * La migration pose donc la propriété à la création (déclencheur, pas
+ * applicatif : les insertions PostgREST directes comptent aussi), puis
+ * remplace `est_staff_global()` par `is_admin()` dans la branche des modèles,
+ * puis réserve `is_public` et `public_subscription_template_id` à
+ * l'administrateur et au serveur — en LEVANT 42501, pas en annulant en
+ * silence. `status`, `publication_status` et `published_at` restent au coach :
+ * c'est la distinction entre son travail interne et la commercialisation.
+ *
+ * Mesuré : supabase/tests/programmes_cloisonnement_coach.sql, 52 contrôles,
+ * dont 26 rougissent quand on rétablit l'état d'avant.
+ */
+export const MIGRATION_PROGRAMMES_COACH =
+  "20261020090000_programmes_prives_par_coach_et_publication_admin.sql";
+
 export const MIGRATIONS_COURSES: readonly string[] = [
   MIGRATION_C2,
   MIGRATION_C3,
@@ -496,17 +523,18 @@ export const MIGRATIONS_APRES_C0_1: readonly string[] = [
   MIGRATION_P13B_AUTOREF,
   MIGRATION_P13B_RUBRIQUES,
   MIGRATION_P13B_ADMIN_CATEGORIES,
+  MIGRATION_PROGRAMMES_COACH,
 ];
 
 /**
  * Le compte attendu — nécessaire, jamais suffisant.
  *
- * 113 = 84 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 28
+ * 114 = 84 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 29
  * migrations nommées dans `MIGRATIONS_APRES_C0_1`. Le point 6 recalcule
  * l'historique à partir de ce nombre : il ne peut pas être remonté seul sans
  * qu'une migration soit nommée en face.
  */
-export const NOMBRE_DE_MIGRATIONS = 113;
+export const NOMBRE_DE_MIGRATIONS = 114;
 
 /**
  * L'empreinte des 79 migrations ANTÉRIEURES à C0.1, dans l'ordre.

@@ -212,6 +212,31 @@ export function sectionAdminVisible(href: string, droits: DroitsNavigationAdmin)
 }
 
 /**
+ * LE TITRE DU TABLEAU DE BORD, selon le rôle RÉELLEMENT authentifié.
+ *
+ * ⚠️ NI L'URL NI LE TITRE EXISTANT NE SERVENT À DÉCIDER. `/admin` est la même
+ * route pour tout le staff — un coach autonome y est parfaitement légitime
+ * (`requireAdminOrCoach()`), et l'ancien titre « Dashboard admin » était
+ * simplement écrit en dur. La décision suit `profiles.role === 'admin'`,
+ * c'est-à-dire `public.is_admin()` : la même règle que les policies
+ * `*_manage_admin`, que `requireAdmin()` et que les sept gardes applicatives.
+ *
+ * ⚠️ TROIS VALEURS, PAS DEUX, ET C'EST UNE QUESTION D'HONNÊTETÉ. Tant que les
+ * droits ne sont pas lus, afficher « admin » à un coach — ou l'inverse —
+ * serait une affirmation fausse sur son compte. On affiche alors le titre
+ * neutre : il ne dit rien de faux, et il ne clignote qu'une fois.
+ */
+export function titreDashboard(droits: {
+  readonly chargement: boolean;
+  readonly estAdmin: boolean;
+  readonly mecanismeIndisponible: boolean;
+}): "Dashboard" | "Dashboard admin" | "Dashboard coach" {
+  if (droits.chargement) return "Dashboard";
+  if (droits.mecanismeIndisponible) return "Dashboard";
+  return droits.estAdmin ? "Dashboard admin" : "Dashboard coach";
+}
+
+/**
  * Un GROUPE (ex. « Programmation ») n'apparaît que si au moins un de ses
  * enfants apparaît — un intitulé dépliable sur un sous-menu vide serait pire
  * qu'un lien manquant.

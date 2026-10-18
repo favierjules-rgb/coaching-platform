@@ -32,7 +32,7 @@ import { useSupabaseAdminFeedback } from "@/hooks/useSupabaseAdminFeedback";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { Loader } from "@/components/ui/Loader";
 import { formatAmountCents } from "@/lib/stripe/status";
-import { droitsNavigationDepuisContexte, sectionAdminVisible } from "@/lib/admin-shell-nav";
+import { droitsNavigationDepuisContexte, sectionAdminVisible, titreDashboard } from "@/lib/admin-shell-nav";
 import { useStaffContext } from "@/hooks/useStaffContext";
 import {
   fullName,
@@ -205,8 +205,12 @@ export default function AdminDashboardPage() {
   return (
     <div>
       <div className="mb-8">
+        {/* ⚠️ LE TITRE SUIT LE RÔLE AUTHENTIFIÉ, pas la route. `/admin` est la
+            même page pour l'administrateur et pour un coach autonome ; le
+            titre était écrit en dur. La règle vit dans `titreDashboard`
+            (lib/admin-shell-nav.ts), fonction pure et testée. */}
         <h1 className="font-heading text-3xl font-extrabold uppercase text-foreground md:text-4xl">
-          Dashboard admin
+          {titreDashboard(staff)}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Vue d&apos;ensemble de ton activité de coaching.

@@ -140,7 +140,6 @@ export default function AdminSettingsPage() {
         <h1 className="font-heading text-3xl font-extrabold uppercase text-foreground md:text-4xl">
           Paramètres
         </h1>
-        <p className="mt-1 text-sm text-muted-foreground">Version mockée — {coachSettings.mockVersion}</p>
       </div>
 
       <div className="flex flex-col gap-6">
