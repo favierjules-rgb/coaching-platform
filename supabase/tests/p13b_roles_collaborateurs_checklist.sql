@@ -1538,6 +1538,289 @@ begin
 end $$;
 
 
+-- ── M. PAIEMENTS, EMAILS, NOTIFICATIONS : AUCUNE INFORMATION ──────────────
+--
+-- ⚠️ L'ACTEUR DE CETTE SECTION EST LE COLLABORATEUR LE MIEUX DOTÉ POSSIBLE :
+-- les QUATRE catégories en ÉCRITURE et un élève affecté. Si même lui ne voit
+-- rien, aucun réglage de `collaborateur_permissions` ne peut rouvrir ces
+-- rubriques — c'est la formulation exacte de la consigne.
+--
+-- Deux fuites avaient été mesurées, et M3 / M8 les épinglent :
+--   · `notification_campaign_targets` rendait les destinataires des campagnes
+--     d'un élève affecté, alors que la campagne elle-même lui est fermée ;
+--   · `subscription_templates` jointe à `student_profiles` donnait le PRIX de
+--     l'offre souscrite par son élève — 199,00 € dans la mesure d'origine.
+do $$
+declare
+  u_coach   constant uuid := '00000000-0000-4000-8000-00000000f001';
+  u_collab  constant uuid := '00000000-0000-4000-8000-00000000f002';
+  u_eleve   constant uuid := '00000000-0000-4000-8000-00000000f011';
+  c_coach   constant uuid := '00000000-0000-4000-8000-00000000f101';
+  c_collab  constant uuid := '00000000-0000-4000-8000-00000000f102';
+  e_un      constant uuid := '00000000-0000-4000-8000-00000000f201';
+  t_offre   constant uuid := '00000000-0000-4000-8000-00000000f301';
+  k_camp    constant uuid := '00000000-0000-4000-8000-00000000f401';
+  v_n int;
+  v_m int;
+  v_col record;
+begin
+  insert into auth.users (id, email) values
+    (u_coach,'p13b.m.coach@test.local'), (u_collab,'p13b.m.collab@test.local'),
+    (u_eleve,'p13b.m.eleve@test.local');
+  insert into public.profiles (user_id, email, role, first_name, last_name) values
+    (u_coach,'p13b.m.coach@test.local','coach','M','Coach'),
+    (u_collab,'p13b.m.collab@test.local','coach','M','Collab'),
+    (u_eleve,'p13b.m.eleve@test.local','student','M','Eleve');
+  insert into public.coaches (id, user_id, email, name, role, status, specialty) values
+    (c_coach, u_coach,'p13b.m.coach@test.local','M Coach','assistant','actif','-'),
+    (c_collab,u_collab,'p13b.m.collab@test.local','M Collab','collaborateur','actif','-');
+  insert into public.students (id, user_id, coach_id, first_name, last_name, email, status, access_type)
+  values (e_un, u_eleve, c_coach, 'M','Eleve','p13b.m.eleve@test.local','active','coaching');
+  insert into public.collaborateur_eleves (collaborateur_id, student_id, affecte_par)
+  values (c_collab, e_un, c_coach);
+  -- LES QUATRE CATÉGORIES, EN ÉCRITURE.
+  insert into public.collaborateur_permissions (collaborateur_id, categorie, niveau, accorde_par)
+  select c_collab, c, 'ecriture', c_coach
+    from unnest(array['entrainement','suivi_eleve','agenda_communication','nutrition']) c;
+
+  -- Des données dans chacune des trois rubriques, pour CET élève.
+  insert into public.payments (student_id) values (e_un);
+  insert into public.email_logs (recipient_email, email_type, subject)
+  values ('p13b.m.eleve@test.local','payment_succeeded','Facture');
+  insert into public.notification_campaigns (id, title, body, target_kind, schedule_kind)
+  values (k_camp,'Campagne','Texte','students','now');
+  insert into public.notification_campaign_targets (campaign_id, student_id) values (k_camp, e_un);
+  insert into public.subscription_templates (id, name, amount_cents, currency, billing_interval, is_active, stripe_price_id)
+  values (t_offre,'Offre M', 19900, 'eur', 'monthly', true, 'price_m_199');
+  -- ⚠️ LES TROIS COLONNES D'ATTRIBUTION SONT RENSEIGNÉES, pas seulement la
+  -- référence : `assigned_stripe_plan` porte le NOM de l'offre et suffit à
+  -- lui seul à lire le prix sur la vitrine publique. Un décor qui n'aurait
+  -- rempli que `assigned_subscription_template_id` aurait laissé les
+  -- contrôles M19/M20 passer sans rien prouver.
+  insert into public.student_profiles (student_id, assigned_subscription_template_id,
+                                       assigned_stripe_plan, assigned_stripe_price_id, goal)
+  values (e_un, t_offre, 'Offre M', 'price_m_199', 'Prise de masse')
+  on conflict (student_id) do update set
+    assigned_subscription_template_id = excluded.assigned_subscription_template_id,
+    assigned_stripe_plan = excluded.assigned_stripe_plan,
+    assigned_stripe_price_id = excluded.assigned_stripe_price_id,
+    goal = excluded.goal;
+
+  -- ── M1 à M8 : le collaborateur ne voit RIEN des trois rubriques. ──────
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab, $q$select count(*) from public.payments$q$);
+  perform pg_temp.noter('M','M1. paiements : aucune ligne', v_n = 0);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab, $q$select count(*) from public.stripe_payments$q$);
+  perform pg_temp.noter('M','M2. paiements Stripe : aucune ligne', v_n = 0);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab, $q$select count(*) from public.subscriptions$q$);
+  perform pg_temp.noter('M','M3. abonnements : aucune ligne', v_n = 0);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab, $q$select count(*) from public.billing_customers$q$);
+  perform pg_temp.noter('M','M4. clients de facturation : aucune ligne', v_n = 0);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab, $q$select count(*) from public.email_logs$q$);
+  perform pg_temp.noter('M','M5. journaux d''emails : aucune ligne', v_n = 0);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab, $q$select count(*) from public.appointment_email_logs$q$);
+  perform pg_temp.noter('M','M6. emails de rendez-vous : aucune ligne', v_n = 0);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab, $q$select count(*) from public.notification_campaigns$q$);
+  perform pg_temp.noter('M','M7. campagnes de notification : aucune ligne', v_n = 0);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab, $q$select count(*) from public.notification_campaign_targets$q$);
+  perform pg_temp.noter('M','M8. CIBLES de campagne : aucune ligne (fuite mesurée, refermée)', v_n = 0);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab, $q$select count(*) from public.push_subscriptions$q$);
+  perform pg_temp.noter('M','M9. abonnements push : aucune ligne', v_n = 0);
+
+  -- ── M10 : LE PRIX PAYÉ PAR SON ÉLÈVE, PAR JOINTURE. ───────────────────
+  -- ⚠️ CETTE FUITE NE SE VOYAIT PAS TABLE PAR TABLE. `student_profiles` lui
+  -- est ouvert par `suivi_eleve` et porte l'identifiant de l'offre ; il
+  -- suffisait de joindre le catalogue pour obtenir le montant.
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab,
+    $q$select count(*) from public.student_profiles sp
+        join public.subscription_templates t on t.id = sp.assigned_subscription_template_id$q$);
+  -- ⚠️ CE CONTRÔLE S'EST DURCI, IL NE S'EST PAS RELÂCHÉ. Il attendait 0
+  -- ligne : le catalogue fermé (section 2 de la migration), la jointure ne
+  -- rendait rien. Il attend maintenant -1, c'est-à-dire un REFUS : la
+  -- jointure CITE `assigned_subscription_template_id`, et cette colonne
+  -- n'est plus accordée à `authenticated` (section 3). La requête ne peut
+  -- plus s'exécuter du tout.
+  --
+  -- ⚠️ ET -1 EST BIEN PLUS EXIGEANT QUE 0 ICI. Si l'on rouvrait un jour la
+  -- colonne en laissant le catalogue fermé, la jointure redeviendrait
+  -- exécutable et rendrait 0 : l'ancienne formulation aurait applaudi, cette
+  -- formulation échoue. Les deux verrous sont donc contrôlés, pas un seul.
+  perform pg_temp.noter('M','M10. le prix par jointure n''est pas vide : il est REFUSÉ', v_n = -1);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab, $q$select count(*) from public.subscription_templates$q$);
+  perform pg_temp.noter('M','M11. catalogue d''offres : aucune ligne', v_n = 0);
+
+  -- ── M12/M13 : L'ÉLÈVE ET LE STAFF GLOBAL NE PERDENT RIEN. ─────────────
+  v_n := pg_temp.lecture_compte_en_tant_que(u_eleve, $q$select count(*) from public.subscription_templates$q$);
+  perform pg_temp.noter('M','M12. l''élève voit toujours le catalogue (son parcours d''achat)', v_n >= 1);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_coach, $q$select count(*) from public.subscription_templates$q$);
+  perform pg_temp.noter('M','M13. l''assistant voit toujours le catalogue', v_n >= 1);
+  v_n := pg_temp.lecture_compte_en_tant_que('00000000-0000-4000-8000-000000000001',
+    $q$select count(*) from public.notification_campaigns$q$);
+  perform pg_temp.noter('M','M14. l''administrateur voit toujours les campagnes', v_n >= 1);
+
+  -- ── M15/M16 : agenda_communication N'EST PAS AMPUTÉE. ────────────────
+  -- ⚠️ DÉCALAGE VOLONTAIRE DES HORAIRES : la table porte une contrainte
+  -- d'exclusion (`appointments_no_overlap_active`), et les sections
+  -- précédentes ont déjà posé des rendez-vous dans la fenêtre immédiate.
+  insert into public.appointments (student_id, coach_id, start_at, end_at, status)
+  values (e_un, c_coach, now() + interval '40 days', now() + interval '40 days 1 hour', 'confirmed');
+  insert into public.coach_unavailabilities (coach_id, start_at, end_at)
+  values (c_coach, now() + interval '41 days', now() + interval '41 days 2 hours');
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab,
+    format($q$select count(*) from public.appointments where student_id = %L$q$, e_un));
+  perform pg_temp.noter('M','M15. agenda : il voit toujours le rendez-vous de son élève', v_n = 1);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab,
+    format($q$select count(*) from public.coach_unavailabilities where coach_id = %L$q$, c_coach));
+  perform pg_temp.noter('M','M16. agenda : il voit les indisponibilités du coach de son élève', v_n = 1);
+
+  -- ══════════════════════════════════════════════════════════════════════
+  -- M18 à M27 : LA FUITE RÉSIDUELLE DE PRIX, ET SA FERMETURE
+  -- ══════════════════════════════════════════════════════════════════════
+  -- ⚠️ M10 NE SUFFISAIT PAS, ET VOICI POURQUOI. Il mesure une JOINTURE, et
+  -- la jointure rend zéro dès que le catalogue est fermé. Mais le
+  -- collaborateur n'a pas besoin de la jointure : il lit la RÉFÉRENCE de
+  -- l'offre en étant connecté, puis lit les prix autrement — vitrine
+  -- publique, session déconnectée — et recoupe les deux de tête. Le seul
+  -- verrou possible est donc sur la référence elle-même.
+  --
+  -- ⚠️ ET LA RÉFÉRENCE EST PORTÉE PAR TROIS COLONNES, pas une.
+  -- `assigned_stripe_plan` est le NOM de l'offre, recopié du catalogue : il
+  -- suffit à lui seul. Les contrôles ci-dessous les prennent UNE PAR UNE.
+  --
+  -- ⚠️ UN REFUS REND -1, JAMAIS 0 (voir lecture_compte_en_tant_que). C'est
+  -- ce qui distingue « la colonne est fermée » de « la requête a tourné et
+  -- n'a rien trouvé » — confondre les deux ferait passer ce contrôle pour
+  -- réussi alors que la valeur serait lisible.
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab,
+    format($q$select count(assigned_subscription_template_id) from public.student_profiles where student_id = %L$q$, e_un));
+  perform pg_temp.noter('M','M18. la référence d''offre de son élève est REFUSÉE, pas vide', v_n = -1);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab,
+    format($q$select count(assigned_stripe_plan) from public.student_profiles where student_id = %L$q$, e_un));
+  perform pg_temp.noter('M','M19. le NOM de l''offre de son élève est refusé', v_n = -1);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab,
+    format($q$select count(assigned_stripe_price_id) from public.student_profiles where student_id = %L$q$, e_un));
+  perform pg_temp.noter('M','M20. le price_id Stripe de son élève est refusé', v_n = -1);
+
+  -- Le privilège de colonne couvre TOUTE citation de la colonne, y compris
+  -- dans un `where` : impossible de la deviner par essais successifs.
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab,
+    format($q$select count(*) from public.student_profiles where assigned_subscription_template_id = %L$q$, t_offre));
+  perform pg_temp.noter('M','M21. deviner la référence par un filtre est refusé aussi', v_n = -1);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab,
+    $q$select count(*) from (select * from public.student_profiles) z$q$);
+  perform pg_temp.noter('M','M22. `select *` sur student_profiles est refusé (il citerait les trois colonnes)', v_n = -1);
+
+  -- …ET LES FONCTIONS D'ACCÈS NE LUI RENDENT RIEN NON PLUS.
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab,
+    $q$select count(*) from public.attribution_offre_eleve()$q$);
+  perform pg_temp.noter('M','M23. la fonction d''attribution ne lui rend aucune ligne', v_n = 0);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab,
+    format($q$select par_modele from public.compte_attributions_offre(%L, 'price_m_199')$q$, t_offre));
+  perform pg_temp.noter('M','M24. le compteur d''attributions le refuse', v_n = -1);
+
+  -- ── M25 : LE TEST NÉGATIF, TOUS LES CHEMINS D'UN COUP. ────────────────
+  -- ⚠️ CE CONTRÔLE EST LE SEUL QUI RÉPOND VRAIMENT À LA CONSIGNE : « un
+  -- collaborateur ayant les quatre catégories en écriture ne peut pas
+  -- déduire le prix de l'abonnement de son élève ». Il balaie TOUTES les
+  -- colonnes du schéma dont le nom évoque un prix, un montant, une offre,
+  -- un abonnement ou une facture, dans SA session, et exige qu'aucune ne
+  -- rende de valeur. C'est ce balayage qui avait trouvé les trois colonnes
+  -- d'attribution là où la relecture table par table n'avait rien vu.
+  v_n := 0;
+  for v_col in
+    select c.table_name as t, c.column_name as col
+      from information_schema.columns c
+      join information_schema.tables tb
+        on tb.table_schema = c.table_schema and tb.table_name = c.table_name
+       and tb.table_type = 'BASE TABLE'
+     where c.table_schema = 'public'
+       -- ⚠️ `stripe` EST DANS LA LISTE, `plan` N'Y EST PAS, ET C'EST VOULU.
+       -- `assigned_stripe_plan` — le NOM de l'offre, celui qui suffit à lire
+       -- le prix sur la vitrine — est attrapé par `stripe`. Ajouter `plan`
+       -- tout court ramasserait `nutrition_plan_id` et compagnie, que le
+       -- collaborateur lit LÉGITIMEMENT : le balayage crierait à la fuite sur
+       -- des colonnes parfaitement en règle, et on finirait par le désarmer.
+       and c.column_name ~* 'price|amount|cents|montant|tarif|offre|template|subscription|facture|invoice|abonnement|stripe'
+     order by 1, 2
+  loop
+    v_m := pg_temp.lecture_compte_en_tant_que(u_collab,
+      format('select count(%I) from public.%I', v_col.col, v_col.t));
+    -- -1 = refusé, 0 = aucune valeur visible. Tout le reste est une fuite.
+    if v_m > 0 then
+      v_n := v_n + 1;
+      raise warning '  fuite : %.% rend % valeur(s)', v_col.t, v_col.col, v_m;
+    end if;
+  end loop;
+  perform pg_temp.noter('M',
+    'M25. AUCUNE colonne de prix/offre du schéma ne rend de valeur au collaborateur le mieux doté', v_n = 0);
+
+  -- ── M26/M27 : ET PERSONNE D'AUTRE NE PERD RIEN. ──────────────────────
+  v_n := pg_temp.lecture_compte_en_tant_que(u_eleve,
+    $q$select count(*) from public.attribution_offre_eleve() where offre_id is not null$q$);
+  perform pg_temp.noter('M','M26. l''élève lit toujours SON offre (son parcours de paiement)', v_n = 1);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_coach,
+    format($q$select count(*) from public.attribution_offre_eleve(%L) where offre_nom is not null$q$, e_un));
+  perform pg_temp.noter('M','M27. l''assistant lit l''attribution de l''élève (facturation)', v_n = 1);
+  v_n := pg_temp.lecture_compte_en_tant_que('00000000-0000-4000-8000-000000000001',
+    format($q$select par_modele from public.compte_attributions_offre(%L, null)$q$, t_offre));
+  perform pg_temp.noter('M','M28. l''administrateur compte toujours les élèves d''une offre (garde-fou de suppression)', v_n = 1);
+
+  -- La fiche élève, elle, n'est pas amputée : le collaborateur garde ce que
+  -- `suivi_eleve` lui donne — tout sauf l'attribution.
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab,
+    format($q$select count(*) from public.student_profiles_lisible where student_id = %L$q$, e_un));
+  perform pg_temp.noter('M','M29. et il garde la fiche de son élève par la vue de lecture', v_n = 1);
+  v_n := pg_temp.lecture_compte_en_tant_que(u_collab,
+    format($q$select count(goal) from public.student_profiles where student_id = %L$q$, e_un));
+  perform pg_temp.noter('M','M30. …y compris colonne par colonne sur la table, hors attribution', v_n = 1);
+
+  -- ── M31 : contrôle statique — le privilège est bien celui des colonnes.
+  select count(*) into v_n
+    from unnest(array['assigned_subscription_template_id','assigned_stripe_plan','assigned_stripe_price_id']) col
+   cross join unnest(array['authenticated','anon']) r
+   where has_column_privilege(r, 'public.student_profiles', col, 'SELECT');
+  perform pg_temp.noter('M','M31. aucune des trois colonnes n''est accordée à authenticated ni à anon', v_n = 0);
+  select count(*) into v_n
+    from unnest(array['assigned_subscription_template_id','assigned_stripe_plan','assigned_stripe_price_id']) col
+   where not has_column_privilege('service_role', 'public.student_profiles', col, 'SELECT');
+  perform pg_temp.noter('M','M32. service_role les garde (webhooks Stripe, emails, suppression d''offre)', v_n = 0);
+
+  -- ── M33 : ET L'ÉCRITURE ? ELLE ÉTAIT DÉJÀ FERMÉE. ────────────────────
+  -- ⚠️ MESURÉ, PAS SUPPOSÉ. Le déclencheur `protect_access_columns`
+  -- (antérieur à P13-B) recopie l'ancienne valeur des sept colonnes d'accès
+  -- dès que l'auteur n'est pas `admin`/`assistant` : l'UPDATE « réussit »
+  -- (une ligne touchée) mais ne change rien. Le correctif de lecture n'avait
+  -- donc pas à toucher l'écriture — ce contrôle le prouve, et il échouera si
+  -- quelqu'un affaiblit le déclencheur un jour.
+  perform pg_temp.devenir(u_collab);
+  begin
+    update public.student_profiles
+       set assigned_stripe_plan = 'Offre Pirate',
+           assigned_stripe_price_id = 'price_pirate',
+           assigned_subscription_template_id = null
+     where student_id = e_un;
+  exception when others then null;
+  end;
+  reset role;
+  select count(*) into v_n
+    from public.student_profiles sp
+   where sp.student_id = e_un
+     and sp.assigned_stripe_plan = 'Offre M'
+     and sp.assigned_stripe_price_id = 'price_m_199'
+     and sp.assigned_subscription_template_id = t_offre;
+  perform pg_temp.noter('M','M33. et son ÉCRITURE sur ces colonnes est annulée (déclencheur préexistant)', v_n = 1);
+
+  -- ── M17 : contrôle statique — aucune catégorie n'ouvre ces rubriques. ─
+  select count(*) into v_n from pg_policies
+   where schemaname = 'public'
+     and tablename in ('payments','payment_entries','stripe_payments','subscriptions',
+                       'billing_customers','billing_events','email_logs','appointment_email_logs',
+                       'notification_campaigns','notification_campaign_targets',
+                       'notification_deliveries','notification_occurrences','push_subscriptions')
+     and (coalesce(qual,'')||' '||coalesce(with_check,'')) ~ 'student_ids_(entrainement|suivi_eleve|agenda_communication|nutrition)_|categories_(lecture|ecriture)';
+  perform pg_temp.noter('M','M17. aucune policy de ces rubriques ne dépend d''une catégorie de collaborateur', v_n = 0);
+end $$;
+
+
 -- ── Z. BILAN ET RIEN NE SURVIT ────────────────────────────────────────────
 do $$ begin reset role; end $$;
 

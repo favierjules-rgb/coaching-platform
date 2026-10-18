@@ -1945,6 +1945,8 @@ const CHEMIN_P13B_INSERT =
   "supabase/migrations/20261013110000_p13b_corriger_policies_insert.sql";
 const CHEMIN_P13B_AUTOREF =
   "supabase/migrations/20261013120000_p13b_policies_non_auto_referentielles.sql";
+const CHEMIN_P13B_RUBRIQUES =
+  "supabase/migrations/20261018090000_p13b_rubriques_globales_collaborateur.sql";
 
 const P13B_MODELE = sansCommentairesSql(lire(CHEMIN_P13B_MODELE));
 const P13B_POLICIES = sansCommentairesSql(lire(CHEMIN_P13B_POLICIES));
@@ -1957,6 +1959,7 @@ const P13B_RESERVATION = sansCommentairesSql(lire(CHEMIN_P13B_RESERVATION));
 const P13B_ADMIN_REEL = sansCommentairesSql(lire(CHEMIN_P13B_ADMIN_REEL));
 const P13B_INSERT = sansCommentairesSql(lire(CHEMIN_P13B_INSERT));
 const P13B_AUTOREF = sansCommentairesSql(lire(CHEMIN_P13B_AUTOREF));
+const P13B_RUBRIQUES = sansCommentairesSql(lire(CHEMIN_P13B_RUBRIQUES));
 
 
 const CATEGORIES = ["entrainement", "suivi_eleve", "agenda_communication", "nutrition"] as const;
@@ -2002,7 +2005,7 @@ const POLICIES_P13B: PolicieP13B[] = (() => {
   return out;
 })();
 
-test("P13B 1. les neuf migrations existent et sont ordonnées", () => {
+test("P13B 1. les dix migrations existent et sont ordonnées", () => {
   for (const [n, s] of [
     ["modèle", P13B_MODELE],
     ["policies", P13B_POLICIES],
@@ -2013,6 +2016,7 @@ test("P13B 1. les neuf migrations existent et sont ordonnées", () => {
     ["admin réel", P13B_ADMIN_REEL],
     ["insert", P13B_INSERT],
     ["auto-référence", P13B_AUTOREF],
+    ["rubriques globales", P13B_RUBRIQUES],
   ] as const) {
     assert.ok(s.trim().length > 0, `la migration ${n} est vide`);
   }
@@ -3250,7 +3254,7 @@ test("P13B/8 1. aucune migration ne peut écrire une policy INSERT sur `id`", ()
     [CHEMIN_P13B_FONCTIONS, P13B_FONCTIONS], [CHEMIN_P13B_NUTRITION, P13B_NUTRITION],
     [CHEMIN_P13B_PROVISION, P13B_PROVISION], [CHEMIN_P13B_RESERVATION, P13B_RESERVATION],
     [CHEMIN_P13B_ADMIN_REEL, P13B_ADMIN_REEL], [CHEMIN_P13B_INSERT, P13B_INSERT],
-    [CHEMIN_P13B_AUTOREF, P13B_AUTOREF],
+    [CHEMIN_P13B_AUTOREF, P13B_AUTOREF], [CHEMIN_P13B_RUBRIQUES, P13B_RUBRIQUES],
   ];
   for (const [chemin, sql] of migrations) {
     const compact = sql.replace(/\s+/g, " ");
@@ -3408,6 +3412,156 @@ test("P13B/9 4. la checklist teste la forme RÉELLEMENT employée par le code", 
     "le builder insère bien avec .select().single() : la policy SELECT est donc exigée");
 });
 
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * P13B/10 — PAIEMENTS, EMAILS, NOTIFICATIONS
+ * ══════════════════════════════════════════════════════════════════════════
+ * Deux fuites mesurées chez un collaborateur ayant les QUATRE catégories en
+ * écriture : les cibles de campagne, et le PRIX de l'offre de son élève —
+ * obtenu en joignant `student_profiles` (ouvert par `suivi_eleve`) au
+ * catalogue `subscription_templates` (ouvert à tout appelant).
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+test("P13B/10 1. les cibles de campagne suivent leur campagne, pas une catégorie", () => {
+  const compact = P13B_RUBRIQUES.replace(/\s+/g, " ");
+  /*
+   * ⚠️ ON DÉCOUPE PAR SECTION, PAS PAR FENÊTRE DE CARACTÈRES. La section 2b du
+   * même fichier rétablit volontairement une clause de catégorie sur
+   * `coach_unavailabilities` : une fenêtre arbitraire la ramassait et
+   * déclarait l'échec. Chaque contrôle doit lire SA section.
+   */
+  const sectionCibles = compact.slice(
+    compact.indexOf("notification_campaign_targets"),
+    compact.indexOf("subscription_templates"),
+  );
+  assert.ok(sectionCibles.length > 0, "la section des cibles est introuvable");
+  assert.ok(!/student_ids_agenda_communication|categories_(lecture|ecriture)/.test(sectionCibles),
+    "aucune policy de cible ne doit dépendre d'une catégorie");
+  assert.equal(
+    (compact.match(/on public\.notification_campaign_targets for (select|insert|update|delete)/g) ?? []).length,
+    4,
+    "les quatre commandes doivent être réalignées, pas seulement la lecture",
+  );
+  assert.ok(/coalesce\(public\.est_staff_global\(\), false\)/.test(compact),
+    "le verdict est celui de la table parente, en fail-closed");
+});
+
+test("P13B/10 2. le catalogue se ferme au collaborateur sans fermer l'élève", () => {
+  const compact = P13B_RUBRIQUES.replace(/\s+/g, " ");
+  // ⚠️ DEUX FONCTIONS INTERMÉDIAIRES : une policy évaluée pour `anon` ne peut
+  // pas appeler les fonctions de portée, dont P13-B lui a retiré l'EXECUTE.
+  assert.ok(/create or replace function public\.peut_voir_catalogue_offres\(\)/.test(compact));
+  assert.ok(/create or replace function public\.offre_de_l_eleve_connecte\(\)/.test(compact));
+  assert.ok(/grant execute on function public\.peut_voir_catalogue_offres\(\) to anon, authenticated, service_role/.test(compact),
+    "anon doit pouvoir évaluer la règle, sinon la policy échoue au lieu de refuser");
+  assert.ok(/public\.current_student_id\(\) is not null/.test(compact),
+    "le parcours d'achat de l'élève doit rester ouvert");
+  assert.ok(/coalesce\(auth\.role\(\), ''\) <> 'authenticated'/.test(compact),
+    "et le visiteur anonyme aussi");
+  assert.ok(/coalesce\(public\.est_staff_global\(\), false\)/.test(compact),
+    "l'administrateur et le coach autonome gardent le catalogue");
+  // Aucune catégorie n'apparaît dans la règle du catalogue : elle n'est pas
+  // rouvrable par une permission.
+  // Même précaution : la règle du catalogue s'arrête avant la section 2b.
+  const sectionCatalogue = compact.slice(
+    compact.indexOf("create or replace function public.peut_voir_catalogue_offres"),
+    compact.indexOf("coach_unavailabilities"),
+  );
+  assert.ok(sectionCatalogue.length > 0, "la section du catalogue est introuvable");
+  assert.ok(!/categories_(lecture|ecriture)/.test(sectionCatalogue),
+    "le catalogue ne doit dépendre d'aucune catégorie de collaborateur");
+});
+
+test("P13B/10 3. agenda_communication n'est pas amputée — elle est complétée", () => {
+  /*
+   * ⚠️ RÉGRESSION ÉVITÉE DE JUSTESSE. 20261013090000 avait donné à
+   * `coach_availabilities` une clause de portée ; `coach_unavailabilities` ne
+   * l'avait pas. Un collaborateur voyait les rendez-vous de son élève mais
+   * aucune indisponibilité du coach — il pouvait proposer un créneau bloqué.
+   */
+  const compact = P13B_RUBRIQUES.replace(/\s+/g, " ");
+  assert.ok(/create policy coach_unavailabilities_select_portee on public\.coach_unavailabilities for select/.test(compact),
+    "la clause de portée des indisponibilités doit exister");
+  assert.ok(/coach_id in \(select public\.coach_ids_portee\(\)\)/.test(compact),
+    "bornée aux coachs de la portée");
+  assert.ok(/'agenda_communication' in \(select public\.categories_lecture\(\)\)/.test(compact),
+    "et à la catégorie, en lecture");
+  // ⚠️ LECTURE SEULEMENT : voir un empêchement n'est pas le lever.
+  assert.ok(!/on public\.coach_unavailabilities for (update|delete|insert)/.test(compact),
+    "la modification et la suppression restent au propriétaire du créneau");
+});
+
+test("P13B/10 4. le correctif ne touche aucune autre table", () => {
+  const compact = P13B_RUBRIQUES.replace(/\s+/g, " ");
+  const tables = new Set(
+    [...compact.matchAll(/on public\.(\w+) for/g)].map((m) => m[1]),
+  );
+  assert.deepEqual(
+    [...tables].sort(),
+    ["coach_unavailabilities", "notification_campaign_targets", "subscription_templates"],
+    "seules ces trois tables doivent être touchées",
+  );
+  assert.ok(!/create table|alter table|drop table/i.test(compact), "aucune table ne doit bouger");
+  for (const f of ["staff_role", "is_admin", "est_staff_global", "categories_lecture", "coach_ids_portee"]) {
+    assert.ok(!new RegExp(`create or replace function public\\.${f}\\(`).test(compact),
+      `${f}() ne doit pas être redéfinie`);
+  }
+});
+
+
+test("P13B/10 5. la fuite de prix se ferme sur la RÉFÉRENCE, par un privilège de colonne", () => {
+  /*
+   * ⚠️ FERMER LE CATALOGUE NE SUFFISAIT PAS. Le catalogue reste public (c'est
+   * la consigne) : un collaborateur déconnecté y lit les prix, puis les
+   * recoupe avec ce qu'il a lu de l'offre de son élève en étant connecté. Le
+   * verrou doit donc porter sur ce qu'il lit CONNECTÉ — trois colonnes de
+   * `student_profiles`, et pas une : `assigned_stripe_plan` est le NOM de
+   * l'offre, qui suffit à lui seul.
+   *
+   * ⚠️ ET UNE POLICY RLS NE SAIT PAS LE FAIRE : elle filtre des lignes, pas
+   * des colonnes, et le collaborateur a BESOIN de la ligne (physiologie,
+   * objectifs, préférences alimentaires de son élève).
+   */
+  const compact = P13B_RUBRIQUES.replace(/\s+/g, " ");
+  assert.ok(/revoke select on public\.student_profiles from authenticated, anon/.test(compact),
+    "un privilège de TABLE implique toutes ses colonnes : il doit partir d'abord");
+  for (const col of ["assigned_subscription_template_id", "assigned_stripe_plan", "assigned_stripe_price_id"]) {
+    assert.ok(compact.includes(`'${col}'`), `${col} doit être fermée`);
+  }
+  assert.ok(/une colonne d''attribution d''offre reste lisible/.test(compact),
+    "la migration doit refuser de s'appliquer si une seule des trois rouvre");
+});
+
+test("P13B/10 6. et rien de légitime ne se ferme avec elle", () => {
+  const compact = P13B_RUBRIQUES.replace(/\s+/g, " ");
+  assert.ok(/grant select \(%s\) on public\.student_profiles to authenticated, anon/.test(compact));
+  assert.ok(/from information_schema\.columns/.test(compact),
+    "la liste des colonnes rendues doit être lue en base, jamais recopiée");
+  assert.ok(/create view public\.student_profiles_lisible with \(security_invoker = true\)/.test(compact),
+    "sans security_invoker la vue contournerait la RLS de l'appelant");
+  assert.ok(/sp\.student_id = public\.current_student_id\(\)/.test(compact));
+  assert.ok(/coalesce\(auth\.role\(\), ''\) = 'service_role'/.test(compact));
+  assert.ok(/service_role a perdu une colonne d''attribution/.test(compact));
+});
+
+test("P13B/10 7. aucune table ne bouge, aucune donnée n'est déplacée", () => {
+  /*
+   * ⚠️ LE CHOIX EST DÉLIBÉRÉ. Déplacer les trois colonnes dans une table
+   * dédiée aurait marché aussi, mais exigeait un `drop column` en production,
+   * irréversible, et la réécriture de la RPC de suppression, des types
+   * générés et de six lectures. Le privilège de colonne est réversible, ne
+   * touche aucune donnée, et laisse la clé étrangère et le déclencheur
+   * `protect_access_columns` exactement en place.
+   */
+  const compact = P13B_RUBRIQUES.replace(/\s+/g, " ");
+  assert.ok(!/create table|drop table|drop column|alter table \w+ add column/i.test(compact),
+    "aucune donnée historique ne doit être déplacée ni supprimée");
+  assert.ok(!/delete from public\.student_profiles|update public\.student_profiles set/i.test(compact),
+    "aucune écriture sur les fiches élèves");
+  assert.ok(!/protect_student_profiles_access_columns/.test(compact.replace(/--[^\n]*/g, "")),
+    "le déclencheur d'écriture n'a pas à être touché");
+});
 
 console.log(`\n${passed} réussis, ${failed} échecs`);
 if (failed > 0) process.exit(1);

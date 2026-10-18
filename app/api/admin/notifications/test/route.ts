@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { requireStaffForStudent } from "@/lib/api/authz";
+import { requireStaffForStudent, requireStaff } from "@/lib/api/authz";
 import { abonnementsActifs, desactiverAbonnement, marquerSucces } from "@/lib/push/depot-abonnements";
 import { DESTINATION_PAR_DEFAUT } from "@/lib/push/destinations";
 import { envoyerNotifications } from "@/lib/push/envoyer";
@@ -88,9 +88,29 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Élève non précisé." }, { status: 400 });
   }
 
-  // P13-B : lire l'état des abonnements push d'un élève relève de
-  // `agenda_communication` en lecture. Un collaborateur sans cette catégorie
-  // — ou non affecté à cet élève — reçoit 403.
+  /*
+   * ⚠️ RUBRIQUE NOTIFICATIONS : AUCUN COLLABORATEUR, QUELLE QUE SOIT SA
+   * CATÉGORIE.
+   *
+   * Cette route n'est appelée que par `NotificationTestButton`, monté sur la
+   * seule page /admin/notifications — une rubrique globale. Elle était gardée
+   * par `agenda_communication / lecture`, ce qui la rendait accessible à un
+   * collaborateur ayant cette catégorie : il pouvait compter les appareils
+   * d'un élève affecté depuis une rubrique qui ne lui est pas ouverte.
+   *
+   * `requireStaff()` refuse tout collaborateur (voir lib/api/authz.ts) et
+   * laisse passer l'administrateur et l'assistant, dont le comportement est
+   * inchangé. Le contrôle d'appartenance par élève RESTE ensuite : fermer la
+   * rubrique ne dispense pas de vérifier la portée.
+   *
+   * ⚠️ `agenda_communication` N'EST PAS AMPUTÉE POUR AUTANT. Les rendez-vous,
+   * les événements et les indisponibilités passent par leurs propres RPC
+   * (`create_appointment_atomic`, `create_coach_event_atomic`…), qui
+   * continuent d'exiger cette catégorie et ne sont pas touchées ici.
+   */
+  const rubrique = await requireStaff();
+  if (!rubrique.ok) return rubrique.response;
+
   const acces = await requireStaffForStudent(studentId, {
     categorie: "agenda_communication",
     niveau: "lecture",
@@ -120,6 +140,11 @@ export async function POST(request: Request) {
   }
 
   // P13-B : ENVOYER une notification est une écriture de communication.
+  // Même règle qu'au GET : la rubrique Notifications est fermée aux
+  // collaborateurs avant toute vérification de portée.
+  const rubrique = await requireStaff();
+  if (!rubrique.ok) return rubrique.response;
+
   const acces = await requireStaffForStudent(studentId, {
     categorie: "agenda_communication",
     niveau: "ecriture",

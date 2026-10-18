@@ -166,6 +166,34 @@ async function fichesStaff(userId: string): Promise<FichesStaff | "indisponible"
 }
 
 /**
+ * L'appelant est-il un COLLABORATEUR ?
+ *
+ * ⚠️ MÊME LECTURE QUE `requireStaff()`, EXPOSÉE POUR LES LAYOUTS. Les trois
+ * rubriques globales — Paiements, Emails, Notifications — sont rendues par des
+ * Server Components, qui ne peuvent pas rendre une `Response` HTTP : ils
+ * redirigent. Ils ont donc besoin du VERDICT, pas de la réponse. Dupliquer la
+ * règle aurait créé deux vérités sur « qu'est-ce qu'un collaborateur » ; c'est
+ * `fichesStaff` qui répond, ici comme là.
+ *
+ * ⚠️ UNE FICHE INACTIVE COMPTE. `fichesStaff` regarde TOUTES les fiches, pas
+ * seulement l'active : désactiver la fiche d'un collaborateur ne doit pas le
+ * faire passer pour un staff sans fiche et lui rouvrir les rubriques globales.
+ *
+ * Rend `"indisponible"` quand le client service role manque — l'appelant
+ * décide, et doit refuser : une panne de configuration ne peut pas ouvrir une
+ * porte.
+ */
+export async function estCollaborateurConnecte(): Promise<boolean | "indisponible"> {
+  const ctx = await contexte();
+  if (!ctx.ok) return false; // non authentifié : les gardes amont ont déjà tranché.
+  if (ctx.estAdmin) return false;
+
+  const fiches = await fichesStaff(ctx.user.id);
+  if (fiches === "indisponible") return "indisponible";
+  return fiches.estCollaborateur;
+}
+
+/**
  * Le collaborateur est-il affecté à cet élève, AVEC la catégorie et le
  * niveau exigés ? Les deux conditions sont nécessaires et aucune ne supplée
  * l'autre : une affectation sans permission ne donne rien, une permission

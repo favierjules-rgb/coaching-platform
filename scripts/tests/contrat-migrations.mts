@@ -397,6 +397,31 @@ export const MIGRATION_P13B_INSERT =
 export const MIGRATION_P13B_AUTOREF =
   "20261013120000_p13b_policies_non_auto_referentielles.sql";
 
+/**
+ * P13-B, migration 10/10 — Paiements, Emails et Notifications fermés au
+ * collaborateur. PAS ENCORE APPLIQUÉE.
+ *
+ * ⚠️ DEUX FUITES MESURÉES, dans la session d'un collaborateur ayant les QUATRE
+ * catégories en écriture et un élève affecté — le mieux doté possible :
+ *
+ *   · `notification_campaign_targets` rendait les DESTINATAIRES des campagnes
+ *     de ses élèves, alors que la campagne elle-même lui est fermée par
+ *     `est_staff_global()` ;
+ *   · `subscription_templates`, lisible dès `is_active = true`, jointe à
+ *     `student_profiles` (ouvert par `suivi_eleve` et porteur de
+ *     `assigned_subscription_template_id`), donnait le PRIX de l'offre
+ *     souscrite par son élève — 199,00 € dans la mesure d'origine.
+ *
+ * ⚠️ ET UNE RÉGRESSION ÉVITÉE DE JUSTESSE. En vérifiant la non-régression,
+ * `coach_unavailabilities` s'est révélée privée de la clause de portée que
+ * 20261013090000 avait donnée à `coach_availabilities` : un collaborateur
+ * `agenda_communication` voyait les rendez-vous de son élève mais aucune
+ * indisponibilité du coach, et pouvait donc proposer un créneau bloqué. La
+ * clause est ajoutée ici, en LECTURE seulement.
+ */
+export const MIGRATION_P13B_RUBRIQUES =
+  "20261018090000_p13b_rubriques_globales_collaborateur.sql";
+
 export const MIGRATIONS_COURSES: readonly string[] = [
   MIGRATION_C2,
   MIGRATION_C3,
@@ -442,17 +467,18 @@ export const MIGRATIONS_APRES_C0_1: readonly string[] = [
   MIGRATION_P13B_ADMIN_REEL,
   MIGRATION_P13B_INSERT,
   MIGRATION_P13B_AUTOREF,
+  MIGRATION_P13B_RUBRIQUES,
 ];
 
 /**
  * Le compte attendu — nécessaire, jamais suffisant.
  *
- * 111 = 84 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 26
+ * 112 = 84 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 27
  * migrations nommées dans `MIGRATIONS_APRES_C0_1`. Le point 6 recalcule
  * l'historique à partir de ce nombre : il ne peut pas être remonté seul sans
  * qu'une migration soit nommée en face.
  */
-export const NOMBRE_DE_MIGRATIONS = 111;
+export const NOMBRE_DE_MIGRATIONS = 112;
 
 /**
  * L'empreinte des 79 migrations ANTÉRIEURES à C0.1, dans l'ordre.

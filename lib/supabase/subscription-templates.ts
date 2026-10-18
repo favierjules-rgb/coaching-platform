@@ -242,20 +242,31 @@ export async function getSubscriptionTemplateReferences(
   const priceId = template.stripePriceId;
   const productId = template.stripeProductId;
 
-  // head + count exact : on ne ramène jamais les lignes, seulement le compte.
-  const byTemplate = await supabase
-    .from("student_profiles")
-    .select("student_id", { count: "exact", head: true })
-    .eq("assigned_subscription_template_id", template.id);
-  devWarn("references.studentsByTemplateId", byTemplate.error);
-
-  const byPrice = priceId
-    ? await supabase
-        .from("student_profiles")
-        .select("student_id", { count: "exact", head: true })
-        .eq("assigned_stripe_price_id", priceId)
-    : null;
-  if (byPrice) devWarn("references.studentsByPriceId", byPrice.error);
+  /*
+   * ⚠️ LES DEUX COMPTES D'ÉLÈVES PASSENT PAR UNE RPC (P13-B/10). Ils
+   * s'obtenaient par `.eq("assigned_subscription_template_id", …)` et
+   * `.eq("assigned_stripe_price_id", …)`. Ces deux colonnes sont désormais
+   * fermées au rôle `authenticated` par un privilège de COLONNE — et
+   * PostgreSQL contrôle ce privilège partout où la colonne est citée, y
+   * compris dans un `where` : les deux requêtes tomberaient en 42501, pour
+   * l'administrateur lui-même.
+   *
+   * `compte_attributions_offre` rend des COMPTES, jamais une valeur, et
+   * refuse quiconque n'est ni l'administrateur, ni le coach autonome, ni le
+   * serveur. Un refus laisse les deux compteurs à zéro, exactement comme une
+   * erreur de requête le faisait avant : ce contrôle sert l'UI, la garantie
+   * anti-course reste la RPC transactionnelle de suppression, qui recompte
+   * elle-même dans sa transaction.
+   */
+  // @ts-expect-error — RPC ajoutée par migration, pas encore dans les types générés.
+  const comptes = await supabase.rpc("compte_attributions_offre", {
+    p_template_id: template.id,
+    p_stripe_price_id: priceId,
+  });
+  devWarn("references.studentsByTemplateId", comptes.error);
+  const compte = ((comptes.data as { par_modele: number; par_prix: number }[] | null) ?? [])[0] ?? null;
+  const studentsByTemplateId = compte?.par_modele ?? 0;
+  const studentsByPriceId = compte?.par_prix ?? 0;
 
   const subs = priceId
     ? await supabase.from("subscriptions").select("id", { count: "exact", head: true }).eq("stripe_price_id", priceId)
@@ -292,8 +303,8 @@ export async function getSubscriptionTemplateReferences(
   if (sharedProduct) devWarn("references.otherTemplatesSharingProduct", sharedProduct.error);
 
   return {
-    studentsByTemplateId: byTemplate.count ?? 0,
-    studentsByPriceId: byPrice?.count ?? 0,
+    studentsByTemplateId,
+    studentsByPriceId,
     subscriptions: subs?.count ?? 0,
     payments,
     otherTemplatesSharingProduct: sharedProduct?.count ?? 0,

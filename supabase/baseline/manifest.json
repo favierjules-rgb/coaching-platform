@@ -117,7 +117,8 @@
     "20261013090000_p13b_cloisonner_surface_reservation.sql",
     "20261013100000_p13b_admin_reel_est_staff_global.sql",
     "20261013110000_p13b_corriger_policies_insert.sql",
-    "20261013120000_p13b_policies_non_auto_referentielles.sql"
+    "20261013120000_p13b_policies_non_auto_referentielles.sql",
+    "20261018090000_p13b_rubriques_globales_collaborateur.sql"
   ],
   "garanties_de_contenu": {
     "insert_de_donnees_metier": 0,

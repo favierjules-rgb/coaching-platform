@@ -26,6 +26,7 @@ import { builderSaveUserMessage, orchestrateBuilderSave } from "../../lib/admin-
 import { updateProgram } from "../../lib/supabase/programs";
 import type { ProgramBuilderData } from "../../components/admin/ProgramBuilder";
 import type { AdminWorkoutSession } from "../../types";
+import { MESSAGE_REFUS_PROGRAMME } from "../../lib/messages-autorisation";
 
 let réussis = 0;
 let échecs = 0;
@@ -276,10 +277,27 @@ await (async () => {
     // b. L'issue « error » produit le message actionnable, pas un générique.
     const issue = await orchestrateBuilderSave({ save: async () => false, refetch: async () => null });
     assert.equal(issue.kind, "error");
-    assert.ok(/droits coach/.test(builderSaveUserMessage(issue) ?? ""), "message : session sans droits coach");
+    /*
+     * ⚠️ LE MESSAGE A CHANGÉ, ET LE CONTRÔLE S'EST RESSERRÉ. Il exigeait la
+     * formule « droits coach », qui posait un diagnostic faux : depuis P13-B,
+     * le cas courant n'est pas une session perdue mais un collaborateur sans
+     * `entrainement / ecriture`, à qui se reconnecter ne donnera jamais ce
+     * droit. Le texte est désormais celui de la nutrition, au mot près.
+     *
+     * On vérifie donc : le message EXACT, l'absence des anciennes formules
+     * trompeuses, et l'absence de tout code technique à l'écran — trois
+     * exigences là où il n'y en avait qu'une.
+     */
+    const messageRefus = builderSaveUserMessage(issue) ?? "";
+    assert.equal(messageRefus, MESSAGE_REFUS_PROGRAMME,
+      "message : refus d'autorisation, formulé comme en nutrition");
+    for (const interdit of ["droits coach", "Reconnecte", "admin", "NOT_AUTHORIZED", "42501", "SAVE_FAILED"]) {
+      assert.ok(!messageRefus.includes(interdit),
+        `le message affiché ne doit pas contenir « ${interdit} »`);
+    }
     assert.ok(/NOT_AUTHORIZED|42501|SAVE_FAILED/.test(
-      readFileSync(new URL("../../lib/admin-builder-save.ts", import.meta.url), "utf8")),
-      "NOT_AUTHORIZED/42501 détectés explicitement");
+      readFileSync(new URL("../../lib/messages-autorisation.ts", import.meta.url), "utf8")),
+      "NOT_AUTHORIZED/42501 restent détectés explicitement, dans la source unique des messages");
     // c. STALE → message « recharge », jamais de fausse réussite.
     const stale = await orchestrateBuilderSave({
       save: async () => { throw new Error("saveTrainingSessionBlocks : STALE_TRAINING_SESSION"); },

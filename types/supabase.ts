@@ -212,6 +212,37 @@ export interface Database {
        * docs/supabase-student-model.md pour la répartition students /
        * student_profiles.
        */
+      /**
+       * P13-B/10 — `student_profiles` SANS les trois colonnes d'attribution
+       * d'offre (`assigned_subscription_template_id`, `assigned_stripe_plan`,
+       * `assigned_stripe_price_id`), devenues illisibles pour
+       * `authenticated`/`anon` par un privilège de COLONNE : un collaborateur,
+       * à qui `suivi_eleve` ouvre la fiche de son élève, en déduisait le prix
+       * payé par cet élève.
+       *
+       * ⚠️ C'EST PAR ICI QUE PASSENT LES LECTURES `select *`. Sur la table
+       * elle-même, `select *` exige le privilège sur TOUTES les colonnes et
+       * tombe en 42501 — pour l'administrateur comme pour l'élève. La vue est
+       * en `security_invoker` : droits ET RLS de l'appelant, pas du
+       * propriétaire. L'attribution elle-même se lit par
+       * `lireAttributionOffre` (lib/supabase/attribution-offre.ts).
+       *
+       * ⚠️ DÉCRITE ICI ET PAS DANS `Views` À DESSEIN. `Views:
+       * Record<string, never>` porte l'index permissif qui laisse passer les
+       * tables pas encore décrites à la main (voir l'en-tête du fichier) :
+       * remplacer cet index par un objet nommé casse une quarantaine de
+       * lectures ailleurs dans le dépôt. Lecture seule : `Insert`/`Update`
+       * sont volontairement vides.
+       */
+      student_profiles_lisible: {
+        Row: Omit<
+          Database["public"]["Tables"]["student_profiles"]["Row"],
+          "assigned_subscription_template_id" | "assigned_stripe_plan" | "assigned_stripe_price_id"
+        >;
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
       student_profiles: {
         Row: {
           id: string;
