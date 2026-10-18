@@ -422,6 +422,33 @@ export const MIGRATION_P13B_AUTOREF =
 export const MIGRATION_P13B_RUBRIQUES =
   "20261018090000_p13b_rubriques_globales_collaborateur.sql";
 
+/*
+ * 20261019090000 — L'ADMINISTRATEUR RÉEL, PARTOUT OÙ IL MANQUAIT ENCORE.
+ *
+ * ⚠️ MÊME CAUSE QUE 20261013100000, QUATRE OBJETS DE PLUS. Cette migration-là
+ * avait posé la règle — « les droits globaux suivent `profiles.role = 'admin'`
+ * par `public.is_admin()` » — et l'avait appliquée à `est_staff_global()`,
+ * `student_ids_portee()` et `coach_ids_portee()`. Quatre objets testaient
+ * encore `coaches.role` seul :
+ *
+ *   · `categories_lecture()` et `categories_ecriture()` — vingt-deux
+ *     fonctions de portée s'enchaînent sur elles, donc un administrateur sans
+ *     fiche `coaches` mesurait 0 catégorie et perdait d'un coup fiches élèves,
+ *     agenda, nutrition et documents ;
+ *   · `protect_students_ownership_columns()` et
+ *     `protect_student_profiles_access_columns()` — deux déclencheurs qui
+ *     RECOPIENT l'ancienne valeur au lieu de lever : la réaffectation d'un
+ *     élève, son passage en pause et l'attribution d'une offre « réussissaient »
+ *     puis revenaient en arrière, sans la moindre erreur à l'écran.
+ *
+ * Mesuré avant/après dans supabase/tests/matrice_roles_admin_coach_collaborateur.sql
+ * (section C) : neuf contrôles rouges avant, zéro après. Rien n'est élargi
+ * pour un collaborateur ni pour un coach autonome — `est_staff_global()` est
+ * exactement l'ancien test OU `is_admin()`.
+ */
+export const MIGRATION_P13B_ADMIN_CATEGORIES =
+  "20261019090000_p13b_admin_reel_categories.sql";
+
 export const MIGRATIONS_COURSES: readonly string[] = [
   MIGRATION_C2,
   MIGRATION_C3,
@@ -468,17 +495,18 @@ export const MIGRATIONS_APRES_C0_1: readonly string[] = [
   MIGRATION_P13B_INSERT,
   MIGRATION_P13B_AUTOREF,
   MIGRATION_P13B_RUBRIQUES,
+  MIGRATION_P13B_ADMIN_CATEGORIES,
 ];
 
 /**
  * Le compte attendu — nécessaire, jamais suffisant.
  *
- * 112 = 84 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 27
+ * 113 = 84 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 28
  * migrations nommées dans `MIGRATIONS_APRES_C0_1`. Le point 6 recalcule
  * l'historique à partir de ce nombre : il ne peut pas être remonté seul sans
  * qu'une migration soit nommée en face.
  */
-export const NOMBRE_DE_MIGRATIONS = 112;
+export const NOMBRE_DE_MIGRATIONS = 113;
 
 /**
  * L'empreinte des 79 migrations ANTÉRIEURES à C0.1, dans l'ordre.

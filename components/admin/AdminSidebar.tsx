@@ -25,6 +25,7 @@ import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { Logo } from "@/components/ui/Logo";
 import { useStaffContext } from "@/hooks/useStaffContext";
 import {
+  droitsNavigationDepuisContexte,
   groupeAdminVisible,
   isAdminRouteActive,
   isAnyAdminRouteActive,
@@ -93,14 +94,13 @@ export function AdminSidebar({ mobile = false, onNavigate }: AdminSidebarProps) 
      pas connus — on affiche la navigation d'avant P13-B plutôt que de faire
      clignoter la sidebar, puisqu'aucune donnée n'en dépend. */
   const staff = useStaffContext();
-  const droits: DroitsNavigationAdmin = staff.chargement
-    ? { estAdmin: false, roleStaff: null, categoriesLecture: [], mecanismeIndisponible: true }
-    : {
-        estAdmin: staff.estAdmin,
-        roleStaff: staff.role,
-        categoriesLecture: staff.categoriesLecture,
-        mecanismeIndisponible: staff.mecanismeIndisponible,
-      };
+  /* ⚠️ LA CONVERSION N'EST PLUS RECOPIÉE ICI. Ce composant neutralisait le
+     chargement par un faux `mecanismeIndisponible`, et `app/admin/page.tsx`
+     — qui applique la MÊME règle à la vitrine du tableau de bord — l'avait
+     oublié : l'administrateur gardait son menu mais perdait les tuiles
+     Paiements de son accueil. `droitsNavigationDepuisContexte` porte
+     désormais la conversion, chargement compris, pour les deux. */
+  const droits: DroitsNavigationAdmin = droitsNavigationDepuisContexte(staff);
 
   /* Le découpage reste celui d'origine — « Dashboard, Élèves, puis le groupe
      Programmation, puis le reste » — mais il est fait par IDENTITÉ et non par

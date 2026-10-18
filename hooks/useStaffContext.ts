@@ -91,6 +91,33 @@ const ETAT_INCONNU: StaffContext = {
   mecanismeIndisponible: false,
 };
 
+/**
+ * RIEN N'A PU ÊTRE ÉTABLI — à ne pas confondre avec « cet appelant n'est
+ * personne ».
+ *
+ * ⚠️ C'EST LA CAUSE DE LA RÉGRESSION QUI A COÛTÉ SON ESPACE À
+ * L'ADMINISTRATEUR. Jusqu'ici, toute lecture qui n'aboutissait pas rendait
+ * `ETAT_INCONNU`, c'est-à-dire une réponse PROPRE : « pas admin, aucun rôle,
+ * aucune catégorie, et le mécanisme fonctionne ». `sectionAdminVisible` en
+ * concluait, très logiquement, qu'il fallait tout masquer sauf l'accueil. Un
+ * administrateur parfaitement provisionné perdait Paramètres, Paiements,
+ * Abonnements, Emails, Notifications et Newsletter — et, le résultat étant
+ * mis en cache pour toute la session, les retrouvait seulement après un
+ * rechargement complet.
+ *
+ * Les chemins concernés n'ont rien d'exotique : client navigateur absent,
+ * session pas encore réhydratée au premier rendu (les RPC partent alors en
+ * `anon`, à qui P13-B a RETIRÉ l'EXECUTE — donc `42501`, que l'ancien
+ * classement ne reconnaissait pas comme une absence de mécanisme), coupure
+ * réseau, 5xx.
+ *
+ * `mecanismeIndisponible: true` est exactement le signal prévu pour cela :
+ * « l'interface ne peut pas savoir, conserve le comportement d'avant
+ * P13-B ». La sécurité ne s'en trouve pas changée d'un pouce — la RLS et
+ * lib/api/authz.ts refusent indépendamment de ce qui est affiché.
+ */
+const INDETERMINE: StaffContext = { ...ETAT_INCONNU, mecanismeIndisponible: true };
+
 function normaliserRole(valeur: unknown): CoachRole | null {
   return valeur === "admin" || valeur === "assistant" || valeur === "collaborateur" ? valeur : null;
 }
@@ -152,16 +179,23 @@ export function useStaffContext(): StaffContext {
     async function lire(): Promise<StaffContext> {
       const supabase = createSupabaseBrowserClient();
       if (!supabase) {
-        return ETAT_INCONNU;
+        return INDETERMINE;
       }
       const { data: session } = await supabase.auth.getUser();
       const userId = session?.user?.id ?? null;
+      // ⚠️ PAS DE SESSION = PAS DE RÉPONSE, PAS « PAS ADMIN ». Sans
+      // `userId`, la lecture de `profiles` est sautée et les quatre RPC
+      // partent en `anon`, à qui P13-B a retiré l'EXECUTE : elles rendent
+      // `42501`. Conclure « cet appelant n'est personne » de cette situation
+      // revenait à démonter l'espace d'administration sur une course au
+      // premier rendu.
+      if (!userId) {
+        return INDETERMINE;
+      }
 
 
       const [profil, roleRpc, idRpc, categoriesRpc, ecritureRpc] = await Promise.all([
-        userId
-          ? supabase.from("profiles").select("role").eq("user_id", userId).maybeSingle()
-          : Promise.resolve({ data: null }),
+        supabase.from("profiles").select("role").eq("user_id", userId).maybeSingle(),
         supabase.rpc("staff_role"),
         supabase.rpc("current_staff_id"),
         supabase.rpc("categories_lecture"),
@@ -181,6 +215,46 @@ export function useStaffContext(): StaffContext {
       const brutId: unknown = Array.isArray(idRpc.data) ? idRpc.data[0] : idRpc.data;
       const profilRole = (profil.data as { role?: unknown } | null)?.role;
 
+      /*
+       * ⚠️ TOUTE ERREUR COMPTE, PAS SEULEMENT LA FONCTION ABSENTE.
+       *
+       * `estFonctionAbsente` ne reconnaissait que `42883`/`PGRST202`. Or pour
+       * un membre du staff RÉGULIÈREMENT authentifié, AUCUNE de ces cinq
+       * lectures n'est censée échouer : `profiles` se lit soi-même (policy
+       * `profiles_select_self_or_staff`) et les quatre fonctions sont
+       * accordées à `authenticated`. Une erreur, quelle qu'elle soit —
+       * `42501` parce que la requête est partie en `anon`, réseau coupé,
+       * 5xx, fonction absente — signifie donc UNE SEULE chose : l'interface
+       * ne sait pas. Elle doit alors conserver le comportement d'avant
+       * P13-B, jamais inventer un appelant sans droits.
+       *
+       * Ce que cela NE change PAS : pour un collaborateur dont les lectures
+       * aboutissent, le verdict reste identique au contrôle près — c'est le
+       * chemin normal, et la suite `rubriques-globales-collaborateur` le
+       * mesure. Et de toute façon, afficher une rubrique n'en ouvre pas les
+       * données : la RLS rend zéro ligne et les routes refusent en 403.
+       */
+      const lectureIncertaine =
+        profil.error != null ||
+        roleRpc.error != null ||
+        idRpc.error != null ||
+        categoriesRpc.error != null ||
+        ecritureRpc.error != null;
+
+      if (lectureIncertaine) {
+        // La fonction absente reste nommée à part : c'est le cas « migrations
+        // pas encore appliquées », attendu et sans gravité, qu'on ne veut pas
+        // journaliser comme une anomalie.
+        const migrationsAbsentes =
+          estFonctionAbsente(roleRpc.error) ||
+          estFonctionAbsente(categoriesRpc.error) ||
+          estFonctionAbsente(ecritureRpc.error);
+        if (!migrationsAbsentes) {
+          console.warn("[StaffContext] droits indéterminables : navigation d'avant P13-B conservée.");
+        }
+        return INDETERMINE;
+      }
+
       return {
         chargement: false,
         estAdmin: profilRole === "admin",
@@ -188,10 +262,7 @@ export function useStaffContext(): StaffContext {
         staffId: typeof brutId === "string" && brutId.length > 0 ? brutId : null,
         categoriesLecture: normaliserCategories(categoriesRpc.data),
         categoriesEcriture: normaliserCategories(ecritureRpc.data),
-        mecanismeIndisponible:
-          estFonctionAbsente(roleRpc.error) ||
-          estFonctionAbsente(categoriesRpc.error) ||
-          estFonctionAbsente(ecritureRpc.error),
+        mecanismeIndisponible: false,
       };
     }
 
@@ -199,17 +270,32 @@ export function useStaffContext(): StaffContext {
     // au chargement figerait l'état « inconnu » pour toute la session, et un
     // simple changement d'onglet ne suffirait plus à retrouver ses droits.
     if (lectureEnCours === null) {
-      lectureEnCours = lire().catch((erreur) => {
-        lectureEnCours = null;
-        throw erreur;
-      });
+      lectureEnCours = lire()
+        .then((resultat) => {
+          /*
+           * ⚠️ UNE NON-RÉPONSE N'EST PAS MISE EN CACHE. Le cache est au
+           * niveau du MODULE et n'a volontairement aucune invalidation : un
+           * état « indéterminé » qui s'y installait figeait la navigation
+           * mutilée pour TOUTE la session, et seul un rechargement complet
+           * en sortait. Désormais la prochaine montée du hook réessaie.
+           */
+          if (resultat.mecanismeIndisponible) {
+            lectureEnCours = null;
+          }
+          return resultat;
+        })
+        .catch((erreur) => {
+          lectureEnCours = null;
+          throw erreur;
+        });
     }
     lectureEnCours.then(
       (resultat) => {
         if (!annule) setEtat(resultat);
       },
       () => {
-        if (!annule) setEtat(ETAT_INCONNU);
+        // Rejet (exception, pas simple erreur Supabase) : même règle.
+        if (!annule) setEtat(INDETERMINE);
       },
     );
 

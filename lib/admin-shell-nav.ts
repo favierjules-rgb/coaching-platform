@@ -149,6 +149,18 @@ export const SECTION_ADMIN_ACCUEIL = "/admin";
  * ce qui donne gratuitement la règle « écriture implique visibilité ».
  */
 export interface DroitsNavigationAdmin {
+  /**
+   * La lecture des droits est encore EN COURS.
+   *
+   * ⚠️ TRAITÉ ICI, ET PLUS CHEZ L'APPELANT. Ce champ existait de fait dans
+   * `AdminSidebar`, qui fabriquait un faux `mecanismeIndisponible` pendant le
+   * chargement ; `app/admin/page.tsx` l'avait oublié, et l'administrateur
+   * perdait de ce fait les trois tuiles de facturation et le composeur de
+   * campagnes de son tableau de bord à chaque chargement. Une règle qu'un
+   * appelant doit se rappeler d'adapter est une règle fausse : elle est donc
+   * dans la fonction, où personne ne peut l'oublier.
+   */
+  chargement?: boolean;
   /** `profiles.role === "admin"` — toujours lisible, même sans les fonctions P13-B. */
   estAdmin: boolean;
   /** `coaches.role`, ou `null` si inconnu. */
@@ -169,6 +181,10 @@ export interface DroitsNavigationAdmin {
  *
  * Ordre des décisions, et chacune a sa raison :
  *
+ *  0. lecture EN COURS, ou droits INDÉTERMINABLES → navigation inchangée. Un
+ *     indice d'interface doit laisser passer quand il ne sait pas : masquer
+ *     une rubrique légitime ne protège rien (la RLS et lib/api/authz.ts
+ *     refusent de toute façon) et prive un administrateur de son espace.
  *  1. `estAdmin` → tout. Il est reconnu par `profiles.role`, jamais par une
  *     fonction P13-B : sa navigation ne peut donc pas disparaître si les
  *     migrations ne sont pas appliquées ou si sa fiche `coaches` manque.
@@ -182,6 +198,7 @@ export interface DroitsNavigationAdmin {
  *     accueil seulement. Refus par défaut.
  */
 export function sectionAdminVisible(href: string, droits: DroitsNavigationAdmin): boolean {
+  if (droits.chargement) return true;
   if (droits.estAdmin) return true;
   if (droits.mecanismeIndisponible) return true;
   if (droits.roleStaff === "admin" || droits.roleStaff === "assistant") return true;
@@ -201,4 +218,42 @@ export function sectionAdminVisible(href: string, droits: DroitsNavigationAdmin)
  */
 export function groupeAdminVisible(hrefs: readonly string[], droits: DroitsNavigationAdmin): boolean {
   return hrefs.some((href) => sectionAdminVisible(href, droits));
+}
+
+/**
+ * Le contexte staff lu par `useStaffContext`, converti en droits de
+ * navigation — UNE SEULE FOIS, pour tous les appelants.
+ *
+ * ⚠️ POURQUOI CETTE FONCTION EXISTE. La conversion était recopiée à la main
+ * dans `AdminSidebar` et dans `app/admin/page.tsx`, et les deux copies ne
+ * disaient pas la même chose : la sidebar neutralisait le chargement, le
+ * tableau de bord non. Résultat mesuré : l'administrateur gardait son menu
+ * mais perdait la vitrine « Paiements » de son accueil. Deux copies d'une
+ * règle de visibilité finissent toujours par diverger — il n'y en a plus
+ * qu'une.
+ *
+ * Le type d'entrée est volontairement STRUCTUREL (pas `StaffContext`) : ce
+ * module reste pur, sans dépendance à React ni à Supabase, donc testable en
+ * Node comme le reste du fichier.
+ */
+export function droitsNavigationDepuisContexte(staff: {
+  readonly chargement: boolean;
+  readonly estAdmin: boolean;
+  readonly role: "admin" | "assistant" | "collaborateur" | null;
+  readonly categoriesLecture: readonly string[];
+  readonly mecanismeIndisponible: boolean;
+}): DroitsNavigationAdmin {
+  return {
+    chargement: staff.chargement,
+    estAdmin: staff.estAdmin,
+    roleStaff: staff.role,
+    categoriesLecture: staff.categoriesLecture.filter(
+      (categorie): categorie is CategorieNavigation =>
+        categorie === "entrainement" ||
+        categorie === "suivi_eleve" ||
+        categorie === "agenda_communication" ||
+        categorie === "nutrition",
+    ),
+    mecanismeIndisponible: staff.mecanismeIndisponible,
+  };
 }

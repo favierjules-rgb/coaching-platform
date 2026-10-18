@@ -150,12 +150,25 @@ async function fichesStaff(userId: string): Promise<FichesStaff | "indisponible"
   const supabase = createSupabaseAdminClient();
   if (!supabase) return "indisponible";
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("coaches")
     .select("id, role, status")
     .eq("user_id", userId)
     .order("created_at", { ascending: true })
     .order("id", { ascending: true });
+
+  /*
+   * ⚠️ UNE LECTURE EN ERREUR N'EST PAS « AUCUNE FICHE ». L'erreur était
+   * ignorée : `data` valait alors `null`, `lignes` devenait vide, et
+   * `estCollaborateur` rendait `false` — c'est-à-dire qu'une panne de
+   * lecture OUVRAIT les rubriques globales à un collaborateur. C'est le sens
+   * inverse de la règle annoncée juste au-dessus. Le verdict est désormais
+   * « indéterminable », que tous les appelants traduisent en refus 503.
+   */
+  if (error) {
+    console.error("[Authz] lecture des fiches staff impossible : refus (fail-closed).");
+    return "indisponible";
+  }
 
   const lignes = data ?? [];
   const active = lignes.find((ligne) => ligne.status === "actif") ?? null;

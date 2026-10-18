@@ -32,7 +32,7 @@ import { useSupabaseAdminFeedback } from "@/hooks/useSupabaseAdminFeedback";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { Loader } from "@/components/ui/Loader";
 import { formatAmountCents } from "@/lib/stripe/status";
-import { sectionAdminVisible } from "@/lib/admin-shell-nav";
+import { droitsNavigationDepuisContexte, sectionAdminVisible } from "@/lib/admin-shell-nav";
 import { useStaffContext } from "@/hooks/useStaffContext";
 import {
   fullName,
@@ -150,12 +150,13 @@ export default function AdminDashboardPage() {
    * autorisés par la RLS.
    */
   const staff = useStaffContext();
-  const droitsNavigation = {
-    estAdmin: staff.estAdmin,
-    roleStaff: staff.role,
-    categoriesLecture: staff.categoriesLecture,
-    mecanismeIndisponible: staff.mecanismeIndisponible,
-  };
+  /* ⚠️ LA CONVERSION PASSE PAR LE MODULE, chargement compris. Recopiée à la
+     main, elle omettait `chargement` : pendant la lecture des droits,
+     `sectionAdminVisible` recevait « pas admin, aucun rôle, mécanisme
+     opérationnel » et masquait la vitrine de facturation À L'ADMINISTRATEUR.
+     La sidebar, elle, neutralisait ce cas — les deux vues du même droit
+     divergeaient donc. */
+  const droitsNavigation = droitsNavigationDepuisContexte(staff);
   const facturationVisible = sectionAdminVisible("/admin/paiements", droitsNavigation);
   const notificationsVisibles = sectionAdminVisible("/admin/notifications", droitsNavigation);
 
