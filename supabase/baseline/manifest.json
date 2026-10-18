@@ -120,7 +120,8 @@
     "20261013120000_p13b_policies_non_auto_referentielles.sql",
     "20261018090000_p13b_rubriques_globales_collaborateur.sql",
     "20261019090000_p13b_admin_reel_categories.sql",
-    "20261020090000_programmes_prives_par_coach_et_publication_admin.sql"
+    "20261020090000_programmes_prives_par_coach_et_publication_admin.sql",
+    "20261021090000_subscription_templates_policies_authenticated.sql"
   ],
   "garanties_de_contenu": {
     "insert_de_donnees_metier": 0,

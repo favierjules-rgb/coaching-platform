@@ -476,6 +476,35 @@ export const MIGRATION_P13B_ADMIN_CATEGORIES =
 export const MIGRATION_PROGRAMMES_COACH =
   "20261020090000_programmes_prives_par_coach_et_publication_admin.sql";
 
+/*
+ * 20261021090000 — LES TROIS DERNIÈRES POLICIES `{public}` DU CATALOGUE.
+ *
+ * ⚠️ LA DERNIÈRE AMORCE DU MÊME PIÈGE. 20261020090000 avait borné au rôle
+ * `authenticated` les policies internes de `programs` et les deux policies de
+ * LECTURE de `subscription_templates`. Ses trois policies d'ÉCRITURE portaient
+ * encore `{public}`, et `anon` détient les privilèges de table correspondants
+ * (GRANT par défaut de Supabase) : elles étaient donc évaluées pour un
+ * visiteur, et chacune appelle `is_admin()`, dont P13-B lui a retiré
+ * l'EXECUTE. Mesuré, pour les trois commandes : `42501 permission denied for
+ * function is_admin`.
+ *
+ * Le visiteur était refusé et il le reste — ce n'est pas une élévation de
+ * privilège. Ce qui change est la NATURE du refus : il vient désormais de la
+ * règle d'accès (`new row violates row-level security policy`) et non d'un
+ * privilège de fonction manquant. C'est le même mécanisme — une policy
+ * permissive évaluée pour `anon` qui LÈVE au lieu de refuser — qui rendait la
+ * vitrine publique illisible avant 20261020090000 ; ici aucune page publique
+ * n'émet ces commandes, donc rien n'était cassé, mais il ne reste plus de
+ * policy capable de le reproduire.
+ *
+ * `alter policy … to authenticated` seul : les trois conditions `is_admin()`
+ * ne sont pas réécrites, donc pas recopiées de travers. Mesuré après : coach,
+ * collaborateur et visiteur refusés à l'identique, administrateur accepté sur
+ * les trois commandes, vitrine intacte.
+ */
+export const MIGRATION_CATALOGUE_POLICIES_AUTHENTICATED =
+  "20261021090000_subscription_templates_policies_authenticated.sql";
+
 export const MIGRATIONS_COURSES: readonly string[] = [
   MIGRATION_C2,
   MIGRATION_C3,
@@ -524,17 +553,18 @@ export const MIGRATIONS_APRES_C0_1: readonly string[] = [
   MIGRATION_P13B_RUBRIQUES,
   MIGRATION_P13B_ADMIN_CATEGORIES,
   MIGRATION_PROGRAMMES_COACH,
+  MIGRATION_CATALOGUE_POLICIES_AUTHENTICATED,
 ];
 
 /**
  * Le compte attendu — nécessaire, jamais suffisant.
  *
- * 114 = 84 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 29
+ * 115 = 84 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 30
  * migrations nommées dans `MIGRATIONS_APRES_C0_1`. Le point 6 recalcule
  * l'historique à partir de ce nombre : il ne peut pas être remonté seul sans
  * qu'une migration soit nommée en face.
  */
-export const NOMBRE_DE_MIGRATIONS = 114;
+export const NOMBRE_DE_MIGRATIONS = 115;
 
 /**
  * L'empreinte des 79 migrations ANTÉRIEURES à C0.1, dans l'ordre.

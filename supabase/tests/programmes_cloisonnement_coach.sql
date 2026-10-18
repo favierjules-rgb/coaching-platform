@@ -531,6 +531,65 @@ begin
                       'public.program_ids_lecture()']) f
    where has_function_privilege('anon', f::regprocedure, 'EXECUTE');
   perform pg_temp.noter('H','H14. anon n''a l''EXECUTE d''AUCUNE fonction interne du staff', v_n = 0);
+
+  /*
+   * ── H15 à H18 : LES TROIS POLICIES D'ÉCRITURE DU CATALOGUE D'OFFRES ────
+   *
+   * ⚠️ POURQUOI CES CONTRÔLES EXISTENT. 20261020090000 avait borné au rôle
+   * `authenticated` les policies internes de `programs` et les deux policies
+   * de LECTURE du catalogue, mais pas ses trois policies d'ÉCRITURE. Or `anon`
+   * détient les privilèges de table INSERT/UPDATE/DELETE sur
+   * `subscription_templates` (GRANT par défaut de Supabase) : ces policies
+   * étaient donc réellement évaluées pour un visiteur, et chacune appelle
+   * `is_admin()`, dont P13-B lui a retiré l'EXECUTE. Mesuré avant correctif,
+   * pour les trois commandes :
+   *
+   *     42501  permission denied for function is_admin
+   *
+   * Le visiteur était refusé, et il reste refusé : ce qui change est la NATURE
+   * du refus. Corrigé par 20261021090000 (`alter policy … to authenticated`).
+   */
+  select count(*) into v_n
+    from pg_policies
+   where schemaname = 'public' and tablename = 'subscription_templates'
+     and policyname in ('subscription_templates_manage_staff_insert',
+                        'subscription_templates_manage_staff_update',
+                        'subscription_templates_manage_staff_delete')
+     and roles::text = '{authenticated}';
+  perform pg_temp.noter('H','H15. les trois policies d''écriture du catalogue sont bornées au rôle authentifié', v_n = 3);
+
+  select count(*) into v_n
+    from pg_policies
+   where schemaname = 'public' and tablename = 'subscription_templates'
+     and policyname in ('subscription_templates_manage_staff_insert',
+                        'subscription_templates_manage_staff_update',
+                        'subscription_templates_manage_staff_delete')
+     and (coalesce(qual,'') || ' ' || coalesce(with_check,'')) ~ 'is_admin';
+  perform pg_temp.noter('H','H16. …et elles ont gardé leur condition is_admin()', v_n = 3);
+
+  /*
+   * ⚠️ ON MESURE LE MESSAGE, PAS SEULEMENT LE SQLSTATE. « refusé par la règle
+   * d'accès » et « refusé parce qu'une fonction manque » portent TOUS DEUX le
+   * code 42501 : seul le texte les distingue, et c'est précisément ce que ce
+   * correctif change. Un contrôle sur le seul SQLSTATE serait resté vert
+   * avant comme après.
+   */
+  perform set_config('role','anon',true);
+  perform set_config('request.jwt.claims', json_build_object('role','anon')::text, true);
+  begin
+    insert into public.subscription_templates (name, amount_cents, currency, billing_interval, is_active)
+    values ('PG verification anon', 1, 'eur','monthly', true);
+    v_ok := true; v_err := '(acceptée)';
+  exception when others then
+    v_ok := false; v_err := sqlerrm;
+  end;
+  perform pg_temp.serveur();
+  perform pg_temp.noter('H','H17. le visiteur ne crée aucune offre, et le refus vient de la RÈGLE, pas d''un privilège de fonction',
+    not coalesce(v_ok, true) and v_err !~* 'function');
+
+  perform pg_temp.noter('H','H18. l''administrateur, lui, crée toujours une offre',
+    pg_temp.ecrit(u_adm, $q$insert into public.subscription_templates (name, amount_cents, currency, billing_interval, is_active)
+      values ('PG offre admin', 1, 'eur','monthly', true) returning id$q$));
 end $$;
 
 

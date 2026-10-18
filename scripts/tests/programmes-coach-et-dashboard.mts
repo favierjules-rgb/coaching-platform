@@ -35,6 +35,9 @@ function test(nom: string, fn: () => void): void {
 const lire = (chemin: string) => readFileSync(new URL(`../../${chemin}`, import.meta.url), "utf8");
 const MIGRATION = lire("supabase/migrations/20261020090000_programmes_prives_par_coach_et_publication_admin.sql");
 const CHECKLIST = lire("supabase/tests/programmes_cloisonnement_coach.sql");
+const MIGRATION_CATALOGUE = lire(
+  "supabase/migrations/20261021090000_subscription_templates_policies_authenticated.sql",
+);
 /**
  * Le code de la migration, commentaires retirés : ils citent ce qu'on interdit.
  *
@@ -351,6 +354,75 @@ test("F5. la checklist SQL mesure le visiteur, et ce qu'il ne doit PAS voir", ()
   }
   // Un brouillon public et une offre hors vitrine : les deux pièges du visiteur.
   assert.ok(/brouillon/.test(CHECKLIST) && /PG Offre interne/.test(CHECKLIST));
+});
+
+test("F6. les trois policies d'écriture du catalogue sont bornées, sans réécrire leurs conditions", () => {
+  /*
+   * ⚠️ LA DERNIÈRE AMORCE DU MÊME PIÈGE, dans une migration à part
+   * (20261021090000) parce que 20261020090000 est enregistrée comme appliquée.
+   *
+   * `anon` détient les privilèges de table INSERT/UPDATE/DELETE sur
+   * `subscription_templates` : ces trois policies `{public}` étaient donc
+   * réellement évaluées pour un visiteur, et chacune appelle `is_admin()`, dont
+   * P13-B lui a retiré l'EXECUTE. Mesuré avant : `42501 permission denied for
+   * function is_admin` sur les trois commandes. Le visiteur était refusé et il
+   * le reste — ce qui change est la NATURE du refus.
+   */
+  const compact = MIGRATION_CATALOGUE.replace(/^\s*--.*$/gm, "").replace(/\s+/g, " ");
+  for (const policy of ["subscription_templates_manage_staff_insert",
+                        "subscription_templates_manage_staff_update",
+                        "subscription_templates_manage_staff_delete"]) {
+    assert.ok(new RegExp(`alter policy ${policy} on public\\.subscription_templates to authenticated`).test(compact),
+      `${policy} doit être bornée par ALTER POLICY … TO authenticated`);
+  }
+  // ⚠️ `alter policy … to` NE RÉÉCRIT PAS `using`/`with check` : les trois
+  // conditions `is_admin()` sont conservées sans être recopiées, donc sans
+  // risque de les recopier de travers.
+  assert.ok(!/create policy|drop policy/.test(compact),
+    "aucune policy ne doit être recréée : seul son rôle change");
+  assert.ok(!/using \(|with check \(/.test(compact),
+    "aucune condition ne doit être réécrite");
+  // Rien d'autre ne bouge : ni table, ni privilège, ni fonction.
+  assert.ok(!/alter table|create table|grant |revoke |create or replace function/i.test(compact),
+    "ce lot ne doit modifier que les rôles de trois policies");
+});
+
+test("F7. et la migration refuse de s'appliquer si le résultat n'est pas celui-là", () => {
+  // Les six contrôles de catalogue système…
+  for (const garde of [
+    "les trois policies d''écriture ne sont pas exactement bornées à authenticated",
+    "une policy d''écriture a perdu sa condition is_admin()",
+    "la policy de vitrine publique a disparu, changé de rôle ou perdu sa borne",
+    "les policies de lecture élève/staff ne sont plus bornées à authenticated",
+    "le nombre de policies a changé",
+    "anon a récupéré l''EXECUTE de is_admin()",
+  ]) {
+    assert.ok(MIGRATION_CATALOGUE.includes(garde), `la garde « ${garde} » manque`);
+  }
+  // ⚠️ `= '{authenticated}'` ET NON `~ 'authenticated'` : une policy portant
+  // `{anon,authenticated}` satisferait une recherche de sous-chaîne tout en
+  // laissant le visiteur dans la règle.
+  assert.ok(/roles::text = '\{authenticated\}'/.test(MIGRATION_CATALOGUE));
+  // …et le contrôle dynamique, qui tente l'écriture en visiteur et exige que
+  // le refus ne vienne PAS d'un privilège de fonction. Les deux refus portent
+  // le même SQLSTATE : seul le message les distingue.
+  assert.ok(/set_config\('role', 'anon', true\)/.test(MIGRATION_CATALOGUE));
+  assert.ok(/v_message ~\* 'function'/.test(MIGRATION_CATALOGUE),
+    "le contrôle doit mesurer le MESSAGE, pas seulement le code d'erreur");
+  assert.ok(/un visiteur anonyme a pu INSÉRER une offre/.test(MIGRATION_CATALOGUE));
+});
+
+test("F8. la checklist SQL mesure les trois policies et les deux sens du refus", () => {
+  for (const controle of [
+    "H15. les trois policies d''écriture du catalogue sont bornées au rôle authentifié",
+    "H16. …et elles ont gardé leur condition is_admin()",
+    "H17. le visiteur ne crée aucune offre, et le refus vient de la RÈGLE, pas d''un privilège de fonction",
+    "H18. l''administrateur, lui, crée toujours une offre",
+  ]) {
+    assert.ok(CHECKLIST.includes(controle), `le contrôle « ${controle} » manque à la checklist SQL`);
+  }
+  assert.ok(/ON MESURE LE MESSAGE, PAS SEULEMENT LE SQLSTATE/.test(CHECKLIST),
+    "la checklist doit expliquer pourquoi le SQLSTATE seul ne suffit pas");
 });
 
 /* ═════════ E — CE QUE LA CHECKLIST SQL DOIT COUVRIR ═════════ */
