@@ -64,6 +64,36 @@
 -- Les trois policies de LECTURE ne sont pas touchées :
 -- `subscription_templates_select_vitrine_publique` reste à `{anon}` — c'est
 -- elle qui porte la vitrine — et les deux autres restent à `{authenticated}`.
+--
+-- ════════════════════════════════════════════════════════════════════════════
+-- ⚠️ CETTE MIGRATION NE CHANGE PAS LE RÔLE ACTIF DE LA SESSION, ET C'EST
+--    DÉLIBÉRÉ
+-- ════════════════════════════════════════════════════════════════════════════
+-- Une première version de ce fichier tentait l'écriture anonyme À L'INTÉRIEUR
+-- de la migration : elle basculait le rôle actif de la session le temps d'un
+-- INSERT, puis revenait en arrière. C'est retiré.
+--
+-- Raison : la CLI Supabase applique le fichier PUIS enregistre son passage
+-- dans `supabase_migrations.schema_migrations`, sur la même connexion. Le lot
+-- précédent a buté sur un « 42501 permission denied for schema
+-- supabase_migrations » qu'il a fallu réparer à la main. Une bascule du rôle
+-- actif en cours de migration — même rendue à son état d'origine — peut faire
+-- perdre à la CLI les droits nécessaires à cet enregistrement. Un fichier de
+-- migration ne doit donc toucher au rôle actif de la session par AUCUN
+-- moyen : ni bascule, ni retour de bascule, ni réglage équivalent par
+-- paramètre de session.
+--
+-- ⚠️ LE CONTRÔLE N'EST PAS SUPPRIMÉ, IL EST DÉPLACÉ. L'exécution RÉELLE en
+-- rôle `anon` — la requête de la vitrine qui aboutit, l'écriture refusée par
+-- la RÈGLE D'ACCÈS et non par un privilège de fonction manquant — est mesurée
+-- par un fichier de test exécuté hors du processus de migration :
+--
+--     supabase/tests/catalogue_offres_role_anon.sql
+--
+-- Ce fichier-ci ne garde que les vérifications de CATALOGUE SYSTÈME
+-- (`pg_policies`, `has_function_privilege`). Elles n'exigent aucun changement
+-- de rôle, et elles font échouer la migration si le résultat n'est pas celui
+-- attendu.
 
 begin;
 
@@ -78,13 +108,11 @@ alter policy subscription_templates_manage_staff_delete
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- VÉRIFICATION
+-- VÉRIFICATION — LECTURES DU CATALOGUE SYSTÈME UNIQUEMENT
 -- ════════════════════════════════════════════════════════════════════════════
 do $g$
 declare
   v_n int;
-  v_sqlstate text;
-  v_message text;
 begin
   -- 1. Les trois policies d'écriture sont EXACTEMENT au rôle authentifié.
   --    `= '{authenticated}'` et non `~ 'authenticated'` : une policy portant
@@ -154,40 +182,19 @@ begin
   end if;
 
   /*
-   * 7. ⚠️ LE CONTRÔLE QUI COMPTE : ON TENTE L'ÉCRITURE EN VISITEUR.
+   * ⚠️ CE QUE CES SIX CONTRÔLES NE PROUVENT PAS, ET QUI LE PROUVE.
    *
-   * Les six contrôles ci-dessus lisent le catalogue système. Celui-ci exerce
-   * le chemin réel : un INSERT anonyme doit être refusé PAR LA RÈGLE D'ACCÈS
-   * (`42501 new row violates row-level security policy`) et non par un
-   * privilège de fonction manquant (`42501 permission denied for function
-   * is_admin`). Les deux portent le même SQLSTATE : seul le message les
-   * distingue, et c'est tout l'objet de ce lot.
+   * Ils lisent le catalogue système : ils établissent que la RÈGLE est celle
+   * attendue, pas que le CHEMIN RÉEL se comporte comme prévu. Le refus par la
+   * règle d'accès et le refus par un privilège de fonction manquant portent
+   * le même SQLSTATE 42501 : seul le message les distingue, et c'est tout
+   * l'objet de ce lot. Cette distinction se mesure en exécutant vraiment la
+   * requête dans le rôle du visiteur — donc hors d'une migration, qui ne doit
+   * pas toucher au rôle actif de sa session :
    *
-   * L'INSERT est tenté dans un sous-bloc : son échec est annulé, rien n'est
-   * écrit dans le catalogue.
+   *     supabase/tests/catalogue_offres_role_anon.sql   (contrôles A5 à A7)
    */
-  perform set_config('role', 'anon', true);
-  perform set_config('request.jwt.claims', json_build_object('role', 'anon')::text, true);
-  begin
-    insert into public.subscription_templates (name, amount_cents, currency, billing_interval, is_active)
-    values ('__verification_anon__', 1, 'eur', 'monthly', true);
-    v_sqlstate := '00000';
-    v_message := '(acceptée)';
-  exception when others then
-    v_sqlstate := sqlstate;
-    v_message := sqlerrm;
-  end;
-  reset role;
-  perform set_config('request.jwt.claims', '{}', true);
-
-  if v_sqlstate = '00000' then
-    raise exception 'Catalogue d''offres : un visiteur anonyme a pu INSÉRER une offre';
-  end if;
-  if v_message ~* 'function' then
-    raise exception 'Catalogue d''offres : le refus anonyme vient encore d''un privilège de fonction (%) — la policy est toujours évaluée pour anon', v_message;
-  end if;
-
-  raise notice 'Catalogue d''offres : les trois policies d''écriture sont bornées au rôle authentifié, leurs conditions is_admin() conservées, la vitrine publique intacte, et l''écriture anonyme refusée par la règle d''accès (% — %).', v_sqlstate, left(v_message, 60);
+  raise notice 'Catalogue d''offres : les trois policies d''écriture sont bornées au rôle authentifié, leurs conditions is_admin() conservées, et la vitrine publique intacte. L''exécution réelle en visiteur est mesurée par supabase/tests/catalogue_offres_role_anon.sql.';
 end $g$;
 
 commit;

@@ -51,6 +51,20 @@ const MIGRATION_CODE = MIGRATION.slice(0, MIGRATION.indexOf(MARQUEUR_VERIFICATIO
   .replace(/^\s*--.*$/gm, "")
   .replace(/\s+/g, " ");
 
+const TEST_CATALOGUE_ANON = lire("supabase/tests/catalogue_offres_role_anon.sql");
+
+/**
+ * Le SQL d'un fichier, ses DEUX formes de commentaire retirées : les lignes
+ * ouvertes par deux tirets, et les blocs encadrés.
+ *
+ * ⚠️ INDISPENSABLE POUR LES CONTRÔLES D'ABSENCE. Un commentaire explique ce
+ * qu'on interdit, donc il NOMME ce qu'on interdit : un contrôle « ce mot
+ * n'apparaît plus » appliqué au fichier brut échouerait sur l'explication
+ * elle-même. On ne mesure donc que le code exécuté.
+ */
+const sansCommentaires = (sql: string) =>
+  sql.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*--.*$/gm, "");
+
 /* ═════════════════════ A — LE TITRE DU DASHBOARD ═════════════════════ */
 
 test("A1. l'administrateur lit « Dashboard admin », le coach « Dashboard coach »", () => {
@@ -403,13 +417,11 @@ test("F7. et la migration refuse de s'appliquer si le résultat n'est pas celui-
   // `{anon,authenticated}` satisferait une recherche de sous-chaîne tout en
   // laissant le visiteur dans la règle.
   assert.ok(/roles::text = '\{authenticated\}'/.test(MIGRATION_CATALOGUE));
-  // …et le contrôle dynamique, qui tente l'écriture en visiteur et exige que
-  // le refus ne vienne PAS d'un privilège de fonction. Les deux refus portent
-  // le même SQLSTATE : seul le message les distingue.
-  assert.ok(/set_config\('role', 'anon', true\)/.test(MIGRATION_CATALOGUE));
-  assert.ok(/v_message ~\* 'function'/.test(MIGRATION_CATALOGUE),
-    "le contrôle doit mesurer le MESSAGE, pas seulement le code d'erreur");
-  assert.ok(/un visiteur anonyme a pu INSÉRER une offre/.test(MIGRATION_CATALOGUE));
+  // …et elle renvoie explicitement au fichier qui porte l'exécution réelle :
+  // les six gardes ci-dessus lisent le catalogue système, elles n'exercent pas
+  // le chemin du visiteur. F10 mesure ce fichier.
+  assert.ok(MIGRATION_CATALOGUE.includes("supabase/tests/catalogue_offres_role_anon.sql"),
+    "la migration doit renvoyer au fichier de test qui exerce le rôle anon");
 });
 
 test("F8. la checklist SQL mesure les trois policies et les deux sens du refus", () => {
@@ -423,6 +435,70 @@ test("F8. la checklist SQL mesure les trois policies et les deux sens du refus",
   }
   assert.ok(/ON MESURE LE MESSAGE, PAS SEULEMENT LE SQLSTATE/.test(CHECKLIST),
     "la checklist doit expliquer pourquoi le SQLSTATE seul ne suffit pas");
+});
+
+test("F9. la migration ne change À AUCUN MOMENT le rôle actif de sa session", () => {
+  /*
+   * ⚠️ POURQUOI C'EST UN CONTRÔLE ET PAS UNE PRÉFÉRENCE DE STYLE.
+   *
+   * La CLI Supabase applique le fichier PUIS enregistre son passage dans
+   * `supabase_migrations.schema_migrations`, sur la même connexion. Le lot
+   * précédent a buté sur un « 42501 permission denied for schema
+   * supabase_migrations » qu'il a fallu réparer à la main. Une bascule du rôle
+   * actif en cours de migration — même rendue à son état d'origine — peut
+   * faire perdre à la CLI les droits nécessaires à cet enregistrement.
+   *
+   * Une première version de 20261021090000 tentait l'écriture anonyme DANS la
+   * migration, en basculant le rôle. Le contrôle n'a pas été supprimé, il a été
+   * déplacé (F10) ; ce test-ci garde la porte fermée.
+   */
+  const formesInterdites = /\bset\s+role\b|\breset\s+role\b|set_config\s*\(\s*'role'/i;
+  assert.ok(!formesInterdites.test(sansCommentaires(MIGRATION_CATALOGUE)),
+    "le code de la migration ne doit contenir aucune bascule du rôle de session");
+  // ⚠️ ET LE FICHIER BRUT NON PLUS, commentaires compris : l'exigence est
+  // littérale, et les commentaires de ce fichier ont été écrits pour ne même
+  // pas nommer ces formes.
+  assert.ok(!formesInterdites.test(MIGRATION_CATALOGUE),
+    "aucune de ces formes ne doit apparaître dans le fichier de migration, pas même en commentaire");
+  // Le bloc de vérification ne garde donc que des lectures du catalogue système.
+  const code = sansCommentaires(MIGRATION_CATALOGUE);
+  assert.ok(/pg_policies/.test(code) && /has_function_privilege/.test(code));
+  assert.ok(!/insert into public\.subscription_templates/i.test(code),
+    "la migration ne doit plus tenter d'écriture : c'est le rôle du fichier de test");
+});
+
+test("F10. …et l'exécution réelle en rôle anon vit dans un fichier de test distinct", () => {
+  /*
+   * ⚠️ LE CONTRÔLE DÉPLACÉ, PAS SUPPRIMÉ. « Refusé par la règle d'accès » et
+   * « refusé parce qu'une fonction manque » portent TOUS DEUX le SQLSTATE
+   * 42501 : seul le message les distingue, et c'est tout l'objet de ce lot.
+   * Mesuré : 15 contrôles verts sur une base propre, 4 rouges dès que les trois
+   * policies retournent au rôle `{public}`.
+   */
+  for (const controle of [
+    "V1. la requête de la vitrine aboutit pour un visiteur (elle ne lève pas)",
+    "E1. le visiteur ne CRÉE aucune offre, et le refus vient de la RÈGLE, pas d''un privilège de fonction",
+    "E2. le visiteur ne MODIFIE aucune offre, sans erreur de privilège de fonction",
+    "E4. le visiteur ne SUPPRIME aucune offre, sans erreur de privilège de fonction",
+    "R1. l''administrateur, lui, crée toujours une offre",
+    "R2. le coach autonome reste refusé (la condition is_admin() est conservée)",
+    "R3. les trois policies d''écriture du catalogue sont bornées au rôle authentifié",
+    "R6. anon n''a l''EXECUTE d''AUCUNE fonction interne du staff",
+  ]) {
+    assert.ok(TEST_CATALOGUE_ANON.includes(controle), `le contrôle « ${controle} » manque au fichier de test`);
+  }
+  // Il prend bien le rôle du visiteur — c'est justement ce qu'une migration ne
+  // peut pas faire — et il mesure le MESSAGE, pas seulement le SQLSTATE.
+  assert.ok(/set_config\('role', 'anon', true\)/.test(TEST_CATALOGUE_ANON),
+    "le fichier de test doit réellement prendre le rôle anon");
+  assert.ok(/!~\* 'function'/.test(TEST_CATALOGUE_ANON),
+    "le contrôle doit mesurer le MESSAGE, pas seulement le code d'erreur");
+  assert.ok(/ON MESURE LE MESSAGE, PAS SEULEMENT LE SQLSTATE/.test(TEST_CATALOGUE_ANON));
+  // Et il se termine par un ROLLBACK : rien n'est écrit.
+  assert.ok(/\nrollback;/.test(TEST_CATALOGUE_ANON), "le fichier de test doit se terminer par un ROLLBACK");
+  // Ce n'est pas une migration : il ne doit modifier aucune règle.
+  assert.ok(!/alter policy|create policy|drop policy/i.test(sansCommentaires(TEST_CATALOGUE_ANON)),
+    "un fichier de test ne doit pas changer les règles qu'il mesure");
 });
 
 /* ═════════ E — CE QUE LA CHECKLIST SQL DOIT COUVRIR ═════════ */
