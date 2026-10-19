@@ -91,7 +91,13 @@ export function warnLargeVideo(file: File, type: DocumentType): string | null {
   return null;
 }
 
-function sanitizeFileName(name: string): string {
+/**
+ * ⚠️ EXPORTÉE POUR QUE LA CONVENTION DE CHEMIN N'EXISTE QU'UNE FOIS. Les
+ * miniatures de couverture (`storage-document-covers.ts`) rangent leurs
+ * fichiers sous la même forme `<fiche_coach>/<document_id>/<horodatage>-<nom>` :
+ * en réécrire une seconde version garantirait qu'elles divergent.
+ */
+export function sanitizeFileName(name: string): string {
   return name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
 }
 
@@ -104,7 +110,7 @@ function sanitizeFileName(name: string): string {
  * identifiant choisi côté navigateur serait une déclaration, et la policy
  * Storage la refuserait de toute façon — autant échouer tôt et clairement.
  */
-async function ficheStaffDeLAppelant(supabase: TypedSupabaseClient): Promise<string | null> {
+export async function ficheStaffDeLAppelant(supabase: TypedSupabaseClient): Promise<string | null> {
   try {
     const { data } = await supabase.rpc("current_staff_id");
     const brut: unknown = Array.isArray(data) ? data[0] : data;

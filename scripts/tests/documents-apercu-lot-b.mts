@@ -113,6 +113,9 @@ const DOC = "aaaaaaaa-0000-4000-8000-000000000001";
 
 function document_(partiel: Partial<AdminDocument> = {}): AdminDocument {
   return {
+    // Defaut explicite : `coverStoragePath` est optionnel dans `partiel`, donc
+    // `...partiel` peut y poser `undefined` et le type exige `string | null`.
+    coverStoragePath: null,
     id: DOC,
     title: "Morphologie",
     type: "pdf",
@@ -348,9 +351,23 @@ await test("B-12. AUCUNE signature pour un document verrouillé", () => {
   assert.ok(corps.includes("[storagePath, disponible]"), "et `disponible` est dans les dépendances");
 
   // Garde EN AMONT : le composant n'est même pas monté pour un verrouillé.
+  //
+  // ⚠️ L'EXPRESSION A CHANGÉ AVEC LES MINIATURES DE COUVERTURE, LA GARANTIE
+  // NON. La condition de montage est désormais nommée `illustrationOriginale`,
+  // parce qu'une couverture peut prendre la place de l'aperçu de l'original —
+  // mais `availability.available` y figure toujours, et c'est ce qui compte.
+  const iRegle = CODE_BIBLIO.indexOf("const illustrationOriginale");
+  assert.ok(iRegle > 0, "la condition de montage est nommée");
+  const regle = CODE_BIBLIO.slice(iRegle, CODE_BIBLIO.indexOf(";", iRegle));
+  assert.ok(/kind === "image"/.test(regle), "l'aperçu ne concerne que les images");
+  assert.ok(/document\.storagePath/.test(regle), "…réellement téléversées");
   assert.ok(
-    /kind === "image" && document\.storagePath && availability\.available &&/.test(CODE_BIBLIO),
+    /availability\.available/.test(regle),
     "⚠️ double garde : la carte ne monte la miniature que si le document est disponible",
+  );
+  assert.ok(
+    /\{illustrationOriginale \?/.test(CODE_BIBLIO),
+    "et c'est bien cette condition qui décide du montage",
   );
 
   // Rendu réel : un document image VERROUILLÉ ne produit aucune balise image.

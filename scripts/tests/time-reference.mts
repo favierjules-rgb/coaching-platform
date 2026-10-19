@@ -43,6 +43,7 @@ function test(name: string, fn: () => void) {
 /* ─── Fixtures : reproduction exacte du cas réel signalé ─── */
 
 const document: AdminDocument = {
+  coverStoragePath: null,
   id: "doc-tempo",
   title: "Tempo d'exécution",
   type: "vidéo",

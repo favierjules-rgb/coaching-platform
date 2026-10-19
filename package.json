@@ -175,6 +175,7 @@
     "test:photos-progression": "npx tsx scripts/tests/photos-progression-p1-p3.mts",
     "test:documents-consultation": "npx tsx scripts/tests/documents-consultation-lot-a.mts",
     "test:documents-apercu": "npx tsx scripts/tests/documents-apercu-lot-b.mts",
+    "test:documents-miniatures": "npx tsx scripts/tests/documents-miniatures.mts",
     "test:provisioning-ligne-coach": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/provisioning-ligne-coach.mts"
   },
   "dependencies": {

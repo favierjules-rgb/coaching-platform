@@ -16,6 +16,12 @@ import {
 } from "lucide-react";
 
 import { ImportantMark } from "@/components/admin/ImportantMark";
+import {
+  CLASSES_CADRE_ILLUSTRATION,
+  CLASSES_IMAGE_ILLUSTRATION,
+  DocumentCoverImage,
+  STYLE_CADRE_ILLUSTRATION,
+} from "@/components/shared/DocumentCoverImage";
 import { FileViewerModal } from "@/components/shared/FileViewerModal";
 import { VideoPlayerModal } from "@/components/shared/VideoPlayerModal";
 import { DocumentStatusBadge } from "@/components/student/DocumentStatusBadge";
@@ -212,13 +218,25 @@ function StorageFileButton({
  * LA MINIATURE D'UNE IMAGE — UNE SEULE SIGNATURE, ET AUCUNE POUR UN VERROUILLÉ.
  *
  * ═════════════════════════════════════════════════════════════════════
- * AUCUNE INFRASTRUCTURE NOUVELLE, ET C'EST LE POINT
+ * CE N'EST PAS LA COUVERTURE, ET LES DEUX COEXISTENT
  * ═════════════════════════════════════════════════════════════════════
- * Pas de `thumbnail_path`, pas d'Edge Function, pas de worker : le navigateur
- * redimensionne l'original, borné à 10 Mo par `validateDocumentFile`. La
- * seule chose dont une vraie miniature Storage nous dispenserait est le
- * téléchargement de l'original — un coût à mesurer le jour où une
- * bibliothèque d'images existe, pas à prévoir aujourd'hui.
+ * Ce composant affiche LE FICHIER DU DOCUMENT quand ce fichier est une image,
+ * signé dans le seau `documents`. La COUVERTURE (`DocumentCoverImage`, seau
+ * `document-covers`) est un AUTRE objet, facultatif, valable pour tous les
+ * types. La couverture a la priorité : voir `illustrationOriginale` dans
+ * `DocumentCard`, qui garantit UNE illustration par carte, jamais deux.
+ *
+ * ⚠️ ET LE CADRE EST COMMUN AUX DEUX. Le rapport 16/9, le recadrage et la
+ * bordure viennent des constantes exportées par `DocumentCoverImage.tsx` :
+ * une carte illustrée par son original a exactement la même hauteur que sa
+ * voisine illustrée par une couverture. C'est précisément ce que l'ancienne
+ * hauteur fixe `h-40` ne garantissait pas.
+ *
+ * Aucune infrastructure n'est ajoutée ici pour autant : pas de
+ * redimensionnement serveur, pas d'Edge Function, pas de worker. Le
+ * navigateur affiche l'original, borné à 10 Mo par `validateDocumentFile`, et
+ * le cadre le recadre. Un vrai service de vignettes économiserait le
+ * téléchargement de l'original — un coût à mesurer, pas à prévoir aujourd'hui.
  *
  * ═════════════════════════════════════════════════════════════════════
  * UN VERROUILLÉ NE SE SIGNE PAS
@@ -246,11 +264,15 @@ function MiniatureImage({
   titre,
   disponible,
   Repli,
+  rounded = "rounded-panel",
+  className = "",
 }: {
   storagePath: string;
   titre: string;
   disponible: boolean;
   Repli: LucideIcon;
+  rounded?: string;
+  className?: string;
 }) {
   const [url, setUrl] = useState<string | null>(null);
   const [echec, setEchec] = useState(false);
@@ -278,10 +300,16 @@ function MiniatureImage({
     };
   }, [storagePath, disponible]);
 
+  // ⚠️ LE MÊME CADRE QUE LA COUVERTURE, ET PAS UNE HAUTEUR À PART. Avant,
+  // cet aperçu faisait `h-40` : une carte illustrée par son original n'avait
+  // donc pas la même hauteur que sa voisine illustrée par une couverture. Le
+  // rapport 16/9, le recadrage et la bordure viennent des constantes
+  // partagées (`DocumentCoverImage.tsx`) : il n'y a qu'un cadre, pas deux.
   if (!disponible || echec || !url) {
     return (
       <div
-        className="flex h-40 w-full items-center justify-center rounded-panel border border-border bg-surface-soft/40"
+        className={`${CLASSES_CADRE_ILLUSTRATION} flex items-center justify-center ${rounded} ${className}`}
+        style={STYLE_CADRE_ILLUSTRATION}
         data-miniature="repli"
       >
         <Repli size={28} className="text-muted-foreground" aria-hidden />
@@ -290,15 +318,20 @@ function MiniatureImage({
   }
 
   return (
-    // eslint-disable-next-line @next/next/no-img-element -- URL signée temporaire, hors next/image (pas de domaine stable à autoriser)
-    <img
-      src={url}
-      alt={`Aperçu de ${titre}`}
-      onError={() => setEchec(true)}
-      loading="lazy"
-      className="h-40 w-full rounded-panel border border-border object-cover"
+    <div
+      className={`${CLASSES_CADRE_ILLUSTRATION} ${rounded} ${className}`}
+      style={STYLE_CADRE_ILLUSTRATION}
       data-miniature="image"
-    />
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element -- URL signée temporaire, hors next/image (pas de domaine stable à autoriser) */}
+      <img
+        src={url}
+        alt={`Aperçu de ${titre}`}
+        onError={() => setEchec(true)}
+        loading="lazy"
+        className={CLASSES_IMAGE_ILLUSTRATION}
+      />
+    </div>
   );
 }
 
@@ -316,8 +349,54 @@ function DocumentCard({
   const Repli = typeIcons[document.type] ?? FileText;
   const marquer = onConsulte ? () => onConsulte(document.id, document.title) : undefined;
 
+  /**
+   * UNE SEULE ILLUSTRATION EN HAUT DE CARTE, ET UNE RÈGLE POUR LA CHOISIR.
+   *
+   * ══════════════════════════════════════════════════════════════
+   * DEUX OBJETS DIFFÉRENTS, QU'IL NE FAUT PAS CONFONDRE
+   * ══════════════════════════════════════════════════════════════
+   *   · la COUVERTURE (`coverStoragePath`, seau `document-covers`) : une image
+   *     facultative que le coach choisit, valable pour TOUS les types ;
+   *   · l'APERÇU DE L'ORIGINAL (`MiniatureImage`, seau `documents`) : le
+   *     fichier du document lui-même, quand ce fichier EST une image. Il
+   *     existait avant ce lot, et son comportement ne change pas.
+   *
+   * ⚠️ L'EMPLACEMENT 16/9 EST TOUJOURS LÀ, SAUF QUAND L'ORIGINAL ILLUSTRE
+   * DÉJÀ LA CARTE. Afficher un emplacement neutre AU-DESSUS d'une vraie image
+   * ferait croire à un chargement raté : dans ce seul cas, l'aperçu de
+   * l'original prend la place de l'emplacement, et la carte garde exactement
+   * une illustration en haut.
+   *
+   * ⚠️ ET LA COUVERTURE NE DÉVERROUILLE RIEN. Elle s'affiche même sur un
+   * document verrouillé — c'est une annonce, pas un contenu. L'APERÇU DE
+   * L'ORIGINAL, lui, reste conditionné à `availability.available` : montrer le
+   * fichier avant sa date de déblocage serait le divulguer.
+   */
+  const illustrationOriginale =
+    !document.coverStoragePath && kind === "image" && Boolean(document.storagePath) && availability.available;
+
   return (
     <div className={`flex flex-col gap-3 rounded-card border border-border bg-card p-6 shadow-soft ${!availability.available ? "bg-surface-soft/40" : ""}`}>
+      {illustrationOriginale ? (
+        <MiniatureImage
+          storagePath={document.storagePath as string}
+          titre={document.title}
+          disponible={availability.available}
+          Repli={Repli}
+          rounded="rounded-t-card"
+          className="-mx-6 -mt-6"
+        />
+      ) : (
+        // Pleine largeur de la carte, coins du haut alignés sur les siens :
+        // les marges négatives annulent le `p-6` du conteneur.
+        <DocumentCoverImage
+          coverStoragePath={document.coverStoragePath}
+          titre={document.title}
+          Repli={Repli}
+          rounded="rounded-t-card"
+          className="-mx-6 -mt-6"
+        />
+      )}
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <h3 className="font-heading text-base font-bold uppercase text-foreground">{document.title}</h3>
@@ -331,15 +410,6 @@ function DocumentCard({
           <DocumentStatusBadge status={viewedAt ? "consulté" : "nouveau"} />
         )}
       </div>
-      {/* La miniature ne concerne QUE les images déjà débloquées et téléversées. */}
-      {kind === "image" && document.storagePath && availability.available && (
-        <MiniatureImage
-          storagePath={document.storagePath}
-          titre={document.title}
-          disponible={availability.available}
-          Repli={Repli}
-        />
-      )}
       <p className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
         <Repli size={13} aria-hidden className="flex-shrink-0" />
         {documentTypeLabels[document.type]} · {documentCategoryLabels[document.category]}

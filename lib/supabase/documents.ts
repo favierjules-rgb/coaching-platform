@@ -62,6 +62,7 @@ function mapDocumentRow(row: DocumentRow, assignedStudentIds: string[]): AdminDo
     storagePath: row.storage_path,
     fileSizeBytes: row.file_size_bytes,
     fileMimeType: row.file_mime_type,
+    coverStoragePath: row.cover_storage_path,
     status: row.status,
     important: row.important,
     distributionMode: row.distribution_mode as AdminDocument["distributionMode"],
@@ -371,6 +372,16 @@ export async function getDocumentViewStats(
 
 type DocumentFormData = Omit<AdminDocument, "id" | "createdAt" | "updatedAt" | "assignedStudentIds">;
 
+/**
+ * ⚠️ `coverStoragePath` N'EST PAS DANS CETTE LISTE, ET C'EST VOULU.
+ *
+ * La miniature de couverture n'est pas un champ du formulaire : elle a son
+ * propre chemin d'écriture (`setDocumentCoverPath`). Conséquence directe —
+ * publier, archiver ou enregistrer un brouillon depuis n'importe quel écran
+ * ne peut PAS effacer la couverture, puisque la charge utile du formulaire ne
+ * la mentionne jamais. C'est le même principe que la photo de recette
+ * (`save_nutrition_recipe` n'écrit pas `image_path`).
+ */
 function documentFields(data: DocumentFormData) {
   return {
     title: data.title,
@@ -440,6 +451,11 @@ const PARTIAL_FIELD_MAP: Partial<Record<keyof AdminDocument, string>> = {
   fileName: "file_name",
   fileSizeBytes: "file_size_bytes",
   fileMimeType: "file_mime_type",
+  // ⚠️ Présente ICI mais absente de `documentFields` : l'écriture ciblée de
+  // la couverture passe par `updateDocument`, jamais par la charge utile du
+  // formulaire. `null` doit pouvoir être écrit (suppression de la miniature),
+  // et il l'est : seule la valeur `undefined` est ignorée par la boucle.
+  coverStoragePath: "cover_storage_path",
   visibility: "visibility",
   tags: "tags",
   status: "status",
@@ -464,6 +480,33 @@ export async function updateDocument(
   const { error } = await supabase.from("documents").update(fields).eq("id", documentId);
   devWarn("updateDocument", error);
   return !error;
+}
+
+/**
+ * LE SEUL CHEMIN D'ÉCRITURE DE LA MINIATURE DE COUVERTURE.
+ *
+ * ════════════════════════════════════════════════════════════════════════
+ * POURQUOI UNE ÉCRITURE SÉPARÉE, ET PAS UN CHAMP DU FORMULAIRE
+ * ════════════════════════════════════════════════════════════════════════
+ * Si la couverture voyageait dans la charge utile de `handleSave`, alors
+ * publier un document depuis la liste, l'archiver ou corriger son titre
+ * réécrirait aussi `cover_storage_path` — avec la valeur que l'écran se
+ * trouve avoir en mémoire à cet instant. Un écran qui ne connait pas la
+ * couverture l'effacerait donc en enregistrant autre chose.
+ *
+ * ⚠️ ET L'ORDRE DES OPÉRATIONS APPARTIENT À L'APPELANT. Cette fonction
+ * n'écrit QUE la base. L'objet précédent ne doit être supprimé qu'APRÈS
+ * qu'elle ait rendu `true` : sans cela, un échec d'écriture laisserait un
+ * document pointant vers un fichier qu'on vient de détruire.
+ *
+ * `null` SUPPRIME la couverture — `updateDocument` n'ignore que `undefined`.
+ */
+export async function setDocumentCoverPath(
+  supabase: TypedSupabaseClient,
+  documentId: string,
+  coverStoragePath: string | null,
+): Promise<boolean> {
+  return updateDocument(supabase, documentId, { coverStoragePath });
 }
 
 /**

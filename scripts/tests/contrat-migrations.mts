@@ -565,6 +565,18 @@ export const MIGRATION_ESPACE_COACH_ISOLE =
 export const MIGRATION_STORAGE_DOCUMENTS_CHEMIN =
   "20261023090000_storage_documents_proprietaire_dans_le_chemin.sql";
 
+/**
+ * MINIATURES DE DOCUMENTS — une image de couverture facultative.
+ *
+ * Additive, et rien d'autre : une colonne nullable `cover_storage_path` sur
+ * `documents`, un seau PRIVÉ dédié `document-covers` (5 Mo, jpeg/png/webp,
+ * sans SVG) et ses quatre policies, décalquées de celles du seau `documents`.
+ * Aucune reprise de données, aucun document existant réécrit, et le seau
+ * `documents` n'est ni modifié ni rendu public.
+ */
+export const MIGRATION_DOCUMENTS_MINIATURES =
+  "20261024090000_documents_miniatures_couverture.sql";
+
 export const MIGRATIONS_COURSES: readonly string[] = [
   MIGRATION_C2,
   MIGRATION_C3,
@@ -616,17 +628,18 @@ export const MIGRATIONS_APRES_C0_1: readonly string[] = [
   MIGRATION_CATALOGUE_POLICIES_AUTHENTICATED,
   MIGRATION_ESPACE_COACH_ISOLE,
   MIGRATION_STORAGE_DOCUMENTS_CHEMIN,
+  MIGRATION_DOCUMENTS_MINIATURES,
 ];
 
 /**
  * Le compte attendu — nécessaire, jamais suffisant.
  *
- * 117 = 84 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 32
+ * 118 = 84 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 33
  * migrations nommées dans `MIGRATIONS_APRES_C0_1`. Le point 6 recalcule
  * l'historique à partir de ce nombre : il ne peut pas être remonté seul sans
  * qu'une migration soit nommée en face.
  */
-export const NOMBRE_DE_MIGRATIONS = 117;
+export const NOMBRE_DE_MIGRATIONS = 118;
 
 /**
  * L'empreinte des 79 migrations ANTÉRIEURES à C0.1, dans l'ordre.
