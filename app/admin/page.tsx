@@ -32,6 +32,8 @@ import { useSupabaseAdminFeedback } from "@/hooks/useSupabaseAdminFeedback";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { Loader } from "@/components/ui/Loader";
 import { formatAmountCents } from "@/lib/stripe/status";
+import { droitsNavigationDepuisContexte, sectionAdminVisible, titreDashboard } from "@/lib/admin-shell-nav";
+import { useStaffContext } from "@/hooks/useStaffContext";
 import {
   fullName,
   studentsWithStaleWeight,
@@ -130,6 +132,35 @@ export default function AdminDashboardPage() {
   const supabaseBilling = useSupabaseAdminBilling();
 
   /*
+   * ⚠️ LES TROIS RUBRIQUES GLOBALES N'ONT PAS DE VITRINE SUR CE TABLEAU DE
+   * BORD POUR UN COLLABORATEUR.
+   *
+   * La rangée « Abonnements / Paiements en retard / Revenu mensuel estimé »
+   * est entièrement alimentée par la facturation, et le bloc Notifications
+   * porte le composeur de campagnes. La RLS rend déjà zéro ligne à un
+   * collaborateur — il ne verrait donc que des zéros et un formulaire dont
+   * chaque envoi serait refusé en 403 — mais un « Revenu mensuel estimé »
+   * affiché reste une rubrique Paiements sur son écran.
+   *
+   * ⚠️ LA RÈGLE N'EST PAS RÉÉCRITE ICI. `sectionAdminVisible` est la même
+   * fonction que celle qui construit la navigation : si la section est
+   * masquée dans le menu, sa vitrine disparaît du tableau de bord, et les
+   * deux ne peuvent pas diverger. Les AUTRES compteurs — élèves, programmes,
+   * plans, documents — ne sont pas touchés : ils sont déjà bornés aux élèves
+   * autorisés par la RLS.
+   */
+  const staff = useStaffContext();
+  /* ⚠️ LA CONVERSION PASSE PAR LE MODULE, chargement compris. Recopiée à la
+     main, elle omettait `chargement` : pendant la lecture des droits,
+     `sectionAdminVisible` recevait « pas admin, aucun rôle, mécanisme
+     opérationnel » et masquait la vitrine de facturation À L'ADMINISTRATEUR.
+     La sidebar, elle, neutralisait ce cas — les deux vues du même droit
+     divergeaient donc. */
+  const droitsNavigation = droitsNavigationDepuisContexte(staff);
+  const facturationVisible = sectionAdminVisible("/admin/paiements", droitsNavigation);
+  const notificationsVisibles = sectionAdminVisible("/admin/notifications", droitsNavigation);
+
+  /*
    * ⚠️ AUCUN COMPTEUR N'EST AFFICHÉ AVANT D'ÊTRE VRAI. Les cinq listes
    * alimentent des chiffres (« 26 élèves », « 16 programmes ») : les rendre
    * à zéro puis les corriger donnerait l'impression d'une base vide. La
@@ -174,8 +205,12 @@ export default function AdminDashboardPage() {
   return (
     <div>
       <div className="mb-8">
+        {/* ⚠️ LE TITRE SUIT LE RÔLE AUTHENTIFIÉ, pas la route. `/admin` est la
+            même page pour l'administrateur et pour un coach autonome ; le
+            titre était écrit en dur. La règle vit dans `titreDashboard`
+            (lib/admin-shell-nav.ts), fonction pure et testée. */}
         <h1 className="font-heading text-3xl font-extrabold uppercase text-foreground md:text-4xl">
-          Dashboard admin
+          {titreDashboard(staff)}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Vue d&apos;ensemble de ton activité de coaching.
@@ -215,16 +250,18 @@ export default function AdminDashboardPage() {
         />
       </div>
 
-      <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard icon={CreditCard} label="Abonnements actifs" value={activeSubscriptions.length} tone="primary" />
-        <StatCard
-          icon={AlertTriangle}
-          label="Paiements en retard"
-          value={latePayments.length}
-          tone={latePayments.length > 0 ? "amber" : "default"}
-        />
-        <StatCard icon={CreditCard} label="Revenu mensuel estimé" value={formatAmountCents(estimatedMonthlyRevenueCents)} />
-      </div>
+      {facturationVisible && (
+        <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <StatCard icon={CreditCard} label="Abonnements actifs" value={activeSubscriptions.length} tone="primary" />
+          <StatCard
+            icon={AlertTriangle}
+            label="Paiements en retard"
+            value={latePayments.length}
+            tone={latePayments.length > 0 ? "amber" : "default"}
+          />
+          <StatCard icon={CreditCard} label="Revenu mensuel estimé" value={formatAmountCents(estimatedMonthlyRevenueCents)} />
+        </div>
+      )}
 
       <div className="mb-8 rounded-card border border-border bg-card p-6 shadow-soft">
         <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
@@ -251,14 +288,21 @@ export default function AdminDashboardPage() {
           </h2>
           {/* La gestion avancée — programmation, répétitions, historique —
               vit sur sa propre page. Ce bloc reste court à dessein. */}
-          <Link
-            href="/admin/notifications"
-            className="text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary"
-          >
-            Gérer →
-          </Link>
+          {notificationsVisibles && (
+            <Link
+              href="/admin/notifications"
+              className="text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary"
+            >
+              Gérer →
+            </Link>
+          )}
         </div>
-        <NotificationComposer students={students} compact />
+        {/* ⚠️ LE CENTRE D'ACTIVITÉ RESTE, LE COMPOSEUR PART. `DashboardNotifications`
+            ci-dessous lit `activity_events` — du suivi d'élève, borné par la RLS
+            aux élèves autorisés — et non la rubrique Notifications. Seul le
+            composeur de campagnes, qui appelle /api/admin/notifications/*,
+            disparaît pour un collaborateur. */}
+        {notificationsVisibles && <NotificationComposer students={students} compact />}
         <div className="mt-6">
           <DashboardNotifications events={supabaseActivity.events} loading={supabaseActivity.loading} />
         </div>

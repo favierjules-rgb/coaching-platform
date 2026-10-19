@@ -14,8 +14,17 @@ import type { DocumentType } from "@/types";
  * Le bucket reste privé (public: false). Toute lecture passe par une URL
  * signée (`createSignedUrl`), jamais par une URL publique directe — la
  * génération elle-même est soumise à la policy RLS
- * `documents_bucket_select_accessible` (voir schema.sql), donc un élève ne
- * peut obtenir un lien que pour un document qu'il a le droit de lire.
+ * `documents_bucket_select_accessible`, donc un élève ne peut obtenir un lien
+ * que pour un document qu'il a le droit de lire.
+ *
+ * ⚠️ CONVENTION DE CHEMIN DEPUIS 20261023090000 :
+ *
+ *     <fiche_coach>/<document_id>/<horodatage>-<nom de fichier>
+ *
+ * Le premier segment porte le PROPRIÉTAIRE, et c'est lui qui protège les
+ * fichiers orphelins (ligne `documents` supprimée). L'ancienne forme
+ * `<document_id>/<nom>` reste lue : la policy cherche l'identifiant du
+ * document dans n'importe quel segment. Aucun fichier existant n'est déplacé.
  */
 
 export const DOCUMENTS_BUCKET = "documents";
@@ -86,13 +95,58 @@ function sanitizeFileName(name: string): string {
   return name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
 }
 
-/** Uploade un fichier dans `<documentId>/<timestamp>-<nom>` du bucket "documents". */
+/**
+ * Fiche staff de l'appelant, telle que la BASE la connaît.
+ *
+ * ⚠️ RÉSOLUE PAR LA BASE, PAS DÉDUITE ICI. `public.current_staff_id()` est
+ * SECURITY DEFINER et ne rend que la fiche de l'appelant : c'est la seule
+ * valeur qu'on puisse mettre dans un chemin de stockage sans mentir. Un
+ * identifiant choisi côté navigateur serait une déclaration, et la policy
+ * Storage la refuserait de toute façon — autant échouer tôt et clairement.
+ */
+async function ficheStaffDeLAppelant(supabase: TypedSupabaseClient): Promise<string | null> {
+  try {
+    const { data } = await supabase.rpc("current_staff_id");
+    const brut: unknown = Array.isArray(data) ? data[0] : data;
+    return typeof brut === "string" && brut.length > 0 ? brut : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Uploade un fichier dans `<fiche_coach>/<documentId>/<timestamp>-<nom>`.
+ *
+ * ⚠️ LE PREMIER SEGMENT EST LE PROPRIÉTAIRE, ET C'EST CE QUI PROTÈGE LES
+ * ORPHELINS. Avant, le chemin était `<documentId>/<nom>` : il ne disait rien
+ * du propriétaire, et la policy Storage devait donc laisser passer l'écriture
+ * quand AUCUNE ligne `documents` ne correspondait — sans quoi le premier
+ * téléversement, qui précède la création de la ligne, aurait été impossible.
+ * Un fichier dont la ligne avait été supprimée retombait dans cette brèche et
+ * redevenait manipulable par tout le staff.
+ *
+ * Désormais la policy compare ce premier segment à `current_staff_id()`
+ * résolu EN BASE : le premier téléversement passe sans ligne, et un coach qui
+ * forge le préfixe d'un autre est refusé.
+ *
+ * ⚠️ L'ANCIENNE CONVENTION RESTE LISIBLE : la policy cherche l'identifiant du
+ * document dans n'importe quel segment du chemin, donc les fichiers déjà en
+ * place et les téléchargements élèves ne bougent pas. Aucun fichier n'est
+ * déplacé par ce lot.
+ */
 export async function uploadDocumentFile(
   supabase: TypedSupabaseClient,
   documentId: string,
   file: File,
 ): Promise<UploadedDocumentFile | { error: string }> {
-  const path = `${documentId}/${Date.now()}-${sanitizeFileName(file.name)}`;
+  const fiche = await ficheStaffDeLAppelant(supabase);
+  if (!fiche) {
+    return {
+      error:
+        "Aucune fiche coach n'est rattachée à ce compte : le fichier n'a pas de propriétaire possible. Contacte l'administrateur.",
+    };
+  }
+  const path = `${fiche}/${documentId}/${Date.now()}-${sanitizeFileName(file.name)}`;
   const { error } = await supabase.storage.from(DOCUMENTS_BUCKET).upload(path, file, {
     upsert: false,
     contentType: file.type || undefined,

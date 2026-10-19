@@ -449,8 +449,19 @@ await (async () => {
     assert.ok(source.includes('type === "nutrition" ? terminerAssignationUnique : terminerAssignation'));
     assert.ok(source.includes('type === "nutrition" ? toggleSingleSelection : toggleStudentSelection'));
     assert.ok(source.includes("if (saving) return;"));
-    assert.ok(source.includes("setSaveFailed(true)"));
-    assert.ok(source.includes("L&apos;enregistrement a échoué"));
+    // ⚠️ RENOMMÉ ET RESSERRÉ (P13-B) : `setSaveFailed(true)` ne disait que
+    // « ça a raté ». Depuis que `provision_program_copy` refuse un
+    // collaborateur hors portée, la modale doit distinguer un refus de droits
+    // d'une panne — le message « réessaie, ou vérifie ta connexion » était un
+    // conseil faux. L'état porte donc le MOTIF, et le texte vient d'une source
+    // unique (`messageEchecAffectation`) au lieu d'être écrit en dur ici.
+    assert.ok(source.includes("setEchecSauvegarde("), "l'échec doit toujours être signalé");
+    assert.ok(/natures\.includes\("autorisation"\) \? "autorisation" : "technique"/.test(source),
+      "le motif retenu doit être celui du refus quand il y en a un");
+    assert.ok(source.includes("messageEchecAffectation(echecSauvegarde)"),
+      "le message affiché doit dépendre du motif");
+    assert.ok(!source.includes("L&apos;enregistrement a échoué"),
+      "plus de message en dur : il masquait le refus de droits");
     assert.ok(source.includes('{saving ? "Enregistrement…" : "Terminer"}'), "bouton verrouillé pendant l'enregistrement");
     // La fermeture n'écrit rien : close() ne touche que l'état local.
     const corpsClose = source.split("function close()")[1]?.split("}")[0] ?? "";

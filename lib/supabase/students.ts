@@ -35,6 +35,12 @@ import type {
   WeightEntry,
   WeightEntrySource,
 } from "@/types";
+import {
+  ATTRIBUTION_ABSENTE,
+  lireAttributionOffre,
+  lireAttributionsOffre,
+  type AttributionOffre,
+} from "@/lib/supabase/attribution-offre";
 import type { Database } from "@/types/supabase";
 
 /**
@@ -58,7 +64,15 @@ import type { Database } from "@/types/supabase";
 type TypedSupabaseClient = SupabaseClient<Database>;
 
 type StudentRow = Database["public"]["Tables"]["students"]["Row"];
-type StudentProfileRow = Database["public"]["Tables"]["student_profiles"]["Row"];
+/*
+ * ⚠️ LA LIGNE DE PROFIL LUE PAR L'APPLICATION EST CELLE DE LA VUE, pas
+ * celle de la table. P13-B/10 a retiré à `authenticated` le privilège de
+ * COLONNE sur les trois colonnes d'attribution d'offre : `select *` sur
+ * `student_profiles` tombe désormais en 42501 pour tout le monde,
+ * administrateur compris. Les trois valeurs arrivent séparément, par
+ * `lireAttributionOffre` — voir lib/supabase/attribution-offre.ts.
+ */
+type StudentProfileRow = Database["public"]["Tables"]["student_profiles_lisible"]["Row"];
 type ProgressPhotoRow = Database["public"]["Tables"]["progress_photos"]["Row"];
 type BodyMeasurementRow = Database["public"]["Tables"]["body_measurements"]["Row"];
 type CustomMeasurementRow = Database["public"]["Tables"]["custom_measurements"]["Row"];
@@ -132,7 +146,10 @@ function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
-function mapStudentProfileRow(row: StudentProfileRow): SupabaseStudentProfile {
+function mapStudentProfileRow(
+  row: StudentProfileRow,
+  attribution: AttributionOffre = ATTRIBUTION_ABSENTE,
+): SupabaseStudentProfile {
   const food = (row.food_preferences ?? {}) as Partial<AdminFoodPreferences>;
   const sport = (row.sport_preferences ?? {}) as Partial<AdminSportPreferences>;
   const injury = (row.injury_note ?? {}) as { currentInjuries?: unknown; coachRemarks?: unknown };
@@ -210,12 +227,12 @@ function mapStudentProfileRow(row: StudentProfileRow): SupabaseStudentProfile {
     workScheduleNotes: row.work_schedule_notes ?? "",
     nutritionNotes: row.nutrition_notes ?? "",
     billingAccessMode: row.billing_access_mode,
-    assignedStripePlan: row.assigned_stripe_plan,
-    assignedStripePriceId: row.assigned_stripe_price_id,
+    assignedStripePlan: attribution.offreNom,
+    assignedStripePriceId: attribution.offrePrixId,
     accessNote: row.access_note ?? "",
     accessUpdatedAt: row.access_updated_at,
     accessUpdatedBy: row.access_updated_by,
-    assignedSubscriptionTemplateId: row.assigned_subscription_template_id,
+    assignedSubscriptionTemplateId: attribution.offreId,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -552,16 +569,27 @@ export async function getStudents(supabase: TypedSupabaseClient): Promise<AdminS
     programIdsByStudent,
     nutritionPlanIdsByStudent,
     documentIdsByStudent,
+    attributionByStudent,
   ] = await Promise.all([
-    supabase.from("student_profiles").select("*").in("student_id", studentIds),
+    supabase.from("student_profiles_lisible").select("*").in("student_id", studentIds),
     supabase.from("payments").select("*").in("student_id", studentIds),
     getAssignedProgramIdsByStudent(supabase, studentIds),
     getAssignedNutritionPlanIdsByStudent(supabase, studentIds),
     getAssignedDocumentIdsByStudent(supabase, studentIds),
+    // Une seule lecture d'attributions pour toute la liste (P13-B/10), dans le
+    // même aller-retour que les autres. Rend une table vide pour un appelant
+    // sans droit sur la facturation : les champs d'attribution tombent à
+    // `null`, le reste de la fiche élève est intact.
+    lireAttributionsOffre(supabase),
   ]);
   devWarn("getStudents (profiles)", profilesError);
   devWarn("getStudents (payments)", paymentsError);
-  const profileByStudent = new Map((profileRows ?? []).map((row) => [row.student_id, mapStudentProfileRow(row)]));
+  const profileByStudent = new Map(
+    (profileRows ?? []).map((row) => [
+      row.student_id,
+      mapStudentProfileRow(row, attributionByStudent.get(row.student_id) ?? ATTRIBUTION_ABSENTE),
+    ]),
+  );
   const paymentByStudent = new Map((paymentRows ?? []).map((row) => [row.student_id, mapPaymentRow(row)]));
 
   return data.map((row) => {
@@ -594,13 +622,12 @@ export async function getStudentProfile(
   supabase: TypedSupabaseClient,
   studentId: string,
 ): Promise<SupabaseStudentProfile | null> {
-  const { data, error } = await supabase
-    .from("student_profiles")
-    .select("*")
-    .eq("student_id", studentId)
-    .maybeSingle();
+  const [{ data, error }, attribution] = await Promise.all([
+    supabase.from("student_profiles_lisible").select("*").eq("student_id", studentId).maybeSingle(),
+    lireAttributionOffre(supabase, studentId),
+  ]);
   devWarn("getStudentProfile", error);
-  return data ? mapStudentProfileRow(data) : null;
+  return data ? mapStudentProfileRow(data, attribution) : null;
 }
 
 export async function getStudentMeasurements(

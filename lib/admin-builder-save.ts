@@ -1,4 +1,5 @@
 import type { AdminProgram } from "@/types";
+import { messageRefusAutorisation } from "@/lib/messages-autorisation";
 
 /**
  * Orchestration PURE du flux de sauvegarde du builder de programme (Lot 3B).
@@ -75,9 +76,20 @@ export function builderSaveUserMessage(outcome: BuilderSaveOutcome): string | nu
     if (message.startsWith("STRUCTURE_INCOMPLETE")) {
       return "Une partie du programme n'a pas pu être enregistrée. Recharge la page et vérifie le contenu avant de réessayer — n'enregistre pas par-dessus.";
     }
-    if (/NOT_AUTHORIZED|42501|SAVE_FAILED/.test(message)) {
-      return "Ta session n'a plus les droits coach (compte élève connecté dans ce navigateur ?). Reconnecte-toi en admin puis réessaie — tes modifications sont conservées.";
-    }
+    /*
+     * ⚠️ L'ANCIEN MESSAGE POSAIT UN DIAGNOSTIC FAUX. Il disait « ta session n'a
+     * plus les droits coach » et demandait de se reconnecter en admin. Depuis
+     * P13-B, le cas courant n'est plus une session perdue : c'est un
+     * collaborateur qui n'a pas `entrainement / ecriture`. Se reconnecter ne
+     * lui donnera jamais ce droit, et le message l'envoyait chercher au
+     * mauvais endroit.
+     *
+     * Le texte est désormais celui de la nutrition, au mot près — même refus,
+     * même formulation. Le code technique (`NOT_AUTHORIZED`, `42501`…) reste
+     * dans `outcome.error` et en console : il n'est simplement plus affiché.
+     */
+    const refus = messageRefusAutorisation(message, "programme");
+    if (refus) return refus;
   }
   return null;
 }

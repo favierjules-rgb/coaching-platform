@@ -15,6 +15,7 @@ import {
   type MealSlotKey,
 } from "@/lib/nutrition/meal-distribution";
 import type { Database } from "@/types/supabase";
+import { messageUtilisateurOuBrut } from "@/lib/messages-autorisation";
 
 /**
  * Couche d'accès au modèle nutrition v2 (répartition structurée).
@@ -392,8 +393,22 @@ export async function saveNutritionPlanV2(
     p_payload: buildSaveNutritionPlanV2Payload(input),
   });
   if (error) {
+    /*
+     * ⚠️ LE CODE TECHNIQUE RESTE EN INTERNE, PAS À L'ÉCRAN.
+     *
+     * La RPC lève `PLAN_NOT_FOUND_OR_FORBIDDEN` aussi bien pour un plan
+     * absent que pour un plan refusé — la confusion est VOULUE, elle empêche
+     * la route de servir d'oracle d'existence. Jusqu'ici ce code remontait
+     * tel quel dans l'interface : un collaborateur sans permission d'écriture
+     * lisait un identifiant d'erreur PostgreSQL au lieu d'une explication.
+     *
+     * `devWarn` conserve le message d'origine pour la console et les tests ;
+     * seul l'affichage change, et seulement pour un refus reconnu — toute
+     * autre erreur garde son message, sans quoi une panne passerait pour un
+     * problème de droits.
+     */
     devWarn("saveNutritionPlanV2 (RPC)", error);
-    return { ok: false, message: error.message };
+    return { ok: false, message: messageUtilisateurOuBrut(error.message, "plan") };
   }
   return parseCanonicalRpcResult(data);
 }

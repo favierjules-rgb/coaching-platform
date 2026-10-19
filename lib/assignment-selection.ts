@@ -15,6 +15,8 @@
  * re-rend pas.
  */
 
+import { estRefusAutorisation, type NatureEchecAffectation } from "@/lib/assignment-refus";
+
 /** Coche/décoche un élève — immuable, idempotent (double ajout impossible). */
 export function toggleStudentSelection(ids: string[], studentId: string, checked: boolean): string[] {
   if (checked) {
@@ -69,6 +71,36 @@ export function applySelectionDiff(
   for (const id of removed) apply(id, false, "retrait");
   for (const id of reappliques) apply(id, true, "date");
   return { added, removed, reappliques };
+}
+
+/* ─── POURQUOI UNE ÉCRITURE A ÉCHOUÉ — lecture commune aux deux « Terminer » ─── */
+
+/**
+ * La nature de l'échec d'une écriture, à partir de ce qui est remonté.
+ *
+ * ⚠️ `ok` NE CHANGE PAS DE DÉFINITION. Un `false` ou un rejet valait déjà
+ * échec, et vaut toujours échec : cette fonction ne décide pas SI l'écriture a
+ * échoué, seulement POURQUOI, afin que la modale choisisse son message. Les
+ * deux parcours qui ne lèvent jamais de refus — nutrition et documents —
+ * tombent donc invariablement sur `"technique"`, soit le comportement d'avant,
+ * message compris.
+ */
+function natureDeLEchec(erreur: unknown): NatureEchecAffectation {
+  return estRefusAutorisation(erreur) ? "autorisation" : "technique";
+}
+
+/**
+ * Agrège les natures d'échec d'un lot.
+ *
+ * ⚠️ LE REFUS DE DROITS L'EMPORTE. Un « Terminer » peut porter plusieurs
+ * élèves : si l'un est refusé et un autre tombe sur une panne, le message utile
+ * est celui du refus — il nomme une cause définitive et actionnable (demander
+ * la permission ou l'affectation), là où « réessaie » n'aurait rien réglé.
+ */
+function echecDominant(natures: readonly (NatureEchecAffectation | null)[]): NatureEchecAffectation | null {
+  if (natures.includes("autorisation")) return "autorisation";
+  if (natures.includes("technique")) return "technique";
+  return null;
 }
 
 /* ─── Sélection à CHOIX UNIQUE — nutrition (fix/nutrition-single-assigned-plan) ─── */
@@ -142,7 +174,14 @@ export async function terminerAssignationUnique(
    * évite un paramètre mort dont personne ne saurait s'il est honoré.
    */
   aReappliquer: readonly string[] = [],
-): Promise<{ ok: boolean; added: string[]; removed: string[]; reappliques: string[] }> {
+): Promise<{
+  ok: boolean;
+  /** POURQUOI, quand `ok` est faux — `null` sur un succès. Voir `natureDeLEchec`. */
+  echec: NatureEchecAffectation | null;
+  added: string[];
+  removed: string[];
+  reappliques: string[];
+}> {
   const { assign, unassign } = planSingleAssignmentWrites(before, after);
   const résultats: Array<boolean | void | Promise<boolean | void>> = [];
   if (assign !== null) résultats.push(apply(assign, true, "ajout"));
@@ -153,9 +192,17 @@ export async function terminerAssignationUnique(
     (id) => avant.has(id) && aReappliquerSet.has(id) && id !== assign,
   );
   for (const id of reappliques) résultats.push(apply(id, true, "date"));
-  const issues = await Promise.all(résultats.map((r) => Promise.resolve(r).catch(() => false as const)));
+  const issues = await Promise.all(
+    résultats.map((r) =>
+      Promise.resolve(r).then(
+        (valeur) => ({ valeur, nature: null as NatureEchecAffectation | null }),
+        (erreur) => ({ valeur: false as const, nature: natureDeLEchec(erreur) }),
+      ),
+    ),
+  );
   return {
-    ok: issues.every((issue) => issue !== false),
+    ok: issues.every(({ valeur }) => valeur !== false),
+    echec: echecDominant(issues.map(({ valeur, nature }) => (valeur === false ? (nature ?? "technique") : null))),
     added: assign !== null ? [assign] : [],
     removed: unassign,
     reappliques,
@@ -215,7 +262,14 @@ export async function terminerAssignation(
   ) => boolean | void | Promise<boolean | void>,
   /** Identifiants inchangés dont la DATE a été modifiée — voir `applySelectionDiff`. */
   aReappliquer: readonly string[] = [],
-): Promise<{ ok: boolean; added: string[]; removed: string[]; reappliques: string[] }> {
+): Promise<{
+  ok: boolean;
+  /** POURQUOI, quand `ok` est faux — `null` sur un succès. Voir `natureDeLEchec`. */
+  echec: NatureEchecAffectation | null;
+  added: string[];
+  removed: string[];
+  reappliques: string[];
+}> {
   const résultats: Array<boolean | void | Promise<boolean | void>> = [];
   const { added, removed, reappliques } = applySelectionDiff(
     before,
@@ -225,8 +279,21 @@ export async function terminerAssignation(
     },
     aReappliquer,
   );
-  const issues = await Promise.all(résultats.map((r) => Promise.resolve(r).catch(() => false as const)));
-  return { ok: issues.every((issue) => issue !== false), added, removed, reappliques };
+  const issues = await Promise.all(
+    résultats.map((r) =>
+      Promise.resolve(r).then(
+        (valeur) => ({ valeur, nature: null as NatureEchecAffectation | null }),
+        (erreur) => ({ valeur: false as const, nature: natureDeLEchec(erreur) }),
+      ),
+    ),
+  );
+  return {
+    ok: issues.every(({ valeur }) => valeur !== false),
+    echec: echecDominant(issues.map(({ valeur, nature }) => (valeur === false ? (nature ?? "technique") : null))),
+    added,
+    removed,
+    reappliques,
+  };
 }
 
 /* ─── LA DATE DE DÉBUT DANS LES MODALES — deux fonctions PURES ─── */

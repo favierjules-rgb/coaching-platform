@@ -1,19 +1,23 @@
 "use client";
 
 import { useState } from "react";
-import { AlertTriangle, CheckCircle, RotateCcw, Trash2 } from "lucide-react";
+import { AlertTriangle, CheckCircle, ShieldCheck, Trash2 } from "lucide-react";
 
 import { Field, SelectField } from "@/components/admin/AdminFormFields";
 import { AdminSection } from "@/components/admin/AdminSection";
 import { CoachModal, type CoachSaveResult } from "@/components/admin/CoachModal";
+import { CollaborateurAccesModal } from "@/components/admin/CollaborateurAccesModal";
 import { PrimaryButton } from "@/components/admin/Modal";
 import { StatusBadge } from "@/components/admin/StatusBadge";
 import { useAdminData } from "@/hooks/useAdminData";
+import { useResumesDroits } from "@/hooks/useCollaborateurAcces";
+import { useStaffContext } from "@/hooks/useStaffContext";
 import { useSupabaseCoaches } from "@/hooks/useSupabaseCoaches";
-import { coachRoleLabels, coachStatusLabels, fullName } from "@/lib/admin";
+import { gestionDesCoachsVisible } from "@/lib/admin-shell-nav";
+import { AUCUN_ACCES_LABEL, categorieDroitLabels, coachRoleLabels, coachStatusLabels, fullName, niveauDroitLabels } from "@/lib/admin";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { updateCoach as updateCoachRow } from "@/lib/supabase/coaches";
-import type { AdminCoach } from "@/types";
+import { CATEGORIES_DROITS, type AdminCoach } from "@/types";
 
 const statusOptions = [
   { value: "en ligne", label: "En ligne" },
@@ -21,9 +25,30 @@ const statusOptions = [
 ];
 
 export default function AdminSettingsPage() {
-  const { state, updateCoachSettings, resetAdminData } = useAdminData();
+  const { state, updateCoachSettings } = useAdminData();
   const { coachSettings } = state;
   const { coaches, currentUserId, refetch: refetchCoaches } = useSupabaseCoaches();
+  const { resumes: resumesDroits, recharger: rechargerDroits } = useResumesDroits();
+  /*
+   * P13-B : « le coach ne gère jamais globalement les coachs ». La section
+   * ci-dessous est donc réservée à l'ADMINISTRATEUR.
+   *
+   * ⚠️ LA CONDITION PRÉCÉDENTE SE DÉCIDAIT SUR LA MAUVAISE SOURCE, et c'est
+   * ce qui a coûté la gestion des coachs à l'administrateur :
+   *
+   *     roleStaff === null || roleStaff === "admin"   // coaches.role
+   *
+   * `coaches.role` est l'étiquette de la FICHE staff, et sa valeur par défaut
+   * en base est `'assistant'` : la fiche d'un administrateur créée sans rôle
+   * explicite porte donc `assistant`, et toute la section disparaissait de son
+   * écran — alors que la base lui accordait tout (`coaches_manage_admin_*`,
+   * `collaborateur_*_manage_admin`, tous sur `is_admin()`).
+   *
+   * La règle du dépôt est `profiles.role`, et elle vit maintenant dans une
+   * fonction pure, testée : `gestionDesCoachsVisible`.
+   */
+  const staff = useStaffContext();
+  const peutGererLesCoachs = gestionDesCoachsVisible(staff);
 
   const [form, setForm] = useState(coachSettings);
   const [saved, setSaved] = useState(false);
@@ -35,6 +60,14 @@ export default function AdminSettingsPage() {
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteErrorId, setDeleteErrorId] = useState<string | null>(null);
+  /** Collaborateur dont la modale de droits est ouverte (P13-B). */
+  const [droitsCoachId, setDroitsCoachId] = useState<string | null>(null);
+
+  // Fiche `coaches` de l'administrateur connecté : tracée dans `affecte_par`
+  // et `accorde_par` pour savoir qui a accordé quoi. `null` si sa ligne
+  // n'existe pas encore — la colonne est nullable précisément pour ce cas.
+  const ficheAdminId = coaches.find((coach) => coach.userId && coach.userId === currentUserId)?.id ?? null;
+  const collaborateurDroits = coaches.find((coach) => coach.id === droitsCoachId) ?? null;
 
   function setField<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -92,10 +125,19 @@ export default function AdminSettingsPage() {
     await refetchCoaches();
   }
 
-  function handleReset() {
-    if (window.confirm("Réinitialiser toutes les données de test admin (élèves, programmes, plans, documents, retours) ? Cette action efface le localStorage.")) {
-      resetAdminData();
-    }
+  /**
+   * Libellé du résumé des droits d'un collaborateur. Volontairement explicite
+   * quand il n'a rien : « Aucun accès » dit la vérité du modèle (absence de
+   * ligne = refus), là où une ligne vide laisserait penser à un chargement.
+   */
+  function resumeDroits(coachId: string): string {
+    const resume = resumesDroits[coachId];
+    const categories = CATEGORIES_DROITS.filter((categorie) => resume?.permissions[categorie]).map(
+      (categorie) => `${categorieDroitLabels[categorie]} (${niveauDroitLabels[resume!.permissions[categorie]!].toLowerCase()})`,
+    );
+    const eleves = resume?.nbEleves ?? 0;
+    const partEleves = eleves === 0 ? "aucun élève affecté" : `${eleves} élève${eleves > 1 ? "s" : ""} affecté${eleves > 1 ? "s" : ""}`;
+    return `${categories.length === 0 ? AUCUN_ACCES_LABEL : categories.join(" · ")} — ${partEleves}`;
   }
 
   return (
@@ -104,7 +146,6 @@ export default function AdminSettingsPage() {
         <h1 className="font-heading text-3xl font-extrabold uppercase text-foreground md:text-4xl">
           Paramètres
         </h1>
-        <p className="mt-1 text-sm text-muted-foreground">Version mockée — {coachSettings.mockVersion}</p>
       </div>
 
       <div className="flex flex-col gap-6">
@@ -128,6 +169,7 @@ export default function AdminSettingsPage() {
           </div>
         </AdminSection>
 
+        {peutGererLesCoachs && (
         <AdminSection title="Coachs" action={<CoachModal onSave={handleCreateCoach} />}>
           {coaches.length === 0 ? (
             <p className="text-sm text-muted-foreground">Aucun coach enregistré.</p>
@@ -151,9 +193,32 @@ export default function AdminSettingsPage() {
                           {coach.email} · {coachRoleLabels[coach.role]}
                           {coach.speciality && ` · ${coach.speciality}`}
                         </span>
+                        {/* P13-B : affichage FIDÈLE de ce qui est enregistré —
+                            aucune catégorie n'est supposée accordée, et
+                            l'absence de droit est écrite en clair plutôt que
+                            laissée vide. */}
+                        {coach.role === "collaborateur" && (
+                          <span className="mt-1 block text-[11px] text-muted-foreground">
+                            {resumeDroits(coach.id)}
+                          </span>
+                        )}
                       </div>
                       <div className="flex flex-wrap gap-2">
                         <CoachModal coach={coach} onSave={(data) => handleUpdateCoach(coach.id, data)} />
+                        {/* P13-B : seul un collaborateur a des droits à
+                            configurer. Un admin a les droits globaux, un coach
+                            autonome gère ses propres élèves — ni l'un ni
+                            l'autre ne passe par `collaborateur_permissions`. */}
+                        {coach.role === "collaborateur" && (
+                          <button
+                            type="button"
+                            onClick={() => setDroitsCoachId(coach.id)}
+                            className="pressable flex min-h-[44px] items-center gap-1.5 rounded-control border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                          >
+                            <ShieldCheck size={12} aria-hidden="true" />
+                            Droits
+                          </button>
+                        )}
                         {!isSelf && (
                           <button
                             type="button"
@@ -179,26 +244,34 @@ export default function AdminSettingsPage() {
             </div>
           )}
         </AdminSection>
+        )}
 
-        {/* Zone de test : plus de grand encadré rouge plein cadre (c'était le
-            « halo rouge » perçu à côté de la sidebar) — carte au langage
-            commun, la dangerosité est portée par le titre et le bouton
-            destructifs, pas par un cadre criard. */}
-        <div className="rounded-card border border-border bg-card p-6 shadow-soft">
-          <h2 className="mb-2 font-heading text-sm font-bold uppercase text-destructive">Zone de test</h2>
-          <p className="mb-4 text-sm text-muted-foreground">
-            Réinitialise toutes les données admin mockées (élèves, programmes, plans, documents, retours) et
-            revient aux données de départ. N&apos;affecte pas l&apos;espace élève.
-          </p>
-          <button
-            type="button"
-            onClick={handleReset}
-            className="pressable flex min-h-[44px] items-center gap-2 rounded-control border border-destructive/50 px-4 py-2 text-xs uppercase tracking-widest text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40"
-          >
-            <RotateCcw size={13} aria-hidden="true" />
-            Réinitialiser les données de test
-          </button>
-        </div>
+        {collaborateurDroits && (
+          <CollaborateurAccesModal
+            collaborateur={collaborateurDroits}
+            accordePar={ficheAdminId}
+            onClose={() => {
+              setDroitsCoachId(null);
+              void rechargerDroits();
+            }}
+          />
+        )}
+
+        {/*
+          ⚠️ LA « ZONE DE TEST » A ÉTÉ RETIRÉE DE L'INTERFACE, et il faut dire
+          exactement ce qu'elle faisait pour qu'on ne la croie pas plus
+          dangereuse qu'elle n'était : son bouton appelait `resetAdminData()`,
+          qui efface la clé `localStorage` du jeu de données MOCKÉ du
+          navigateur. Aucune route API, aucune action serveur, aucune ligne de
+          la base — vérifié : `resetAdminData` n'est défini qu'une fois, dans
+          hooks/useAdminData.ts, et n'était appelé que d'ici.
+
+          Elle disparaît quand même : un bouton « Réinitialiser les données »
+          dans l'espace d'administration normal est un risque d'interface, et
+          son libellé (« élèves, programmes, plans, documents, retours »)
+          laissait légitimement croire qu'il touchait aux vraies données.
+          La fonction reste dans le hook, sans aucun point d'entrée.
+        */}
       </div>
     </div>
   );

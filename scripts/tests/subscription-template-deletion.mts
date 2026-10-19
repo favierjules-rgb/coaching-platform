@@ -99,8 +99,32 @@ function makeFakeStripe(opts: {
 }
 
 /** Faux client Supabase pour getSubscriptionTemplateReferences : renvoie un count selon la dernière colonne .eq(). */
-function makeFakeSupabaseCounts(map: Record<string, number>) {
+function makeFakeSupabaseCounts(map: Record<string, number>, journal?: { rpc: unknown[] }) {
   return {
+    /*
+     * ⚠️ LES DEUX COMPTES D'ÉLÈVES NE PASSENT PLUS PAR `.from()` (P13-B/10).
+     * Ils s'obtenaient par `.eq("assigned_subscription_template_id", …)` et
+     * `.eq("assigned_stripe_price_id", …)` ; ces deux colonnes sont désormais
+     * fermées au rôle `authenticated` par un privilège de COLONNE — qui
+     * s'applique aussi dans un `where`. Les requêtes tomberaient en 42501,
+     * pour l'administrateur lui-même. La RPC `compte_attributions_offre` rend
+     * les deux comptes, et elle seule.
+     */
+    rpc(nom: string, args: Record<string, unknown>) {
+      journal?.rpc.push({ nom, args });
+      return Promise.resolve({
+        data:
+          nom === "compte_attributions_offre"
+            ? [
+                {
+                  par_modele: map.assigned_subscription_template_id ?? 0,
+                  par_prix: map.assigned_stripe_price_id ?? 0,
+                },
+              ]
+            : null,
+        error: null,
+      });
+    },
     from() {
       return {
         select() {
@@ -248,17 +272,26 @@ async function run() {
   });
 
   await test("getSubscriptionTemplateReferences mappe correctement les counts", async () => {
+    const journal = { rpc: [] as unknown[] };
     const supabase = makeFakeSupabaseCounts({
       assigned_subscription_template_id: 2,
       assigned_stripe_price_id: 1,
       stripe_price_id: 3,
       stripe_product_id: 4,
-    });
-    const refs = await getSubscriptionTemplateReferences(supabase, makeTemplate());
+    }, journal);
+    const template = makeTemplate();
+    const refs = await getSubscriptionTemplateReferences(supabase, template);
     assert.equal(refs.studentsByTemplateId, 2);
     assert.equal(refs.studentsByPriceId, 1);
     assert.equal(refs.subscriptions, 3);
     assert.equal(refs.otherTemplatesSharingProduct, 4);
+    // …et les deux comptes d'élèves viennent bien de la RPC, avec le modèle ET
+    // le price_id : sans le second argument, `studentsByPriceId` serait
+    // toujours nul et une offre encore attribuée par son prix passerait pour
+    // libre de toute référence.
+    assert.deepEqual(journal.rpc, [
+      { nom: "compte_attributions_offre", args: { p_template_id: template.id, p_stripe_price_id: template.stripePriceId } },
+    ]);
   });
 
   // ─── Orchestrateur (garde-fous + ordre) ───

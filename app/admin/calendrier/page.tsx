@@ -26,13 +26,11 @@ import {
   deleteCoachAvailability,
   deleteCoachUnavailability,
   getAvailableSlots,
-  getBookingSettings,
-  getPrimaryCoachInfo,
   notifyAppointmentCancellation,
   notifyAppointmentConfirmation,
   notifyAppointmentReschedule,
   rescheduleAppointment,
-  updateBookingSettings,
+  saveMyBookingSettings,
   updateCoachAvailability,
   updateCoachEventAtomic,
 } from "@/lib/supabase/appointments";
@@ -67,21 +65,23 @@ export default function AdminCalendrierPage() {
 
   const studentById = useMemo(() => new Map(students.map((s) => [s.id, s])), [students]);
   const studentNameById = useMemo(() => new Map(students.map((s) => [s.id, fullName(s)])), [students]);
-  const [coachInfo, setCoachInfo] = useState({ name: "Ton coach", email: "" });
+  /* ─── L'ORGANISATEUR DES EMAILS N'EST PLUS RÉSOLU ICI (P13-B, 11/10/2026)
+     Cette page appelait `getPrimaryCoachInfo` dans le navigateur pour
+     alimenter `coachName` / `coachEmail`. Deux raisons de l'avoir retiré :
 
-  useEffect(() => {
-    let cancelled = false;
-    const supabase = createSupabaseBrowserClient();
-    if (!supabase) return;
-    getPrimaryCoachInfo(supabase).then((info) => {
-      if (!cancelled) setCoachInfo(info);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  const coachName = coachInfo.name;
-  const coachEmail = coachInfo.email;
+       1. C'était inutile. `notifyAppointment*` n'envoie que
+          `appointmentId` à /api/email/appointment-notification, qui relit le
+          rendez-vous ET le coach principal en base avec le service role
+          avant de composer l'email et le .ics. La valeur lue ici n'était
+          jamais utilisée — ni affichée, ni transmise.
+       2. C'était devenu une lecture refusée. Depuis P13-B, `coaches` est en
+          lecture `is_admin()` : un assistant ou un collaborateur recevait
+          zéro ligne et retombait sur « Ton coach », affichant un
+          organisateur faux pour une donnée qui ne servait à rien.
+
+     La correction la plus restreinte est donc de NE RIEN LIRE : aucune RPC
+     et aucune policy n'ont été ajoutées pour un champ mort. Le serveur
+     reste la seule autorité sur l'identité de l'organisateur. */
 
   /* ─── Aperçu des créneaux élèves : EXACTEMENT la même source que la page
      élève (getAvailableSlots + BookingSlotPicker), aucune logique dupliquée. */
@@ -185,8 +185,6 @@ export default function AdminCalendrierPage() {
         await notifyAppointmentConfirmation(supabase, created, {
           studentFirstName: student.firstName,
           studentEmail: student.email,
-          coachName,
-          coachEmail,
         });
       }
       refreshAfterMutation();
@@ -234,8 +232,6 @@ export default function AdminCalendrierPage() {
       await notifyAppointmentCancellation(supabase, appointment, {
         studentFirstName: student.firstName,
         studentEmail: student.email,
-        coachName,
-        coachEmail,
       });
     }
     refreshAfterMutation();
@@ -256,7 +252,7 @@ export default function AdminCalendrierPage() {
       await notifyAppointmentReschedule(
         supabase,
         { ...appointment, id: newId, startAt: newStartAt, endAt: newEndAt },
-        { studentFirstName: student.firstName, studentEmail: student.email, coachName, coachEmail },
+        { studentFirstName: student.firstName, studentEmail: student.email },
       );
     }
     refreshAfterMutation();
@@ -409,11 +405,15 @@ export default function AdminCalendrierPage() {
           }
           onUpdateSettings={(partial) =>
             withSupabase(async (supabase) => {
-              const current = supabaseAppointments.bookingSettings.id
-                ? supabaseAppointments.bookingSettings
-                : await getBookingSettings(supabase);
-              if (!current.id) return;
-              await updateBookingSettings(supabase, current.id, partial);
+              /*
+               * ⚠️ PLUS DE RECHERCHE D'IDENTIFIANT ICI. L'ancien code relisait
+               * « la » ligne de réglages et la modifiait par son id — or il n'y
+               * en avait qu'une pour tout le cabinet : un coach écrasait les
+               * réglages de l'administrateur. `saveMyBookingSettings` choisit
+               * la ligne qui appartient à l'appelant, ou crée la sienne, et le
+               * `with check` de la policy refuse toute autre propriété.
+               */
+              await saveMyBookingSettings(supabase, partial);
             })
           }
         />

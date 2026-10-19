@@ -6,6 +6,7 @@ import {
   composeAppointmentCreatedStudentEmail,
 } from "@/lib/email/templates";
 import { sendTransactionalEmail, wasEmailRecentlySent } from "@/lib/email/send-transactional-email";
+import { resoudreAuteurEnvoi } from "@/lib/email/auteur-envoi";
 import { buildCancellationIcs, buildConfirmationIcs, type IcsAppointmentInput } from "@/lib/ics";
 import { getCurrentUser, getCurrentUserRole } from "@/lib/supabase/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -48,6 +49,15 @@ export async function POST(request: Request) {
   }
 
   const adminSupabase = createSupabaseAdminClient();
+
+  /*
+   * ⚠️ L'AUTEUR DE L'ENVOI SE LIT SUR LA SESSION, PAS DANS LE CORPS DE LA
+   * REQUÊTE. `current_staff_id()` est SECURITY DEFINER et ne rend que la fiche
+   * de l'appelant : c'est ce qui cloisonne `email_logs`. `null` pour un
+   * appelant sans fiche staff — l'envoi est alors journalisé comme système,
+   * lisible par l'administrateur seul.
+   */
+  const auteurEnvoi = await resoudreAuteurEnvoi(sessionSupabase);
   if (!adminSupabase) {
     return NextResponse.json({ error: "Client Supabase service role indisponible." }, { status: 503 });
   }
@@ -68,7 +78,12 @@ export async function POST(request: Request) {
   } else {
     // Correctif H-3 : un coach ne notifie que les rendez-vous de SES élèves.
     // L'administrateur passe sans condition.
-    const accesEleve = await requireStaffForStudent(appointment.studentId);
+    // P13-B : notifier un rendez-vous relève de `agenda_communication` en
+    // écriture (un email part réellement).
+    const accesEleve = await requireStaffForStudent(appointment.studentId, {
+      categorie: "agenda_communication",
+      niveau: "ecriture",
+    });
     if (!accesEleve.ok) return accesEleve.response;
   }
 
@@ -128,6 +143,7 @@ export async function POST(request: Request) {
           isReschedule,
         });
     const result = await sendTransactionalEmail(adminSupabase, {
+    sentByCoachId: auteurEnvoi,
       emailType,
       recipientEmail: student.email,
       recipientUserId: student.userId,
@@ -159,6 +175,7 @@ export async function POST(request: Request) {
           isReschedule,
         });
     const result = await sendTransactionalEmail(adminSupabase, {
+    sentByCoachId: auteurEnvoi,
       emailType,
       recipientEmail: coach.email,
       subject: email.subject,

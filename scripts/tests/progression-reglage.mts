@@ -11,7 +11,7 @@
  * Lancement : npx tsx scripts/tests/progression-reglage.mts
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 
@@ -366,16 +366,40 @@ await (async () => {
       migrations_post_baseline_attendues: string[];
     };
     const nom = "20260925090000_progression_automatique_par_exercice.sql";
-    assert.ok(manifeste.migrations_post_baseline_attendues.includes(nom), "déclarée au manifeste");
-    assert.equal(
-      manifeste.migrations_post_baseline_attendues[manifeste.migrations_post_baseline_attendues.length - 1],
-      nom,
-      "et en dernière position : l'ordre d'application est lexicographique",
+    const declarees = manifeste.migrations_post_baseline_attendues;
+    assert.ok(declarees.includes(nom), "déclarée au manifeste");
+
+    // ⚠️ CE CONTRÔLE DISAIT « ET EN DERNIÈRE POSITION », ET C'ÉTAIT UNE
+    // PROPRIÉTÉ PÉRISSABLE. Elle n'était vraie que tant qu'aucune migration
+    // n'était ajoutée après celle-ci — il y en a eu quatorze (P13-A, P13-B et
+    // trois autres chantiers), et ce test est resté vert uniquement parce que
+    // le MANIFESTE ne les déclarait pas. Manifeste complété le 11/10/2026, la
+    // dernière position est devenue fausse.
+    //
+    // La propriété réellement voulue est conservée, et elle est plus forte :
+    // le manifeste est TRIÉ (l'ordre d'application est lexicographique), et
+    // cette migration s'y trouve à SA place — après ce qui la précède, avant
+    // ce qui la suit. L'assertion ne dépend plus de ce qui sera ajouté demain.
+    assert.deepEqual(declarees, [...declarees].sort(), "le manifeste doit rester trié : db:local:init rejoue dans cet ordre");
+    const index = declarees.indexOf(nom);
+    assert.ok(
+      declarees.slice(0, index).every((f) => f < nom) && declarees.slice(index + 1).every((f) => f > nom),
+      "la migration doit être à sa place dans l'ordre lexicographique",
     );
+
     const contrat = lire("../../scripts/tests/contrat-migrations.mts");
     assert.ok(contrat.includes(nom), "déclarée au contrat");
     assert.ok(contrat.includes("MIGRATION_PROGRESSION_AUTOMATIQUE"), "et nommée");
-    assert.ok(/NOMBRE_DE_MIGRATIONS = 91/.test(contrat), "le compte est à jour");
+    // Le compte suit l'inventaire nommé, il n'est plus récité ici : le
+    // contrat lui-même (point 1 de verifierContratDesMigrations) vérifie
+    // qu'il coïncide avec le dossier, et le point 6 qu'il coïncide avec
+    // l'empreinte de l'historique. Le recopier dans ce fichier-ci était
+    // précisément la faute que contrat-migrations.mts a été écrit pour
+    // supprimer : un nombre dupliqué dans dix suites.
+    const compte = Number(/NOMBRE_DE_MIGRATIONS = (\d+)/.exec(contrat)?.[1]);
+    assert.ok(Number.isFinite(compte), "le compte doit rester déclaré au contrat");
+    assert.equal(compte, readdirSync(new URL("../../supabase/migrations/", import.meta.url)).filter((f) => f.endsWith(".sql")).length,
+      "le compte du contrat doit coïncider avec le dossier");
   });
 
   /* ══════════════════════════════════════════════════════════════════════

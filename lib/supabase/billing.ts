@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { lireAttributionsOffre } from "@/lib/supabase/attribution-offre";
 import { computeStudentAccess } from "@/lib/stripe/access-status";
 import { toStudentBillingStatus } from "@/lib/stripe/status";
 import { getStudents } from "@/lib/supabase/students";
@@ -153,13 +154,19 @@ export async function getAdminBillingList(supabase: TypedSupabaseClient): Promis
     { data: paymentRows, error: paymentError },
     { data: profileRows, error: profileError },
     { data: templateRows, error: templateError },
+    attributionByStudent,
   ] = await Promise.all([
     getStudents(supabase),
     supabase.from("billing_customers").select("*"),
     supabase.from("subscriptions").select("*").order("updated_at", { ascending: false }),
     supabase.from("stripe_payments").select("*").order("created_at", { ascending: false }),
-    supabase.from("student_profiles").select("student_id, billing_access_mode, assigned_stripe_plan, assigned_subscription_template_id"),
+    // ⚠️ PLUS AUCUNE COLONNE D'ATTRIBUTION ICI (P13-B/10). Les trois sont
+    // fermées au rôle `authenticated` par un privilège de colonne — les
+    // nommer tomberait en 42501, pour l'administrateur comme pour les
+    // autres. Elles arrivent par `lireAttributionsOffre` juste en dessous.
+    supabase.from("student_profiles").select("student_id, billing_access_mode"),
     supabase.from("subscription_templates").select("id, name"),
+    lireAttributionsOffre(supabase),
   ]);
   devWarn("getAdminBillingList (billing_customers)", customerError);
   devWarn("getAdminBillingList (subscriptions)", subscriptionError);
@@ -183,9 +190,11 @@ export async function getAdminBillingList(supabase: TypedSupabaseClient): Promis
   const accessModeByStudent = new Map<string, BillingAccessMode>(
     (profileRows ?? []).map((row) => [row.student_id, row.billing_access_mode as BillingAccessMode]),
   );
-  const assignedPlanByStudent = new Map<string, string | null>((profileRows ?? []).map((row) => [row.student_id, row.assigned_stripe_plan]));
+  const assignedPlanByStudent = new Map<string, string | null>(
+    (profileRows ?? []).map((row) => [row.student_id, attributionByStudent.get(row.student_id)?.offreNom ?? null]),
+  );
   const assignedTemplateIdByStudent = new Map<string, string | null>(
-    (profileRows ?? []).map((row) => [row.student_id, row.assigned_subscription_template_id]),
+    (profileRows ?? []).map((row) => [row.student_id, attributionByStudent.get(row.student_id)?.offreId ?? null]),
   );
   const templateNameById = new Map<string, string>((templateRows ?? []).map((row) => [row.id, row.name]));
 

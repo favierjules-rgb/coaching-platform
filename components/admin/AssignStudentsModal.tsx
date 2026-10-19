@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { CheckCircle, UserPlus } from "lucide-react";
 
 import {
@@ -12,6 +12,9 @@ import {
   toggleStudentSelection,
 } from "@/lib/assignment-selection";
 import type { MotifAssignation } from "@/lib/assignment-selection";
+import { messageEchecAffectation, type NatureEchecAffectation } from "@/lib/assignment-refus";
+import { MESSAGE_LECTURE_SEULE_PROGRAMMES } from "@/lib/droit-affectation";
+import { useDroitEcritureProgrammes } from "@/hooks/useStaffContext";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { cleAffectation, debutsDesAffectations } from "@/lib/supabase/programs";
 import { Modal, PrimaryButton } from "@/components/admin/Modal";
@@ -62,6 +65,7 @@ export function AssignStudentsModal({
   triggerLabel = "Assigner",
   triggerVariant = "outline",
 }: AssignStudentsModalProps) {
+  const idLectureSeule = useId();
   const [open, setOpen] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   // Correctif fix/program-assignment-checkbox : la sélection vit ICI,
@@ -73,7 +77,29 @@ export function AssignStudentsModal({
   // anti-double-clic), et un échec laisse la modale OUVERTE avec un message
   // — jamais de faux succès.
   const [saving, setSaving] = useState(false);
-  const [saveFailed, setSaveFailed] = useState(false);
+  /**
+   * POURQUOI le dernier « Terminer » a échoué — `null` tant que rien n'a
+   * échoué. Un booléen ne suffisait plus : depuis P13-B, un refus de droits
+   * (collaborateur hors portée) et une panne réseau ne se corrigent pas de la
+   * même façon, et ne doivent donc pas porter le même message.
+   */
+  const [echecSauvegarde, setEchecSauvegarde] = useState<NatureEchecAffectation | null>(null);
+  /*
+   * ⚠️ INDICE D'INTERFACE, PAS GARDE DE SÉCURITÉ, ET SEULEMENT POUR LES
+   * PROGRAMMES.
+   *
+   * Ce même bouton « Assigner » sert aussi aux plans alimentaires et aux
+   * documents : les griser sur un droit d'ENTRAÎNEMENT retirerait à un
+   * collaborateur nutrition une action qu'il a parfaitement le droit
+   * d'exercer. Le test sur `contentType` est donc la moitié du correctif.
+   *
+   * L'autorité reste au serveur (RLS + garde de `provision_program_copy`) :
+   * si ce calcul se trompe, la base refuse — et le message de refus de
+   * `lib/assignment-refus.ts` reste le filet. Voir lib/droit-affectation.ts
+   * pour le choix assumé de ne griser que sur signal positif.
+   */
+  const droitEcriture = useDroitEcritureProgrammes();
+  const ecritureProgrammeRefusee = contentType === "programme" && droitEcriture === "lecture_seule";
   /**
    * Date de début du programme, PROGRAMMES UNIQUEMENT.
    *
@@ -169,15 +195,20 @@ export function AssignStudentsModal({
     setOpen(false);
     setConfirmed(false);
     setSaving(false);
-    setSaveFailed(false);
+    setEchecSauvegarde(null);
   }
 
   return (
     <>
       <button
         type="button"
+        disabled={ecritureProgrammeRefusee}
+        aria-describedby={ecritureProgrammeRefusee ? idLectureSeule : undefined}
         onClick={(event) => {
           event.stopPropagation();
+          // Ceinture : `disabled` suffit à l'interface, mais un clic
+          // programmatique ne doit pas davantage ouvrir une modale sans issue.
+          if (ecritureProgrammeRefusee) return;
           setSelection(assignedStudentIds);
           /*
            * ⚠️ LE CHAMP NE PART PLUS À « AUJOURD'HUI » QUAND UNE DATE EXISTE.
@@ -196,9 +227,12 @@ export function AssignStudentsModal({
           setOpen(true);
         }}
         className={
-          triggerVariant === "primary"
+          (triggerVariant === "primary"
             ? "pressable flex min-h-[44px] items-center rounded-control border border-primary bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-            : "pressable flex min-h-[44px] items-center rounded-control border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            : "pressable flex min-h-[44px] items-center rounded-control border border-border px-4 py-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40") +
+          (ecritureProgrammeRefusee
+            ? " cursor-not-allowed opacity-50 hover:border-border hover:bg-transparent hover:text-muted-foreground"
+            : "")
         }
       >
         <span className="flex items-center gap-1.5">
@@ -206,6 +240,11 @@ export function AssignStudentsModal({
           {triggerLabel}
         </span>
       </button>
+      {ecritureProgrammeRefusee && (
+        <p id={idLectureSeule} role="note" className="mt-1.5 text-xs leading-relaxed text-warning">
+          {MESSAGE_LECTURE_SEULE_PROGRAMMES}
+        </p>
+      )}
 
       {open && (
         <Modal title={`Assigner — ${contentLabel}`} onClose={close}>
@@ -295,9 +334,12 @@ export function AssignStudentsModal({
                   )}
                 </div>
               )}
-              {saveFailed && (
-                <p className="rounded-panel border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-                  L&apos;enregistrement a échoué. Ta sélection est conservée — réessaie, ou vérifie ta connexion.
+              {echecSauvegarde && (
+                <p
+                  role="alert"
+                  className="rounded-panel border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+                >
+                  {messageEchecAffectation(echecSauvegarde)}
                 </p>
               )}
               <PrimaryButton
@@ -305,7 +347,7 @@ export function AssignStudentsModal({
                 onClick={() => {
                   if (saving) return;
                   setSaving(true);
-                  setSaveFailed(false);
+                  setEchecSauvegarde(null);
                   // SEUL point d'écriture : le diff sélection ↔ assignations
                   // initiales, TOUTES les écritures attendues avant de
                   // confirmer — un échec laisse la modale ouverte.
@@ -349,12 +391,15 @@ export function AssignStudentsModal({
                         motif,
                       ),
                     aReappliquer,
-                  ).then(({ ok }) => {
+                  ).then(({ ok, echec }) => {
                     setSaving(false);
                     if (ok) {
                       setConfirmed(true);
                     } else {
-                      setSaveFailed(true);
+                      // `?? "technique"` : `ok` faux sans nature lue reste un
+                      // échec technique — jamais un succès, jamais un refus
+                      // inventé.
+                      setEchecSauvegarde(echec ?? "technique");
                     }
                   });
                 }}

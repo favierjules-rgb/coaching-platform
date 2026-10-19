@@ -23,7 +23,16 @@ import {
 import { SignOutButton } from "@/components/auth/SignOutButton";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { Logo } from "@/components/ui/Logo";
-import { isAdminRouteActive, isAnyAdminRouteActive, isSubmenuOpen } from "@/lib/admin-shell-nav";
+import { useStaffContext } from "@/hooks/useStaffContext";
+import {
+  droitsNavigationDepuisContexte,
+  groupeAdminVisible,
+  isAdminRouteActive,
+  isAnyAdminRouteActive,
+  isSubmenuOpen,
+  sectionAdminVisible,
+  type DroitsNavigationAdmin,
+} from "@/lib/admin-shell-nav";
 
 // "Programmation" (V3 chantier module Programmation, étape 2) regroupe les 3
 // sous-domaines du contenu d'entraînement admin derrière un seul item
@@ -72,6 +81,43 @@ interface AdminSidebarProps {
 
 export function AdminSidebar({ mobile = false, onNavigate }: AdminSidebarProps) {
   const pathname = usePathname();
+
+  /* ─── CLOISONNEMENT DE LA NAVIGATION (P13-B) ───
+     Un collaborateur ne voit que les sections dont une catégorie lui est
+     accordée en lecture. La décision est prise par `sectionAdminVisible`,
+     fonction PURE de lib/admin-shell-nav.ts (testée dans
+     scripts/tests/admin-shell-nav.mts) : ce composant ne décide rien lui-même.
+
+     ⚠️ Ce masquage est un confort d'affichage, jamais une protection : les
+     policies RLS et les gardes de lib/api/authz.ts refusent indépendamment de
+     ce qui est rendu ici. Tant que `chargement` est vrai, les droits ne sont
+     pas connus — on affiche la navigation d'avant P13-B plutôt que de faire
+     clignoter la sidebar, puisqu'aucune donnée n'en dépend. */
+  const staff = useStaffContext();
+  /* ⚠️ LA CONVERSION N'EST PLUS RECOPIÉE ICI. Ce composant neutralisait le
+     chargement par un faux `mecanismeIndisponible`, et `app/admin/page.tsx`
+     — qui applique la MÊME règle à la vitrine du tableau de bord — l'avait
+     oublié : l'administrateur gardait son menu mais perdait les tuiles
+     Paiements de son accueil. `droitsNavigationDepuisContexte` porte
+     désormais la conversion, chargement compris, pour les deux. */
+  const droits: DroitsNavigationAdmin = droitsNavigationDepuisContexte(staff);
+
+  /* Le découpage reste celui d'origine — « Dashboard, Élèves, puis le groupe
+     Programmation, puis le reste » — mais il est fait par IDENTITÉ et non par
+     index : avec `slice(0, 2)` sur la liste filtrée, masquer « Élèves » aurait
+     fait remonter « Calendrier » au-dessus de Programmation. */
+  const HREFS_AVANT_PROGRAMMATION = ["/admin", "/admin/eleves"];
+  const liensVisibles = adminLinks.filter(({ href }) => sectionAdminVisible(href, droits));
+  const liensAvant = liensVisibles.filter(({ href }) => HREFS_AVANT_PROGRAMMATION.includes(href));
+  const liensApres = liensVisibles.filter(({ href }) => !HREFS_AVANT_PROGRAMMATION.includes(href));
+  const enfantsProgrammationVisibles = programmationChildren.filter(({ href }) =>
+    sectionAdminVisible(href, droits),
+  );
+  const programmationVisible = groupeAdminVisible(
+    programmationChildren.map((child) => child.href),
+    droits,
+  );
+
   const programmationActive = isAnyAdminRouteActive(
     pathname,
     programmationChildren.map((child) => child.href),
@@ -107,7 +153,7 @@ export function AdminSidebar({ mobile = false, onNavigate }: AdminSidebarProps) 
       </div>
 
       <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-3 py-4">
-        {adminLinks.slice(0, 2).map(({ href, label, icon: Icon }) => {
+        {liensAvant.map(({ href, label, icon: Icon }) => {
           const active = isAdminRouteActive(pathname, href);
           return (
             <Link
@@ -123,6 +169,7 @@ export function AdminSidebar({ mobile = false, onNavigate }: AdminSidebarProps) 
           );
         })}
 
+        {programmationVisible && (
         <div>
           <button
             type="button"
@@ -139,7 +186,7 @@ export function AdminSidebar({ mobile = false, onNavigate }: AdminSidebarProps) 
           </button>
           {programmationOpen && (
             <div className="sidebar-submenu-fade-in mt-1 flex flex-col gap-1 pl-[38px]">
-              {programmationChildren.map((child) => {
+              {enfantsProgrammationVisibles.map((child) => {
                 const childActive = isAdminRouteActive(pathname, child.href);
                 return (
                   <Link
@@ -160,8 +207,9 @@ export function AdminSidebar({ mobile = false, onNavigate }: AdminSidebarProps) 
             </div>
           )}
         </div>
+        )}
 
-        {adminLinks.slice(2).map(({ href, label, icon: Icon }) => {
+        {liensApres.map(({ href, label, icon: Icon }) => {
           const active = isAdminRouteActive(pathname, href);
           return (
             <Link

@@ -57,7 +57,7 @@ export interface Database {
           user_id: string | null;
           name: string;
           email: string;
-          role: "admin" | "assistant";
+          role: "admin" | "assistant" | "collaborateur";
           status: "actif" | "inactif";
           specialty: string;
           created_at: string;
@@ -68,7 +68,7 @@ export interface Database {
           user_id?: string | null;
           name: string;
           email?: string;
-          role?: "admin" | "assistant";
+          role?: "admin" | "assistant" | "collaborateur";
           status?: "actif" | "inactif";
           specialty?: string;
           created_at?: string;
@@ -79,9 +79,77 @@ export interface Database {
           user_id?: string | null;
           name?: string;
           email?: string;
-          role?: "admin" | "assistant";
+          role?: "admin" | "assistant" | "collaborateur";
           status?: "actif" | "inactif";
           specialty?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      /**
+       * Affectation EXPLICITE d'un élève à un collaborateur (modèle P13-B,
+       * migration 20261011090000). `students.coach_id` n'est jamais touché :
+       * le coach principal reste le coach principal, un collaborateur ne
+       * s'approprie jamais un élève. Écriture réservée à l'administrateur
+       * (policy `collaborateur_eleves_manage_admin`) ; un collaborateur lit
+       * uniquement ses propres lignes (`collaborateur_eleves_select_self`).
+       */
+      collaborateur_eleves: {
+        Row: {
+          id: string;
+          collaborateur_id: string;
+          student_id: string;
+          affecte_par: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          collaborateur_id: string;
+          student_id: string;
+          affecte_par?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          collaborateur_id?: string;
+          student_id?: string;
+          affecte_par?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      /**
+       * Niveau accordé à un collaborateur, CATÉGORIE PAR CATÉGORIE (modèle
+       * P13-B). Une seule ligne par couple (collaborateur, catégorie) —
+       * contrainte `collaborateur_permissions_unique`. L'absence de ligne
+       * vaut « aucun accès » : il n'existe pas de niveau « aucun ».
+       */
+      collaborateur_permissions: {
+        Row: {
+          id: string;
+          collaborateur_id: string;
+          categorie: "entrainement" | "suivi_eleve" | "agenda_communication" | "nutrition";
+          niveau: "lecture" | "ecriture";
+          accorde_par: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          collaborateur_id: string;
+          categorie: "entrainement" | "suivi_eleve" | "agenda_communication" | "nutrition";
+          niveau: "lecture" | "ecriture";
+          accorde_par?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          collaborateur_id?: string;
+          categorie?: "entrainement" | "suivi_eleve" | "agenda_communication" | "nutrition";
+          niveau?: "lecture" | "ecriture";
+          accorde_par?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -144,6 +212,37 @@ export interface Database {
        * docs/supabase-student-model.md pour la répartition students /
        * student_profiles.
        */
+      /**
+       * P13-B/10 — `student_profiles` SANS les trois colonnes d'attribution
+       * d'offre (`assigned_subscription_template_id`, `assigned_stripe_plan`,
+       * `assigned_stripe_price_id`), devenues illisibles pour
+       * `authenticated`/`anon` par un privilège de COLONNE : un collaborateur,
+       * à qui `suivi_eleve` ouvre la fiche de son élève, en déduisait le prix
+       * payé par cet élève.
+       *
+       * ⚠️ C'EST PAR ICI QUE PASSENT LES LECTURES `select *`. Sur la table
+       * elle-même, `select *` exige le privilège sur TOUTES les colonnes et
+       * tombe en 42501 — pour l'administrateur comme pour l'élève. La vue est
+       * en `security_invoker` : droits ET RLS de l'appelant, pas du
+       * propriétaire. L'attribution elle-même se lit par
+       * `lireAttributionOffre` (lib/supabase/attribution-offre.ts).
+       *
+       * ⚠️ DÉCRITE ICI ET PAS DANS `Views` À DESSEIN. `Views:
+       * Record<string, never>` porte l'index permissif qui laisse passer les
+       * tables pas encore décrites à la main (voir l'en-tête du fichier) :
+       * remplacer cet index par un objet nommé casse une quarantaine de
+       * lectures ailleurs dans le dépôt. Lecture seule : `Insert`/`Update`
+       * sont volontairement vides.
+       */
+      student_profiles_lisible: {
+        Row: Omit<
+          Database["public"]["Tables"]["student_profiles"]["Row"],
+          "assigned_subscription_template_id" | "assigned_stripe_plan" | "assigned_stripe_price_id"
+        >;
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
       student_profiles: {
         Row: {
           id: string;
@@ -2113,6 +2212,13 @@ export interface Database {
       booking_settings: {
         Row: {
           id: string;
+          /**
+           * Coach propriétaire de ces réglages (migration 20261022090000).
+           * NULL = réglage par défaut du cabinet, géré par l'administrateur.
+           * Jamais envoyé par le client : posé par le déclencheur
+           * `poser_proprietaire_staff`.
+           */
+          coach_id: string | null;
           min_lead_minutes: number;
           max_days_ahead: number;
           default_duration_minutes: number;
@@ -2121,6 +2227,7 @@ export interface Database {
         };
         Insert: {
           id?: string;
+          coach_id?: string | null;
           min_lead_minutes?: number;
           max_days_ahead?: number;
           default_duration_minutes?: number;
@@ -2129,6 +2236,7 @@ export interface Database {
         };
         Update: {
           id?: string;
+          coach_id?: string | null;
           min_lead_minutes?: number;
           max_days_ahead?: number;
           default_duration_minutes?: number;
@@ -2412,6 +2520,12 @@ export interface Database {
           related_entity_id: string | null;
           error_message: string | null;
           metadata: Record<string, unknown>;
+          /**
+           * Fiche staff à l'origine de l'envoi (migration 20261022090000).
+           * NULL = envoi système ou administrateur. Résolue CÔTÉ SERVEUR
+           * depuis la session de l'appelant, jamais reçue du navigateur.
+           */
+          sent_by_coach_id: string | null;
           sent_at: string | null;
           created_at: string;
         };
@@ -2427,6 +2541,7 @@ export interface Database {
           related_entity_id?: string | null;
           error_message?: string | null;
           metadata?: Record<string, unknown>;
+          sent_by_coach_id?: string | null;
           sent_at?: string | null;
           created_at?: string;
         };
@@ -2442,6 +2557,7 @@ export interface Database {
           related_entity_id?: string | null;
           error_message?: string | null;
           metadata?: Record<string, unknown>;
+          sent_by_coach_id?: string | null;
           sent_at?: string | null;
           created_at?: string;
         };

@@ -168,6 +168,403 @@ export const MIGRATION_SUPPRESSION_NOLIO = "20260924090000_suppression_nolio.sql
 export const MIGRATION_PROGRESSION_AUTOMATIQUE =
   "20260925090000_progression_automatique_par_exercice.sql";
 
+/* ────────────────────────────────────────────────────────────────────────────
+ * LES QUATORZE MIGRATIONS INSCRITES LE 11/10/2026 — ET POURQUOI SI TARD
+ * ────────────────────────────────────────────────────────────────────────────
+ * Le contrat dit « aucune migration n'existe sans avoir été nommée ». Il n'a
+ * pourtant plus été alimenté après `20260925090000` : onze migrations ont été
+ * ajoutées et COMMITTÉES par le propriétaire du dépôt entre le 24/09 et le
+ * 10/10 sans passer ici, puis trois de plus par P13-B. Le contrôle rougissait
+ * donc en permanence, ce qui est exactement ce qu'il devait faire — personne
+ * ne l'avait relancé.
+ *
+ * Les quatorze sont inscrites APRÈS vérification, une par une : commit
+ * d'origine (`git log` sur le fichier), appartenance à un chantier réel du
+ * dépôt, absence de donnée personnelle, de secret et d'identifiant Stripe.
+ * Les onze premières sont déjà APPLIQUÉES en production (la branche part de
+ * `85a76f8`, état exact de la production) ; les trois dernières (P13-B) ne le
+ * sont pas et ne doivent pas l'être sans décision explicite.
+ *
+ * ⚠️ Aucune assertion n'a été modifiée pour masquer l'écart : le compte, les
+ * deux ordres, l'empreinte de l'historique antérieur et le balayage COURSES
+ * sont intacts. Seul l'INVENTAIRE NOMMÉ s'allonge, ce que le contrat exige.
+ */
+
+/** Les drapeaux de relecture d'un programme (commit fb30d98). */
+export const MIGRATION_PROGRAM_REVIEW_FLAGS = "20260926090000_program_review_flags.sql";
+
+/**
+ * Les deux rails de rappel automatique (commit fb30d98).
+ *
+ * ⚠️ SEULE DES QUATORZE À ÉCRIRE DES LIGNES, et ce sont des lignes de
+ * CONFIGURATION, pas des données d'élève : deux campagnes système
+ * (`rappel_auto = 'entrainement' | 'nutrition'`), `created_by` à NULL, insérées
+ * sous `where not exists` donc idempotentes. Aucune donnée personnelle.
+ */
+export const MIGRATION_RAPPELS_AUTOMATIQUES = "20260927090000_rappels_automatiques.sql";
+
+/** Les privilèges manquants des drapeaux de relecture (commit 287e58f). */
+export const MIGRATION_REVIEW_FLAGS_GRANTS = "20260928090000_program_review_flags_grants.sql";
+
+/** Les privilèges manquants des notifications (commit 287e58f). */
+export const MIGRATION_NOTIFICATIONS_GRANTS = "20260929090000_notifications_grants.sql";
+
+/** Le profil physiologique de l'élève (commit 9ea1576). */
+export const MIGRATION_PROFIL_PHYSIOLOGIQUE = "20260930090000_profil_physiologique.sql";
+
+/**
+ * Le builder cardio et le calendrier (commit 9ea1576).
+ *
+ * Ses `insert` sont tous DANS des corps de fonction (RPC atomiques de
+ * rendez-vous et de séance) : la migration elle-même n'écrit aucune ligne.
+ */
+export const MIGRATION_CARDIO_ET_CALENDRIER = "20260930100000_cardio_builder_et_calendrier.sql";
+
+/** La consultation sécurisée des documents (commit 2096095). */
+export const MIGRATION_DOCUMENTS_SECURISES = "20261001090000_documents_consultation_securisee.sql";
+
+/**
+ * P13-A, migration 1/4 — l'isolation RLS du cœur nutrition entre coachs
+ * (commit ec98601). Couverte par
+ * `scripts/tests/rls-nutrition-isolation-multi-coachs.mts` et par
+ * `supabase/tests/nutrition_isolation_multi_coachs_checklist.sql`.
+ */
+export const MIGRATION_P13A_ISOLATION = "20261002090000_rls_nutrition_isolation_multi_coachs.sql";
+
+/** P13-A, migration 2/4 — le coût d'évaluation des policies (commit 85a76f8). */
+export const MIGRATION_P13A_PERF = "20261003090000_p13a_perf_rls_nutrition.sql";
+
+/** P13-A, migration 3/4 — la garde admin du chemin d'écriture (commit 85a76f8). */
+export const MIGRATION_P13A_GARDE_ADMIN = "20261003190000_p13a_perf_garde_admin_ecriture.sql";
+
+/** P13-A, migration 4/4 — la lecture élève ensembliste (commit 85a76f8). */
+export const MIGRATION_P13A_LECTURE_ELEVE = "20261003200000_p13a_perf_lecture_eleve_ensembliste.sql";
+
+/**
+ * P13-B, migration 1/3 — le modèle de droits des collaborateurs.
+ *
+ * ⚠️ PAS ENCORE APPLIQUÉE. Elle ajoute `coaches.role = 'collaborateur'`, les
+ * deux tables `collaborateur_eleves` / `collaborateur_permissions` et 27
+ * fonctions d'accès sans argument. Elle ne touche ni `profiles.role`, ni une
+ * policy existante, ni une donnée.
+ */
+export const MIGRATION_P13B_MODELE = "20261011090000_p13b_modele_droits_collaborateurs.sql";
+
+/**
+ * P13-B, migration 2/3 — la réécriture des 72 policies `is_coach_or_admin()`
+ * en policies cloisonnées par portée et par catégorie. PAS ENCORE APPLIQUÉE.
+ */
+export const MIGRATION_P13B_POLICIES = "20261011100000_p13b_policies_cloisonnees.sql";
+
+/**
+ * P13-B, migration 3/3 — le durcissement des fonctions `SECURITY DEFINER` qui
+ * contournaient la RLS. PAS ENCORE APPLIQUÉE.
+ */
+export const MIGRATION_P13B_FONCTIONS = "20261011110000_p13b_durcissement_fonctions_definer.sql";
+
+/**
+ * P13-B, migration 4/4 — le cœur nutrition entre dans le modèle de
+ * catégories. PAS ENCORE APPLIQUÉE.
+ *
+ * ⚠️ ELLE EXISTE PARCE QUE LES TROIS PREMIÈRES NE SUFFISAIENT PAS, ET C'EST
+ * MESURÉ : un collaborateur `nutrition / ecriture` explicitement affecté
+ * obtenait zéro plan, les huit tables du cœur opposant encore les ensembles de
+ * PROPRIÉTÉ de P13-A (`nutrition_plan_ids_geres()` → `is_coach_of_student()` →
+ * `students.coach_id`), qu'un collaborateur ne vaut jamais.
+ *
+ * Elle n'étend PAS les anciennes fonctions — un ensemble unique opposé en
+ * lecture comme en écriture aurait fait du niveau `lecture` un droit
+ * d'écriture. Elle ajoute dix fonctions de portée PAR NIVEAU et scinde les
+ * policies `FOR ALL` en quatre. Elle corrige au passage le DÉFAUT de
+ * `coaches.role` (`'admin'` → `'assistant'`) et fait suivre les droits
+ * globaux à `public.is_admin()` : sans cela, toute fiche créée sans rôle
+ * explicite devenait administrateur de cabinet sous P13-B.
+ */
+export const MIGRATION_P13B_NUTRITION = "20261011120000_p13b_integration_nutrition.sql";
+
+/**
+ * P13-B, migration 5/5 — la garde de `provision_program_copy`.
+ * PAS ENCORE APPLIQUÉE.
+ *
+ * ⚠️ ELLE FERME LA DERNIÈRE PORTE, ET CELLE-LÀ ÉTAIT MESURÉE. La revue
+ * finale a montré qu'un collaborateur SANS permission ni affectation créait
+ * un programme et une affectation pour n'importe quel élève : la fonction est
+ * `SECURITY DEFINER` (elle écrit hors RLS) et sa garde acceptait
+ * `profiles.role in ('service','admin','coach')` — la bonne règle avant
+ * P13-B, quand `coach` désignait un staff forcément global.
+ *
+ * Elle ne change QUE la garde, par substitution sur la définition en place
+ * (même technique que 20261011110000) : le corps de la copie — semaines,
+ * séances, blocs, exercices, prescriptions, RPE, verrou advisory, idempotence
+ * — est repris octet pour octet, et la substitution échoue si le motif
+ * attendu n'apparaît pas exactement une fois.
+ */
+export const MIGRATION_P13B_PROVISION = "20261011130000_p13b_garde_provision_program_copy.sql";
+
+/**
+ * P13-B, migration 6/6 — la surface de réservation.
+ * PAS ENCORE APPLIQUÉE. Les cinq précédentes le sont (commit 8fc530f).
+ *
+ * ⚠️ ELLE CORRIGE UNE ANOMALIE MESURÉE SUR PREVIEW, ET LA CAUSE N'EST PAS
+ * CELLE QU'ON CROIT. Un collaborateur dont `agenda_communication` vaut
+ * « aucun accès » lisait les créneaux de disponibilité, les réglages de
+ * réservation et les bornes occupées. Ce n'était ni une permission mal
+ * enregistrée, ni un rôle mal résolu : les policies PERMISSIVES de PostgreSQL
+ * se combinent en **OU**, et la migration 20261011100000 avait ajouté ses
+ * policies catégorisées À CÔTÉ des policies héritées du parcours de
+ * réservation élève (`auth.role() = 'authenticated'`), qui restaient vraies
+ * pour tout compte connecté. `get_busy_ranges()`, SECURITY DEFINER, n'avait
+ * aucune garde du tout.
+ *
+ * ⚠️ ELLE NE REFERME PAS LE PARCOURS ÉLÈVE, et c'est la moitié du correctif :
+ * sans les créneaux, les réglages et les bornes occupées, un élève ne peut
+ * plus réserver — ou réserve un créneau déjà pris. Les contrôles I13 à I15 de
+ * la checklist échouent si on referme trop.
+ */
+export const MIGRATION_P13B_RESERVATION =
+  "20261013090000_p13b_cloisonner_surface_reservation.sql";
+
+/**
+ * P13-B, migration 7/7 — l'administrateur réel et `est_staff_global()`.
+ * PAS ENCORE APPLIQUÉE.
+ *
+ * ⚠️ ELLE DÉBLOQUE UN ENREGISTREMENT, PAS SEULEMENT UNE LECTURE. Signalé le
+ * 13/10/2026 : plus aucune modification de programme ne s'enregistrait, avec
+ * le bandeau « Une partie du programme n'a pas pu être enregistrée » — soit
+ * `STRUCTURE_INCOMPLETE` (lib/admin-builder-save.ts). Reproduit : un compte
+ * `profiles.role = 'admin'` SANS fiche `coaches` active obtenait
+ * `staff_role()` NULL, donc `est_staff_global()` NULL, donc des ensembles
+ * `program_ids_lecture()` / `program_ids_ecriture()` vides sur les programmes
+ * MODÈLES — zéro semaine lue, insertion refusée en 42501.
+ *
+ * `est_staff_global()` ne consultait que `coaches.role` ; elle consulte
+ * désormais AUSSI `is_admin()` (`profiles.role = 'admin'`), la distinction
+ * déjà posée par 20261011130000 pour `provision_program_copy`. Un
+ * collaborateur porte `profiles.role = 'coach'` : il ne gagne rien
+ * (contrôles J5/J6 de la checklist).
+ */
+export const MIGRATION_P13B_ADMIN_REEL =
+  "20261013100000_p13b_admin_reel_est_staff_global.sql";
+
+/**
+ * P13-B, migration 8/8 — les policies `INSERT` qui testaient leur propre id.
+ * PAS ENCORE APPLIQUÉE. **CORRECTIF BLOQUANT.**
+ *
+ * ⚠️ CE DÉFAUT NE VISAIT PAS QUE LES COLLABORATEURS : il empêchait TOUTE
+ * CRÉATION, administrateur compris. Cinq policies de 20261011100000 étaient
+ * écrites `with check (id in (select <table>_ids_ecriture()))`, or ces
+ * ensembles sont calculés depuis les lignes DÉJÀ EXISTANTES de la même
+ * table : l'identifiant d'une ligne qu'on crée ne peut jamais y figurer. Une
+ * policy INSERT doit porter sur le PARENT (« ai-je le droit d'écrire DANS ce
+ * programme ? »), jamais sur son propre identifiant — ce que faisaient
+ * correctement les neuf autres policies INSERT du cœur.
+ *
+ * Mesuré pour un ADMIN à fiche active : INSERT sur workout_sessions,
+ * workout_exercises, programs, students et documents → 42501. UPDATE d'une
+ * ligne existante → accepté. D'où « Une partie du programme n'a pas pu être
+ * enregistrée » dès qu'une séance neuve partait.
+ *
+ * ⚠️ UN SIXIÈME CAS, DE MÊME NATURE : `training_prescriptions` ne testait que
+ * `block_id`, NULL pour une prescription rattachée à un EXERCICE — les séries
+ * d'exercice étaient bloquées elles aussi.
+ */
+export const MIGRATION_P13B_INSERT =
+  "20261013110000_p13b_corriger_policies_insert.sql";
+
+/**
+ * P13-B, migration 9/9 — les policies qui dépendaient de la ligne autorisée.
+ * PAS ENCORE APPLIQUÉE. **CORRECTIF BLOQUANT, suite de la 8e.**
+ *
+ * ⚠️ LA 8e NE SUFFISAIT PAS, ET VOICI POURQUOI. Elle a réparé `with check`, et
+ * l'insertion NUE fonctionne. Mais avec la RLS, `INSERT … RETURNING` exige EN
+ * PLUS que la ligne produite satisfasse la policy **SELECT** — et celle-ci
+ * était écrite `id in (select <table>_ids_lecture())`, une fonction `STABLE`
+ * qui lit la table elle-même. Évaluée sur le snapshot du DÉBUT de la commande,
+ * elle ne peut pas contenir la ligne qu'on vient d'insérer.
+ *
+ * Or `RETURNING` est la forme employée PARTOUT : `returning … into` dans les
+ * RPC, `.insert().select("id").single()` côté client. Mesuré dans la RPC
+ * réelle du builder : INSERT accepté, INSERT … RETURNING refusé en 42501, à
+ * une ligne d'intervalle et avec les mêmes valeurs.
+ *
+ * Les policies sont transposées sur les COLONNES de la ligne (program_id,
+ * session_id, block_id, student_id, coach_id, owner_student_id, category) —
+ * mêmes ensembles, mêmes catégories, mêmes niveaux, une indirection de moins.
+ * Deux élargissements assumés et bornés : la PROPRIÉTÉ (`coach_id`) ouvre un
+ * document et un plan neufs à leur auteur, sans quoi il ne pourrait pas les
+ * relire après création.
+ */
+export const MIGRATION_P13B_AUTOREF =
+  "20261013120000_p13b_policies_non_auto_referentielles.sql";
+
+/**
+ * P13-B, migration 10/10 — Paiements, Emails et Notifications fermés au
+ * collaborateur. PAS ENCORE APPLIQUÉE.
+ *
+ * ⚠️ DEUX FUITES MESURÉES, dans la session d'un collaborateur ayant les QUATRE
+ * catégories en écriture et un élève affecté — le mieux doté possible :
+ *
+ *   · `notification_campaign_targets` rendait les DESTINATAIRES des campagnes
+ *     de ses élèves, alors que la campagne elle-même lui est fermée par
+ *     `est_staff_global()` ;
+ *   · `subscription_templates`, lisible dès `is_active = true`, jointe à
+ *     `student_profiles` (ouvert par `suivi_eleve` et porteur de
+ *     `assigned_subscription_template_id`), donnait le PRIX de l'offre
+ *     souscrite par son élève — 199,00 € dans la mesure d'origine.
+ *
+ * ⚠️ ET UNE RÉGRESSION ÉVITÉE DE JUSTESSE. En vérifiant la non-régression,
+ * `coach_unavailabilities` s'est révélée privée de la clause de portée que
+ * 20261013090000 avait donnée à `coach_availabilities` : un collaborateur
+ * `agenda_communication` voyait les rendez-vous de son élève mais aucune
+ * indisponibilité du coach, et pouvait donc proposer un créneau bloqué. La
+ * clause est ajoutée ici, en LECTURE seulement.
+ */
+export const MIGRATION_P13B_RUBRIQUES =
+  "20261018090000_p13b_rubriques_globales_collaborateur.sql";
+
+/*
+ * 20261019090000 — L'ADMINISTRATEUR RÉEL, PARTOUT OÙ IL MANQUAIT ENCORE.
+ *
+ * ⚠️ MÊME CAUSE QUE 20261013100000, QUATRE OBJETS DE PLUS. Cette migration-là
+ * avait posé la règle — « les droits globaux suivent `profiles.role = 'admin'`
+ * par `public.is_admin()` » — et l'avait appliquée à `est_staff_global()`,
+ * `student_ids_portee()` et `coach_ids_portee()`. Quatre objets testaient
+ * encore `coaches.role` seul :
+ *
+ *   · `categories_lecture()` et `categories_ecriture()` — vingt-deux
+ *     fonctions de portée s'enchaînent sur elles, donc un administrateur sans
+ *     fiche `coaches` mesurait 0 catégorie et perdait d'un coup fiches élèves,
+ *     agenda, nutrition et documents ;
+ *   · `protect_students_ownership_columns()` et
+ *     `protect_student_profiles_access_columns()` — deux déclencheurs qui
+ *     RECOPIENT l'ancienne valeur au lieu de lever : la réaffectation d'un
+ *     élève, son passage en pause et l'attribution d'une offre « réussissaient »
+ *     puis revenaient en arrière, sans la moindre erreur à l'écran.
+ *
+ * Mesuré avant/après dans supabase/tests/matrice_roles_admin_coach_collaborateur.sql
+ * (section C) : neuf contrôles rouges avant, zéro après. Rien n'est élargi
+ * pour un collaborateur ni pour un coach autonome — `est_staff_global()` est
+ * exactement l'ancien test OU `is_admin()`.
+ */
+export const MIGRATION_P13B_ADMIN_CATEGORIES =
+  "20261019090000_p13b_admin_reel_categories.sql";
+
+/*
+ * 20261020090000 — PROGRAMMES PRIVÉS PAR COACH, PUBLICATION RÉSERVÉE À L'ADMIN.
+ *
+ * ⚠️ DEUX DÉFAUTS SUPERPOSÉS, ET LE SECOND RENDAIT LE PREMIER INCORRIGEABLE.
+ * Les policies de `programs` savaient parler de propriété
+ * (`coach_id in (select coach_ids_portee())`), mais :
+ *   · `est_staff_global()`, placé en PREMIER terme du `or`, est vrai pour tout
+ *     coach autonome — la clause de propriété était décorative. Mesuré : un
+ *     second coach voyait, modifiait et SUPPRIMAIT les programmes du premier ;
+ *   · `coach_id` n'était JAMAIS renseigné — 28 programmes en production,
+ *     NULL sur les 28, parce que `createProgram` ne l'écrit pas. Corriger la
+ *     seule policy aurait rendu chaque coach aveugle à son propre travail.
+ *
+ * La migration pose donc la propriété à la création (déclencheur, pas
+ * applicatif : les insertions PostgREST directes comptent aussi), puis
+ * remplace `est_staff_global()` par `is_admin()` dans la branche des modèles,
+ * puis réserve `is_public` et `public_subscription_template_id` à
+ * l'administrateur et au serveur — en LEVANT 42501, pas en annulant en
+ * silence. `status`, `publication_status` et `published_at` restent au coach :
+ * c'est la distinction entre son travail interne et la commercialisation.
+ *
+ * Mesuré : supabase/tests/programmes_cloisonnement_coach.sql, 52 contrôles,
+ * dont 26 rougissent quand on rétablit l'état d'avant.
+ */
+export const MIGRATION_PROGRAMMES_COACH =
+  "20261020090000_programmes_prives_par_coach_et_publication_admin.sql";
+
+/*
+ * 20261021090000 — LES TROIS DERNIÈRES POLICIES `{public}` DU CATALOGUE.
+ *
+ * ⚠️ LA DERNIÈRE AMORCE DU MÊME PIÈGE. 20261020090000 avait borné au rôle
+ * `authenticated` les policies internes de `programs` et les deux policies de
+ * LECTURE de `subscription_templates`. Ses trois policies d'ÉCRITURE portaient
+ * encore `{public}`, et `anon` détient les privilèges de table correspondants
+ * (GRANT par défaut de Supabase) : elles étaient donc évaluées pour un
+ * visiteur, et chacune appelle `is_admin()`, dont P13-B lui a retiré
+ * l'EXECUTE. Mesuré, pour les trois commandes : `42501 permission denied for
+ * function is_admin`.
+ *
+ * Le visiteur était refusé et il le reste — ce n'est pas une élévation de
+ * privilège. Ce qui change est la NATURE du refus : il vient désormais de la
+ * règle d'accès (`new row violates row-level security policy`) et non d'un
+ * privilège de fonction manquant. C'est le même mécanisme — une policy
+ * permissive évaluée pour `anon` qui LÈVE au lieu de refuser — qui rendait la
+ * vitrine publique illisible avant 20261020090000 ; ici aucune page publique
+ * n'émet ces commandes, donc rien n'était cassé, mais il ne reste plus de
+ * policy capable de le reproduire.
+ *
+ * `alter policy … to authenticated` seul : les trois conditions `is_admin()`
+ * ne sont pas réécrites, donc pas recopiées de travers. Mesuré après : coach,
+ * collaborateur et visiteur refusés à l'identique, administrateur accepté sur
+ * les trois commandes, vitrine intacte.
+ */
+export const MIGRATION_CATALOGUE_POLICIES_AUTHENTICATED =
+  "20261021090000_subscription_templates_policies_authenticated.sql";
+
+/**
+ * 20261022090000 — L'ESPACE COACH DEVIENT RÉELLEMENT INDÉPENDANT.
+ *
+ * ⚠️ LA CAUSE ÉTAIT `est_staff_global()`, qui rend VRAI pour un coach
+ * autonome (`coaches.role = 'assistant'`). Toutes les policies
+ * `…_manage_staff_*` de l'agenda, des réglages de réservation et du journal
+ * d'emails commençaient par cette branche : un coach lisait, modifiait et
+ * SUPPRIMAIT les lignes de l'administrateur. Mesuré avant : suppression d'une
+ * disponibilité de l'administrateur depuis le compte coach = 1 ligne, et elle
+ * avait disparu.
+ *
+ * S'y ajoutaient quatre défauts de modèle, tous mesurés :
+ *   · `coach_availabilities.coach_id` et `coach_unavailabilities.coach_id`
+ *     nullables, sans défaut ni déclencheur, et jamais envoyés par
+ *     l'application : toutes les lignes sans propriétaire ;
+ *   · `booking_settings` sans colonne de propriétaire : UNE ligne pour tout
+ *     le cabinet ;
+ *   · `documents_select_global_or_assigned` sans aucune condition sur
+ *     l'appelant dans sa branche « visibilité globale » — c'est par là qu'un
+ *     nouveau coach voyait les 17 documents de l'administrateur ;
+ *   · `email_logs` sans colonne d'auteur : rien à filtrer ;
+ *   · les policies Storage du seau `documents` sur `is_coach_or_admin()` :
+ *     le fichier restait téléchargeable même la ligne masquée ;
+ *   · et surtout les RPC `SECURITY DEFINER` du calendrier, hors RLS, qui
+ *     autorisaient sur l'étiquette `assistant` (`update_coach_event_atomic`)
+ *     ou balayaient le cabinet entier (`get_busy_ranges`,
+ *     `calendar_has_conflict`).
+ *
+ * Additive : aucune donnée réattribuée. `coach_id` NULL reste NULL, donc
+ * réservé à l'administrateur, jusqu'à décision métier.
+ */
+export const MIGRATION_ESPACE_COACH_ISOLE =
+  "20261022090000_espace_coach_isole_agenda_documents_emails.sql";
+
+/**
+ * 20261023090000 — LE PROPRIÉTAIRE PASSE DANS LE CHEMIN DE STOCKAGE.
+ *
+ * ⚠️ IL RESTAIT UNE PORTE DÉROBÉE, ÉCRITE NOIR SUR BLANC DANS LE LOT
+ * PRÉCÉDENT : les policies d'écriture du seau `documents` laissaient passer
+ * l'opération quand AUCUNE ligne `documents` ne correspondait au chemin. Sans
+ * cette branche, le premier téléversement — qui précède la création de la
+ * ligne — aurait été impossible ; avec elle, un fichier ORPHELIN (ligne
+ * supprimée) redevenait lisible, remplaçable et supprimable par n'importe quel
+ * membre du staff.
+ *
+ * La convention devient `<fiche_coach>/<document_id>/<horodatage>-<nom>` et la
+ * policy compare le PREMIER SEGMENT à `current_staff_id()` résolu en base. Ce
+ * n'est pas faire confiance au chemin : le navigateur propose un emplacement,
+ * la base refuse tout préfixe qui n'est pas celui de l'appelant. Le premier
+ * téléversement passe donc sans ligne, et un orphelin reste à son
+ * propriétaire.
+ *
+ * L'ancienne convention `<document_id>/<nom>` continue d'être lue —
+ * l'identifiant est cherché dans n'importe quel segment —, aucun fichier n'est
+ * déplacé, et un orphelin de l'ancienne forme reste réservé à
+ * l'administrateur : son préfixe n'est la fiche de personne.
+ */
+export const MIGRATION_STORAGE_DOCUMENTS_CHEMIN =
+  "20261023090000_storage_documents_proprietaire_dans_le_chemin.sql";
+
 export const MIGRATIONS_COURSES: readonly string[] = [
   MIGRATION_C2,
   MIGRATION_C3,
@@ -192,10 +589,44 @@ export const MIGRATIONS_APRES_C0_1: readonly string[] = [
   MIGRATION_DEBUT_PROGRAMME,
   MIGRATION_SUPPRESSION_NOLIO,
   MIGRATION_PROGRESSION_AUTOMATIQUE,
+  // Inscrites le 11/10/2026 — voir le bloc de justification ci-dessus.
+  MIGRATION_PROGRAM_REVIEW_FLAGS,
+  MIGRATION_RAPPELS_AUTOMATIQUES,
+  MIGRATION_REVIEW_FLAGS_GRANTS,
+  MIGRATION_NOTIFICATIONS_GRANTS,
+  MIGRATION_PROFIL_PHYSIOLOGIQUE,
+  MIGRATION_CARDIO_ET_CALENDRIER,
+  MIGRATION_DOCUMENTS_SECURISES,
+  MIGRATION_P13A_ISOLATION,
+  MIGRATION_P13A_PERF,
+  MIGRATION_P13A_GARDE_ADMIN,
+  MIGRATION_P13A_LECTURE_ELEVE,
+  MIGRATION_P13B_MODELE,
+  MIGRATION_P13B_POLICIES,
+  MIGRATION_P13B_FONCTIONS,
+  MIGRATION_P13B_NUTRITION,
+  MIGRATION_P13B_PROVISION,
+  MIGRATION_P13B_RESERVATION,
+  MIGRATION_P13B_ADMIN_REEL,
+  MIGRATION_P13B_INSERT,
+  MIGRATION_P13B_AUTOREF,
+  MIGRATION_P13B_RUBRIQUES,
+  MIGRATION_P13B_ADMIN_CATEGORIES,
+  MIGRATION_PROGRAMMES_COACH,
+  MIGRATION_CATALOGUE_POLICIES_AUTHENTICATED,
+  MIGRATION_ESPACE_COACH_ISOLE,
+  MIGRATION_STORAGE_DOCUMENTS_CHEMIN,
 ];
 
-/** Le compte attendu — nécessaire, jamais suffisant. */
-export const NOMBRE_DE_MIGRATIONS = 91;
+/**
+ * Le compte attendu — nécessaire, jamais suffisant.
+ *
+ * 117 = 84 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 32
+ * migrations nommées dans `MIGRATIONS_APRES_C0_1`. Le point 6 recalcule
+ * l'historique à partir de ce nombre : il ne peut pas être remonté seul sans
+ * qu'une migration soit nommée en face.
+ */
+export const NOMBRE_DE_MIGRATIONS = 117;
 
 /**
  * L'empreinte des 79 migrations ANTÉRIEURES à C0.1, dans l'ordre.

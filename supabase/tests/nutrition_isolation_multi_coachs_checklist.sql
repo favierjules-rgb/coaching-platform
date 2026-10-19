@@ -1002,6 +1002,17 @@ begin
       'nutrition_plan_ids_geres', 'nutrition_day_ids_geres', 'meal_ids_geres',
       'meal_choice_slot_ids_geres', 'nutrition_plan_profile_ids_geres',
       'student_ids_geres',
+      -- Forme 20261011120000 (P13-B/4) : la propriété est devenue une PORTÉE
+      -- PAR NIVEAU, pour que l'affectation explicite d'un collaborateur entre
+      -- dans le modèle sans que `lecture` vaille `ecriture`. Les noms changent,
+      -- la propriété testée par J3 ne change pas : chaque table du cœur doit
+      -- opposer un ensemble borné, et non un accès administrateur déguisé.
+      'nutrition_plan_ids_lecture', 'nutrition_plan_ids_ecriture',
+      'nutrition_plan_profile_ids_lecture', 'nutrition_plan_profile_ids_ecriture',
+      'nutrition_day_ids_lecture', 'nutrition_day_ids_ecriture',
+      'meal_ids_lecture', 'meal_ids_ecriture',
+      'meal_choice_slot_ids_lecture', 'meal_choice_slot_ids_ecriture',
+      'student_ids_nutrition_lecture', 'student_ids_nutrition_ecriture',
       -- Primitives de propriété, quelle que soit la forme.
       'is_coach_of_student', 'current_coach_id'
     ];
@@ -1040,6 +1051,44 @@ begin
           and coalesce(p.qual, '') like '%is_admin()%');
     perform pg_temp.noter('J',
       format('J3b. chaque table du cœur a une policy administrateur DISTINCTE%s',
+             case when v_liste = '' then '' else ' — sans : ' || v_liste end),
+      v_n = 0);
+
+    -- (e) LA SÉPARATION LECTURE / ÉCRITURE EST RÉELLE, TABLE PAR TABLE.
+    --
+    -- ⚠️ ÉTIQUETTE `J3e`, ET NON `J3c` : ce contrôle a d'abord été ajouté sous
+    -- `J3c`, qui était DÉJÀ pris par « admin et élève ne se mélangent pas ».
+    -- Deux contrôles portant le même nom rendent le bilan ambigu et trompent
+    -- `scripts/tests/rls-nutrition-isolation-multi-coachs.mts::PERF 18`, qui
+    -- localise un contrôle par son nom — il l'a signalé. Les étiquettes déjà
+    -- validées (J3, J3b, J3c, J3d) ne sont pas renumérotées : elles sont
+    -- citées dans les rapports précédents. L'ordre des lettres suit donc
+    -- l'ordre d'AJOUT, pas la position dans le fichier.
+    -- Allonger la liste des marqueurs ci-dessus aurait suffi à faire repasser
+    -- J3 au vert sans rien garantir de plus. Ce contrôle-ci est le
+    -- resserrement qui l'accompagne : une table du cœur doit porter une
+    -- policy de LECTURE opposant un ensemble `_lecture`, ET au moins une
+    -- policy d'écriture opposant un ensemble `_ecriture`. Une seule policy
+    -- `FOR ALL` sur un ensemble unique — l'état d'avant P13-B/4 — ne peut
+    -- plus satisfaire J3 : c'est elle qui faisait d'une permission
+    -- `lecture` un droit d'écriture.
+    select coalesce(string_agg(tables.t, ', '), ''), count(*)
+      into v_liste, v_n
+      from (select unnest(array['nutrition_plans','nutrition_days','nutrition_plan_profiles',
+                                'nutrition_meal_slot_targets','meals','meal_choice_slots',
+                                'meal_choice_options','nutrition_daily_logs']) as t) tables
+     where not exists (
+       select 1 from pg_policies p
+        where p.schemaname = 'public' and p.tablename = tables.t
+          and p.cmd = 'SELECT' and coalesce(p.qual, '') like '%\_lecture()%'
+     ) or not exists (
+       select 1 from pg_policies p
+        where p.schemaname = 'public' and p.tablename = tables.t
+          and p.cmd in ('INSERT','UPDATE','DELETE')
+          and (coalesce(p.qual, '') like '%\_ecriture()%' or coalesce(p.with_check, '') like '%\_ecriture()%')
+     );
+    perform pg_temp.noter('J',
+      format('J3e. chaque table du cœur sépare LECTURE et ÉCRITURE par deux ensembles distincts%s',
              case when v_liste = '' then '' else ' — sans : ' || v_liste end),
       v_n = 0);
 

@@ -20,6 +20,13 @@ type SetAssignmentFn = (
  * Écriture AWAITABLE (fix/program-assignment-checkbox) : la modale doit
  * attendre la fin réelle des écritures avant d'afficher le succès — le
  * booléen résolu remonte l'échec (ex. RPC refusée) au lieu de le perdre.
+ *
+ * ⚠️ LA PROMESSE PEUT AUSSI REJETER, et c'est voulu (P13-B). Un refus de
+ * droits sur `provision_program_copy` n'est pas un échec technique : il
+ * remonte en exception pour que la modale affiche la bonne cause au lieu de
+ * conseiller « réessaie ». `terminerAssignation` attrape le rejet et le
+ * traduit en `ok: false` + motif — un rejet ne peut donc jamais devenir un
+ * succès, qu'il soit lu ou non.
  */
 type AwaitableSetAssignmentFn = (
   studentId: string,
@@ -102,22 +109,43 @@ export function useContentAssignment(
             contentId,
             assigned,
             contentType === "programme" ? programStartDate : undefined,
-          ).then((ok) => {
-            onWritten?.();
-            // Email envoyé uniquement lors d'une vraie nouvelle attribution
-            // (jamais au retrait, "assigned" ci-dessus) — best-effort, ne
-            // bloque jamais l'action d'attribution elle-même.
-            // ⚠️ `motif !== "date"` : une correction de date n'est pas une
-            // attribution. Voir le commentaire sur `motif` ci-dessus.
-            if (ok && assigned && notifyByEmail && motif !== "date") {
-              fetch("/api/email/content-assigned", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ studentId, contentType, contentId }),
-              }).catch(() => {});
-            }
-            return ok;
-          });
+          ).then(
+            (ok) => {
+              onWritten?.();
+              // Email envoyé uniquement lors d'une vraie nouvelle attribution
+              // (jamais au retrait, "assigned" ci-dessus) — best-effort, ne
+              // bloque jamais l'action d'attribution elle-même.
+              // ⚠️ `motif !== "date"` : une correction de date n'est pas une
+              // attribution. Voir le commentaire sur `motif` ci-dessus.
+              if (ok && assigned && notifyByEmail && motif !== "date") {
+                fetch("/api/email/content-assigned", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ studentId, contentType, contentId }),
+                }).catch(() => {});
+              }
+              return ok;
+            },
+            (erreur) => {
+              /*
+               * ⚠️ UNE ÉCRITURE REJETÉE RAFRAÎCHIT QUAND MÊME, ET N'ENVOIE RIEN.
+               *
+               * Depuis P13-B, `setProgramAssignment` peut REJETER : la RPC
+               * refuse un appelant hors portée, et le motif du refus doit
+               * atteindre la modale (lib/assignment-refus.ts). Sans ce second
+               * bras, `onWritten` était sauté sur un rejet — et dans un lot
+               * mixte « un élève affecté, un élève refusé », l'écriture qui a
+               * RÉUSSI n'aurait pas été relue.
+               *
+               * Aucun email ne part ici : il n'y a eu aucune attribution. Et
+               * l'erreur est RELANCÉE telle quelle — c'est elle qui porte le
+               * motif ; l'avaler rendrait `ok: true` à la modale, soit
+               * exactement le faux succès que tout ce parcours interdit.
+               */
+              onWritten?.();
+              throw erreur;
+            },
+          );
         }
       }
       fallback(studentId, contentType, contentId, assigned);

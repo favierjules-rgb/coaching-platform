@@ -10,6 +10,7 @@ import type {
   AdminStudent,
   AdminStudentFeedback,
   AppointmentStatus,
+  CategorieDroit,
   CoachAccountStatus,
   CoachRole,
   DocumentCategory,
@@ -21,6 +22,7 @@ import type {
   ExerciseLibraryItem,
   FeedbackStatus,
   FeedbackType,
+  NiveauDroit,
   StudentAccountStatus,
   StudentDocumentUnlock,
 } from "@/types";
@@ -541,8 +543,33 @@ export function appointmentStatusTone(status: AppointmentStatus): "green" | "amb
 
 export const coachRoleLabels: Record<CoachRole, string> = {
   admin: "Admin",
-  assistant: "Assistant",
+  assistant: "Coach autonome",
+  collaborateur: "Collaborateur",
 };
+
+/**
+ * Libellés des quatre catégories de droits P13-B (table
+ * `collaborateur_permissions`). Les clés sont exactement les valeurs
+ * autorisées en base : la contrainte CHECK est la source de vérité.
+ */
+export const categorieDroitLabels: Record<CategorieDroit, string> = {
+  entrainement: "Entraînement",
+  nutrition: "Nutrition",
+  suivi_eleve: "Suivi élève",
+  agenda_communication: "Agenda et communication",
+};
+
+/**
+ * Niveaux accordables. `null` n'est pas une valeur stockée : c'est
+ * l'ABSENCE de ligne dans `collaborateur_permissions`, d'où le libellé
+ * distinct ici plutôt qu'une troisième valeur en base.
+ */
+export const niveauDroitLabels: Record<NiveauDroit, string> = {
+  lecture: "Lecture seule",
+  ecriture: "Lecture et écriture",
+};
+
+export const AUCUN_ACCES_LABEL = "Aucun accès";
 
 export const coachStatusLabels: Record<CoachAccountStatus, string> = {
   actif: "Actif",

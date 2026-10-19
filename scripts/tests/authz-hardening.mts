@@ -397,5 +397,182 @@ await test("23. les refus n'exposent pas la raison du refus", () => {
   assert.equal(new Set(refus403).size, 1, `tous les 403 doivent partager le même message : ${refus403.join(" / ")}`);
 });
 
+/* ═══════════ P13-B — cloisonnement des collaborateurs (statique) ════════ */
+
+/** Routes nominatives qui NE DOIVENT déclarer aucune catégorie : rien ne les couvre. */
+const ROUTES_SANS_CATEGORIE = [
+  "app/api/email/welcome/route.ts",
+  "app/api/email/subscription-assigned/route.ts",
+  "app/api/stripe/create-checkout-session/route.ts",
+  "app/api/stripe/create-customer-portal-session/route.ts",
+];
+
+/** Routes nominatives de communication : elles déclarent `agenda_communication`. */
+const ROUTES_AGENDA_COMMUNICATION = [
+  "app/api/admin/notifications/test/route.ts",
+  "app/api/email/appointment-notification/route.ts",
+];
+
+await test("24. la garde élève accepte une exigence de catégorie, et refuse sans elle", () => {
+  const bloc = AUTHZ.slice(AUTHZ.indexOf("export async function requireStaffForStudent"));
+  const corps = bloc.slice(0, bloc.indexOf("\n}\n"));
+  assert.ok(/exigence\?: ExigenceCategorie/.test(bloc), "la garde doit accepter une exigence de catégorie");
+  // Un collaborateur sur une route qui ne déclare rien : refus, sans exception.
+  assert.ok(
+    /if \(!exigence\) return refus\("Accès refusé\.", 403\);/.test(corps),
+    "l'absence de catégorie exigée doit refuser un collaborateur, pas le laisser passer",
+  );
+  // Son périmètre ne passe jamais par `students.coach_id`.
+  const blocCollab = corps.slice(corps.indexOf('ficheCoach.role === "collaborateur"'));
+  const corpsCollab = blocCollab.slice(0, blocCollab.indexOf("\n  }"));
+  assert.ok(
+    !/coach_id/.test(corpsCollab),
+    "le chemin collaborateur ne doit jamais comparer students.coach_id — il ne le vaut jamais",
+  );
+});
+
+await test("25. les deux conditions du modèle sont exigées, et aucune ne supplée l'autre", () => {
+  const bloc = AUTHZ.slice(AUTHZ.indexOf("async function collaborateurAutorise"));
+  const corps = bloc.slice(0, bloc.indexOf("\n}\n"));
+  assert.ok(/from\("collaborateur_eleves"\)/.test(corps), "l'affectation explicite doit être vérifiée");
+  assert.ok(/from\("collaborateur_permissions"\)/.test(corps), "la permission de catégorie doit être vérifiée");
+  assert.ok(/if \(!affectation\) return false;/.test(corps), "pas d'affectation ⇒ refus");
+  assert.ok(/if \(!permission\) return false;/.test(corps), "pas de permission ⇒ refus");
+  // `ecriture` implique `lecture`, et seulement dans la même catégorie : la
+  // comparaison porte sur la ligne de CETTE catégorie.
+  assert.ok(
+    /exigence\.niveau === "lecture" \? true : permission\.niveau === "ecriture"/.test(corps),
+    "l'implication ecriture ⇒ lecture doit rester interne à la catégorie demandée",
+  );
+  assert.ok(/eq\("categorie", exigence\.categorie\)/.test(corps), "la permission doit être filtrée par catégorie");
+});
+
+await test("26. aucun accès global n'est accordé à un collaborateur", () => {
+  const bloc = AUTHZ.slice(AUTHZ.indexOf("export async function requireStaff("));
+  const corps = bloc.slice(0, bloc.indexOf("\n}\n"));
+  assert.ok(/fiches\.estCollaborateur/.test(corps), "requireStaff doit écarter un collaborateur");
+  assert.ok(/return refus\("Accès refusé\.", 403\);/.test(corps), "le refus doit être un 403 indistinct");
+
+  // Le statut ne doit pas pouvoir servir d'échappatoire : `estCollaborateur`
+  // regarde toutes les fiches, y compris inactives.
+  const blocFiches = AUTHZ.slice(AUTHZ.indexOf("async function fichesStaff"));
+  const corpsFiches = blocFiches.slice(0, blocFiches.indexOf("\n}\n"));
+  assert.ok(
+    /lignes\.some\(\(ligne\) => ligne\.role === "collaborateur"\)/.test(corpsFiches),
+    "estCollaborateur doit être évalué sur toutes les fiches, pas seulement l'active",
+  );
+  assert.ok(/status === "actif"/.test(corpsFiches), "la fiche de PORTÉE doit être l'active, comme en SQL");
+});
+
+await test("27. facturation, Stripe et création de compte : aucune catégorie déclarée", () => {
+  for (const relatif of ROUTES_SANS_CATEGORIE) {
+    const source = readFileSync(join(RACINE, relatif), "utf8");
+    const code = sansCommentaires(source);
+    assert.ok(code.includes("requireStaffForStudent("), `${relatif} : la garde élève est attendue`);
+    for (const categorie of ["entrainement", "suivi_eleve", "agenda_communication", "nutrition"]) {
+      assert.ok(
+        !code.includes(`categorie: "${categorie}"`),
+        `${relatif} : aucune catégorie ne doit ouvrir cette route à un collaborateur`,
+      );
+    }
+  }
+});
+
+await test("28. les routes de communication déclarent agenda_communication", () => {
+  for (const relatif of ROUTES_AGENDA_COMMUNICATION) {
+    const code = sansCommentaires(readFileSync(join(RACINE, relatif), "utf8"));
+    assert.ok(
+      /categorie: "agenda_communication"/.test(code),
+      `${relatif} : la catégorie exigée doit être déclarée, sinon un collaborateur légitime est refusé`,
+    );
+  }
+  // L'email d'attribution suit LE CONTENU, pas la route : un collaborateur
+  // nutrition ne doit pas pouvoir annoncer un programme d'entraînement.
+  const contenu = sansCommentaires(lire("../../app/api/email/content-assigned/route.ts"));
+  assert.ok(/programme: "entrainement"/.test(contenu), "un programme relève de entrainement");
+  assert.ok(/nutrition: "nutrition"/.test(contenu), "un plan alimentaire relève de nutrition");
+  assert.ok(/CATEGORIE_PAR_CONTENU\[contentType\]/.test(contenu), "la catégorie doit dépendre du contenu attribué");
+});
+
+await test("29. `profiles.role` n'a gagné aucune quatrième valeur", () => {
+  const types = lire("../../types/index.ts");
+  assert.ok(
+    /export type UserRole = "admin" \| "coach" \| "student";/.test(types),
+    "UserRole doit rester inchangé : sept gardes applicatives en dépendent",
+  );
+  const provisioning = sansCommentaires(lire("../../lib/supabase/coach-account-provisioning.ts"));
+  assert.ok(
+    /role: "coach",/.test(provisioning),
+    "un collaborateur doit continuer d'avoir profiles.role = 'coach'",
+  );
+  assert.ok(
+    !/role: "collaborateur"[\s\S]{0,80}from\("profiles"\)/.test(provisioning),
+    "le rôle fin ne doit jamais être écrit dans profiles",
+  );
+});
+
+await test("30. le rôle fin vit dans `coaches.role`, avec les trois mêmes valeurs qu'en base", () => {
+  const schema = lire("../../lib/api/schemas/coaches.ts");
+  assert.ok(
+    /role: z\.enum\(\["admin", "assistant", "collaborateur"\]\)/.test(schema),
+    "le schéma de création doit accepter exactement les trois valeurs de coaches_role_check",
+  );
+  const types = lire("../../types/index.ts");
+  assert.ok(
+    /export type CoachRole = "admin" \| "assistant" \| "collaborateur";/.test(types),
+    "CoachRole doit refléter la contrainte en base",
+  );
+  const migration = lire("../../supabase/migrations/20261011090000_p13b_modele_droits_collaborateurs.sql");
+  assert.ok(
+    /check \(role = any \(array\['admin','assistant','collaborateur'\]\)\)/.test(migration),
+    "la contrainte CHECK est la source de vérité et doit rester alignée",
+  );
+});
+
+await test("31. l'interface des droits n'invente aucun modèle de données", () => {
+  const acces = lire("../../lib/supabase/collaborateurs.ts");
+  // Seules les deux tables P13-B sont écrites — ni table parallèle, ni
+  // colonne ajoutée à `students` ou `coaches`.
+  const tables = [...acces.matchAll(/\.from\("([a-z_]+)"\)/g)].map((m) => m[1]);
+  assert.deepEqual(
+    [...new Set(tables)].sort(),
+    ["collaborateur_eleves", "collaborateur_permissions", "students"],
+    `tables inattendues : ${[...new Set(tables)].join(", ")}`,
+  );
+  // `students` n'est lue que pour afficher un nom : aucune écriture.
+  const blocStudents = acces.slice(acces.indexOf('from("students")'));
+  assert.ok(
+    !/from\("students"\)[\s\S]{0,200}\.(insert|update|upsert|delete)\(/.test(blocStudents),
+    "la table students ne doit jamais être écrite ici — surtout pas coach_id",
+  );
+  assert.ok(!/coach_id/.test(acces), "aucune écriture ni lecture de coach_id : l'affectation est explicite");
+
+  // « Aucun accès » reste l'ABSENCE de ligne, pas une troisième valeur.
+  assert.ok(
+    /if \(niveau === null\)[\s\S]{0,200}\.delete\(\)/.test(acces),
+    "retirer une catégorie doit supprimer la ligne, et non écrire un niveau 'aucun'",
+  );
+});
+
+await test("32. aucune nouvelle route API n'expose les tables de droits hors RLS", () => {
+  // L'administration des droits passe par un client de SESSION (RLS
+  // `..._manage_admin`, réservée à is_admin()). Une route service role
+  // aurait contourné précisément la policy qui protège ces tables.
+  for (const chemin of TOUTES_LES_ROUTES) {
+    const source = readFileSync(chemin, "utf8");
+    const relatif = chemin.replace(`${RACINE}/`, "");
+    if (!/collaborateur_(eleves|permissions)/.test(source)) continue;
+    assert.ok(
+      /requireAdmin\(\)/.test(source),
+      `${relatif} : une route touchant aux tables de droits doit être réservée à l'administrateur`,
+    );
+  }
+  const acces = lire("../../lib/supabase/collaborateurs.ts");
+  assert.ok(
+    !/createSupabaseAdminClient|service_role|SERVICE_ROLE/.test(acces),
+    "la couche d'accès aux droits ne doit jamais utiliser le service role",
+  );
+});
+
 console.log(`\n${passed} test(s) réussi(s), ${failed} échec(s).`);
 if (failed > 0) process.exit(1);

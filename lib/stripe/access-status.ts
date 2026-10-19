@@ -34,3 +34,21 @@ export function computeStudentAccess(accessMode: BillingAccessMode, subscription
   }
   return { allowed: false, reason: STRIPE_STATUS_REASONS[subscriptionStatus] ?? "no_subscription", accessMode, subscriptionStatus };
 }
+
+/**
+ * OÙ ENVOYER UN ÉLÈVE DONT L'ACCÈS EST REFUSÉ.
+ *
+ * ⚠️ DEUX REFUS, DEUX ÉCRANS, ET LA DISTINCTION N'EST PAS COSMÉTIQUE.
+ * `/acces-limite` AFFIRME quelque chose sur le compte : « votre accès sera
+ * activé après validation de votre abonnement », et, sans formule attribuée,
+ * « aucune formule attribuée pour le moment ». C'est une affirmation vraie
+ * quand elle découle d'une lecture réussie — et entièrement fausse quand le
+ * mode de facturation n'a PAS PU être lu. Le 18/10, 34 élèves en accès
+ * manuel autorisé ont lu cette phrase à cause d'un privilège de colonne.
+ *
+ * Une panne va donc sur `/acces-indisponible` : même fermeture du contenu,
+ * mais un message honnête et un bouton Réessayer.
+ */
+export function destinationRefusAcces(statut: { reason: StudentAccessReason }): "/acces-limite" | "/acces-indisponible" {
+  return statut.reason === "indetermine" ? "/acces-indisponible" : "/acces-limite";
+}

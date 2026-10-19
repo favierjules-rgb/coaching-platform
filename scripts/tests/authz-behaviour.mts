@@ -56,6 +56,15 @@ interface EtatMocks {
   sessionStripe: Record<string, unknown> | null;
   /** Lignes renvoyées par les tables Supabase, par nom de table. */
   lignes: Record<string, unknown | null>;
+  /**
+   * Lignes renvoyées quand la requête n'est PAS terminée par `maybeSingle()`
+   * / `single()` — ajouté pour P13-B : `fichesStaff` lit TOUTES les fiches
+   * `coaches` d'un compte (`select().eq().order().order()`), afin qu'un
+   * collaborateur dont la fiche est inactive ne puisse pas passer pour un
+   * compte « sans fiche ». À défaut de liste déclarée, la ligne unique de
+   * `lignes` est reprise : les scénarios existants n'ont pas à changer.
+   */
+  listes: Record<string, unknown[]>;
   /** Identité de l'appelant. */
   utilisateur: { id: string } | null;
   role: string | null;
@@ -67,6 +76,7 @@ interface EtatMocks {
 const etat: EtatMocks = {
   sessionStripe: null,
   lignes: {},
+  listes: {},
   utilisateur: null,
   role: null,
   emailsEnvoyes: [],
@@ -76,6 +86,7 @@ const etat: EtatMocks = {
 function reinitialiser() {
   etat.sessionStripe = null;
   etat.lignes = {};
+  etat.listes = {};
   etat.utilisateur = null;
   etat.role = null;
   etat.emailsEnvoyes = [];
@@ -92,7 +103,16 @@ function faireClientSupabase() {
     }
     chainable.maybeSingle = async () => ({ data: etat.lignes[table] ?? null, error: null });
     chainable.single = async () => ({ data: etat.lignes[table] ?? null, error: null });
-    chainable.then = undefined;
+    // `await supabase.from(t).select().eq().order()` — sans maybeSingle — doit
+    // rendre une LISTE, comme le vrai client. Le double se contentait de
+    // `then = undefined`, ce qui renvoyait le constructeur de requête
+    // lui-même : `data` arrivait `undefined` et toute lecture de liste
+    // semblait vide, quel que soit le code testé.
+    chainable.then = (resoudre: (valeur: { data: unknown[]; error: null }) => unknown) => {
+      const declaree = etat.listes[table];
+      const repli = etat.lignes[table] != null ? [etat.lignes[table]] : [];
+      return Promise.resolve({ data: declaree ?? repli, error: null }).then(resoudre);
+    };
     return chainable;
   };
   return { from: (table: string) => construireRequete(table) };
@@ -421,18 +441,27 @@ await test("9. un quota ne se réinitialise pas en changeant X-Forwarded-For", a
  * AVANT la limitation de fréquence, et le test ne prouverait plus rien.
  */
 function corpsDemandeEntreprise() {
+  // Aligné sur `lib/business-inquiry/schema.ts` tel qu'il est AUJOURD'HUI.
+  // L'ancien corps datait d'avant la refonte du configurateur (13/09/2026) :
+  // `needs`, `otherNeed`, `format` et la tranche "26-50" n'existent plus, et
+  // le schéma étant `.strict()`, la route répondait 400 AVANT d'atteindre ce
+  // que ces deux tests vérifient (le 503 fail-closed et le 200 hors
+  // production). Les assertions sont inchangées — seul le corps est remis en
+  // conformité, sans quoi les deux tests ne prouvaient plus rien.
   return {
+    headcount: "20-49",
+    frequency: "2-seances",
+    objectives: ["prevention-sante", "bien-etre"],
+    sector: "industrie",
+    timeline: "1-mois",
+    location: "sur-site",
+    city: "Lyon",
+    projectDetails: "Deux séances par semaine à partir de septembre.",
     companyName: "Acme Industries",
     contactName: "Camille Martin",
     contactRole: "Responsable RH",
     email: "camille.martin@acme.test",
     phone: "01 23 45 67 89",
-    headcount: "26-50",
-    needs: ["prevention-tms", "qvt"],
-    otherNeed: "",
-    format: "sur-site",
-    city: "Lyon",
-    projectDetails: "Deux séances par semaine à partir de septembre.",
     privacyAccepted: true,
     website: "",
   };
@@ -528,7 +557,7 @@ await test("14. coach : autorisé sur SON élève", async () => {
   reinitialiser();
   etat.utilisateur = { id: "user-coach" };
   etat.role = "coach";
-  etat.lignes = { coaches: { id: "coach-1" }, students: { coach_id: "coach-1" } };
+  etat.lignes = { coaches: { id: "coach-1", role: "assistant", status: "actif" }, students: { coach_id: "coach-1" } };
 
   const acces = await requireStaffForStudent(UUID_A);
   assert.equal(acces.ok, true, "le coach doit pouvoir agir sur son propre élève");
@@ -538,7 +567,7 @@ await test("15. coach : refusé sur l'élève d'un autre coach", async () => {
   reinitialiser();
   etat.utilisateur = { id: "user-coach" };
   etat.role = "coach";
-  etat.lignes = { coaches: { id: "coach-1" }, students: { coach_id: "coach-2" } };
+  etat.lignes = { coaches: { id: "coach-1", role: "assistant", status: "actif" }, students: { coach_id: "coach-2" } };
 
   const acces = await requireStaffForStudent(UUID_B);
   assert.equal(acces.ok, false, "l'élève d'un autre coach doit être refusé");
@@ -578,7 +607,7 @@ await test("18. élève : refusé sur toutes les gardes staff", async () => {
     assert.equal(acces.ok, false, `${nom} doit refuser un élève`);
     if (!acces.ok) assert.equal(acces.response.status, 403);
   }
-  etat.lignes = { coaches: { id: "coach-1" }, students: { coach_id: "coach-1" } };
+  etat.lignes = { coaches: { id: "coach-1", role: "assistant", status: "actif" }, students: { coach_id: "coach-1" } };
   const surEleve = await requireStaffForStudent(UUID_A);
   assert.equal(surEleve.ok, false, "un élève ne doit pas passer par la garde staff");
 });
@@ -623,7 +652,7 @@ await test("22. coach : refusé pour supprimer définitivement un élève (route
   etat.role = "coach";
   // Même s'il s'agit de SON élève : la suppression définitive est réservée
   // à l'administrateur (arbitrage Jules du 27/07/2026).
-  etat.lignes = { coaches: { id: "coach-1" }, students: { coach_id: "coach-1" } };
+  etat.lignes = { coaches: { id: "coach-1", role: "assistant", status: "actif" }, students: { coach_id: "coach-1" } };
 
   const res = await supprimerEleve(new Request("https://exemple.test", { method: "DELETE" }), {
     params: Promise.resolve({ studentId: UUID_A }),
@@ -680,6 +709,167 @@ await test("25. le refus ne distingue pas coach et élève", async () => {
 
   assert.equal(refusCoach.status, refusEleve.status);
   assert.deepEqual(corpsCoach, corpsEleve, "les deux refus doivent être indiscernables");
+});
+
+/* ═══════════ P13-B — cloisonnement des collaborateurs, exécuté ═════════ */
+
+/**
+ * Décor d'un collaborateur : sa fiche `coaches` (role = 'collaborateur'),
+ * l'affectation de l'élève visé, et sa permission sur une catégorie. Les
+ * trois sont déclarés séparément, pour pouvoir en retirer UN SEUL et vérifier
+ * que le droit tombe.
+ */
+function decorCollaborateur(options: {
+  statut?: string;
+  affecte?: boolean;
+  categorie?: string;
+  niveau?: string;
+  coachIdEleve?: string | null;
+}) {
+  reinitialiser();
+  etat.utilisateur = { id: "user-collab" };
+  etat.role = "coach"; // `profiles.role` reste "coach" : c'est tout le modèle P13-B
+  etat.listes = {
+    coaches: [{ id: "collab-1", role: "collaborateur", status: options.statut ?? "actif" }],
+  };
+  etat.lignes = {
+    students: { coach_id: options.coachIdEleve ?? "coach-1" },
+    collaborateur_eleves: options.affecte ? { id: "aff-1" } : null,
+    collaborateur_permissions: options.categorie && options.niveau ? { niveau: options.niveau } : null,
+  };
+}
+
+await test("26. collaborateur : autorisé sur son élève affecté, dans sa catégorie", async () => {
+  decorCollaborateur({ affecte: true, categorie: "nutrition", niveau: "ecriture" });
+  const acces = await requireStaffForStudent(UUID_A, { categorie: "nutrition", niveau: "ecriture" });
+  assert.equal(acces.ok, true, "affectation + permission doivent suffire");
+  assert.equal(acces.ok && acces.roleStaff, "collaborateur");
+});
+
+await test("27. collaborateur : refusé dans une AUTRE catégorie que la sienne", async () => {
+  // `collaborateur_permissions` ne renvoie une ligne que pour la catégorie
+  // demandée dans le vrai client ; ici la ligne est absente, exactement comme
+  // en base pour une catégorie non accordée.
+  decorCollaborateur({ affecte: true });
+  const acces = await requireStaffForStudent(UUID_A, { categorie: "entrainement", niveau: "lecture" });
+  assert.equal(acces.ok, false, "une catégorie non accordée ne doit rien ouvrir");
+  if (!acces.ok) assert.equal(acces.response.status, 403);
+});
+
+await test("28. collaborateur : `lecture` ne vaut JAMAIS `ecriture`", async () => {
+  decorCollaborateur({ affecte: true, categorie: "nutrition", niveau: "lecture" });
+  const lecture = await requireStaffForStudent(UUID_A, { categorie: "nutrition", niveau: "lecture" });
+  assert.equal(lecture.ok, true, "la lecture doit passer");
+
+  decorCollaborateur({ affecte: true, categorie: "nutrition", niveau: "lecture" });
+  const ecriture = await requireStaffForStudent(UUID_A, { categorie: "nutrition", niveau: "ecriture" });
+  assert.equal(ecriture.ok, false, "une lecture seule ne doit pas autoriser une écriture");
+  if (!ecriture.ok) assert.equal(ecriture.response.status, 403);
+});
+
+await test("29. collaborateur : `ecriture` implique `lecture` dans la même catégorie", async () => {
+  decorCollaborateur({ affecte: true, categorie: "nutrition", niveau: "ecriture" });
+  const acces = await requireStaffForStudent(UUID_A, { categorie: "nutrition", niveau: "lecture" });
+  assert.equal(acces.ok, true, "l'écriture doit emporter la lecture de SA catégorie");
+});
+
+await test("30. collaborateur : permission sans affectation ne donne rien", async () => {
+  decorCollaborateur({ affecte: false, categorie: "nutrition", niveau: "ecriture" });
+  const acces = await requireStaffForStudent(UUID_A, { categorie: "nutrition", niveau: "ecriture" });
+  assert.equal(acces.ok, false, "sans affectation explicite, aucun élève n'est accessible");
+  if (!acces.ok) assert.equal(acces.response.status, 403);
+});
+
+await test("31. collaborateur : affectation sans permission ne donne rien", async () => {
+  decorCollaborateur({ affecte: true });
+  const acces = await requireStaffForStudent(UUID_A, { categorie: "nutrition", niveau: "lecture" });
+  assert.equal(acces.ok, false, "l'absence de permission signifie refus");
+  if (!acces.ok) assert.equal(acces.response.status, 403);
+});
+
+await test("32. collaborateur : une route SANS catégorie déclarée le refuse", async () => {
+  // Facturation, Stripe, création de compte : aucune des quatre catégories ne
+  // les couvre. L'absence d'exigence n'est pas un laissez-passer.
+  decorCollaborateur({ affecte: true, categorie: "nutrition", niveau: "ecriture" });
+  const acces = await requireStaffForStudent(UUID_A);
+  assert.equal(acces.ok, false, "sans catégorie exigée, un collaborateur doit être refusé");
+  if (!acces.ok) assert.equal(acces.response.status, 403);
+});
+
+await test("33. collaborateur : refusé sur les routes globales (requireStaff)", async () => {
+  decorCollaborateur({ affecte: true, categorie: "nutrition", niveau: "ecriture" });
+  const acces = await requireStaff();
+  assert.equal(acces.ok, false, "aucune permission n'ouvre une route globale");
+  if (!acces.ok) assert.equal(acces.response.status, 403);
+});
+
+await test("34. collaborateur DÉSACTIVÉ : toujours refusé sur les routes globales", async () => {
+  // Sans ce contrôle, passer son statut à 'inactif' le ferait passer pour un
+  // compte « staff sans fiche », qui lui est autorisé : retirer un statut
+  // deviendrait une élévation de privilège.
+  decorCollaborateur({ statut: "inactif", affecte: true, categorie: "nutrition", niveau: "ecriture" });
+  const acces = await requireStaff();
+  assert.equal(acces.ok, false, "une fiche inactive ne doit pas ouvrir les routes globales");
+  if (!acces.ok) assert.equal(acces.response.status, 403);
+
+  decorCollaborateur({ statut: "inactif", affecte: true, categorie: "nutrition", niveau: "ecriture" });
+  const surEleve = await requireStaffForStudent(UUID_A, { categorie: "nutrition", niveau: "ecriture" });
+  assert.equal(surEleve.ok, false, "une fiche inactive n'a plus aucun périmètre");
+});
+
+await test("35. collaborateur : `students.coach_id` ne lui donne aucun droit", async () => {
+  // Même si la fiche élève portait SON identifiant comme coach principal,
+  // seule l'affectation explicite compte. Le contraire aurait suffi à
+  // s'approprier un élève en réécrivant une colonne.
+  decorCollaborateur({ affecte: false, coachIdEleve: "collab-1", categorie: "nutrition", niveau: "ecriture" });
+  const acces = await requireStaffForStudent(UUID_A, { categorie: "nutrition", niveau: "ecriture" });
+  assert.equal(acces.ok, false, "coach_id ne doit jamais tenir lieu d'affectation");
+  if (!acces.ok) assert.equal(acces.response.status, 403);
+});
+
+await test("36. coach autonome (assistant) : comportement strictement inchangé", async () => {
+  reinitialiser();
+  etat.utilisateur = { id: "user-coach" };
+  etat.role = "coach";
+  etat.listes = { coaches: [{ id: "coach-1", role: "assistant", status: "actif" }] };
+  etat.lignes = { students: { coach_id: "coach-1" } };
+
+  const global = await requireStaff();
+  assert.equal(global.ok, true, "un coach autonome garde l'accès aux lectures globales");
+
+  const surEleve = await requireStaffForStudent(UUID_A);
+  assert.equal(surEleve.ok, true, "il passe sur SON élève, sans qu'aucune catégorie soit exigée");
+
+  etat.lignes = { students: { coach_id: "coach-2" } };
+  const autreEleve = await requireStaffForStudent(UUID_B);
+  assert.equal(autreEleve.ok, false, "et reste refusé sur l'élève d'un autre coach");
+});
+
+await test("37. admin : une exigence de catégorie ne le contraint pas", async () => {
+  reinitialiser();
+  etat.utilisateur = { id: "user-admin" };
+  etat.role = "admin";
+  etat.listes = { coaches: [] };
+  etat.lignes = { students: { coach_id: "coach-2" }, collaborateur_permissions: null };
+
+  const acces = await requireStaffForStudent(UUID_B, { categorie: "nutrition", niveau: "ecriture" });
+  assert.equal(acces.ok, true, "l'administrateur ne dépend ni d'une affectation ni d'une permission");
+});
+
+await test("38. le refus d'un collaborateur est indiscernable de celui d'un élève", async () => {
+  decorCollaborateur({ affecte: false });
+  const refusCollab = await requireStaffForStudent(UUID_A, { categorie: "nutrition", niveau: "lecture" });
+  assert.equal(refusCollab.ok, false);
+  const corpsCollab = refusCollab.ok ? null : await refusCollab.response.json();
+
+  reinitialiser();
+  etat.utilisateur = { id: "user-eleve" };
+  etat.role = "student";
+  const refusEleve = await requireStaffForStudent(UUID_A, { categorie: "nutrition", niveau: "lecture" });
+  assert.equal(refusEleve.ok, false);
+  const corpsEleve = refusEleve.ok ? null : await refusEleve.response.json();
+
+  assert.deepEqual(corpsCollab, corpsEleve, "la réponse ne doit pas révéler ce qui manque");
 });
 
 console.log(`\n${passed} test(s) réussi(s), ${failed} échec(s).`);

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { composeDocumentAssignedEmail, composeNutritionAssignedEmail, composeProgramAssignedEmail } from "@/lib/email/templates";
 import { sendTransactionalEmail, wasEmailRecentlySent } from "@/lib/email/send-transactional-email";
+import { resoudreAuteurEnvoi } from "@/lib/email/auteur-envoi";
 import { getCurrentUserRole } from "@/lib/supabase/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -37,7 +38,23 @@ export async function POST(request: Request) {
   }
   // Correctif H-3 : un coach n'agit que sur les élèves qui lui sont
   // affectés. L'administrateur passe sans condition.
-  const accesEleve = await requireStaffForStudent(studentId);
+  //
+  // P13-B : la catégorie exigée suit LE CONTENU attribué, et non la route.
+  // Annoncer un programme relève de `entrainement`, un plan alimentaire de
+  // `nutrition` ; un collaborateur nutrition ne notifie donc pas une
+  // attribution d'entraînement. Un document est rangé sous `suivi_eleve`,
+  // qui est la catégorie des documents administratifs côté RLS — la route ne
+  // connaît que l'identifiant du document, pas sa catégorie, et le choix le
+  // plus strict est le seul qui ne puisse pas élargir un droit.
+  const CATEGORIE_PAR_CONTENU = {
+    programme: "entrainement",
+    nutrition: "nutrition",
+    document: "suivi_eleve",
+  } as const;
+  const accesEleve = await requireStaffForStudent(studentId, {
+    categorie: CATEGORIE_PAR_CONTENU[contentType],
+    niveau: "ecriture",
+  });
   if (!accesEleve.ok) return accesEleve.response;
 
 
@@ -45,6 +62,15 @@ export async function POST(request: Request) {
   // pour un rôle authentifié (voir supabase/schema.sql), seul le service
   // role peut y écrire.
   const supabase = createSupabaseAdminClient();
+
+  /*
+   * ⚠️ L'AUTEUR DE L'ENVOI SE LIT SUR LA SESSION, PAS DANS LE CORPS DE LA
+   * REQUÊTE. `current_staff_id()` est SECURITY DEFINER et ne rend que la fiche
+   * de l'appelant : c'est ce qui cloisonne `email_logs`. `null` pour un
+   * appelant sans fiche staff — l'envoi est alors journalisé comme système,
+   * lisible par l'administrateur seul.
+   */
+  const auteurEnvoi = await resoudreAuteurEnvoi(sessionSupabase);
   if (!supabase) {
     return NextResponse.json({ error: "Client Supabase service role indisponible." }, { status: 503 });
   }
@@ -137,6 +163,7 @@ export async function POST(request: Request) {
   }
 
   const result = await sendTransactionalEmail(supabase, {
+    sentByCoachId: auteurEnvoi,
     emailType,
     recipientEmail: student.email,
     recipientUserId: student.userId,

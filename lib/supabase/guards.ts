@@ -9,6 +9,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getCurrentStudentId } from "@/lib/supabase/current-student";
 import { getOnboardingCompleted } from "@/lib/supabase/onboarding";
 import { getStudentAccessStatus } from "@/lib/supabase/student-access";
+import { destinationRefusAcces } from "@/lib/stripe/access-status";
 import type { Database } from "@/types/supabase";
 
 /**
@@ -76,6 +77,48 @@ export async function requireAdminOrCoach(): Promise<void> {
   await requireAuth();
   const role = await getCurrentUserRole();
   if (role !== "admin" && role !== "coach") {
+    redirect("/acces-refuse");
+  }
+}
+
+/**
+ * RUBRIQUES GLOBALES INTERDITES AUX COLLABORATEURS — Paiements, Emails,
+ * Notifications.
+ *
+ * ════════════════════════════════════════════════════════════════════════
+ * POURQUOI UNE GARDE DE PLUS, ET POURQUOI ICI
+ * ════════════════════════════════════════════════════════════════════════
+ * La navigation masque déjà ces trois sections à un collaborateur
+ * (`CATEGORIES_PAR_SECTION_ADMIN` les déclare sans catégorie, donc jamais
+ * visibles). Mais un lien masqué n'est pas une interdiction : l'URL reste
+ * tapable. Cette garde ferme l'accès DIRECT, côté serveur, avant tout rendu.
+ *
+ * ⚠️ ELLE NE REMPLACE NI LA RLS NI LES GARDES D'API, ELLE LES COMPLÈTE. Les
+ * routes de ces rubriques passent par `requireStaff()`, qui refuse un
+ * collaborateur en 403, et la base refuse déjà les tables concernées. Cette
+ * redirection évite seulement d'afficher un écran dont chaque requête
+ * échouerait — et de laisser croire que la rubrique existe pour lui.
+ *
+ * ⚠️ AUCUNE CATÉGORIE NE PEUT LA ROUVRIR, ET C'EST LE POINT. Le refus porte
+ * sur le RÔLE, pas sur une permission : il n'existe aucun réglage de
+ * `collaborateur_permissions` qui rende ces rubriques à un collaborateur, et
+ * aucune catégorie nouvelle ne doit être créée pour le faire.
+ *
+ * ⚠️ FAIL-CLOSED. Si le client service role manque, le verdict est inconnu :
+ * on refuse. Une panne de configuration ne peut pas ouvrir une porte — même
+ * principe que `shouldSkipGuards()` en production.
+ */
+export async function interdireCollaborateur(): Promise<void> {
+  if (shouldSkipGuards()) {
+    return;
+  }
+  const { estCollaborateurConnecte } = await import("@/lib/api/authz");
+  const verdict = await estCollaborateurConnecte();
+  if (verdict === "indisponible") {
+    console.error("[Guards] rôle staff indéterminable : rubrique globale refusée (fail-closed).");
+    redirect("/acces-refuse");
+  }
+  if (verdict) {
     redirect("/acces-refuse");
   }
 }
@@ -183,7 +226,10 @@ export async function requireActiveStudentAccess(): Promise<void> {
   }
   const status = await getStudentAccessStatus(supabase, studentId);
   if (!status.allowed) {
-    redirect("/acces-limite");
+    // ⚠️ DEUX REFUS, DEUX ÉCRANS. Une panne de lecture ne doit pas affirmer
+    // à l'élève qu'aucune formule ne lui est attribuée — voir
+    // `destinationRefusAcces`.
+    redirect(destinationRefusAcces(status));
   }
 }
 
@@ -219,7 +265,7 @@ export async function requireEntrainementAccess(): Promise<void> {
   }
   const status = await getStudentAccessStatus(supabase, studentId);
   if (!status.allowed) {
-    redirect("/acces-limite");
+    redirect(destinationRefusAcces(status));
   }
 }
 

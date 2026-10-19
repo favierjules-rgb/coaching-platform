@@ -220,7 +220,12 @@ export async function lirePhysiologie(
   studentId: string,
 ): Promise<{ physio: PhysiologieBrute; erreur: string | null }> {
   const { data, error } = await supabase
-    .from("student_profiles")
+    // ⚠️ LA VUE, PAS LA TABLE (P13-B/10). `select *` sur `student_profiles`
+    // exige le privilège sur toutes ses colonnes, et trois d'entre elles ont
+    // été fermées pour que le prix de l'offre d'un élève ne fuite pas : la
+    // lecture tomberait en 42501. La vue rend les mêmes colonnes moins ces
+    // trois-là — dont aucune n'est physiologique.
+    .from("student_profiles_lisible")
     // Voir l'en-tête : `*` rend ce qui existe, quel que soit l'état de la migration.
     .select("*")
     .eq("student_id", studentId)

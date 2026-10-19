@@ -37,7 +37,7 @@ export interface CreateCoachAccountInput {
   firstName: string;
   lastName: string;
   email: string;
-  role: "admin" | "assistant";
+  role: "admin" | "assistant" | "collaborateur";
   speciality: string;
   /** Prénom/nom (ou email) de l'admin connecté à l'origine de l'invitation, pour l'email envoyé. */
   requestingUserName: string;
@@ -86,10 +86,14 @@ export async function createCoachAccount(
   const { error: profileError } = await supabase.from("profiles").insert({
     user_id: authUserId,
     // Toujours "coach" ici, jamais "admin" : "admin" reste réservé au
-    // compte principal existant. Sans incidence sur les droits réels
-    // (is_coach_or_admin() traite coach et admin de façon identique) — le
-    // champ `role` choisi dans le formulaire (Admin/Assistant) n'alimente
-    // que `coaches.role`, un libellé d'organisation, jamais `profiles.role`.
+    // compte principal existant. Le champ `role` choisi dans le formulaire
+    // (Admin / Coach autonome / Collaborateur) n'alimente que
+    // `coaches.role`, JAMAIS `profiles.role` — c'est la décision P13-B :
+    // sept gardes applicatives testent `profiles.role === "coach"` (voir
+    // lib/api/authz.ts, lib/supabase/guards.ts, lib/stripe/return-routes.ts),
+    // y ajouter une quatrième valeur les aurait toutes fait basculer d'un
+    // coup. Depuis P13-B, `coaches.role` n'est plus un simple libellé : il
+    // décide du périmètre réel, côté RLS comme côté API.
     role: "coach",
     first_name: input.firstName,
     last_name: input.lastName,

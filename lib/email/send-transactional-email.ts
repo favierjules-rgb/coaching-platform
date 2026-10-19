@@ -48,6 +48,23 @@ export interface SendTransactionalEmailInput {
    * — voir lib/stripe/webhook-handlers.ts).
    */
   idempotencyKey?: string;
+  /**
+   * Fiche staff à l'origine de l'envoi, journalisée dans
+   * `email_logs.sent_by_coach_id` — c'est elle qui cloisonne le journal.
+   *
+   * ⚠️ RÉSOLUE CÔTÉ SERVEUR, DEPUIS LA SESSION DE L'APPELANT, JAMAIS REÇUE DU
+   * NAVIGATEUR. Les routes `app/api/email/*` disposent déjà de deux clients :
+   * la session (`createSupabaseServerClient`) pour autoriser, et le service
+   * role (`createSupabaseAdminClient`) pour travailler. L'auteur se lit sur la
+   * PREMIÈRE, par `public.current_staff_id()` qui est SECURITY DEFINER et ne
+   * rend que la fiche de l'appelant. Un `coachId` transmis dans le corps de la
+   * requête serait déclaratif, donc faux par construction.
+   *
+   * `null` ou absent = envoi SYSTÈME (webhook Stripe, cron de rappel,
+   * provisionnement) : la ligne reste sans auteur, donc lisible par
+   * l'administrateur seul.
+   */
+  sentByCoachId?: string | null;
 }
 
 export interface SendTransactionalEmailResult {
@@ -125,6 +142,7 @@ export async function sendTransactionalEmail(
     related_entity_type: input.relatedEntityType ?? null,
     related_entity_id: input.relatedEntityId ?? null,
     metadata: input.metadata ?? {},
+    sent_by_coach_id: input.sentByCoachId ?? null,
   });
   devWarn("sendTransactionalEmail (insert pending)", insertError);
 

@@ -377,12 +377,28 @@ function corpsDesEffets(source: string): string[] {
   });
 
   await test("12. erreur d'affectation → pas de confirmation (la modale reste ouverte)", async () => {
-    const { ok } = await terminerAssignation([], ["eleve-gaelle"], () => false);
+    const { ok, echec } = await terminerAssignation([], ["eleve-gaelle"], () => false);
     assert.equal(ok, false, "échec remonté — jamais avalé");
-    // Le handler ne confirme que si ok, sinon message d'erreur et modale ouverte.
-    assert.ok(/if \(ok\) \{\s*\n?\s*setConfirmed\(true\);\s*\n?\s*\} else \{\s*\n?\s*setSaveFailed\(true\);/.test(sourceModale),
-      "échec → setSaveFailed, la modale ne se ferme pas");
-    assert.ok(/saveFailed && \(/.test(sourceModale), "message d'erreur visible");
+    // ⚠️ `setSaveFailed` A ÉTÉ REMPLACÉ PAR `setEchecSauvegarde`, et le contrôle
+    // s'est RESSERRÉ au passage (P13-B, gestion applicative du refus) : le
+    // booléen « ça a raté » ne pouvait pas distinguer un refus de droits d'une
+    // panne réseau, et la modale conseillait « réessaie » à un collaborateur que
+    // la base refusera toujours. L'état mémorise désormais LE MOTIF.
+    //
+    // Ce qui est vérifié ici reste exactement la garantie d'origine — pas de
+    // confirmation sans `ok` — plus deux exigences nouvelles : le motif est
+    // conservé, et il ne peut pas valoir `null` (ce qui n'afficherait aucun
+    // message et laisserait la modale muette).
+    assert.equal(echec, "technique", "un `false` sans nature lue reste un échec technique");
+    assert.ok(/if \(ok\) \{\s*\n?\s*setConfirmed\(true\);\s*\n?\s*\} else \{/.test(sourceModale),
+      "la confirmation reste conditionnée au seul `ok`");
+    assert.ok(/setEchecSauvegarde\(echec \?\? "technique"\)/.test(sourceModale),
+      "échec → le motif est mémorisé, et jamais nul : la modale ne se ferme pas et dit pourquoi");
+    assert.ok(!/setConfirmed\(true\)[\s\S]{0,80}setEchecSauvegarde/.test(sourceModale.replace(/if \(ok\)[\s\S]*?\}\);/, "")),
+      "aucun chemin ne confirme ET signale un échec");
+    assert.ok(/\{echecSauvegarde && \(/.test(sourceModale), "message d'erreur visible");
+    assert.ok(/messageEchecAffectation\(echecSauvegarde\)/.test(sourceModale),
+      "et il est choisi selon le motif, au lieu d'un texte unique pour toutes les causes");
   });
 
   await test("13. deux écritures async sont TOUTES attendues avant le résultat", async () => {

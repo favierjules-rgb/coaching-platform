@@ -27,8 +27,25 @@ export interface AppointmentEmailContext {
   meetingUrl: string;
   studentFirstName: string;
   studentEmail: string;
-  coachName: string;
-  coachEmail: string;
+  /**
+   * Coordonnées de l'organisateur — FACULTATIVES, et ignorées par l'envoi.
+   *
+   * `POST /api/email/appointment-notification` relit le rendez-vous ET le
+   * coach principal en base avec le client service role
+   * (`getPrimaryCoachInfo`), puis compose l'email et le .ics à partir de
+   * CELA : seul `appointmentId` quitte le navigateur (voir
+   * `notifyAppointmentNotificationRoute` ci-dessous). Ces deux champs ne
+   * servaient donc à rien, et l'espace admin lisait la table `coaches` dans
+   * le navigateur uniquement pour les remplir — une lecture que la RLS
+   * réserve désormais à l'administrateur (`is_admin()`), donc vide pour un
+   * assistant comme pour un collaborateur.
+   *
+   * Ils restent déclarés pour l'espace ÉLÈVE, qui affiche réellement le nom
+   * de son coach (obtenu par la RPC `get_my_coach_public_profile`, sans
+   * jamais lire `coaches`).
+   */
+  coachName?: string;
+  coachEmail?: string;
 }
 
 export interface EmailSendResult {

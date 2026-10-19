@@ -10,6 +10,8 @@ import { PrimaryButton } from "@/components/admin/Modal";
 import { useAdminData } from "@/hooks/useAdminData";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { createProgram as createProgramSupabase } from "@/lib/supabase/programs";
+import { MESSAGE_PUBLICATION_RESERVEE, peutPublierProgramme } from "@/lib/droit-publication-programme";
+import { useStaffContext } from "@/hooks/useStaffContext";
 
 const levelOptions = [
   { value: "Débutant", label: "Débutant" },
@@ -84,6 +86,19 @@ export default function NewProgramPage() {
   const { createProgram } = useAdminData();
 
   const [pole, setPole] = useState<ProgramPole | null>(null);
+  /*
+   * ⚠️ LE PÔLE « HOME PAGE » EST UNE PUBLICATION ET UNE MISE EN VENTE. Il
+   * écrit `is_public = true` et rattache une offre payante : réservé à
+   * l'administrateur. Ce masquage N'EST PAS la protection — le déclencheur
+   * `programs_publication_reservee_admin` (migration 20261020090000) lève
+   * `42501` sur toute tentative, formulaire contourné ou non, et
+   * `/api/admin/subscription-templates` exige déjà `requireAdmin()`. Il évite
+   * seulement de proposer à un coach un parcours dont la dernière étape
+   * échouerait.
+   */
+  const staff = useStaffContext();
+  const publicationAutorisee = peutPublierProgramme(staff);
+  const polesVisibles = poles.filter(({ id }) => id !== "public" || publicationAutorisee);
   const [name, setName] = useState("");
   const [goal, setGoal] = useState("");
   const [level, setLevel] = useState("Intermédiaire");
@@ -117,7 +132,7 @@ export default function NewProgramPage() {
     // achète ce programme précis paie bien le Product Stripe de ce programme
     // précis.
     let publicSubscriptionTemplateId: string | null = null;
-    if (pole === "public" && accessChoice === "__new__") {
+    if (pole === "public" && accessChoice === "__new__" && publicationAutorisee) {
       try {
         const response = await fetch("/api/admin/subscription-templates", {
           method: "POST",
@@ -152,7 +167,11 @@ export default function NewProgramPage() {
       status: "brouillon" as const,
       sessions: [],
       programMode: pole === "groupe" ? ("groupe" as const) : ("individuel" as const),
-      isPublic: pole === "public",
+      // ⚠️ `publicationAutorisee` EST RÉÉVALUÉ ICI, et pas seulement à
+      // l'affichage : un état React forcé pourrait porter `pole === "public"`
+      // sans que la carte ait jamais été rendue. La base refuserait de toute
+      // façon en 42501 ; autant ne pas émettre la requête.
+      isPublic: pole === "public" && publicationAutorisee,
       publicSubscriptionTemplateId,
     };
 
@@ -188,7 +207,7 @@ export default function NewProgramPage() {
         </div>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          {poles.map(({ id, icon: Icon, title, badge, bullets, cta }) => (
+          {polesVisibles.map(({ id, icon: Icon, title, badge, bullets, cta }) => (
             <div key={id} className="flex flex-col rounded-card border border-border bg-card p-6 shadow-soft transition-colors hover:border-border-strong">
               <div className="mb-6 flex h-28 items-center justify-center rounded-panel border border-border bg-surface-soft/50">
                 <Icon size={32} className="text-primary" />
@@ -217,6 +236,12 @@ export default function NewProgramPage() {
             </div>
           ))}
         </div>
+
+        {/* Dire pourquoi un pôle manque vaut mieux que le faire disparaître
+            sans un mot : le coach sait à qui s'adresser. */}
+        {!publicationAutorisee && (
+          <p className="mt-6 text-sm text-muted-foreground">{MESSAGE_PUBLICATION_RESERVEE}</p>
+        )}
       </div>
     );
   }
