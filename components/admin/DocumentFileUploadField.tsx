@@ -34,7 +34,12 @@ function acceptHint(type: DocumentType): string {
 }
 
 interface DocumentFileUploadFieldProps {
-  /** Id (déjà généré ou réel) sous lequel le fichier est rangé dans le bucket : `<documentId>/<timestamp>-<nom>`. */
+  /**
+   * Id (déjà généré ou réel) du document. Le fichier est rangé dans
+   * `<fiche_coach>/<documentId>/<horodatage>-<nom>` : le propriétaire est le
+   * PREMIER segment, résolu en base par `uploadDocumentFile` et vérifié par la
+   * policy Storage. Ce composant ne choisit pas le propriétaire.
+   */
   documentId: string;
   type: DocumentType;
   /** Fichier déjà uploadé (édition) — affiché avec une option "Remplacer". */

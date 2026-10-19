@@ -2212,6 +2212,13 @@ export interface Database {
       booking_settings: {
         Row: {
           id: string;
+          /**
+           * Coach propriétaire de ces réglages (migration 20261022090000).
+           * NULL = réglage par défaut du cabinet, géré par l'administrateur.
+           * Jamais envoyé par le client : posé par le déclencheur
+           * `poser_proprietaire_staff`.
+           */
+          coach_id: string | null;
           min_lead_minutes: number;
           max_days_ahead: number;
           default_duration_minutes: number;
@@ -2220,6 +2227,7 @@ export interface Database {
         };
         Insert: {
           id?: string;
+          coach_id?: string | null;
           min_lead_minutes?: number;
           max_days_ahead?: number;
           default_duration_minutes?: number;
@@ -2228,6 +2236,7 @@ export interface Database {
         };
         Update: {
           id?: string;
+          coach_id?: string | null;
           min_lead_minutes?: number;
           max_days_ahead?: number;
           default_duration_minutes?: number;
@@ -2511,6 +2520,12 @@ export interface Database {
           related_entity_id: string | null;
           error_message: string | null;
           metadata: Record<string, unknown>;
+          /**
+           * Fiche staff à l'origine de l'envoi (migration 20261022090000).
+           * NULL = envoi système ou administrateur. Résolue CÔTÉ SERVEUR
+           * depuis la session de l'appelant, jamais reçue du navigateur.
+           */
+          sent_by_coach_id: string | null;
           sent_at: string | null;
           created_at: string;
         };
@@ -2526,6 +2541,7 @@ export interface Database {
           related_entity_id?: string | null;
           error_message?: string | null;
           metadata?: Record<string, unknown>;
+          sent_by_coach_id?: string | null;
           sent_at?: string | null;
           created_at?: string;
         };
@@ -2541,6 +2557,7 @@ export interface Database {
           related_entity_id?: string | null;
           error_message?: string | null;
           metadata?: Record<string, unknown>;
+          sent_by_coach_id?: string | null;
           sent_at?: string | null;
           created_at?: string;
         };

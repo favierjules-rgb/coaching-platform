@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { AlertTriangle, CheckCircle, RotateCcw, ShieldCheck, Trash2 } from "lucide-react";
+import { AlertTriangle, CheckCircle, ShieldCheck, Trash2 } from "lucide-react";
 
 import { Field, SelectField } from "@/components/admin/AdminFormFields";
 import { AdminSection } from "@/components/admin/AdminSection";
@@ -24,7 +24,7 @@ const statusOptions = [
 ];
 
 export default function AdminSettingsPage() {
-  const { state, updateCoachSettings, resetAdminData } = useAdminData();
+  const { state, updateCoachSettings } = useAdminData();
   const { coachSettings } = state;
   const { coaches, currentUserId, refetch: refetchCoaches } = useSupabaseCoaches();
   const { resumes: resumesDroits, recharger: rechargerDroits } = useResumesDroits();
@@ -126,12 +126,6 @@ export default function AdminSettingsPage() {
     const eleves = resume?.nbEleves ?? 0;
     const partEleves = eleves === 0 ? "aucun élève affecté" : `${eleves} élève${eleves > 1 ? "s" : ""} affecté${eleves > 1 ? "s" : ""}`;
     return `${categories.length === 0 ? AUCUN_ACCES_LABEL : categories.join(" · ")} — ${partEleves}`;
-  }
-
-  function handleReset() {
-    if (window.confirm("Réinitialiser toutes les données de test admin (élèves, programmes, plans, documents, retours) ? Cette action efface le localStorage.")) {
-      resetAdminData();
-    }
   }
 
   return (
@@ -251,25 +245,21 @@ export default function AdminSettingsPage() {
           />
         )}
 
-        {/* Zone de test : plus de grand encadré rouge plein cadre (c'était le
-            « halo rouge » perçu à côté de la sidebar) — carte au langage
-            commun, la dangerosité est portée par le titre et le bouton
-            destructifs, pas par un cadre criard. */}
-        <div className="rounded-card border border-border bg-card p-6 shadow-soft">
-          <h2 className="mb-2 font-heading text-sm font-bold uppercase text-destructive">Zone de test</h2>
-          <p className="mb-4 text-sm text-muted-foreground">
-            Réinitialise toutes les données admin mockées (élèves, programmes, plans, documents, retours) et
-            revient aux données de départ. N&apos;affecte pas l&apos;espace élève.
-          </p>
-          <button
-            type="button"
-            onClick={handleReset}
-            className="pressable flex min-h-[44px] items-center gap-2 rounded-control border border-destructive/50 px-4 py-2 text-xs uppercase tracking-widest text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40"
-          >
-            <RotateCcw size={13} aria-hidden="true" />
-            Réinitialiser les données de test
-          </button>
-        </div>
+        {/*
+          ⚠️ LA « ZONE DE TEST » A ÉTÉ RETIRÉE DE L'INTERFACE, et il faut dire
+          exactement ce qu'elle faisait pour qu'on ne la croie pas plus
+          dangereuse qu'elle n'était : son bouton appelait `resetAdminData()`,
+          qui efface la clé `localStorage` du jeu de données MOCKÉ du
+          navigateur. Aucune route API, aucune action serveur, aucune ligne de
+          la base — vérifié : `resetAdminData` n'est défini qu'une fois, dans
+          hooks/useAdminData.ts, et n'était appelé que d'ici.
+
+          Elle disparaît quand même : un bouton « Réinitialiser les données »
+          dans l'espace d'administration normal est un risque d'interface, et
+          son libellé (« élèves, programmes, plans, documents, retours »)
+          laissait légitimement croire qu'il touchait aux vraies données.
+          La fonction reste dans le hook, sans aucun point d'entrée.
+        */}
       </div>
     </div>
   );

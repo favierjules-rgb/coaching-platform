@@ -6,6 +6,7 @@ import {
   composeAppointmentCreatedStudentEmail,
 } from "@/lib/email/templates";
 import { sendTransactionalEmail, wasEmailRecentlySent } from "@/lib/email/send-transactional-email";
+import { resoudreAuteurEnvoi } from "@/lib/email/auteur-envoi";
 import { buildCancellationIcs, buildConfirmationIcs, type IcsAppointmentInput } from "@/lib/ics";
 import { getCurrentUser, getCurrentUserRole } from "@/lib/supabase/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -48,6 +49,15 @@ export async function POST(request: Request) {
   }
 
   const adminSupabase = createSupabaseAdminClient();
+
+  /*
+   * ⚠️ L'AUTEUR DE L'ENVOI SE LIT SUR LA SESSION, PAS DANS LE CORPS DE LA
+   * REQUÊTE. `current_staff_id()` est SECURITY DEFINER et ne rend que la fiche
+   * de l'appelant : c'est ce qui cloisonne `email_logs`. `null` pour un
+   * appelant sans fiche staff — l'envoi est alors journalisé comme système,
+   * lisible par l'administrateur seul.
+   */
+  const auteurEnvoi = await resoudreAuteurEnvoi(sessionSupabase);
   if (!adminSupabase) {
     return NextResponse.json({ error: "Client Supabase service role indisponible." }, { status: 503 });
   }
@@ -133,6 +143,7 @@ export async function POST(request: Request) {
           isReschedule,
         });
     const result = await sendTransactionalEmail(adminSupabase, {
+    sentByCoachId: auteurEnvoi,
       emailType,
       recipientEmail: student.email,
       recipientUserId: student.userId,
@@ -164,6 +175,7 @@ export async function POST(request: Request) {
           isReschedule,
         });
     const result = await sendTransactionalEmail(adminSupabase, {
+    sentByCoachId: auteurEnvoi,
       emailType,
       recipientEmail: coach.email,
       subject: email.subject,

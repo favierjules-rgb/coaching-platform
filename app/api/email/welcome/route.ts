@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { composeWelcomeEmail } from "@/lib/email/templates";
 import { sendTransactionalEmail, wasEmailAlreadySent } from "@/lib/email/send-transactional-email";
+import { resoudreAuteurEnvoi } from "@/lib/email/auteur-envoi";
 import { getCurrentStudentId } from "@/lib/supabase/current-student";
 import { getCurrentUser, getCurrentUserRole } from "@/lib/supabase/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -59,6 +60,15 @@ export async function POST(request: Request) {
   // pour un rôle authentifié (voir supabase/schema.sql), seul le service
   // role peut y écrire.
   const supabase = createSupabaseAdminClient();
+
+  /*
+   * ⚠️ L'AUTEUR DE L'ENVOI SE LIT SUR LA SESSION, PAS DANS LE CORPS DE LA
+   * REQUÊTE. `current_staff_id()` est SECURITY DEFINER et ne rend que la fiche
+   * de l'appelant : c'est ce qui cloisonne `email_logs`. `null` pour un
+   * appelant sans fiche staff — l'envoi est alors journalisé comme système,
+   * lisible par l'administrateur seul.
+   */
+  const auteurEnvoi = await resoudreAuteurEnvoi(sessionSupabase);
   if (!supabase) {
     return NextResponse.json({ error: "Client Supabase service role indisponible." }, { status: 503 });
   }
@@ -81,6 +91,7 @@ export async function POST(request: Request) {
   const email = composeWelcomeEmail({ firstName: student.firstName, dashboardUrl: `${appUrl}/dashboard` });
 
   const result = await sendTransactionalEmail(supabase, {
+    sentByCoachId: auteurEnvoi,
     emailType: "welcome",
     recipientEmail: student.email,
     recipientUserId: student.userId,

@@ -121,7 +121,9 @@
     "20261018090000_p13b_rubriques_globales_collaborateur.sql",
     "20261019090000_p13b_admin_reel_categories.sql",
     "20261020090000_programmes_prives_par_coach_et_publication_admin.sql",
-    "20261021090000_subscription_templates_policies_authenticated.sql"
+    "20261021090000_subscription_templates_policies_authenticated.sql",
+    "20261022090000_espace_coach_isole_agenda_documents_emails.sql",
+    "20261023090000_storage_documents_proprietaire_dans_le_chemin.sql"
   ],
   "garanties_de_contenu": {
     "insert_de_donnees_metier": 0,

@@ -119,9 +119,21 @@ test("B2. et le RESTE de la page n'a pas bougé", () => {
    * ce lot ne prétend pas le contraire, il enlève seulement une ligne.
    */
   const page = lire("app/admin/parametres/page.tsx");
-  for (const attendu of ["Informations coach", "Nom du coach", "Statut du site", "handleReset", "resetAdminData"]) {
+  for (const attendu of ["Informations coach", "Nom du coach", "Statut du site"]) {
     assert.ok(page.includes(attendu), `${attendu} doit rester`);
   }
+  /*
+   * ⚠️ `handleReset` ET `resetAdminData` NE SONT PLUS EXIGÉS ICI, et il faut
+   * dire pourquoi plutôt que de les retirer en silence : le lot
+   * 20261022090000 a supprimé la section « Zone de test » de l'interface
+   * d'administration, à la demande explicite du rapport. Ce contrôle
+   * garantissait que le retrait de la mention de version n'avait rien
+   * emporté d'autre ; il ne doit pas devenir le gardien d'un panneau qu'on a
+   * décidé de retirer. L'ABSENCE est désormais mesurée, et plus précisément,
+   * par scripts/tests/espace-coach-isolation.mts (contrôle D3).
+   */
+  assert.ok(!/handleReset|resetAdminData/.test(page.replace(/\{\/\*[\s\S]*?\*\/\}/g, "")),
+    "la zone de test ne doit pas être réapparue");
   assert.ok(/mockVersion: string;/.test(lire("types/index.ts")),
     "le modèle de données n'est pas touché — la page est toujours mockée, et on ne le cache pas");
 });

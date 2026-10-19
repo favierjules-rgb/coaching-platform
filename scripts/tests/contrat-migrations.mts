@@ -505,6 +505,66 @@ export const MIGRATION_PROGRAMMES_COACH =
 export const MIGRATION_CATALOGUE_POLICIES_AUTHENTICATED =
   "20261021090000_subscription_templates_policies_authenticated.sql";
 
+/**
+ * 20261022090000 — L'ESPACE COACH DEVIENT RÉELLEMENT INDÉPENDANT.
+ *
+ * ⚠️ LA CAUSE ÉTAIT `est_staff_global()`, qui rend VRAI pour un coach
+ * autonome (`coaches.role = 'assistant'`). Toutes les policies
+ * `…_manage_staff_*` de l'agenda, des réglages de réservation et du journal
+ * d'emails commençaient par cette branche : un coach lisait, modifiait et
+ * SUPPRIMAIT les lignes de l'administrateur. Mesuré avant : suppression d'une
+ * disponibilité de l'administrateur depuis le compte coach = 1 ligne, et elle
+ * avait disparu.
+ *
+ * S'y ajoutaient quatre défauts de modèle, tous mesurés :
+ *   · `coach_availabilities.coach_id` et `coach_unavailabilities.coach_id`
+ *     nullables, sans défaut ni déclencheur, et jamais envoyés par
+ *     l'application : toutes les lignes sans propriétaire ;
+ *   · `booking_settings` sans colonne de propriétaire : UNE ligne pour tout
+ *     le cabinet ;
+ *   · `documents_select_global_or_assigned` sans aucune condition sur
+ *     l'appelant dans sa branche « visibilité globale » — c'est par là qu'un
+ *     nouveau coach voyait les 17 documents de l'administrateur ;
+ *   · `email_logs` sans colonne d'auteur : rien à filtrer ;
+ *   · les policies Storage du seau `documents` sur `is_coach_or_admin()` :
+ *     le fichier restait téléchargeable même la ligne masquée ;
+ *   · et surtout les RPC `SECURITY DEFINER` du calendrier, hors RLS, qui
+ *     autorisaient sur l'étiquette `assistant` (`update_coach_event_atomic`)
+ *     ou balayaient le cabinet entier (`get_busy_ranges`,
+ *     `calendar_has_conflict`).
+ *
+ * Additive : aucune donnée réattribuée. `coach_id` NULL reste NULL, donc
+ * réservé à l'administrateur, jusqu'à décision métier.
+ */
+export const MIGRATION_ESPACE_COACH_ISOLE =
+  "20261022090000_espace_coach_isole_agenda_documents_emails.sql";
+
+/**
+ * 20261023090000 — LE PROPRIÉTAIRE PASSE DANS LE CHEMIN DE STOCKAGE.
+ *
+ * ⚠️ IL RESTAIT UNE PORTE DÉROBÉE, ÉCRITE NOIR SUR BLANC DANS LE LOT
+ * PRÉCÉDENT : les policies d'écriture du seau `documents` laissaient passer
+ * l'opération quand AUCUNE ligne `documents` ne correspondait au chemin. Sans
+ * cette branche, le premier téléversement — qui précède la création de la
+ * ligne — aurait été impossible ; avec elle, un fichier ORPHELIN (ligne
+ * supprimée) redevenait lisible, remplaçable et supprimable par n'importe quel
+ * membre du staff.
+ *
+ * La convention devient `<fiche_coach>/<document_id>/<horodatage>-<nom>` et la
+ * policy compare le PREMIER SEGMENT à `current_staff_id()` résolu en base. Ce
+ * n'est pas faire confiance au chemin : le navigateur propose un emplacement,
+ * la base refuse tout préfixe qui n'est pas celui de l'appelant. Le premier
+ * téléversement passe donc sans ligne, et un orphelin reste à son
+ * propriétaire.
+ *
+ * L'ancienne convention `<document_id>/<nom>` continue d'être lue —
+ * l'identifiant est cherché dans n'importe quel segment —, aucun fichier n'est
+ * déplacé, et un orphelin de l'ancienne forme reste réservé à
+ * l'administrateur : son préfixe n'est la fiche de personne.
+ */
+export const MIGRATION_STORAGE_DOCUMENTS_CHEMIN =
+  "20261023090000_storage_documents_proprietaire_dans_le_chemin.sql";
+
 export const MIGRATIONS_COURSES: readonly string[] = [
   MIGRATION_C2,
   MIGRATION_C3,
@@ -554,17 +614,19 @@ export const MIGRATIONS_APRES_C0_1: readonly string[] = [
   MIGRATION_P13B_ADMIN_CATEGORIES,
   MIGRATION_PROGRAMMES_COACH,
   MIGRATION_CATALOGUE_POLICIES_AUTHENTICATED,
+  MIGRATION_ESPACE_COACH_ISOLE,
+  MIGRATION_STORAGE_DOCUMENTS_CHEMIN,
 ];
 
 /**
  * Le compte attendu — nécessaire, jamais suffisant.
  *
- * 115 = 84 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 30
+ * 117 = 84 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 32
  * migrations nommées dans `MIGRATIONS_APRES_C0_1`. Le point 6 recalcule
  * l'historique à partir de ce nombre : il ne peut pas être remonté seul sans
  * qu'une migration soit nommée en face.
  */
-export const NOMBRE_DE_MIGRATIONS = 115;
+export const NOMBRE_DE_MIGRATIONS = 117;
 
 /**
  * L'empreinte des 79 migrations ANTÉRIEURES à C0.1, dans l'ordre.

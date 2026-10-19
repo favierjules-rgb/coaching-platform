@@ -359,23 +359,86 @@ export async function deleteCoachUnavailability(supabase: TypedSupabaseClient, i
 
 /* ─── Réglages de réservation ─── */
 
+/**
+ * Réglages de réservation de L'APPELANT.
+ *
+ * ⚠️ IL N'Y EN AVAIT QU'UN, POUR TOUT LE MONDE. `booking_settings` ne portait
+ * aucune colonne de propriétaire : la première ligne créée servait au cabinet
+ * entier, et un coach qui changeait son délai de prévenance changeait celui de
+ * l'administrateur. La migration 20261022090000 ajoute `coach_id` (nullable)
+ * et borne les policies ; cette fonction choisit la bonne ligne.
+ *
+ * La RLS ne laisse voir que SA ligne et le DÉFAUT DU CABINET (`coach_id`
+ * NULL) : on préfère donc la sienne, et on retombe sur le défaut tant qu'il
+ * n'en a pas. Aucun filtre `coach_id` envoyé depuis le navigateur — ce serait
+ * déclaratif, donc faux par construction.
+ */
 export async function getBookingSettings(supabase: TypedSupabaseClient): Promise<BookingSettings> {
-  const { data, error } = await supabase.from("booking_settings").select("*").order("created_at", { ascending: true }).limit(1).maybeSingle();
+  const { data, error } = await supabase
+    .from("booking_settings")
+    .select("*")
+    .order("created_at", { ascending: true });
   devWarn("getBookingSettings", error);
-  return data ? mapBookingSettingsRow(data) : DEFAULT_BOOKING_SETTINGS;
+  const lignes = data ?? [];
+  const sienne = lignes.find((ligne) => ligne.coach_id !== null);
+  const defaut = lignes.find((ligne) => ligne.coach_id === null);
+  const retenue = sienne ?? defaut ?? null;
+  return retenue ? mapBookingSettingsRow(retenue) : DEFAULT_BOOKING_SETTINGS;
 }
 
-export async function updateBookingSettings(
+/**
+ * Enregistre les réglages de réservation de l'appelant.
+ *
+ * ⚠️ TROIS CAS, ET LE PLUS IMPORTANT EST LE TROISIÈME.
+ *   · il a déjà SA ligne              → on la met à jour ;
+ *   · c'est l'administrateur          → il met à jour le DÉFAUT DU CABINET,
+ *                                       exactement comme avant ce lot ;
+ *   · c'est un coach sans ligne       → on CRÉE la sienne, à partir des
+ *                                       valeurs du défaut.
+ *
+ * ⚠️ `coach_id` N'EST PAS ENVOYÉ. Le déclencheur `poser_proprietaire_staff`
+ * le pose à `current_staff_id()`, et le `with check` de la policy refuse toute
+ * autre valeur : un coach ne peut pas créer les réglages d'un autre, même en
+ * forgeant la requête PostgREST.
+ */
+export async function saveMyBookingSettings(
   supabase: TypedSupabaseClient,
-  id: string,
   partial: Partial<Omit<BookingSettings, "id">>,
 ): Promise<boolean> {
-  const update: Database["public"]["Tables"]["booking_settings"]["Update"] = { updated_at: new Date().toISOString() };
-  if (partial.minLeadMinutes !== undefined) update.min_lead_minutes = partial.minLeadMinutes;
-  if (partial.maxDaysAhead !== undefined) update.max_days_ahead = partial.maxDaysAhead;
-  if (partial.defaultDurationMinutes !== undefined) update.default_duration_minutes = partial.defaultDurationMinutes;
-  const { error } = await supabase.from("booking_settings").update(update).eq("id", id);
-  devWarn("updateBookingSettings", error);
+  const { data, error: lectureError } = await supabase
+    .from("booking_settings")
+    .select("*")
+    .order("created_at", { ascending: true });
+  devWarn("saveMyBookingSettings (lecture)", lectureError);
+  const lignes = data ?? [];
+  const sienne = lignes.find((ligne) => ligne.coach_id !== null) ?? null;
+  const defaut = lignes.find((ligne) => ligne.coach_id === null) ?? null;
+
+  const champs: Database["public"]["Tables"]["booking_settings"]["Update"] = { updated_at: new Date().toISOString() };
+  if (partial.minLeadMinutes !== undefined) champs.min_lead_minutes = partial.minLeadMinutes;
+  if (partial.maxDaysAhead !== undefined) champs.max_days_ahead = partial.maxDaysAhead;
+  if (partial.defaultDurationMinutes !== undefined) champs.default_duration_minutes = partial.defaultDurationMinutes;
+
+  if (sienne) {
+    const { error } = await supabase.from("booking_settings").update(champs).eq("id", sienne.id);
+    devWarn("saveMyBookingSettings (sienne)", error);
+    return !error;
+  }
+
+  const { data: estAdmin } = await supabase.rpc("is_admin");
+  if (estAdmin === true && defaut) {
+    const { error } = await supabase.from("booking_settings").update(champs).eq("id", defaut.id);
+    devWarn("saveMyBookingSettings (défaut du cabinet)", error);
+    return !error;
+  }
+
+  const base = defaut ? mapBookingSettingsRow(defaut) : DEFAULT_BOOKING_SETTINGS;
+  const { error } = await supabase.from("booking_settings").insert({
+    min_lead_minutes: partial.minLeadMinutes ?? base.minLeadMinutes,
+    max_days_ahead: partial.maxDaysAhead ?? base.maxDaysAhead,
+    default_duration_minutes: partial.defaultDurationMinutes ?? base.defaultDurationMinutes,
+  });
+  devWarn("saveMyBookingSettings (création)", error);
   return !error;
 }
 

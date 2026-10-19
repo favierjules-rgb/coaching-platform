@@ -262,7 +262,23 @@ begin
   v_hist   := pg_temp.lecture_compte($q$select count(*) from public.coach_unavailabilities
                where id = 'cccccccc-0000-4000-8000-000000000001'$q$);
   perform pg_temp.noter('D', 'D3. l''assistant voit ses deux élèves', v_coachb = 2);
-  perform pg_temp.noter('D', 'D4. l''assistant voit les indisponibilités sans propriétaire', v_hist = 1);
+  /*
+   * ⚠️ CE CONTRÔLE A ÉTÉ INVERSÉ PAR LE LOT 20261022090000, et il faut dire
+   * pourquoi : il mesurait l'ANCIEN comportement, celui qui était le défaut.
+   *
+   * Avant, les policies de l'agenda commençaient par `est_staff_global()`,
+   * qui rend VRAI pour un coach autonome (`coaches.role = 'assistant'`) : il
+   * voyait donc les lignes SANS propriétaire — c'est-à-dire l'agenda
+   * historique de l'administrateur — et il pouvait les supprimer, ce qui a
+   * été rapporté comme « supprimer une disponibilité depuis le compte coach
+   * la supprime aussi côté administrateur ».
+   *
+   * Désormais une ligne sans propriétaire est réservée à l'administrateur
+   * (D2 ci-dessus le mesure toujours). L'assistant ne la voit plus, et c'est
+   * l'assertion qui est renforcée, pas relâchée : on exige maintenant 0 là où
+   * on tolérait 1.
+   */
+  perform pg_temp.noter('D', 'D4. l''assistant ne voit PAS les indisponibilités sans propriétaire (réservées à l''administrateur)', v_hist = 0);
   perform pg_temp.noter('D', 'D5. l''assistant écrit une note de coach sur son élève',
     not pg_temp.ecriture_refusee($q$update public.coach_notes set text = 'maj coach'
       where student_id = 'bbbbbbbb-0000-4000-8000-000000000001'$q$));

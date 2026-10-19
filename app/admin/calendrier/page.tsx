@@ -26,12 +26,11 @@ import {
   deleteCoachAvailability,
   deleteCoachUnavailability,
   getAvailableSlots,
-  getBookingSettings,
   notifyAppointmentCancellation,
   notifyAppointmentConfirmation,
   notifyAppointmentReschedule,
   rescheduleAppointment,
-  updateBookingSettings,
+  saveMyBookingSettings,
   updateCoachAvailability,
   updateCoachEventAtomic,
 } from "@/lib/supabase/appointments";
@@ -406,11 +405,15 @@ export default function AdminCalendrierPage() {
           }
           onUpdateSettings={(partial) =>
             withSupabase(async (supabase) => {
-              const current = supabaseAppointments.bookingSettings.id
-                ? supabaseAppointments.bookingSettings
-                : await getBookingSettings(supabase);
-              if (!current.id) return;
-              await updateBookingSettings(supabase, current.id, partial);
+              /*
+               * ⚠️ PLUS DE RECHERCHE D'IDENTIFIANT ICI. L'ancien code relisait
+               * « la » ligne de réglages et la modifiait par son id — or il n'y
+               * en avait qu'une pour tout le cabinet : un coach écrasait les
+               * réglages de l'administrateur. `saveMyBookingSettings` choisit
+               * la ligne qui appartient à l'appelant, ou crée la sienne, et le
+               * `with check` de la policy refuse toute autre propriété.
+               */
+              await saveMyBookingSettings(supabase, partial);
             })
           }
         />
