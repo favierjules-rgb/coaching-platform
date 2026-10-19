@@ -380,6 +380,68 @@ test("F4. la checklist mesure les orphelins ET le premier téléversement", () =
   assert.ok(/K2 ET K3 TENAIENT DÉJÀ AVANT CE LOT/.test(CHECKLIST));
 });
 
+/* ═════ G — LA GESTION DES COACHS RESTE CELLE DE L'ADMINISTRATEUR ═════ */
+
+test("G1. la page Paramètres ne décide plus « administrateur » sur l'étiquette de la fiche", () => {
+  /*
+   * ⚠️ LA RÉGRESSION SIGNALÉE : « la page Paramètres n'affiche plus que les
+   * informations du coach connecté ». La condition était
+   *
+   *     roleStaff === null || roleStaff === "admin"      // coaches.role
+   *
+   * or `coaches.role` a pour valeur par défaut `'assistant'` en base. La fiche
+   * d'un administrateur créée sans rôle explicite porte donc `assistant`, et
+   * toute la section disparaissait de son écran.
+   *
+   * ⚠️ ET CE N'EST PAS LE COMMIT QU'ON CROYAIT. `git log -S` place cette ligne
+   * dans `8fc530f feat: add collaborator permissions and isolation` ; le
+   * commit `af48f4b` ne touche à la page que pour retirer la « Zone de test ».
+   */
+  const code = PARAMETRES.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  assert.ok(!/roleStaff === "admin"/.test(code),
+    "l'administrateur ne doit pas être reconnu par coaches.role");
+  assert.ok(/gestionDesCoachsVisible\(staff\)/.test(code),
+    "la page doit utiliser la règle pure, testée dans admin-shell-nav");
+  // La règle elle-même se décide sur profiles.role, comme tout le dépôt.
+  const nav = lire("lib/admin-shell-nav.ts");
+  const d = nav.indexOf("export function gestionDesCoachsVisible");
+  const corps = nav.slice(d, nav.indexOf("\n}\n", d));
+  assert.ok(/return droits\.estAdmin;/.test(corps));
+  assert.ok(!/roleStaff/.test(corps), "la règle ne doit pas regarder l'étiquette de la fiche");
+});
+
+test("G2. …et la base, elle, n'a jamais cessé d'accorder cette gestion à l'administrateur", () => {
+  /*
+   * ⚠️ AUCUNE MIGRATION N'EST NÉCESSAIRE POUR CE CORRECTIF, et c'est le point
+   * important : les policies de `coaches` et des tables de droits se décident
+   * toutes sur `is_admin()`, donc sur `profiles.role`. Mesuré en base par la
+   * section L de la checklist — l'administrateur gère les quatre fiches, un
+   * coach n'en lit ni n'en écrit aucune, pas même la sienne.
+   *
+   * Les deux migrations de ce lot ne touchent ni `coaches`, ni
+   * `collaborateur_permissions`, ni `collaborateur_eleves` : on le vérifie
+   * plutôt que de l'affirmer.
+   */
+  for (const migration of [MIGRATION, MIGRATION_SEAU]) {
+    const code = sansCommentaires(migration);
+    assert.ok(!/(alter|create|drop)\s+policy[^;]*on\s+public\.coaches/i.test(code),
+      "aucune policy de coaches ne doit être touchée");
+    assert.ok(!/(alter|create|drop)\s+policy[^;]*collaborateur_/i.test(code),
+      "aucune policy des tables de droits ne doit être touchée");
+  }
+  for (const controle of [
+    "L1. l''administrateur voit les quatre fiches du staff",
+    "L2. le coach B n''en voit AUCUNE, pas même la sienne (P13-B)",
+    "L4. …ni la sienne : les fiches sont gérées par l''administration",
+    "L8. l''administrateur modifie la fiche d''un autre coach",
+    "L11. …et il n''en accorde aucune",
+    "L13. l''administrateur lit les permissions des collaborateurs",
+    "L14. …et le collaborateur lit les SIENNES, et seulement les siennes",
+  ]) {
+    assert.ok(CHECKLIST.includes(controle), `le contrôle « ${controle} » manque à la checklist SQL`);
+  }
+});
+
 /* ═════════════ E — CE QUE LA CHECKLIST SQL DOIT COUVRIR ═════════════ */
 
 test("E1. la checklist mesure les six acteurs et les deux sens", () => {

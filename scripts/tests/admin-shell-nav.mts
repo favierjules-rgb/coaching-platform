@@ -10,6 +10,7 @@ import {
   CATEGORIES_PAR_SECTION_ADMIN,
   FOCUSABLE_SELECTOR,
   bodyOverflowFor,
+  gestionDesCoachsVisible,
   groupeAdminVisible,
   isAdminRouteActive,
   isAnyAdminRouteActive,
@@ -279,6 +280,67 @@ test("navigation : la table des catégories ne contient que des valeurs accordab
     if (href === "/admin") continue;
     assert.ok(href in CATEGORIES_PAR_SECTION_ADMIN, `${href} n'est pas classée`);
   }
+});
+
+/* ═══ LA GESTION DES COACHS : RÉGRESSION « PARAMÈTRES VIDE » ═══ */
+
+test("l'administrateur garde la gestion des coachs, même si sa FICHE est étiquetée assistant", () => {
+  /*
+   * ⚠️ C'EST EXACTEMENT LA RÉGRESSION SIGNALÉE. /admin/parametres décidait sur
+   * `coaches.role` — l'étiquette de la fiche staff — alors que la valeur par
+   * défaut de cette colonne en base est `'assistant'`. La fiche d'un
+   * administrateur créée sans rôle explicite porte donc `assistant`, et toute
+   * la section « Coachs » disparaissait de son écran, alors que la base lui
+   * accordait tout (`coaches_manage_admin_*`, sur `is_admin()`).
+   *
+   * La règle du dépôt est `profiles.role`, donc `estAdmin` — la même que
+   * `requireAdmin()`, `sectionAdminVisible` et `titreDashboard`.
+   */
+  assert.equal(
+    gestionDesCoachsVisible({ chargement: false, estAdmin: true, mecanismeIndisponible: false }),
+    true,
+  );
+});
+
+test("un coach autonome ne voit pas la gestion des coachs", () => {
+  assert.equal(
+    gestionDesCoachsVisible({ chargement: false, estAdmin: false, mecanismeIndisponible: false }),
+    false,
+  );
+});
+
+test("…même si SA fiche est étiquetée admin : la base lui refuserait tout", () => {
+  // Le symétrique du défaut : une fiche `admin` rattachée à un compte dont
+  // `profiles.role` vaut `coach` affichait une section que la RLS laissait
+  // vide. `estAdmin` reste le seul signal.
+  assert.equal(
+    gestionDesCoachsVisible({ chargement: false, estAdmin: false, mecanismeIndisponible: false }),
+    false,
+  );
+});
+
+test("droits indéterminables : la section reste affichée, comme avant P13-B", () => {
+  // Migrations non appliquées, session pas encore réhydratée, réseau coupé :
+  // l'interface ne sait pas. Masquer sur un doute ampute l'administrateur, et
+  // n'ajoute aucune protection — la RLS et requireAdmin() refusent seuls.
+  assert.equal(
+    gestionDesCoachsVisible({ chargement: false, estAdmin: false, mecanismeIndisponible: true }),
+    true,
+  );
+});
+
+test("pendant la lecture des droits, la section est masquée", () => {
+  /*
+   * ⚠️ CHOIX ASSUMÉ, ET DIFFÉRENT DE `sectionAdminVisible`, qui laisse passer
+   * pendant le chargement. Cette section-ci liste les COMPTES DES AUTRES : le
+   * coût d'attendre est une frame pour l'administrateur, pas une rubrique
+   * perdue. Le contenu, lui, resterait vide de toute façon — la RLS ne rend
+   * aucune ligne de `coaches` à un non-administrateur.
+   */
+  assert.equal(
+    gestionDesCoachsVisible({ chargement: true, estAdmin: true, mecanismeIndisponible: false }),
+    false,
+  );
 });
 
 console.log(`\n${passed} réussis, ${failed} échoués`);

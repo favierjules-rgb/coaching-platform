@@ -212,6 +212,50 @@ export function sectionAdminVisible(href: string, droits: DroitsNavigationAdmin)
 }
 
 /**
+ * LA GESTION DES COACHS ET DES COLLABORATEURS EST-ELLE OUVERTE À CET APPELANT ?
+ *
+ * ⚠️ `profiles.role`, JAMAIS L'ÉTIQUETTE DE LA FICHE. C'est la règle de tout
+ * le dépôt — `requireAdmin()` (lib/api/authz.ts), `sectionAdminVisible`,
+ * `titreDashboard`, et en base les policies `coaches_manage_admin_*` et
+ * `collaborateur_*_manage_admin`, qui se décident toutes sur `is_admin()`.
+ *
+ * ⚠️ ET C'EST PRÉCISÉMENT CE QUI MANQUAIT. /admin/parametres décidait sur
+ * `coaches.role` — l'étiquette de la fiche staff — avec
+ * `roleStaff === null || roleStaff === "admin"`. Or `coaches.role` a pour
+ * valeur par défaut `'assistant'` (relevé en base) : la fiche d'un
+ * administrateur créée sans rôle explicite porte donc `assistant`, et toute la
+ * section « Coachs » disparaissait de SON écran — alors que la base, elle, lui
+ * accordait tout. Le symétrique était vrai aussi : une fiche étiquetée `admin`
+ * rattachée à un compte dont `profiles.role` vaut `coach` affichait une section
+ * que la RLS laissait vide.
+ *
+ * ⚠️ CE QUE CETTE FONCTION NE FAIT PAS : accorder quoi que ce soit. La
+ * création, la modification et la suppression d'une fiche passent par
+ * `requireAdmin()` côté route et par les policies `*_manage_admin` côté base.
+ * Masquer ou afficher cette section ne change aucun droit — ça change
+ * seulement si l'administrateur peut travailler.
+ *
+ * Ordre des décisions :
+ *  1. lecture EN COURS → masqué. Contrairement à `sectionAdminVisible`, on ne
+ *     laisse pas passer pendant le chargement : cette section liste les COMPTES
+ *     DES AUTRES, et le coût d'attendre est une frame pour l'administrateur,
+ *     pas une rubrique perdue.
+ *  2. droits INDÉTERMINABLES → affiché. Le mécanisme P13-B ne répond pas
+ *     (migrations absentes, session pas encore réhydratée) : on conserve le
+ *     comportement d'avant P13-B plutôt que d'amputer l'écran sur un doute.
+ *  3. sinon → `estAdmin`, et lui seul.
+ */
+export function gestionDesCoachsVisible(droits: {
+  readonly chargement: boolean;
+  readonly estAdmin: boolean;
+  readonly mecanismeIndisponible: boolean;
+}): boolean {
+  if (droits.chargement) return false;
+  if (droits.mecanismeIndisponible) return true;
+  return droits.estAdmin;
+}
+
+/**
  * LE TITRE DU TABLEAU DE BORD, selon le rôle RÉELLEMENT authentifié.
  *
  * ⚠️ NI L'URL NI LE TITRE EXISTANT NE SERVENT À DÉCIDER. `/admin` est la même

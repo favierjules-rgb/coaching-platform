@@ -21,6 +21,7 @@ const PRIVATE_PREFIXES = [
   "/inscription",
   "/acces-refuse",
   "/acces-limite",
+  "/acces-indisponible",
   // Écrans autonomes (Logo centré + carte, sans nav marketing) oubliés de
   // cette liste (audit design juillet 2026, Lot 1) : ils recevaient à tort
   // le Header/Footer marketing en plus de leur propre layout, avec un

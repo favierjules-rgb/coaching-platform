@@ -9,6 +9,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getCurrentStudentId } from "@/lib/supabase/current-student";
 import { getOnboardingCompleted } from "@/lib/supabase/onboarding";
 import { getStudentAccessStatus } from "@/lib/supabase/student-access";
+import { destinationRefusAcces } from "@/lib/stripe/access-status";
 import type { Database } from "@/types/supabase";
 
 /**
@@ -225,7 +226,10 @@ export async function requireActiveStudentAccess(): Promise<void> {
   }
   const status = await getStudentAccessStatus(supabase, studentId);
   if (!status.allowed) {
-    redirect("/acces-limite");
+    // ⚠️ DEUX REFUS, DEUX ÉCRANS. Une panne de lecture ne doit pas affirmer
+    // à l'élève qu'aucune formule ne lui est attribuée — voir
+    // `destinationRefusAcces`.
+    redirect(destinationRefusAcces(status));
   }
 }
 
@@ -261,7 +265,7 @@ export async function requireEntrainementAccess(): Promise<void> {
   }
   const status = await getStudentAccessStatus(supabase, studentId);
   if (!status.allowed) {
-    redirect("/acces-limite");
+    redirect(destinationRefusAcces(status));
   }
 }
 

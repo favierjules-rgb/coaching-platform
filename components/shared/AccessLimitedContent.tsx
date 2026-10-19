@@ -46,6 +46,20 @@ export function AccessLimitedContent() {
     >
       {!access.ready ? (
         <Loader libelle="Chargement…" variante="ligne" />
+      ) : access.status?.reason === "indetermine" ? (
+        /*
+         * ⚠️ DERNIER CHEMIN PAR LEQUEL LE MENSONGE POUVAIT PASSER. Les gardes
+         * envoient désormais une panne de lecture sur /acces-indisponible,
+         * mais cette page reste atteignable en tapant son URL. Tant que les
+         * droits n'ont pas pu être lus, on n'affirme RIEN sur la formule : on
+         * renvoie vers l'écran d'indisponibilité.
+         */
+        <Link
+          href="/acces-indisponible"
+          className="border border-border px-4 py-3 text-center text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+        >
+          Vos droits n&apos;ont pas pu être vérifiés — réessayer
+        </Link>
       ) : access.assignedTemplate ? (
         <button
           type="button"

@@ -774,6 +774,142 @@ begin
 end $$;
 
 
+-- ── L. LA GESTION DES COACHS ET DES COLLABORATEURS ────────────────────────
+-- ⚠️ POURQUOI CETTE SECTION EXISTE. Une régression a été signalée : « dans
+-- l'espace admin, la page Paramètres n'affiche plus que les informations du
+-- coach connecté ». La cause était côté INTERFACE — la page décidait
+-- « administrateur » sur `coaches.role` (étiquette de la fiche, valeur par
+-- défaut `'assistant'`) au lieu de `profiles.role`. La base, elle, n'avait
+-- jamais cessé d'accorder la gestion à l'administrateur.
+--
+-- Ces contrôles figent les deux moitiés de la règle, pour qu'une correction
+-- d'interface ne puisse plus être confondue avec un relâchement en base :
+-- l'administrateur gère tout le staff, un coach ne gère RIEN — pas même sa
+-- propre fiche, dont la modification est réservée à l'administration.
+do $$
+declare
+  u_adm    constant uuid := '00000000-0000-4000-8000-00000000e001';
+  u_a      constant uuid := '00000000-0000-4000-8000-00000000e002';
+  u_b      constant uuid := '00000000-0000-4000-8000-00000000e003';
+  u_collab constant uuid := '00000000-0000-4000-8000-00000000e004';
+  c_a      constant uuid := '00000000-0000-4000-8000-00000000e102';
+  c_b      constant uuid := '00000000-0000-4000-8000-00000000e103';
+  c_collab constant uuid := '00000000-0000-4000-8000-00000000e104';
+begin
+  -- L1/L2 — la LECTURE du personnel.
+  perform pg_temp.noter('L','L1. l''administrateur voit les quatre fiches du staff',
+    pg_temp.lire(u_adm,'select count(*) from public.coaches') = 4);
+  perform pg_temp.noter('L','L2. le coach B n''en voit AUCUNE, pas même la sienne (P13-B)',
+    pg_temp.lire(u_b,'select count(*) from public.coaches') = 0);
+
+  -- L3 à L6 — et il n'en ÉCRIT aucune.
+  perform pg_temp.noter('L','L3. le coach B ne modifie pas la fiche du coach A',
+    pg_temp.ecrit(u_b, format($q$update public.coaches set name='pirate' where id=%L$q$, c_a)) <= 0);
+  perform pg_temp.noter('L','L4. …ni la sienne : les fiches sont gérées par l''administration',
+    pg_temp.ecrit(u_b, format($q$update public.coaches set role='admin' where id=%L$q$, c_b)) <= 0);
+  perform pg_temp.noter('L','L5. …et le nom du coach A n''a pas bougé',
+    (select name from public.coaches where id = c_a) = 'EC CoachA');
+  perform pg_temp.noter('L','L6. le coach B ne supprime aucune fiche',
+    pg_temp.ecrit(u_b, format($q$delete from public.coaches where id=%L$q$, c_a)) <= 0);
+  perform pg_temp.noter('L','L7. …et il n''en crée aucune',
+    pg_temp.ecrit(u_b, $q$insert into public.coaches (user_id, email, name, role, status, specialty)
+      values (null,'intrus@test.local','Intrus','assistant','actif','-')$q$) = -1);
+
+  -- L8/L9 — l'administrateur, lui, gère tout le staff. C'est ce que la page
+  -- Paramètres doit permettre, et ce que la régression masquait.
+  perform pg_temp.noter('L','L8. l''administrateur modifie la fiche d''un autre coach',
+    pg_temp.ecrit(u_adm, format($q$update public.coaches set specialty='maj admin' where id=%L$q$, c_a)) = 1);
+  perform pg_temp.noter('L','L9. …et il crée une fiche',
+    pg_temp.ecrit(u_adm, $q$insert into public.coaches (user_id, email, name, role, status, specialty)
+      values (null,'ec.neuf@test.local','EC Neuf','collaborateur','actif','-')$q$) = 1);
+
+  -- L10 à L14 — les droits des collaborateurs : administration seule.
+  perform pg_temp.noter('L','L10. le coach B ne lit aucune permission de collaborateur',
+    pg_temp.lire(u_b,'select count(*) from public.collaborateur_permissions') = 0);
+  perform pg_temp.noter('L','L11. …et il n''en accorde aucune',
+    pg_temp.ecrit(u_b, format($q$insert into public.collaborateur_permissions (collaborateur_id, categorie, niveau, accorde_par)
+      values (%L,'nutrition','ecriture',%L)$q$, c_collab, c_b)) = -1);
+  perform pg_temp.noter('L','L12. …ni n''en retire',
+    pg_temp.ecrit(u_b, format($q$delete from public.collaborateur_permissions where collaborateur_id=%L$q$, c_collab)) <= 0);
+  perform pg_temp.noter('L','L13. l''administrateur lit les permissions des collaborateurs',
+    pg_temp.lire(u_adm,'select count(*) from public.collaborateur_permissions') = 4);
+  perform pg_temp.noter('L','L14. …et le collaborateur lit les SIENNES, et seulement les siennes',
+    pg_temp.lire(u_collab, format('select count(*) from public.collaborateur_permissions where collaborateur_id=%L', c_collab)) = 4);
+
+  -- L15/L16 — les affectations d'élèves suivent la même règle.
+  perform pg_temp.noter('L','L15. le coach B ne voit aucune affectation de collaborateur',
+    pg_temp.lire(u_b,'select count(*) from public.collaborateur_eleves') = 0);
+  perform pg_temp.noter('L','L16. l''administrateur, lui, les voit',
+    pg_temp.lire(u_adm,'select count(*) from public.collaborateur_eleves') = 1);
+end $$;
+
+
+-- ── M. L'ACCÈS DE L'ÉLÈVE À SA PROPRE FICHE DE FACTURATION ────────────────
+-- ⚠️ POURQUOI CETTE SECTION EXISTE. Le 18/10, tous les élèves ont basculé sur
+-- « accès temporairement limité ». Relevé dans les journaux Supabase :
+--
+--     403 — /rest/v1/student_profiles?select=*&student_id=eq.<élève>
+--     « permission denied for table student_profiles », 277 refus,
+--     première occurrence 18/10 11:53 — six minutes après l'application de la
+--     migration qui a retiré le privilège de TABLE au rôle `authenticated`.
+--
+-- Le contrôle d'accès lisait la fiche ENTIÈRE pour un seul champ. Les
+-- contrôles ci-dessous figent la règle en base : la lecture large est bien
+-- refusée (c'est voulu, les trois colonnes d'attribution sont fermées), et la
+-- lecture ÉTROITE dont le contrôle d'accès a besoin fonctionne.
+do $$
+declare
+  u_b    constant uuid := '00000000-0000-4000-8000-00000000e003';
+  u_el_a constant uuid := '00000000-0000-4000-8000-00000000e005';
+  u_el_b constant uuid := '00000000-0000-4000-8000-00000000e006';
+  e_a    constant uuid := '00000000-0000-4000-8000-00000000e201';
+begin
+  perform pg_temp.serveur();
+  insert into public.student_profiles (student_id, billing_access_mode)
+  values (e_a, 'manual_allowed')
+  on conflict (student_id) do update set billing_access_mode = 'manual_allowed';
+
+  -- M1/M2 — la lecture ÉTROITE, celle du contrôle d'accès.
+  perform pg_temp.noter('M','M1. l''élève lit SON mode de facturation (lecture étroite)',
+    pg_temp.lire(u_el_a, format($q$select count(*) from (select student_id, billing_access_mode
+      from public.student_profiles where student_id=%L) t$q$, e_a)) = 1);
+  perform pg_temp.noter('M','M2. …et la valeur est bien celle enregistrée',
+    (select billing_access_mode from public.student_profiles where student_id = e_a) = 'manual_allowed');
+
+  -- M3 — ⚠️ LA LECTURE LARGE EST REFUSÉE, ET C'EST VOULU. Si ce contrôle
+  -- devient vert un jour, c'est qu'on a rouvert les trois colonnes
+  -- d'attribution d'offre au rôle `authenticated` : le correctif de
+  -- cloisonnement P13-B/10 aurait été défait.
+  perform pg_temp.noter('M','M3. la lecture de TOUTE la table reste refusée au rôle authentifié',
+    pg_temp.lire(u_el_a, format($q$select count(*) from (select * from public.student_profiles
+      where student_id=%L) t$q$, e_a)) = -1);
+
+  -- M4 — mais la fiche complète reste lisible par la VUE, qui exclut les
+  -- trois colonnes fermées. C'est le chemin de l'espace élève.
+  perform pg_temp.noter('M','M4. …tandis que la vue student_profiles_lisible, elle, répond',
+    pg_temp.lire(u_el_a, format($q$select count(*) from (select * from public.student_profiles_lisible
+      where student_id=%L) t$q$, e_a)) = 1);
+
+  -- M5/M6 — l'isolation ne bouge pas : ni un autre élève, ni un coach
+  -- étranger ne lisent cette fiche.
+  perform pg_temp.noter('M','M5. l''élève d''un autre coach ne lit pas cette fiche',
+    pg_temp.lire(u_el_b, format($q$select count(*) from (select student_id, billing_access_mode
+      from public.student_profiles where student_id=%L) t$q$, e_a)) = 0);
+  perform pg_temp.noter('M','M6. le coach B non plus (l''élève est au coach A)',
+    pg_temp.lire(u_b, format($q$select count(*) from (select student_id, billing_access_mode
+      from public.student_profiles where student_id=%L) t$q$, e_a)) = 0);
+
+  -- M7 — et l'élève ne lit toujours pas la colonne d'attribution d'offre.
+  perform pg_temp.noter('M','M7. l''élève ne lit pas la colonne d''attribution d''offre en direct',
+    pg_temp.lire(u_el_a, format($q$select count(*) from (select assigned_subscription_template_id
+      from public.student_profiles where student_id=%L) t$q$, e_a)) = -1);
+
+  -- M8 — ses abonnements restent lisibles : c'est l'autre moitié du verdict.
+  perform pg_temp.noter('M','M8. l''élève lit ses propres abonnements',
+    pg_temp.lire(u_el_a,'select count(*) from public.subscriptions') >= 0);
+end $$;
+
+
 -- ── Z. BILAN ──────────────────────────────────────────────────────────────
 do $$ begin perform pg_temp.serveur(); end $$;
 

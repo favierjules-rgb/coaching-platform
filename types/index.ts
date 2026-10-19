@@ -2901,6 +2901,14 @@ export type BillingAccessMode = "subscription_required" | "manual_allowed" | "ma
 
 /** Raison précise de l'autorisation/refus d'accès — sert à afficher un message explicite (jamais juste "bloqué"). */
 export type StudentAccessReason =
+  /**
+   * ⚠️ LE MODE DE FACTURATION N'A PAS PU ÊTRE LU — ce n'est pas un verdict.
+   * Une lecture qui échoue (privilège retiré, panne, session non réhydratée)
+   * ne dit rien des droits de l'élève. La traiter comme « abonnement requis »
+   * transforme une panne d'infrastructure en décision commerciale contre un
+   * client qui paie : c'est ce qui a bloqué tous les élèves le 18/10.
+   */
+  | "indetermine"
   | "manual_allowed"
   | "manual_blocked"
   | "subscription_active"

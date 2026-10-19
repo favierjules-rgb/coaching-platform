@@ -13,6 +13,7 @@ import { useAdminData } from "@/hooks/useAdminData";
 import { useResumesDroits } from "@/hooks/useCollaborateurAcces";
 import { useStaffContext } from "@/hooks/useStaffContext";
 import { useSupabaseCoaches } from "@/hooks/useSupabaseCoaches";
+import { gestionDesCoachsVisible } from "@/lib/admin-shell-nav";
 import { AUCUN_ACCES_LABEL, categorieDroitLabels, coachRoleLabels, coachStatusLabels, fullName, niveauDroitLabels } from "@/lib/admin";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { updateCoach as updateCoachRow } from "@/lib/supabase/coaches";
@@ -28,15 +29,26 @@ export default function AdminSettingsPage() {
   const { coachSettings } = state;
   const { coaches, currentUserId, refetch: refetchCoaches } = useSupabaseCoaches();
   const { resumes: resumesDroits, recharger: rechargerDroits } = useResumesDroits();
-  // P13-B : « le coach ne gère jamais globalement les coachs ». La section
-  // ci-dessous est donc masquée dès que le rôle staff est CONNU et qu'il n'est
-  // pas `admin`. `null` signifie inconnu (migrations non appliquées, ou aucune
-  // fiche active) : on garde alors l'affichage d'avant, car masquer sur un
-  // doute cacherait la section au compte principal. Rien ne repose sur cet
-  // affichage : la création et la suppression passent par `requireAdmin()`, et
-  // les écritures sur les tables de droits par les policies `..._manage_admin`.
-  const { role: roleStaff } = useStaffContext();
-  const peutGererLesCoachs = roleStaff === null || roleStaff === "admin";
+  /*
+   * P13-B : « le coach ne gère jamais globalement les coachs ». La section
+   * ci-dessous est donc réservée à l'ADMINISTRATEUR.
+   *
+   * ⚠️ LA CONDITION PRÉCÉDENTE SE DÉCIDAIT SUR LA MAUVAISE SOURCE, et c'est
+   * ce qui a coûté la gestion des coachs à l'administrateur :
+   *
+   *     roleStaff === null || roleStaff === "admin"   // coaches.role
+   *
+   * `coaches.role` est l'étiquette de la FICHE staff, et sa valeur par défaut
+   * en base est `'assistant'` : la fiche d'un administrateur créée sans rôle
+   * explicite porte donc `assistant`, et toute la section disparaissait de son
+   * écran — alors que la base lui accordait tout (`coaches_manage_admin_*`,
+   * `collaborateur_*_manage_admin`, tous sur `is_admin()`).
+   *
+   * La règle du dépôt est `profiles.role`, et elle vit maintenant dans une
+   * fonction pure, testée : `gestionDesCoachsVisible`.
+   */
+  const staff = useStaffContext();
+  const peutGererLesCoachs = gestionDesCoachsVisible(staff);
 
   const [form, setForm] = useState(coachSettings);
   const [saved, setSaved] = useState(false);

@@ -2,7 +2,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { computeStudentAccess } from "@/lib/stripe/access-status";
 import { getSubscriptionForStudent } from "@/lib/supabase/billing";
-import { getStudentProfile } from "@/lib/supabase/students";
 import type { BillingAccessMode, StudentAccessReason, StudentAccessStatus } from "@/types";
 import type { Database } from "@/types/supabase";
 
@@ -31,14 +30,87 @@ export { computeStudentAccess };
 
 type TypedSupabaseClient = SupabaseClient<Database>;
 
-/** Lit `billing_access_mode` + l'abonnement le plus récent, puis calcule le statut d'accès. Utilisable côté navigateur (RLS) ou serveur. */
+export interface ResolutionModeAcces {
+  /** `billing_access_mode` de l'élève, `null` si AUCUNE fiche ne lui correspond. */
+  mode: BillingAccessMode | null;
+  /** `true` si la lecture a ÉCHOUÉ — à ne jamais confondre avec « aucune fiche ». */
+  lectureEchouee: boolean;
+}
+
+/**
+ * LE MODE DE FACTURATION, PAR LA LECTURE LA PLUS ÉTROITE POSSIBLE.
+ *
+ * ⚠️ DEUX COLONNES, ET PAS UNE DE PLUS — c'est la leçon du blocage du 18/10.
+ * Le contrôle d'accès passait par `getStudentProfile`, qui lit la fiche
+ * ENTIÈRE (87 colonnes, via `student_profiles_lisible`). Le jour où un
+ * privilège de colonne a changé sur `student_profiles`, la requête complète
+ * est tombée en `42501 permission denied for table student_profiles` — et
+ * comme un profil illisible valait « pas de mode », tous les élèves en
+ * `manual_allowed` ont basculé en « abonnement requis », donc bloqués.
+ * Relevé dans les journaux Supabase : 277 refus, du 18/10 11:53 au 19/10.
+ *
+ * `student_id` et `billing_access_mode` sont les seules colonnes dont ce
+ * contrôle a besoin, et les seules qu'il nomme. Une fermeture de colonne
+ * ailleurs dans la table ne peut plus l'atteindre.
+ *
+ * ⚠️ ET ON DISTINGUE L'ÉCHEC DE L'ABSENCE. Zéro ligne (aucune fiche, ou RLS
+ * qui filtre) rend `mode: null` : l'élève retombe sur la règle normale du
+ * produit. Une ERREUR rend `lectureEchouee: true` : on ne sait pas, et on ne
+ * le fera pas payer d'une porte fermée.
+ */
+export async function lireModeAccesFacturation(
+  supabase: TypedSupabaseClient,
+  studentId: string,
+): Promise<ResolutionModeAcces> {
+  const { data, error } = await supabase
+    .from("student_profiles")
+    .select("student_id, billing_access_mode")
+    .eq("student_id", studentId)
+    .maybeSingle();
+  if (error) {
+    console.error(`[Accès élève] lecture du mode de facturation impossible : ${error.message}`);
+    return { mode: null, lectureEchouee: true };
+  }
+  const brut = (data as { billing_access_mode?: unknown } | null)?.billing_access_mode;
+  return {
+    mode: brut === "manual_allowed" || brut === "manual_blocked" || brut === "subscription_required" ? brut : null,
+    lectureEchouee: false,
+  };
+}
+
+/**
+ * Statut d'accès de l'élève : mode de facturation + abonnement le plus
+ * récent. Utilisable côté navigateur (RLS) ou serveur.
+ *
+ * ⚠️ UNE LECTURE QUI ÉCHOUE N'EST PAS UNE ABSENCE DE FORMULE, et c'est tout
+ * l'objet du correctif. Le contenu protégé reste FERMÉ — on n'accorde rien
+ * sur une panne — mais le refus porte sa propre raison, `indetermine`, et
+ * conduit à un écran d'INDISPONIBILITÉ TEMPORAIRE avec un bouton Réessayer,
+ * jamais à « aucune formule attribuée ». Dire à 34 élèves en accès manuel
+ * autorisé qu'ils n'ont pas de formule était faux, et c'est ce mensonge-là
+ * qui a fait perdre une journée.
+ *
+ * Trois verdicts, donc, et jamais deux : autorisé, refusé par la règle,
+ * indéterminable. Le même principe gouverne déjà `useStaffContext`
+ * (`mecanismeIndisponible`).
+ */
 export async function getStudentAccessStatus(supabase: TypedSupabaseClient, studentId: string): Promise<StudentAccessStatus> {
-  const [profile, subscription] = await Promise.all([
-    getStudentProfile(supabase, studentId),
+  const [resolution, subscription] = await Promise.all([
+    lireModeAccesFacturation(supabase, studentId),
     getSubscriptionForStudent(supabase, studentId),
   ]);
-  const accessMode = profile?.billingAccessMode ?? "subscription_required";
-  return computeStudentAccess(accessMode, subscription?.status ?? null);
+  const subscriptionStatus = subscription?.status ?? null;
+
+  if (resolution.lectureEchouee) {
+    console.error(
+      "[Accès élève] mode de facturation indéterminable : accès NON accordé, " +
+        "et l'élève est renvoyé vers un écran d'indisponibilité temporaire, jamais " +
+        "vers « aucune formule attribuée ». Ce message signale une panne à corriger.",
+    );
+    return { allowed: false, reason: "indetermine", accessMode: "subscription_required", subscriptionStatus };
+  }
+
+  return computeStudentAccess(resolution.mode ?? "subscription_required", subscriptionStatus);
 }
 
 export interface UpdateStudentAccessInput {
@@ -90,6 +162,7 @@ export const accessModeLabels: Record<BillingAccessMode, string> = {
 };
 
 export const accessReasonLabels: Record<StudentAccessReason, string> = {
+  indetermine: "Droits indéterminables (panne de lecture)",
   manual_allowed: "Accès manuel autorisé",
   manual_blocked: "Accès manuel bloqué",
   subscription_active: "Abonnement actif",
