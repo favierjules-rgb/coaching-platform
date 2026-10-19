@@ -1900,6 +1900,8 @@ export interface Database {
           file_name: string | null;
           file_size_bytes: number | null;
           file_mime_type: string | null;
+          /** Chemin de la miniature de couverture dans le seau prive `document-covers`, ou NULL. JAMAIS une URL signee (migration 20261024090000). */
+          cover_storage_path: string | null;
           content_text: string;
           visibility: "global" | "assigned";
           tags: string[];
@@ -1928,6 +1930,7 @@ export interface Database {
           file_name?: string | null;
           file_size_bytes?: number | null;
           file_mime_type?: string | null;
+          cover_storage_path?: string | null;
           content_text?: string;
           visibility?: "global" | "assigned";
           tags?: string[];
@@ -1956,6 +1959,7 @@ export interface Database {
           file_name?: string | null;
           file_size_bytes?: number | null;
           file_mime_type?: string | null;
+          cover_storage_path?: string | null;
           content_text?: string;
           visibility?: "global" | "assigned";
           tags?: string[];

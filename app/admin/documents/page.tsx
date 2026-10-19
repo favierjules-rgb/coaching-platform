@@ -5,6 +5,7 @@ import Link from "next/link";
 import { FileText, Plus } from "lucide-react";
 
 import { DocumentModal } from "@/components/admin/DocumentModal";
+import { DocumentCoverImage } from "@/components/shared/DocumentCoverImage";
 import { FilterButtons, SearchInput } from "@/components/admin/SearchAndFilters";
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
 import { ImportantMark } from "@/components/admin/ImportantMark";
@@ -156,8 +157,19 @@ export default function AdminDocumentsPage() {
           {filtered.map((doc) => (
             <div
               key={doc.id}
-              className="flex flex-col gap-4 rounded-card border border-border bg-card p-6 shadow-soft transition-colors hover:border-border-strong lg:flex-row lg:items-center lg:justify-between"
+              className="flex flex-col gap-4 rounded-card border border-border bg-card p-6 shadow-soft transition-colors hover:border-border-strong"
             >
+              {/* ⚠️ MÊME COMPOSANT QUE LA CARTE ÉLÈVE, donc même rapport 16/9,
+                  même recadrage et même emplacement neutre quand il n'y a pas
+                  d'image. Seule la LARGEUR diffère : cette vue est une liste de
+                  lignes, pas une grille de cartes — une miniature pleine largeur
+                  y occuperait tout l'écran. */}
+              <DocumentCoverImage
+                coverStoragePath={doc.coverStoragePath}
+                titre={doc.title}
+                className="w-full sm:w-64 lg:w-72"
+              />
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
                 <div>
                   <div className="flex items-center gap-2">
@@ -211,6 +223,7 @@ export default function AdminDocumentsPage() {
                   students={students}
                   onSave={(partial) => handleSave(doc.id, partial)}
                   onSetAssignment={handleSetAssignment}
+                  onCoverChanged={supabaseDocuments.refetch}
                   triggerLabel="Voir"
                 />
                 <DocumentModal
@@ -218,9 +231,11 @@ export default function AdminDocumentsPage() {
                   students={students}
                   onSave={(partial) => handleSave(doc.id, partial)}
                   onSetAssignment={handleSetAssignment}
+                  onCoverChanged={supabaseDocuments.refetch}
                   triggerLabel="Modifier"
                   initialEditing
                 />
+              </div>
               </div>
             </div>
           ))}

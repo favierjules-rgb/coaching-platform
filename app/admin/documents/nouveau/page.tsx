@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, CheckCircle, FileUp } from "lucide-react";
 
 import { CheckboxField, Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
+import { DocumentCoverField } from "@/components/admin/DocumentCoverField";
 import { DocumentFileUploadField } from "@/components/admin/DocumentFileUploadField";
 import { useAdminData } from "@/hooks/useAdminData";
 import { useContentAssignment } from "@/hooks/useContentAssignment";
@@ -13,6 +14,10 @@ import { useSupabaseDocuments } from "@/hooks/useSupabaseDocuments";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { fullName } from "@/lib/admin";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import {
+  poserCouvertureApresCreation,
+  type PendingDocumentCover,
+} from "@/lib/supabase/document-cover-lifecycle";
 import { createDocument as createDocumentSupabase } from "@/lib/supabase/documents";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import type { UploadedDocumentFile } from "@/lib/supabase/storage-documents";
@@ -80,6 +85,16 @@ export default function NewDocumentPage() {
   // sans déplacement de fichier après coup (voir lib/supabase/documents.ts::createDocument).
   const [pendingDocumentId] = useState(() => crypto.randomUUID());
   const [uploadedFile, setUploadedFile] = useState<UploadedDocumentFile | null>(null);
+  /**
+   * ⚠️ LA COUVERTURE ATTEND ICI, EN MÉMOIRE, ET NE PART PAS VERS STORAGE.
+   *
+   * Le chemin de stockage contient `pendingDocumentId`, donc téléverser tout
+   * de suite serait possible — mais un formulaire abandonné laisserait un
+   * fichier que plus rien ne référence. En différant, un abandon ne laisse
+   * RIEN : il n'y a aucun orphelin à nettoyer plus tard.
+   */
+  const [pendingCover, setPendingCover] = useState<PendingDocumentCover | null>(null);
+  const [coverWarning, setCoverWarning] = useState<string | null>(null);
 
   // Dès que Supabase est configuré, la création doit produire une vraie
   // ligne `documents` — jamais de repli mock silencieux (même principe que
@@ -178,6 +193,10 @@ export default function NewDocumentPage() {
       fileSizeBytes: uploadedFile?.fileSizeBytes ?? null,
       // `||` et non `??` : une chaîne vide ne doit jamais atteindre la base.
       fileMimeType: uploadedFile?.fileMimeType || null,
+      // ⚠️ TOUJOURS `null` À L'INSERTION. La couverture est posée juste après,
+      // par `poserCouvertureApresCreation` : l'insertion ne peut donc pas
+      // référencer un fichier qui n'existe pas encore.
+      coverStoragePath: null,
       status: publish ? ("publié" as const) : status,
       important,
       distributionMode,
@@ -194,6 +213,16 @@ export default function NewDocumentPage() {
         if (!id) {
           setSaveError("Échec de l'enregistrement du document. Réessaie.");
           return;
+        }
+        // ⚠️ LA COUVERTURE SE POSE APRÈS, ET SON ÉCHEC N'ANNULE PAS LA
+        // CRÉATION. Un document sans miniature est un état normal ; perdre le
+        // document parce que son image n'est pas passée ne le serait pas. Le
+        // coach est averti, et peut la reposer depuis « Modifier ».
+        if (pendingCover) {
+          const pose = await poserCouvertureApresCreation(supabase, id, pendingCover.file);
+          if (!pose.ok) {
+            setCoverWarning(`${pose.error} Le document est enregistré sans miniature.`);
+          }
         }
         for (const studentId of assignedStudentIds) {
           await handleSetAssignment(studentId, "document", id, true);
@@ -223,6 +252,11 @@ export default function NewDocumentPage() {
           <CheckCircle size={18} aria-hidden className="flex-shrink-0" />
           Document &quot;{created.title}&quot; enregistré.
         </div>
+        {coverWarning && (
+          <p className="mt-4 flex items-center gap-2 rounded-panel border border-warning/40 bg-warning/5 px-4 py-3 text-sm text-warning" role="alert">
+            {coverWarning}
+          </p>
+        )}
         <button
           type="button"
           onClick={() => router.push("/admin/documents")}
@@ -307,6 +341,16 @@ export default function NewDocumentPage() {
                   </p>
                 )}
               </div>
+            )}
+
+            {supabaseActive && (
+              <DocumentCoverField
+                documentId={pendingDocumentId}
+                coverStoragePath={null}
+                titre={title.trim() || "ce document"}
+                differe
+                onPending={setPendingCover}
+              />
             )}
 
             <SelectField label="Statut" value={status} onChange={(v) => setStatus(v as AdminDocumentStatus)} options={statusOptions} />

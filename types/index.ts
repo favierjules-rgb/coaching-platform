@@ -1502,6 +1502,20 @@ export interface AdminDocument {
   storagePath: string | null;
   fileSizeBytes: number | null;
   fileMimeType: string | null;
+  /**
+   * Chemin de la MINIATURE DE COUVERTURE dans le seau prive `document-covers`,
+   * ou `null` quand le document n'est pas illustre (cas normal, et majoritaire
+   * sur les documents anterieurs a ce champ).
+   *
+   * ⚠️ DISTINCT DE `storagePath`, QUI EST LE FICHIER DU DOCUMENT. Une
+   * couverture est un second objet, facultatif, valable pour tous les types —
+   * y compris un PDF, une video ou un lien.
+   *
+   * ⚠️ UN CHEMIN, JAMAIS UNE URL SIGNEE. La signature est demandee a chaque
+   * affichage et repasse donc par la policy de lecture du seau : c'est elle
+   * qui refuse un brouillon, un document non affecte ou celui d'un autre coach.
+   */
+  coverStoragePath: string | null;
   status: AdminDocumentStatus;
   important: boolean;
   distributionMode: DocumentDistributionMode;

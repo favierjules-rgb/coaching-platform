@@ -4,7 +4,9 @@ import { useState } from "react";
 import { CheckCircle, Eye, Pencil } from "lucide-react";
 
 import { CheckboxField, Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
+import { DocumentCoverField } from "@/components/admin/DocumentCoverField";
 import { DocumentFileUploadField } from "@/components/admin/DocumentFileUploadField";
+import { DocumentCoverImage } from "@/components/shared/DocumentCoverImage";
 import { Modal, PrimaryButton } from "@/components/admin/Modal";
 import { StatusBadge, contentStatusTone } from "@/components/admin/StatusBadge";
 import { StudentPickerList } from "@/components/admin/StudentPickerList";
@@ -102,6 +104,7 @@ export function DocumentModal({
   onSetAssignment,
   triggerLabel,
   initialEditing = false,
+  onCoverChanged,
 }: {
   document: AdminDocument;
   students: AdminStudent[];
@@ -109,11 +112,22 @@ export function DocumentModal({
   onSetAssignment: (studentId: string, contentType: "document", contentId: string, assigned: boolean) => void;
   triggerLabel: string;
   initialEditing?: boolean;
+  /**
+   * ⚠️ LA COUVERTURE NE PASSE PAS PAR `onSave`. Elle s'écrit par son propre
+   * chemin (`document-cover-lifecycle.ts`), dès le téléversement et sans
+   * attendre « Enregistrer ». Ce rappel sert uniquement à ce que la liste
+   * recharge ce que la base porte désormais.
+   */
+  onCoverChanged?: () => void | Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(initialEditing);
   const [saved, setSaved] = useState(false);
   const [form, setForm] = useState(() => formFromDoc(document));
+  // ⚠️ ÉTAT SÉPARÉ DU FORMULAIRE, ET C'EST VOULU. `handleSave` n'émet jamais
+  // `coverStoragePath` : enregistrer un titre ou publier un document ne peut
+  // donc pas effacer la miniature.
+  const [coverPath, setCoverPath] = useState<string | null>(document.coverStoragePath);
   const [uploadedFile, setUploadedFile] = useState<UploadedDocumentFile | null>(
     // ⚠️ `fileMimeType` N'EST PAS RAMENÉ À `""` (B). Un MIME absent vaut `null`,
     // et doit le rester : ouvrir « Modifier » sur l'un des 7 documents dont
@@ -234,6 +248,17 @@ export function DocumentModal({
               ) : (
                 <Field label="Nom du fichier (mocké)" value={form.fileName} onChange={(v) => setField("fileName", v)} />
               )}
+              {isSupabaseConfigured() && (
+                <DocumentCoverField
+                  documentId={document.id}
+                  coverStoragePath={coverPath}
+                  titre={document.title}
+                  onCommitted={async (chemin) => {
+                    setCoverPath(chemin);
+                    await onCoverChanged?.();
+                  }}
+                />
+              )}
               <Field label="Tags (séparés par des virgules)" value={form.tags} onChange={(v) => setField("tags", v)} />
               <SelectField label="Statut" value={form.status} onChange={(v) => setField("status", v as AdminDocumentStatus)} options={statusOptions} />
               <CheckboxField label="Marquer comme important" checked={form.important} onChange={(v) => setField("important", v)} />
@@ -269,6 +294,10 @@ export function DocumentModal({
             </div>
           ) : (
             <div className="flex flex-col gap-4">
+              {/* La couverture telle que l'élève la verra — même composant, même
+                  recadrage 16/9. Un document sans image montre l'emplacement
+                  neutre, pas un message d'erreur. */}
+              <DocumentCoverImage coverStoragePath={coverPath} titre={document.title} />
               <div className="flex flex-wrap items-center gap-2">
                 <StatusBadge label={documentStatusLabels[document.status]} tone={contentStatusTone(document.status)} />
                 {document.important && <StatusBadge label="Important" tone="primary" />}
