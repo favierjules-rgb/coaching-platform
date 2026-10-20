@@ -53,6 +53,26 @@ export type ModePush =
   /** Nominal, jamais demandé. */
   | "pas_abonne";
 
+/**
+ * L'ENVIRONNEMENT DÉTAILLÉ — AJOUTÉ POUR LE RAPPEL DE RÉACTIVATION.
+ *
+ * ⚠️ ADDITIF, ET DÉLIBÉRÉMENT À CÔTÉ DE `ModePush`. Les six cas de
+ * `profil-push-render` reposent sur les modes nommés ci-dessus ; les toucher
+ * reviendrait à changer leur décor. Le rappel, lui, a besoin de croiser
+ * librement permission et abonnement — c'est là que vivent les états 2, 3, 4
+ * et 5 du cahier des charges — d'où cette seconde entrée.
+ */
+export interface EnvironnementDetaille {
+  permission: NotificationPermission;
+  /** `pushManager.getSubscription()` rend un abonnement. */
+  abonne: boolean;
+  /** Ce que rend `requestPermission()` au clic. */
+  reponsePermission?: NotificationPermission;
+}
+
+/** Compte les appels réels aux surfaces du navigateur, pour les assertions. */
+const compteurs = { requestPermission: 0, subscribe: 0 };
+
 let racine: Root | null = null;
 
 const routeurFactice = {
@@ -135,6 +155,55 @@ const harnais = {
         enregistrement(async () => (mode === "abonne" ? { endpoint: "x" } : null)),
       ),
     });
+  },
+
+  /**
+   * Permission ET abonnement choisis séparément, avec un compteur d'appels.
+   *
+   * `requestPermission` MET À JOUR `Notification.permission` : sans cela, le
+   * parcours d'activation relirait `default` après une autorisation accordée
+   * et conclurait à tort « sans réponse ».
+   */
+  environnementPushDetaille(environnement: EnvironnementDetaille) {
+    compteurs.requestPermission = 0;
+    compteurs.subscribe = 0;
+    let permission: NotificationPermission = environnement.permission;
+    Object.defineProperty(window, "Notification", {
+      configurable: true,
+      value: {
+        get permission() {
+          return permission;
+        },
+        requestPermission: async () => {
+          compteurs.requestPermission += 1;
+          permission = environnement.reponsePermission ?? "granted";
+          return permission;
+        },
+      },
+    });
+    const abonnementFactice = {
+      endpoint: "https://exemple.test/push/JETON",
+      toJSON: () => ({ endpoint: "https://exemple.test/push/JETON", keys: { p256dh: "p", auth: "a" } }),
+      unsubscribe: async () => true,
+    };
+    let abonne = environnement.abonne;
+    poserServiceWorker({
+      ready: Promise.resolve({
+        pushManager: {
+          getSubscription: async () => (abonne ? abonnementFactice : null),
+          subscribe: async () => {
+            compteurs.subscribe += 1;
+            abonne = true;
+            return abonnementFactice;
+          },
+        },
+      }),
+    });
+  },
+
+  /** Combien de fois le navigateur a réellement été sollicité. */
+  compteurs() {
+    return { ...compteurs };
   },
 
   /** Ce que `useNotificationsPush.supporte()` verra réellement. */

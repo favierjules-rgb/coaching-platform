@@ -763,3 +763,77 @@ self.addEventListener("notificationclick", function (evenement) {
     })(),
   );
 });
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * LE RENOUVELLEMENT D'ABONNEMENT — LA MOITIÉ QUI MANQUAIT
+ * ══════════════════════════════════════════════════════════════════════════
+ * `pushsubscriptionchange` est émis quand le service push REMPLACE
+ * l'abonnement sans que personne ne l'ait demandé : rotation de clé du
+ * service, nettoyage après une longue inactivité, mise à jour du navigateur.
+ * L'ancien endpoint devient mort à cet instant précis.
+ *
+ * Ce service worker ne l'écoutait pas. Conséquence mesurable, et c'est la
+ * cause première de la perte silencieuse des notifications :
+ *
+ *   · le navigateur a un abonnement NEUF, que le serveur ne connaît pas ;
+ *   · le serveur a une ligne qui pointe sur l'ANCIEN endpoint, mort ;
+ *   · le prochain envoi reçoit 404/410 et la ligne est désactivée ;
+ *   · et le profil continuait d'afficher « activé », puisqu'il ne regardait
+ *     que `pushManager.getSubscription()` — qui rend bien un abonnement.
+ *
+ * ⚠️ LA CLÉ VIENT DE L'ANCIEN ABONNEMENT, PAS D'UNE VARIABLE. Un service
+ * worker n'a accès à aucune variable `NEXT_PUBLIC_` ; aller chercher la clé
+ * par une requête créerait un second chemin de clé à maintenir. Or
+ * `oldSubscription.options.applicationServerKey` porte exactement celle avec
+ * laquelle l'abonnement avait été créé. Aucune clé privée n'entre ici, et
+ * aucune ne pourrait : le service worker tourne dans le navigateur.
+ *
+ * ⚠️ AUCUN SECOND ABONNEMENT. On prend `newSubscription` si le navigateur l'a
+ * déjà créé, sinon celui que porte l'enregistrement, et on n'appelle
+ * `subscribe()` qu'en dernier recours — quand il n'y en a réellement aucun.
+ *
+ * ⚠️ ET CE RENOUVELLEMENT PEUT ÉCHOUER, LÉGITIMEMENT. L'évènement arrive
+ * quand il veut, y compris sans session active : `/api/push/subscribe` rend
+ * alors 401 et il n'y a rien à faire ici. C'est pour cela que le profil
+ * VÉRIFIE l'état auprès du serveur à chaque visite et propose la
+ * réactivation : les deux moitiés se complètent, aucune ne suffit seule.
+ */
+self.addEventListener("pushsubscriptionchange", function (evenement) {
+  evenement.waitUntil(
+    (async function () {
+      try {
+        const ancien = evenement.oldSubscription || null;
+        const cle =
+          ancien && ancien.options ? ancien.options.applicationServerKey || null : null;
+
+        let nouveau = evenement.newSubscription || null;
+        if (!nouveau) {
+          nouveau = await self.registration.pushManager.getSubscription();
+        }
+        if (!nouveau && cle) {
+          nouveau = await self.registration.pushManager.subscribe({
+            // Sans ce drapeau, aucun navigateur n'accepte l'abonnement.
+            userVisibleOnly: true,
+            applicationServerKey: cle,
+          });
+        }
+        if (!nouveau) {
+          // Ni abonnement, ni clé pour en recréer un : le profil s'en
+          // chargera à la prochaine visite, sur un clic de l'élève.
+          return;
+        }
+
+        await fetch("/api/push/subscribe", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          // La session vit dans un cookie : sans lui, la route rend 401 et
+          // l'appareil resterait inconnu du serveur.
+          credentials: "same-origin",
+          body: JSON.stringify({ subscription: nouveau.toJSON() }),
+        });
+      } catch (erreur) {
+        /* Jamais bloquant : le profil détecte et rattrape (voir l'en-tête). */
+      }
+    })(),
+  );
+});

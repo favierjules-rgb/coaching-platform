@@ -87,6 +87,75 @@ export async function abonnementsActifs(
 }
 
 /**
+ * CE QUE LE SERVEUR SAIT DE CET APPAREIL — ET RIEN DE PLUS.
+ *
+ * ═══════════════════════════════════════════════════════════════════════
+ * POURQUOI CETTE LECTURE EXISTE
+ * ═══════════════════════════════════════════════════════════════════════
+ * Le profil déduisait « notifications actives » de la seule présence d'un
+ * `PushSubscription` dans le navigateur. Or c'est le SERVEUR qui sait si cet
+ * abonnement est encore enregistré et actif : un envoi qui reçoit 404/410
+ * pose `disabled_at` (voir `desactiverAbonnement`), une rotation d'abonnement
+ * laisse la ligne pointer sur un endpoint mort, et un changement de clé VAPID
+ * rend l'abonnement insignable. Dans ces trois cas, le navigateur dit « oui »
+ * et plus rien n'arrive.
+ *
+ * ⚠️ CETTE FONCTION NE REND AUCUNE CLÉ, AUCUN ENDPOINT, AUCUNE LISTE. Deux
+ * booléens sur l'endpoint que l'appelant possède déjà. Les clés de
+ * chiffrement n'ont rien à faire dans un navigateur — c'est la raison pour
+ * laquelle RLS interdit à l'élève de lire cette table, et ce lot ne change
+ * pas cette règle : la lecture se fait côté serveur, en client admin, avec le
+ * `user_id` de la session.
+ */
+export interface EtatAbonnementServeur {
+  /** Une ligne existe pour ce couple (utilisateur, endpoint). */
+  connu: boolean;
+  /** Elle existe ET n'a pas été désactivée. */
+  actif: boolean;
+}
+
+/** La forme minimale utilisée par cette seule lecture. */
+interface ClientEtat {
+  from: (table: string) => {
+    select: (colonnes: string) => {
+      eq: (colonne: string, valeur: string) => {
+        eq: (
+          colonne: string,
+          valeur: string,
+        ) => Promise<{ data: { disabled_at: string | null }[] | null; error: unknown }>;
+      };
+    };
+  };
+}
+
+export async function etatAbonnement(
+  client: unknown,
+  userId: string,
+  endpoint: string,
+): Promise<EtatAbonnementServeur> {
+  const { data, error } = await (client as ClientEtat)
+    .from("push_subscriptions")
+    .select("disabled_at")
+    // ⚠️ LES DEUX FILTRES, ET DANS CET ORDRE DE NÉCESSITÉ : l'endpoint désigne
+    // l'appareil, `user_id` garantit qu'on ne répond que sur LES SIENS.
+    // Sans le second, connaître un endpoint suffirait à savoir si quelqu'un
+    // d'autre a les notifications actives.
+    .eq("endpoint", endpoint)
+    .eq("user_id", userId);
+
+  if (error || !data) {
+    // ⚠️ UNE PANNE N'EST PAS UNE ABSENCE. On rend `connu: false` ET
+    // `actif: false`, mais l'appelant distingue les deux cas par le code HTTP :
+    // la route rend 503, jamais un « absent » qui ferait croire à une perte.
+    return { connu: false, actif: false };
+  }
+  if (data.length === 0) {
+    return { connu: false, actif: false };
+  }
+  return { connu: true, actif: data.some((l) => l.disabled_at === null) };
+}
+
+/**
  * Désactive UN abonnement — celui dont le service push a dit qu'il n'existe
  * plus. Jamais les autres appareils du même élève.
  */
