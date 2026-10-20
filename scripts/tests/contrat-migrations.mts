@@ -577,6 +577,21 @@ export const MIGRATION_STORAGE_DOCUMENTS_CHEMIN =
 export const MIGRATION_DOCUMENTS_MINIATURES =
   "20261024090000_documents_miniatures_couverture.sql";
 
+/**
+ * AFFECTATIONS DE DOCUMENTS — SORTIR DE L'AUTO-RÉFÉRENCE.
+ *
+ * Les quatre policies de `document_assignments` ne testaient que
+ * `document_id in (select document_ids_*())`, et ces fonctions sont définies
+ * par une JOINTURE INTERNE sur `document_assignments` : la PREMIÈRE
+ * affectation d'un document était donc impossible, pour tous les rôles. Les
+ * policies ne regardaient par ailleurs JAMAIS `student_id` — un coach pouvait
+ * affecter l'élève d'un autre, et lire ses affectations. Deux prédicats
+ * prenant le couple (document, élève) remplacent cette forme ; `document_ids_*()`
+ * n'est pas touchée (les policies Storage s'appuient dessus).
+ */
+export const MIGRATION_DOCUMENTS_AFFECTATIONS =
+  "20261025090000_document_assignments_portee_eleve.sql";
+
 export const MIGRATIONS_COURSES: readonly string[] = [
   MIGRATION_C2,
   MIGRATION_C3,
@@ -629,17 +644,18 @@ export const MIGRATIONS_APRES_C0_1: readonly string[] = [
   MIGRATION_ESPACE_COACH_ISOLE,
   MIGRATION_STORAGE_DOCUMENTS_CHEMIN,
   MIGRATION_DOCUMENTS_MINIATURES,
+  MIGRATION_DOCUMENTS_AFFECTATIONS,
 ];
 
 /**
  * Le compte attendu — nécessaire, jamais suffisant.
  *
- * 118 = 84 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 33
+ * 119 = 84 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 34
  * migrations nommées dans `MIGRATIONS_APRES_C0_1`. Le point 6 recalcule
  * l'historique à partir de ce nombre : il ne peut pas être remonté seul sans
  * qu'une migration soit nommée en face.
  */
-export const NOMBRE_DE_MIGRATIONS = 118;
+export const NOMBRE_DE_MIGRATIONS = 119;
 
 /**
  * L'empreinte des 79 migrations ANTÉRIEURES à C0.1, dans l'ordre.
