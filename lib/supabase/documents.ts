@@ -1,6 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { computeDocumentAvailability, type DocumentAvailability } from "@/lib/admin";
+import { RefusAutorisationAffectation } from "@/lib/assignment-refus";
+import { classerErreur } from "@/lib/offline/source-donnees";
 import { currentDate } from "@/lib/clock";
 import { buildStudentActivityLink, logActivityEvent } from "@/lib/supabase/activity";
 import type { AdminDocument } from "@/types";
@@ -510,6 +512,50 @@ export async function setDocumentCoverPath(
 }
 
 /**
+ * UN REFUS DE DROITS N'EST PAS UNE PANNE, ET NE DOIT PAS SE DIRE COMME TELLE.
+ *
+ * ════════════════════════════════════════════════════════════════════════
+ * LE DÉFAUT CORRIGÉ
+ * ════════════════════════════════════════════════════════════════════════
+ * `setDocumentAssignment` rendait `false` pour TOUTE erreur, refus de droits
+ * compris. En face, deux écrans :
+ *   · `DocumentModal` jetait le booléen (prop typeée `=> void`) — l'échec
+ *     était TOTALEMENT invisible, et c'est pour cela qu'un interblocage RLS a
+ *     pu rester en place sans que personne voie d'erreur ;
+ *   · `AssignContentToStudentModal` l'affichait, mais classé `"technique"`,
+ *     donc avec le message « réessaie, ou vérifie ta connexion » — un conseil
+ *     faux : la base refusera identiquement au second clic.
+ *
+ * ════════════════════════════════════════════════════════════════════════
+ * AUCUN NOUVEAU CLASSIFICATEUR, AUCUNE NOUVELLE SIGNATURE
+ * ════════════════════════════════════════════════════════════════════════
+ * On réemploie EXACTEMENT le mécanisme des programmes
+ * (`lib/supabase/programs.ts`) : `classerErreur` — déjà en place, déjà testé,
+ * qui rend `"autorisation"` sur un `42501` ou un HTTP 403 — et une exception
+ * `RefusAutorisationAffectation`. Rien d'autre ne change : tout le reste
+ * (5xx, contrainte d'unicité, payload, panne réseau) garde le chemin d'avant,
+ * `devWarn` puis `false`.
+ *
+ * ⚠️ ET UN BOOLÉEN NU RESTE « TECHNIQUE ». `terminerAssignation` ne doit pas
+ * se mettre à deviner une cause à partir d'un `false` : c'est la LEVÉE qui
+ * porte la cause. Le contrôle 8 de `affectation-refus-autorisation` reste donc
+ * vrai au caractère près.
+ *
+ * ⚠️ AUCUN DÉTAIL NE SORT. Ni message SQL, ni code d'erreur, ni identifiant
+ * d'élève : un coach refusé ne doit rien apprendre de l'élève qu'il n'a pas le
+ * droit de toucher.
+ */
+function refuserSiAutorisation(
+  contexte: string,
+  error: { message: string; code?: string } | null,
+): void {
+  if (error && classerErreur(error) === "autorisation") {
+    console.error(`[Supabase] ${contexte} : autorisation refusée`);
+    throw new RefusAutorisationAffectation("affectation de document");
+  }
+}
+
+/**
  * Assigne/retire un document réel à un élève réel via `document_assignments`
  * — jamais la table générique `assignments`. `unlockAt` (optionnel) fixe un
  * déblocage propre à cette assignation, distinct du déblocage du document.
@@ -527,6 +573,7 @@ export async function setDocumentAssignment(
       .delete()
       .eq("student_id", studentId)
       .eq("document_id", documentId);
+    refuserSiAutorisation("setDocumentAssignment (delete)", error);
     devWarn("setDocumentAssignment (delete)", error);
     return !error;
   }
@@ -544,6 +591,7 @@ export async function setDocumentAssignment(
         .from("document_assignments")
         .update({ unlock_at: unlockAt, updated_at: new Date().toISOString() })
         .eq("id", existing.id);
+      refuserSiAutorisation("setDocumentAssignment (update unlock_at)", error);
       devWarn("setDocumentAssignment (update unlock_at)", error);
       return !error;
     }
@@ -553,6 +601,7 @@ export async function setDocumentAssignment(
   const { error: insertError } = await supabase
     .from("document_assignments")
     .insert({ student_id: studentId, document_id: documentId, unlock_at: unlockAt });
+  refuserSiAutorisation("setDocumentAssignment (insert)", insertError);
   devWarn("setDocumentAssignment (insert)", insertError);
   if (!insertError) {
     const { data: document } = await supabase.from("documents").select("title").eq("id", documentId).maybeSingle();

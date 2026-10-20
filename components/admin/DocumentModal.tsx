@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle, Eye, Pencil } from "lucide-react";
+import { AlertTriangle, CheckCircle, Eye, Loader2, Pencil } from "lucide-react";
 
 import { CheckboxField, Field, SelectField, TextareaField } from "@/components/admin/AdminFormFields";
 import { DocumentCoverField } from "@/components/admin/DocumentCoverField";
@@ -16,6 +16,11 @@ import {
   documentStatusLabels,
   documentTypeLabels,
 } from "@/lib/admin";
+import {
+  estRefusAutorisation,
+  messageEchecAffectation,
+  type NatureEchecAffectation,
+} from "@/lib/assignment-refus";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import type { UploadedDocumentFile } from "@/lib/supabase/storage-documents";
 import type {
@@ -109,7 +114,19 @@ export function DocumentModal({
   document: AdminDocument;
   students: AdminStudent[];
   onSave: (partial: Partial<AdminDocument>) => void;
-  onSetAssignment: (studentId: string, contentType: "document", contentId: string, assigned: boolean) => void;
+  /**
+   * ⚠️ LA PROMESSE EST ATTENDUE, ET SON RÉSULTAT EST LU. Cette prop était
+   * typée `=> void` : le booléen d'échec de `setDocumentAssignment` était
+   * jeté, et un refus de la base ne produisait RIEN à l'écran — la case
+   * restait simplement décochée, sans explication. C'est ce silence qui a
+   * laissé un interblocage RLS en place sans que personne voie d'erreur.
+   */
+  onSetAssignment: (
+    studentId: string,
+    contentType: "document",
+    contentId: string,
+    assigned: boolean,
+  ) => Promise<boolean>;
   triggerLabel: string;
   initialEditing?: boolean;
   /**
@@ -128,6 +145,47 @@ export function DocumentModal({
   // `coverStoragePath` : enregistrer un titre ou publier un document ne peut
   // donc pas effacer la miniature.
   const [coverPath, setCoverPath] = useState<string | null>(document.coverStoragePath);
+  /**
+   * ÉCRITURES D'AFFECTATION EN VOL, et le motif du dernier échec.
+   *
+   * ⚠️ UN COMPTEUR, PAS UN BOOLÉEN. « Tout sélectionner les résultats » lance
+   * une écriture PAR élève filtré, en parallèle : un booléen serait remis à
+   * faux par la première qui finit, pendant que les autres sont encore en
+   * cours.
+   */
+  const [ecrituresEnVol, setEcrituresEnVol] = useState(0);
+  const [echecAffectation, setEchecAffectation] = useState<NatureEchecAffectation | null>(null);
+
+  /**
+   * LE CLIC SUR UNE CASE ÉLÈVE — ATTENDU, ET SON ÉCHEC AFFICHÉ.
+   *
+   * ⚠️ LA CASE EST ENTIÈREMENT CONTRÔLÉE PAR LA BASE. `StudentPickerList` rend
+   * `checked` depuis `document.assignedStudentIds`, sans aucun état local : si
+   * l'écriture échoue, la case ne bouge pas. Sans le message ci-dessous, le
+   * coach voit une case qui ne répond pas et n'a AUCUN moyen de savoir
+   * pourquoi.
+   *
+   * ⚠️ UN REJET NE DOIT PAS DEVENIR UNE PROMESSE NON GÉRÉE. `selectAllResults`
+   * appelle `onToggle` dans un `forEach` sans attendre : c'est ici qu'on
+   * attrape, pas dans la liste partagée (utilisée aussi par les programmes et
+   * la nutrition, et qu'on ne touche pas).
+   */
+  async function basculerAffectation(studentId: string, checked: boolean) {
+    setEchecAffectation(null);
+    setEcrituresEnVol((n) => n + 1);
+    try {
+      const ok = await onSetAssignment(studentId, "document", document.id, checked);
+      if (!ok) {
+        setEchecAffectation("technique");
+      }
+    } catch (erreur) {
+      // `estRefusAutorisation` plutôt qu'un `instanceof` : voir
+      // lib/assignment-refus.ts (deux copies du module casseraient l'instanceof).
+      setEchecAffectation(estRefusAutorisation(erreur) ? "autorisation" : "technique");
+    } finally {
+      setEcrituresEnVol((n) => n - 1);
+    }
+  }
   const [uploadedFile, setUploadedFile] = useState<UploadedDocumentFile | null>(
     // ⚠️ `fileMimeType` N'EST PAS RAMENÉ À `""` (B). Un MIME absent vaut `null`,
     // et doit le rester : ouvrir « Modifier » sur l'un des 7 documents dont
@@ -348,8 +406,20 @@ export function DocumentModal({
                 <StudentPickerList
                   students={students}
                   selectedIds={document.assignedStudentIds}
-                  onToggle={(studentId, checked) => onSetAssignment(studentId, "document", document.id, checked)}
+                  onToggle={(studentId, checked) => void basculerAffectation(studentId, checked)}
                 />
+                {ecrituresEnVol > 0 && (
+                  <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground" role="status">
+                    <Loader2 size={13} aria-hidden className="flex-shrink-0 animate-spin" />
+                    Enregistrement de l&apos;accès…
+                  </p>
+                )}
+                {echecAffectation && (
+                  <p className="mt-2 flex items-start gap-2 text-xs text-destructive" role="alert">
+                    <AlertTriangle size={13} aria-hidden className="mt-0.5 flex-shrink-0" />
+                    {messageEchecAffectation(echecAffectation)}
+                  </p>
+                )}
               </div>
               <button
                 type="button"

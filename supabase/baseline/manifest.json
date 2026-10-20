@@ -124,7 +124,8 @@
     "20261021090000_subscription_templates_policies_authenticated.sql",
     "20261022090000_espace_coach_isole_agenda_documents_emails.sql",
     "20261023090000_storage_documents_proprietaire_dans_le_chemin.sql",
-    "20261024090000_documents_miniatures_couverture.sql"
+    "20261024090000_documents_miniatures_couverture.sql",
+    "20261025090000_document_assignments_portee_eleve.sql"
   ],
   "garanties_de_contenu": {
     "insert_de_donnees_metier": 0,
