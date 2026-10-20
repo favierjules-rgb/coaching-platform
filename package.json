@@ -99,6 +99,8 @@
     "test:menu-offline": "npx tsx scripts/tests/menu-offline-render.mts",
     "test:push-socle": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/push-socle.mts",
     "test:profil-push": "npx tsx scripts/tests/profil-push-render.mts",
+    "test:profil-rappel-push": "npx tsx scripts/tests/profil-rappel-push.mts",
+    "test:profil-rappel-push-render": "npx tsx scripts/tests/profil-rappel-push-render.mts",
     "test:push-test-admin": "NODE_OPTIONS=\"--conditions=react-server --no-warnings\" npx tsx --experimental-test-module-mocks scripts/tests/push-test-admin.mts",
     "test:admin-notifications": "NODE_OPTIONS=\"--conditions=react-server --no-warnings\" npx tsx --experimental-test-module-mocks scripts/tests/admin-notifications.mts",
     "test:dashboard-notifications": "npx tsx scripts/tests/dashboard-notifications.mts",

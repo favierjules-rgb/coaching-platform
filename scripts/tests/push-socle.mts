@@ -279,8 +279,15 @@ await test("PUSH14. aucune variable `NEXT_PUBLIC_` ne porte une clé privée", (
  * VI. LES ROUTES SONT GARDÉES CÔTÉ SERVEUR
  * ════════════════════════════════════════════════════════════════════════ */
 
-await test("PUSH15. abonnement et désabonnement exigent une session (ADMINPUSH13)", () => {
-  for (const route of ["app/api/push/subscribe/route.ts", "app/api/push/unsubscribe/route.ts"]) {
+await test("PUSH15. abonnement, désabonnement et statut exigent une session (ADMINPUSH13)", () => {
+  // `status` a rejoint la liste avec le rappel de réactivation du profil :
+  // elle lit l'état d'un appareil en client admin, donc elle doit être gardée
+  // exactement comme les deux autres.
+  for (const route of [
+    "app/api/push/subscribe/route.ts",
+    "app/api/push/unsubscribe/route.ts",
+    "app/api/push/status/route.ts",
+  ]) {
     const source = lire(route);
     assert.ok(source.includes("supabase.auth.getUser()"), `${route} ne vérifie pas la session`);
     assert.ok(source.includes("401"), `${route} ne refuse pas un appel non authentifié`);
