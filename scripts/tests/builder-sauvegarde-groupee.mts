@@ -233,16 +233,44 @@ await (async () => {
     assert.ok(!/create trigger[\s\S]*on public\.(workout_sessions|training_blocks|programs)/.test(migration));
   });
 
-  await test("2. AUDIT — la sauvegarde est SÉQUENTIELLE par séance : d'où le coût multiplié", () => {
-    // C'est le fait qui rend une sauvegarde concurrente si chère : chaque
-    // séance attend la précédente. K sauvegardes simultanées ne se
-    // parallélisent pas, elles font la queue.
+  await test("2. la sauvegarde n'est PLUS séquentielle par séance : un seul appel groupé", () => {
+    /*
+     * ⚠️ CE CONTRÔLE A ÉTÉ INVERSÉ, ET C'EST LE CHANTIER LUI-MÊME.
+     *
+     * Il affirmait, et vérifiait, que `diffProgramStructure` bouclait sur les
+     * séances en attendant chaque appel — c'était le DÉFAUT mesuré : 87 requêtes
+     * séquentielles pour renommer une séance d'une programmation de 12 semaines,
+     * 100 pour y ajouter une semaine, et 1 840 ms de moyenne par appel contre un
+     * `statement_timeout` de 8 s.
+     *
+     * `diffProgramStructure` n'existe plus. Le même travail passe par
+     * `calculerDiffProgrammation` (pur, sans réseau) puis par UN appel à
+     * `save_training_program_sessions`. Le test garde donc son objet — la forme
+     * du chemin d'écriture — en vérifiant la propriété INVERSE.
+     */
     const code = sansCommentaires(lire("../../lib/supabase/programs.ts"));
-    const diff = code.slice(code.indexOf("async function diffProgramStructure"));
-    const corps = diff.slice(0, diff.indexOf("\nexport "));
-    assert.ok(/for \(const session of sessions\)/.test(corps), "une boucle par séance");
-    assert.ok(/await saveTrainingSessionBlocks\(/.test(corps), "et un appel ATTENDU à l'intérieur");
-    assert.ok(!/Promise\.all\(\s*sessions/.test(corps), "aucune parallélisation des séances");
+    const bloc = code.slice(
+      code.indexOf("export async function updateProgram"),
+      code.indexOf("function teteIdentique"),
+    );
+
+    assert.ok(
+      !code.includes("async function diffProgramStructure"),
+      "diffProgramStructure doit avoir disparu : deux moteurs d'écriture divergeraient",
+    );
+    assert.ok(!/for \(const session of /.test(bloc), "plus aucune boucle par séance dans updateProgram");
+    assert.ok(!/await saveTrainingSessionBlocks\(/.test(bloc), "plus aucun appel par séance depuis updateProgram");
+    assert.ok(bloc.includes("calculerDiffProgrammation("), "le diff est calculé par la fonction pure");
+    assert.ok(bloc.includes("saveTrainingProgramSessions("), "et appliqué par l'appel groupé");
+
+    // Le service groupé fait UN SEUL appel RPC, et aucune mutation directe.
+    const service = sansCommentaires(lire("../../lib/supabase/training-program-save.ts"));
+    const appels = service.match(/rpc\(/g) ?? [];
+    assert.equal(appels.length, 1, `un seul appel rpc attendu, ${appels.length} trouvé(s)`);
+    for (const mutation of [".insert(", ".update(", ".delete(", ".upsert("]) {
+      assert.ok(!service.includes(mutation), `le service groupé ne doit faire aucune ${mutation}`);
+    }
+
     // Le builder n'émet AUCUNE requête de réglage pendant la sauvegarde.
     const codeBuilder = sansCommentaires(sourceBuilder);
     assert.ok(!codeBuilder.includes("setProgressionReglage"), "le builder n'écrit aucun réglage lui-même");
@@ -553,8 +581,22 @@ await (async () => {
     const effetClavier = code.slice(code.indexOf("function handleKeyDown"), code.indexOf("addEventListener"));
     assert.ok(/metaKey \|\| event\.ctrlKey/.test(effetClavier) && /=== "s"/.test(effetClavier), "Cmd/Ctrl+S est bien là");
     assert.ok(/handleSave\(\)/.test(effetClavier), "et il passe par handleSave, donc par la garde");
-    // Le bouton reste désactivé : la garde s'ajoute, elle ne remplace pas.
-    assert.ok(code.includes('disabled={saveStatus === "saving"}'), "le bouton reste désactivé pendant la sauvegarde");
+    /*
+     * Le bouton reste désactivé pendant la sauvegarde : la garde s'ajoute, elle
+     * ne remplace pas.
+     * ⚠️ DEUX CONDITIONS SE SONT AJOUTÉES À LA DÉSACTIVATION, et aucune ne doit
+     * retirer celle-ci : `resynchronisation` (relecture en cours) et
+     * `desynchroniseEffectif` (état serveur non réconcilié — une sauvegarde
+     * partirait avec un `expectedUpdatedAt` périmé et réinsérerait les
+     * prescriptions déjà créées). On teste donc la PRÉSENCE de `"saving"` dans
+     * la condition, pas l'égalité du texte entier.
+     */
+    const conditionBouton = /disabled=\{([^}]*saveStatus === "saving"[^}]*)\}/.exec(code)?.[1] ?? "";
+    assert.ok(conditionBouton, "le bouton reste désactivé pendant la sauvegarde");
+    assert.ok(
+      conditionBouton.includes("desynchroniseEffectif"),
+      "et aussi tant que l'état serveur n'est pas réconcilié",
+    );
   });
 
   await test("17. le module de garde ne se fonde PAS sur l'état React", () => {
@@ -717,7 +759,21 @@ await (async () => {
     assert.ok(posReglages < posStructure, "et AVANT les 56 RPC de la structure");
     // Le toggle rend le programme « modifié », comme tout autre champ.
     assert.ok(codeBuilder.includes("onModificationLocale={marquerModifieParReglage}"), "le statut passe à « dirty »");
-    assert.ok(codeBuilder.includes('setSaveStatus("dirty")'), "et c'est bien le même statut que les autres champs");
+    /*
+     * ⚠️ `setSaveStatus("dirty")` NU A DISPARU, et c'est voulu : il écrasait
+     * l'état `"desynchronise"` dès que le coach touchait un champ, faisant
+     * disparaître l'avertissement « enregistré mais non synchronisé » alors que
+     * la sauvegarde restait interdite. Les deux chemins passent désormais par
+     * la même forme conditionnelle.
+     */
+    assert.ok(
+      codeBuilder.includes('prev === "desynchronise" ? prev : "dirty"'),
+      "et c'est bien le même statut que les autres champs, sans écraser la désynchronisation",
+    );
+    assert.ok(
+      !/setSaveStatus\("dirty"\)/.test(codeBuilder),
+      "plus aucun passage à « dirty » inconditionnel",
+    );
   });
 
   /* ══════════════════════════════════════════════════════════════════════

@@ -436,8 +436,116 @@ function makeProgramsFake(opts?: { store?: Record<string, Record<string, unknown
     from: (table: string) => new B(table),
     // RPC simulée : mappe les ids temporaires → UUID, PERSISTE un minimum (pour
     // permettre le rechargement / la double sauvegarde) et bumpe updated_at.
-    rpc: (_fn: string, args: { p_payload: Record<string, unknown> }) => {
-      const payload = args.p_payload;
+    rpc: (fn: string, args: { p_payload: Record<string, unknown> }) =>
+      fn === "save_training_program_sessions" ? rpcGroupee(args.p_payload) : rpcSeance(args.p_payload),
+  };
+
+  /**
+   * LA RPC GROUPÉE, REJOUÉE — et elle DÉLÈGUE, comme la vraie.
+   *
+   * `save_training_program_sessions` n'a pas de logique de contenu propre :
+   * elle applique la tête, les semaines et les séances créées/supprimées, puis
+   * APPELLE `save_training_session_blocks` pour chaque séance. Le faux fait
+   * exactement cela — il décompose la charge groupée et passe chaque séance au
+   * handler ci-dessous, celui qui porte déjà les garde-fous de la vraie base
+   * (verrou optimiste, `FOREIGN_BLOCK_ID`, application du patch).
+   *
+   * ⚠️ `rpcPayloads` CONTINUE DE RECEVOIR LES CHARGES PAR SÉANCE, et c'est ce
+   * qui permet aux assertions de ce fichier de rester les mêmes : ce qui est
+   * mesuré est la charge réellement reçue par le moteur, quel que soit le
+   * chemin qui l'a transportée.
+   *
+   * ⚠️ LA PREMIÈRE ERREUR ARRÊTE TOUT ET N'ÉCRIT RIEN. La vraie fonction est
+   * transactionnelle : un refus en milieu de charge annule les séances déjà
+   * traitées. Le faux ne sait pas annuler, mais il PROPAGE l'erreur sans
+   * traiter la suite — suffisant pour que les tests constatent l'arrêt, et
+   * l'atomicité réelle est prouvée par la section E de
+   * `save_training_program_sessions_checklist.sql`, sur PostgreSQL.
+   */
+  async function rpcGroupee(charge: Record<string, unknown>) {
+    const programId = charge.program_id as string;
+    const resultats: Record<string, unknown>[] = [];
+
+    const patch = charge.program_patch as Record<string, unknown> | undefined;
+    if (patch) {
+      writes.push({ table: "programs", op: "update" });
+      for (const r of rows("programs")) if (r.id === programId) Object.assign(r, patch);
+    }
+
+    for (const n of (charge.weeks_to_delete as number[]) ?? []) {
+      writes.push({ table: "program_weeks", op: "delete" });
+      store.program_weeks = rows("program_weeks").filter(
+        (w) => !(w.program_id === programId && w.week_number === n),
+      );
+    }
+    const semaines: Record<string, string> = {};
+    for (const n of (charge.weeks_to_create as number[]) ?? []) {
+      writes.push({ table: "program_weeks", op: "insert" });
+      const id = crypto.randomUUID();
+      rows("program_weeks").push({ id, program_id: programId, week_number: n });
+      semaines[String(n)] = id;
+    }
+    const aSupprimer = new Set((charge.sessions_to_delete as string[]) ?? []);
+    if (aSupprimer.size > 0) {
+      writes.push({ table: "workout_sessions", op: "delete" });
+      store.workout_sessions = rows("workout_sessions").filter((x) => !aSupprimer.has(x.id as string));
+    }
+
+    for (const neuve of (charge.sessions_to_create as Record<string, unknown>[]) ?? []) {
+      writes.push({ table: "workout_sessions", op: "insert" });
+      const weekId =
+        semaines[String(neuve.week_number)] ??
+        (rows("program_weeks").find(
+          (w) => w.program_id === programId && w.week_number === neuve.week_number,
+        )?.id as string);
+      const ligne = {
+        id: crypto.randomUUID(), program_id: programId, program_week_id: weekId,
+        day: neuve.day, name: neuve.name, updated_at: nextTs(),
+      };
+      rows("workout_sessions").push(ligne);
+      const blocs = (neuve.blocks as unknown[]) ?? [];
+      if (blocs.length > 0) {
+        const r = await rpcSeance({
+          session_id: ligne.id, expected_updated_at: ligne.updated_at, blocks: blocs,
+        });
+        if (r.error) return r;
+        resultats.push({ ...(r.data as Record<string, unknown>), client_id: neuve.client_id, created: true });
+      } else {
+        resultats.push({
+          client_id: neuve.client_id, created: true, session_id: ligne.id,
+          updated_at: ligne.updated_at, session_type: "rest", blocks: [],
+          id_mapping: { blocks: {}, exercises: {} },
+          warnings: { detached_exercise_feedback_count: 0 },
+        });
+      }
+    }
+
+    for (const maj of (charge.sessions_to_update as Record<string, unknown>[]) ?? []) {
+      const sousCharge: Record<string, unknown> = {
+        session_id: maj.session_id,
+        expected_updated_at: maj.expected_updated_at,
+        blocks: maj.blocks ?? [],
+      };
+      if (maj.session_patch) sousCharge.session_patch = maj.session_patch;
+      const r = await rpcSeance(sousCharge);
+      if (r.error) return r;
+      resultats.push({ ...(r.data as Record<string, unknown>), created: false });
+    }
+
+    return {
+      data: {
+        program_id: programId,
+        program_updated_at: nextTs(),
+        weeks: semaines,
+        week_count: rows("program_weeks").filter((w) => w.program_id === programId).length,
+        sessions: resultats,
+        session_count: resultats.length,
+      },
+      error: null,
+    };
+  }
+
+  function rpcSeance(payload: Record<string, unknown>) {
       rpcPayloads.push(payload);
       if (opts?.rpcError) return Promise.resolve({ data: null, error: { message: opts.rpcError } });
       const blocksMap: Record<string, string> = {};
@@ -509,9 +617,62 @@ function makeProgramsFake(opts?: { store?: Record<string, Record<string, unknown
         },
         error: null,
       });
-    },
-  };
+  }
+
   return { db: db as unknown as SupabaseClient<Database>, writes, rpcPayloads, store };
+}
+
+/**
+ * L'INSTANTANÉ QUE LE BUILDER AURAIT CHARGÉ, dérivé du magasin factice.
+ *
+ * ⚠️ SES SÉANCES SONT VOLONTAIREMENT VIDES DE CONTENU. Ces tests mesurent la
+ * CHARGE ENVOYÉE pour une séance donnée, pas la détection des séances
+ * inchangées — celle-là est couverte par `program-diff.mts`, sur des séances
+ * strictement identiques. Un instantané sans blocs déclare donc toutes les
+ * séances MODIFIÉES, et chaque assertion continue de porter sur une charge
+ * réellement émise. Un instantané fidèle au contenu ferait l'inverse : il
+ * déclarerait tout inchangé, aucune charge ne partirait, et les neuf tests
+ * passeraient en ne vérifiant plus rien.
+ */
+function instantaneDuStore(
+  store: Record<string, Record<string, unknown>[]>,
+  programId: string,
+): AdminProgram {
+  const semaines = new Map(
+    (store.program_weeks ?? [])
+      .filter((w) => w.program_id === programId)
+      .map((w) => [w.id as string, w.week_number as number]),
+  );
+  const sessions = (store.workout_sessions ?? [])
+    .filter((x) => semaines.has(x.program_week_id as string))
+    .map(
+      (x) =>
+        ({
+          id: x.id as string,
+          programId,
+          weekNumber: semaines.get(x.program_week_id as string) ?? 0,
+          day: (x.day as string) ?? "",
+          isRestDay: false,
+          name: (x.name as string) ?? "",
+          muscleGroup: "",
+          durationMinutes: 0,
+          warmup: "",
+          coachNotes: "",
+          exercises: [],
+          sessionType: "strength",
+          cardioBlocks: [],
+          bannerUrl: null,
+          blocks: [],
+          updatedAt: (x.updated_at as string) ?? "",
+          scheduledDate: null,
+        }) as unknown as AdminWorkoutSession,
+    );
+  return {
+    id: programId, name: "Programme", goal: "", level: "", durationWeeks: 1,
+    description: "", status: "actif", assignedStudentIds: [], sessions,
+    createdAt: "", updatedAt: "u-prog", bannerUrl: null, programMode: "individuel",
+    groupStartDate: null, isPublic: false, publicSubscriptionTemplateId: null,
+  } as unknown as AdminProgram;
 }
 const CONTENT_TABLES = ["workout_exercises", "training_blocks", "training_prescriptions"];
 const contentWrites = (writes: FakeWrite[]) => writes.filter((w) => CONTENT_TABLES.includes(w.table));
@@ -683,7 +844,7 @@ async function runAsync() {
       name: "Modifié",
       blocks: [strengthWith(B_STRENGTH, 0, OTHER_UUID)],
     });
-    const ok = await updateProgram(db, "prog", baseProgramData([session]));
+    const ok = await updateProgram(db, "prog", baseProgramData([session]), instantaneDuStore(store, "prog"));
     assert.equal(ok, true);
     assert.equal(rpcPayloads.length, 1);
     const p = rpcPayloads[0];
@@ -719,7 +880,7 @@ async function runAsync() {
       cardioBlock("55555555-5555-4555-8555-5555555555c2", 2),
       strengthBlock("55555555-5555-4555-8555-5555555555s2", 3),
     ];
-    await updateProgram(db, "prog", baseProgramData([adminSession({ id: SESS1, weekNumber: 1, day: "lundi", updatedAt: "u0", blocks })]));
+    await updateProgram(db, "prog", baseProgramData([adminSession({ id: SESS1, weekNumber: 1, day: "lundi", updatedAt: "u0", blocks })]), instantaneDuStore(store, "prog"));
     const p = rpcPayloads[0];
     assert.deepEqual(
       p.blocks.map((b: { category: string }) => b.category),
@@ -753,6 +914,7 @@ async function runAsync() {
           cardioBlocks: [{ id: "88888888-8888-4888-8888-888888888888", order: 1, title: "X", cardioType: "easy_run", segments: [] }],
         }),
       ]),
+      instantaneDuStore(store, "prog"),
     );
     const p = rpcPayloads[0];
     assert.equal(p.blocks.length, 1, "un seul bloc = blocks[] canonique");
@@ -767,6 +929,7 @@ async function runAsync() {
       db,
       "prog",
       baseProgramData([adminSession({ id: "sess-new", weekNumber: 1, day: "lundi", blocks: [strengthWith(`new-block:${CLIENT_UUID}`, 0, `new-exercise:${OTHER_UUID}`)] })]),
+      instantaneDuStore(store, "prog"),
     );
     assert.equal(writes.some((w) => w.table === "workout_sessions" && w.op === "insert"), true, "INSERT de la nouvelle séance");
     assert.equal(contentWrites(writes).length, 0, "aucun insert direct de contenu");
@@ -828,6 +991,7 @@ async function runAsync() {
         adminSession({ id: SESS1, weekNumber: 1, day: "jeudi", updatedAt: "u-mer", name: "Lower", blocks: [strengthWith(B_STRENGTH, 0, EX_S1)] }),
         adminSession({ id: SESS2, weekNumber: 1, day: "mercredi", updatedAt: "u-jeu", name: "Upper", blocks: [strengthWith(B_S2, 0, EX_S2)] }),
       ]),
+      instantaneDuStore(store, "prog"),
     );
     assert.equal(ok, true, "l'enregistrement doit RÉUSSIR (c'est tout le défaut)");
 
@@ -875,6 +1039,7 @@ async function runAsync() {
         adminSession({ id: SESS1, weekNumber: 1, day: "jeudi", updatedAt: "u-mer", blocks: [strengthWith(B_STRENGTH, 0, EX_S1)] }),
         adminSession({ id: SESS2, weekNumber: 1, day: "mercredi", updatedAt: "u-jeu", isRestDay: true, blocks: [] }),
       ]),
+      instantaneDuStore(store, "prog"),
     );
     assert.equal(ok, true);
     const parSession = new Map(rpcPayloads.map((p) => [p.session_id as string, p]));
@@ -901,6 +1066,7 @@ async function runAsync() {
             // SESS1 réclame le bloc de SESS2 : refus attendu.
             adminSession({ id: SESS1, weekNumber: 1, day: "mercredi", updatedAt: "u-mer", blocks: [strengthWith(B_S2, 0, EX_S1)] }),
           ]),
+          instantaneDuStore(store, "prog"),
         ),
       /FOREIGN_BLOCK_ID/,
     );
@@ -921,6 +1087,7 @@ async function runAsync() {
         adminSession({ id: SESS1, weekNumber: 1, day: "mercredi", updatedAt: "u-mer", blocks: [strengthWith(B_STRENGTH, 0, EX_S1)] }),
         adminSession({ id: SESS2, weekNumber: 1, day: "jeudi", updatedAt: "u-jeu", blocks: [strengthWith(B_S2, 0, EX_S2)] }),
       ]),
+      instantaneDuStore(store, "prog"),
     );
     assert.equal(ok, true);
     const parSession = new Map(rpcPayloads.map((p) => [p.session_id as string, p]));
@@ -942,7 +1109,10 @@ async function runAsync() {
       adminSession({ id: SESS1, weekNumber: 1, day: "lundi", updatedAt: "u0", blocks: [strengthWith("55555555-5555-4555-8555-5555555555a1", 0, "55555555-5555-4555-8555-5555555555a2")] }),
       adminSession({ id: SESS2, weekNumber: 1, day: "mardi", updatedAt: "u0", blocks: [strengthWith("55555555-5555-4555-8555-5555555555a3", 0, "55555555-5555-4555-8555-5555555555a4")] }),
     ];
-    await assert.rejects(() => updateProgram(db, "prog", baseProgramData(sessions)), /STALE_TRAINING_SESSION/);
+    await assert.rejects(
+      () => updateProgram(db, "prog", baseProgramData(sessions), instantaneDuStore(store, "prog")),
+      /STALE_TRAINING_SESSION/,
+    );
     assert.equal(rpcPayloads.length, 1, "arrêt au premier STALE (2e séance non sauvegardée)");
   });
 
@@ -958,6 +1128,7 @@ async function runAsync() {
       db,
       "prog",
       baseProgramData([adminSession({ id: SESS1, weekNumber: 1, day: "lundi", updatedAt: "u0", blocks: [strengthWith(`new-block:${CLIENT_UUID}`, 0, `new-exercise:${OTHER_UUID}`)] })]),
+      instantaneDuStore(store, "prog"),
     );
     assert.equal((rpcPayloads[0].blocks[0].id as string).startsWith("new-block:"), true, "save1 : bloc temporaire");
     assert.equal((rpcPayloads[0].blocks[0].exercises[0].id as string).startsWith("new-exercise:"), true, "save1 : exercice temporaire");
@@ -970,6 +1141,7 @@ async function runAsync() {
       db,
       "prog",
       baseProgramData([adminSession({ id: SESS1, weekNumber: 1, day: "lundi", updatedAt: freshUpdatedAt, blocks: [strengthWith(persistedBlock.id as string, 0, persistedEx.id as string)] })]),
+      instantaneDuStore(store, "prog"),
     );
     const p2 = rpcPayloads[1];
     assert.equal(p2.expected_updated_at, freshUpdatedAt, "save2 utilise le nouvel updatedAt (aucun STALE)");
@@ -1018,7 +1190,7 @@ async function runAsync() {
       refetch: async () => prog("prog-1", "u1"),
     });
     assert.equal(outcome.kind, "success");
-    const next = nextBuilderState({ program: prog("prog-1", "u0"), revision: 0 }, outcome);
+    const next = nextBuilderState({ program: prog("prog-1", "u0"), revision: 0, desynchronise: false }, outcome);
     assert.equal(next.revision, 1, "révision incrémentée → remount");
     assert.equal(next.program.updatedAt, "u1", "snapshot remplacé par la version fraîche");
   });
@@ -1029,10 +1201,11 @@ async function runAsync() {
       refetch: async () => null, // refetch échoue / aucune donnée
     });
     assert.equal(outcome.kind, "refetch-failed");
-    const before = { program: prog("prog-1", "u0"), revision: 3 };
+    const before = { program: prog("prog-1", "u0"), revision: 3, desynchronise: false };
     const next = nextBuilderState(before, outcome);
     assert.equal(next.revision, 3, "révision inchangée");
     assert.equal(next.program, before.program, "snapshot inchangé (pas de remount avec données incomplètes)");
+    assert.equal(next.desynchronise, true, "le drapeau de désynchronisation est levé : plus aucune écriture possible");
   });
 
   await atest("remount — STALE : aucune révision, snapshot local conservé, non-succès", async () => {
@@ -1048,10 +1221,11 @@ async function runAsync() {
     });
     assert.equal(outcome.kind, "stale");
     assert.equal(refetched, false, "refetch NON lancé sur STALE (sauvegarde échouée)");
-    const before = { program: prog("prog-1", "u0"), revision: 5 };
+    const before = { program: prog("prog-1", "u0"), revision: 5, desynchronise: false };
     const next = nextBuilderState(before, outcome);
     assert.equal(next.revision, 5, "révision inchangée sur STALE");
     assert.equal(next.program, before.program, "état local (modifications non enregistrées) conservé");
+    assert.equal(next.desynchronise, false, "un STALE ne désynchronise pas : rien n a été écrit, l instantané reste valable");
   });
 
   await atest("remount — program.updatedAt INCHANGÉ : le remount se produit quand même via la révision", async () => {
@@ -1062,14 +1236,14 @@ async function runAsync() {
       refetch: async () => prog("prog-1", "u0"), // MÊME updatedAt programme
     });
     assert.equal(outcome.kind, "success");
-    const next = nextBuilderState({ program: prog("prog-1", "u0"), revision: 0 }, outcome);
+    const next = nextBuilderState({ program: prog("prog-1", "u0"), revision: 0, desynchronise: false }, outcome);
     assert.equal(next.revision, 1, "remount déclenché malgré program.updatedAt identique");
   });
 
   await atest("remount — échec de sauvegarde (false) : erreur, aucun remount", async () => {
     const outcome = await orchestrateBuilderSave({ save: async () => false, refetch: async () => prog("prog-1", "u1") });
     assert.equal(outcome.kind, "error");
-    const before = { program: prog("prog-1", "u0"), revision: 2 };
+    const before = { program: prog("prog-1", "u0"), revision: 2, desynchronise: false };
     assert.equal(nextBuilderState(before, outcome).revision, 2, "aucun remount sur échec");
   });
 

@@ -25,7 +25,50 @@ import type { AdminProgram } from "@/types";
  *
  * `refetch` rend le programme FRAIS, sans repasser `loading` à vrai : le
  * builder s'en sert après un enregistrement et ne doit pas être démonté.
+ *
+ * ════════════════════════════════════════════════════════════════════════════
+ * ⚠️ UNE RELECTURE QUI ÉCHOUE NE VIDE PLUS `program`, ET C'EST UNE CORRECTION
+ * DE PERTE DE DONNÉES
+ * ════════════════════════════════════════════════════════════════════════════
+ * `refetch` faisait `setProgram(frais)` sans condition. Or `getProgramById`
+ * rend `null` quand la LECTURE ÉCHOUE — il ne lève pas. Enchaînement constaté
+ * (démontré par scripts/tests/reprise-interface-desynchronisee.mts) :
+ *
+ *   sauvegarde réussie → relecture en échec → `setProgram(null)` → le cache de
+ *   la page est vide → `savedProgram` vaut encore `null` s'il s'agit de la
+ *   première sauvegarde du montage → `activeProgram` tombe à `undefined` → la
+ *   page affiche « Programme introuvable. » → LE BUILDER EST DÉMONTÉ, et les
+ *   modifications locales non enregistrées partent avec lui, en même temps que
+ *   le message qui demandait de recharger.
+ *
+ * Désormais : si une valeur était déjà chargée et que la relecture rend `null`,
+ * on CONSERVE la valeur précédente et on rend `null` à l'appelant, qui sait
+ * ainsi que la relecture a échoué. L'état affiché est périmé — c'est précisément
+ * pour cela que la page bascule en « désynchronisé » et interdit une nouvelle
+ * sauvegarde jusqu'à une relecture réussie.
+ *
+ * ⚠️ LE COMPROMIS EST ASSUMÉ. Si le programme avait RÉELLEMENT été supprimé
+ * entre-temps, le builder resterait ouvert sur un instantané périmé au lieu
+ * d'afficher « introuvable ». C'est volontaire : `getProgramById` ne distingue
+ * pas « supprimé » de « illisible », et entre afficher trop longtemps un
+ * programme disparu et détruire le travail en cours d'un coach, seul le second
+ * est irréparable. Aucune écriture n'est possible dans cet état (la page la
+ * refuse), donc rien ne peut être écrit par-dessus une suppression réelle.
+ * Le chargement INITIAL garde l'ancien comportement : à ce moment-là il n'y a
+ * aucune modification locale à perdre, et « introuvable » est la bonne réponse.
  */
+/**
+ * Le réducteur de `refetch`, extrait pour être appelé TEL QUEL par les tests
+ * plutôt que décrit par eux. Voir l'avertissement de l'en-tête : une relecture
+ * vide ne doit jamais effacer un programme déjà chargé.
+ */
+export function conserverProgrammeSiRelectureVide(
+  precedent: AdminProgram | null,
+  frais: AdminProgram | null,
+): AdminProgram | null {
+  return frais ?? precedent;
+}
+
 export function useSupabaseProgram(programId: string | undefined) {
   const [loading, setLoading] = useState(true);
   const [program, setProgram] = useState<AdminProgram | null>(null);
@@ -38,7 +81,10 @@ export function useSupabaseProgram(programId: string | undefined) {
       return null;
     }
     const frais = await getProgramById(supabase, programId);
-    setProgram(frais);
+    // Voir l'avertissement de l'en-tête : on n'écrase JAMAIS une valeur déjà
+    // chargée par un `null` de relecture. Le `null` rendu signale l'échec à
+    // l'appelant, qui en tire les conséquences (état désynchronisé).
+    setProgram((precedent) => conserverProgrammeSiRelectureVide(precedent, frais));
     setLoading(false);
     return frais;
   }, [programId]);

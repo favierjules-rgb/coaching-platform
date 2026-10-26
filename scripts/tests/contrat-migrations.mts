@@ -592,6 +592,84 @@ export const MIGRATION_DOCUMENTS_MINIATURES =
 export const MIGRATION_DOCUMENTS_AFFECTATIONS =
   "20261025090000_document_assignments_portee_eleve.sql";
 
+/**
+ * ENTRAÎNEMENT — LES TROIS INDEX DE CLÉ ÉTRANGÈRE QUI MANQUAIENT.
+ *
+ * Strictement additive : trois index, aucune colonne, aucune policy, aucune
+ * fonction, aucune donnée. `workout_exercises(session_id)`,
+ * `workout_sessions(program_week_id)` et `workout_sessions(program_id)` —
+ * ce dernier NON PARTIEL, parce que le seul index existant dont `program_id`
+ * était la tête l'était (`WHERE scheduled_date IS NOT NULL`) et ne pouvait donc
+ * pas servir un filtre d'égalité général. Aucun index existant n'est modifié
+ * ni supprimé.
+ *
+ * Mesure, base locale reconstruite, volumétrie de production, les index pour
+ * seule variable : un enregistrement de programmation 12 semaines passe de
+ * 318,5 s à 7,2 s de temps serveur (84 séances, moyenne 3 791 → 86 ms).
+ */
+export const MIGRATION_ENTRAINEMENT_INDEX =
+  "20261026090000_entrainement_index_cles_etrangeres.sql";
+
+/**
+ * ENREGISTREMENT GROUPÉ ET ATOMIQUE D'UNE PROGRAMMATION.
+ *
+ * `save_training_program_sessions(jsonb)` applique tête, semaines, séances
+ * créées/supprimées et séances modifiées en UNE transaction et UN aller-retour,
+ * là où le chemin précédent émettait 87 à 100 requêtes séquentielles. Elle
+ * DÉLÈGUE le contenu de chaque séance à `save_training_session_blocks`,
+ * inchangée : aucune règle métier n'est réimplémentée, donc aucune ne peut
+ * diverger. `security invoker` — la RLS et le périmètre collaborateur
+ * s'appliquent intégralement. Les suppressions sont EXPLICITES : une séance
+ * absente de la charge est inchangée, jamais supprimée.
+ */
+export const MIGRATION_ENREGISTREMENT_GROUPE =
+  "20261027090000_save_training_program_sessions_rpc.sql";
+
+/**
+ * ENTRAÎNEMENT — DES PRÉDICATS SCALAIRES À LA PLACE DES ENSEMBLES D'IDENTIFIANTS.
+ *
+ * Expérience de contrôle, la RLS pour seule variable sur un appel groupé de
+ * 84 séances : 6 411 ms avec, 89 ms sans. Autrement dit 98,7 % du coût restant
+ * était l'évaluation des policies, qui matérialisaient à CHAQUE instruction la
+ * liste entière des identifiants autorisés (jusqu'à 5 074 exercices).
+ *
+ * Les policies `*_manage_staff_*` des six tables d'entraînement appellent
+ * désormais neuf prédicats booléens (`programme_ecrivable`, `seance_lisible`,
+ * `exercice_ecrivable`…) qui répondent par une recherche d'index. La règle
+ * métier est TRANSCRITE À L'IDENTIQUE, et la migration le PROUVE avant de
+ * toucher la moindre policy : elle compare, pour chaque identité de la base et
+ * chaque ligne des quatre tables, le verdict de l'ancien ensemble et celui du
+ * nouveau prédicat, et lève au premier désaccord.
+ *
+ * Les fonctions d'ensemble sont CONSERVÉES (policies Storage, autres chantiers,
+ * et référence de la preuve). Les policies `*_select_assigned_student` de
+ * l'élève ne sont pas touchées. `statement_timeout` n'est pas modifié.
+ */
+export const MIGRATION_ENTRAINEMENT_PREDICATS_RLS =
+  "20261028090000_entrainement_predicats_rls_scalaires.sql";
+
+/**
+ * LOT D — les prescriptions cardio cessent d'être détruites et recréées.
+ *
+ * `save_training_session_blocks` traitait les blocs et les exercices par diff
+ * mais les prescriptions par REMPLACEMENT (`delete … where block_id = …` puis
+ * réinsertion). Leurs identifiants changeaient donc à chaque enregistrement de
+ * la séance, même sans modification, et `created_at` était perdu — le mécanisme
+ * qui a produit les 228 retours d'exercice orphelins relevés en production.
+ *
+ * Signature INCHANGÉE, `security invoker` conservé. Trois différences avec la
+ * v2 : validation de la forme des identifiants de prescription, diff à la place
+ * du remplacement, et `id_mapping.prescriptions` dans le retour. Chacune des 25
+ * colonnes issues de la charge porte une garde de présence (le contrat de
+ * `session_patch`) : une clé absente conserve la valeur en base, une clé
+ * présente à null l'efface.
+ *
+ * Une charge SANS identifiant de prescription reste acceptée — c'est ce qui
+ * permet de déployer la base avant le client.
+ */
+export const MIGRATION_PRESCRIPTIONS_DIFF =
+  "20261029090000_training_prescriptions_synchronisation_differentielle.sql";
+
 export const MIGRATIONS_COURSES: readonly string[] = [
   MIGRATION_C2,
   MIGRATION_C3,
@@ -645,17 +723,21 @@ export const MIGRATIONS_APRES_C0_1: readonly string[] = [
   MIGRATION_STORAGE_DOCUMENTS_CHEMIN,
   MIGRATION_DOCUMENTS_MINIATURES,
   MIGRATION_DOCUMENTS_AFFECTATIONS,
+  MIGRATION_ENTRAINEMENT_INDEX,
+  MIGRATION_ENREGISTREMENT_GROUPE,
+  MIGRATION_ENTRAINEMENT_PREDICATS_RLS,
+  MIGRATION_PRESCRIPTIONS_DIFF,
 ];
 
 /**
  * Le compte attendu — nécessaire, jamais suffisant.
  *
- * 119 = 84 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 34
+ * 123 = 84 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 37
  * migrations nommées dans `MIGRATIONS_APRES_C0_1`. Le point 6 recalcule
  * l'historique à partir de ce nombre : il ne peut pas être remonté seul sans
  * qu'une migration soit nommée en face.
  */
-export const NOMBRE_DE_MIGRATIONS = 119;
+export const NOMBRE_DE_MIGRATIONS = 123;
 
 /**
  * L'empreinte des 79 migrations ANTÉRIEURES à C0.1, dans l'ordre.

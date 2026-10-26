@@ -1,4 +1,5 @@
 import {
+  makeNewPrescriptionId,
   deriveSessionType,
   moveBlockDown,
   moveBlockUp,
@@ -298,12 +299,30 @@ function duplicateBlock(block: TrainingBlock, gen: IdFactory): TrainingBlock {
   return {
     ...block,
     id: newBlockId(gen),
-    prescriptions: block.prescriptions.map((prescription, index) => ({ ...prescription, id: gen(), order: index })),
+    /*
+     * ⚠️ `gen()` NU ÉTAIT UN DÉFAUT, ET IL EST DEVENU FATAL. Il rendait un
+     * `crypto.randomUUID()` brut : un identifiant qui a EXACTEMENT la forme d'un
+     * UUID persisté. Tant que le moteur faisait `delete` + `insert`, les
+     * identifiants de prescription étaient ignorés et personne ne pouvait s'en
+     * apercevoir. Avec la synchronisation différentielle (migration
+     * 20261029090000), le serveur cherche cette ligne sur ce bloc, ne la trouve
+     * pas, et lève `FOREIGN_PRESCRIPTION_ID`.
+     *
+     * Mesuré sur le banc avant correction : scénario « ajout d'une semaine par
+     * copie », trois passages sur trois en échec. Recopier l'identifiant de la
+     * source serait tout aussi faux — la ligne appartient au bloc d'origine.
+     */
+    prescriptions: block.prescriptions.map((prescription, index) => ({
+      ...prescription,
+      id: makeNewPrescriptionId(gen),
+      order: index,
+    })),
   };
 }
 
 /**
- * Régénère TOUS les ids (blocs + exercices) d'une liste de blocs vers de
+ * Régénère TOUS les ids (blocs, exercices ET prescriptions cardio) d'une liste
+ * de blocs vers de
  * nouveaux ids temporaires stricts — utilisé pour la duplication d'une séance
  * ou d'une semaine entière dans le builder. Aucun UUID source n'est réutilisé,
  * la source reste intacte (copie immuable), l'ordre et le contenu préservés.

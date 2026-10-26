@@ -14,6 +14,7 @@ import {
   PanelBottomClose,
   PanelBottomOpen,
   Plus,
+  RefreshCw,
   Settings,
   Trash2,
 } from "lucide-react";
@@ -52,7 +53,15 @@ const statusOptions: { value: AdminContentStatus; label: string }[] = [
   { value: "archivé", label: "Archivé" },
 ];
 
-type SaveStatus = "idle" | "dirty" | "saving" | "saved" | "error";
+/**
+ * ⚠️ `"desynchronise"` N'EST PAS UNE NUANCE D'`"error"`. Il dit « la sauvegarde
+ * a RÉUSSI, la synchronisation non ». Les écritures sont commitées ; seule la
+ * relecture a échoué. Le ranger dans `"error"` affichait le message en ROUGE,
+ * sous un libellé d'échec et sans horodatage d'enregistrement — un diagnostic
+ * faux pour le coach, qui pouvait croire son travail perdu alors qu'il était
+ * en base. Il a donc son état, sa couleur (ambre) et son action.
+ */
+type SaveStatus = "idle" | "dirty" | "saving" | "saved" | "error" | "desynchronise";
 
 export interface BuilderData {
   name: string;
@@ -157,12 +166,25 @@ export function ProgramBuilderFullscreen({
   program,
   library,
   onSave,
+  desynchronise = false,
+  onResynchroniser,
   templates,
   onSaveAsTemplate,
 }: {
   program: AdminProgram;
   library: ExerciseLibraryItem[];
-  onSave: (data: BuilderData) => Promise<boolean | { ok: boolean; userMessage?: string | null }>;
+  onSave: (
+    data: BuilderData,
+  ) => Promise<boolean | { ok: boolean; userMessage?: string | null; desynchronise?: boolean }>;
+  /**
+   * « Enregistré, mais pas relu » : la page a réussi l'écriture et raté la
+   * relecture. Tant que c'est vrai, l'instantané affiché est périmé et aucune
+   * sauvegarde ne doit partir — la page la refuse de toute façon avant le
+   * réseau, ce drapeau sert à le DIRE et à désactiver le bouton.
+   */
+  desynchronise?: boolean;
+  /** Relecture explicite de l'état serveur. `true` si elle a abouti. */
+  onResynchroniser?: () => Promise<boolean>;
   // Modèles de séance CANONIQUES (dernière passe Lot 4) : le picker et
   // « Enregistrer comme modèle » sont câblés dans SessionBlockPanel ; le contenu
   // est stocké/lu en blocks[] (voir lib/session-template-content.ts).
@@ -205,6 +227,13 @@ export function ProgramBuilderFullscreen({
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  const [resynchronisation, setResynchronisation] = useState(false);
+  /*
+   * L'état affiché suit le drapeau de la PAGE : si elle déclare la
+   * désynchronisation (au montage comme après coup), le bandeau le dit, même si
+   * aucune sauvegarde n'a eu lieu dans CE montage.
+   */
+  const desynchroniseEffectif = desynchronise || saveStatus === "desynchronise";
   /**
    * ⚠️ UNE SEULE SAUVEGARDE À LA FOIS — ET CE N'EST PAS `saveStatus` QUI LE
    * GARANTIT. Le bouton est désactivé pendant `"saving"`, mais Cmd/Ctrl+S ne
@@ -235,7 +264,13 @@ export function ProgramBuilderFullscreen({
    * qu'un changement de nom ou de séance. Stable, pour ne pas recréer le
    * contexte de progression à chaque rendu.
    */
-  const marquerModifieParReglage = useCallback(() => setSaveStatus("dirty"), []);
+  // ⚠️ NE PAS ÉCRASER `"desynchronise"`. Une modification locale faite après un
+  // échec de relecture ne doit pas faire disparaître l'avertissement : l'état
+  // serveur reste non réconcilié, et la sauvegarde reste interdite.
+  const marquerModifieParReglage = useCallback(
+    () => setSaveStatus((prev) => (prev === "desynchronise" ? prev : "dirty")),
+    [],
+  );
 
   // Raccourci clavier Cmd/Ctrl+S pour sauvegarder sans quitter le clavier,
   // et "[" pour basculer les deux panneaux latéraux (voir spec V3 —
@@ -270,8 +305,29 @@ export function ProgramBuilderFullscreen({
     sessions,
   ]);
 
+  /*
+   * ⚠️ F5 N'EMPORTE PLUS LE TRAVAIL EN SILENCE. Le message de
+   * désynchronisation demandait de recharger ; rien n'avertissait que le
+   * rechargement effaçait les modifications non enregistrées. Le garde couvre
+   * les DEUX états où il y a quelque chose à perdre : `"dirty"` (modifications
+   * jamais envoyées) et la désynchronisation (modifications faites depuis un
+   * enregistrement non relu). Le navigateur affiche son propre libellé : on ne
+   * contrôle que le déclenchement.
+   */
+  useEffect(() => {
+    if (saveStatus !== "dirty" && !desynchroniseEffectif) return;
+    function avertir(event: BeforeUnloadEvent) {
+      event.preventDefault();
+      // Requis par les navigateurs historiques ; ignoré par les récents.
+      event.returnValue = "";
+    }
+    window.addEventListener("beforeunload", avertir);
+    return () => window.removeEventListener("beforeunload", avertir);
+  }, [saveStatus, desynchroniseEffectif]);
+
   function markDirty() {
-    setSaveStatus("dirty");
+    // Même règle que marquerModifieParReglage : `"desynchronise"` prime.
+    setSaveStatus((prev) => (prev === "desynchronise" ? prev : "dirty"));
   }
 
   /**
@@ -311,17 +367,80 @@ export function ProgramBuilderFullscreen({
         sessions,
       });
       const ok = typeof résultat === "boolean" ? résultat : résultat.ok;
+      const message = typeof résultat === "boolean" ? null : (résultat.userMessage ?? null);
+      const desynchro = typeof résultat === "boolean" ? false : résultat.desynchronise === true;
       if (ok) {
         setSaveStatus("saved");
         setSavedAt(new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }));
+      } else if (desynchro) {
+        /*
+         * ⚠️ L'HORODATAGE EST POSÉ, ET CE N'EST PAS UN DÉTAIL COSMÉTIQUE.
+         * L'enregistrement a RÉUSSI : ne pas l'horodater laissait le coach sans
+         * aucune trace que son travail était en base. Seule la synchronisation
+         * a échoué, et c'est ce que dit le bandeau ambre.
+         *
+         * Cas particulier : un refus PRÉVENTIF (la page refuse d'envoyer parce
+         * qu'on est déjà désynchronisé) passe aussi ici. Rien n'a été écrit
+         * cette fois-ci, mais l'horodatage de la sauvegarde précédente — celle
+         * qui a réussi — reste la bonne information à montrer, et le message
+         * dit explicitement que rien n'a été envoyé.
+         */
+        setSaveStatus("desynchronise");
+        setSaveErrorMessage(message);
+        if (!savedAt) {
+          setSavedAt(new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }));
+        }
       } else {
         // Incident du 02/08 : jamais un échec générique quand une cause
         // actionnable est connue (session sans droits coach, séance STALE…).
         setSaveStatus("error");
-        setSaveErrorMessage(typeof résultat === "boolean" ? null : (résultat.userMessage ?? null));
+        setSaveErrorMessage(message);
       }
       return ok;
     });
+  }
+
+  /**
+   * RELECTURE EXPLICITE DE L'ÉTAT SERVEUR — la seule sortie de l'état
+   * désynchronisé.
+   *
+   * ⚠️ UN SUCCÈS DÉMONTE CE COMPOSANT, ET C'EST LE BUT. La page remplace
+   * l'instantané et incrémente la révision, donc la `key` change et le builder
+   * se réinitialise sur les données SERVEUR : les identifiants temporaires
+   * `new-prescription:…` de l'état local partent avec l'ancien montage et sont
+   * remplacés par les identifiants réellement persistés. Aucun état n'est donc
+   * à nettoyer ici — et rien n'est à remettre à jour après l'await, puisque ce
+   * composant n'existera plus.
+   *
+   * ⚠️ CE QUE LE COACH PERD EN RESYNCHRONISANT : ses modifications locales non
+   * enregistrées, puisque le builder repart de l'état serveur. D'où la
+   * confirmation — et d'où le fait que ce bouton n'apparaisse QUE dans cet
+   * état, où continuer à éditer ne mène de toute façon à aucune sauvegarde.
+   */
+  async function handleResynchroniser() {
+    if (!onResynchroniser || resynchronisation) return;
+    if (
+      saveStatus === "desynchronise" &&
+      !window.confirm(
+        "Recharger l'état enregistré sur le serveur ?\n\n" +
+          "Ton dernier enregistrement a réussi : il est bien en base. " +
+          "En revanche, les modifications faites DEPUIS cet enregistrement seront perdues.",
+      )
+    ) {
+      return;
+    }
+    setResynchronisation(true);
+    const ok = await onResynchroniser();
+    if (!ok) {
+      // Toujours désynchronisé : on le redit, sans prétendre à un succès.
+      setResynchronisation(false);
+      setSaveStatus("desynchronise");
+      setSaveErrorMessage(
+        "La relecture a encore échoué. Vérifie ta connexion : tant que l'état serveur n'est pas relu, aucune nouvelle sauvegarde ne partira.",
+      );
+    }
+    // Sur succès : la page change la `key`, ce composant est démonté. Ne rien
+    // écrire ici — un setState sur un composant démonté ne servirait à rien.
   }
 
   function cloneWeekSessions(sourceWeek: number, targetWeek: number): BuilderWorkoutSession[] {
@@ -461,6 +580,16 @@ export function ProgramBuilderFullscreen({
 
   function saveIndicatorLabel(): string {
     if (saveStatus === "saving") return "Enregistrement…";
+    if (resynchronisation) return "Relecture de l'état serveur…";
+    // ⚠️ AVANT `"error"` : « enregistré, non synchronisé » n'est pas un échec.
+    if (desynchroniseEffectif) {
+      return (
+        saveErrorMessage ??
+        (savedAt
+          ? `Enregistré à ${savedAt} — synchronisation échouée`
+          : "Enregistré — synchronisation échouée")
+      );
+    }
     if (saveStatus === "error") return saveErrorMessage ?? "Échec de l'enregistrement";
     if (saveStatus === "dirty") return "Modifications non enregistrées";
     if (saveStatus === "saved" && savedAt) return `Enregistré à ${savedAt}`;
@@ -521,11 +650,13 @@ export function ProgramBuilderFullscreen({
         <div className="flex flex-shrink-0 items-center gap-2">
           <span
             className={`hidden text-[11px] uppercase tracking-widest sm:inline ${
-              saveStatus === "error"
-                ? "text-red-400"
-                : saveStatus === "dirty"
-                  ? "text-amber-400"
-                  : "text-muted-foreground"
+              desynchroniseEffectif
+                ? "text-amber-400"
+                : saveStatus === "error"
+                  ? "text-red-400"
+                  : saveStatus === "dirty"
+                    ? "text-amber-400"
+                    : "text-muted-foreground"
             }`}
           >
             {saveIndicatorLabel()}
@@ -555,10 +686,40 @@ export function ProgramBuilderFullscreen({
           >
             {status === "actif" ? "Repasser en brouillon" : "Publier"}
           </button>
+          {/*
+            ⚠️ L'ACTION QUI MANQUAIT. Le message disait « recharge la page » et
+            aucune commande ne le faisait : le coach devait deviner F5, ce qui
+            emportait ses modifications locales sans l'avertir. Ce bouton
+            n'apparaît que dans l'état désynchronisé, où il est la SEULE sortie.
+          */}
+          {desynchroniseEffectif && onResynchroniser ? (
+            <button
+              type="button"
+              onClick={() => void handleResynchroniser()}
+              disabled={resynchronisation}
+              title="Relire l'état enregistré sur le serveur et repartir de là"
+              className="flex items-center gap-1.5 border border-amber-400 px-3 py-1.5 text-xs font-bold uppercase tracking-widest text-amber-400 transition-colors hover:bg-amber-400 hover:text-background disabled:opacity-50"
+            >
+              {resynchronisation ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+              Resynchroniser
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => void handleSave()}
-            disabled={saveStatus === "saving"}
+            /*
+             * ⚠️ DÉSACTIVÉ TANT QUE L'ÉTAT SERVEUR N'EST PAS RÉCONCILIÉ. La page
+             * refuse de toute façon l'envoi avant le réseau ; le bouton grisé
+             * évite de faire croire au coach qu'un clic pourrait aboutir. Le
+             * raccourci Cmd/Ctrl+S passe par le même `handleSave`, donc par le
+             * même refus.
+             */
+            disabled={saveStatus === "saving" || resynchronisation || desynchroniseEffectif}
+            title={
+              desynchroniseEffectif
+                ? "Resynchronise l'état serveur avant d'enregistrer à nouveau"
+                : "Enregistrer la programmation"
+            }
             className="flex items-center gap-1.5 border border-border px-3 py-1.5 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary disabled:opacity-50"
           >
             {saveStatus === "saving" ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}

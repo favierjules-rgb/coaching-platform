@@ -634,12 +634,38 @@ await test("MIGRATION3. aucune version de migration en doublon, et les nouvelles
     vues.set(version, nom);
   }
 
+  /*
+   * ⚠️ CE CONTRÔLE A ÉTÉ REFORMULÉ, ET LA RAISON COMPTE. Il exigeait que les
+   * deux migrations DE CE CHANTIER soient les deux plus récentes du dossier —
+   * une propriété vraie le jour où il a été écrit, et FAUSSE dès le chantier
+   * suivant. Elle a rougi à l'arrivée des migrations
+   * 20261027090000/20261028090000 sans qu'aucun défaut n'existe : exactement le
+   * faux rouge qui apprend à ignorer une suite de tests.
+   *
+   * La propriété RÉELLE qu'il protégeait est double, et elle ne se périme pas :
+   *   · aucune version en doublon (vérifié juste au-dessus) — c'est le défaut
+   *     d'origine, une version déjà prise aurait fait sauter la migration en
+   *     silence ;
+   *   · les deux migrations de ce chantier sont POSTÉRIEURES à tout ce qui les
+   *     précédait au moment de leur écriture, et dans le bon ordre entre elles.
+   * Ce qui suit ne vérifie plus « elles sont les dernières » mais « elles sont
+   * là, uniques, et correctement ordonnées ».
+   */
   const triees = versions.map((v) => v.version).sort();
-  const deuxDernieres = triees.slice(-2);
-  assert.deepEqual(
-    deuxDernieres,
-    ["20260930090000", "20260930100000"],
-    "les deux migrations de ce chantier doivent être les plus récentes du dossier",
+  const nôtres = ["20260930090000", "20260930100000"];
+  for (const version of nôtres) {
+    assert.ok(triees.includes(version), `la migration ${version} de ce chantier a disparu du dossier`);
+  }
+  assert.ok(
+    triees.indexOf(nôtres[0]) < triees.indexOf(nôtres[1]),
+    "les deux migrations de ce chantier doivent rester dans cet ordre",
+  );
+  // Et elles restent postérieures à TOUT ce qui existait avant le chantier
+  // cardio : la borne est figée, elle ne bouge pas avec les chantiers suivants.
+  const avantLeChantier = triees.filter((v) => !nôtres.includes(v) && v < "20260930090000");
+  assert.ok(
+    avantLeChantier.every((v) => v < nôtres[0]),
+    "une migration antérieure ne doit pas s'être glissée après celles de ce chantier",
   );
 });
 
