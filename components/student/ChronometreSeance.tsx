@@ -173,6 +173,7 @@ export function ChronometreSeance() {
               </h2>
               <button
                 type="button"
+                data-guide="chrono-fermer"
                 onClick={fermer}
                 aria-label="Fermer le chronomètre"
                 className="pressable inline-flex min-h-9 min-w-9 items-center justify-center rounded-control text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
@@ -191,6 +192,7 @@ export function ChronometreSeance() {
             */}
             <p
               role="timer"
+              data-guide="chrono-cadran"
               aria-label={libelleRestant(secondes)}
               className={`mb-4 text-center font-heading text-4xl font-extrabold tabular-nums ${
                 termine ? "text-primary" : "text-foreground"
@@ -199,7 +201,7 @@ export function ChronometreSeance() {
               <span aria-hidden="true">{cadran(secondes)}</span>
             </p>
 
-            <div className="mb-3 grid grid-cols-2 gap-2">
+            <div data-guide="chrono-ajuster" className="mb-3 grid grid-cols-2 gap-2">
               <button
                 ref={premierControle}
                 type="button"
@@ -217,7 +219,7 @@ export function ChronometreSeance() {
               </button>
             </div>
 
-            <div className="mb-3 flex gap-2">
+            <div data-guide="chrono-marche" className="mb-3 flex gap-2">
               {enMarche ? (
                 <button
                   type="button"
@@ -248,7 +250,7 @@ export function ChronometreSeance() {
               </button>
             </div>
 
-            <fieldset className="flex items-end gap-2" disabled={enMarche}>
+            <fieldset data-guide="chrono-duree" className="flex items-end gap-2" disabled={enMarche}>
               <legend className="sr-only">Durée initiale</legend>
               <label className="flex-1 text-[11px] uppercase tracking-widest text-muted-foreground">
                 Minutes
@@ -289,8 +291,14 @@ export function ChronometreSeance() {
           </div>
         )}
 
+        {/* ANCRE DE VISITE GUIDÉE. Ce bouton est le seul élément du chronomètre
+            qui existe en permanence : le panneau n'est monté que lorsqu'il est
+            ouvert. C'est donc par lui que la visite entre — et ouvrir le
+            panneau ne touche à aucune donnée, ni en base ni dans le navigateur,
+            ce qui en fait une ouverture que le guide peut déclencher lui-même. */}
         <button
           ref={declencheur}
+          data-guide="chrono-ouvrir"
           type="button"
           onClick={() => (ouvert ? fermer() : setOuvert(true))}
           aria-expanded={ouvert}

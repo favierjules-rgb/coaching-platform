@@ -183,7 +183,9 @@
     "test:documents-apercu": "npx tsx scripts/tests/documents-apercu-lot-b.mts",
     "test:documents-miniatures": "npx tsx scripts/tests/documents-miniatures.mts",
     "test:documents-affectation": "npx tsx scripts/tests/documents-affectation-modale.mts",
-    "test:provisioning-ligne-coach": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/provisioning-ligne-coach.mts"
+    "test:provisioning-ligne-coach": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/provisioning-ligne-coach.mts",
+    "test:guide-decouverte": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/guide-decouverte.mts",
+    "test:guide-categories": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/guide-categories.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

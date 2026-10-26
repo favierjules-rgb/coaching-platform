@@ -174,10 +174,10 @@ export default function NutritionPlanDetailPage() {
         </div>
 
         <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5" data-guide="espace-nutrition-objectifs">
-          <StatCard label="kcal / jour" value={String(plan.caloriesPerDay)} size="lg" />
-          <StatCard label="Protéines" value={`${plan.protein}g`} size="lg" />
-          <StatCard label="Glucides" value={`${plan.carbs}g`} size="lg" />
-          <StatCard label="Lipides" value={`${plan.fat}g`} size="lg" />
+          <StatCard label="kcal / jour" dataGuide="nutrition-objectif-kcal" value={String(plan.caloriesPerDay)} size="lg" />
+          <StatCard label="Protéines" dataGuide="nutrition-objectif-proteines" value={`${plan.protein}g`} size="lg" />
+          <StatCard label="Glucides" dataGuide="nutrition-objectif-glucides" value={`${plan.carbs}g`} size="lg" />
+          <StatCard label="Lipides" dataGuide="nutrition-objectif-lipides" value={`${plan.fat}g`} size="lg" />
           <StatCard label="kcal / semaine" value={caloriesSemaine.toLocaleString("fr-FR")} size="lg" />
         </div>
 
@@ -363,10 +363,10 @@ export default function NutritionPlanDetailPage() {
       </div>
 
       <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5" data-guide="espace-nutrition-objectifs">
-        <StatCard label="kcal / jour" value={String(plan.dailyTarget.calories)} size="lg" />
-        <StatCard label="Protéines" value={`${plan.dailyTarget.protein}g`} size="lg" />
-        <StatCard label="Glucides" value={`${plan.dailyTarget.carbs}g`} size="lg" />
-        <StatCard label="Lipides" value={`${plan.dailyTarget.fat}g`} size="lg" />
+        <StatCard label="kcal / jour" dataGuide="nutrition-objectif-kcal" value={String(plan.dailyTarget.calories)} size="lg" />
+        <StatCard label="Protéines" dataGuide="nutrition-objectif-proteines" value={`${plan.dailyTarget.protein}g`} size="lg" />
+        <StatCard label="Glucides" dataGuide="nutrition-objectif-glucides" value={`${plan.dailyTarget.carbs}g`} size="lg" />
+        <StatCard label="Lipides" dataGuide="nutrition-objectif-lipides" value={`${plan.dailyTarget.fat}g`} size="lg" />
         <StatCard label="kcal / semaine" value={plan.weeklyTargetCalories.toLocaleString("fr-FR")} size="lg" />
       </div>
 

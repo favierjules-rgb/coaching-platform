@@ -59,8 +59,11 @@ export function GuideEspace() {
     return <GuideDecouverte etapes={espace.etapes} libelleParcours={espace.titre} onFermer={fermer} />;
   }
 
-  // Déjà vue ou écartée : plus aucune proposition. La visite reste relançable
-  // depuis « Visite guidée » dans la navigation.
+  /* Déjà vue ou écartée : plus aucune proposition.
+     La visite reste relançable par « Visite de cette page », dans le pied de la
+     navigation — bouton que `LanceurGuide` ne rend que sur une route qui a une
+     visite d'espace. Sans lui, écarter la bannière une fois rendait ce parcours
+     définitivement inaccessible. */
   if (dejaVu || ecarte) return null;
 
   return (

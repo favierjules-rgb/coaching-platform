@@ -236,12 +236,22 @@ export function ScannerCodeBarres({
 
       {état === "inactif" && (
         <>
-          <p className="rounded-panel border border-border bg-surface-soft/40 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+          <p
+            data-guide="nutrition-scan-intro"
+            className="rounded-panel border border-border bg-surface-soft/40 px-4 py-3 text-xs leading-relaxed text-muted-foreground"
+          >
             Vise le code-barres au dos de l&apos;emballage. La caméra ne s&apos;ouvre qu&apos;à ta
             demande, et l&apos;image reste sur ton téléphone.
           </p>
+          {/* ANCRE DE VISITE GUIDÉE, EN LECTURE SEULE. Cet attribut sert à
+              ENTOURER ce bouton, jamais à le presser : aucune étape ne le
+              déclare dans `ouvrirVia`, et la visite n'allume donc pas la caméra.
+              C'est la même promesse que la phrase juste au-dessus — « la caméra
+              ne s'ouvre qu'à ta demande » — et un tutoriel qui l'allumerait pour
+              faire une démonstration la démentirait. */}
           <button
             type="button"
+            data-guide="nutrition-scan-camera"
             onClick={() => void ouvrir()}
             className="pressable inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-control bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >

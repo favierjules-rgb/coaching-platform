@@ -376,7 +376,10 @@ function DocumentCard({
     !document.coverStoragePath && kind === "image" && Boolean(document.storagePath) && availability.available;
 
   return (
-    <div className={`flex flex-col gap-3 rounded-card border border-border bg-card p-6 shadow-soft ${!availability.available ? "bg-surface-soft/40" : ""}`}>
+    <div
+      data-guide="documents-carte"
+      className={`flex flex-col gap-3 rounded-card border border-border bg-card p-6 shadow-soft ${!availability.available ? "bg-surface-soft/40" : ""}`}
+    >
       {illustrationOriginale ? (
         <MiniatureImage
           storagePath={document.storagePath as string}
@@ -422,7 +425,7 @@ function DocumentCard({
           {unlockLabel(availability.unlockDate)}
         </p>
       ) : (
-        <div className="flex flex-wrap gap-2">
+        <div data-guide="documents-actions" className="flex flex-wrap gap-2">
           {document.type === "texte" && document.contentText && (
             <p className="whitespace-pre-wrap text-sm text-foreground">{document.contentText}</p>
           )}
@@ -557,12 +560,13 @@ export function RealDocumentLibrary({
     <div>
       <input
         value={query}
+        data-guide="documents-recherche"
         onChange={(event) => setQuery(event.target.value)}
         placeholder="Rechercher par titre ou description…"
         className="mb-6 w-full rounded-control border border-border bg-surface-soft px-4 py-3 text-sm text-foreground transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
       />
 
-      <div className="mb-8 flex flex-wrap gap-2">
+      <div data-guide="documents-filtres" className="mb-8 flex flex-wrap gap-2">
         {filters.map((filter) => (
           <button
             key={filter.key}
@@ -583,7 +587,10 @@ export function RealDocumentLibrary({
       {filtered.length === 0 ? (
         <p className="text-sm text-muted-foreground">Aucun document ne correspond à ta recherche.</p>
       ) : (
-        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <div
+          data-guide="documents-liste"
+          className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3"
+        >
           {filtered.map((item) => (
             <DocumentCard
               key={item.document.id}

@@ -41,7 +41,47 @@ export interface EtapeGuide {
   readonly exemple?: string;
   /** Route correspondante — sert au filtrage par rôle, pas à naviguer. */
   readonly href: string;
+  /**
+   * `data-guide` d'un bouton que le guide PRESSE pour faire apparaître la
+   * cible (feuille d'ajout, panneau, scanner), uniquement quand l'étape est
+   * atteinte et que la cible manque encore.
+   *
+   * ⚠️ UNIQUEMENT DES OUVERTURES, JAMAIS UNE VALIDATION. Ce champ ne doit
+   * désigner qu'une commande qui AFFICHE quelque chose. Y mettre un bouton
+   * d'enregistrement ferait écrire le guide à la place de l'utilisateur —
+   * c'est l'interdit central de cette fonctionnalité, et le test
+   * `ouvertures-sans-ecriture` le vérifie sur chaque étape déclarée.
+   */
+  readonly ouvrirVia?: CibleGuide;
+  /** `data-guide` de la commande qui referme ce qui a été ouvert, à la sortie. */
+  readonly fermerVia?: CibleGuide;
+  /**
+   * Délai d'attente de la cible, en millisecondes, quand elle apparaît APRÈS
+   * le rendu (ouverture d'une modale, chargement). Au-delà, l'étape est sautée
+   * comme avant : le guide ne reste jamais bloqué.
+   */
+  readonly attenteMs?: number;
+  /**
+   * L'étape attend un GESTE RÉEL de l'utilisateur sur la cible : la découpe
+   * laisse alors passer les clics, au lieu de les absorber dans le voile.
+   *
+   * ⚠️ C'EST L'INVERSE DE `ouvrirVia`, ET CE N'EST PAS UN DÉTAIL. `ouvrirVia`
+   * fait presser la commande PAR LE GUIDE ; `gesteAttendu` laisse l'utilisateur
+   * la presser LUI-MÊME. Quand l'ouverture d'un panneau crée au passage une
+   * donnée — le journal alimentaire ouvre un conteneur de repas en base avant
+   * d'afficher la feuille d'ajout —, le guide n'a pas à la déclencher à la
+   * place de qui que ce soit : il montre le bouton et laisse la main.
+   *
+   * ⚠️ JAMAIS SUR UNE VALIDATION NON PLUS. Ouvrir la découpe sur un bouton
+   * « Enregistrer » inviterait à enregistrer au milieu d'une visite. Le test
+   * `gestes-sans-ecriture` applique à ce champ la même liste de verbes
+   * interdits qu'à `ouvrirVia`.
+   */
+  readonly gesteAttendu?: boolean;
 }
+
+/** Attente par défaut d'une cible déclarée tardive. */
+export const ATTENTE_CIBLE_MS = 1500;
 
 /* ══════════════════════════════════════════════════════════════════════════
    LE CONTENU

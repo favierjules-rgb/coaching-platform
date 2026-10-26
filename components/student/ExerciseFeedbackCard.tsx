@@ -180,7 +180,18 @@ export function ExerciseFeedbackCard({
     "pointer-events-none absolute -right-1 -top-1.5 z-10 rounded-full bg-card px-1 text-xs font-semibold leading-tight";
 
   return (
-    <div className="rounded-card border border-border bg-card p-4 shadow-soft sm:p-6">
+    /* ANCRES DE VISITE GUIDÉE — POSÉES SUR TOUTES LES CARTES, PAS SUR UNE.
+       Le guide cherche sa cible avec `querySelector`, qui rend le PREMIER
+       élément dans l'ordre du document : poser l'attribut partout revient donc
+       à désigner le premier exercice de musculation affiché, sans que cette
+       carte ait à savoir si elle est la première. Conditionner sur un index
+       aurait supposé que la numérotation commence à zéro sur un exercice de
+       musculation — faux dès qu'une séance commence par du cardio.
+
+       `renderStrengthExercise` ne monte cette carte que pour la MUSCULATION :
+       une séance uniquement cardio n'en rend aucune, les ancres n'existent pas,
+       et le guide saute proprement ces étapes. C'est la dégradation voulue. */
+    <div data-guide="seance-exercice" className="rounded-card border border-border bg-card p-4 shadow-soft sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-baseline gap-2.5">
@@ -196,7 +207,10 @@ export function ExerciseFeedbackCard({
               À la place de {exercise.name}
             </p>
           )}
-          <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+          <p
+            data-guide="seance-prescription"
+            className="mt-1.5 text-sm leading-relaxed text-muted-foreground"
+          >
             {[
               `${exercise.sets} séries`,
               `${exercise.reps} reps`,
@@ -315,7 +329,10 @@ export function ExerciseFeedbackCard({
                     </span>
                   </div>
                 )}
-                <div className="grid grid-cols-2 items-center gap-2 sm:grid-cols-[72px_1fr_1fr_84px]">
+                <div
+                  {...(position === 0 ? { "data-guide": "seance-serie" } : {})}
+                  className="grid grid-cols-2 items-center gap-2 sm:grid-cols-[72px_1fr_1fr_84px]"
+                >
                   <span className="col-span-2 text-xs font-medium text-muted-foreground sm:col-span-1">
                     Série {set.setNumber}
                   </span>
@@ -355,6 +372,7 @@ export function ExerciseFeedbackCard({
                       </span>
                     )}
                     <input
+                      {...(position === 0 ? { "data-guide": "seance-charge" } : {})}
                       value={set.loadUsed}
                       onChange={(event) =>
                         onSetChange(set.setNumber, "loadUsed", event.target.value)
@@ -380,6 +398,7 @@ export function ExerciseFeedbackCard({
                       </span>
                     )}
                     <input
+                      {...(position === 0 ? { "data-guide": "seance-reps" } : {})}
                       value={set.repsDone}
                       onChange={(event) =>
                         onSetChange(set.setNumber, "repsDone", event.target.value)
@@ -389,6 +408,7 @@ export function ExerciseFeedbackCard({
                     />
                   </div>
                   <input
+                    {...(position === 0 ? { "data-guide": "seance-rpe-serie" } : {})}
                     value={set.rpe}
                     onChange={(event) =>
                       onSetChange(set.setNumber, "rpe", event.target.value)

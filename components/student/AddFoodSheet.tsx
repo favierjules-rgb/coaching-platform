@@ -431,7 +431,12 @@ export function AddFoodSheet({
         </div>
 
         {/* Deux onglets de MÊME RANG : la saisie manuelle n'est pas reléguée. */}
-        <div role="tablist" aria-label="Mode d'ajout" className="flex border-b border-border">
+        <div
+          role="tablist"
+          aria-label="Mode d'ajout"
+          data-guide="nutrition-ajout-modes"
+          className="flex border-b border-border"
+        >
           {(
             [
               { clé: "recherche" as const, libellé: "Rechercher", icône: Search },
@@ -494,6 +499,7 @@ export function AddFoodSheet({
                 <input
                   id="recherche-aliment"
                   type="search"
+                  data-guide="nutrition-ajout-recherche"
                   value={terme}
                   onChange={(e) => {
                     setTerme(e.target.value);
@@ -521,6 +527,7 @@ export function AddFoodSheet({
                   {raccourcis.favoris.length > 0 && (
                     <SectionRapide
                       titre="Favoris"
+                      dataGuide="nutrition-liste-favoris"
                       éléments={raccourcis.favoris}
                       désactivé={hydratation}
                       estFavori={raccourcis.estFavori}
@@ -531,6 +538,7 @@ export function AddFoodSheet({
                   {raccourcis.recents.length > 0 && (
                     <SectionRapide
                       titre="Récents"
+                      dataGuide="nutrition-liste-recents"
                       éléments={raccourcis.recents}
                       désactivé={hydratation}
                       estFavori={raccourcis.estFavori}
@@ -571,6 +579,7 @@ export function AddFoodSheet({
               {!choix && !scanEnCours && (
                 <button
                   type="button"
+                  data-guide="nutrition-ajout-scanner"
                   onClick={ouvrirScan}
                   className="pressable inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-control border border-border py-3 text-xs font-bold uppercase tracking-widest text-foreground transition-colors hover:border-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                 >
@@ -627,6 +636,13 @@ export function AddFoodSheet({
                     </p>
                   )}
 
+                  {/* LA ZONE DE RÉSULTATS, ENVELOPPÉE POUR LA VISITE GUIDÉE.
+                      Elle englobe aussi l'encart « rien trouvé » : sans lui, le
+                      conteneur serait haut de zéro pixel tant que rien n'a été
+                      cherché, et la découpe du guide n'aurait rien à entourer.
+                      `flex flex-col gap-4` reprend l'espacement du parent, pour
+                      que l'enveloppe ne déplace rien à l'écran. */}
+                  <div data-guide="nutrition-ajout-resultats" className="flex flex-col gap-4">
                   {cherche && aliments.length === 0 && produits.length === 0 ? (
                     <p className="py-4 text-center text-sm text-muted-foreground">Recherche…</p>
                   ) : null}
@@ -717,6 +733,7 @@ export function AddFoodSheet({
                   {terme.trim().length >= 3 && !externeFaite && (
                     <button
                       type="button"
+                      data-guide="nutrition-ajout-produits"
                       onClick={() => void chercherLesProduits()}
                       disabled={externeEnCours}
                       className="pressable inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-control border border-border py-3 text-xs font-bold uppercase tracking-widest text-foreground transition-colors hover:border-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-40"
@@ -745,9 +762,11 @@ export function AddFoodSheet({
                       </p>
                     </div>
                   )}
+                  </div>
 
                   <button
                     type="button"
+                    data-guide="nutrition-ajout-manuel"
                     onClick={basculerVersManuel}
                     className="pressable inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-control bg-primary px-5 py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                   >
@@ -906,6 +925,7 @@ export function AddFoodSheet({
  */
 function SectionRapide({
   titre,
+  dataGuide,
   éléments,
   désactivé,
   estFavori,
@@ -913,6 +933,15 @@ function SectionRapide({
   onChoisir,
 }: {
   titre: string;
+  /**
+   * Ancre de visite guidée, posée par l'appelant.
+   *
+   * DÉCLARÉE PLUTÔT QUE DÉDUITE DU TITRE. Un `data-guide` calculé depuis
+   * « Favoris » deviendrait introuvable au premier changement de libellé, et
+   * les tests qui cherchent la chaîne littérale dans le dépôt ne la verraient
+   * pas. Les deux appels la donnent en clair.
+   */
+  dataGuide?: string;
   éléments: readonly AlimentRapide[];
   désactivé?: boolean;
   estFavori: (cible: CibleRecente) => boolean;
@@ -921,7 +950,7 @@ function SectionRapide({
 }) {
   const identifiant = `titre-${titre.toLowerCase()}`;
   return (
-    <section aria-labelledby={identifiant}>
+    <section aria-labelledby={identifiant} data-guide={dataGuide}>
       <h4
         id={identifiant}
         className="mb-2 text-xs font-bold uppercase tracking-widest text-muted-foreground"
@@ -1165,6 +1194,7 @@ function FormulaireQuantité({
       <div className="flex gap-2">
         <input
           id="catalogue-quantite"
+          data-guide="nutrition-ajout-quantite"
           type="text"
           inputMode="decimal"
           value={quantité}
@@ -1198,6 +1228,7 @@ function FormulaireQuantité({
 
       <button
         type="button"
+        data-guide="nutrition-ajout-confirmer"
         onClick={onAjouter}
         disabled={!valide || enCours}
         className="pressable mt-4 min-h-[48px] w-full rounded-control bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"

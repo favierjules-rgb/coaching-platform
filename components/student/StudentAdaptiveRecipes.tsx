@@ -100,7 +100,7 @@ export function StudentAdaptiveRecipes({
     <div className="flex flex-col gap-5">
       {/* Étape 1 — le jour. Les sept jours tiennent sur une ligne dès 320 px
           grâce aux libellés courts, et se replient sinon. */}
-      <div>
+      <div data-guide="recettes-jour">
         <p className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Jour</p>
         <div className="flex flex-wrap gap-2">
           {jours.map((j) => {
@@ -126,7 +126,7 @@ export function StudentAdaptiveRecipes({
       </div>
 
       {/* Étape 2 — le créneau. Seuls les créneaux ACTIVÉS du profil du jour. */}
-      <div>
+      <div data-guide="recettes-creneau">
         <p className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Créneau</p>
         {créneaux.length === 0 ? (
           <p className="text-sm text-muted-foreground">
@@ -171,7 +171,7 @@ export function StudentAdaptiveRecipes({
       )}
 
       {créneauChoisi && cible?.ok && (
-        <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+        <dl data-guide="recettes-cible" className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
           {(
             [
               ["Calories visées", `${formatIntegerFr(cible.calories)}${NBSP}kcal`],
@@ -193,7 +193,7 @@ export function StudentAdaptiveRecipes({
 
       {/* Étape 3 — la liste, ou étape 4 — le détail. */}
       {créneauChoisi && cible?.ok && !recette && (
-        <div>
+        <div data-guide="recettes-liste">
           <p className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">
             Recettes proposées
           </p>
@@ -308,7 +308,13 @@ export function StudentAdaptiveRecipes({
           )}
 
           {/* Téléphone : une carte par ingrédient. Tablette et ordinateur :
-              le tableau, dans une zone défilante atteignable au clavier. */}
+              le tableau, dans une zone défilante atteignable au clavier.
+
+              L'ANCRE DE VISITE ENVELOPPE LES DEUX. Chacune des deux
+              présentations est masquée sur l'autre largeur d'écran : viser l'une
+              d'elles donnerait une découpe de hauteur nulle la moitié du temps.
+              L'enveloppe, elle, a toujours la taille de celle qui est visible. */}
+          <div data-guide="recettes-quantites" className="flex flex-col gap-4">
           <ul className="flex flex-col gap-2 md:hidden">
             {solution.ingredients.map((ing) => (
               <li
@@ -389,8 +395,9 @@ export function StudentAdaptiveRecipes({
               </tfoot>
             </table>
           </div>
+          </div>
 
-          <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+          <dl data-guide="recettes-ecarts" className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
             {(
               [
                 ["Écart protéines", solution.deltas.proteinGrams],
@@ -433,7 +440,7 @@ export function StudentAdaptiveRecipes({
             </div>
           )}
 
-          <div className="flex flex-wrap gap-3">
+          <div data-guide="recettes-sorties" className="flex flex-wrap gap-3">
             <button
               type="button"
               onClick={() => setRecetteChoisie(null)}
