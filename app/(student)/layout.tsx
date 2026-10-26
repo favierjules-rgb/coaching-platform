@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { GuideEspace } from "@/components/guide/GuideEspace";
 import { PreparationCoquille } from "@/components/pwa/PreparationCoquille";
 import { SynchronisationOffline } from "@/components/pwa/SynchronisationOffline";
 import { StudentShell } from "@/components/student/StudentShell";
@@ -24,6 +25,12 @@ export default async function StudentAreaLayout({
         de navigation client. Ne rend rien.
       */}
       <PreparationCoquille />
+      {/*
+        Proposition de visite de l'espace courant. Monté UNE fois ici plutôt
+        que page par page : il lit la route et ne rend rien là où aucune
+        visite n'est définie.
+      */}
+      <GuideEspace />
       {children}
     </StudentShell>
   );
