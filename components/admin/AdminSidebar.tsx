@@ -21,6 +21,8 @@ import {
 } from "lucide-react";
 
 import { SignOutButton } from "@/components/auth/SignOutButton";
+import { LanceurGuide } from "@/components/guide/LanceurGuide";
+import { cibleGuideStaff } from "@/lib/guide-decouverte";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { Logo } from "@/components/ui/Logo";
 import { useStaffContext } from "@/hooks/useStaffContext";
@@ -161,6 +163,7 @@ export function AdminSidebar({ mobile = false, onNavigate }: AdminSidebarProps) 
               href={href}
               onClick={onNavigate}
               aria-current={active ? "page" : undefined}
+              data-guide={cibleGuideStaff(href)}
               className={navItemClass(Boolean(active))}
             >
               <Icon size={18} />
@@ -175,6 +178,7 @@ export function AdminSidebar({ mobile = false, onNavigate }: AdminSidebarProps) 
             type="button"
             onClick={() => setProgrammationManualOpen((v) => !v)}
             aria-expanded={programmationOpen}
+            data-guide="nav-admin-programmation"
             className={`w-full ${navItemClass(programmationActive)}`}
           >
             <Dumbbell size={18} />
@@ -217,6 +221,7 @@ export function AdminSidebar({ mobile = false, onNavigate }: AdminSidebarProps) 
               href={href}
               onClick={onNavigate}
               aria-current={active ? "page" : undefined}
+              data-guide={cibleGuideStaff(href)}
               className={navItemClass(Boolean(active))}
             >
               <Icon size={18} />
@@ -227,6 +232,7 @@ export function AdminSidebar({ mobile = false, onNavigate }: AdminSidebarProps) 
       </nav>
 
       <div className="border-t border-border px-3 py-4">
+        <LanceurGuide espace="staff" />
         <ThemeToggle />
         <Link
           href="/dashboard"
