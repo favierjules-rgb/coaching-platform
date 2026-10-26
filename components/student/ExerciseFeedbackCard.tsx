@@ -433,13 +433,15 @@ export function ExerciseFeedbackCard({
         )}
 
         {onSubstituteChange && (
-          <ExerciseSubstitutionPicker
+          <div data-guide="seance-remplacement">
+            <ExerciseSubstitutionPicker
             libraryExerciseId={exercise.libraryExerciseId ?? null}
             substitute={substitute}
             onChoose={onSubstituteChange}
             onReset={() => onSubstituteChange(null)}
             {...(chargerRemplacants ? { chargerRemplacants } : {})}
           />
+          </div>
         )}
       </div>
     </div>

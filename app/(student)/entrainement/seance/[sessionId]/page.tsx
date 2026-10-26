@@ -131,7 +131,10 @@ export default function SessionDetailPage() {
           </p>
         </div>
 
-        <SessionAnalysisSection session={{ ...realSession, muscleGroup: realSession.muscleGroups }} />
+        <div data-guide="seance-analyse">
+
+          <SessionAnalysisSection session={{ ...realSession, muscleGroup: realSession.muscleGroups }} />
+        </div>
 
         <div className="mb-8">
           <MuscleHeatmapSection blocks={realSession.blocks ?? []} />
@@ -268,7 +271,10 @@ export default function SessionDetailPage() {
         </p>
       </div>
 
-      <SessionAnalysisSection session={{ ...session, muscleGroup: session.muscleGroups }} />
+      <div data-guide="seance-analyse">
+
+        <SessionAnalysisSection session={{ ...session, muscleGroup: session.muscleGroups }} />
+        </div>
 
       <div className="mb-8 flex items-start gap-4 rounded-card border border-border bg-card p-6 shadow-soft" data-guide="espace-seance-echauffement">
         <Flame size={20} className="mt-0.5 flex-shrink-0 text-primary" />

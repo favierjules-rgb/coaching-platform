@@ -66,29 +66,104 @@ const ENTRAINEMENT_SEANCE: EspaceGuide = {
   id: "entrainement-seance",
   titre: "le déroulé d'une séance",
   route: "/entrainement/seance",
+  /*
+   * ⚠️ DEUX ÉTAPES PEUVENT NE PAS S'AFFICHER, ET C'EST VOULU. Le RPE global
+   * et la douleur globale ne sont rendus par `SessionFeedbackSection` que
+   * lorsque la séance comporte un bloc CARDIO (`hasCardio`). Sur une séance de
+   * force seule, leurs cibles n'existent pas et le guide les saute — c'est le
+   * comportement normal, pas une étape manquante.
+   */
   etapes: [
+    {
+      id: "seance-analyse",
+      cible: "seance-analyse",
+      href: "/entrainement/seance",
+      titre: "Ce que la séance représente",
+      texte:
+        "Avant de commencer : le volume prévu, le nombre de séries et leur répartition par groupe musculaire. C'est le plan de la séance, pas un objectif à atteindre à tout prix.",
+      exemple: "Voir que le dos porte 9 séries et les pectoraux 5 : la séance est orientée tirage.",
+    },
     {
       id: "seance-echauffement",
       cible: "espace-seance-echauffement",
       href: "/entrainement/seance",
       titre: "L'échauffement",
-      texte: "Ce que votre coach a prévu avant d'attaquer le travail principal.",
+      texte:
+        "Les consignes à faire AVANT les exercices. Elles préparent les articulations sollicitées par cette séance précise.",
     },
     {
-      id: "seance-notes",
+      id: "seance-consignes",
       cible: "espace-seance-notes",
       href: "/entrainement/seance",
       titre: "Les notes du coach",
-      texte: "Les consignes laissées pour cette séance précise : intention, points de vigilance, adaptations.",
+      texte:
+        "Les consignes laissées pour cette séance : intention, points de vigilance, adaptations à prévoir.",
     },
     {
-      id: "seance-retour",
-      cible: "espace-seance-retour",
+      id: "seance-blocs",
+      cible: "seance-blocs",
       href: "/entrainement/seance",
-      titre: "Votre retour de séance",
+      titre: "Les blocs, un par un",
       texte:
-        "En fin de séance, vous renvoyez à votre coach ce qui s'est passé. C'est ce retour qui lui permet d'ajuster la suite.",
-      exemple: "Signaler qu'un exercice était trop lourd pour que la charge soit revue.",
+        "La séance avance bloc par bloc. Chaque bloc affiche ce qui est prévu, puis son formulaire de réalisation : vous cochez « Bloc terminé » et vous saisissez ce qui est demandé — pour un bloc cardio, la durée et la distance réellement faites.",
+      exemple: "Sur un bloc cardio de 10 min prévu, noter 12 min et 2,4 km réalisés.",
+    },
+    {
+      id: "seance-remplacement",
+      cible: "seance-remplacement",
+      href: "/entrainement/seance",
+      titre: "Remplacer un exercice",
+      texte:
+        "Si un mouvement est impossible — matériel pris, douleur, machine absente — vous choisissez ici un exercice de remplacement proposé pour celui-ci. Votre coach voit ce que vous avez réellement fait à la place.",
+    },
+    {
+      id: "seance-terminee",
+      cible: "seance-terminee",
+      href: "/entrainement/seance",
+      titre: "Consultée, réalisée, enregistrée",
+      texte:
+        "Trois choses différentes. Ouvrir la séance ne l'enregistre pas. Cocher un bloc note ce bloc. Cette case-ci déclare la SÉANCE terminée — et rien n'est transmis tant que vous n'avez pas enregistré votre retour, à la fin.",
+    },
+    {
+      id: "seance-rpe",
+      cible: "seance-rpe",
+      href: "/entrainement/seance",
+      titre: "Votre RPE global",
+      texte:
+        "Une note sur 10 pour la difficulté GÉNÉRALE de la séance. Elle ne remplace pas le RPE de chaque bloc, qui se saisit sous le bloc concerné : l'un résume, l'autre détaille.",
+      exemple: "7 sur 10 : exigeant, mais il restait de la marge.",
+    },
+    {
+      id: "seance-duree",
+      cible: "seance-duree",
+      href: "/entrainement/seance",
+      titre: "La durée réelle",
+      texte:
+        "Le temps que la séance vous a réellement pris, en minutes. Facultatif — à remplir si l'écart avec le prévu est parlant.",
+    },
+    {
+      id: "seance-commentaire",
+      cible: "seance-commentaire",
+      href: "/entrainement/seance",
+      titre: "Votre commentaire",
+      texte:
+        "Ce qu'aucun chiffre ne dit : sensations, fatigue, circonstances. C'est souvent ce qui fait bouger la programmation.",
+    },
+    {
+      id: "seance-douleur",
+      cible: "seance-douleur",
+      href: "/entrainement/seance",
+      titre: "Douleur ou gêne",
+      texte:
+        "Ici vous déclarez un ressenti d'ENSEMBLE. Une gêne liée à un bloc précis se signale sous ce bloc : votre coach sait ainsi où chercher.",
+    },
+    {
+      id: "seance-enregistrer",
+      cible: "seance-enregistrer",
+      href: "/entrainement/seance",
+      titre: "Enregistrer votre retour",
+      texte:
+        "Ce bouton transmet tout : blocs réalisés, RPE, durée, commentaire et gênes. Tant que vous ne l'avez pas pressé, rien n'est parti. Pendant l'envoi, il affiche « Enregistrement… » et reste inactif.",
     },
   ],
 };

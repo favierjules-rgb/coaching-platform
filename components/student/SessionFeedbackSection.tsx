@@ -1402,7 +1402,8 @@ export function SessionFeedbackSection({
 
         La validation GLOBALE de la séance reste dessous, hors du rail.
       */}
-      <SessionCarousel
+      <div data-guide="seance-blocs">
+        <SessionCarousel
         blocks={blockViews}
         renderStrengthExercise={(exercise, index) => (
           <ExerciseFeedbackCard
@@ -1466,15 +1467,16 @@ export function SessionFeedbackSection({
             />
           );
         }}
-      />
+        />
+      </div>
 
-      <div className="rounded-card border border-border bg-card p-6 shadow-soft">
+      <div className="rounded-card border border-border bg-card p-6 shadow-soft" data-guide="seance-resume">
         <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
           Résumé de la séance
         </h2>
 
         <div className="flex flex-col gap-5">
-          <label className="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-control border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus-within:ring-2 focus-within:ring-primary/40 hover:border-border-strong">
+          <label data-guide="seance-terminee" className="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-control border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors focus-within:ring-2 focus-within:ring-primary/40 hover:border-border-strong">
             <input
               type="checkbox"
               checked={completed}
@@ -1484,7 +1486,7 @@ export function SessionFeedbackSection({
             Séance terminée
           </label>
 
-          <div>
+          <div data-guide="seance-rpe">
             <label
               htmlFor="global-rpe"
               className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground"
@@ -1515,7 +1517,7 @@ export function SessionFeedbackSection({
             séance d'une heure laissée trois heures dans une poche resterait
             une séance d'une heure. Aucun chronomètre, aucun `startedAt`.
           */}
-          <div>
+          <div data-guide="seance-duree">
             <label
               htmlFor="duration-minutes"
               className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground"
@@ -1547,7 +1549,7 @@ export function SessionFeedbackSection({
             )}
           </div>
 
-          <div>
+          <div data-guide="seance-commentaire">
             <label
               htmlFor="global-comment"
               className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground"
@@ -1566,7 +1568,7 @@ export function SessionFeedbackSection({
 
           {hasCardio ? (
             <div className="flex flex-col gap-3">
-              <div>
+              <div data-guide="seance-douleur">
                 <label htmlFor="pain-level" className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
                   Douleur ou gêne globale
                   <span className="ml-2 normal-case tracking-normal">(ressenti d&apos;ensemble — une gêne localisée à un bloc se saisit sous le bloc)</span>
@@ -1640,6 +1642,7 @@ export function SessionFeedbackSection({
 
           <button
             type="submit"
+            data-guide="seance-enregistrer"
             disabled={submitting}
             className="pressable mt-2 min-h-[48px] rounded-control bg-primary py-4 text-center text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-60"
           >
