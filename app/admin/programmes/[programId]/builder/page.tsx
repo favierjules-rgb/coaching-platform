@@ -10,7 +10,12 @@ import { useAdminData } from "@/hooks/useAdminData";
 import { useSupabaseExerciseLibrary } from "@/hooks/useSupabaseExerciseLibrary";
 import { useSupabaseProgram } from "@/hooks/useSupabaseProgram";
 import { useSupabaseSessionTemplates } from "@/hooks/useSupabaseSessionTemplates";
-import { builderSaveUserMessage, nextBuilderState, orchestrateBuilderSave } from "@/lib/admin-builder-save";
+import {
+  executerResynchronisationDeLaPage,
+  executerSauvegardeDeLaPage,
+  programmeActifDeLaPage,
+  type ResultatPourBuilder,
+} from "@/lib/admin-builder-save";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { updateProgram as updateProgramSupabase } from "@/lib/supabase/programs";
@@ -51,7 +56,20 @@ export default function ProgramBuilderPage() {
   // révision incrémentée explicitement.
   const [savedProgram, setSavedProgram] = useState<AdminProgram | null>(null);
   const [builderRevision, setBuilderRevision] = useState(0);
-  const activeProgram = savedProgram && savedProgram.id === params.programId ? savedProgram : derivedProgram;
+  /*
+   * ⚠️ « ENREGISTRÉ MAIS PAS RELU » EST UN ÉTAT À PART ENTIÈRE, PAS UNE ERREUR.
+   * Les écritures sont commitées ; c'est la relecture qui a échoué. L'état
+   * affiché est donc périmé sur deux points qui interdisent d'écrire par-dessus :
+   * ses `updatedAt` de séance ne valent plus comme verrous optimistes, et les
+   * prescriptions que le serveur vient de créer portent encore ici des
+   * identifiants temporaires `new-prescription:…`. Tant que ce drapeau est levé,
+   * `handleSave` refuse AVANT le réseau et l'interface propose une
+   * resynchronisation. Voir refusPourDesynchronisation() pour les trois raisons.
+   */
+  const [desynchronise, setDesynchronise] = useState(false);
+  // Dérivation extraite dans lib/admin-builder-save.ts — c'est l'expression qui
+  // tombait à `undefined` après un échec de relecture et démontait le builder.
+  const activeProgram = programmeActifDeLaPage(savedProgram, derivedProgram, params.programId);
 
   const supabaseExerciseLibrary = useSupabaseExerciseLibrary();
   /*
@@ -75,34 +93,89 @@ export default function ProgramBuilderPage() {
     return Boolean(id);
   }
 
-  async function handleSave(data: BuilderData): Promise<boolean | { ok: boolean; userMessage?: string | null }> {
+  async function handleSave(data: BuilderData): Promise<boolean | ResultatPourBuilder> {
     if (!activeProgram) return false;
     if (!isSupabaseActive) return true;
     const supabase = createSupabaseBrowserClient();
     if (!supabase) return true;
 
     const programId = activeProgram.id;
-    const outcome = await orchestrateBuilderSave({
-      save: () => updateProgramSupabase(supabase, programId, data),
-      // refetch RETOURNE la liste fraîche (jamais un état périmé) → on en extrait
-      // le snapshot à jour (UUID réels + nouveaux updatedAt de séances).
+    const etatCourant = { program: activeProgram, revision: builderRevision, desynchronise };
+
+    /*
+     * TOUTE la décision est dans `executerSauvegardeDeLaPage` (hors React, donc
+     * testée directement) : refus préventif si l'état est désynchronisé — AVANT
+     * d'appeler `save`, donc avant tout réseau —, puis sauvegarde, relecture, et
+     * transition d'état. La page ne fait qu'injecter les deux poignées et
+     * appliquer le résultat.
+     */
+    const { etat, resultat, outcome } = await executerSauvegardeDeLaPage({
+      etat: etatCourant,
+      /*
+       * ⚠️ `activeProgram` EST PASSÉ COMME INSTANTANÉ, ET CE N'EST PAS UN
+       * DÉTAIL. C'est la référence du diff : la source des `updatedAt`
+       * (verrous optimistes) et des identifiants réels. Sans lui,
+       * `calculerDiffProgrammation` ne peut déclarer aucune séance inchangée et
+       * les 84 repartent — correct, mais sans aucun gain.
+       */
+      save: () => updateProgramSupabase(supabase, programId, data, activeProgram),
       refetch: () => supabaseProgram.refetch(),
     });
 
-    // Seul un succès remplace le snapshot et incrémente la révision → UN unique
-    // remount depuis les données fraîches. STALE / refetch-failed / error :
-    // aucun setState → aucun remount, état local (édits non enregistrés) conservé.
-    if (outcome.kind === "success") {
-      const next = nextBuilderState({ program: activeProgram, revision: builderRevision }, outcome);
-      setSavedProgram(next.program);
-      setBuilderRevision(next.revision);
+    /*
+     * ⚠️ ON N'ÉCRIT L'ÉTAT QUE S'IL A CHANGÉ — la référence est conservée quand
+     * rien ne bouge (STALE, erreur, refus préventif). Épingler `savedProgram`
+     * sur un STALE figerait la page sur un instantané périmé alors qu'un
+     * rafraîchissement du cache serait justement la bonne suite.
+     *
+     * Quand il a changé après un `refetch-failed` : `etat.program` est le MÊME
+     * objet et `etat.revision` la MÊME valeur, donc la `key` du builder ne
+     * change pas et il n'est PAS démonté ; l'écriture de `savedProgram` ne sert
+     * qu'à ÉPINGLER cet instantané pour qu'`activeProgram` reste défini même si
+     * le cache du hook venait à se vider. C'est la seconde des deux protections.
+     */
+    if (etat !== etatCourant) {
+      setSavedProgram(etat.program);
+      setBuilderRevision(etat.revision);
+      setDesynchronise(etat.desynchronise);
+    }
+
+    if (resultat.ok) return true;
+    if (resultat.desynchronise) {
+      console.warn("[builder] enregistré, relecture échouée — état désynchronisé", outcome);
+    } else {
+      // Incident du 02/08 : l'erreur TECHNIQUE part en console (diagnostic), et
+      // un message ACTIONNABLE remonte au builder quand la cause est connue.
+      console.error("[builder] échec d'enregistrement", outcome);
+    }
+    return resultat;
+  }
+
+  /**
+   * LA SORTIE DE L'ÉTAT DÉSYNCHRONISÉ, déclenchée par le coach.
+   *
+   * Un succès se comporte exactement comme un succès de sauvegarde : nouvel
+   * instantané + révision incrémentée ⇒ le builder remonte sur les données
+   * SERVEUR. Les identifiants temporaires `new-prescription:…` disparaissent
+   * avec l'ancien état local et sont remplacés par les identifiants réellement
+   * persistés — c'est là, et nulle part ailleurs, que se fait la réconciliation.
+   * Aucun `id_mapping` n'est interprété côté client.
+   */
+  async function handleResynchroniser(): Promise<boolean> {
+    if (!activeProgram) return false;
+    if (!isSupabaseActive) return true;
+    const { etat, ok } = await executerResynchronisationDeLaPage({
+      etat: { program: activeProgram, revision: builderRevision, desynchronise },
+      refetch: () => supabaseProgram.refetch(),
+    });
+    if (ok) {
+      setSavedProgram(etat.program);
+      setBuilderRevision(etat.revision);
+      setDesynchronise(etat.desynchronise);
       return true;
     }
-    // Incident du 02/08 : l'erreur TECHNIQUE part en console (diagnostic),
-    // et un message ACTIONNABLE remonte au builder quand la cause est connue
-    // (session sans droits coach, séance STALE, rechargement raté).
-    console.error("[builder] échec d'enregistrement", outcome);
-    return { ok: false, userMessage: builderSaveUserMessage(outcome) };
+    console.error("[builder] resynchronisation échouée — état toujours désynchronisé");
+    return false;
   }
 
   /*
@@ -140,6 +213,8 @@ export default function ProgramBuilderPage() {
       program={activeProgram}
       library={library}
       onSave={handleSave}
+      desynchronise={desynchronise}
+      onResynchroniser={handleResynchroniser}
       templates={sessionTemplates.items}
       onSaveAsTemplate={handleSaveAsTemplate}
     />

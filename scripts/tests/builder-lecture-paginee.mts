@@ -356,53 +356,118 @@ await test("7. une lecture INCOMPLÈTE n'alimente jamais le builder", async () =
 
 /* ═══════════════ 8-9. L'ENREGISTREMENT NE MENT PLUS ═══════════════ */
 
-await test("8. updateProgram ne rend plus `true` sans regarder la structure", async () => {
+await test("8. updateProgram ne rend plus `true` sans que l'écriture ait réussi", async () => {
+  /*
+   * ⚠️ CE CONTRÔLE A CHANGÉ DE MÉCANISME, PAS D'OBJET.
+   *
+   * Il visait la ligne exacte de l'incident du 25/08 : `await
+   * diffProgramStructure(...); return true;` — le compte-rendu était jeté, une
+   * séance sautée passait pour un succès, et l'écran affichait « À JOUR » sur
+   * un travail perdu. Il vérifiait donc que `bilan` était recueilli puis
+   * regardé.
+   *
+   * `diffProgramStructure` n'existe plus : l'écriture est une transaction
+   * unique côté PostgreSQL. Il n'y a donc plus de « compte-rendu partiel » à
+   * recueillir — il y a un succès ou une exception, et rien entre les deux.
+   * La propriété protégée reste la même : `updateProgram` ne peut pas rendre
+   * `true` sans que l'écriture ait réellement abouti.
+   */
   const source = readFileSync(new URL("../../lib/supabase/programs.ts", import.meta.url), "utf8");
   const bloc = source
-    .slice(source.indexOf("export async function updateProgram"), source.indexOf("export async function deleteProgram"))
+    .slice(source.indexOf("export async function updateProgram"), source.indexOf("function teteIdentique"))
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/^\s*\/\/.*$/gm, "");
 
-  // ⚠️ LA LIGNE EXACTE DE L'INCIDENT. Elle valait
-  // `await diffProgramStructure(...);` suivie de `return true;` — le
-  // compte-rendu était jeté et une séance sautée passait pour un succès.
   assert.ok(
-    !/await diffProgramStructure\([^)]*\);\s*return true;/.test(bloc),
-    "le résultat de diffProgramStructure ne doit plus être jeté",
+    !source.includes("async function diffProgramStructure"),
+    "diffProgramStructure doit avoir disparu avec son chemin d'écriture",
   );
-  assert.ok(bloc.includes("const bilan = await diffProgramStructure("), "le compte-rendu est recueilli");
-  assert.ok(bloc.includes("if (!bilan.complet)"), "et il est regardé");
-  assert.ok(bloc.includes("STRUCTURE_INCOMPLETE"), "un échec de structure porte un code distinct");
+  // Le `return true` du chemin nominal est précédé de l'appel groupé ATTENDU.
+  assert.ok(
+    /await saveTrainingProgramSessions\(/.test(bloc),
+    "l'écriture passe par l'appel groupé, et il est attendu",
+  );
+  const iAppel = bloc.indexOf("await saveTrainingProgramSessions(");
+  const iVrai = bloc.indexOf("return true;", iAppel);
+  assert.ok(iAppel > -1 && iVrai > iAppel, "`return true` ne vient qu'APRÈS l'appel groupé");
+
+  // ⚠️ L'ÉCHEC EST RELANCÉ, JAMAIS AVALÉ. Un `catch` qui rendrait `false`
+  // ferait diagnostiquer un problème de droits là où il y a autre chose ; un
+  // `catch` silencieux rendrait `true` sur un échec.
+  assert.ok(/throw error;/.test(bloc), "une erreur d'écriture est relancée à l'appelant");
+  assert.ok(!/catch[\s\S]{0,200}return false/.test(bloc), "aucun catch ne doit rendre `false` en avalant la cause");
+  assert.ok(!/catch[\s\S]{0,200}return true/.test(bloc), "aucun catch ne doit rendre `true` sur un échec");
+
+  // Le seul `return true` sans appel réseau est le cas « rien n'a changé ».
+  assert.ok(
+    /diffVide\(diff\)/.test(bloc),
+    "le court-circuit sans requête est borné au cas où le diff est VIDE",
+  );
 });
 
-await test("9. une séance sautée est NOMMÉE, jamais tue", async () => {
-  const source = readFileSync(new URL("../../lib/supabase/programs.ts", import.meta.url), "utf8");
-  const bloc = source
-    .slice(source.indexOf("async function diffProgramStructure"), source.indexOf("export async function updateProgram"))
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^\s*\/\/.*$/gm, "");
+await test("9. aucune séance ne peut être abandonnée en silence", async () => {
+  /*
+   * ⚠️ MÊME OBJET, GARANTIE PLUS FORTE.
+   *
+   * L'ancien chemin pouvait SAUTER une séance (`continue`) et devait donc
+   * l'inscrire au compte-rendu pour ne pas la perdre en silence — d'où les
+   * `ignorees.push(...)` que ce test comptait.
+   *
+   * Le nouveau chemin ne peut plus sauter de séance : le serveur traite la
+   * charge entière dans UNE transaction et LÈVE au premier refus, en nommant la
+   * séance fautive (`SESSION_FAILED <clé>: <cause>`). Il n'y a plus de « séance
+   * sautée » possible, donc plus rien à inscrire : il y a un échec total, situé.
+   */
+  const diff = readFileSync(new URL("../../lib/program-diff.ts", import.meta.url), "utf8");
+  const sansNotes = diff.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
-  // Chaque saut de séance doit s'inscrire au compte-rendu. On compte les
-  // `continue` qui abandonnent une séance et les `ignorees.push` en regard.
-  const pousses = (bloc.match(/ignorees\.push\(/g) ?? []).length;
-  assert.ok(pousses >= 6, `chaque abandon de séance doit être nommé — ${pousses} trouvé(s)`);
-  assert.ok(bloc.includes("return { complet: ignorees.length === 0, ignorees };"), "le bilan est rendu");
+  // Le diff est PUR : aucune lecture réseau ne peut y être tronquée.
+  for (const interdit of ["supabase", ".from(", "await ", "fetch("]) {
+    assert.ok(!sansNotes.includes(interdit), `le diff doit rester pur — « ${interdit} » trouvé`);
+  }
 
-  // Et le message utilisateur ne confond plus ce cas avec un problème de droits.
+  // ⚠️ LA RÈGLE ASYMÉTRIQUE : en cas de doute, on ÉCRIT. Une empreinte qui ne
+  // se calcule pas ne doit jamais conclure « identiques ».
+  assert.ok(
+    /catch\s*\{\s*\n?\s*\/\/[\s\S]{0,400}?return false;/.test(diff) || /catch \{[\s\S]{0,400}?return false;/.test(diff),
+    "une empreinte impossible à calculer doit rendre `false` (donc écrire)",
+  );
+
+  // Les suppressions ne se déduisent JAMAIS d'une absence.
+  assert.ok(
+    sansNotes.includes("seancesInstantane") && sansNotes.includes("idsConserves"),
+    "les suppressions se dérivent de l'instantané LU, pas d'une absence dans la charge",
+  );
+
+  // Et une séance qui porte les marques d'une ligne persistée est MODIFIÉE,
+  // jamais recréée — sinon elle serait dupliquée.
+  assert.ok(sansNotes.includes("ligneDejaPersistee"), "la règle « déjà persistée » est explicite");
+  assert.ok(
+    /isUuid\(session\.id\) && Boolean\(session\.updatedAt\)/.test(sansNotes),
+    "et elle repose sur les deux marques d'une ligne lue en base",
+  );
+
+  // Le serveur, lui, nomme la séance fautive et conserve la cause.
+  const rpc = readFileSync(
+    new URL("../../supabase/migrations/20261027090000_save_training_program_sessions_rpc.sql", import.meta.url),
+    "utf8",
+  );
+  assert.ok(rpc.includes("SESSION_FAILED %: %"), "l'erreur serveur nomme la séance ET conserve la cause");
+  assert.ok(rpc.includes("WEEK_INSERT_FAILED"), "une semaine refusée est nommée");
+  assert.ok(rpc.includes("SESSION_INSERT_FAILED"), "une séance non créée est nommée");
+
+  // Et le client sait extraire cette séance pour le dire au coach.
+  const service = readFileSync(new URL("../../lib/supabase/training-program-save.ts", import.meta.url), "utf8");
+  assert.ok(/SESSION_\(\?:FAILED\|INSERT_FAILED\)/.test(service), "le client extrait la séance fautive du message");
+
   const orchestrateur = readFileSync(new URL("../../lib/admin-builder-save.ts", import.meta.url), "utf8");
   assert.ok(
-    orchestrateur.includes('message.startsWith("STRUCTURE_INCOMPLETE")'),
-    "un échec de structure a son propre message",
-  );
-  const iStructure = orchestrateur.indexOf('startsWith("STRUCTURE_INCOMPLETE")');
-  const iDroits = orchestrateur.indexOf("NOT_AUTHORIZED|42501|SAVE_FAILED");
-  assert.ok(
-    iStructure > -1 && iStructure < iDroits,
-    "il doit être testé AVANT le message de droits, sinon il serait absorbé",
+    orchestrateur.includes('case "delai_depasse":'),
+    "un dépassement de délai a son propre message : il ne doit pas passer pour un refus de droits",
   );
   assert.ok(
-    /n'enregistre pas par-dessus/i.test(orchestrateur),
-    "et il doit dire au coach de NE PAS réenregistrer par-dessus",
+    /Aucune modification n'a été enregistrée/.test(orchestrateur),
+    "et il dit au coach que RIEN n'a été écrit — c'est désormais vrai, la transaction est annulée",
   );
 });
 

@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   isLegacyStrengthBlockId,
   isUuid,
+  normalizeTrainingPrescriptionId,
   makeLegacyStrengthBlockId,
   parseTrainingBlockId,
   parseTrainingExerciseId,
@@ -111,12 +112,33 @@ export interface SaveTrainingSessionBlocksResult {
   blocks: unknown[];
   /** Date réelle de la séance après écriture (NULL = date calculée). */
   scheduledDate: string | null;
-  /** Correspondance identifiants temporaires → UUID serveur réels. */
-  idMapping: { blocks: Record<string, string>; exercises: Record<string, string> };
+  /**
+   * Correspondance identifiants temporaires → UUID serveur réels.
+   *
+   * ⚠️ `prescriptions` EST OPTIONNEL, ET C'EST DÉLIBÉRÉ. La clé n'apparaît
+   * qu'avec la migration 20261029090000 : une base qui ne l'a pas encore rend
+   * un `id_mapping` à deux clés. Le lire avec un repli — jamais le supposer
+   * présent — est ce qui permet de déployer le client et la base dans l'ordre
+   * que l'on veut.
+   */
+  idMapping: {
+    blocks: Record<string, string>;
+    exercises: Record<string, string>;
+    prescriptions?: Record<string, string>;
+  };
   warnings: { detachedExerciseFeedbackCount: number };
 }
 
-/** Sérialise un bloc du modèle canonique vers le JSON attendu par la RPC (snake_case). */
+/**
+ * Sérialise un bloc du modèle canonique vers le JSON attendu par la RPC (snake_case).
+ *
+ * ⚠️ EXPORTÉE SOUS LE NOM `serializeBlockPourRpc` POUR LA RPC GROUPÉE, et c'est
+ * une réutilisation, pas une copie. `lib/supabase/training-program-save.ts`
+ * construit la MÊME charge que cette fonction produit depuis toujours : deux
+ * sérialisations auraient divergé au premier champ ajouté, et la divergence se
+ * serait vue comme un champ silencieusement non enregistré selon le chemin
+ * emprunté. Le corps reste l'unique source de vérité du format de bloc.
+ */
 function serializeBlock(block: TrainingBlock): Record<string, unknown> {
   const base = {
     id: block.id,
@@ -165,6 +187,19 @@ function serializeBlock(block: TrainingBlock): Record<string, unknown> {
     sport: block.sport ?? null,
     rounds: block.rounds ?? null,
     prescriptions: block.prescriptions.map((seg) => ({
+      /*
+       * ⚠️ L'IDENTITÉ PART MAINTENANT AVEC LA PRESCRIPTION, et c'est tout
+       * l'objet du lot D. Elle existait côté client depuis toujours
+       * (`mapCardioSegmentRow` la lit depuis `training_prescriptions.id`) mais
+       * la sérialisation la JETAIT : le serveur ne pouvait donc que supprimer
+       * puis réinsérer le bloc entier, et les `id` changeaient à chaque
+       * enregistrement de la séance.
+       *
+       * UUID réel → la ligne est mise à jour EN PLACE, id conservé ;
+       * `new-prescription:<uuid>` → elle est insérée, et le serveur rend l'id
+       * réel dans `id_mapping.prescriptions`.
+       */
+      id: normalizeTrainingPrescriptionId(seg.id),
       segment_type: seg.segmentType,
       title: seg.title,
       repetitions: seg.repetitions ?? null,
@@ -193,6 +228,8 @@ function serializeBlock(block: TrainingBlock): Record<string, unknown> {
     })),
   };
 }
+
+export { serializeBlock as serializeBlockPourRpc };
 
 /**
  * Valide + sérialise le payload, puis fait UN SEUL appel RPC. Lève une erreur
@@ -320,6 +357,13 @@ function parseRpcResult(data: unknown): SaveTrainingSessionBlocksResult {
     idMapping: {
       blocks: (idMapping.blocks ?? {}) as Record<string, string>,
       exercises: (idMapping.exercises ?? {}) as Record<string, string>,
+      // Absent avant la migration 20261029090000 : on rend `undefined` plutôt
+      // qu'un objet vide, pour que l'appelant puisse distinguer « la base ne
+      // sait pas encore » de « aucune prescription créée ».
+      prescriptions:
+        idMapping.prescriptions === undefined
+          ? undefined
+          : (idMapping.prescriptions as Record<string, string>),
     },
     warnings: {
       detachedExerciseFeedbackCount: Number(warnings.detached_exercise_feedback_count ?? 0),
@@ -409,5 +453,22 @@ function normalizeBlockIds(block: TrainingBlock): TrainingBlock {
       exercises: block.exercises.map((ex) => ({ ...ex, id: normalizeExerciseId(ex.id) })),
     };
   }
-  return { ...block, id: normalizeBlockId(block.id) };
+  return {
+    ...block,
+    id: normalizeBlockId(block.id),
+    /*
+     * Les prescriptions suivent la même règle que les exercices : l'identité
+     * réelle est conservée, et seul le vraiment neuf devient temporaire.
+     *
+     * ⚠️ NORMALISER ICI *ET* DANS `serializeBlock` N'EST PAS REDONDANT. Cette
+     * fonction prépare l'entrée (c'est elle que les tests inspectent, et c'est
+     * elle qui fixe l'identité une fois pour toutes) ; `serializeBlock` est le
+     * dernier rempart avant le réseau, pour les appelants qui construiraient un
+     * `SaveTrainingSessionBlocksInput` sans passer par un adaptateur.
+     */
+    prescriptions: block.prescriptions.map((seg) => ({
+      ...seg,
+      id: normalizeTrainingPrescriptionId(seg.id),
+    })),
+  };
 }

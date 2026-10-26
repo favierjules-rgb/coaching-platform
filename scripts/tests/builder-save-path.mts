@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import esbuild from "esbuild";
 
 import { builderSaveUserMessage, orchestrateBuilderSave } from "../../lib/admin-builder-save";
+import { EchecEnregistrementGroupe } from "../../lib/supabase/training-program-save";
 import { updateProgram } from "../../lib/supabase/programs";
 import type { ProgramBuilderData } from "../../components/admin/ProgramBuilder";
 import type { AdminWorkoutSession } from "../../types";
@@ -124,6 +125,7 @@ function creerBase() {
   /** Émulation fidèle de save_training_session_blocks : garde staff, verrou optimiste, patch de séance, bump updated_at. */
   let sansDroitsStaff = false;
   function rpc(fn: string, args: { p_payload: Record<string, unknown> }) {
+    if (fn === "save_training_program_sessions") return rpcGroupee(args);
     if (fn !== "save_training_session_blocks") return Promise.resolve({ data: null, error: { message: `fonction inconnue ${fn}` } });
     if (sansDroitsStaff) return Promise.resolve({ data: null, error: { message: "NOT_AUTHORIZED" } });
     const p = args.p_payload;
@@ -137,6 +139,139 @@ function creerBase() {
       data: {
         session_id: session.id, updated_at: session.updated_at, session_type: "rest",
         blocks: [], id_mapping: { blocks: {}, exercises: {} }, warnings: { detached_exercise_feedback_count: 0 },
+      },
+      error: null,
+    });
+  }
+
+  /**
+   * Émulation fidèle de `save_training_program_sessions` (migration 20261027090000).
+   *
+   * ⚠️ AJOUTÉE AVEC LE CHANTIER DE PERFORMANCE, ET SANS ELLE CE HARNAIS NE
+   * MESURAIT PLUS RIEN. `updateProgram` n'émet plus un appel par séance : il
+   * émet UN appel groupé. La base factice rendait donc « fonction inconnue
+   * save_training_program_sessions », et deux cas passaient au rouge pour une
+   * raison qui n'avait rien à voir avec ce qu'ils vérifient.
+   *
+   * L'ordre des étapes suit celui du serveur, parce que c'est l'ordre qui porte
+   * les garanties : droits, puis existence, puis verrou de tête, puis tête,
+   * puis suppressions explicites, puis créations, puis modifications. Un échec
+   * à n'importe quelle étape rend une erreur et n'écrit RIEN de plus — l'atomicité
+   * réelle vient de PostgreSQL, ici on refuse simplement de continuer.
+   */
+  function rpcGroupee(args: { p_payload: Record<string, unknown> }) {
+    const p = args.p_payload;
+    const refus = (message: string) => Promise.resolve({ data: null, error: { message } });
+
+    if (sansDroitsStaff) return refus("NOT_AUTHORIZED");
+
+    const programId = p.program_id as string;
+    const programme = table("programs").find((x) => x.id === programId);
+    // Le serveur ne distingue pas « inconnu » de « hors périmètre » : il ne
+    // révèle pas l'existence d'une programmation d'un autre coach.
+    if (!programme) return refus("PROGRAM_NOT_FOUND_OR_FORBIDDEN");
+
+    if (p.expected_program_updated_at != null
+        && programme.updated_at != null
+        && programme.updated_at !== p.expected_program_updated_at) {
+      return refus("STALE_TRAINING_PROGRAM");
+    }
+
+    // Tête : seules les clés présentes sont écrites. `owner_student_id` et
+    // `source_template_id` n'y figurent jamais — une copie reste possédée.
+    const patch = (p.program_patch ?? null) as Record<string, unknown> | null;
+    if (patch) {
+      for (const [cle, valeur] of Object.entries(patch)) programme[cle] = valeur as never;
+      programme.updated_at = `t${(horloge += 1)}`;
+    }
+
+    // Semaines retirées, par NUMÉRO, avec leur cascade.
+    for (const numero of (p.weeks_to_delete ?? []) as number[]) {
+      const semaines = table("program_weeks");
+      const cible = semaines.find((w) => w.program_id === programId && w.week_number === numero);
+      if (!cible) continue;
+      const seances = table("workout_sessions");
+      for (let i = seances.length - 1; i >= 0; i -= 1) {
+        if (seances[i].program_week_id === cible.id) seances.splice(i, 1);
+      }
+      semaines.splice(semaines.indexOf(cible), 1);
+    }
+
+    // Semaines ajoutées — idempotent sur (program_id, week_number).
+    const weeks: Record<string, string> = {};
+    for (const numero of (p.weeks_to_create ?? []) as number[]) {
+      const semaines = table("program_weeks");
+      let w = semaines.find((x) => x.program_id === programId && x.week_number === numero);
+      if (!w) {
+        w = { id: `w-${programId}-${numero}`, program_id: programId, week_number: numero };
+        semaines.push(w);
+      }
+      weeks[String(numero)] = w.id as string;
+    }
+
+    // Séances retirées, par IDENTIFIANT, bornées à CE programme.
+    const aSupprimer = new Set((p.sessions_to_delete ?? []) as string[]);
+    if (aSupprimer.size > 0) {
+      const seances = table("workout_sessions");
+      for (let i = seances.length - 1; i >= 0; i -= 1) {
+        if (aSupprimer.has(seances[i].id as string) && seances[i].program_id === programId) seances.splice(i, 1);
+      }
+    }
+
+    const sessions: Record<string, unknown>[] = [];
+
+    // Séances créées : la ligne d'abord, son contenu ensuite via le moteur.
+    for (const neuve of (p.sessions_to_create ?? []) as Record<string, unknown>[]) {
+      const numero = neuve.week_number as number;
+      const w = weeks[String(numero)]
+        ?? table("program_weeks").find((x) => x.program_id === programId && x.week_number === numero)?.id;
+      if (!w) return refus(`WEEK_MISSING: ${numero}`);
+      const ligne: Ligne = {
+        id: `00000000-0000-4000-8000-${String((seedCompteur += 1)).padStart(12, "0")}`,
+        program_id: programId, program_week_id: w,
+        day: neuve.day ?? "", name: neuve.name ?? "", updated_at: `t${(horloge += 1)}`,
+      };
+      table("workout_sessions").push(ligne);
+      sessions.push({
+        session_id: ligne.id, updated_at: ligne.updated_at, session_type: "rest",
+        client_id: neuve.client_id ?? null, created: true,
+        id_mapping: { blocks: {}, exercises: {} },
+        warnings: { detached_exercise_feedback_count: 0 },
+      });
+    }
+
+    // Séances modifiées : DÉLÉGUÉES au moteur par séance, exactement comme le
+    // serveur — mêmes validations, même verrou optimiste, même bump.
+    for (const maj of (p.sessions_to_update ?? []) as Record<string, unknown>[]) {
+      const sid = maj.session_id as string;
+      const ligne = table("workout_sessions").find((x) => x.id === sid);
+      // Bornage au programme : la charge ne peut pas détourner le moteur vers
+      // une séance d'un AUTRE programme, même du même coach.
+      if (!ligne || ligne.program_id !== programId) {
+        return refus(`SESSION_FAILED ${sid}: séance absente de ce programme`);
+      }
+      if (ligne.updated_at !== maj.expected_updated_at) {
+        return refus(`SESSION_FAILED ${sid}: STALE_TRAINING_SESSION`);
+      }
+      const sp = (maj.session_patch ?? {}) as Record<string, unknown>;
+      if (typeof sp.name === "string") ligne.name = sp.name;
+      ligne.updated_at = `t${(horloge += 1)}`;
+      sessions.push({
+        session_id: sid, updated_at: ligne.updated_at, session_type: "rest",
+        client_id: maj.client_id ?? null, created: false,
+        id_mapping: { blocks: {}, exercises: {} },
+        warnings: { detached_exercise_feedback_count: 0 },
+      });
+    }
+
+    return Promise.resolve({
+      data: {
+        program_id: programId,
+        program_updated_at: programme.updated_at ?? `t${horloge}`,
+        weeks,
+        week_count: table("program_weeks").filter((w) => w.program_id === programId).length,
+        sessions,
+        session_count: sessions.length,
       },
       error: null,
     });
@@ -267,13 +402,32 @@ await (async () => {
   });
 
   await test("11. échec sans fausse confirmation : 0 ligne / NOT_AUTHORIZED / STALE", async () => {
-    // a. UPDATE silencieux sous RLS (0 ligne) — le cas exact de l'incident :
-    //    échec NET, AUCUNE écriture de structure tentée.
+    /*
+     * a. Programme invisible sous la RLS — le cas exact de l'incident du 02/08 :
+     *    échec NET, AUCUNE écriture de structure.
+     *
+     * ⚠️ LE CONTRAT A CHANGÉ, ET DANS LE BON SENS. `updateProgram` rendait
+     * `false` ; il LÈVE désormais une `EchecEnregistrementGroupe` portant une
+     * cause TYPÉE. `false` ne disait pas pourquoi, et `builderSaveUserMessage`
+     * devait le deviner en relisant un texte d'erreur — ce qui a produit le
+     * faux diagnostic « vérifie tes droits coach » sur des pannes qui n'avaient
+     * rien à voir. On vérifie donc plus qu'avant : la cause exacte, et le fait
+     * que rien n'a bougé.
+     */
     const base = creerBase();
     const sid = seedProgramme(base, "prog-t");
-    const ok = await updateProgram(base.client, "prog-inexistant", données("X", [seance(sid, "t1")]));
-    assert.equal(ok, false, "0 ligne modifiée → false, jamais true");
+    await assert.rejects(
+      () => updateProgram(base.client, "prog-inexistant", données("X", [seance(sid, "t1")])),
+      (erreur: unknown) => {
+        assert.ok(erreur instanceof EchecEnregistrementGroupe, "une erreur typée, jamais un `false` muet");
+        assert.equal(erreur.cause, "programme_introuvable",
+          "le serveur ne distingue pas « inconnu » de « hors périmètre » : une seule cause");
+        return true;
+      },
+      "un programme hors périmètre doit LEVER, jamais rendre true",
+    );
     assert.equal(base.table("workout_sessions")[0].updated_at, "t1", "structure jamais tentée");
+    assert.equal(base.table("programs").length, 1, "aucune ligne créée au passage");
     // b. L'issue « error » produit le message actionnable, pas un générique.
     const issue = await orchestrateBuilderSave({ save: async () => false, refetch: async () => null });
     assert.equal(issue.kind, "error");
@@ -309,7 +463,17 @@ await (async () => {
 
   await test("12. le bouton d'enregistrement est verrouillé pendant l'écriture", () => {
     const composant = readFileSync(new URL("../../components/admin/ProgramBuilderFullscreen.tsx", import.meta.url), "utf8");
-    assert.ok(/disabled=\{saveStatus === "saving"\}/.test(composant), "bouton désactivé pendant l'enregistrement");
+    /*
+     * ⚠️ LA CONDITION S'EST ÉTOFFÉE, ET L'ÉGALITÉ EXACTE DU TEXTE NE TIENT PLUS.
+     * Le bouton est désormais désactivé pendant la sauvegarde ET pendant une
+     * relecture ET tant que l'état serveur n'est pas réconcilié. On vérifie donc
+     * que `"saving"` figure toujours dans la condition, et que la nouvelle garde
+     * y figure aussi — plutôt que de figer la forme de l'expression.
+     */
+    const conditionBouton = /disabled=\{([^}]*saveStatus === "saving"[^}]*)\}/.exec(composant)?.[1] ?? "";
+    assert.ok(conditionBouton, "bouton désactivé pendant l'enregistrement");
+    assert.ok(conditionBouton.includes("desynchroniseEffectif"),
+      "et tant que l'état serveur n'est pas réconcilié (sauvegarde interdite)");
     assert.ok(/saveStatus === "saving"\) return "Enregistrement…"/.test(composant), "état de chargement visible");
     assert.ok(/saveErrorMessage \?\? "Échec de l'enregistrement"/.test(composant),
       "le message actionnable remplace le libellé générique quand il existe");

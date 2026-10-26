@@ -147,6 +147,48 @@ export function parseTrainingBlockId(value: string, expectedSessionId: string): 
  */
 const NEW_EXERCISE_ID_PREFIX = "new-exercise:";
 
+/**
+ * Identifiant temporaire STRICT d'une nouvelle prescription cardio :
+ * `new-prescription:<uuid-client>`.
+ *
+ * ⚠️ LES PRESCRIPTIONS N'AVAIENT PAS D'IDENTITÉ DANS LA CHARGE, et c'est ce qui
+ * a produit les 228 retours d'exercice orphelins relevés en production. Le
+ * moteur supprimait puis réinsérait tout le bloc cardio à chaque
+ * enregistrement, donc leurs `id` changeaient même sans modification. La
+ * migration 20261029090000 les synchronise désormais par diff — encore faut-il
+ * que le client dise quelle ligne est laquelle.
+ */
+const NEW_PRESCRIPTION_ID_PREFIX = "new-prescription:";
+
+/** Forge l'identifiant temporaire d'une prescription neuve. */
+export function makeNewPrescriptionId(gen: () => string = () => crypto.randomUUID()): string {
+  return `${NEW_PRESCRIPTION_ID_PREFIX}${gen()}`;
+}
+
+/** Vrai si cet identifiant est un identifiant temporaire de prescription. */
+export function isNewPrescriptionId(value: string): boolean {
+  return value.startsWith(NEW_PRESCRIPTION_ID_PREFIX);
+}
+
+/**
+ * Normalise l'identifiant d'une prescription vers la grammaire que le serveur
+ * accepte : UUID réel conservé tel quel, `new-prescription:<uuid>` conservé,
+ * tout le reste converti en identifiant temporaire strict.
+ *
+ * ⚠️ NE JAMAIS LAISSER PASSER UN UUID QUI N'EST PAS CELUI D'UNE LIGNE
+ * PERSISTÉE. Un `crypto.randomUUID()` nu a la forme d'un identifiant réel : le
+ * serveur le chercherait sur ce bloc, ne le trouverait pas, et lèverait
+ * `FOREIGN_PRESCRIPTION_ID`. C'est exactement le piège dans lequel tombait
+ * `duplicateBlock` — voir lib/training-block-editing.ts.
+ *
+ * Les identifiants locaux du builder (`seg-<horodatage>-<n>`, produits par
+ * `generateId`) tombent dans le cas « tout le reste » et deviennent temporaires.
+ */
+export function normalizeTrainingPrescriptionId(id: string | undefined | null): string {
+  if (typeof id === "string" && (isUuid(id) || isNewPrescriptionId(id))) return id;
+  return makeNewPrescriptionId();
+}
+
 /** Résultat du parsing strict d'un id d'exercice entrant. */
 export type ParsedTrainingExerciseId = { kind: "persisted"; id: string } | { kind: "new"; clientId: string };
 

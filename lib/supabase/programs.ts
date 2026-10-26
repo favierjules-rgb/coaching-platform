@@ -10,6 +10,12 @@ import {
   buildLegacySessionBlocksInput,
   saveTrainingSessionBlocks,
 } from "@/lib/supabase/training-session-blocks";
+import { calculerDiffProgrammation, diffVide, type DiffDeProgrammation } from "@/lib/program-diff";
+import {
+  EchecEnregistrementGroupe,
+  saveTrainingProgramSessions,
+  type PatchDeProgramme,
+} from "@/lib/supabase/training-program-save";
 import type {
   AdminCardioBlock,
   AdminCardioSegment,
@@ -1513,460 +1519,173 @@ async function duplicateProgramCore(
   return newProgramRow.id;
 }
 
-/**
- * Diffe et applique en place la structure (semaines/séances/exercices) d'un
- * programme existant, au lieu du delete + reinsert complet précédemment
- * utilisé par updateProgram (voir V3 — training-builder-v3-running-fullscreen).
+/*
+ * ════════════════════════════════════════════════════════════════════════════
+ * `diffProgramStructure` A ÉTÉ SUPPRIMÉE — ET SON ABSENCE EST LE CHANTIER
+ * ════════════════════════════════════════════════════════════════════════════
+ * Elle diffait la structure côté CLIENT : deux lectures, puis un appel RPC par
+ * séance, attendu, pour TOUTES les séances du programme. Soit `7·N + 12`
+ * requêtes dont `7·N + 3` séquentielles — 87 pour renommer une séance d'une
+ * programmation de 12 semaines, 100 pour y ajouter une semaine.
  *
- * Pourquoi ce changement : le delete + reinsert recréait un nouvel id à
- * chaque séance/exercice à chaque sauvegarde, ce qui (a) mettait à `null` le
- * lien `workout_feedback.session_id` de tout retour élève déjà soumis pour
- * cette séance (ON DELETE SET NULL — le retour survit mais perd son
- * rattachement direct), et (b) aurait supprimé et fait perdre tout bloc/
- * prescription cardio (training_blocks/training_prescriptions, ON DELETE
- * CASCADE sur workout_sessions/workout_exercises) à chaque simple
- * modification du programme par le coach une fois le builder cardio en
- * place. Le diff fin préserve les ids existants et donc ces rattachements.
+ * Elle a été remplacée par :
+ *   · `lib/program-diff.ts` — le diff, devenu une fonction PURE et testable,
+ *     qui ne lit plus la base : l'instantané déjà chargé par le builder suffit ;
+ *   · `public.save_training_program_sessions` (migration 20261027090000) —
+ *     l'application du diff, en UNE transaction et UN aller-retour.
  *
- * Stratégie de correspondance (sans nouvelle colonne, juste plus de
- * requêtes ciblées) :
- * - Semaine : identifiée par son `week_number` (unique par programme).
- * - Séance : identifiée par (semaine, `day`) — chaque semaine a toujours
- *   exactement les 7 jours de weekDays, day est donc une clé stable.
- * - Exercice : identifié par son `id` — un id déjà présent en base pour
- *   CETTE séance est mis à jour ; un id absent (placeholder généré
- *   côté client par generateId(), voir lib/admin.ts) est inséré comme
- *   nouvel exercice ; un id en base absent du nouveau jeu de données est
- *   supprimé.
+ * Ce que ce déplacement a fait disparaître, et qu'il faut garder en tête avant
+ * de songer à revenir en arrière :
+ *   · la frontière d'atomicité (tête commise, structure à moitié écrite) ;
+ *   · le `STALE_TRAINING_SESSION` déterministe à la deuxième tentative ;
+ *   · la suppression IMPLICITE par absence, qui a détruit des séances le
+ *     25/08/2026 quand une lecture tronquée les a rendues invisibles.
+ *
+ * Les garanties qu'elle portait n'ont pas disparu, elles ont changé de place :
+ * `BilanDeStructure` et `STRUCTURE_INCOMPLETE` sont devenus les causes typées
+ * de `EchecEnregistrementGroupe`, et aucune séance ne peut plus être « sautée
+ * en silence » puisque le serveur nomme celle qui échoue et annule tout le reste.
  */
+
 /**
- * Ce que l'écriture de structure a RÉELLEMENT fait.
+ * Met à jour un programme existant — EN UN SEUL ALLER-RETOUR, ATOMIQUEMENT.
  *
- * ⚠️ CE TYPE EXISTE PARCE QUE `void` MENTAIT. Jusqu'au 25/08,
- * `diffProgramStructure` ne rendait rien et `updateProgram` rendait `true`
- * juste après : une séance sautée, une semaine non insérée ou une lecture
- * ratée produisaient un « enregistré » à l'écran. Le coach voyait « À JOUR »
- * et son travail avait disparu.
- */
-interface BilanDeStructure {
-  /** `false` dès qu'une séance n'a PAS été écrite comme demandé. */
-  readonly complet: boolean;
-  /** Ce qui a été sauté, nommément. Vide quand tout est passé. */
-  readonly ignorees: readonly string[];
-}
-
-async function diffProgramStructure(
-  supabase: TypedSupabaseClient,
-  programId: string,
-  sessions: AdminWorkoutSession[],
-  mode: ProgramContentMode,
-): Promise<BilanDeStructure> {
-  // Chaque `continue` silencieux vient s'inscrire ici. Une séance sautée est
-  // une PERTE pour le coach, pas un détail d'implémentation.
-  const ignorees: string[] = [];
-  const incomingWeekNumbers = Array.from(new Set(sessions.map((s) => s.weekNumber))).sort((a, b) => a - b);
-
-  /*
-   * ⚠️ CETTE LECTURE EST PAGINÉE, ET SON INTÉGRITÉ CONDITIONNE L'ÉCRITURE.
-   *
-   * Tronquée, elle rendrait des semaines existantes INVISIBLES : elles
-   * seraient réinsérées en double, et leurs séances traitées comme neuves —
-   * donc les vraies lignes marquées à la suppression. Une lecture partielle
-   * ici ne coûte pas un affichage, elle coûte des données.
-   */
-  const semainesExistantes = await lireToutesLesLignes<{ id: string; week_number: number }>(
-    "diffProgramStructure (program_weeks lecture)",
-    (debut, fin, compter) =>
-      supabase
-        .from("program_weeks")
-        .select("id, week_number", optionsDePage(compter))
-        .eq("program_id", programId)
-        .order("id")
-        .range(debut, fin),
-  );
-  if (!semainesExistantes.complet) {
-    return {
-      complet: false,
-      ignorees: [`lecture des semaines du programme ${programId} incomplète — aucune écriture de structure tentée`],
-    };
-  }
-  const existingWeeks = semainesExistantes.rows;
-
-  const weekIdByNumber = new Map<number, string>(existingWeeks.map((w) => [w.week_number, w.id]));
-
-  // Semaines retirées par le coach (plus aucune séance dessus) : suppression,
-  // cascade jusqu'aux séances/exercices/blocs/prescriptions de cette semaine.
-  const weeksToDelete = existingWeeks.filter((w) => !incomingWeekNumbers.includes(w.week_number));
-  if (weeksToDelete.length > 0) {
-    const { error } = await supabase
-      .from("program_weeks")
-      .delete()
-      .in("id", weeksToDelete.map((w) => w.id));
-    devWarn("diffProgramStructure (program_weeks suppression)", error);
-    for (const w of weeksToDelete) weekIdByNumber.delete(w.week_number);
-  }
-
-  // Nouvelles semaines : insertion, on complète weekIdByNumber avec leur id.
-  const weekNumbersToInsert = incomingWeekNumbers.filter((n) => !weekIdByNumber.has(n));
-  for (const weekNumber of weekNumbersToInsert) {
-    const { data: weekRow, error } = await supabase
-      .from("program_weeks")
-      .insert({ program_id: programId, week_number: weekNumber })
-      .select("id")
-      .single();
-    devWarn("diffProgramStructure (program_weeks insertion)", error);
-    if (weekRow) weekIdByNumber.set(weekNumber, weekRow.id);
-  }
-
-  const keptOrNewWeekIds = incomingWeekNumbers.map((n) => weekIdByNumber.get(n)).filter((id): id is string => Boolean(id));
-
-  /*
-   * ⚠️ MÊME ENJEU, EN PIRE. Une séance absente de cette lecture n'entre pas
-   * dans `idsConserves` : elle est traitée comme neuve, et sa VRAIE ligne
-   * part dans `sessionsToDelete`. Une troncature silencieuse ici supprime
-   * des séances entières.
-   */
-  const seancesExistantes =
-    keptOrNewWeekIds.length > 0
-      ? await lireToutesLesLignes<{ id: string; program_week_id: string; day: string }>(
-          "diffProgramStructure (workout_sessions lecture)",
-          (debut, fin, compter) =>
-            supabase
-              .from("workout_sessions")
-              .select("id, program_week_id, day", optionsDePage(compter))
-              .in("program_week_id", keptOrNewWeekIds)
-              .order("id")
-              .range(debut, fin),
-        )
-      : { rows: [] as { id: string; program_week_id: string; day: string }[], complet: true };
-  if (!seancesExistantes.complet) {
-    return {
-      complet: false,
-      ignorees: [`lecture des séances du programme ${programId} incomplète — aucune suppression tentée`],
-    };
-  }
-  const existingSessions = seancesExistantes.rows;
-
-  // ════════════════════════════════════════════════════════════════════════
-  // ⚠️ L'IDENTITÉ D'UNE SÉANCE EST SON `id`, PLUS SA CASE DANS LA GRILLE
-  // ════════════════════════════════════════════════════════════════════════
-  // L'appariement se faisait par (semaine, jour). Une séance ne pouvait donc
-  // pas CHANGER de jour : le builder recopiait son contenu dans la case
-  // voisine, UUID de blocs compris, et la RPC refusait — à juste titre — des
-  // blocs appartenant à une autre séance (`FOREIGN_BLOCK_ID`, étape 5 de
-  // `save_training_session_blocks`). Résultat mesuré en production : éditer
-  // une séance s'enregistrait, la déplacer échouait toujours.
-  //
-  // Avec l'`id` pour identité, déplacer une séance déplace sa LIGNE : elle
-  // garde ses blocs, ses exercices, ses prescriptions cardio et le
-  // rattachement des retours élèves déjà soumis. `day` devient une donnée
-  // patchée comme le nom ou les notes — `session_patch` l'autorise déjà, et
-  // aucun index unique ne pèse sur (program_week_id, day), donc deux lignes
-  // peuvent transitoirement partager un jour pendant un échange.
-  const existingRowById = new Map(existingSessions.map((s) => [s.id, s]));
-
-  const idsConserves = new Set<string>();
-  const sessionsToInsert: AdminWorkoutSession[] = [];
-
-  for (const session of sessions) {
-    const weekId = weekIdByNumber.get(session.weekNumber);
-    if (!weekId) {
-      // ⚠️ SEMAINE ABSENTE = SÉANCE PERDUE, PAS SÉANCE IGNORÉE. Son insertion
-      // a échoué plus haut. Sauter en silence laissait la séance tomber dans
-      // `sessionsToDelete` : sa ligne était SUPPRIMÉE et l'enregistrement se
-      // déclarait réussi. On le compte comme un échec.
-      ignorees.push(`séance ${session.id} (semaine ${session.weekNumber} indisponible)`);
-      continue;
-    }
-    const ligne = existingRowById.get(session.id);
-    // ⚠️ UNE SÉANCE NE CHANGE PAS DE SEMAINE — et si elle le faisait un jour,
-    // on ne le maquillerait pas. `session_patch` n'accepte pas
-    // `program_week_id` : la ligne serait patchée dans la mauvaise semaine, en
-    // silence. Ce cas est donc traité comme une séance NEUVE dans la semaine
-    // cible, et l'ancienne ligne est supprimée avec le reste.
-    if (ligne !== undefined && ligne.program_week_id === weekId) {
-      idsConserves.add(session.id);
-      // Séance existante : gérée plus bas via son SNAPSHOT (session.updatedAt) +
-      // session_patch, SANS UPDATE préalable de la ligne.
-      continue;
-    }
-    if (ligne !== undefined) {
-      devWarn("diffProgramStructure (séance changée de semaine)", {
-        message: `séance ${session.id} recréée dans la semaine ${session.weekNumber}`,
-      });
-    }
-    sessionsToInsert.push(session);
-  }
-
-  // Séances en base qui n'apparaissent plus dans le nouveau jeu de données :
-  // le coach a supprimé une semaine, ou une séance a changé de semaine.
-  const sessionsToDelete = existingSessions.filter((s) => !idsConserves.has(s.id));
-  if (sessionsToDelete.length > 0) {
-    const { error } = await supabase
-      .from("workout_sessions")
-      .delete()
-      .in("id", sessionsToDelete.map((s) => s.id));
-    devWarn("diffProgramStructure (workout_sessions suppression)", error);
-  }
-
-  // Nouvelles séances : la ligne n'existe pas encore → INSERT (avec ses champs),
-  // en récupérant l'updated_at EXACT retourné pour le passer à la RPC.
-  const insertedByKey = new Map<AdminWorkoutSession, { id: string; updatedAt: string }>();
-  for (const session of sessionsToInsert) {
-    const weekId = weekIdByNumber.get(session.weekNumber);
-    if (!weekId) {
-      ignorees.push(`séance ${session.id} (semaine ${session.weekNumber} indisponible à l'insertion)`);
-      continue;
-    }
-    // En canonique, is_rest_day/session_type DÉRIVÉS des blocs (jamais saisis).
-    const canonical = mode === "canonical" ? toCanonicalSessionSaveData(session) : null;
-    const { data: sessionRow, error } = await supabase
-      .from("workout_sessions")
-      .insert({
-        program_id: programId,
-        program_week_id: weekId,
-        day: session.day,
-        is_rest_day: canonical ? canonical.isRestDay : session.isRestDay,
-        name: session.name,
-        muscle_group: session.muscleGroup,
-        duration_minutes: session.durationMinutes,
-        warmup: session.warmup,
-        coach_notes: session.coachNotes,
-        session_type: canonical ? sessionTypeForColumn(canonical.sessionType) : (session.sessionType ?? "strength"),
-        banner_url: session.bannerUrl ?? null,
-      })
-      .select("id, updated_at")
-      .single();
-    devWarn("diffProgramStructure (workout_sessions insertion)", error);
-    if (sessionRow) insertedByKey.set(session, { id: sessionRow.id, updatedAt: sessionRow.updated_at });
-  }
-
-  /**
-   * La ligne à écrire pour cette séance — son `id`, jamais sa case.
-   *
-   * ⚠️ ET SEULEMENT SI ELLE A ÉTÉ RETENUE. Une séance dont la ligne vient
-   * d'être supprimée (changement de semaine) doit passer par l'INSERT, pas
-   * viser un identifiant qui n'existe plus.
-   */
-  function resolveExistingId(session: AdminWorkoutSession): string | undefined {
-    return idsConserves.has(session.id) ? session.id : undefined;
-  }
-
-  // Id du bloc musculation déjà persisté par séance EXISTANTE : le fournir à
-  // l'adaptateur le met à jour en place (id conservé). Le modèle legacy ne
-  // produit qu'un seul bloc muscu par séance.
-  const existingSessionIds = sessions
-    .map((session) => resolveExistingId(session))
-    .filter((id): id is string => Boolean(id));
-  // Bloc muscu déjà persisté par séance — nécessaire UNIQUEMENT au chemin legacy
-  // (un seul bloc muscu par séance). En canonique, les ids de blocs viennent
-  // directement de blocks[], donc pas de lecture.
-  const strengthBlockIdBySession = new Map<string, string>();
-  if (mode === "legacy" && existingSessionIds.length > 0) {
-    const blocsExistants = await lireToutesLesLignes<{ id: string; session_id: string; block_type: string }>(
-      "diffProgramStructure (training_blocks lecture)",
-      (debut, fin, compter) =>
-        supabase
-          .from("training_blocks")
-          .select("id, session_id, block_type", optionsDePage(compter))
-          .in("session_id", existingSessionIds)
-          .order("id")
-          .range(debut, fin),
-    );
-    if (!blocsExistants.complet) {
-      return {
-        complet: false,
-        ignorees: [`lecture des blocs du programme ${programId} incomplète — aucune écriture legacy tentée`],
-      };
-    }
-    for (const row of blocsExistants.rows) {
-      if (row.block_type !== "cardio") strengthBlockIdBySession.set(row.session_id, row.id);
-    }
-  }
-
-  // ── Persistance canonique + métadonnées, atomique par séance via la RPC ───
-  // Séance EXISTANTE : expected_updated_at = SNAPSHOT chargé (session.updatedAt),
-  // AUCUNE écriture préalable sur workout_sessions ; les métadonnées passent en
-  // session_patch (UPDATE final unique, côté RPC, après le contrôle STALE).
-  // Séance NOUVELLE : verrou sur l'updated_at exact de l'INSERT ; ses champs
-  // sont déjà posés par l'INSERT. Toute erreur (ex. STALE) remonte à l'appelant.
-  for (const session of sessions) {
-    const existingId = resolveExistingId(session);
-
-    // ── Chemin CANONIQUE (nouveau builder multi-blocs) : source = blocks[] ────
-    if (mode === "canonical") {
-      const data = toCanonicalSessionSaveData(session);
-      if (existingId) {
-        if (!session.updatedAt) {
-          // Défensif : une séance chargée porte toujours son updatedAt (snapshot).
-          // Sans version fiable, on NE devine PAS via une relecture (cela romprait
-          // le verrou) : on saute cette séance en le signalant.
-          devWarn("diffProgramStructure (séance existante sans updatedAt de snapshot)", {
-            message: `séance ${existingId} ignorée`,
-          });
-          ignorees.push(`séance ${existingId} (aucun updatedAt de snapshot)`);
-          continue;
-        }
-        // Verrou = SNAPSHOT chargé ; blocks[] + session_patch atomique (UPDATE
-        // final unique côté RPC après le contrôle STALE). blocks vide (repos) :
-        // la RPC efface le contenu et pose l'état repos, patch inclus.
-        await saveTrainingSessionBlocks(
-          supabase,
-          buildCanonicalSessionBlocksInput({
-            sessionId: existingId,
-            expectedUpdatedAt: session.updatedAt,
-            blocks: data.blocks,
-            sessionPatch: data.sessionPatch,
-          }),
-        );
-      } else {
-        const inserted = insertedByKey.get(session);
-        if (!inserted) {
-          // L'INSERT de la séance a échoué : son contenu n'a nulle part où aller.
-          ignorees.push(`séance ${session.id} (insertion échouée, contenu non écrit)`);
-          continue;
-        }
-        // Nouvelle séance : champs déjà posés par l'INSERT (pas de session_patch) ;
-        // verrou = updated_at exact de l'INSERT ; repos (aucun bloc) → pas de RPC.
-        if (data.blocks.length > 0) {
-          await saveTrainingSessionBlocks(
-            supabase,
-            buildCanonicalSessionBlocksInput({
-              sessionId: inserted.id,
-              expectedUpdatedAt: inserted.updatedAt,
-              blocks: data.blocks,
-            }),
-          );
-        }
-      }
-      continue;
-    }
-
-    // ── Chemin LEGACY (parcours n'émettant pas encore blocks[]) ───────────────
-    if (existingId) {
-      if (!session.updatedAt) {
-        devWarn("diffProgramStructure (séance existante sans updatedAt de snapshot)", {
-          message: `séance ${existingId} ignorée`,
-        });
-        ignorees.push(`séance ${existingId} (aucun updatedAt de snapshot, chemin legacy)`);
-        continue;
-      }
-      await saveTrainingSessionBlocks(
-        supabase,
-        buildLegacySessionBlocksInput({
-          session,
-          sessionId: existingId,
-          expectedUpdatedAt: session.updatedAt,
-          strengthBlockId: strengthBlockIdBySession.get(existingId),
-          sessionPatch: {
-            day: session.day,
-            name: session.name,
-            muscleGroup: session.muscleGroup,
-            durationMinutes: session.durationMinutes,
-            warmup: session.warmup,
-            coachNotes: session.coachNotes,
-            bannerUrl: session.bannerUrl ?? null,
-          },
-        }),
-      );
-    } else {
-      const inserted = insertedByKey.get(session);
-      if (!inserted) {
-        ignorees.push(`séance ${session.id} (insertion échouée, contenu non écrit, chemin legacy)`);
-        continue;
-      }
-      await saveTrainingSessionBlocks(
-        supabase,
-        buildLegacySessionBlocksInput({
-          session,
-          sessionId: inserted.id,
-          expectedUpdatedAt: inserted.updatedAt,
-        }),
-      );
-    }
-  }
-
-  return { complet: ignorees.length === 0, ignorees };
-}
-
-/**
- * Met à jour un programme existant : les champs du programme sont modifiés
- * en place, et sa structure (semaines/séances/exercices) est diffée
- * finement (voir diffProgramStructure) plutôt que remplacée par delete +
- * reinsert, pour préserver les ids existants (retours élève déjà soumis,
- * futurs blocs/prescriptions cardio V3).
+ * ════════════════════════════════════════════════════════════════════════════
+ * CE QUI A CHANGÉ, ET POURQUOI
+ * ════════════════════════════════════════════════════════════════════════════
+ * Cette fonction émettait `7·N + 12` requêtes dont `7·N + 3` STRICTEMENT
+ * SÉQUENTIELLES : un `UPDATE programs`, deux lectures, puis UN APPEL RPC PAR
+ * SÉANCE — toutes les séances, y compris celles que le coach n'avait pas
+ * touchées. Mesuré par instrumentation sur une programmation de 12 semaines
+ * (84 séances) : 87 requêtes pour renommer UNE séance, 100 pour ajouter une
+ * semaine. Et 1 840,6 ms de moyenne par appel en production contre un
+ * `statement_timeout` de 8 s sur le rôle `authenticated`, pour un maximum
+ * observé de 7 873,2 ms — 127 ms de marge.
+ *
+ * Désormais : `calculerDiffProgrammation` établit ce qui a réellement changé,
+ * et `save_training_program_sessions` l'applique dans UNE transaction.
+ *
+ * ⚠️ `instantane` EST LA RÉFÉRENCE DU DIFF, ET SON ABSENCE EST SÛRE. C'est le
+ * programme tel qu'il a été LU : la source des `updatedAt` (verrous) et des
+ * identifiants réels. À `null`, aucune séance ne peut être déclarée inchangée
+ * et tout repart — le gain disparaît, la correction reste. Voir la règle
+ * asymétrique de `lib/program-diff.ts` : un faux « modifiée » coûte un appel,
+ * un faux « inchangée » perd le travail du coach.
+ *
+ * ⚠️ IL N'Y A PLUS DE FRONTIÈRE D'ATOMICITÉ. L'ancienne version le
+ * documentait comme une limite assumée : tête et structure étaient des
+ * requêtes distinctes, et un échec en cours de route laissait la tête et les
+ * séances déjà sauvées COMMISES. Le coach voyait alors sa deuxième tentative
+ * échouer en `STALE_TRAINING_SESSION` de façon déterministe, jusqu'à un
+ * rechargement. Tout est maintenant dans une seule transaction : soit tout est
+ * écrit, soit rien ne l'est.
+ *
+ * ⚠️ LES SUPPRESSIONS SONT EXPLICITES. « Absent de la charge » ne vaut plus
+ * « à supprimer » : c'est ce raccourci qui a détruit des séances le 25/08/2026
+ * quand une lecture tronquée les a rendues invisibles. Une séance absente est
+ * INCHANGÉE ; seules celles que le diff nomme disparaissent.
+ *
+ * Rend `true` sur succès, et LÈVE sur refus métier — jamais `false`, qui ne
+ * dirait pas pourquoi. `builderSaveUserMessage` traduit la cause pour le coach.
  */
 export async function updateProgram(
   supabase: TypedSupabaseClient,
   programId: string,
   data: ProgramBuilderData,
+  instantane?: AdminProgram | null,
 ): Promise<boolean> {
   const isPublicNormalise = normalizeIsPublicForWrite("updateProgram", data);
-  const { data: updatedRows, error: updateError } = await supabase
-    .from("programs")
-    .update({
-      name: data.name,
-      goal: data.goal,
-      level: data.level,
-      duration_weeks: data.durationWeeks,
-      description: data.description,
-      status: data.status,
-      banner_url: data.bannerUrl ?? null,
-      program_mode: data.programMode ?? "individuel",
-      group_start_date: data.programMode === "groupe" ? (data.groupStartDate ?? null) : null,
-      is_public: isPublicNormalise,
-      public_subscription_template_id: isPublicNormalise ? (data.publicSubscriptionTemplateId ?? null) : null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", programId)
-    .select("id");
-  devWarn("updateProgram", updateError);
-  // Incident du 02/08 : sous RLS, un UPDATE émis sans droits coach (session
-  // devenue élève dans le même navigateur, session expirée…) ne renvoie NI
-  // erreur NI ligne — l'ancien code retournait alors true et enchaînait la
-  // structure, qui échouait en cascade (NOT_AUTHORIZED) derrière un message
-  // générique. 0 ligne modifiée = échec NET, AVANT toute écriture de
-  // structure. owner_student_id / source_template_id ne figurent jamais dans
-  // ce payload : une copie individuelle reste possédée et rattachée.
-  if (updateError || !updatedRows || updatedRows.length === 0) {
-    devWarn("updateProgram (tête non modifiée)", {
-      message: `programme ${programId} : 0 ligne mise à jour (droits insuffisants ou programme inconnu) — structure non tentée`,
-    });
-    return false;
-  }
-  // FRONTIÈRE D'ATOMICITÉ ASSUMÉE : tête (ci-dessus) et structure
-  // (ci-dessous) restent des requêtes DISTINCTES — il n'existe pas de
-  // transaction englobante. Seule la RPC est atomique, PAR séance. Une
-  // erreur de structure (ex. STALE) laisse donc la tête et les séances déjà
-  // sauvées commises ; le builder le signale (builderSaveUserMessage) et une
-  // re-sauvegarde après rechargement reconverge : diff par clés stables
-  // (semaine::jour) + RPC idempotente par séance.
 
-  // updateProgram est l'entrée du BUILDER multi-blocs (seul appelant) : mode
-  // CANONIQUE explicite — la persistance vient de blocks[], jamais de
-  // exercises[]/cardioBlocks[]/sessionType.
-  //
-  // ⚠️ LE RÉSULTAT EST REGARDÉ, ET C'EST UNE CORRECTION DU 25/08. Cette ligne
-  // était `await diffProgramStructure(...); return true;` : le compte-rendu
-  // était jeté, et une séance sautée passait pour un enregistrement réussi.
-  // L'écran affichait « À JOUR » sur un travail perdu. Une structure
-  // incomplète est désormais un ÉCHEC, et le builder le dira.
-  const bilan = await diffProgramStructure(supabase, programId, data.sessions, "canonical");
-  if (!bilan.complet) {
-    devWarn("updateProgram (structure incomplète)", {
-      message: `programme ${programId} : ${bilan.ignorees.length} séance(s) non écrite(s) — ${bilan.ignorees.join(" ; ")}`,
+  const diff = calculerDiffProgrammation(instantane ?? null, data.sessions);
+
+  /*
+   * La tête n'est envoyée que si elle a bougé. Un enregistrement qui ne touche
+   * qu'une séance ne doit pas bumper `programs.updated_at` : ce serait réveiller
+   * l'abonnement Realtime de tous les élèves assignés pour rien.
+   *
+   * ⚠️ SANS INSTANTANÉ, ON ENVOIE LA TÊTE. Même règle asymétrique : ne pas
+   * l'envoyer risquerait de perdre un changement de nom ou de statut.
+   */
+  const patch: PatchDeProgramme = {
+    name: data.name,
+    goal: data.goal,
+    level: data.level,
+    duration_weeks: data.durationWeeks,
+    description: data.description,
+    status: data.status,
+    banner_url: data.bannerUrl ?? null,
+    program_mode: data.programMode ?? "individuel",
+    group_start_date: data.programMode === "groupe" ? (data.groupStartDate ?? null) : null,
+    is_public: isPublicNormalise,
+    public_subscription_template_id: isPublicNormalise ? (data.publicSubscriptionTemplateId ?? null) : null,
+  };
+  const teteInchangee = instantane !== null && instantane !== undefined && teteIdentique(instantane, patch);
+
+  // Rien à écrire du tout : on n'émet AUCUNE requête. Un enregistrement à vide
+  // est un succès légitime, pas une opération à facturer au réseau.
+  if (teteInchangee && diffVide(diff)) {
+    devWarn("updateProgram (aucun changement)", {
+      message: `programme ${programId} : aucun changement détecté — aucune requête émise`,
     });
-    // ⚠️ ON LÈVE PLUTÔT QUE DE RENDRE `false`. `false` remonte en
-    // « SAVE_FAILED », que le message utilisateur traduit par un problème de
-    // DROITS — ce serait un diagnostic faux, et le coach chercherait au
-    // mauvais endroit. Un code distinct permet de lui dire ce qui s'est
-    // réellement passé.
-    throw new Error(
-      `STRUCTURE_INCOMPLETE : ${bilan.ignorees.length} séance(s) non écrite(s) — ${bilan.ignorees.join(" ; ")}`,
-    );
+    return true;
   }
-  return true;
+
+  try {
+    const resultat = await saveTrainingProgramSessions(supabase, {
+      programId,
+      // Verrou optimiste de tête : il n'existait pas, et son absence laissait
+      // le dernier qui écrivait gagner en silence quand deux coachs éditaient
+      // la même programmation.
+      expectedProgramUpdatedAt: instantane?.updatedAt ?? null,
+      programPatch: teteInchangee ? undefined : patch,
+      diff,
+    });
+    devWarn("updateProgram (groupé)", {
+      message:
+        `programme ${programId} : 1 requête — ${diff.seancesAModifier.length} séance(s) modifiée(s), ` +
+        `${diff.seancesACreer.length} créée(s), ${diff.sessionIdsASupprimer.length} supprimée(s), ` +
+        `${diff.seancesInchangees} inchangée(s) non réécrite(s) ; ${resultat.sessionCount} traitée(s) côté serveur`,
+    });
+    return true;
+  } catch (error) {
+    if (error instanceof EchecEnregistrementGroupe) {
+      devWarn("updateProgram (échec groupé)", {
+        message: `programme ${programId} : ${error.cause}${error.seance ? ` sur la séance ${error.seance}` : ""} — ${error.message}`,
+      });
+    }
+    throw error;
+  }
 }
+
+/**
+ * Vrai si la tête du programme est inchangée par rapport à l'instantané.
+ *
+ * ⚠️ COMPARAISON CHAMP PAR CHAMP ASSUMÉE ICI, contrairement aux séances. La
+ * tête compte onze champs stables, tous présents dans `AdminProgram` : il n'y a
+ * pas de sérialisation partagée à réutiliser. Un champ oublié ferait croire la
+ * tête inchangée, donc on retombe sur le défaut sûr — toute différence non
+ * reconnue rend `false` par construction, puisque chaque champ est comparé
+ * explicitement et qu'un champ ajouté au type sans l'être ici laisse
+ * simplement la tête repartir à chaque enregistrement.
+ */
+function teteIdentique(instantane: AdminProgram, patch: PatchDeProgramme): boolean {
+  return (
+    instantane.name === patch.name &&
+    instantane.goal === patch.goal &&
+    instantane.level === patch.level &&
+    instantane.durationWeeks === patch.duration_weeks &&
+    instantane.description === patch.description &&
+    instantane.status === patch.status &&
+    (instantane.bannerUrl ?? null) === (patch.banner_url ?? null) &&
+    (instantane.programMode ?? "individuel") === patch.program_mode &&
+    (instantane.groupStartDate ?? null) === (patch.group_start_date ?? null) &&
+    (instantane.isPublic ?? false) === patch.is_public &&
+    (instantane.publicSubscriptionTemplateId ?? null) === (patch.public_subscription_template_id ?? null)
+  );
+}
+
+/** Le diff d'une programmation, exposé pour les tests et le diagnostic. */
+export type { DiffDeProgrammation };
 
 /**
  * Supprime définitivement un programme et toute sa structure — jamais
