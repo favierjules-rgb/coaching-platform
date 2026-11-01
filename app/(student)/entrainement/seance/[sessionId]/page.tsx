@@ -131,14 +131,17 @@ export default function SessionDetailPage() {
           </p>
         </div>
 
-        <SessionAnalysisSection session={{ ...realSession, muscleGroup: realSession.muscleGroups }} />
+        <div data-guide="seance-analyse">
+
+          <SessionAnalysisSection session={{ ...realSession, muscleGroup: realSession.muscleGroups }} />
+        </div>
 
         <div className="mb-8">
           <MuscleHeatmapSection blocks={realSession.blocks ?? []} />
         </div>
 
         {realSession.warmup && (
-          <div className="mb-8 flex items-start gap-4 rounded-card border border-border bg-card p-6 shadow-soft">
+          <div className="mb-8 flex items-start gap-4 rounded-card border border-border bg-card p-6 shadow-soft" data-guide="espace-seance-echauffement">
             <Flame size={20} className="mt-0.5 flex-shrink-0 text-primary" />
             <div>
               <h2 className="mb-1 font-heading text-sm font-bold uppercase text-foreground">Échauffement</h2>
@@ -148,7 +151,7 @@ export default function SessionDetailPage() {
         )}
 
         {realSession.coachNotes && (
-          <div className="mb-8 flex items-start gap-4 rounded-card border border-border bg-card p-6 shadow-soft">
+          <div className="mb-8 flex items-start gap-4 rounded-card border border-border bg-card p-6 shadow-soft" data-guide="espace-seance-notes">
             <MessageSquare size={20} className="mt-0.5 flex-shrink-0 text-primary" />
             <div>
               <h2 className="mb-1 font-heading text-sm font-bold uppercase text-foreground">Notes du coach</h2>
@@ -189,7 +192,9 @@ export default function SessionDetailPage() {
           }}
         />
 
-        <SessionFeedbackSection
+        <div data-guide="espace-seance-retour">
+
+          <SessionFeedbackSection
           studentId={contenu.studentId}
           sessionId={realSession.id}
           programId={realProgramId}
@@ -217,6 +222,8 @@ export default function SessionDetailPage() {
           cheminsVideoConnus={cheminsVideoConnus}
           chargerRemplacants={seance.chargerRemplacants}
         />
+
+        </div>
       </div>
     );
   }
@@ -264,9 +271,12 @@ export default function SessionDetailPage() {
         </p>
       </div>
 
-      <SessionAnalysisSection session={{ ...session, muscleGroup: session.muscleGroups }} />
+      <div data-guide="seance-analyse">
 
-      <div className="mb-8 flex items-start gap-4 rounded-card border border-border bg-card p-6 shadow-soft">
+        <SessionAnalysisSection session={{ ...session, muscleGroup: session.muscleGroups }} />
+        </div>
+
+      <div className="mb-8 flex items-start gap-4 rounded-card border border-border bg-card p-6 shadow-soft" data-guide="espace-seance-echauffement">
         <Flame size={20} className="mt-0.5 flex-shrink-0 text-primary" />
         <div>
           <h2 className="mb-1 font-heading text-sm font-bold uppercase text-foreground">
@@ -278,7 +288,7 @@ export default function SessionDetailPage() {
         </div>
       </div>
 
-      <div className="mb-8 flex items-start gap-4 rounded-card border border-border bg-card p-6 shadow-soft">
+      <div className="mb-8 flex items-start gap-4 rounded-card border border-border bg-card p-6 shadow-soft" data-guide="espace-seance-notes">
         <MessageSquare size={20} className="mt-0.5 flex-shrink-0 text-primary" />
         <div>
           <h2 className="mb-1 font-heading text-sm font-bold uppercase text-foreground">
@@ -301,7 +311,9 @@ export default function SessionDetailPage() {
         }}
       />
 
-      <SessionFeedbackSection
+      <div data-guide="espace-seance-retour">
+
+        <SessionFeedbackSection
         studentId={student.id}
         sessionId={session.id}
         programId={program?.id ?? null}
@@ -311,6 +323,8 @@ export default function SessionDetailPage() {
         cardioBlocks={session.cardioBlocks}
         sessionMuscleGroup={session.muscleGroups}
       />
+
+      </div>
     </div>
   );
 }

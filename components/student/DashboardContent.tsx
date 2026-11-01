@@ -197,15 +197,30 @@ export function DashboardContent({
         <StatCard icon={Flame} label="Séances cette semaine (exemple)" value="3 / 5" />
         <StatCard
           icon={Scale}
+          dataGuide="dashboard-poids"
           label="Poids actuel"
           value={evolution.hasData ? `${evolution.currentWeightKg} kg` : "Non renseigné"}
         />
-        <StatCard icon={Target} label="Objectif" value={profile.goal || "Non renseigné"} />
-        <StatCard icon={TrendingUp} label="Progression" value={weightDeltaLabel} tone="positive" />
+        <StatCard
+          icon={Target}
+          dataGuide="dashboard-objectif"
+          label="Objectif"
+          value={profile.goal || "Non renseigné"}
+        />
+        <StatCard
+          icon={TrendingUp}
+          dataGuide="dashboard-progression"
+          label="Progression"
+          value={weightDeltaLabel}
+          tone="positive"
+        />
       </div>
 
       <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="rounded-card border border-border bg-card p-6 shadow-soft lg:col-span-2">
+        <div
+          data-guide="dashboard-evolution"
+          className="rounded-card border border-border bg-card p-6 shadow-soft lg:col-span-2"
+        >
           <div className="mb-4 flex items-center justify-between">
             <h2 className="font-heading text-lg font-bold uppercase text-foreground">
               Évolution du poids
@@ -248,7 +263,10 @@ export function DashboardContent({
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <div className="rounded-card border border-border bg-card p-6 shadow-soft">
+        <div
+          data-guide="dashboard-prochaine-seance"
+          className="rounded-card border border-border bg-card p-6 shadow-soft"
+        >
           <div className="mb-4 flex items-center justify-between">
             <h2 className="font-heading text-lg font-bold uppercase text-foreground">
               Prochaine séance
@@ -286,7 +304,10 @@ export function DashboardContent({
           </Link>
         </div>
 
-        <div className="rounded-card border border-border bg-card p-6 shadow-soft">
+        <div
+          data-guide="dashboard-plan-alimentaire"
+          className="rounded-card border border-border bg-card p-6 shadow-soft"
+        >
           <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
             Plan alimentaire actif
           </h2>
@@ -319,7 +340,10 @@ export function DashboardContent({
             .filter((a) => (a.status === "pending" || a.status === "confirmed") && new Date(a.startAt).getTime() >= new Date().getTime())
             .sort((a, b) => a.startAt.localeCompare(b.startAt))[0];
           return (
-            <div className="mt-6 rounded-card border border-border bg-card p-6 shadow-soft">
+            <div
+              data-guide="dashboard-rendez-vous"
+              className="mt-6 rounded-card border border-border bg-card p-6 shadow-soft"
+            >
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="font-heading text-lg font-bold uppercase text-foreground">Prochain rendez-vous</h2>
                 <Link href="/rendez-vous" className="text-xs uppercase tracking-wide text-primary hover:underline">

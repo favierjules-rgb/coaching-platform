@@ -650,7 +650,13 @@ await test("A5-SUP §12. aucune requête par aliment — les listes sont chargé
   // du terme cherché.
   const effetFrappe = CODE_SHEET.slice(
     CODE_SHEET.indexOf("const minuterie = setTimeout"),
-    CODE_SHEET.indexOf("}, [terme, chercher]);"),
+    /* ⚠️ LA BORNE EST LA FIN DE L'EFFET, PAS SA LISTE DE DÉPENDANCES EXACTE.
+       Écrire « }, [terme, chercher]); » faisait dépendre ce test d'un détail
+       sans rapport avec ce qu'il vérifie : le jour où une dépendance s'ajoute,
+       `indexOf` rend -1, la tranche part jusqu'à la fin du fichier et le test
+       échoue sur du code qu'il n'examinait pas. On borne donc à l'effet
+       suivant, qui est une vraie frontière. */
+    CODE_SHEET.indexOf("async function chercherLesProduits"),
   );
   assert.ok(!effetFrappe.includes("raccourcis"));
   assert.ok(!effetFrappe.includes("listerFavoris"));

@@ -107,7 +107,7 @@ export default function EntrainementPage() {
           <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
             Mes programmes
           </h2>
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3" data-guide="espace-entrainement-programmes">
             {programs.map((program) => (
               <TrainingProgramCard
                 key={program.id}
@@ -243,7 +243,7 @@ export default function EntrainementPage() {
       </div>
 
       {highlightedSession && highlightedDay && (
-        <div className="mb-8">
+        <div className="mb-8" data-guide="espace-entrainement-prochaine">
           <NextSessionHighlight
             session={highlightedSession}
             dayLabel={highlightedDay.isToday ? "Aujourd'hui" : highlightedDay.day}

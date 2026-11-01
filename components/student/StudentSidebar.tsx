@@ -17,6 +17,8 @@ import {
 import { SignOutButton } from "@/components/auth/SignOutButton";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { Logo } from "@/components/ui/Logo";
+import { LanceurGuide } from "@/components/guide/LanceurGuide";
+import { cibleGuideEleve } from "@/lib/guide-decouverte";
 import { useSupabaseAccessType } from "@/hooks/useSupabaseAccessType";
 import { useSupabaseMyAccess } from "@/hooks/useSupabaseMyAccess";
 import {
@@ -104,6 +106,7 @@ export function StudentSidebar({
                 onNavigate?.();
               }}
               aria-label={locked ? `${label} (accès verrouillé — abonnement requis)` : label}
+              data-guide={cibleGuideEleve(href)}
               className={`flex min-h-11 items-center gap-3 rounded-control px-4 py-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
                 active
                   ? "bg-primary font-medium text-primary-foreground"
@@ -119,6 +122,7 @@ export function StudentSidebar({
       </nav>
 
       <div className="border-t border-border p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <LanceurGuide espace="eleve" />
         <ThemeToggle />
         <SignOutButton
           onBeforeNavigate={onNavigate}

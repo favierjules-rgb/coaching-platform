@@ -19,6 +19,15 @@ interface StatCardProps {
    *  plan nutrition). Deux tailles contrôlées plutôt qu'une valeur libre par
    *  page — audit design juillet 2026, Lot 2. */
   size?: "md" | "lg";
+  /**
+   * Ancre de visite guidée (`data-guide`) posée sur la racine de la carte.
+   *
+   * ⚠️ UNE PROP PLUTÔT QU'UN `<div>` ENVELOPPANT. Ces cartes sont des ENFANTS
+   * DE GRILLE : les envelopper déplacerait le dimensionnement sur le wrapper
+   * et casserait les colonnes. La prop est facultative et sans effet quand
+   * elle est absente — aucun appelant existant n'a à changer.
+   */
+  dataGuide?: string;
 }
 
 /**
@@ -31,10 +40,10 @@ interface StatCardProps {
  * (Training Builder), hors périmètre tant que le Lot 3 n'est pas validé
  * (audit design juillet 2026, Lot 2).
  */
-export function StatCard({ icon: Icon, label, value, hint, tone = "default", size = "md" }: StatCardProps) {
+export function StatCard({ icon: Icon, label, value, hint, tone = "default", size = "md", dataGuide }: StatCardProps) {
   const valueSizeClass = size === "lg" ? "text-2xl" : "text-xl";
   return (
-    <div className="rounded-card border border-border bg-card p-5 shadow-soft">
+    <div className="rounded-card border border-border bg-card p-5 shadow-soft" data-guide={dataGuide}>
       {Icon && (
         <Icon
           size={18}

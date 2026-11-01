@@ -120,7 +120,7 @@ export function ConsumedMealSection({
   }
 
   return (
-    <div className="mt-3 border-t border-dashed border-border pt-3">
+    <div data-guide="nutrition-journal" className="mt-3 border-t border-dashed border-border pt-3">
       <div className="flex items-center justify-between gap-2">
         <h5 className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
           <UtensilsCrossed size={12} aria-hidden="true" />
@@ -136,8 +136,10 @@ export function ConsumedMealSection({
 
       {entrées.length > 0 && (
         <ul className="mt-2 flex flex-col gap-1.5">
-          {entrées.map((entrée) => (
-            <li key={entrée.id}>
+          {entrées.map((entrée, position) => (
+            /* L'ancre est posée sur la PREMIÈRE ligne seulement : la visite
+               montre à quoi ressemble une ligne de journal, pas les douze. */
+            <li key={entrée.id} {...(position === 0 ? { "data-guide": "nutrition-journal-ligne" } : {})}>
               <ConsumedFoodBar
                 entrée={entrée}
                 désactivé={enCours}
@@ -152,7 +154,10 @@ export function ConsumedMealSection({
       )}
 
       {entrées.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs tabular-nums text-muted-foreground">
+        <div
+          data-guide="nutrition-journal-total"
+          className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs tabular-nums text-muted-foreground"
+        >
           <span>
             Consommé : P{NBSP}
             {formatDecimalFr(consommé.proteinG, 1)}
@@ -171,8 +176,20 @@ export function ConsumedMealSection({
         </div>
       )}
 
+      {/* ANCRE DE VISITE GUIDÉE — et le geste reste celui de l'élève.
+          `ouvrirAjout()` crée un conteneur de repas en base quand il n'en
+          existe pas encore pour ce créneau. La visite guidée ne presse donc
+          JAMAIS ce bouton : son étape déclare `gesteAttendu`, met le bouton en
+          lumière et laisse l'élève appuyer. Écrire une ligne en base pour
+          illustrer une explication serait exactement ce que cette visite
+          s'interdit.
+
+          Ce composant est rendu une fois par repas : à l'écran, plusieurs
+          éléments portent cet attribut. Le guide retient le premier, c'est-à-dire
+          le premier repas de la journée — un choix stable et lisible. */}
       <button
         type="button"
+        data-guide="nutrition-ajout-ouvrir"
         onClick={() => void ouvrirAjout()}
         disabled={enCours || ouverture}
         className="pressable mt-2 flex min-h-[44px] w-full items-center justify-center gap-2 rounded-control border border-dashed border-border text-xs font-bold uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-40"

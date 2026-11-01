@@ -15,9 +15,18 @@ import { useSupabaseMyProgress } from "@/hooks/useSupabaseMyProgress";
 import { buildTransformationRecapInput } from "@/lib/pdf/transformation-recap";
 import { Loader } from "@/components/ui/Loader";
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  dataGuide,
+  children,
+}: {
+  title: string;
+  /** Ancre de visite guidée, déclarée en clair par l'appelant. */
+  dataGuide?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <section className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
+    <section data-guide={dataGuide} className="mb-6 rounded-card border border-border bg-card p-6 shadow-soft">
       <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">{title}</h2>
       {children}
     </section>
@@ -86,20 +95,20 @@ export default function StudentProgressionPage() {
       </div>
 
       {summary && (
-        <Section title="Résumé">
+        <Section title="Résumé" dataGuide="progression-resume">
           <ProgressSummaryCards summary={summary} />
         </Section>
       )}
 
-      <Section title="Évolution du poids">{weight && <ProgressWeightSection weight={weight} />}</Section>
+      <Section title="Évolution du poids" dataGuide="progression-poids">{weight && <ProgressWeightSection weight={weight} />}</Section>
 
-      <Section title="Entraînement">{workout && <ProgressWorkoutSection workout={workout} showRecentFeedback={false} />}</Section>
+      <Section title="Entraînement" dataGuide="progression-entrainement">{workout && <ProgressWorkoutSection workout={workout} showRecentFeedback={false} />}</Section>
 
-      <Section title="Suivi nutrition (semaine)">{nutrition && <ProgressNutritionSection nutrition={nutrition} />}</Section>
+      <Section title="Suivi nutrition (semaine)" dataGuide="progression-nutrition">{nutrition && <ProgressNutritionSection nutrition={nutrition} />}</Section>
 
-      <Section title="Rendez-vous">{appointments && <ProgressAppointmentsSection appointments={appointments} />}</Section>
+      <Section title="Rendez-vous" dataGuide="progression-rendez-vous">{appointments && <ProgressAppointmentsSection appointments={appointments} />}</Section>
 
-      <Section title="Photos de progression">
+      <Section title="Photos de progression" dataGuide="progression-photos">
         {!gallery.loading && (
           <p className="mb-4 text-xs text-muted-foreground">
             {activePhotos.length} photo{activePhotos.length > 1 ? "s" : ""}
@@ -109,7 +118,7 @@ export default function StudentProgressionPage() {
         <ProgressPhotosSection gallery={gallery} defaultWeightKg={summary?.currentWeightKg ?? null} />
       </Section>
 
-      <Section title="Comparaison avant / après">
+      <Section title="Comparaison avant / après" dataGuide="progression-avant-apres">
         {beforePhoto && afterPhoto ? (
           <div className="flex flex-col gap-4">
             <BeforeAfterComparison before={beforePhoto} after={afterPhoto} />

@@ -268,6 +268,7 @@ export function StudentPrescribedWeek({
                   hebdomadaire, erreur qu'une version antérieure de cet écran
                   avait commise. */}
               {suivi && date && (
+                <div data-guide="nutrition-bilan-jour">
                 <DailyNutritionProgress
                   objectif={
                     cibles
@@ -281,6 +282,7 @@ export function StudentPrescribedWeek({
                   }
                   consommé={totalsForDay(repasDuJour)}
                 />
+                </div>
               )}
 
               {jour.meals.length === 0 ? (

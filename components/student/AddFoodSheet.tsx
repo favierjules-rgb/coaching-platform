@@ -107,6 +107,36 @@ function cibleDe(élément: AlimentRapide): CibleRecente {
     : { type: "produit", id: élément.produit.id };
 }
 
+/**
+ * L'ÉTAT DE DÉMONSTRATION, quand la visite guidée monte cette feuille.
+ *
+ * ⚠️ IL N'EXISTE QU'UN SEUL POINT D'ENTRÉE, et c'est celui-ci. Toute la
+ * démonstration passe par cette propriété : si elle vaut `null` — le cas de
+ * TOUS les montages de l'application —, la feuille se comporte exactement
+ * comme avant, interroge réellement la base et appelle réellement ses
+ * callbacks. Il n'y a pas un second chemin caché à auditer.
+ *
+ * ⚠️ LA FEUILLE DE DÉMONSTRATION NE REÇOIT PAS LES CALLBACKS RÉELS. C'est
+ * `GuideDemonstration` qui la monte, avec des fonctions qui n'appellent rien.
+ * Même en forçant un clic sur « Ajouter cet aliment », il n'y a littéralement
+ * rien à écrire.
+ *
+ * ⚠️ UN SCÉNARIO = UN MONTAGE. L'appelant change la `key` à chaque scénario,
+ * comme le scanner le fait déjà avec `sessionScan` : l'état initial ci-dessous
+ * est donc relu à chaque fois, sans une ligne de synchronisation à écrire.
+ */
+export interface DemonstrationAjout {
+  readonly onglet: "recherche" | "manuel";
+  readonly terme: string;
+  readonly aliments: readonly CatalogFood[];
+  readonly produits: readonly ProduitLocal[];
+  /** Non nul : l'étape quantité est rendue d'emblée. */
+  readonly choix: CatalogFood | null;
+  readonly quantite: string;
+  /** L'écran du scanner, sans caméra. */
+  readonly scanner: boolean;
+}
+
 /** Ce que l'élève a choisi, avant l'étape quantité. */
 type Choix =
   | { readonly type: "aliment"; readonly aliment: CatalogFood }
@@ -122,6 +152,7 @@ export function AddFoodSheet({
   onAjouterManuel,
   fetcher,
   raccourcis,
+  demonstration,
 }: {
   titreRepas: string;
   enCours: boolean;
@@ -151,15 +182,19 @@ export function AddFoodSheet({
    * fois. Les passer en propriété les rend aussi éprouvables sans réseau.
    */
   raccourcis?: RaccourcisAlimentsUI;
+  /** Non nul UNIQUEMENT quand la visite guidée monte cette feuille. */
+  demonstration?: DemonstrationAjout | null;
 }) {
-  const [onglet, setOnglet] = useState<Onglet>("recherche");
+  const demo = demonstration ?? null;
+
+  const [onglet, setOnglet] = useState<Onglet>(demo?.onglet ?? "recherche");
 
   // ── Recherche ────────────────────────────────────────────────────────────
-  const [terme, setTerme] = useState("");
-  const [aliments, setAliments] = useState<readonly CatalogFood[]>([]);
-  const [produits, setProduits] = useState<readonly ProduitLocal[]>([]);
+  const [terme, setTerme] = useState(demo?.terme ?? "");
+  const [aliments, setAliments] = useState<readonly CatalogFood[]>(demo?.aliments ?? []);
+  const [produits, setProduits] = useState<readonly ProduitLocal[]>(demo?.produits ?? []);
   const [cherche, setCherche] = useState(false);
-  const [aCherché, setACherché] = useState(false);
+  const [aCherché, setACherché] = useState(demo !== null && demo.terme.trim().length > 0);
 
   // Recherche EXTERNE — état séparé, parce qu'elle n'a ni le même déclencheur
   // ni les mêmes conséquences que la recherche locale.
@@ -167,10 +202,12 @@ export function AddFoodSheet({
   const [externeFaite, setExterneFaite] = useState(false);
   const [externeIndisponible, setExterneIndisponible] = useState(false);
 
-  const [choix, setChoix] = useState<Choix | null>(null);
+  const [choix, setChoix] = useState<Choix | null>(
+    demo?.choix ? { type: "aliment", aliment: demo.choix } : null,
+  );
   const [hydratation, setHydratation] = useState(false);
   const [échecHydratation, setÉchecHydratation] = useState(false);
-  const [quantitéChoix, setQuantitéChoix] = useState("100");
+  const [quantitéChoix, setQuantitéChoix] = useState(demo?.quantite ?? "100");
   const [unitéChoix, setUnitéChoix] = useState<ConsumedUnit>("g");
 
   // ── Scan ─────────────────────────────────────────────────────────────────
@@ -179,7 +216,7 @@ export function AddFoodSheet({
   // verrou, état d'erreur, tout repart de zéro. C'est ce qui rend la
   // réouverture après un scan aussi propre que la première fois, sans une
   // seule ligne de remise à zéro à écrire ni à oublier.
-  const [scanOuvert, setScanOuvert] = useState(false);
+  const [scanOuvert, setScanOuvert] = useState(demo?.scanner ?? false);
   const [sessionScan, setSessionScan] = useState(0);
   const [scanEnCours, setScanEnCours] = useState(false);
   const [échecScan, setÉchecScan] = useState<EchecLookup | null>(null);
@@ -246,11 +283,17 @@ export function AddFoodSheet({
   // Anti-rebond : une requête par pause de frappe, pas une par caractère. Elle
   // ne vise que NOTRE base — voir l'en-tête.
   useEffect(() => {
+    /* DÉMONSTRATION : la frappe n'interroge rien. Les résultats affichés sont
+       les fixtures reçues en propriété ; lancer la vraie recherche les
+       écraserait aussitôt par le contenu de la base. */
+    if (demo) return;
     const minuterie = setTimeout(() => void chercher(terme), 250);
     return () => clearTimeout(minuterie);
-  }, [terme, chercher]);
+  }, [terme, chercher, demo]);
 
   async function chercherLesProduits() {
+    // DÉMONSTRATION : aucun appel sortant, même si le bouton est pressé.
+    if (demo) return;
     if (externeRef.current || externeEnCours) return;
     externeRef.current = true;
     setExterneEnCours(true);
@@ -270,6 +313,13 @@ export function AddFoodSheet({
   }
 
   async function choisirProduit(produit: ProduitLocal) {
+    // DÉMONSTRATION : pas d'hydratation de fiche, donc pas de requête.
+    if (demo) {
+      setChoix({ type: "produit", produit });
+      setUnitéChoix(unitesPourProduit(produit)[0]);
+      setQuantitéChoix("100");
+      return;
+    }
     setÉchecHydratation(false);
     // Fiche déjà hydratée : aucun appel, on ouvre la quantité tout de suite.
     if (!doitHydrater(produit)) {
@@ -363,6 +413,10 @@ export function AddFoodSheet({
    * maintenir, et deux occasions de diverger sur l'unité.
    */
   async function traiterGtin(gtin: string) {
+    // DÉMONSTRATION : le scanner simulé n'émet aucun code, mais la garde
+    // reste posée — une garde qu'on croit inatteignable est exactement celle
+    // qui manque le jour où le chemin change.
+    if (demo) return;
     setScanOuvert(false);
     setScanEnCours(true);
     setÉchecScan(null);
@@ -431,7 +485,12 @@ export function AddFoodSheet({
         </div>
 
         {/* Deux onglets de MÊME RANG : la saisie manuelle n'est pas reléguée. */}
-        <div role="tablist" aria-label="Mode d'ajout" className="flex border-b border-border">
+        <div
+          role="tablist"
+          aria-label="Mode d'ajout"
+          data-guide="nutrition-ajout-modes"
+          className="flex border-b border-border"
+        >
           {(
             [
               { clé: "recherche" as const, libellé: "Rechercher", icône: Search },
@@ -477,6 +536,7 @@ export function AddFoodSheet({
                  réutilisé, aucun verrou resté fermé, aucune erreur d'avant. */
               <ScannerCodeBarres
                 key={sessionScan}
+                simulation={demo !== null}
                 onGtin={(gtin) => void traiterGtin(gtin)}
                 onFermer={fermerScan}
                 onRechercheParNom={fermerScan}
@@ -494,6 +554,7 @@ export function AddFoodSheet({
                 <input
                   id="recherche-aliment"
                   type="search"
+                  data-guide="nutrition-ajout-recherche"
                   value={terme}
                   onChange={(e) => {
                     setTerme(e.target.value);
@@ -521,6 +582,7 @@ export function AddFoodSheet({
                   {raccourcis.favoris.length > 0 && (
                     <SectionRapide
                       titre="Favoris"
+                      dataGuide="nutrition-liste-favoris"
                       éléments={raccourcis.favoris}
                       désactivé={hydratation}
                       estFavori={raccourcis.estFavori}
@@ -531,6 +593,7 @@ export function AddFoodSheet({
                   {raccourcis.recents.length > 0 && (
                     <SectionRapide
                       titre="Récents"
+                      dataGuide="nutrition-liste-recents"
                       éléments={raccourcis.recents}
                       désactivé={hydratation}
                       estFavori={raccourcis.estFavori}
@@ -571,6 +634,7 @@ export function AddFoodSheet({
               {!choix && !scanEnCours && (
                 <button
                   type="button"
+                  data-guide="nutrition-ajout-scanner"
                   onClick={ouvrirScan}
                   className="pressable inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-control border border-border py-3 text-xs font-bold uppercase tracking-widest text-foreground transition-colors hover:border-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                 >
@@ -627,6 +691,13 @@ export function AddFoodSheet({
                     </p>
                   )}
 
+                  {/* LA ZONE DE RÉSULTATS, ENVELOPPÉE POUR LA VISITE GUIDÉE.
+                      Elle englobe aussi l'encart « rien trouvé » : sans lui, le
+                      conteneur serait haut de zéro pixel tant que rien n'a été
+                      cherché, et la découpe du guide n'aurait rien à entourer.
+                      `flex flex-col gap-4` reprend l'espacement du parent, pour
+                      que l'enveloppe ne déplace rien à l'écran. */}
+                  <div data-guide="nutrition-ajout-resultats" className="flex flex-col gap-4">
                   {cherche && aliments.length === 0 && produits.length === 0 ? (
                     <p className="py-4 text-center text-sm text-muted-foreground">Recherche…</p>
                   ) : null}
@@ -717,6 +788,7 @@ export function AddFoodSheet({
                   {terme.trim().length >= 3 && !externeFaite && (
                     <button
                       type="button"
+                      data-guide="nutrition-ajout-produits"
                       onClick={() => void chercherLesProduits()}
                       disabled={externeEnCours}
                       className="pressable inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-control border border-border py-3 text-xs font-bold uppercase tracking-widest text-foreground transition-colors hover:border-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-40"
@@ -745,9 +817,11 @@ export function AddFoodSheet({
                       </p>
                     </div>
                   )}
+                  </div>
 
                   <button
                     type="button"
+                    data-guide="nutrition-ajout-manuel"
                     onClick={basculerVersManuel}
                     className="pressable inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-control bg-primary px-5 py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                   >
@@ -798,6 +872,12 @@ export function AddFoodSheet({
                 automatiquement.
               </p>
 
+              {/* ANCRE DE VISITE GUIDÉE — le groupe de champs, pas un champ.
+                  Ce que l'étape explique est la RÈGLE commune aux quatre :
+                  recopier les valeurs pour 100 g de l'emballage, et non celles
+                  de sa portion. Entourer le seul champ « Nom » aurait mis en
+                  lumière le seul qui ne pose aucune question. */}
+              <div data-guide="nutrition-manuel-champs" className="flex flex-col gap-4">
               <Champ
                 id="manuel-nom"
                 label="Nom de l'aliment"
@@ -859,8 +939,11 @@ export function AddFoodSheet({
                 </div>
               </div>
 
+              </div>
+
               <button
                 type="button"
+                data-guide="nutrition-manuel-enregistrer"
                 onClick={() => {
                   // Garde de double soumission EN PLUS de `disabled` : deux
                   // tapes très rapprochées peuvent partir avant que React n'ait
@@ -906,6 +989,7 @@ export function AddFoodSheet({
  */
 function SectionRapide({
   titre,
+  dataGuide,
   éléments,
   désactivé,
   estFavori,
@@ -913,6 +997,15 @@ function SectionRapide({
   onChoisir,
 }: {
   titre: string;
+  /**
+   * Ancre de visite guidée, posée par l'appelant.
+   *
+   * DÉCLARÉE PLUTÔT QUE DÉDUITE DU TITRE. Un `data-guide` calculé depuis
+   * « Favoris » deviendrait introuvable au premier changement de libellé, et
+   * les tests qui cherchent la chaîne littérale dans le dépôt ne la verraient
+   * pas. Les deux appels la donnent en clair.
+   */
+  dataGuide?: string;
   éléments: readonly AlimentRapide[];
   désactivé?: boolean;
   estFavori: (cible: CibleRecente) => boolean;
@@ -921,7 +1014,7 @@ function SectionRapide({
 }) {
   const identifiant = `titre-${titre.toLowerCase()}`;
   return (
-    <section aria-labelledby={identifiant}>
+    <section aria-labelledby={identifiant} data-guide={dataGuide}>
       <h4
         id={identifiant}
         className="mb-2 text-xs font-bold uppercase tracking-widest text-muted-foreground"
@@ -1165,6 +1258,7 @@ function FormulaireQuantité({
       <div className="flex gap-2">
         <input
           id="catalogue-quantite"
+          data-guide="nutrition-ajout-quantite"
           type="text"
           inputMode="decimal"
           value={quantité}
@@ -1198,6 +1292,7 @@ function FormulaireQuantité({
 
       <button
         type="button"
+        data-guide="nutrition-ajout-confirmer"
         onClick={onAjouter}
         disabled={!valide || enCours}
         className="pressable mt-4 min-h-[48px] w-full rounded-control bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary"

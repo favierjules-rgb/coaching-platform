@@ -173,11 +173,11 @@ export default function NutritionPlanDetailPage() {
           <StatusBadge status={plan.status} />
         </div>
 
-        <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-          <StatCard label="kcal / jour" value={String(plan.caloriesPerDay)} size="lg" />
-          <StatCard label="Protéines" value={`${plan.protein}g`} size="lg" />
-          <StatCard label="Glucides" value={`${plan.carbs}g`} size="lg" />
-          <StatCard label="Lipides" value={`${plan.fat}g`} size="lg" />
+        <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5" data-guide="espace-nutrition-objectifs">
+          <StatCard label="kcal / jour" dataGuide="nutrition-objectif-kcal" value={String(plan.caloriesPerDay)} size="lg" />
+          <StatCard label="Protéines" dataGuide="nutrition-objectif-proteines" value={`${plan.protein}g`} size="lg" />
+          <StatCard label="Glucides" dataGuide="nutrition-objectif-glucides" value={`${plan.carbs}g`} size="lg" />
+          <StatCard label="Lipides" dataGuide="nutrition-objectif-lipides" value={`${plan.fat}g`} size="lg" />
           <StatCard label="kcal / semaine" value={caloriesSemaine.toLocaleString("fr-FR")} size="lg" />
         </div>
 
@@ -197,7 +197,7 @@ export default function NutritionPlanDetailPage() {
         {/* ─────────────── SECTION 1 — SEMAINE ALIMENTAIRE ────────────────
             Ce que le COACH a prescrit à la main. Lecture seule : aucun champ
             de modification n'est rendu côté élève. */}
-        <section className="mb-10">
+        <section className="mb-10" data-guide="espace-nutrition-repas">
           <h2 className="mb-4 font-heading text-lg font-bold uppercase text-foreground">
             Semaine alimentaire
           </h2>
@@ -362,11 +362,11 @@ export default function NutritionPlanDetailPage() {
         <StatusBadge status={plan.status} />
       </div>
 
-      <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-        <StatCard label="kcal / jour" value={String(plan.dailyTarget.calories)} size="lg" />
-        <StatCard label="Protéines" value={`${plan.dailyTarget.protein}g`} size="lg" />
-        <StatCard label="Glucides" value={`${plan.dailyTarget.carbs}g`} size="lg" />
-        <StatCard label="Lipides" value={`${plan.dailyTarget.fat}g`} size="lg" />
+      <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5" data-guide="espace-nutrition-objectifs">
+        <StatCard label="kcal / jour" dataGuide="nutrition-objectif-kcal" value={String(plan.dailyTarget.calories)} size="lg" />
+        <StatCard label="Protéines" dataGuide="nutrition-objectif-proteines" value={`${plan.dailyTarget.protein}g`} size="lg" />
+        <StatCard label="Glucides" dataGuide="nutrition-objectif-glucides" value={`${plan.dailyTarget.carbs}g`} size="lg" />
+        <StatCard label="Lipides" dataGuide="nutrition-objectif-lipides" value={`${plan.dailyTarget.fat}g`} size="lg" />
         <StatCard label="kcal / semaine" value={plan.weeklyTargetCalories.toLocaleString("fr-FR")} size="lg" />
       </div>
 
@@ -374,7 +374,7 @@ export default function NutritionPlanDetailPage() {
         <NutritionPlanWorkspace studentId={student.id} plan={plan} />
       </div>
 
-      <div className="border border-border bg-card p-6">
+      <div className="border border-border bg-card p-6" data-guide="espace-nutrition-courses">
         <div className="mb-4 flex items-center gap-3">
           <ShoppingCart size={18} className="text-primary" />
           <h2 className="font-heading text-lg font-bold uppercase text-foreground">

@@ -41,7 +41,7 @@ export function CardioBlockFeedbackForm({
   const showElevation = prescribed.elevationGainMeters !== null || draft.elevation !== "";
 
   return (
-    <div className="rounded-panel border border-border bg-surface-soft/40 p-5">
+    <div data-guide="seance-cardio-validation" className="rounded-panel border border-border bg-surface-soft/40 p-5">
       <h3 className="mb-1 text-xs font-bold uppercase tracking-widest text-foreground">
         Réalisation du bloc
       </h3>
@@ -58,7 +58,7 @@ export function CardioBlockFeedbackForm({
           Bloc terminé
         </label>
 
-        <fieldset>
+        <fieldset data-guide="seance-cardio-duree">
           <legend className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
             Durée réalisée
             {prescribed.durationSeconds !== null && (
@@ -82,7 +82,7 @@ export function CardioBlockFeedbackForm({
         </fieldset>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div className="min-w-0">
+          <div data-guide="seance-cardio-distance" className="min-w-0">
             <label htmlFor={id("distance")} className="mb-2 block text-xs uppercase tracking-wide text-muted-foreground">
               Distance réalisée (km)
               {prescribed.distanceMeters !== null && (

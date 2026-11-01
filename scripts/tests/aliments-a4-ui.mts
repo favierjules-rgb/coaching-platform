@@ -555,7 +555,13 @@ await test("A4-UI21. la recherche texte d'A3 est intacte", () => {
   // ACTION : le scan ne l'a pas transformée en effet de bord du clavier.
   const effetFrappe = CODE_SHEET.slice(
     CODE_SHEET.indexOf("const minuterie = setTimeout"),
-    CODE_SHEET.indexOf("}, [terme, chercher]);"),
+    /* ⚠️ LA BORNE EST LA FIN DE L'EFFET, PAS SA LISTE DE DÉPENDANCES EXACTE.
+       Écrire « }, [terme, chercher]); » faisait dépendre ce test d'un détail
+       sans rapport avec ce qu'il vérifie : le jour où une dépendance s'ajoute,
+       `indexOf` rend -1, la tranche part jusqu'à la fin du fichier et le test
+       échoue sur du code qu'il n'examinait pas. On borne donc à l'effet
+       suivant, qui est une vraie frontière. */
+    CODE_SHEET.indexOf("async function chercherLesProduits"),
   );
   assert.ok(!effetFrappe.includes("rechercherProduitsExternes"));
   assert.ok(!effetFrappe.includes("lireProduitParGtin"));

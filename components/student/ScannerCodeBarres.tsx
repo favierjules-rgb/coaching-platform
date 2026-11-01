@@ -58,12 +58,27 @@ export function ScannerCodeBarres({
   onFermer,
   onRechercheParNom,
   onSaisieManuelle,
+  simulation = false,
 }: {
   /** Appelé UNE fois, avec la caméra DÉJÀ éteinte. */
   onGtin: (gtin: string) => void;
   onFermer: () => void;
   onRechercheParNom: () => void;
   onSaisieManuelle: () => void;
+  /**
+   * DÉMONSTRATION DE LA VISITE GUIDÉE — l'écran, sans la caméra.
+   *
+   * ⚠️ `ouvrir()` EST NEUTRALISÉE, PAS SEULEMENT ÉVITÉE. Montrer le bouton en
+   * comptant sur le fait que personne ne le pressera serait une promesse, pas
+   * une garantie : pendant une visite, le bouton est à l'écran, éclairé, et
+   * c'est exactement ce sur quoi on appuie. La fonction sort donc avant la
+   * moindre ligne — `getUserMedia` n'est jamais appelée, aucune autorisation
+   * n'est demandée, et aucun voyant de caméra ne s'allume.
+   *
+   * Le cadre de visée reste affiché, inerte, pour que l'étape puisse montrer
+   * à quoi ressemble l'écran de scan.
+   */
+  simulation?: boolean;
 }) {
   const [état, setÉtat] = useState<EtatCamera>("inactif");
   const [motif, setMotif] = useState<MotifEchec | null>(null);
@@ -107,6 +122,7 @@ export function ScannerCodeBarres({
   useEffect(() => () => toutArrêter(), [toutArrêter]);
 
   async function ouvrir() {
+    if (simulation) return;
     if (ouvertureRef.current) return;
     ouvertureRef.current = true;
     setMotif(null);
@@ -236,12 +252,22 @@ export function ScannerCodeBarres({
 
       {état === "inactif" && (
         <>
-          <p className="rounded-panel border border-border bg-surface-soft/40 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+          <p
+            data-guide="nutrition-scan-intro"
+            className="rounded-panel border border-border bg-surface-soft/40 px-4 py-3 text-xs leading-relaxed text-muted-foreground"
+          >
             Vise le code-barres au dos de l&apos;emballage. La caméra ne s&apos;ouvre qu&apos;à ta
             demande, et l&apos;image reste sur ton téléphone.
           </p>
+          {/* ANCRE DE VISITE GUIDÉE, EN LECTURE SEULE. Cet attribut sert à
+              ENTOURER ce bouton, jamais à le presser : aucune étape ne le
+              déclare dans `ouvrirVia`, et la visite n'allume donc pas la caméra.
+              C'est la même promesse que la phrase juste au-dessus — « la caméra
+              ne s'ouvre qu'à ta demande » — et un tutoriel qui l'allumerait pour
+              faire une démonstration la démentirait. */}
           <button
             type="button"
+            data-guide="nutrition-scan-camera"
             onClick={() => void ouvrir()}
             className="pressable inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-control bg-primary py-3 text-xs font-bold uppercase tracking-widest text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
@@ -254,7 +280,14 @@ export function ScannerCodeBarres({
       {/* LA VUE CAMÉRA. `hidden` plutôt que démontée : l'élément `<video>` doit
           exister AVANT que le flux ne lui soit attaché, sans quoi
           `srcObject` s'appliquerait à rien. */}
-      <div className={enCours || état === "scan" || état === "detecte" ? "" : "hidden"}>
+      {/* EN SIMULATION, LE CADRE EST MONTRÉ SANS FLUX. L'élément `<video>` reste
+          vide : le conteneur est noir, le cadre blanc est dessiné par-dessus, et
+          c'est exactement l'écran que l'élève verra — sans qu'un seul octet
+          d'image n'ait été capturé. */}
+      <div
+        data-guide={simulation ? "nutrition-scan-cadre" : undefined}
+        className={simulation || enCours || état === "scan" || état === "detecte" ? "" : "hidden"}
+      >
         <div className="relative w-full overflow-hidden rounded-panel border border-border bg-black">
           <video
             ref={vidéoRef}
@@ -279,7 +312,11 @@ export function ScannerCodeBarres({
           </div>
         </div>
         <p className="mt-3 text-center text-xs text-muted-foreground" role="status">
-          {enCours ? "Démarrage de la caméra…" : "Place le code-barres dans le cadre."}
+          {simulation
+            ? "Aperçu de démonstration — la caméra n'est pas allumée."
+            : enCours
+              ? "Démarrage de la caméra…"
+              : "Place le code-barres dans le cadre."}
         </p>
 
         {/* LA LAMPE — seulement si la piste l'expose VRAIMENT. Un bouton qui ne
