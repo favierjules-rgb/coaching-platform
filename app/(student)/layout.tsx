@@ -4,6 +4,7 @@ import { GuideDemonstration } from "@/components/guide/GuideDemonstration";
 import { GuideEspace } from "@/components/guide/GuideEspace";
 import { PreparationCoquille } from "@/components/pwa/PreparationCoquille";
 import { SynchronisationOffline } from "@/components/pwa/SynchronisationOffline";
+import { SessionRappelPushProvider } from "@/components/student/SessionRappelPushProvider";
 import { StudentShell } from "@/components/student/StudentShell";
 import { requireStudent } from "@/lib/supabase/guards";
 
@@ -14,6 +15,17 @@ export default async function StudentAreaLayout({
 }) {
   await requireStudent();
   return (
+    /*
+      MÉMOIRE DE SESSION DU RAPPEL PUSH.
+
+      ⚠️ ICI, ET PAS DANS LA PAGE. Ce layout n'est pas remonté quand on passe
+      du tableau de bord à la nutrition : seuls les `children` changent. Un
+      « Plus tard » enregistré ici survit donc aux changements de route, et
+      disparaît au rechargement — c'est-à-dire à la réouverture réelle de
+      l'application. Le provider ne tient qu'un booléen : il ne crée aucune
+      instance de `useNotificationsPush`.
+    */
+    <SessionRappelPushProvider>
     <StudentShell>
       {/*
         Premier des quatre déclencheurs de synchronisation : ouvrir
@@ -36,5 +48,6 @@ export default async function StudentAreaLayout({
       <GuideDemonstration />
       {children}
     </StudentShell>
+    </SessionRappelPushProvider>
   );
 }
