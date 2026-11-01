@@ -289,3 +289,99 @@ await test("F4. le composant ne contourne ni les droits ni la navigation", () =>
   assert.ok(/aria-modal="true"/.test(composant) && /role="dialog"/.test(composant), "la carte est un dialogue modal");
   assert.ok(/aria-live="polite"/.test(composant), "la progression est annoncée");
 });
+
+/* ═══════════ F. LA BULLE NE RECOUVRE JAMAIS CE QU'ELLE EXPLIQUE ═══════════ */
+
+/** L'aire commune à la carte et à la cible. Zéro = elles ne se touchent pas. */
+function recouvrement(
+  position: { top: number; left: number },
+  carte: { width: number; height: number },
+  cible: { top: number; left: number; width: number; height: number },
+): number {
+  const largeur = Math.min(position.left + carte.width, cible.left + cible.width) - Math.max(position.left, cible.left);
+  const hauteur = Math.min(position.top + carte.height, cible.top + cible.height) - Math.max(position.top, cible.top);
+  return largeur > 0 && hauteur > 0 ? largeur * hauteur : 0;
+}
+
+/* Le bouton flottant du chronomètre : 56 px, collé en bas à droite. C'est le
+   cas qui a révélé le défaut — aucun des quatre placements ne tenait, et
+   l'ancien repli ramenait la carte dans le coin, donc par-dessus le bouton. */
+const CHRONO = { top: 800 - 16 - 56, left: 1280 - 16 - 56, width: 56, height: 56 };
+
+await test("F1. la carte ne recouvre pas le chronomètre flottant", () => {
+  const position = positionnerCarte(CHRONO, FENETRE, CARTE);
+  assert.equal(recouvrement(position, CARTE, CHRONO), 0,
+    "la bulle masquait l'élément qu'elle est censée montrer");
+  assert.ok(position.left >= ECART && position.top >= ECART, "et elle reste dans la fenêtre");
+  assert.ok(position.left + CARTE.width <= FENETRE.width - ECART);
+  assert.ok(position.top + CARTE.height <= FENETRE.height - ECART);
+});
+
+await test("F2. aucune cible, où qu'elle soit, n'est recouverte", () => {
+  /*
+   * ⚠️ LA RÈGLE EST GÉNÉRALE, PAS UNE RUSTINE POUR LE CHRONOMÈTRE. Un balayage
+   * de la fenêtre entière : si un seul point produit un recouvrement, c'est que
+   * l'algorithme choisit encore un placement par habitude plutôt que par place
+   * disponible.
+   */
+  let pires = 0;
+  for (let top = 0; top <= FENETRE.height - 56; top += 56) {
+    for (let left = 0; left <= FENETRE.width - 56; left += 56) {
+      const cible = { top, left, width: 56, height: 56 };
+      const position = positionnerCarte(cible, FENETRE, CARTE);
+      if (recouvrement(position, CARTE, cible) > 0) pires += 1;
+    }
+  }
+  assert.equal(pires, 0, `${pires} positions recouvrent leur cible`);
+});
+
+await test("F3. sur mobile, la carte se place dans la moitié opposée à la cible", () => {
+  const mobile = { width: 390, height: 844 };
+  const enBas = { top: 844 - 16 - 56, left: 390 - 16 - 56, width: 56, height: 56 };
+  const haut = positionnerCarte(enBas, mobile, CARTE);
+  assert.equal(haut.placement, "haut-ecran", "cible en bas → carte en haut");
+  assert.equal(recouvrement(haut, CARTE, enBas), 0, "et elle ne la recouvre pas");
+
+  const enHaut = { top: 24, left: 16, width: 240, height: 44 };
+  const bas = positionnerCarte(enHaut, mobile, CARTE);
+  assert.equal(bas.placement, "bas-ecran", "cible en haut → carte en bas");
+  assert.equal(recouvrement(bas, CARTE, enHaut), 0);
+});
+
+await test("F4. un défilement change la position, et la cible reste dégagée", () => {
+  /*
+   * Le moteur recalcule à chaque mesure — défilement compris. On vérifie ici
+   * que le CALCUL suit : la même cible, vue à deux hauteurs différentes, donne
+   * deux placements, tous deux dégagés.
+   */
+  const avant = { top: 700, left: 600, width: 200, height: 60 };
+  const apres = { top: 120, left: 600, width: 200, height: 60 };
+  const p1 = positionnerCarte(avant, FENETRE, CARTE);
+  const p2 = positionnerCarte(apres, FENETRE, CARTE);
+  assert.equal(recouvrement(p1, CARTE, avant), 0);
+  assert.equal(recouvrement(p2, CARTE, apres), 0);
+  assert.notDeepEqual({ top: p1.top, left: p1.left }, { top: p2.top, left: p2.left },
+    "la position doit suivre la cible, sinon rien n'est recalculé au défilement");
+});
+
+await test("F5. une carte plus haute que l'écran reste gérée, sans débordement en haut", () => {
+  /* Cas limite : un texte long sur un petit écran. On ne peut pas tout faire
+     tenir, mais la carte ne doit jamais commencer hors de l'écran. */
+  const petit = { width: 900, height: 400 };
+  const grande = { width: 340, height: 520 };
+  const position = positionnerCarte({ top: 180, left: 420, width: 60, height: 40 }, petit, grande);
+  assert.ok(position.top >= ECART, "le haut de la carte reste atteignable");
+  assert.ok(position.left >= ECART);
+});
+
+await test("F6. le moteur recalcule au défilement ET au redimensionnement", () => {
+  const composant = readFileSync(new URL("../../components/guide/GuideDecouverte.tsx", import.meta.url), "utf8");
+  assert.match(composant, /window\.addEventListener\("resize", onChangement\)/,
+    "un changement de taille d'écran repositionne la bulle");
+  assert.match(composant, /window\.addEventListener\("scroll", onChangement, true\)/,
+    "et un défilement aussi — `true` pour capter celui des conteneurs internes");
+  assert.match(composant, /height: carteRef\.current\?\.offsetHeight \?\? TAILLE_CARTE\.height/,
+    "la hauteur RÉELLE de la bulle entre dans le calcul : une bulle à six lignes n'occupe pas la place d'une bulle à deux");
+  assert.match(composant, /const mesure = element\.getBoundingClientRect\(\);\s*\n\s*const precedente/,
+    "la découpe et la bulle partent de la MÊME mesure : elles ne peuvent pas se désaligner");
+});

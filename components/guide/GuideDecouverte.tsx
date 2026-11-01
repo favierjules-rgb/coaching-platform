@@ -7,6 +7,7 @@ import { FOCUSABLE_SELECTOR, wrapFocusTarget } from "@/lib/admin-shell-nav";
 import {
   ATTENTE_CIBLE_MS,
   deployerEtapes,
+  listeCibles,
   estDerniereEtape,
   indexBorne,
   marquerGuideVu,
@@ -170,7 +171,9 @@ export function GuideDecouverte({ etapes, onFermer, libelleParcours = "l'applica
    * précisément là qu'il quitte, puisqu'il a lu ce qu'il voulait. On garde donc
    * la commande de fermeture tant qu'elle n'a pas servi.
    */
-  const aFermer = useRef<string | null>(null);
+  const aFermer = useRef<readonly string[]>([]);
+  /** Nombre d'ouvertures déjà pressées POUR L'ÉTAPE COURANTE. */
+  const ouverturesFaites = useRef(0);
   /** Étape dont la préparation (démonstration, ouverture) a déjà été jouée. */
   const preparePour = useRef<string | null>(null);
   /** Étape dont le défilement a déjà été demandé. */
@@ -207,20 +210,46 @@ export function GuideDecouverte({ etapes, onFermer, libelleParcours = "l'applica
      */
     if (preparePour.current !== etape.id) {
       preparePour.current = etape.id;
+      ouverturesFaites.current = 0;
       appliquerScenario(etape.demo ?? "aucun");
-      if (etape.ouvrirVia && !elementCible(etape.cible, rang)) {
-        const declencheur = elementCible(etape.ouvrirVia);
-        if (declencheur) {
-          declencheur.click();
-          // Retenu AU MOMENT DE L'OUVERTURE : seul instant où l'on sait avec
-          // certitude que c'est le guide qui a ouvert.
-          if (etape.fermerVia) aFermer.current = etape.fermerVia;
-        }
-      }
       echeance.current = Date.now() + (etape.attenteMs ?? ATTENTE_CIBLE_MS);
       attenteEnCours.current = true;
       derniereMesure.current = null;
       imagesStables.current = 0;
+    }
+
+    /*
+     * ════════════════════════════════════════════════════════════════════════
+     * 1 bis. OUVRIR, GESTE APRÈS GESTE — une commande par image, pas toutes
+     *        d'un coup.
+     * ════════════════════════════════════════════════════════════════════════
+     * ⚠️ C'EST LA CORRECTION DE LA VISITE DES RECETTES. Y afficher une recette
+     * demande trois gestes successifs : le jour, puis le créneau, puis la
+     * recette. Le deuxième bouton N'EXISTE PAS tant que le premier n'a pas été
+     * pressé et le rendu refait. Les presser en rafale dans la même image
+     * n'aurait rien ouvert du tout — d'où une commande, puis retour, puis
+     * l'image suivante reprend là où l'on s'était arrêté.
+     *
+     * Les commandes concernées ne font que changer l'état d'affichage d'une
+     * page : aucune n'écrit. Le test `ouvertures-sans-ecriture` le vérifie sur
+     * chaque étape déclarée.
+     */
+    const ouvertures = listeCibles(etape.ouvrirVia);
+    if (!elementCible(etape.cible, rang) && ouverturesFaites.current < ouvertures.length) {
+      const declencheur = elementCible(ouvertures[ouverturesFaites.current]!);
+      if (declencheur) {
+        ouverturesFaites.current += 1;
+        declencheur.click();
+        // Retenu AU MOMENT DE L'OUVERTURE : seul instant où l'on sait avec
+        // certitude que c'est le guide qui a ouvert.
+        const fermetures = listeCibles(etape.fermerVia);
+        if (fermetures.length > 0) aFermer.current = fermetures;
+        echeance.current = Date.now() + (etape.attenteMs ?? ATTENTE_CIBLE_MS);
+        attenteEnCours.current = true;
+        return;
+      }
+      /* La commande n'est pas encore là : on laisse l'attente courir plutôt
+         que de consommer l'étape de la séquence pour rien. */
     }
 
     const element = elementCible(etape.cible, rang);
@@ -355,16 +384,17 @@ export function GuideDecouverte({ etapes, onFermer, libelleParcours = "l'applica
      * ouvert lui-même avant la visite n'est jamais refermé — `aFermer` ne vaut
      * quelque chose que si le guide a réellement pressé le déclencheur.
      */
-    if (aFermer.current) {
-      elementCible(aFermer.current)?.click();
-      aFermer.current = null;
+    for (const fermeture of aFermer.current) {
+      elementCible(fermeture)?.click();
     }
+    aFermer.current = [];
     /* ⚠️ LA DÉMONSTRATION S'ÉTEINT ICI, ET AUSSI AU DÉMONTAGE (effet plus bas).
        Les deux chemins sont nécessaires : on peut quitter par le bouton, par
        Échap ou par le voile — tous passent par ici — mais on peut aussi
        disparaître sans quitter, en changeant de page. */
     reinitialiserDemonstration();
     ouvertePour.current = null;
+    ouverturesFaites.current = 0;
     preparePour.current = null;
     defilePour.current = null;
     echeance.current = null;
@@ -544,7 +574,13 @@ export function GuideDecouverte({ etapes, onFermer, libelleParcours = "l'applica
         className="absolute flex flex-col gap-4 rounded-card border border-border bg-card p-5 shadow-xl transition-[top,left] duration-300 ease-out motion-reduce:transition-none"
         style={
           position
-            ? { top: position.top, left: position.placement === "bas-ecran" ? 16 : position.left, width: largeurCarte }
+            ? {
+                top: position.top,
+                /* Les deux placements d'écran (haut et bas) collent la carte à
+                   la gouttière : sur mobile elle occupe toute la largeur. */
+                left: position.placement === "bas-ecran" || position.placement === "haut-ecran" ? 16 : position.left,
+                width: largeurCarte,
+              }
             : { top: "50%", left: "50%", transform: "translate(-50%, -50%)", width: largeurCarte }
         }
       >

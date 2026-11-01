@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { ArrowLeft, ChefHat } from "lucide-react";
 
 import { RecipeImage } from "@/components/shared/RecipeImage";
@@ -18,6 +18,13 @@ import { formatSolvedIngredientQuantity } from "@/lib/nutrition/recipe-quantity"
 import { describeTag } from "@/lib/nutrition/recipe-labels";
 import type { RecipeWithTags } from "@/lib/nutrition/recipe-rows";
 import { solveRecipe } from "@/lib/nutrition/recipe-solver";
+import {
+  abonnerDemonstration,
+  cibleAAfficher,
+  demonstrationServeur,
+  lireDemonstration,
+  recettesAAfficher,
+} from "@/lib/guide-demonstration";
 import { WEEKDAY_LABELS_FR, WEEKDAY_SHORT_LABELS_FR, type WeekdayKey } from "@/lib/nutrition/weekdays";
 
 /**
@@ -48,6 +55,25 @@ export function StudentAdaptiveRecipes({
   week: PlanV2Week;
   recipes: readonly RecipeWithTags[];
 }) {
+  /*
+   * ════════════════════════════════════════════════════════════════════════
+   * LA RECETTE D'EXEMPLE DE LA VISITE GUIDÉE
+   * ════════════════════════════════════════════════════════════════════════
+   * ⚠️ ELLE NE REMPLACE JAMAIS UNE VRAIE RECETTE. La substitution exige DEUX
+   * conditions : la visite guidée le demande, ET le coach n'a publié aucune
+   * recette. Montrer un exemple à un élève qui a de vraies recettes sous les
+   * yeux serait pire que de ne rien montrer — il croirait que son coach lui a
+   * prescrit du poulet au riz.
+   *
+   * ⚠️ RIEN N'EST ÉCRIT NULLE PART. Ce composant ne reçoit aucun callback
+   * d'écriture et n'importe rien de `lib/supabase` : la substitution ne change
+   * que ce qui est affiché, le temps de la visite. Le magasin est remis à zéro
+   * à la sortie du guide, et le choix de recette vit de toute façon dans l'état
+   * React, qu'un rechargement efface.
+   */
+  const demo = useSyncExternalStore(abonnerDemonstration, lireDemonstration, demonstrationServeur);
+  const { recettes: recettesAffichees, exemple } = recettesAAfficher(demo.recettes, recipes);
+
   const jours = useMemo(() => orderedDays(week.days), [week]);
   const [jourChoisi, setJourChoisi] = useState<WeekdayKey | null>(jours[0]?.day ?? null);
   const [créneauChoisi, setCréneauChoisi] = useState<MealSlotKey | null>(null);
@@ -56,15 +82,45 @@ export function StudentAdaptiveRecipes({
   const jour = jours.find((j) => j.day === jourChoisi) ?? null;
   const créneaux = useMemo(() => (jour ? enabledSlotsForDay(week, jour) : []), [week, jour]);
 
-  const cible = useMemo(
+  const cibleReelle = useMemo(
     () => (jour && créneauChoisi ? slotTargetForDay(week, jour, créneauChoisi) : null),
     [week, jour, créneauChoisi],
   );
 
+  /*
+   * ════════════════════════════════════════════════════════════════════════
+   * L'OBJECTIF D'EXEMPLE — UNIQUEMENT QUAND IL N'Y EN A AUCUN
+   * ════════════════════════════════════════════════════════════════════════
+   * ⚠️ SANS CIBLE, CETTE PAGE NE CALCULE RIEN, et c'est voulu :
+   * `buildRecipeTargetForMealSlot` refuse un profil sans calories plutôt que
+   * de rendre une cible à zéro. Sur un plan dont le coach n'a pas encore fixé
+   * les objectifs, la liste des recettes n'était donc pas rendue du tout — et
+   * la visite guidée n'avait rien à montrer, même avec sa recette d'exemple.
+   *
+   * ⚠️ LA SUBSTITUTION EST LIÉE À CELLE DE LA RECETTE. `exemple` exige déjà que
+   * la visite soit lancée ET que la bibliothèque du coach soit vide : un
+   * objectif inventé ne peut donc JAMAIS servir à doser une recette réelle.
+   * C'est la seule garantie qui compte ici — des quantités calculées sur un
+   * objectif que personne n'a fixé, affichées sous une vraie recette, seraient
+   * prises pour une prescription.
+   */
+  const { cible, fictive: cibleFictive } = cibleAAfficher(exemple, créneauChoisi, cibleReelle);
+
   const proposées = useMemo(
-    () => (créneauChoisi ? recipesForSlot(recipes, créneauChoisi) : []),
-    [recipes, créneauChoisi],
+    () => (créneauChoisi ? recipesForSlot(recettesAffichees, créneauChoisi) : []),
+    [recettesAffichees, créneauChoisi],
   );
+
+  /*
+   * LE CRÉNEAU QUE LA VISITE DOIT OUVRIR : le premier qui a réellement quelque
+   * chose à montrer. Viser le premier de la liste aurait conduit la visite sur
+   * un créneau vide dès que le coach range ses recettes par repas — et toutes
+   * les étapes suivantes seraient retombées en repli, ce que ce lot corrige.
+   */
+  const créneauDemonstration = useMemo(() => {
+    const avecRecettes = créneaux.find((slot) => recipesForSlot(recettesAffichees, slot).length > 0);
+    return avecRecettes ?? créneaux[0] ?? null;
+  }, [créneaux, recettesAffichees]);
 
   const recette = proposées.find((r) => r.recipe.id === recetteChoisie) ?? null;
 
@@ -98,17 +154,48 @@ export function StudentAdaptiveRecipes({
 
   return (
     <div className="flex flex-col gap-5">
+      {/* ⚠️ L'EXEMPLE SE DIT, TOUJOURS. Un élève qui prendrait cette recette
+          pour une prescription de son coach suivrait des quantités que
+          personne n'a décidées pour lui. Le bandeau reste visible tant que la
+          substitution est active, et disparaît avec la visite. */}
+      {exemple && (
+        <p
+          role="status"
+          data-guide="recettes-exemple"
+          className="rounded-panel border border-primary/40 bg-primary/10 px-4 py-3 text-xs leading-relaxed text-foreground"
+        >
+          <strong className="font-bold uppercase tracking-widest">Exemple de démonstration</strong>
+          <span className="mt-1 block text-muted-foreground">
+            Votre coach n&apos;a pas encore publié de recette. Celle affichée ci-dessous sert
+            uniquement à montrer le fonctionnement de la page : elle n&apos;est pas une
+            prescription, et elle disparaît en quittant la visite guidée.
+            {cibleFictive && (
+              <>
+                {" "}
+                Les objectifs de ce créneau ne sont pas encore renseignés : la visite en utilise
+                un d&apos;exemple pour pouvoir calculer les quantités. Ce n&apos;est pas un
+                objectif fixé par votre coach.
+              </>
+            )}
+          </span>
+        </p>
+      )}
+
       {/* Étape 1 — le jour. Les sept jours tiennent sur une ligne dès 320 px
           grâce aux libellés courts, et se replient sinon. */}
       <div data-guide="recettes-jour">
         <p className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Jour</p>
         <div className="flex flex-wrap gap-2">
-          {jours.map((j) => {
+          {jours.map((j, rang) => {
             const actif = j.day === jourChoisi;
             return (
               <button
                 key={j.id}
                 type="button"
+                /* ANCRE DE VISITE GUIDÉE. Le guide presse LUI-MÊME ce bouton :
+                   choisir un jour ne change que l'état React de cette page —
+                   aucune écriture, aucune trace, et un rechargement l'efface. */
+                {...(rang === 0 ? { "data-guide": "recettes-jour-premier" } : {})}
                 onClick={() => choisirJour(j.day)}
                 aria-pressed={actif}
                 className={`pressable min-h-11 rounded-control border px-3 text-xs font-bold uppercase tracking-widest transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
@@ -140,6 +227,9 @@ export function StudentAdaptiveRecipes({
                 <button
                   key={slot}
                   type="button"
+                  {...(slot === créneauDemonstration
+                    ? { "data-guide": "recettes-creneau-premier" }
+                    : {})}
                   onClick={() => choisirCréneau(slot)}
                   aria-pressed={actif}
                   className={`pressable min-h-11 rounded-control border px-3 text-xs uppercase tracking-widest transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
@@ -167,6 +257,20 @@ export function StudentAdaptiveRecipes({
             : cible.reason === "slot_disabled"
               ? "Ce créneau est désactivé pour ce jour."
               : "Ce créneau n'est pas configuré pour ce jour."}
+        </p>
+      )}
+
+      {/* ⚠️ LA MENTION VOYAGE AVEC LE CHIFFRE. Elle ne peut pas rester dans le
+          seul bandeau du haut : c'est ici qu'on lit « 660 kcal visées », et
+          c'est ici qu'il faut savoir d'où vient ce nombre. */}
+      {cibleFictive && (
+        <p
+          role="status"
+          data-guide="recettes-cible-exemple"
+          className="rounded-control border border-dashed border-border px-3 py-2 text-xs text-muted-foreground"
+        >
+          Objectif d&apos;exemple, le temps de la visite guidée — votre coach n&apos;a pas encore
+          fixé d&apos;objectif pour ce créneau.
         </p>
       )}
 
@@ -203,10 +307,11 @@ export function StudentAdaptiveRecipes({
             </p>
           ) : (
             <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {proposées.map((r) => (
+              {proposées.map((r, rang) => (
                 <li key={r.recipe.id}>
                   <button
                     type="button"
+                    {...(rang === 0 ? { "data-guide": "recettes-recette-premiere" } : {})}
                     onClick={() => setRecetteChoisie(r.recipe.id)}
                     className="pressable flex min-h-11 w-full flex-col items-start gap-1 rounded-panel border border-border bg-card p-4 text-left shadow-soft transition-colors hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                   >
@@ -287,6 +392,7 @@ export function StudentAdaptiveRecipes({
           )}
 
           <p
+            data-guide="recettes-verdict"
             className={`rounded-panel border px-4 py-3 text-sm ${
               verdict.status === "exact"
                 ? "border-success/40 bg-success/10 text-success"
@@ -460,6 +566,11 @@ export function StudentAdaptiveRecipes({
             </button>
             <button
               type="button"
+              /* ANCRE DE SORTIE DE LA VISITE GUIDÉE. Un seul appui remet la
+                 page dans son état d'arrivée — premier jour, aucun créneau,
+                 aucune recette — ce qui est exactement ce que le guide doit
+                 restaurer en se refermant. */
+              data-guide="recettes-reinitialiser"
               onClick={() => {
                 setJourChoisi(jours[0]?.day ?? null);
                 setCréneauChoisi(null);

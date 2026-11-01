@@ -53,9 +53,12 @@ export interface EtapeGuide {
    * c'est l'interdit central de cette fonctionnalité, et le test
    * `ouvertures-sans-ecriture` le vérifie sur chaque étape déclarée.
    */
-  readonly ouvrirVia?: CibleGuide;
-  /** `data-guide` de la commande qui referme ce qui a été ouvert, à la sortie. */
-  readonly fermerVia?: CibleGuide;
+  readonly ouvrirVia?: CibleGuide | readonly CibleGuide[];
+  /**
+   * `data-guide` de la ou des commandes qui referment ce qui a été ouvert, à
+   * la sortie. Plusieurs sont pressées dans l'ordre donné.
+   */
+  readonly fermerVia?: CibleGuide | readonly CibleGuide[];
   /**
    * Délai d'attente de la cible, en millisecondes, quand elle apparaît APRÈS
    * le rendu (ouverture d'une modale, chargement). Au-delà, l'étape est sautée
@@ -160,6 +163,21 @@ function substituer(etape: EtapeGuide, rang: number, total: number): EtapeGuide 
 
 /** Attente par défaut d'une cible déclarée tardive. */
 export const ATTENTE_CIBLE_MS = 1500;
+
+/**
+ * Normalise une déclaration d'ouverture ou de fermeture en liste ordonnée.
+ *
+ * ⚠️ POURQUOI UNE LISTE. Afficher une recette demande TROIS gestes
+ * successifs — choisir le jour, puis le créneau, puis la recette —, et chacun
+ * ne devient possible qu'une fois le précédent rendu. Une seule commande ne
+ * pouvait donc pas suffire, et c'est la raison pour laquelle la visite des
+ * recettes n'affichait jamais de recette : elle expliquait des ingrédients que
+ * rien n'avait fait apparaître.
+ */
+export function listeCibles(valeur: CibleGuide | readonly CibleGuide[] | undefined): readonly CibleGuide[] {
+  if (valeur === undefined) return [];
+  return typeof valeur === "string" ? [valeur] : valeur;
+}
 
 /* ══════════════════════════════════════════════════════════════════════════
    LE CONTENU
@@ -411,7 +429,7 @@ export function prochaineEtapeAtteignable(
    PLACEMENT DE LA CARTE
    ══════════════════════════════════════════════════════════════════════════ */
 
-export type PlacementCarte = "droite" | "gauche" | "dessous" | "dessus" | "bas-ecran";
+export type PlacementCarte = "droite" | "gauche" | "dessous" | "dessus" | "bas-ecran" | "haut-ecran";
 
 export interface Rectangle {
   readonly top: number;
@@ -448,39 +466,108 @@ export function positionnerCarte(
   fenetre: { width: number; height: number },
   carte: { width: number; height: number },
 ): PositionCarte {
+  const borner = (valeur: number, max: number) => Math.min(Math.max(valeur, ECART), Math.max(ECART, max));
+  const bornerX = (x: number) => borner(x, fenetre.width - carte.width - ECART);
+  const bornerY = (y: number) => borner(y, fenetre.height - carte.height - ECART);
+
+  /* La place libre de chaque côté de la cible : c'est elle qui décide du
+     « côté opposé ». Une cible collée en bas à droite laisse de la place en
+     haut et à gauche, et c'est là que la carte doit aller. */
+  const place = {
+    droite: fenetre.width - (cible.left + cible.width),
+    gauche: cible.left,
+    dessous: fenetre.height - (cible.top + cible.height),
+    dessus: cible.top,
+  };
+
   if (fenetre.width < SEUIL_MOBILE) {
+    /*
+     * ⚠️ SUR MOBILE AUSSI, ON CHOISIT LE CÔTÉ. La carte occupe toute la largeur :
+     * il ne reste que le haut et le bas. L'ancienne version la posait TOUJOURS
+     * en bas — donc par-dessus le chronomètre, qui vit précisément en bas à
+     * droite. On la pose maintenant dans la moitié où la cible n'est pas.
+     */
+    const enHaut = place.dessus < place.dessous;
     return {
-      top: Math.max(ECART, fenetre.height - carte.height - ECART),
+      top: enHaut ? Math.max(ECART, fenetre.height - carte.height - ECART) : ECART,
       left: ECART,
-      placement: "bas-ecran",
+      placement: enHaut ? "bas-ecran" : "haut-ecran",
     };
   }
-
-  const tientHorizontalement = (left: number) => left >= ECART && left + carte.width <= fenetre.width - ECART;
-  const tientVerticalement = (top: number) => top >= ECART && top + carte.height <= fenetre.height - ECART;
 
   const centreVertical = cible.top + cible.height / 2 - carte.height / 2;
   const centreHorizontal = cible.left + cible.width / 2 - carte.width / 2;
 
+  /*
+   * ⚠️ CHAQUE CANDIDAT EST BORNÉ SUR SON AXE SECONDAIRE, PAS SUR LES DEUX.
+   * « Dessus » impose sa hauteur et laisse glisser la largeur ; « droite »
+   * impose sa largeur et laisse glisser la hauteur. Borner les deux axes, comme
+   * le faisait le repli précédent, transformait « à droite de la cible » en
+   * « dans le coin », c'est-à-dire PAR-DESSUS une cible déjà dans ce coin.
+   */
   const candidats: readonly PositionCarte[] = [
-    { left: cible.left + cible.width + ECART, top: centreVertical, placement: "droite" },
-    { left: cible.left - carte.width - ECART, top: centreVertical, placement: "gauche" },
-    { left: centreHorizontal, top: cible.top + cible.height + ECART, placement: "dessous" },
-    { left: centreHorizontal, top: cible.top - carte.height - ECART, placement: "dessus" },
+    { left: cible.left + cible.width + ECART, top: bornerY(centreVertical), placement: "droite" },
+    { left: cible.left - carte.width - ECART, top: bornerY(centreVertical), placement: "gauche" },
+    { left: bornerX(centreHorizontal), top: cible.top + cible.height + ECART, placement: "dessous" },
+    { left: bornerX(centreHorizontal), top: cible.top - carte.height - ECART, placement: "dessus" },
   ];
 
-  for (const candidat of candidats) {
-    if (tientHorizontalement(candidat.left) && tientVerticalement(candidat.top)) return candidat;
+  /* Du côté le plus dégagé vers le plus encombré. L'ordre de déclaration ne
+     sert plus que de départage à place égale. */
+  const ordonnes = [...candidats].sort((a, b) => place[placeCle(b.placement)] - place[placeCle(a.placement)]);
+
+  const dansLaFenetre = (p: PositionCarte) =>
+    p.left >= ECART &&
+    p.top >= ECART &&
+    p.left + carte.width <= fenetre.width - ECART &&
+    p.top + carte.height <= fenetre.height - ECART;
+
+  const recouvrement = (p: PositionCarte) =>
+    aireCommune(
+      { top: p.top, left: p.left, width: carte.width, height: carte.height },
+      { top: cible.top - ECART, left: cible.left - ECART, width: cible.width + ECART * 2, height: cible.height + ECART * 2 },
+    );
+
+  /* 1. Le meilleur cas : la carte tient entièrement ET ne touche pas la cible. */
+  for (const candidat of ordonnes) {
+    if (dansLaFenetre(candidat) && recouvrement(candidat) === 0) return candidat;
   }
 
-  // Dernier recours : on garde le placement préféré mais on ramène la carte
-  // dans la fenêtre. Mieux vaut une carte décalée qu'une carte hors écran.
-  const repli = candidats[0] as PositionCarte;
-  return {
-    placement: repli.placement,
-    left: Math.min(Math.max(repli.left, ECART), Math.max(ECART, fenetre.width - carte.width - ECART)),
-    top: Math.min(Math.max(repli.top, ECART), Math.max(ECART, fenetre.height - carte.height - ECART)),
-  };
+  /*
+   * 2. Sinon on ramène chaque candidat dans la fenêtre et on retient celui qui
+   *    recouvre le MOINS la cible. C'est le cas du chronomètre flottant : aucun
+   *    placement ne tient tel quel, mais « dessus », une fois ramené, laisse le
+   *    bouton entièrement visible — alors que l'ancien repli, qui gardait
+   *    toujours « droite », le masquait.
+   */
+  let meilleur: PositionCarte | null = null;
+  let moindre = Number.POSITIVE_INFINITY;
+  for (const candidat of ordonnes) {
+    const ramene: PositionCarte = {
+      placement: candidat.placement,
+      left: bornerX(candidat.left),
+      top: bornerY(candidat.top),
+    };
+    const aire = recouvrement(ramene);
+    if (aire < moindre) {
+      moindre = aire;
+      meilleur = ramene;
+      if (aire === 0) break;
+    }
+  }
+  return meilleur ?? { placement: "dessus", left: bornerX(centreHorizontal), top: ECART };
+}
+
+/** La clé de `place` correspondant à un placement. */
+function placeCle(placement: PlacementCarte): "droite" | "gauche" | "dessous" | "dessus" {
+  return placement === "droite" || placement === "gauche" || placement === "dessous" ? placement : "dessus";
+}
+
+/** L'aire commune à deux rectangles, 0 s'ils ne se touchent pas. */
+function aireCommune(a: Rectangle, b: Rectangle): number {
+  const largeur = Math.min(a.left + a.width, b.left + b.width) - Math.max(a.left, b.left);
+  const hauteur = Math.min(a.top + a.height, b.top + b.height) - Math.max(a.top, b.top);
+  return largeur > 0 && hauteur > 0 ? largeur * hauteur : 0;
 }
 
 /** La cible est-elle suffisamment dans la fenêtre pour ne pas devoir défiler ? */

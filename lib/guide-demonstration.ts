@@ -1,3 +1,8 @@
+import { kcalFromMacros } from "@/lib/nutrition/consumed";
+import type { MealSlotKey } from "@/lib/nutrition/meal-distribution";
+import type { RecipeTargetResult } from "@/lib/nutrition/recipe-matching";
+import type { RecipeWithTags } from "@/lib/nutrition/recipe-rows";
+import type { RecipeMacroTarget } from "@/lib/nutrition/recipe-types";
 import type { CatalogFood, ProduitLocal } from "@/lib/supabase/consumed-meals";
 
 /**
@@ -46,6 +51,15 @@ export interface EtatDemonstration {
   readonly choix: boolean;
   /** L'écran du scanner, SANS caméra ni demande d'autorisation. */
   readonly scanner: boolean;
+  /**
+   * Une recette d'exemple, UNIQUEMENT si le coach n'en a publié aucune.
+   *
+   * ⚠️ ELLE NE REMPLACE JAMAIS UNE VRAIE RECETTE. La substitution ne se fait
+   * que lorsque la bibliothèque reçue est vide : sinon la visite montrerait un
+   * exemple à un élève qui a de vraies recettes sous les yeux, ce qui serait
+   * pire que de ne rien montrer.
+   */
+  readonly recettes: boolean;
 }
 
 export const DEMONSTRATION_ETEINTE: EtatDemonstration = {
@@ -54,6 +68,7 @@ export const DEMONSTRATION_ETEINTE: EtatDemonstration = {
   recherche: false,
   choix: false,
   scanner: false,
+  recettes: false,
 };
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -112,6 +127,84 @@ export const PRODUITS_DEMONSTRATION: readonly ProduitLocal[] = [
 /** La quantité pré-saisie à l'étape quantité, et son unité. */
 export const QUANTITE_DEMONSTRATION = "120";
 
+/**
+ * UNE RECETTE D'EXEMPLE, pour la page des recettes quand la bibliothèque du
+ * coach est vide.
+ *
+ * ⚠️ `slotKey: null` — « convient à tous les créneaux ». C'est le comportement
+ * de `recipesForSlot`, pas une astuce : une recette sans créneau déclaré est
+ * proposée partout. La visite peut donc ouvrir n'importe quel créneau et y
+ * trouver quelque chose à montrer.
+ *
+ * ⚠️ LES MACROS SONT COHÉRENTES ENTRE ELLES. Le solveur ajuste réellement ces
+ * quantités pour atteindre la cible du créneau : des valeurs fantaisistes
+ * donneraient des quantités absurdes à l'écran, et la démonstration
+ * enseignerait le contraire de ce qu'elle veut montrer. Ce sont les ordres de
+ * grandeur de la table Ciqual pour du poulet, du riz et de l'huile d'olive.
+ *
+ * ⚠️ `sourceKey` porte le préfixe de démonstration, comme les aliments.
+ */
+export const RECETTES_DEMONSTRATION: readonly RecipeWithTags[] = [
+  {
+    recipe: {
+      id: `${PREFIXE_DEMONSTRATION}recette-poulet-riz`,
+      name: "Exemple — poulet, riz et légumes",
+      slot: null,
+      ingredients: [
+        {
+          id: `${PREFIXE_DEMONSTRATION}ing-poulet`,
+          name: "Blanc de poulet, cru",
+          role: "protein",
+          proteinPer100g: 23,
+          carbPer100g: 0,
+          fatPer100g: 1.5,
+          referenceGrams: 150,
+          minGrams: 80,
+          maxGrams: 250,
+        },
+        {
+          id: `${PREFIXE_DEMONSTRATION}ing-riz`,
+          name: "Riz blanc, cru",
+          role: "carbohydrate",
+          proteinPer100g: 7,
+          carbPer100g: 78,
+          fatPer100g: 0.6,
+          referenceGrams: 80,
+          minGrams: 40,
+          maxGrams: 160,
+        },
+        {
+          id: `${PREFIXE_DEMONSTRATION}ing-huile`,
+          name: "Huile d'olive",
+          role: "fat",
+          proteinPer100g: 0,
+          carbPer100g: 0,
+          fatPer100g: 100,
+          referenceGrams: 10,
+          minGrams: 5,
+          maxGrams: 25,
+        },
+        {
+          id: `${PREFIXE_DEMONSTRATION}ing-legumes`,
+          name: "Courgette, cuite",
+          role: "free",
+          proteinPer100g: 1.2,
+          carbPer100g: 2.3,
+          fatPer100g: 0.3,
+          referenceGrams: 150,
+        },
+      ],
+    },
+    slotKey: null,
+    status: "active",
+    tags: [],
+    description: "Recette d'exemple affichée pendant la visite guidée.",
+    sourceKey: `${PREFIXE_DEMONSTRATION}visite-guidee`,
+    imagePath: null,
+    updatedAt: null,
+  },
+] as const;
+
 /* ══════════════════════════════════════════════════════════════════════════
    LE MAGASIN
    ══════════════════════════════════════════════════════════════════════════
@@ -158,7 +251,8 @@ export function appliquerDemonstration(suivant: Partial<EtatDemonstration>): voi
     fusion.onglet === etat.onglet &&
     fusion.recherche === etat.recherche &&
     fusion.choix === etat.choix &&
-    fusion.scanner === etat.scanner
+    fusion.scanner === etat.scanner &&
+    fusion.recettes === etat.recettes
   ) {
     return;
   }
@@ -183,15 +277,17 @@ export function reinitialiserDemonstration(): void {
 
 export const SCENARIOS_DEMONSTRATION = {
   /** La feuille ouverte, champ vide : favoris, récents, scanner, saisie manuelle. */
-  "feuille-vide": { feuilleAjout: true, onglet: "recherche", recherche: false, choix: false, scanner: false },
+  "feuille-vide": { feuilleAjout: true, onglet: "recherche", recherche: false, choix: false, scanner: false, recettes: false },
   /** Un terme tapé et ses résultats affichés. */
-  "recherche-resultats": { feuilleAjout: true, onglet: "recherche", recherche: true, choix: false, scanner: false },
+  "recherche-resultats": { feuilleAjout: true, onglet: "recherche", recherche: true, choix: false, scanner: false, recettes: false },
   /** Un aliment choisi : l'étape quantité est à l'écran. */
-  "quantite": { feuilleAjout: true, onglet: "recherche", recherche: true, choix: true, scanner: false },
+  "quantite": { feuilleAjout: true, onglet: "recherche", recherche: true, choix: true, scanner: false, recettes: false },
   /** L'onglet de saisie manuelle. */
-  "saisie-manuelle": { feuilleAjout: true, onglet: "manuel", recherche: false, choix: false, scanner: false },
+  "saisie-manuelle": { feuilleAjout: true, onglet: "manuel", recherche: false, choix: false, scanner: false, recettes: false },
   /** L'écran du scanner, caméra ÉTEINTE et jamais demandée. */
-  "scanner": { feuilleAjout: true, onglet: "recherche", recherche: false, choix: false, scanner: true },
+  "scanner": { feuilleAjout: true, onglet: "recherche", recherche: false, choix: false, scanner: true, recettes: false },
+  /** La page des recettes, avec un exemple si le coach n'en a publié aucune. */
+  "recettes": { feuilleAjout: false, onglet: "recherche", recherche: false, choix: false, scanner: false, recettes: true },
   /** Plus rien : la page réelle, telle qu'elle était. */
   "aucun": DEMONSTRATION_ETEINTE,
 } as const satisfies Record<string, EtatDemonstration>;
@@ -200,4 +296,91 @@ export type CleDemonstration = keyof typeof SCENARIOS_DEMONSTRATION;
 
 export function appliquerScenario(cle: CleDemonstration): void {
   appliquerDemonstration(SCENARIOS_DEMONSTRATION[cle]);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   UN OBJECTIF DE CRÉNEAU FICTIF — POUR QUE LE CALCUL PUISSE AVOIR LIEU
+   ══════════════════════════════════════════════════════════════════════════
+   ⚠️ POURQUOI IL EXISTE. La page des recettes ne calcule rien sans cible :
+   `buildRecipeTargetForMealSlot` REFUSE explicitement un profil sans calories
+   plutôt que de rendre une cible à zéro — et ce refus est juste, parce qu'une
+   cible à zéro est une cible valide que le solveur traiterait. Conséquence :
+   sur un plan dont le coach n'a pas encore fixé les objectifs, la liste des
+   recettes n'est pas rendue du tout, et la visite guidée n'avait rien à
+   montrer, même avec sa recette d'exemple.
+
+   ⚠️ IL N'ACCOMPAGNE JAMAIS UNE VRAIE RECETTE. La substitution de la cible est
+   liée à celle de la recette : elle n'a lieu que lorsque la bibliothèque du
+   coach est vide et que la visite est lancée. Doser une recette RÉELLE avec un
+   objectif inventé afficherait des quantités que personne n'a prescrites —
+   c'est précisément ce qu'il ne faut pas faire.
+
+   ⚠️ IL NE SE FAIT PAS PASSER POUR UN OBJECTIF DU COACH. L'écran le marque, et
+   un test vérifie cette mention.
+
+   ⚠️ LES CALORIES SONT DÉRIVÉES, PAS SAISIES. Elles passent par
+   `kcalFromMacros`, le 4/4/9 de l'application : un trio de macros et un total
+   écrits à la main auraient fini par se contredire.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/** Grammes d'un créneau d'exemple — l'ordre de grandeur d'un déjeuner. */
+export const MACROS_CIBLE_DEMONSTRATION: RecipeMacroTarget = {
+  proteinGrams: 45,
+  carbGrams: 75,
+  fatGrams: 20,
+};
+
+export function cibleDemonstration(slot: MealSlotKey): RecipeTargetResult {
+  return {
+    ok: true,
+    slot,
+    target: MACROS_CIBLE_DEMONSTRATION,
+    calories: kcalFromMacros(
+      MACROS_CIBLE_DEMONSTRATION.proteinGrams,
+      MACROS_CIBLE_DEMONSTRATION.carbGrams,
+      MACROS_CIBLE_DEMONSTRATION.fatGrams,
+    ),
+  };
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   LES DEUX DÉCISIONS DE SUBSTITUTION, ISOLÉES ET PURES
+   ══════════════════════════════════════════════════════════════════════════
+   ⚠️ POURQUOI ELLES VIVENT ICI PLUTÔT QUE DANS LE COMPOSANT. Ce sont ELLES qui
+   portent la garantie — « jamais par-dessus de vraies données » — et une règle
+   enfouie dans un rendu React ne se vérifie qu'en rendant la page, ce qui
+   demande un navigateur. Sorties du composant, les quatre situations du cahier
+   des charges s'éprouvent directement, sans DOM.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * La bibliothèque à afficher.
+ *
+ * ⚠️ DEUX CONDITIONS, PAS UNE. La visite doit être lancée ET le coach ne doit
+ * avoir publié aucune recette. Afficher un exemple à un élève qui a de vraies
+ * recettes lui ferait croire que son coach lui a prescrit ce plat.
+ */
+export function recettesAAfficher(
+  demonstrationActive: boolean,
+  recettesReelles: readonly RecipeWithTags[],
+): { readonly recettes: readonly RecipeWithTags[]; readonly exemple: boolean } {
+  const exemple = demonstrationActive && recettesReelles.length === 0;
+  return { recettes: exemple ? RECETTES_DEMONSTRATION : recettesReelles, exemple };
+}
+
+/**
+ * La cible du créneau à utiliser.
+ *
+ * ⚠️ `exemple` EN PREMIER ARGUMENT, ET CE N'EST PAS UN DÉTAIL. La cible fictive
+ * est conditionnée à la substitution de la RECETTE : il devient impossible de
+ * doser une recette réelle avec un objectif que personne n'a fixé. Les
+ * quantités inventées ne peuvent accompagner qu'une recette inventée.
+ */
+export function cibleAAfficher(
+  exemple: boolean,
+  slot: MealSlotKey | null,
+  cibleReelle: RecipeTargetResult | null,
+): { readonly cible: RecipeTargetResult | null; readonly fictive: boolean } {
+  const fictive = exemple && slot !== null && cibleReelle?.ok !== true;
+  return { cible: fictive && slot ? cibleDemonstration(slot) : cibleReelle, fictive };
 }

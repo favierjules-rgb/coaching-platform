@@ -26,6 +26,7 @@ import {
   ETAPES_ELEVE as ETAPES_ELEVE_IMPORT,
   ETAPES_STAFF as ETAPES_STAFF_IMPORT,
   deployerEtapes,
+  listeCibles,
 } from "../../lib/guide-decouverte";
 
 const RACINE = new URL("../../", import.meta.url).pathname;
@@ -273,9 +274,16 @@ await test("D1. `ouvrirVia` ne désigne JAMAIS une validation ou un enregistreme
   const interdits = /enregistr|valider|confirm|supprim|envoyer|soumettre|terminer|submit|save|delete/i;
   for (const espace of ESPACES_GUIDES) {
     for (const etape of espace.etapes) {
-      if (!etape.ouvrirVia) continue;
-      assert.doesNotMatch(etape.ouvrirVia, interdits,
-        `${espace.id}/${etape.id} : « ${etape.ouvrirVia} » ressemble à une action d'écriture`);
+      /* Une étape peut déclarer PLUSIEURS ouvertures successives — afficher une
+         recette en demande trois. Chacune est contrôlée séparément. */
+      for (const ouverture of listeCibles(etape.ouvrirVia)) {
+        assert.doesNotMatch(ouverture, interdits,
+          `${espace.id}/${etape.id} : « ${ouverture} » ressemble à une action d'écriture`);
+      }
+      for (const fermeture of listeCibles(etape.fermerVia)) {
+        assert.doesNotMatch(fermeture, interdits,
+          `${espace.id}/${etape.id} : la fermeture « ${fermeture} » ressemble à une action d'écriture`);
+      }
     }
   }
 });
@@ -283,8 +291,8 @@ await test("D1. `ouvrirVia` ne désigne JAMAIS une validation ou un enregistreme
 await test("D2. toute étape qui ouvre une interface déclare aussi par où la refermer", () => {
   for (const espace of ESPACES_GUIDES) {
     for (const etape of espace.etapes) {
-      if (!etape.ouvrirVia) continue;
-      assert.ok(etape.fermerVia,
+      if (listeCibles(etape.ouvrirVia).length === 0) continue;
+      assert.ok(listeCibles(etape.fermerVia).length > 0,
         `${espace.id}/${etape.id} ouvre une interface sans dire comment la refermer : quitter le guide laisserait l'élève dedans`);
     }
   }
@@ -333,10 +341,17 @@ await test("D5. le moteur prépare une fois, attend, puis REPLIE — il ne saute
   assert.match(composant, /Date\.now\(\) < echeance\.current/, "l'attente est comparée à une échéance");
   assert.match(composant, /attenteEnCours\.current = false;\s*\n\s*cancelAnimationFrame/,
     "la boucle d'attente est arrêtée au démontage");
-  assert.match(composant, /if \(etape\.fermerVia\) aFermer\.current = etape\.fermerVia;/,
-    "la commande de fermeture est mémorisée AU MOMENT de l'ouverture");
-  assert.match(composant, /if \(aFermer\.current\) \{\s*\n\s*elementCible\(aFermer\.current\)\?\.click\(\);/,
-    "et pressée à la sortie, depuis n'importe quelle étape");
+  assert.match(composant, /if \(fermetures\.length > 0\) aFermer\.current = fermetures;/,
+    "la ou les commandes de fermeture sont mémorisées AU MOMENT de l'ouverture");
+  assert.match(composant, /for \(const fermeture of aFermer\.current\) \{\s*\n\s*elementCible\(fermeture\)\?\.click\(\);/,
+    "et pressées à la sortie, dans l'ordre, depuis n'importe quelle étape");
+  /* ⚠️ UNE OUVERTURE PAR IMAGE. Presser les trois commandes d'affilée dans la
+     même image n'ouvrirait rien : la deuxième n'existe pas encore quand la
+     première est pressée. */
+  assert.match(composant, /ouverturesFaites\.current < ouvertures\.length/,
+    "la séquence d'ouverture reprend là où elle s'était arrêtée");
+  assert.match(composant, /ouverturesFaites\.current \+= 1;\s*\n\s*declencheur\.click\(\);/,
+    "une commande pressée, puis on rend la main au rendu");
 });
 
 await test("D6. le défilement couvre les DEUX axes et attend son terme", () => {
@@ -1157,4 +1172,124 @@ await test("M4. toutes les fonctions de séance sont couvertes par une étape", 
   const posees = ancresPosees();
   const sansAncre = attendues.filter((c) => !posees.has(c));
   assert.deepEqual(sansAncre, [], "étapes dont l'ancre n'est pas posée dans le code");
+});
+
+/* ═══════ N. L'INVITATION DE PREMIÈRE ARRIVÉE ═══════ */
+
+import {
+  PREFIXE_CLE_INVITATION,
+  cleInvitation,
+  invitationDejaProposee,
+  marquerInvitationProposee,
+} from "../../lib/guide-categories";
+
+await test("N1. chaque espace a sa propre mémoire d'invitation", () => {
+  const stockage = stockageFactice();
+  for (const espace of ESPACES_GUIDES) {
+    assert.equal(invitationDejaProposee(stockage, espace.id), false,
+      `${espace.id} : rien n'a encore été proposé`);
+  }
+  marquerInvitationProposee(stockage, "dashboard");
+  assert.equal(invitationDejaProposee(stockage, "dashboard"), true);
+  for (const espace of ESPACES_GUIDES) {
+    if (espace.id === "dashboard") continue;
+    assert.equal(invitationDejaProposee(stockage, espace.id), false,
+      `${espace.id} : avoir vu l'invitation du tableau de bord ne doit pas supprimer les autres`);
+  }
+});
+
+await test("N2. « proposée » et « visite faite » ne partagent JAMAIS leur clé", () => {
+  /*
+   * ⚠️ LES CONFONDRE CASSE LES DEUX SENS. Avec une clé commune, « Plus tard »
+   * marquerait la visite comme accomplie — donc plus aucune proposition nulle
+   * part —, et terminer une visite depuis le bouton permanent empêcherait
+   * l'invitation des autres espaces.
+   */
+  for (const espace of ESPACES_GUIDES) {
+    assert.notEqual(cleInvitation(espace.id), cleEspace(espace.id));
+    assert.notEqual(cleInvitation(espace.id), CLE_GUIDE_TERMINE);
+    assert.ok(cleInvitation(espace.id).startsWith(PREFIXE_CLE_INVITATION));
+  }
+  assert.notEqual(PREFIXE_CLE_INVITATION, PREFIXE_CLE_ESPACE);
+
+  const stockage = stockageFactice();
+  marquerInvitationProposee(stockage, "nutrition-plan");
+  assert.equal(espaceDejaVu(stockage, "nutrition-plan"), false,
+    "refuser l'invitation ne marque pas la visite comme faite");
+  assert.equal(stockage.getItem(CLE_GUIDE_TERMINE), null,
+    "et ne touche pas la visite des menus");
+});
+
+await test("N3. un stockage refusé ne fait pas planter l'invitation", () => {
+  const refus = {
+    getItem: () => {
+      throw new Error("mode privé");
+    },
+    setItem: () => {
+      throw new Error("mode privé");
+    },
+  };
+  assert.doesNotThrow(() => invitationDejaProposee(refus, "x"));
+  assert.equal(invitationDejaProposee(refus, "x"), false);
+  assert.doesNotThrow(() => marquerInvitationProposee(refus, "x"));
+  assert.equal(invitationDejaProposee(null, "x"), false);
+});
+
+await test("N4. le pop-up a bien la forme d'une fenêtre, et ses deux actions", () => {
+  const composant = readFileSync(`${RACINE}components/guide/GuideEspace.tsx`, "utf8");
+  assert.match(composant, /role="dialog"/, "c'est une fenêtre, pas une ligne dans le flux");
+  assert.match(composant, /aria-modal="true"/);
+  assert.match(composant, /aria-labelledby="invitation-guide-titre"/);
+  assert.match(composant, /Découvrez votre espace/, "le titre demandé");
+  assert.match(composant, /Faire la visite guidée/, "le bouton qui lance");
+  assert.match(composant, /Plus tard/, "et celui qui referme");
+  assert.match(composant, /min-h-\[44px\]/, "les deux actions respectent la taille de cible minimale");
+  assert.match(composant, /flex-col-reverse gap-2 sm:flex-row/, "et se réordonnent sur mobile");
+  // Le design reste celui de l'application : mêmes jetons, mêmes animations.
+  assert.match(composant, /modal-overlay-fade-in/);
+  assert.match(composant, /rounded-card border border-border bg-card/);
+});
+
+await test("N5. l'invitation attend la page, et ne se superpose à rien", () => {
+  const composant = sansProse(readFileSync(`${RACINE}components/guide/GuideEspace.tsx`, "utf8"));
+  /* ⚠️ UNE CONDITION RÉELLE, PAS UNE TEMPORISATION. Proposer de découvrir un
+     écran encore vide montrerait une visite sans aucune cible. */
+  assert.match(composant, /document\.querySelector\(`\[data-guide="\$\{CSS\.escape\(cible\)\}"\]`\)/,
+    "on attend qu'au moins une ancre de la visite existe");
+  assert.match(composant, /document\.querySelector\('\[role="dialog"\]\[aria-modal="true"\]'\)/,
+    "et qu'aucune autre fenêtre ne soit ouverte");
+  assert.match(composant, /requestAnimationFrame\(boucle\)/,
+    "la décision est prise depuis une image, jamais dans le corps de l'effet");
+  assert.match(composant, /cancelAnimationFrame\(image\)/, "et la boucle s'arrête au démontage");
+});
+
+await test("N6. l'invitation est marquée dès qu'elle est MONTRÉE", () => {
+  /*
+   * ⚠️ MONTRÉE, PAS RÉPONDUE. Si on n'écrivait la mémoire qu'au clic, une
+   * navigation qui quitte la page sans répondre ferait revenir le pop-up à
+   * chaque passage — exactement ce que le cahier des charges interdit.
+   */
+  const composant = sansProse(readFileSync(`${RACINE}components/guide/GuideEspace.tsx`, "utf8"));
+  assert.match(composant, /marquerInvitationProposee\([^)]*\);\s*\n\s*setInvite\(true\)/,
+    "la mémoire est écrite au moment de l'affichage");
+  assert.match(composant, /dejaPropose\.current === espaceId/,
+    "et un garde en mémoire évite un second affichage dans la même session");
+});
+
+await test("N7. l'invitation ne s'affiche que là où une visite existe", () => {
+  const composant = sansProse(readFileSync(`${RACINE}components/guide/GuideEspace.tsx`, "utf8"));
+  assert.match(composant, /if \(!espace\) return null;/,
+    "aucune route sans visite ne doit proposer quoi que ce soit");
+  // Et la résolution de route reste celle du catalogue, pas une seconde règle.
+  assert.match(composant, /espaceGuidePour\(pathname\)/);
+  assert.equal(espaceGuidePour("/profil"), null);
+  assert.equal(espaceGuidePour("/documents/abc"), null);
+});
+
+await test("N8. le pop-up réutilise le moteur, il n'en crée pas un second", () => {
+  const composant = readFileSync(`${RACINE}components/guide/GuideEspace.tsx`, "utf8");
+  assert.match(composant, /from "@\/components\/guide\/GuideDecouverte"/);
+  assert.match(composant, /<GuideDecouverte etapes=\{espace\.etapes\}/,
+    "« Faire la visite guidée » lance la visite DE CET ESPACE");
+  assert.match(composant, /marquerEspaceVu\(/, "et sa fin marque la visite comme faite, pas l'invitation");
 });

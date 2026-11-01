@@ -762,77 +762,133 @@ const NUTRITION_RECETTES: EspaceGuide = {
    * du créneau, et n'expose pas de nombre de parts.
    */
   etapes: [
+    /* ══════════════════════════════════════════════════════════════════════
+       LA VISITE PILOTE LA PAGE, ELLE NE LA COMMENTE PAS
+       ══════════════════════════════════════════════════════════════════════
+       ⚠️ CE QUI NE MARCHAIT PAS. Cette page n'affiche une recette qu'après
+       TROIS gestes : choisir le jour, puis le créneau, puis la recette. Seul
+       le jour est présélectionné. La visite expliquait donc des ingrédients,
+       des quantités et un écart que rien n'avait fait apparaître : quatre
+       étapes sur sept ne montraient qu'un encart « cela apparaîtra une fois
+       une recette ouverte ».
+
+       ⚠️ CE QUI LE REMPLACE. Les étapes déclarent la SÉQUENCE de commandes à
+       presser (`ouvrirVia`). Le moteur en presse une par image et attend le
+       rendu avant la suivante : le créneau n'est pressé qu'une fois affiché,
+       la recette qu'une fois la liste rendue.
+
+       ⚠️ AUCUNE DE CES COMMANDES N'ÉCRIT. Choisir un jour, un créneau ou une
+       recette ne touche que l'état React de la page — ce composant ne reçoit
+       aucun callback d'écriture et n'importe rien de `lib/supabase`. La sortie
+       presse « Changer de jour », qui remet exactement l'état d'arrivée.
+       ══════════════════════════════════════════════════════════════════════ */
     {
       id: "rec-jour",
+      demo: "recettes",
       cible: "recettes-jour",
       href: "/nutrition",
       titre: "Le jour",
       texte:
         "Tout part de là : les quantités affichées plus bas sont calculées pour les objectifs de CE jour de votre plan. Changer de jour les recalcule.",
+      texteSansCible:
+        "Le choix du jour apparaît dès que votre plan contient une semaine.",
     },
     {
       id: "rec-creneau",
+      demo: "recettes",
       cible: "recettes-creneau",
       href: "/nutrition",
       titre: "Le créneau",
       texte:
         "Petit-déjeuner, déjeuner, collation… Seuls les créneaux que votre coach a activés pour ce jour sont proposés. Si la liste est vide, c'est à lui d'en activer un.",
+      texteSansCible:
+        "Les créneaux apparaissent une fois un jour sélectionné.",
     },
     {
       id: "rec-cible",
+      demo: "recettes",
       cible: "recettes-cible",
       href: "/nutrition",
       titre: "Ce que vise ce créneau",
       texte:
-        "Les calories et les macros attribuées à ce seul créneau, réparties depuis les objectifs du jour. C'est la cible que les recettes essaient d'atteindre.",
+        "La visite vient d'ouvrir un créneau pour vous. Voici les calories et les macros qui lui sont attribuées, réparties depuis les objectifs du jour : c'est la cible que les recettes essaient d'atteindre.",
       texteSansCible:
-        "Les objectifs de ce créneau apparaissent une fois un jour et un créneau choisis.",
-      attenteMs: 1500,
+        "Les objectifs de ce créneau n'ont pas encore été renseignés par votre coach : sans eux, aucune quantité ne peut être calculée.",
+      ouvrirVia: ["recettes-jour-premier", "recettes-creneau-premier"],
+      fermerVia: "recettes-reinitialiser",
+      attenteMs: 2500,
     },
     {
       id: "rec-liste",
+      demo: "recettes",
       cible: "recettes-liste",
       href: "/nutrition",
       titre: "Les recettes proposées",
       texte:
         "Les recettes de votre coach compatibles avec ce créneau. Appuyer sur une recette ouvre son détail : cela ne l'enregistre ni ne la choisit pour vous.",
       texteSansCible:
-        "Les recettes proposées apparaissent une fois un créneau choisi.",
-      attenteMs: 1500,
+        "Aucune recette n'est disponible pour ce créneau. Votre coach en ajoutera peut-être bientôt.",
+      ouvrirVia: ["recettes-jour-premier", "recettes-creneau-premier"],
+      fermerVia: "recettes-reinitialiser",
+      attenteMs: 2500,
+    },
+    {
+      id: "rec-verdict",
+      demo: "recettes",
+      cible: "recettes-verdict",
+      href: "/nutrition",
+      titre: "Cette recette tient-elle la cible ?",
+      texte:
+        "La visite vient d'ouvrir une recette. Ce bandeau dit d'un mot ce que valent les quantités calculées face à la cible du créneau : exactes, approchantes, ou impossibles à atteindre avec cette recette.",
+      texteSansCible:
+        "Ce bandeau apparaît une fois une recette ouverte.",
+      ouvrirVia: ["recettes-jour-premier", "recettes-creneau-premier", "recettes-recette-premiere"],
+      fermerVia: "recettes-reinitialiser",
+      attenteMs: 3000,
     },
     {
       id: "rec-quantites",
+      demo: "recettes",
       cible: "recettes-quantites",
       href: "/nutrition",
       titre: "Les ingrédients et leurs quantités",
       texte:
-        "Chaque ingrédient avec la quantité recalculée pour approcher la cible, et ce qu'il apporte. « Plancher » ou « plafond » signale un ingrédient bloqué à une limite fixée par votre coach.",
+        "Chaque ingrédient avec la quantité recalculée pour approcher la cible, et ce qu'il apporte en protéines, glucides, lipides et calories. « Plancher » ou « plafond » signale un ingrédient bloqué à une limite fixée par votre coach.",
+      exemple: "Ces quantités sont celles de CE créneau : elles ne se confondent pas avec vos objectifs de la journée.",
       texteSansCible:
         "Les quantités adaptées apparaissent une fois une recette ouverte.",
-      attenteMs: 1500,
+      ouvrirVia: ["recettes-jour-premier", "recettes-creneau-premier", "recettes-recette-premiere"],
+      fermerVia: "recettes-reinitialiser",
+      attenteMs: 3000,
     },
     {
       id: "rec-ecarts",
+      demo: "recettes",
       cible: "recettes-ecarts",
       href: "/nutrition",
       titre: "L'écart qui reste",
       texte:
-        "La différence entre le total de la recette ainsi dosée et la cible du créneau. Un écart nul est rare ; le bandeau coloré au-dessus dit si l'approximation est acceptable.",
+        "La différence entre le total de la recette ainsi dosée et la cible du créneau, macro par macro. Un écart nul est rare ; le bandeau coloré au-dessus dit si l'approximation est acceptable.",
       texteSansCible:
         "Cet écart apparaît une fois une recette ouverte.",
-      attenteMs: 1500,
+      ouvrirVia: ["recettes-jour-premier", "recettes-creneau-premier", "recettes-recette-premiere"],
+      fermerVia: "recettes-reinitialiser",
+      attenteMs: 3000,
     },
     {
       id: "rec-sorties",
+      demo: "recettes",
       cible: "recettes-sorties",
       href: "/nutrition",
       titre: "Rien n'est enregistré ici",
       texte:
         "Ces trois boutons sont les seules actions de la page, et ils ne font que revenir en arrière. Cette page calcule et affiche : elle n'écrit ni dans votre journal, ni dans votre plan, et tout disparaît si vous rechargez.",
+      exemple: "Pour noter ce que vous avez vraiment mangé, passez par « Ajouter un aliment » sur la page du plan.",
       texteSansCible:
         "Ces boutons apparaissent une fois une recette ouverte.",
-      exemple: "Pour noter ce que vous avez vraiment mangé, passez par « Ajouter un aliment » sur la page du plan.",
-      attenteMs: 1500,
+      ouvrirVia: ["recettes-jour-premier", "recettes-creneau-premier", "recettes-recette-premiere"],
+      fermerVia: "recettes-reinitialiser",
+      attenteMs: 3000,
     },
   ],
 };
@@ -1142,5 +1198,50 @@ export function marquerEspaceVu(stockage: Pick<Storage, "setItem"> | null | unde
     stockage.setItem(cleEspace(id), "1");
   } catch {
     // Sans stockage, la proposition reviendra : acceptable, jamais bloquant.
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   L'INVITATION DE PREMIÈRE ARRIVÉE — UNE MÉMOIRE DE PLUS, ET SÉPARÉE
+   ══════════════════════════════════════════════════════════════════════════
+   ⚠️ PROPOSÉE N'EST PAS TERMINÉE, ET LES DEUX NE PARTAGENT PAS LEUR CLÉ.
+   « On lui a déjà proposé la visite de cet espace » et « il a fait la visite
+   de cet espace » répondent à des questions différentes. Les confondre aurait
+   deux effets, tous deux faux : refuser l'invitation une fois marquerait la
+   visite comme faite, et terminer la visite depuis le bouton permanent
+   empêcherait toute invitation future sur les autres espaces.
+
+   ⚠️ ET SURTOUT PAS LA CLÉ DE LA VISITE DES MENUS. Elle a encore un autre
+   rôle : la pastille du lanceur.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+export const PREFIXE_CLE_INVITATION = "guide-invitation-";
+
+export function cleInvitation(id: string): string {
+  return `${PREFIXE_CLE_INVITATION}${id}`;
+}
+
+export function invitationDejaProposee(
+  stockage: Pick<Storage, "getItem"> | null | undefined,
+  id: string,
+): boolean {
+  if (!stockage) return false;
+  try {
+    return stockage.getItem(cleInvitation(id)) === "1";
+  } catch {
+    // Stockage refusé (navigation privée) : on reproposera, ce qui est bénin.
+    return false;
+  }
+}
+
+export function marquerInvitationProposee(
+  stockage: Pick<Storage, "setItem"> | null | undefined,
+  id: string,
+): void {
+  if (!stockage) return;
+  try {
+    stockage.setItem(cleInvitation(id), "1");
+  } catch {
+    // Sans stockage, l'invitation reviendra : acceptable, jamais bloquant.
   }
 }
