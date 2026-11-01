@@ -186,7 +186,8 @@
     "test:provisioning-ligne-coach": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/provisioning-ligne-coach.mts",
     "test:guide-decouverte": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/guide-decouverte.mts",
     "test:guide-categories": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/guide-categories.mts",
-    "test:guide-demonstration": "npx tsx scripts/tests/guide-demonstration-render.mts"
+    "test:guide-demonstration": "npx tsx scripts/tests/guide-demonstration-render.mts",
+    "test:nutrition-mobile-largeur": "npx tsx scripts/tests/nutrition-mobile-largeur.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

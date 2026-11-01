@@ -132,14 +132,14 @@ export default function NutritionPage() {
         {(activePlan.hydrationTip || activePlan.supplements.length > 0) && (
           <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
             {activePlan.hydrationTip && (
-              <div className="flex flex-col gap-2 border border-border bg-card p-6">
+              <div className="flex flex-col gap-2 rounded-card border border-border bg-card p-6 shadow-soft">
                 <Droplet size={20} className="mb-2 text-primary" />
                 <span className="text-xs uppercase tracking-wide text-muted-foreground">Conseil hydratation</span>
                 <p className="text-sm leading-relaxed text-foreground">{activePlan.hydrationTip}</p>
               </div>
             )}
             {activePlan.supplements.length > 0 && (
-              <div className="flex flex-col gap-2 border border-border bg-card p-6">
+              <div className="flex flex-col gap-2 rounded-card border border-border bg-card p-6 shadow-soft">
                 <Pill size={20} className="mb-2 text-primary" />
                 <span className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">Compléments</span>
                 <ul className="flex flex-col gap-1 text-sm text-foreground">
@@ -153,7 +153,7 @@ export default function NutritionPage() {
         )}
 
         {activePlan.coachNotes && (
-          <div className="mb-8 flex flex-col gap-2 border border-border bg-card p-6">
+          <div className="mb-8 flex flex-col gap-2 rounded-card border border-border bg-card p-6 shadow-soft">
             <Lightbulb size={20} className="mb-2 text-primary" />
             <span className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">Consignes du coach</span>
             <p className="text-sm leading-relaxed text-foreground">{activePlan.coachNotes}</p>
@@ -166,32 +166,53 @@ export default function NutritionPage() {
           </h2>
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {plans.map((plan) => (
-              <div key={plan.id} className="flex flex-col gap-4 border border-border bg-card p-6">
+              /* ⚠️ MÊMES JETONS QUE LES CARTES DU HAUT DE PAGE, PAS UN STYLE
+                 DE PLUS. `rounded-card` (1 rem) et `shadow-soft` sont ceux que
+                 « Recettes » et « Générer ma liste de course » emploient déjà
+                 juste au-dessus : la page avait deux familles de coins pour des
+                 cartes de même rang. Aucune nouvelle valeur n'est introduite. */
+              <div
+                key={plan.id}
+                className="flex flex-col gap-4 rounded-card border border-border bg-card p-6 shadow-soft"
+              >
                 <div className="flex items-start justify-between gap-3">
-                  <h3 className="font-heading text-lg font-bold uppercase text-foreground">{plan.name}</h3>
+                  {/* `min-w-0` + `truncate` : un nom de plan long ne doit pas
+                      pousser la pastille d'état hors de la carte. */}
+                  <h3 className="min-w-0 flex-1 truncate font-heading text-lg font-bold uppercase text-foreground">
+                    {plan.name}
+                  </h3>
                   <StatusBadge status={plan.status} />
                 </div>
+                {/* Les quatre indicateurs prennent le vocabulaire des autres
+                    chiffres de l'espace élève : libellé en petites capitales
+                    espacées, valeur en chiffres tabulaires pour que les
+                    colonnes restent alignées d'une carte à l'autre. Les
+                    VALEURS elles-mêmes sont inchangées. */}
                 <div className="grid grid-cols-4 gap-2 text-sm text-foreground">
-                  <div>
-                    <span className="block text-xs uppercase tracking-wide text-muted-foreground">Kcal</span>
-                    {plan.caloriesPerDay}
+                  <div className="min-w-0">
+                    <span className="block text-[11px] uppercase tracking-widest text-muted-foreground">Kcal</span>
+                    <span className="font-semibold tabular-nums">{plan.caloriesPerDay}</span>
                   </div>
-                  <div>
-                    <span className="block text-xs uppercase tracking-wide text-muted-foreground">Prot</span>
-                    {plan.protein}g
+                  <div className="min-w-0">
+                    <span className="block text-[11px] uppercase tracking-widest text-muted-foreground">Prot</span>
+                    <span className="font-semibold tabular-nums">{plan.protein}g</span>
                   </div>
-                  <div>
-                    <span className="block text-xs uppercase tracking-wide text-muted-foreground">Gluc</span>
-                    {plan.carbs}g
+                  <div className="min-w-0">
+                    <span className="block text-[11px] uppercase tracking-widest text-muted-foreground">Gluc</span>
+                    <span className="font-semibold tabular-nums">{plan.carbs}g</span>
                   </div>
-                  <div>
-                    <span className="block text-xs uppercase tracking-wide text-muted-foreground">Lip</span>
-                    {plan.fat}g
+                  <div className="min-w-0">
+                    <span className="block text-[11px] uppercase tracking-widest text-muted-foreground">Lip</span>
+                    <span className="font-semibold tabular-nums">{plan.fat}g</span>
                   </div>
                 </div>
+                {/* `rounded-control` et `min-h-[44px]` : le même bouton bordé
+                    que partout ailleurs dans l'espace élève, et la cible
+                    tactile minimale. Le lien et sa destination sont
+                    inchangés. */}
                 <Link
                   href={`/nutrition/${plan.id}`}
-                  className="mt-2 block border border-primary py-3 text-center text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+                  className="pressable mt-2 flex min-h-[44px] items-center justify-center rounded-control border border-primary px-4 text-center text-xs uppercase tracking-widest text-primary transition-colors hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                 >
                   Voir le plan
                 </Link>
@@ -247,7 +268,7 @@ export default function NutritionPage() {
       />
 
       <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="flex flex-col gap-2 border border-border bg-card p-6">
+        <div className="flex flex-col gap-2 rounded-card border border-border bg-card p-6 shadow-soft">
           <Droplet size={20} className="mb-2 text-primary" />
           <span className="text-xs uppercase tracking-wide text-muted-foreground">
             Hydratation
@@ -256,7 +277,7 @@ export default function NutritionPage() {
             {hydrationAndSupplements.waterTarget}
           </span>
         </div>
-        <div className="flex flex-col gap-2 border border-border bg-card p-6">
+        <div className="flex flex-col gap-2 rounded-card border border-border bg-card p-6 shadow-soft">
           <Pill size={20} className="mb-2 text-primary" />
           <span className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">
             Compléments
@@ -267,7 +288,7 @@ export default function NutritionPage() {
             ))}
           </ul>
         </div>
-        <div className="flex flex-col gap-2 border border-border bg-card p-6">
+        <div className="flex flex-col gap-2 rounded-card border border-border bg-card p-6 shadow-soft">
           <Lightbulb size={20} className="mb-2 text-primary" />
           <span className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">
             Conseil du jour

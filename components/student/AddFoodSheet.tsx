@@ -466,7 +466,7 @@ export function AddFoodSheet({
       aria-label={`Ajouter un aliment à ${titreRepas}`}
       className="modal-overlay-fade-in fixed inset-0 z-50 flex items-end justify-center bg-black/70 sm:items-center sm:p-4"
     >
-      <div className="modal-content-scale-in flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-card border border-border bg-card shadow-soft sm:max-w-lg sm:rounded-card">
+      <div className="modal-content-scale-in flex max-h-[92vh] w-full max-w-full flex-col overflow-hidden rounded-t-card border border-border bg-card shadow-soft sm:max-w-lg sm:rounded-card">
         <div className="flex items-start justify-between gap-4 border-b border-border p-5 pb-4">
           <div className="min-w-0">
             <h3 className="font-heading text-base font-bold uppercase text-foreground">
@@ -503,7 +503,7 @@ export function AddFoodSheet({
               role="tab"
               aria-selected={onglet === clé}
               onClick={() => setOnglet(clé)}
-              className={`flex min-h-[48px] flex-1 items-center justify-center gap-2 border-b-2 text-xs font-bold uppercase tracking-widest transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+              className={`flex min-h-[48px] min-w-0 flex-1 items-center justify-center gap-2 border-b-2 text-xs font-bold uppercase tracking-widest transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
                 onglet === clé
                   ? "border-primary text-foreground"
                   : "border-transparent text-muted-foreground hover:text-foreground"
@@ -515,7 +515,20 @@ export function AddFoodSheet({
           ))}
         </div>
 
-        <div className="flex-1 overflow-y-auto p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+        {/* ⚠️ `overflow-x-hidden` EST DÉCLARÉ, PAS SOUS-ENTENDU. `overflow-y: auto`
+            seul laisse `overflow-x` à `visible` — et la spécification impose
+            alors de le calculer en `auto`. Cette zone devenait donc un
+            défileur HORIZONTAL silencieux : au moindre contenu trop large, au
+            lieu d'être rognée, la feuille glissait de côté et son contenu
+            sortait de l'écran. C'est ce qu'on voyait sur iPhone.
+
+            Ce n'est pas un `overflow-x: hidden` global sur le `body` — qui
+            masquerait la cause partout : c'est la déclaration d'intention de
+            CETTE zone, qui n'a aucune raison de défiler latéralement. Les
+            causes réelles (éléments flex qui refusaient de rétrécir) sont
+            corrigées séparément, plus bas. Le défilement VERTICAL est
+            inchangé. */}
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
           {erreur && (
             <div className="mb-4 flex items-start gap-3 rounded-panel border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
               <AlertTriangle size={18} className="mt-0.5 flex-shrink-0" />
@@ -565,7 +578,7 @@ export function AddFoodSheet({
                     setÉchecScan(null);
                   }}
                   placeholder="banane, riz, poulet…"
-                  className="min-h-[48px] w-full rounded-control border border-border bg-background px-4 py-3 text-base text-foreground transition-colors focus:border-primary focus:outline-none"
+                  className="min-h-[48px] w-full min-w-0 rounded-control border border-border bg-background px-4 py-3 text-base text-foreground transition-colors focus:border-primary focus:outline-none"
                 />
               </div>
 
@@ -917,7 +930,11 @@ export function AddFoodSheet({
                     value={quantitéManuelle}
                     onChange={(e) => setQuantitéManuelle(e.target.value)}
                     placeholder="120"
-                    className="min-h-[48px] w-full rounded-control border border-border bg-background px-4 py-3 text-base tabular-nums text-foreground transition-colors focus:border-primary focus:outline-none"
+                    /* ⚠️ `min-w-0` : un `<input>` porte une largeur intrinsèque
+                       (attribut `size`, ~20 caractères) qui, combinée à
+                       `min-width: auto`, l'empêche de rétrécir. À 320 px, le
+                       champ et ses boutons d'unité débordaient la feuille. */
+                    className="min-h-[48px] w-full min-w-0 rounded-control border border-border bg-background px-4 py-3 text-base tabular-nums text-foreground transition-colors focus:border-primary focus:outline-none"
                   />
                   <div className="flex flex-shrink-0 gap-1" role="group" aria-label="Unité">
                     {(["g", "ml"] as const).map((u) => (
@@ -1031,12 +1048,23 @@ function SectionRapide({
               : (élément.produit.brand ?? "Produit");
           const favori = estFavori(cible);
           return (
-            <li key={cleAlimentRapide(élément)} className="flex items-stretch gap-2">
+            /* ⚠️ `min-w-0` SUR LA LIGNE ET SUR LE BOUTON — c'était LA cause du
+               débordement horizontal de cette feuille. Un élément flex a
+               `min-width: auto` par défaut : il refuse de descendre sous la
+               largeur minimale de son contenu. Le nom d'un aliment Ciqual
+               (« Crème dessert à base de crème légère 4 % MG environ, fluide
+               ou épaisse ») imposait donc sa largeur à toute la ligne, étoile
+               comprise, et la feuille se mettait à défiler latéralement.
+
+               La ligne de RÉSULTAT, elle, enveloppait déjà son bouton dans un
+               `min-w-0 flex-1` : les deux listes avaient des contraintes de
+               largeur différentes alors qu'elles affichent la même chose. */
+            <li key={cleAlimentRapide(élément)} className="flex min-w-0 items-stretch gap-2">
               <button
                 type="button"
                 onClick={() => onChoisir(élément)}
                 disabled={désactivé}
-                className="pressable flex min-h-[48px] flex-1 items-center gap-3 rounded-control border border-border bg-surface-soft/40 px-3 py-2 text-left transition-colors hover:border-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
+                className="pressable flex min-h-[48px] min-w-0 flex-1 items-center gap-3 rounded-control border border-border bg-surface-soft/40 px-3 py-2 text-left transition-colors hover:border-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate text-sm font-semibold text-foreground">{nom}</span>
@@ -1110,7 +1138,7 @@ function LigneRésultat({
       type="button"
       onClick={onChoisir}
       disabled={désactivé}
-      className="pressable flex min-h-[56px] w-full items-center gap-3 rounded-control border border-border bg-surface-soft/40 px-3 py-2 text-left transition-colors hover:border-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
+      className="pressable flex min-h-[56px] w-full min-w-0 items-center gap-3 rounded-control border border-border bg-surface-soft/40 px-3 py-2 text-left transition-colors hover:border-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
     >
       {imageUrl ? (
         // Vignette DISTANTE : l'image appartient à Open Food Facts sous
@@ -1146,7 +1174,7 @@ function LigneRésultat({
   // abouti ou non.
   if (favori === undefined || !onBasculerFavori) return ligne;
   return (
-    <div className="flex items-stretch gap-2">
+    <div className="flex min-w-0 items-stretch gap-2">
       <div className="min-w-0 flex-1">{ligne}</div>
       <button
         type="button"
@@ -1263,7 +1291,9 @@ function FormulaireQuantité({
           inputMode="decimal"
           value={quantité}
           onChange={(e) => onQuantité(e.target.value)}
-          className="min-h-[48px] w-full rounded-control border border-border bg-background px-4 py-3 text-base tabular-nums text-foreground transition-colors focus:border-primary focus:outline-none"
+          /* Même raison que le champ de la saisie manuelle : sans `min-w-0`,
+             la largeur intrinsèque de l'`<input>` déborde la feuille. */
+          className="min-h-[48px] w-full min-w-0 rounded-control border border-border bg-background px-4 py-3 text-base tabular-nums text-foreground transition-colors focus:border-primary focus:outline-none"
         />
         <div className="flex flex-shrink-0 gap-1" role="group" aria-label="Unité">
           {unités.map((u) => (
@@ -1327,7 +1357,7 @@ function Champ({
         value={value}
         placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
-        className="min-h-[48px] w-full rounded-control border border-border bg-background px-4 py-3 text-base text-foreground transition-colors focus:border-primary focus:outline-none"
+        className="min-h-[48px] w-full min-w-0 rounded-control border border-border bg-background px-4 py-3 text-base text-foreground transition-colors focus:border-primary focus:outline-none"
       />
     </div>
   );
@@ -1345,7 +1375,11 @@ function ChampNombre({
   onChange: (v: string) => void;
 }) {
   return (
-    <div>
+    /* ⚠️ `min-w-0` SUR LA CELLULE AUTANT QUE SUR LE CHAMP. Une cellule de
+       grille porte `min-width: auto` exactement comme un élément flex : sans
+       cela, les trois colonnes de `grid-cols-3` réclamaient chacune la largeur
+       intrinsèque d'un `<input>`, et la saisie manuelle débordait l'écran. */
+    <div className="min-w-0">
       <label htmlFor={id} className="mb-1.5 block text-[11px] uppercase tracking-wide text-muted-foreground">
         {label}
       </label>
@@ -1356,7 +1390,7 @@ function ChampNombre({
         value={value}
         placeholder="0"
         onChange={(e) => onChange(e.target.value)}
-        className="min-h-[48px] w-full rounded-control border border-border bg-background px-3 py-3 text-base tabular-nums text-foreground transition-colors focus:border-primary focus:outline-none"
+        className="min-h-[48px] w-full min-w-0 rounded-control border border-border bg-background px-3 py-3 text-base tabular-nums text-foreground transition-colors focus:border-primary focus:outline-none"
       />
     </div>
   );
