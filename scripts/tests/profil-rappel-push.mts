@@ -684,3 +684,278 @@ await test("E-9. le message demandé par le cahier des charges est présent, au 
   assert.ok(/aria-label="Fermer"/.test(socle), "le socle fournit une croix accessible");
   assert.ok(/role="dialog"/.test(socle) && /aria-modal="true"/.test(socle), "…et le rôle dialogue");
 });
+
+/* ══════════════════════════════════════════════════════════════════════════
+   G. LE RAPPEL DÈS L'ARRIVÉE — TABLEAU DE BORD
+   ══════════════════════════════════════════════════════════════════════════
+   ⚠️ LE DÉFAUT CORRIGÉ. Le rappel n'existait que sur `/profil`, monté par
+   `NotificationsSection` — l'onglet où l'on va justement le moins souvent. Un
+   élève qui ne l'ouvrait jamais ne voyait jamais la demande, et ne recevait
+   donc plus aucune notification sans jamais savoir pourquoi.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+const CODE_AUTONOME = sansProse(lire("../../components/student/RappelPushAutonome.tsx"));
+/* Relu sous un autre nom dans le bloc H, pour que chaque bloc reste lisible seul. */
+const CODE_AUTONOME_SESSION = CODE_AUTONOME;
+const CODE_PAGE_DASHBOARD = sansProse(lire("../../app/(student)/dashboard/page.tsx"));
+const CODE_PAGE_PROFIL = sansProse(lire("../../app/(student)/profil/page.tsx"));
+
+await test("G-1. le rappel est monté sur le tableau de bord", () => {
+  assert.match(CODE_PAGE_DASHBOARD, /<RappelPushAutonome \/>/,
+    "sans ce montage, le rappel reste invisible pour qui n'ouvre pas son profil");
+  assert.match(CODE_PAGE_DASHBOARD, /from "@\/components\/student\/RappelPushAutonome"/);
+});
+
+await test("G-2. ⚠️ JAMAIS DEUX INSTANCES DU HOOK SUR UNE MÊME PAGE", () => {
+  /*
+   * C'est la règle que `NotificationsSection` documente depuis sa création :
+   * deux appels à `useNotificationsPush` produiraient deux états indépendants,
+   * deux interrogations du serveur, et la possibilité qu'ils se contredisent —
+   * la fenêtre disant « réactive » pendant que le bloc dit « actif ».
+   *
+   * Les deux points de montage doivent donc rester sur des pages DIFFÉRENTES.
+   */
+  assert.doesNotMatch(CODE_PAGE_DASHBOARD, /NotificationsSection/,
+    "le tableau de bord ne porte pas le bloc de réglages");
+  assert.doesNotMatch(CODE_PAGE_PROFIL, /RappelPushAutonome/,
+    "et le profil ne porte pas le rappel autonome : il a déjà le sien");
+  assert.doesNotMatch(sansProse(lire("../../components/student/DashboardContent.tsx")), /useNotificationsPush/,
+    "le contenu du tableau de bord ne lit pas l'état Push de son côté");
+  assert.doesNotMatch(sansProse(lire("../../app/(student)/layout.tsx")), /RappelPushAutonome|useNotificationsPush/,
+    "monté dans le layout, il aurait recréé le doublon sur /profil");
+
+  // Une seule lecture du hook dans le composant autonome.
+  const lectures = [...CODE_AUTONOME.matchAll(/useNotificationsPush\(\)/g)];
+  assert.equal(lectures.length, 1);
+});
+
+await test("G-3. aucun SECOND mécanisme : même fenêtre, même règle, même parcours", () => {
+  assert.match(CODE_AUTONOME, /from "@\/components\/student\/RappelNotificationsPush"/,
+    "la fenêtre est celle du profil, pas une copie");
+  assert.match(CODE_AUTONOME, /rappelPushVisible\(etat, session\)/,
+    "la décision d'affichage passe par la couche de session…");
+  assert.match(sansProse(lire("../../lib/push/rappel-session.ts")), /doitProposerRappel\(/,
+    "…qui délègue elle-même à la règle d'états du profil : une seule table, pas deux");
+  assert.match(CODE_AUTONOME, /onReactiver=\{\(\) => void activer\(\)\}/,
+    "et le bouton exécute le VRAI parcours d'activation");
+  assert.doesNotMatch(CODE_AUTONOME, /Notification\.requestPermission|serviceWorker/,
+    "rien du socle Push n'est réécrit ici");
+});
+
+await test("G-4. rien ne s'affiche tant que l'état Push n'est pas connu", () => {
+  /*
+   * Une fenêtre qui s'ouvrirait par-dessus un écran de chargement serait
+   * refermée d'un geste réflexe, sans être lue.
+   */
+  /* La garde a migré dans `rappelPushVisible` avec le reste de la décision :
+     elle est désormais partagée par tous les appelants, au lieu d'être
+     recopiée dans chaque composant qui monte le rappel. */
+  assert.match(sansProse(lire("../../lib/push/rappel-session.ts")),
+    /if \(etat === "chargement"\) return false;/);
+  assert.equal(doitProposerRappel("chargement", false, false), false);
+});
+
+await test("G-5. « Plus tard » n'écrit toujours rien, nulle part", () => {
+  /*
+   * ⚠️ PAS DE VERROU PERSISTANT. Un `localStorage` ferait taire le rappel
+   * définitivement au premier « Plus tard » — alors que « plus tard » veut dire
+   * plus tard, pas « non ». L'état vit dans la visite.
+   */
+  assert.doesNotMatch(CODE_AUTONOME, /localStorage|sessionStorage|document\.cookie/,
+    "aucune préférence écrite");
+  assert.doesNotMatch(CODE_AUTONOME, /fetch\(|supabase/,
+    "aucun appel réseau à la fermeture");
+  assert.match(CODE_AUTONOME, /onFermer=\{reporter\}/,
+    "fermer ne fait qu'enregistrer le report dans la session");
+  // Fermée, la fenêtre ne se rouvre pas dans la même visite.
+  assert.equal(doitProposerRappel("a_reactiver", false, true), false);
+  assert.equal(doitProposerRappel("inactif", false, true), false);
+});
+
+await test("G-6. les quatre états qui méritent un rappel le déclenchent aussi au tableau de bord", () => {
+  /* La règle étant partagée, c'est la même table de vérité qui s'applique —
+     on la rejoue ici pour que le lien soit explicite plutôt que supposé. */
+  assert.equal(doitProposerRappel("a_reactiver", false, false), true);
+  assert.equal(doitProposerRappel("inactif", false, false), true);
+  assert.equal(doitProposerRappel("refuse", false, false), true);
+  assert.equal(doitProposerRappel("active", false, false), false, "déjà actives : rien à demander");
+  assert.equal(doitProposerRappel("non_supporte", false, false), false, "appareil incapable : rien à proposer");
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+   H. « PLUS TARD » TIENT POUR LA SESSION — ET PAS AU-DELÀ
+   ══════════════════════════════════════════════════════════════════════════
+   ⚠️ LE DÉFAUT CORRIGÉ. Le report vivait dans un `useState` du composant, et
+   le composant est démonté à chaque changement de route : aller voir sa
+   nutrition puis revenir au tableau de bord rouvrait la même fenêtre, déjà
+   refusée. Une demande légitime devenait du harcèlement.
+
+   ⚠️ CE QUE CE BLOC EXÉCUTE VRAIMENT. Ni jsdom ni navigateur ici : on ne clique
+   pas. Mais la question posée n'est PAS « le clic marche-t-il » — c'est « à
+   quelle DURÉE DE VIE le report est-il attaché ». On modélise donc les deux
+   durées de vie en présence (la session du layout, le montage de la page) et on
+   rejoue la séquence complète sur les vraies fonctions. Le modèle fautif est
+   rejoué lui aussi, pour que le test échoue si on y revenait.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+import {
+  SESSION_RAPPEL_INITIALE,
+  rappelPushVisible,
+  reporterRappel,
+  type SessionRappelPush,
+} from "../../lib/push/rappel-session";
+import type { EtatNotifications } from "../../lib/push/etat";
+
+const CODE_PROVIDER = sansProse(lire("../../components/student/SessionRappelPushProvider.tsx"));
+const CODE_LAYOUT_ELEVE = sansProse(lire("../../app/(student)/layout.tsx"));
+
+/**
+ * Une session d'application : ce que le provider du layout tient entre deux
+ * rechargements de page. Ouvrir l'application en crée une neuve.
+ */
+function ouvrirApplication() {
+  let session: SessionRappelPush = SESSION_RAPPEL_INITIALE;
+  return {
+    /** Arriver sur une page qui monte le rappel : la fenêtre est-elle là ? */
+    afficherPage: (etat: EtatNotifications) => rappelPushVisible(etat, session),
+    /** Le clic sur « Plus tard ». */
+    plusTard: () => {
+      session = reporterRappel(session);
+    },
+    lire: () => session,
+  };
+}
+
+await test("H-1. la séquence complète : report, navigation, retour, nouvelle session", () => {
+  // 1. Arrivée sur le tableau de bord, notifications à réactiver.
+  const application = ouvrirApplication();
+  assert.equal(application.afficherPage("a_reactiver"), true, "1. le rappel s'affiche à l'arrivée");
+
+  // 2. Clic sur « Plus tard ».
+  application.plusTard();
+  assert.equal(application.afficherPage("a_reactiver"), false, "2. la fenêtre disparaît");
+
+  // 3. Navigation vers une autre page : le composant est démonté, la session
+  //    vit dans le layout, qui ne l'est pas.
+  assert.equal(application.afficherPage("a_reactiver"), false, "3. rien ne s'ouvre ailleurs");
+
+  // 4 et 5. Retour au tableau de bord : nouveau montage, même session.
+  assert.equal(application.afficherPage("a_reactiver"), false,
+    "5. le rappel reste fermé au retour — c'est le défaut corrigé");
+
+  // 6. Nouvelle ouverture de l'application.
+  const seconde = ouvrirApplication();
+  // 7. Les notifications sont toujours éteintes : on repose la question.
+  assert.equal(seconde.afficherPage("a_reactiver"), true,
+    "7. une nouvelle session repose la question");
+  assert.deepEqual(seconde.lire(), SESSION_RAPPEL_INITIALE, "et elle repart de zéro");
+});
+
+await test("H-2. le modèle FAUTIF échoue sur la même séquence", () => {
+  /*
+   * ⚠️ SANS CE CONTRÔLE, H-1 NE PROUVERAIT RIEN. Un test qui ne passe que sur
+   * la bonne implémentation doit aussi tomber sur la mauvaise, sinon il ne
+   * mesure rien. On rejoue donc la séquence avec le report attaché au MONTAGE,
+   * comme avant ce lot : le retour au tableau de bord rouvre la fenêtre.
+   */
+  let reporteParLeComposant = false; // l'ancien `useState` local
+  const monter = () => {
+    reporteParLeComposant = false; // ⚠️ un nouveau montage repart à zéro
+    return () => rappelPushVisible("a_reactiver", { reporte: reporteParLeComposant });
+  };
+
+  let visible = monter();
+  assert.equal(visible(), true, "arrivée");
+  reporteParLeComposant = true;
+  assert.equal(visible(), false, "« Plus tard »");
+
+  visible = monter(); // navigation puis retour
+  assert.equal(visible(), true,
+    "l'ancien modèle rouvrait la fenêtre au retour : c'est bien ce que H-1 interdit");
+});
+
+await test("H-3. un second « Plus tard » ne change rien, et ne rend pas pour rien", () => {
+  const session = reporterRappel(SESSION_RAPPEL_INITIALE);
+  assert.equal(session.reporte, true);
+  assert.equal(reporterRappel(session), session,
+    "le même objet est rendu : React ne déclenche aucun rendu supplémentaire");
+  assert.deepEqual(SESSION_RAPPEL_INITIALE, { reporte: false },
+    "et la constante initiale n'est jamais mutée");
+});
+
+await test("H-4. le report ne vaut QUE pour les états qui méritaient un rappel", () => {
+  /* Il ne devient pas un interrupteur général : un état `active` ne proposait
+     déjà rien, et un `non_supporte` non plus. */
+  const reporte: SessionRappelPush = { reporte: true };
+  for (const etat of ["a_reactiver", "inactif", "refuse"] as const) {
+    assert.equal(rappelPushVisible(etat, SESSION_RAPPEL_INITIALE), true, `${etat} sans report`);
+    assert.equal(rappelPushVisible(etat, reporte), false, `${etat} après report`);
+  }
+  for (const etat of ["active", "non_supporte", "chargement"] as const) {
+    assert.equal(rappelPushVisible(etat, SESSION_RAPPEL_INITIALE), false,
+      `${etat} ne propose rien, report ou pas`);
+  }
+});
+
+await test("H-5. la règle d'état n'est PAS réécrite : elle délègue au profil", () => {
+  /*
+   * Dupliquer la table des états aurait signé sa divergence au premier état
+   * ajouté — le rappel du tableau de bord et celui du profil se seraient mis à
+   * dire deux choses différentes.
+   */
+  const code = sansProse(lire("../../lib/push/rappel-session.ts"));
+  assert.match(code, /doitProposerRappel\(etat, false, session\.reporte\)/,
+    "la même fonction pure que le profil décide quels états méritent un rappel");
+  assert.doesNotMatch(code, /"a_reactiver"\s*\|\|/, "aucune table d'états recopiée ici");
+});
+
+await test("H-6. la mémoire vit dans le LAYOUT, seule durée de vie correcte", () => {
+  /*
+   * ⚠️ C'EST LA DURÉE DE VIE QUI FAIT TOUT LE TRAVAIL. Le layout `(student)`
+   * n'est pas remonté d'une route à l'autre : seuls les `children` changent.
+   * Dans la page, l'état serait perdu à la première navigation.
+   */
+  assert.match(CODE_LAYOUT_ELEVE, /<SessionRappelPushProvider>/,
+    "le provider enveloppe l'espace élève");
+  assert.match(CODE_LAYOUT_ELEVE, /from "@\/components\/student\/SessionRappelPushProvider"/);
+  assert.doesNotMatch(sansProse(lire("../../app/(student)/dashboard/page.tsx")), /SessionRappelPushProvider/,
+    "monté dans la page, il serait remonté — donc remis à zéro — à chaque navigation");
+
+  // Et le composant ne tient plus d'état local pour ce report.
+  assert.match(CODE_AUTONOME_SESSION, /useSessionRappelPush\(\)/,
+    "le rappel lit la session plutôt qu'un état à lui");
+  assert.doesNotMatch(CODE_AUTONOME_SESSION, /useState/,
+    "aucun état local ne doit revenir : il serait perdu à la navigation");
+});
+
+await test("H-7. RIEN n'est persisté, et l'état réel des notifications n'est pas touché", () => {
+  for (const [nom, code] of [
+    ["le modèle", sansProse(lire("../../lib/push/rappel-session.ts"))],
+    ["le provider", CODE_PROVIDER],
+    ["le rappel", CODE_AUTONOME_SESSION],
+  ] as const) {
+    assert.doesNotMatch(code, /localStorage|sessionStorage|document\.cookie|indexedDB/,
+      `${nom} : aucune mémorisation permanente du refus`);
+    assert.doesNotMatch(code, /supabase|from\("push_subscriptions"\)/i,
+      `${nom} : rien dans la base`);
+    assert.doesNotMatch(code, /fetch\(|Notification\.requestPermission|serviceWorker/,
+      `${nom} : reporter n'est pas refuser — aucun appel, aucune permission touchée`);
+  }
+  // Le provider ne crée aucune seconde instance du hook Push.
+  assert.doesNotMatch(CODE_PROVIDER, /useNotificationsPush/,
+    "la règle « une seule instance par page » reste intacte");
+});
+
+await test("H-8. le rappel du PROFIL est inchangé", () => {
+  /*
+   * Il garde son `ferme` local, et c'est voulu : sur le profil, la fenêtre est
+   * adossée au bloc « Notifications » qui porte les boutons et le message de
+   * confirmation. Ce lot ne touche pas à ce parcours.
+   */
+  assert.match(CODE_SECTION, /const \[ferme, setFerme\] = useState\(false\)/,
+    "le profil conserve son état local");
+  assert.match(CODE_SECTION, /doitProposerRappel\(etat, false, ferme\)/,
+    "et sa règle d'affichage d'origine");
+  assert.doesNotMatch(CODE_SECTION, /useSessionRappelPush|rappelPushVisible/,
+    "il n'est pas branché sur la session : le lot ne devait pas le modifier");
+});
