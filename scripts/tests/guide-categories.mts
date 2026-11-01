@@ -25,7 +25,7 @@ import {
   CLE_GUIDE_TERMINE,
   ETAPES_ELEVE as ETAPES_ELEVE_IMPORT,
   ETAPES_STAFF as ETAPES_STAFF_IMPORT,
-  prochaineEtapeAtteignable,
+  deployerEtapes,
 } from "../../lib/guide-decouverte";
 
 const RACINE = new URL("../../", import.meta.url).pathname;
@@ -65,13 +65,18 @@ function ancresPosees(): Set<string> {
        *     sur sa racine (StatCard : l'envelopper casserait la grille) ;
        *   · `{...(cond ? { "data-guide": "x" } : {})}` — l'attribut posé
        *     CONDITIONNELLEMENT, seule façon de n'ancrer que la première série
-       *     d'un exercice sans dupliquer l'attribut sur toutes les lignes.
+       *     d'un exercice sans dupliquer l'attribut sur toutes les lignes ;
+       *   · `data-guide={cond ? "x" : undefined}` — l'ancre qui n'existe que
+       *     dans un mode précis (le cadre du scanner, en démonstration).
        * N'en connaître qu'une partie ferait échouer ce contrôle sur des ancres
        * pourtant bien réelles — et inciterait à affaiblir l'assertion.
        */
       for (const m of source.matchAll(/data-guide="([^"]+)"/g)) trouvees.add(m[1]!);
       for (const m of source.matchAll(/dataGuide="([^"]+)"/g)) trouvees.add(m[1]!);
       for (const m of source.matchAll(/"data-guide":\s*"([^"]+)"/g)) trouvees.add(m[1]!);
+      for (const bloc of source.matchAll(/data-guide=\{([^}]*)\}/g)) {
+        for (const m of bloc[1]!.matchAll(/"([^"]+)"/g)) trouvees.add(m[1]!);
+      }
     }
   };
   parcourir(`${RACINE}app`);
@@ -202,7 +207,35 @@ await test("C2. aucun espace vide, aucun identifiant ni aucune cible en double",
     }
   }
   assert.equal(new Set(ids).size, ids.length, "identifiants d'étape uniques");
-  assert.equal(new Set(cibles).size, cibles.length, "cibles uniques");
+});
+
+await test("C2b. une cible partagée l'est À DESSEIN, jamais par inadvertance", () => {
+  /*
+   * ⚠️ RÈGLE ASSOUPLIE, MAIS PAS SUPPRIMÉE. Une même ancre sert maintenant
+   * légitimement deux fois : une étape qui détaille l'ANATOMIE de la première
+   * carte, puis une étape répétée qui PARCOURT toutes les cartes. Exiger
+   * l'unicité pure interdirait ce parcours ; ne rien exiger laisserait repasser
+   * le vrai défaut — deux étapes qui montrent la même chose sans le vouloir.
+   *
+   * Le couple est donc autorisé à deux conditions : au plus deux étapes par
+   * ancre, et exactement une des deux déclare la répétition.
+   */
+  for (const espace of ESPACES_GUIDES) {
+    const parCible = new Map<string, typeof espace.etapes[number][]>();
+    for (const etape of espace.etapes) {
+      const liste = parCible.get(etape.cible) ?? [];
+      liste.push(etape);
+      parCible.set(etape.cible, liste);
+    }
+    for (const [cible, liste] of parCible) {
+      if (liste.length === 1) continue;
+      assert.equal(liste.length, 2,
+        `${espace.id} : « ${cible} » est visée ${liste.length} fois — au-delà d'un couple anatomie/parcours, c'est une répétition involontaire`);
+      const repetees = liste.filter((e) => e.repeterPour !== undefined);
+      assert.equal(repetees.length, 1,
+        `${espace.id} : « ${cible} » doit avoir exactement une étape de parcours et une étape de détail`);
+    }
+  }
 });
 
 await test("C3. la visite d'espace n'altère pas celle des menus", () => {
@@ -279,32 +312,48 @@ await test("D4. les nouveaux champs restent OPTIONNELS : les parcours existants 
   }
 });
 
-await test("D5. le moteur ouvre au plus une fois par étape et ne reste jamais bloqué", () => {
+await test("D5. le moteur prépare une fois, attend, puis REPLIE — il ne saute plus rien", () => {
   const composant = readFileSync(`${RACINE}components/guide/GuideDecouverte.tsx`, "utf8");
-  assert.match(composant, /ouvertePour\.current !== etape\.id/, "une ouverture par étape, pas une par image");
-  assert.match(composant, /ouvertePour\.current = etape\.id/, "le déclencheur est marqué avant d'être pressé");
+
+  /* ⚠️ L'INVARIANT LE PLUS IMPORTANT DE CETTE VERSION. L'ancien moteur
+     appelait `prochaineEtapeAtteignable` quand la cible manquait : la visite
+     de nutrition s'arrêtait à la dixième étape sur vingt-trois, sans un mot,
+     parce que tout ce qui suivait vivait dans une feuille fermée. Ce contrôle
+     interdit le retour de ce comportement. */
+  assert.doesNotMatch(composant, /prochaineEtapeAtteignable/,
+    "aucune étape ne doit plus être sautée parce que sa cible manque");
+  assert.match(composant, /setRepli\(true\)/, "une cible introuvable affiche l'étape en repli");
+  assert.match(composant, /console\.warn/, "et le signale en développement");
+  assert.match(composant, /process\.env\.NODE_ENV !== "production"/,
+    "la journalisation reste hors production");
+
+  assert.match(composant, /preparePour\.current !== etape\.id/, "une préparation par étape, pas une par image");
+  assert.match(composant, /appliquerScenario\(etape\.demo \?\? "aucun"\)/,
+    "une étape sans scénario ÉTEINT la démonstration : aucune fuite vers la suite");
   assert.match(composant, /Date\.now\(\) < echeance\.current/, "l'attente est comparée à une échéance");
-  assert.match(composant, /prochaineEtapeAtteignable\(etapes, index \+ 1, 1, cibleExiste\)/,
-    "délai écoulé : on saute à l'étape suivante");
   assert.match(composant, /attenteEnCours\.current = false;\s*\n\s*cancelAnimationFrame/,
     "la boucle d'attente est arrêtée au démontage");
-  /*
-   * ⚠️ CONTRAT RENFORCÉ, PAS ASSOUPLI. La version précédente ne refermait que si
-   * l'étape COURANTE était celle qui avait ouvert. Une interface ouverte à
-   * l'étape 2 et quittée à l'étape 5 restait donc ouverte — et c'est à l'étape
-   * 5 qu'on quitte, puisqu'on a lu ce qu'on voulait. La commande de fermeture
-   * est maintenant retenue au moment de l'ouverture et vaut pour toute la
-   * suite du parcours.
-   *
-   * La garantie « seulement ce que le guide a ouvert » est préservée : `aFermer`
-   * n'est renseigné que dans la branche qui presse réellement le déclencheur.
-   */
   assert.match(composant, /if \(etape\.fermerVia\) aFermer\.current = etape\.fermerVia;/,
     "la commande de fermeture est mémorisée AU MOMENT de l'ouverture");
   assert.match(composant, /if \(aFermer\.current\) \{\s*\n\s*elementCible\(aFermer\.current\)\?\.click\(\);/,
     "et pressée à la sortie, depuis n'importe quelle étape");
-  assert.doesNotMatch(composant, /ouvertePour\.current === etape\.id/,
-    "l'ancienne condition, trop étroite, ne doit pas revenir");
+});
+
+await test("D6. le défilement couvre les DEUX axes et attend son terme", () => {
+  /*
+   * ⚠️ LA CORRECTION DU RAIL DE SÉANCE. Les cartes d'exercice vivent dans un
+   * conteneur `overflow-x:auto` : un défilement qui ne parlait que de l'axe
+   * vertical ne les atteignait jamais, et la visite restait sur la première.
+   */
+  const composant = readFileSync(`${RACINE}components/guide/GuideDecouverte.tsx`, "utf8");
+  assert.match(composant, /block: "center", inline: "center"/,
+    "sans `inline`, le rail horizontal n'est jamais déplacé");
+  assert.match(composant, /imagesStables\.current >= IMAGES_STABLES/,
+    "on attend l'immobilité de la cible avant de considérer le défilement terminé");
+  assert.match(composant, /Date\.now\(\) < echeanceDefilement\.current/,
+    "et cette attente est bornée : un défilement empêché ne fige pas le parcours");
+  assert.match(composant, /const tous = document\.querySelectorAll/,
+    "la cible est résolue par RANG : sans cela, seule la première carte du rail était atteignable");
 });
 
 /* ═══════════ E. NUTRITION : OBJECTIFS, CONSOMMÉ, RESTANT ═══════════ */
@@ -387,21 +436,20 @@ await test("F2. une étape ne peut pas à la fois presser et laisser presser", (
   }
 });
 
-await test("F3. l'ouverture de la feuille d'ajout est laissée à l'élève, car elle écrit", () => {
+await test("F3. le guide n'ouvre JAMAIS la feuille d'un vrai repas, parce qu'elle écrit", () => {
   /*
    * ⚠️ LE CONTRÔLE LE PLUS IMPORTANT DE CE LOT. `ouvrirAjout()` dans
    * `ConsumedMealSection` appelle `onOuvrirConteneur()` quand aucun repas
    * n'existe encore pour le créneau : presser ce bouton CRÉE une ligne en base.
-   * Une visite qui le presserait écrirait dans le journal alimentaire d'un
-   * élève pour illustrer une explication. L'étape doit donc déclarer
-   * `gesteAttendu`, et surtout pas `ouvrirVia`.
+   * La visite ne le presse donc pas — elle monte sa PROPRE feuille d'ajout,
+   * avec des fixtures et des callbacks inertes.
    */
   const nutrition = ESPACES_GUIDES.find((e) => e.id === "nutrition-plan");
   assert.ok(nutrition);
   const ouvrir = nutrition.etapes.find((e) => e.cible === "nutrition-ajout-ouvrir");
-  assert.ok(ouvrir, "l'étape d'ouverture de la feuille d'ajout existe");
-  assert.equal(ouvrir.gesteAttendu, true, "l'élève appuie lui-même");
+  assert.ok(ouvrir, "l'étape qui montre le bouton d'ouverture existe");
   assert.equal(ouvrir.ouvrirVia, undefined, "le guide ne presse pas ce bouton");
+  assert.equal(ouvrir.demo, undefined, "et il n'ouvre rien à cette étape : il montre la page réelle");
   for (const espace of ESPACES_GUIDES) {
     for (const etape of espace.etapes) {
       assert.notEqual(etape.ouvrirVia, "nutrition-ajout-ouvrir",
@@ -413,6 +461,30 @@ await test("F3. l'ouverture de la feuille d'ajout est laissée à l'élève, car
   const section = sansProse(readFileSync(`${RACINE}components/student/ConsumedMealSection.tsx`, "utf8"));
   assert.match(section, /onOuvrirConteneur\(\)/,
     "si l'ouverture n'écrit plus rien, cette contrainte doit être rediscutée — pas contournée");
+});
+
+await test("F3b. la feuille de démonstration n'a RIEN à appeler", () => {
+  /*
+   * ⚠️ UNE GARANTIE STRUCTURELLE, PAS UNE PROMESSE. `GuideDemonstration` monte
+   * le vrai composant `AddFoodSheet` avec des callbacks qui ne reçoivent aucune
+   * fonction de `lib/supabase`. Il n'y a pas « un appel qu'on évite » : il n'y
+   * a aucune fonction d'écriture dans cette portée.
+   */
+  const demo = sansProse(readFileSync(`${RACINE}components/guide/GuideDemonstration.tsx`, "utf8"));
+  assert.doesNotMatch(demo, /lib\/supabase/, "aucun import de la base");
+  assert.doesNotMatch(demo, /fetch\(/, "aucun appel sortant");
+  assert.match(demo, /onAjouterCatalogue=\{async \(\) => false\}/, "l'ajout catalogue ne mène nulle part");
+  assert.match(demo, /onAjouterProduit=\{async \(\) => false\}/, "l'ajout produit non plus");
+  assert.match(demo, /onAjouterManuel=\{async \(\) => false\}/, "la saisie manuelle non plus");
+
+  // Les fixtures sont reconnaissables : rien qui ressemble à un identifiant réel.
+  const fixtures = sansProse(readFileSync(`${RACINE}lib/guide-demonstration.ts`, "utf8"));
+  assert.doesNotMatch(fixtures, /lib\/supabase\/(?!consumed-meals)/, "le magasin n'appelle pas la base");
+  for (const m of fixtures.matchAll(/id: `\$\{PREFIXE_DEMONSTRATION\}([a-z-]+)`/g)) {
+    assert.ok(m[1]!.length > 0);
+  }
+  assert.match(fixtures, /PREFIXE_DEMONSTRATION = "demo-"/,
+    "un identifiant de démonstration doit se voir du premier coup d'œil dans n'importe quel journal");
 });
 
 await test("F4. la visite n'allume jamais la caméra", () => {
@@ -469,8 +541,8 @@ await test("G1. la quantité et la confirmation sont ciblées SÉPARÉMENT", () 
     "appuyer sur un résultat ne fait qu'ouvrir l'étape de quantité");
   const confirmer = nutrition.etapes.find((e) => e.cible === "nutrition-ajout-confirmer")!;
   assert.match(confirmer.texte, /journal/i, "l'étape dit OÙ la ligne est écrite");
-  assert.match(confirmer.texte, /ne le presse pas|pas la visite/i,
-    "et que la visite ne le presse pas");
+  assert.match(confirmer.texte, /démonstration|ne mène nulle part/i,
+    "et que, pendant la visite, cet appui n'enregistre rien");
 });
 
 await test("G2. les listes montrées sont celles qui existent vraiment", () => {
@@ -740,54 +812,42 @@ await test("J1. l'ordre des étapes suit le geste réel, pas l'ordre d'écriture
   assert.ok(rang("nutrition-recettes", "recettes-liste") < rang("nutrition-recettes", "recettes-quantites"));
 });
 
-await test("J2. Suivant et Précédent franchissent les cibles absentes, dans les deux sens", () => {
+await test("J2. Suivant et Précédent parcourent TOUTES les étapes, sans en éviter une", () => {
   /*
-   * ⚠️ LE CAS QUI COMPTE : une feuille d'ajout fermée. La moitié des étapes de
-   * nutrition n'ont alors pas de cible. Le parcours doit continuer à avancer et
-   * à reculer sans jamais s'arrêter sur une étape invisible, et sans boucler.
+   * ⚠️ CE TEST A CHANGÉ DE SENS, ET C'EST VOULU. Il vérifiait autrefois que le
+   * parcours ÉVITAIT les étapes sans cible — le comportement qui faisait
+   * s'arrêter la nutrition à la dixième étape sur vingt-trois. Le moteur
+   * n'évite plus rien : il avance d'un cran, affiche l'étape, et la replie si
+   * sa cible manque. Ce qui se teste désormais est donc l'inverse.
    */
-  const nutrition = ESPACES_GUIDES.find((e) => e.id === "nutrition-plan")!;
-  const surLaPage = new Set([
-    "nutrition-objectif-kcal",
-    "nutrition-objectif-proteines",
-    "nutrition-objectif-glucides",
-    "nutrition-objectif-lipides",
-    "espace-nutrition-repas",
-    "nutrition-ajout-ouvrir",
-    "espace-nutrition-courses",
-  ]);
-  const existe = (cible: string) => surLaPage.has(cible);
-
-  // En avant depuis la première étape : on ne s'arrête que sur du visible.
-  const vus: number[] = [];
-  let position = prochaineEtapeAtteignable(nutrition.etapes, 0, 1, existe);
-  let garde = 0;
-  while (position !== null && garde++ < 100) {
-    vus.push(position);
-    assert.ok(existe(nutrition.etapes[position]!.cible),
-      `l'étape ${nutrition.etapes[position]!.id} n'a pas de cible et ne devrait pas être montrée`);
-    position = prochaineEtapeAtteignable(nutrition.etapes, position + 1, 1, existe);
-  }
-  assert.ok(garde < 100, "la recherche d'étape atteignable se termine toujours");
-  assert.equal(vus.length, surLaPage.size, "toutes les étapes visibles, et elles seules");
-  assert.deepEqual(vus, [...vus].sort((a, b) => a - b), "l'ordre est préservé");
-
-  // En arrière depuis la dernière : même garantie.
-  const retour: number[] = [];
-  let arriere = prochaineEtapeAtteignable(nutrition.etapes, nutrition.etapes.length - 1, -1, existe);
-  garde = 0;
-  while (arriere !== null && garde++ < 100) {
-    retour.push(arriere);
-    arriere = prochaineEtapeAtteignable(nutrition.etapes, arriere - 1, -1, existe);
-  }
-  assert.ok(garde < 100, "et dans l'autre sens aussi");
-  assert.deepEqual(retour, [...vus].reverse(), "Précédent repasse exactement par où Suivant est venu");
+  const composant = readFileSync(`${RACINE}components/guide/GuideDecouverte.tsx`, "utf8");
+  assert.match(composant, /const depuis = index \+ direction;/, "Suivant et Précédent avancent d'un cran");
+  assert.match(composant, /setIndex\(depuis\);/, "et posent exactement ce cran");
+  assert.doesNotMatch(composant, /prochaineEtapeAtteignable\(/,
+    "plus aucune recherche d'étape « atteignable » : Précédent repasse par où Suivant est venu");
 });
 
-await test("J3. aucune cible visible : le parcours ne reste pas ouvert sur du vide", () => {
-  for (const espace of ESPACES_GUIDES) {
-    assert.equal(prochaineEtapeAtteignable(espace.etapes, 0, 1, () => false), null,
-      `${espace.id} : sans aucune cible, aucune étape n'est atteignable — le guide se referme`);
+await test("J3. chaque étape d'un parcours peut s'afficher, même sans cible", () => {
+  /*
+   * Une étape sans `texteSansCible` reste affichable — le moteur a une phrase
+   * de repli générique. Mais une étape dont la cible est CONDITIONNELLE mérite
+   * mieux qu'une phrase passe-partout : ce contrôle vérifie que les étapes
+   * dont on sait la cible intermittente portent leur propre explication.
+   */
+  const intermittentes = [
+    ["nutrition-plan", "nut-journal-ligne"],
+    ["nutrition-plan", "nut-ajout-ouvrir"],
+    ["nutrition-recettes", "rec-quantites"],
+    ["entrainement-seance", "seance-exercice-premier"],
+    ["entrainement-seance", "seance-cardio-carte"],
+    ["documents", "doc-liste"],
+  ] as const;
+  for (const [espaceId, etapeId] of intermittentes) {
+    const espace = ESPACES_GUIDES.find((e) => e.id === espaceId)!;
+    const etape = espace.etapes.find((e) => e.id === etapeId);
+    assert.ok(etape, `${espaceId}/${etapeId} existe`);
+    assert.ok(etape.texteSansCible && etape.texteSansCible.length > 20,
+      `${espaceId}/${etapeId} doit expliquer son absence plutôt que de laisser un vide`);
   }
 });
 
@@ -889,4 +949,212 @@ await test("K3. le journal alimentaire n'existe que sur le chemin RÉEL, et c'es
   const atelier = sansProse(readFileSync(`${RACINE}components/student/NutritionPlanWorkspace.tsx`, "utf8"));
   assert.doesNotMatch(atelier, /data-guide="nutrition-ajout|data-guide="nutrition-journal/,
     "le chemin de démonstration ne fait PAS semblant d'avoir ces ancres : les étapes y sont sautées");
+});
+
+/* ═══════ L. LA DÉMONSTRATION : TOUT MONTRER, NE RIEN ÉCRIRE ═══════ */
+
+import {
+  DEMONSTRATION_ETEINTE,
+  PREFIXE_DEMONSTRATION,
+  SCENARIOS_DEMONSTRATION,
+  appliquerScenario,
+  lireDemonstration,
+  reinitialiserDemonstration,
+  type CleDemonstration,
+} from "../../lib/guide-demonstration";
+
+await test("L1. la nutrition va jusqu'au bout, et chaque étape de feuille a son scénario", () => {
+  /*
+   * ⚠️ LE DÉFAUT CORRIGÉ. La visite annonçait 23 étapes et s'arrêtait à la
+   * dixième : les treize suivantes visaient l'intérieur d'une feuille que
+   * personne n'avait ouverte, et l'ancien moteur les sautait. Chaque étape qui
+   * vise cet intérieur doit donc déclarer le scénario qui l'affiche.
+   */
+  const nutrition = ESPACES_GUIDES.find((e) => e.id === "nutrition-plan");
+  assert.ok(nutrition);
+  assert.ok(nutrition.etapes.length >= 23,
+    `la visite nutrition doit couvrir au moins 23 étapes, elle en a ${nutrition.etapes.length}`);
+
+  const dansLaFeuille = /^(nutrition-ajout-(modes|recherche|resultats|produits|quantite|confirmer|manuel|scanner)|nutrition-liste-|nutrition-manuel-|nutrition-scan-)/;
+  const sansScenario = nutrition.etapes
+    .filter((e) => dansLaFeuille.test(e.cible) && e.demo === undefined)
+    .map((e) => e.id);
+  assert.deepEqual(sansScenario, [],
+    "une étape qui vise l'intérieur de la feuille sans déclarer de scénario ne trouvera jamais sa cible");
+});
+
+await test("L2. chaque scénario affiche réellement les cibles que ses étapes visent", () => {
+  /*
+   * Contrôle de cohérence entre les scénarios et ce que `AddFoodSheet` rend
+   * dans chacun. Il ne remplace pas une vérification à l'écran, mais il attrape
+   * le cas le plus probable : une étape rattachée au mauvais scénario, donc une
+   * cible qui n'apparaîtra jamais.
+   */
+  const attendu: Record<string, CleDemonstration> = {
+    "nutrition-ajout-modes": "feuille-vide",
+    "nutrition-ajout-recherche": "feuille-vide",
+    "nutrition-liste-favoris": "feuille-vide",
+    "nutrition-liste-recents": "feuille-vide",
+    "nutrition-ajout-scanner": "feuille-vide",
+    "nutrition-ajout-resultats": "recherche-resultats",
+    "nutrition-ajout-produits": "recherche-resultats",
+    "nutrition-ajout-manuel": "recherche-resultats",
+    "nutrition-ajout-quantite": "quantite",
+    "nutrition-ajout-confirmer": "quantite",
+    "nutrition-manuel-champs": "saisie-manuelle",
+    "nutrition-manuel-enregistrer": "saisie-manuelle",
+    "nutrition-scan-intro": "scanner",
+    "nutrition-scan-camera": "scanner",
+    "nutrition-scan-cadre": "scanner",
+  };
+  const nutrition = ESPACES_GUIDES.find((e) => e.id === "nutrition-plan")!;
+  for (const etape of nutrition.etapes) {
+    const voulu = attendu[etape.cible];
+    if (!voulu) continue;
+    assert.equal(etape.demo, voulu,
+      `${etape.id} vise « ${etape.cible} », qui n'est rendue que par le scénario « ${voulu} »`);
+  }
+});
+
+await test("L3. quitter la visite éteint la démonstration, par tous les chemins", () => {
+  appliquerScenario("quantite");
+  assert.equal(lireDemonstration().feuilleAjout, true, "le scénario est bien appliqué");
+  reinitialiserDemonstration();
+  assert.deepEqual(lireDemonstration(), DEMONSTRATION_ETEINTE, "et il se retire entièrement");
+
+  const composant = readFileSync(`${RACINE}components/guide/GuideDecouverte.tsx`, "utf8");
+  assert.match(composant, /reinitialiserDemonstration\(\);/,
+    "la sortie par le bouton, le voile ou Échap éteint la démonstration");
+  assert.match(composant, /useEffect\(\(\) => reinitialiserDemonstration, \[\]\)/,
+    "et le démontage aussi : changer de page ne doit pas laisser une feuille d'exemple à l'écran");
+});
+
+await test("L4. une étape sans scénario ÉTEINT la démonstration", () => {
+  /*
+   * ⚠️ LA RÈGLE QUI EMPÊCHE LES FUITES. Si la démonstration ne s'éteignait que
+   * sur demande, il suffirait d'oublier une étape pour qu'une feuille
+   * d'exemple reste par-dessus la liste de courses. Le défaut par défaut est
+   * donc « éteinte ».
+   */
+  const composant = readFileSync(`${RACINE}components/guide/GuideDecouverte.tsx`, "utf8");
+  assert.match(composant, /appliquerScenario\(etape\.demo \?\? "aucun"\)/);
+  assert.deepEqual(SCENARIOS_DEMONSTRATION["aucun"], DEMONSTRATION_ETEINTE);
+
+  // Et la dernière étape de la nutrition est bien hors feuille.
+  const nutrition = ESPACES_GUIDES.find((e) => e.id === "nutrition-plan")!;
+  const derniere = nutrition.etapes[nutrition.etapes.length - 1]!;
+  assert.equal(derniere.demo, undefined, "la visite se termine sur la page réelle, feuille refermée");
+});
+
+await test("L5. la démonstration n'écrit rien, nulle part", () => {
+  /*
+   * Trois verrous, à trois endroits différents — un seul aurait suffi tant que
+   * personne ne le déplace.
+   */
+  // 1. La feuille de démonstration n'a aucune fonction d'écriture (voir F3b).
+  // 2. `AddFoodSheet` coupe TOUS ses chemins réseau en démonstration.
+  const feuille = sansProse(readFileSync(`${RACINE}components/student/AddFoodSheet.tsx`, "utf8"));
+  const gardes = [...feuille.matchAll(/if \(demo\)/g)].length;
+  assert.ok(gardes >= 4,
+    `chaque chemin réseau de la feuille doit être coupé en démonstration (${gardes} gardes trouvées)`);
+  assert.match(feuille, /if \(demo\) return;\s*\n\s*const minuterie = setTimeout/,
+    "la frappe n'interroge pas la base");
+  // 3. Le scanner n'allume pas la caméra.
+  const scanner = sansProse(readFileSync(`${RACINE}components/student/ScannerCodeBarres.tsx`, "utf8"));
+  assert.match(scanner, /async function ouvrir\(\) \{\s*\n\s*if \(simulation\) return;/,
+    "`ouvrir()` sort avant la moindre ligne : `getUserMedia` n'est jamais appelée");
+  assert.match(scanner, /simulation \|\| enCours/,
+    "le cadre de visée reste montré, sans flux");
+});
+
+await test("L6. les fixtures sont reconnaissables et plausibles", () => {
+  /*
+   * ⚠️ PLAUSIBLES, PAS AU HASARD. Un écran de démonstration qui afficherait
+   * « banane : 40 g de protéines » apprendrait quelque chose de faux à qui le
+   * lit — et la visite sert précisément à apprendre.
+   */
+  assert.equal(PREFIXE_DEMONSTRATION, "demo-");
+  const fixtures = readFileSync(`${RACINE}lib/guide-demonstration.ts`, "utf8");
+  assert.match(fixtures, /proteinPer100: 1\.1/, "la banane garde les ordres de grandeur de la table Ciqual");
+  assert.doesNotMatch(sansProse(fixtures), /createSupabaseBrowserClient|from\("/,
+    "aucune requête : ce sont des constantes");
+});
+
+/* ═══════ M. LE RAIL DE SÉANCE ═══════ */
+
+await test("M1. le rail est parcouru carte par carte, pas seulement la première", () => {
+  const seance = ESPACES_GUIDES.find((e) => e.id === "entrainement-seance");
+  assert.ok(seance);
+  const repetees = seance.etapes.filter((e) => e.repeterPour !== undefined).map((e) => e.repeterPour);
+  for (const ancre of ["seance-exercice", "seance-carte-cardio", "seance-cardio-validation"]) {
+    assert.ok(repetees.includes(ancre), `le parcours doit répéter l'étape sur « ${ancre} »`);
+  }
+});
+
+await test("M2. le déploiement produit une étape par carte, numérotée", () => {
+  const seance = ESPACES_GUIDES.find((e) => e.id === "entrainement-seance")!;
+  const parcours = seance.etapes.find((e) => e.id === "seance-exercice-parcours")!;
+  const sept = deployerEtapes([parcours], () => 7);
+  assert.equal(sept.length, 7, "sept cartes, sept étapes");
+  assert.deepEqual(sept.map((e) => e.occurrence), [0, 1, 2, 3, 4, 5, 6],
+    "chaque étape vise un RANG différent : sans cela, le guide resterait sur la première carte");
+  assert.match(sept[2]!.titre, /3 sur 7/, "le titre dit où l'on en est");
+  assert.equal(new Set(sept.map((e) => e.id)).size, 7, "identifiants distincts");
+});
+
+await test("M3. zéro carte ne SUPPRIME pas l'étape, elle la replie", () => {
+  /*
+   * Une séance entièrement cardio n'a aucune carte de musculation. L'étape doit
+   * rester — avec son explication — plutôt que de disparaître : « il n'y en a
+   * pas » est une information, l'absence silencieuse n'en est pas une.
+   */
+  const seance = ESPACES_GUIDES.find((e) => e.id === "entrainement-seance")!;
+  const parcours = seance.etapes.find((e) => e.id === "seance-exercice-parcours")!;
+  const vide = deployerEtapes([parcours], () => 0);
+  assert.equal(vide.length, 1, "l'étape survit");
+  assert.ok(vide[0]!.texteSansCible, "et elle sait expliquer pourquoi elle ne montre rien");
+});
+
+await test("M4. toutes les fonctions de séance sont couvertes par une étape", () => {
+  /*
+   * La liste demandée au cahier des charges, vérifiée ancre par ancre. Si une
+   * fonctionnalité perd son ancre au cours d'un remaniement, ce test le dit
+   * avant que la visite ne devienne muette dessus.
+   */
+  const seance = ESPACES_GUIDES.find((e) => e.id === "entrainement-seance")!;
+  const cibles = new Set(seance.etapes.map((e) => e.cible));
+  const attendues = [
+    "seance-analyse",
+    "espace-seance-echauffement",
+    "espace-seance-notes",
+    "seance-blocs",
+    "seance-exercice",
+    "seance-prescription",
+    "seance-video",
+    "seance-serie",
+    "seance-charge",
+    "seance-reps",
+    "seance-rpe-serie",
+    "seance-commentaire-exercice",
+    "seance-carte-cardio",
+    "seance-cardio-validation",
+    "seance-cardio-duree",
+    "seance-cardio-distance",
+    "seance-remplacement",
+    "chrono-ouvrir",
+    "chrono-cadran",
+    "chrono-marche",
+    "chrono-duree",
+    "seance-terminee",
+    "seance-rpe",
+    "seance-duree",
+    "seance-commentaire",
+    "seance-douleur",
+    "seance-enregistrer",
+  ];
+  const manquantes = attendues.filter((c) => !cibles.has(c));
+  assert.deepEqual(manquantes, [], "fonctionnalités de séance sans étape");
+  const posees = ancresPosees();
+  const sansAncre = attendues.filter((c) => !posees.has(c));
+  assert.deepEqual(sansAncre, [], "étapes dont l'ancre n'est pas posée dans le code");
 });

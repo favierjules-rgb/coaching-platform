@@ -6,15 +6,15 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { FOCUSABLE_SELECTOR, wrapFocusTarget } from "@/lib/admin-shell-nav";
 import {
   ATTENTE_CIBLE_MS,
-  doitFaireDefiler,
+  deployerEtapes,
   estDerniereEtape,
   indexBorne,
   marquerGuideVu,
   positionnerCarte,
-  prochaineEtapeAtteignable,
   type EtapeGuide,
   type PositionCarte,
 } from "@/lib/guide-decouverte";
+import { appliquerScenario, reinitialiserDemonstration } from "@/lib/guide-demonstration";
 
 /**
  * ════════════════════════════════════════════════════════════════════════════
@@ -89,16 +89,67 @@ function bandesAutour(d: Decoupe): readonly { cle: string; style: CSSProperties 
   ];
 }
 
-function elementCible(cible: string): HTMLElement | null {
+/**
+ * L'élément visé, au rang demandé.
+ *
+ * ⚠️ LE RANG EST INDISPENSABLE. Les cartes du rail de séance portent toutes la
+ * même ancre : sans rang, `querySelector` rendait éternellement la première et
+ * la visite ne pouvait pas passer à l'exercice suivant. `querySelectorAll`
+ * suit l'ordre du document, donc le rang suit l'ordre du rail.
+ */
+function elementCible(cible: string, rang = 0): HTMLElement | null {
   if (typeof document === "undefined") return null;
-  return document.querySelector<HTMLElement>(`[data-guide="${CSS.escape(cible)}"]`);
+  const tous = document.querySelectorAll<HTMLElement>(`[data-guide="${CSS.escape(cible)}"]`);
+  return tous[rang] ?? null;
 }
 
+function compterCibles(cible: string): number {
+  if (typeof document === "undefined") return 0;
+  return document.querySelectorAll(`[data-guide="${CSS.escape(cible)}"]`).length;
+}
+
+/**
+ * Amène l'élément au centre de la zone visible, dans TOUS ses conteneurs.
+ *
+ * ⚠️ `inline: "center"` AUTANT QUE `block: "center"`. C'est la correction du
+ * rail de séance : les cartes d'exercice vivent dans un conteneur
+ * `overflow-x:auto`, et un défilement qui ne parlait que de l'axe vertical ne
+ * les atteignait jamais. `scrollIntoView` remonte la chaîne des ancêtres
+ * défilants — le défileur vertical interne de la carte, le rail horizontal,
+ * puis la page — ce qui couvre les trois d'un seul appel.
+ */
+function amenerEnVue(element: HTMLElement): void {
+  const reduit = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  element.scrollIntoView({ behavior: reduit ? "auto" : "smooth", block: "center", inline: "center" });
+}
+
+/** Deux mesures assez proches pour qu'on considère le défilement terminé. */
+function mesuresProches(a: DOMRect, b: DOMRect): boolean {
+  return Math.abs(a.top - b.top) < 0.5 && Math.abs(a.left - b.left) < 0.5;
+}
+
+/** Durée maximale accordée à un défilement avant de poser la carte quand même. */
+const DEFILEMENT_MAX_MS = 1500;
+/** Images consécutives immobiles qui valent « défilement terminé ». */
+const IMAGES_STABLES = 3;
+
 export function GuideDecouverte({ etapes, onFermer, libelleParcours = "l'application" }: GuideDecouverteProps) {
+  /*
+   * ⚠️ LE DÉPLOIEMENT A LIEU UNE SEULE FOIS, À L'OUVERTURE. Les étapes
+   * répétées (une par carte du rail) ont besoin du nombre d'éléments
+   * réellement présents. Le recompter à chaque rendu ferait changer le nombre
+   * total d'étapes en plein parcours — et la barre de progression avec lui.
+   */
+  const [deployees] = useState<readonly EtapeGuide[]>(() =>
+    typeof document === "undefined" ? etapes : deployerEtapes(etapes, compterCibles),
+  );
+
   const [index, setIndex] = useState(0);
   const [termine, setTermine] = useState(false);
   const [rect, setRect] = useState<DOMRect | null>(null);
   const [position, setPosition] = useState<PositionCarte | null>(null);
+  /** Vrai quand la cible est restée introuvable : l'étape s'affiche sans découpe. */
+  const [repli, setRepli] = useState(false);
   const carteRef = useRef<HTMLDivElement | null>(null);
   const titreRef = useRef<HTMLHeadingElement | null>(null);
   /* Identifiant de l'étape dont le déclencheur a DÉJÀ été pressé : une
@@ -120,11 +171,18 @@ export function GuideDecouverte({ etapes, onFermer, libelleParcours = "l'applica
    * la commande de fermeture tant qu'elle n'a pas servi.
    */
   const aFermer = useRef<string | null>(null);
+  /** Étape dont la préparation (démonstration, ouverture) a déjà été jouée. */
+  const preparePour = useRef<string | null>(null);
+  /** Étape dont le défilement a déjà été demandé. */
+  const defilePour = useRef<string | null>(null);
+  /** Étape déjà signalée en console : un avertissement, pas un par image. */
+  const signalePour = useRef<string | null>(null);
+  const derniereMesure = useRef<DOMRect | null>(null);
+  const imagesStables = useRef(0);
+  const echeanceDefilement = useRef(0);
 
-  const total = etapes.length;
-  const etape = etapes[indexBorne(index, total)];
-
-  const cibleExiste = useCallback((cible: string) => elementCible(cible) !== null, []);
+  const total = deployees.length;
+  const etape = deployees[indexBorne(index, total)];
 
   /**
    * Mesure la cible, place la carte, et saute l'étape si la cible n'existe pas.
@@ -137,67 +195,101 @@ export function GuideDecouverte({ etapes, onFermer, libelleParcours = "l'applica
    */
   const mesurer = useCallback(() => {
     if (!etape) return;
-    const element = elementCible(etape.cible);
+    const rang = etape.occurrence ?? 0;
 
-    if (!element) {
-      /*
-       * ════════════════════════════════════════════════════════════════════
-       * CIBLE ABSENTE : OUVRIR, PUIS ATTENDRE, PUIS SEULEMENT ABANDONNER.
-       * ════════════════════════════════════════════════════════════════════
-       * L'ancien comportement sautait l'étape immédiatement. C'est juste pour
-       * un menu replié, mais faux pour une feuille d'ajout ou un scanner : la
-       * cible n'existe pas ENCORE, elle apparaîtra au clic puis au rendu.
-       * Trois temps, dans cet ordre.
-       */
-
-      // 1. Un déclencheur est déclaré et n'a pas encore servi POUR CETTE
-      //    étape : on le presse une fois. Il n'ouvre qu'une interface —
-      //    jamais une validation (voir le contrat sur `ouvrirVia`).
-      if (etape.ouvrirVia && ouvertePour.current !== etape.id) {
-        ouvertePour.current = etape.id;
+    /*
+     * ════════════════════════════════════════════════════════════════════════
+     * 1. PRÉPARER — une seule fois par étape.
+     * ════════════════════════════════════════════════════════════════════════
+     * La démonstration d'abord, l'ouverture ensuite. Une étape qui ne déclare
+     * aucun scénario ÉTEINT la démonstration : c'est ce qui garantit qu'une
+     * feuille de démonstration ne survit jamais aux étapes qui l'ont demandée.
+     */
+    if (preparePour.current !== etape.id) {
+      preparePour.current = etape.id;
+      appliquerScenario(etape.demo ?? "aucun");
+      if (etape.ouvrirVia && !elementCible(etape.cible, rang)) {
         const declencheur = elementCible(etape.ouvrirVia);
         if (declencheur) {
           declencheur.click();
-          // Mémorisé AU MOMENT DE L'OUVERTURE : c'est le seul instant où l'on
-          // sait avec certitude que l'interface a été ouverte par le guide.
+          // Retenu AU MOMENT DE L'OUVERTURE : seul instant où l'on sait avec
+          // certitude que c'est le guide qui a ouvert.
           if (etape.fermerVia) aFermer.current = etape.fermerVia;
-          echeance.current = Date.now() + (etape.attenteMs ?? ATTENTE_CIBLE_MS);
-          attenteEnCours.current = true;
-          return;
         }
       }
+      echeance.current = Date.now() + (etape.attenteMs ?? ATTENTE_CIBLE_MS);
+      attenteEnCours.current = true;
+      derniereMesure.current = null;
+      imagesStables.current = 0;
+    }
 
-      // 2. Une attente est déclarée (ou vient d'être armée) et court encore :
-      //    on laisse la boucle de mesure repasser.
-      if (etape.attenteMs !== undefined && echeance.current === null) {
-        echeance.current = Date.now() + etape.attenteMs;
-        attenteEnCours.current = true;
-        return;
-      }
+    const element = elementCible(etape.cible, rang);
+
+    /*
+     * ════════════════════════════════════════════════════════════════════════
+     * 2. ATTENDRE, PUIS REPLIER — JAMAIS SAUTER.
+     * ════════════════════════════════════════════════════════════════════════
+     * ⚠️ C'EST LE CHANGEMENT CENTRAL DE CETTE VERSION. L'ancien moteur passait
+     * à « l'étape suivante atteignable » quand la cible manquait : une visite
+     * de 23 étapes pouvait s'arrêter à la dixième sans un mot, parce que tout
+     * ce qui suivait vivait dans une feuille restée fermée. Désormais l'étape
+     * s'affiche quand même, sans découpe, avec son explication de repli. Le
+     * parcours continue, et l'utilisateur sait ce qu'il ne voit pas.
+     */
+    if (!element) {
       if (echeance.current !== null && Date.now() < echeance.current) {
         attenteEnCours.current = true;
         return;
       }
-
-      // 3. Délai écoulé, ou aucune attente demandée : on saute à l'étape
-      //    suivante atteignable. Le guide ne reste JAMAIS bloqué.
       attenteEnCours.current = false;
-      echeance.current = null;
-      const suivante = prochaineEtapeAtteignable(etapes, index + 1, 1, cibleExiste);
-      if (suivante !== null && suivante !== index) {
-        setIndex(suivante);
-      } else {
-        setTermine(true);
+      if (process.env.NODE_ENV !== "production" && signalePour.current !== etape.id) {
+        signalePour.current = etape.id;
+        console.warn(
+          `[guide] cible introuvable — étape « ${etape.id} », ancre « ${etape.cible} »` +
+            (rang > 0 ? ` (rang ${rang})` : "") +
+            ". L'étape est affichée en repli, sans mise en lumière.",
+        );
       }
       setRect(null);
+      setPosition(null);
+      setRepli(true);
       return;
     }
 
-    // Cible trouvée : l'attente, s'il y en avait une, est terminée.
-    attenteEnCours.current = false;
-    echeance.current = null;
+    setRepli(false);
 
+    /*
+     * ════════════════════════════════════════════════════════════════════════
+     * 3. AMENER EN VUE — horizontalement AUTANT que verticalement.
+     * ════════════════════════════════════════════════════════════════════════
+     */
+    if (defilePour.current !== etape.id) {
+      defilePour.current = etape.id;
+      amenerEnVue(element);
+      echeanceDefilement.current = Date.now() + DEFILEMENT_MAX_MS;
+      attenteEnCours.current = true;
+      derniereMesure.current = null;
+      imagesStables.current = 0;
+    }
+
+    /*
+     * ════════════════════════════════════════════════════════════════════════
+     * 4. SUIVRE LE DÉFILEMENT JUSQU'À L'IMMOBILITÉ.
+     * ════════════════════════════════════════════════════════════════════════
+     * La découpe est repositionnée à CHAQUE image pendant le défilement : elle
+     * accompagne la carte au lieu d'être posée une fois depuis une mesure
+     * d'avant le mouvement. On continue la boucle tant que la cible bouge
+     * encore — et au plus une seconde et demie, pour qu'un défilement empêché
+     * ne fige pas le parcours.
+     */
     const mesure = element.getBoundingClientRect();
+    const precedente = derniereMesure.current;
+    imagesStables.current = precedente && mesuresProches(precedente, mesure) ? imagesStables.current + 1 : 0;
+    derniereMesure.current = mesure;
+    const immobile = imagesStables.current >= IMAGES_STABLES;
+    attenteEnCours.current = !immobile && Date.now() < echeanceDefilement.current;
+    if (immobile) echeance.current = null;
+
     setRect(mesure);
     setPosition(
       positionnerCarte(
@@ -209,7 +301,7 @@ export function GuideDecouverte({ etapes, onFermer, libelleParcours = "l'applica
         },
       ),
     );
-  }, [etape, etapes, index, cibleExiste]);
+  }, [etape]);
 
   /*
    * Un seul effet pour toute la mesure : première image, redimensionnement,
@@ -240,18 +332,14 @@ export function GuideDecouverte({ etapes, onFermer, libelleParcours = "l'applica
     };
   }, [mesurer]);
 
-  /* Défilement jusqu'à la cible si elle est hors de la zone visible. */
-  useEffect(() => {
-    if (!etape) return;
-    const element = elementCible(etape.cible);
-    if (!element) return;
-    const mesure = element.getBoundingClientRect();
-    if (!doitFaireDefiler({ top: mesure.top, left: mesure.left, width: mesure.width, height: mesure.height }, { height: window.innerHeight })) {
-      return;
-    }
-    const reduit = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-    element.scrollIntoView({ behavior: reduit ? "auto" : "smooth", block: "center" });
-  }, [etape]);
+  /*
+   * ⚠️ L'ANCIEN EFFET DE DÉFILEMENT A ÉTÉ RETIRÉ, PAS OUBLIÉ. Il ne traitait
+   * que l'axe vertical et ne décidait qu'une fois, au changement d'étape.
+   * `amenerEnVue`, appelé depuis la mesure, couvre les deux axes et toute la
+   * chaîne des conteneurs défilants — et la boucle qui suit accompagne le
+   * mouvement jusqu'à son terme. Deux mécanismes concurrents se seraient
+   * contredits sur le rail de séance.
+   */
 
   const quitter = useCallback(() => {
     /*
@@ -271,7 +359,14 @@ export function GuideDecouverte({ etapes, onFermer, libelleParcours = "l'applica
       elementCible(aFermer.current)?.click();
       aFermer.current = null;
     }
+    /* ⚠️ LA DÉMONSTRATION S'ÉTEINT ICI, ET AUSSI AU DÉMONTAGE (effet plus bas).
+       Les deux chemins sont nécessaires : on peut quitter par le bouton, par
+       Échap ou par le voile — tous passent par ici — mais on peut aussi
+       disparaître sans quitter, en changeant de page. */
+    reinitialiserDemonstration();
     ouvertePour.current = null;
+    preparePour.current = null;
+    defilePour.current = null;
     echeance.current = null;
     attenteEnCours.current = false;
     marquerGuideVu(typeof window === "undefined" ? null : window.localStorage);
@@ -282,6 +377,14 @@ export function GuideDecouverte({ etapes, onFermer, libelleParcours = "l'applica
        écouteurs clavier à chaque pas. */
   }, [onFermer]);
 
+  /*
+   * ⚠️ ON AVANCE D'UNE ÉTAPE, SANS CHERCHER LAQUELLE EST « ATTEIGNABLE ».
+   * L'ancienne navigation sautait les étapes dont la cible manquait : c'est ce
+   * qui faisait disparaître treize étapes de nutrition d'un coup. Une étape
+   * sans cible s'affiche maintenant en repli, donc il n'y a plus rien à
+   * éviter — et `Précédent` repasse exactement par où `Suivant` est venu,
+   * même après l'ouverture et la fermeture de plusieurs panneaux.
+   */
   const aller = useCallback(
     (direction: 1 | -1) => {
       const depuis = index + direction;
@@ -290,14 +393,9 @@ export function GuideDecouverte({ etapes, onFermer, libelleParcours = "l'applica
         setTermine(true);
         return;
       }
-      const cible = prochaineEtapeAtteignable(etapes, depuis, direction, cibleExiste);
-      if (cible === null) {
-        if (direction === 1) setTermine(true);
-        return;
-      }
-      setIndex(cible);
+      setIndex(depuis);
     },
-    [index, total, etapes, cibleExiste],
+    [index, total],
   );
 
   /* Clavier : Échap quitte, flèches naviguent, Tab reste dans la carte. */
@@ -337,6 +435,15 @@ export function GuideDecouverte({ etapes, onFermer, libelleParcours = "l'applica
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [quitter, aller, etape]);
+
+  /*
+   * ⚠️ FILET DE SÉCURITÉ DU MODE DÉMONSTRATION. `quitter()` l'éteint déjà, mais
+   * on peut disparaître SANS quitter : un changement de route démonte ce
+   * composant sans passer par le bouton. Sans ce nettoyage, une feuille de
+   * démonstration survivrait à la visite et s'afficherait par-dessus une page
+   * réelle. Le tableau de dépendances est vide : il ne s'agit que du démontage.
+   */
+  useEffect(() => reinitialiserDemonstration, []);
 
   /* Le focus suit l'étape : annoncé, et le parcours au clavier reste linéaire. */
   useEffect(() => {
@@ -495,6 +602,20 @@ export function GuideDecouverte({ etapes, onFermer, libelleParcours = "l'applica
               </p>
               {etape?.exemple ? (
                 <p className="border-l-2 border-border pl-3 text-sm italic text-muted-foreground">{etape.exemple}</p>
+              ) : null}
+              {/* ⚠️ LE REPLI SE DIT, IL NE SE DEVINE PAS. Quand la cible n'a pas
+                  pu être amenée à l'écran, l'étape reste affichée — mais sans
+                  découpe, et il faut que l'utilisateur sache pourquoi rien n'est
+                  mis en lumière. Le rôle `status` l'annonce aussi aux lecteurs
+                  d'écran, sans voler le focus posé sur le titre. */}
+              {repli ? (
+                <p
+                  role="status"
+                  className="rounded-control border border-border bg-surface-soft/60 px-3 py-2 text-xs leading-relaxed text-muted-foreground"
+                >
+                  {etape?.texteSansCible ??
+                    "Cet élément n'est pas présent sur cette page pour le moment — il apparaît selon ce que contient votre programme ou votre plan."}
+                </p>
               ) : null}
             </div>
 

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { GuideDemonstration } from "@/components/guide/GuideDemonstration";
 import { GuideEspace } from "@/components/guide/GuideEspace";
 import { PreparationCoquille } from "@/components/pwa/PreparationCoquille";
 import { SynchronisationOffline } from "@/components/pwa/SynchronisationOffline";
@@ -31,6 +32,8 @@ export default async function StudentAreaLayout({
         visite n'est définie.
       */}
       <GuideEspace />
+      {/* Ne rend rien hors visite guidée : voir l'en-tête du composant. */}
+      <GuideDemonstration />
       {children}
     </StudentShell>
   );

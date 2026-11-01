@@ -231,6 +231,7 @@ export function ExerciseFeedbackCard({
                 type y déclencherait un envoi. */}
             <button
               type="button"
+              data-guide="seance-video"
               onClick={() => setLecteurOuvert(true)}
               className="pressable inline-flex min-h-11 items-center gap-2 rounded-control border border-border px-4 py-2 text-xs font-medium text-muted-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             >
@@ -428,6 +429,7 @@ export function ExerciseFeedbackCard({
         </div>
 
         <input
+          data-guide="seance-commentaire-exercice"
           value={feedback.comment}
           onChange={(event) => onCommentChange(event.target.value)}
           placeholder="Commentaire exercice (optionnel)"

@@ -139,26 +139,34 @@ const ENTRAINEMENT_SEANCE: EspaceGuide = {
     },
 
     /* ══════════════════════════════════════════════════════════════════════
-       UN EXERCICE DE MUSCULATION, CHAMP PAR CHAMP
+       LE RAIL, CARTE PAR CARTE — ET LE DÉFILEMENT QUI VA AVEC
        ══════════════════════════════════════════════════════════════════════
-       ⚠️ CES CINQ ÉTAPES N'EXISTENT QUE S'IL Y A DE LA MUSCULATION. Les ancres
-       sont posées par `ExerciseFeedbackCard`, que `SessionCarousel` ne monte
-       que pour `renderStrengthExercise`. Une séance uniquement cardio n'en rend
-       aucune : les cibles sont absentes, le moteur saute les étapes, et la
-       visite enchaîne sur le remplacement d'exercice. C'est la dégradation
-       voulue — pas un cas non traité.
+       ⚠️ CE QUI NE MARCHAIT PAS. Les cartes de séance vivent sur un rail
+       `overflow-x:auto`. Toutes portent la même ancre, et le moteur résolvait
+       sa cible par `querySelector` : il rendait éternellement la PREMIÈRE, et
+       son défilement ne parlait que de l'axe vertical. La visite montrait donc
+       un exercice sur sept, sans jamais faire glisser le rail.
 
-       ⚠️ LA CHARGE ET LES RÉPÉTITIONS SONT CIBLÉES SÉPARÉMENT, pas la carte.
-       Entourer la carte entière aurait laissé l'élève chercher lequel des trois
-       champs d'une ligne est la charge — c'est précisément la question posée.
+       ⚠️ CE QUI LE REMPLACE. `repeterPour` déploie l'étape une fois par carte
+       présente — `{n}` et `{total}` sont remplacés dans les textes —, et le
+       moteur vise la n-ième occurrence puis l'amène au centre avec
+       `inline: "center"`, ce qui fait glisser le rail, le défileur vertical de
+       la carte ET la page. La découpe suit le mouvement jusqu'à l'immobilité.
+
+       ⚠️ UNE SÉANCE SANS MUSCULATION GARDE SES ÉTAPES. Le déploiement conserve
+       un exemplaire même à zéro occurrence, et `texteSansCible` explique. Rien
+       n'est sauté en silence.
        ══════════════════════════════════════════════════════════════════════ */
     {
-      id: "seance-exercice",
+      id: "seance-exercice-premier",
       cible: "seance-exercice",
       href: "/entrainement/seance",
       titre: "La carte d'un exercice",
       texte:
-        "Le premier exercice de musculation de la séance. En haut, son numéro et son nom — ou, s'il a été remplacé, le nom du remplaçant et la mention de l'exercice d'origine.",
+        "Le premier exercice de musculation de la séance. En haut, son numéro et son nom — ou, s'il a été remplacé, le nom du remplaçant et la mention de l'exercice d'origine. Les étapes qui suivent en détaillent chaque champ.",
+      texteSansCible:
+        "Cette séance ne contient aucun exercice de musculation à saisir : elle est entièrement cardio. Les étapes de charge et de répétitions ne s'appliquent donc pas ici.",
+      attenteMs: 2500,
     },
     {
       id: "seance-prescription",
@@ -168,6 +176,19 @@ const ENTRAINEMENT_SEANCE: EspaceGuide = {
       texte:
         "La consigne de votre coach pour cet exercice : nombre de séries, répétitions visées, temps de repos, et selon les cas le tempo, la charge conseillée et le RPE cible. C'est le PRÉVU — ce que vous saisirez plus bas est le RÉALISÉ.",
       exemple: "« 4 séries · 8 reps · 1 min 30 de repos · charge conseillée 40 kg ».",
+      texteSansCible: "Cette ligne apparaît sur chaque carte d'exercice de musculation.",
+      attenteMs: 2000,
+    },
+    {
+      id: "seance-video",
+      cible: "seance-video",
+      href: "/entrainement/seance",
+      titre: "Revoir le mouvement",
+      texte:
+        "Quand votre coach a joint une démonstration, ce bouton l'ouvre en plein écran. Il n'apparaît que sur les exercices qui en ont une.",
+      texteSansCible:
+        "Aucun exercice de cette séance n'a de vidéo de démonstration jointe. Le bouton n'apparaît que lorsqu'il y en a une.",
+      attenteMs: 2000,
     },
     {
       id: "seance-serie",
@@ -176,7 +197,8 @@ const ENTRAINEMENT_SEANCE: EspaceGuide = {
       titre: "Une ligne, une série",
       texte:
         "Chaque série a sa propre ligne, numérotée. Il n'y a rien à valider pour passer à la suivante : vous remplissez les lignes dans l'ordre qui vous arrange, et tout part ensemble à l'enregistrement du retour.",
-      attenteMs: 1200,
+      texteSansCible: "Les lignes de séries apparaissent sur les cartes d'exercices de musculation.",
+      attenteMs: 2000,
     },
     {
       id: "seance-charge",
@@ -186,7 +208,8 @@ const ENTRAINEMENT_SEANCE: EspaceGuide = {
       texte:
         "Le premier champ de la ligne : la charge que vous avez réellement utilisée sur cette série. Le texte grisé n'est qu'un repère — la charge conseillée, ou votre dernière performance — et il ne compte pas comme une saisie.",
       exemple: "Repère « Reco 47 kg », et vous notez 45 si c'est ce que vous avez fait.",
-      attenteMs: 1200,
+      texteSansCible: "Le champ de charge apparaît sur chaque série d'un exercice de musculation.",
+      attenteMs: 2000,
     },
     {
       id: "seance-reps",
@@ -195,7 +218,8 @@ const ENTRAINEMENT_SEANCE: EspaceGuide = {
       titre: "Les répétitions faites",
       texte:
         "Le champ juste à côté : le nombre de répétitions réellement effectuées à cette charge. Un petit écart vert ou rouge apparaît dès que la comparaison avec votre référence a un sens.",
-      attenteMs: 1200,
+      texteSansCible: "Le champ de répétitions apparaît sur chaque série d'un exercice de musculation.",
+      attenteMs: 2000,
     },
     {
       id: "seance-rpe-serie",
@@ -204,7 +228,72 @@ const ENTRAINEMENT_SEANCE: EspaceGuide = {
       titre: "Le RPE de cette série",
       texte:
         "Le troisième champ : la difficulté de CETTE série, de 1 à 10 et par demi-points. Ne le confondez pas avec le RPE global de la séance, demandé une seule fois tout en bas.",
-      attenteMs: 1200,
+      texteSansCible: "Le RPE par série se saisit sur les cartes d'exercices de musculation.",
+      attenteMs: 2000,
+    },
+    {
+      id: "seance-commentaire-exercice",
+      cible: "seance-commentaire-exercice",
+      href: "/entrainement/seance",
+      titre: "Un mot sur cet exercice",
+      texte:
+        "Sous les séries, un commentaire propre à cet exercice : une gêne, un réglage de machine, une sensation. Il est facultatif, et distinct du commentaire général de la séance.",
+      texteSansCible: "Ce champ accompagne chaque carte d'exercice de musculation.",
+      attenteMs: 2000,
+    },
+    {
+      id: "seance-exercice-parcours",
+      cible: "seance-exercice",
+      repeterPour: "seance-exercice",
+      href: "/entrainement/seance",
+      titre: "Exercice {n} sur {total}",
+      texte:
+        "Maintenant que la carte est lue, la visite les parcourt toutes. Le rail glisse tout seul jusqu'à chacune : vous n'avez rien à faire glisser du doigt. Le bandeau du haut rappelle à quel bloc appartient l'exercice.",
+      texteSansCible:
+        "Cette séance ne contient aucun exercice de musculation à saisir : elle est entièrement cardio. Les étapes de charge et de répétitions ne s'appliquent donc pas ici.",
+      attenteMs: 2500,
+    },
+    {
+      id: "seance-cardio-carte",
+      cible: "seance-carte-cardio",
+      repeterPour: "seance-carte-cardio",
+      href: "/entrainement/seance",
+      titre: "Bloc cardio {n} sur {total}",
+      texte:
+        "La prescription d'un bloc cardio : le type d'effort, sa durée ou sa distance, l'intensité visée, et le détail des segments quand l'effort est fractionné.",
+      texteSansCible: "Cette séance ne contient aucun bloc cardio.",
+      attenteMs: 2500,
+    },
+    {
+      id: "seance-cardio-validation",
+      cible: "seance-cardio-validation",
+      repeterPour: "seance-cardio-validation",
+      href: "/entrainement/seance",
+      titre: "Réalisation du bloc cardio {n} sur {total}",
+      texte:
+        "La carte suivante sur le rail est le formulaire de ce bloc : la case « Bloc terminé », puis ce que vous avez réellement fait. Cocher la case ne transmet rien — tout part à l'enregistrement du retour.",
+      texteSansCible: "Le formulaire de réalisation accompagne chaque bloc cardio de la séance.",
+      attenteMs: 2500,
+    },
+    {
+      id: "seance-cardio-duree",
+      cible: "seance-cardio-duree",
+      href: "/entrainement/seance",
+      titre: "La durée réalisée",
+      texte:
+        "Heures, minutes et secondes réellement effectuées, avec le prévu rappelé à côté. C'est la durée de CE bloc — ni celle de la séance entière, ni le minuteur de repos.",
+      texteSansCible: "Ce champ appartient au formulaire d'un bloc cardio.",
+      attenteMs: 2000,
+    },
+    {
+      id: "seance-cardio-distance",
+      cible: "seance-cardio-distance",
+      href: "/entrainement/seance",
+      titre: "La distance réalisée",
+      texte:
+        "En kilomètres, avec le prévu rappelé. Selon le type d'effort, le formulaire demande aussi les répétitions du fractionné ou le dénivelé.",
+      texteSansCible: "Ce champ appartient au formulaire d'un bloc cardio.",
+      attenteMs: 2000,
     },
     {
       id: "seance-remplacement",
@@ -213,6 +302,8 @@ const ENTRAINEMENT_SEANCE: EspaceGuide = {
       titre: "Remplacer un exercice",
       texte:
         "Si un mouvement est impossible — matériel pris, douleur, machine absente — vous choisissez ici un exercice de remplacement proposé pour celui-ci. Votre coach voit ce que vous avez réellement fait à la place.",
+      texteSansCible:
+        "Le remplacement n'est proposé que sur les exercices pour lesquels votre coach a prévu des alternatives.",
     },
 
     /* ══════════════════════════════════════════════════════════════════════
@@ -359,6 +450,8 @@ const NUTRITION_PLAN: EspaceGuide = {
       titre: "Votre objectif calorique",
       texte:
         "Le nombre de calories par jour fixé par votre coach pour ce plan. C'est un repère de travail, pas une prescription médicale — s'il vous paraît inadapté, parlez-en à votre coach.",
+      texteSansCible:
+        "Les objectifs s'affichent dès qu'un plan alimentaire vous est affecté.",
     },
     {
       id: "nut-proteines",
@@ -367,6 +460,8 @@ const NUTRITION_PLAN: EspaceGuide = {
       titre: "Les protéines",
       texte:
         "L'objectif quotidien en grammes. Les protéines servent surtout à la construction et à la réparation musculaire — c'est ce qui rend ce chiffre important quand vous vous entraînez.",
+      texteSansCible:
+        "Les objectifs s'affichent dès qu'un plan alimentaire vous est affecté.",
     },
     {
       id: "nut-glucides",
@@ -375,6 +470,8 @@ const NUTRITION_PLAN: EspaceGuide = {
       titre: "Les glucides",
       texte:
         "L'objectif quotidien en grammes. Les glucides sont le carburant principal de l'effort : ils pèsent beaucoup sur l'énergie disponible en séance.",
+      texteSansCible:
+        "Les objectifs s'affichent dès qu'un plan alimentaire vous est affecté.",
     },
     {
       id: "nut-lipides",
@@ -383,6 +480,8 @@ const NUTRITION_PLAN: EspaceGuide = {
       titre: "Les lipides",
       texte:
         "L'objectif quotidien en grammes. Les lipides participent notamment au fonctionnement hormonal — d'où un objectif plancher plutôt qu'un chiffre à minimiser.",
+      texteSansCible:
+        "Les objectifs s'affichent dès qu'un plan alimentaire vous est affecté.",
     },
     {
       id: "nut-bilan",
@@ -391,6 +490,8 @@ const NUTRITION_PLAN: EspaceGuide = {
       titre: "Le bilan de votre journée",
       texte:
         "Trois choses à ne pas confondre : l'OBJECTIF fixé plus haut, ce que vous avez CONSOMMÉ, et ce qu'il vous RESTE. Ce résumé se met à jour à chaque repas enregistré.",
+      texteSansCible:
+        "Ce bilan apparaît dès que votre coach vous a affecté un plan et que la journée affichée en fait partie.",
       exemple: "Protéines 90 g sur 150 g : il reste 60 g à couvrir sur la journée.",
       attenteMs: 1200,
     },
@@ -401,6 +502,8 @@ const NUTRITION_PLAN: EspaceGuide = {
       titre: "Enregistrer un repas",
       texte:
         "C'est ici que vous notez ce que vous avez mangé. Trois façons d'ajouter un aliment : le chercher dans la banque d'aliments, le saisir à la main, ou scanner son code-barres avec l'appareil photo.",
+      texteSansCible:
+        "La semaine alimentaire s'affiche dès qu'un plan réel vous est affecté.",
       exemple: "Scanner un paquet de céréales pour reprendre ses valeurs sans rien ressaisir.",
     },
 
@@ -425,6 +528,8 @@ const NUTRITION_PLAN: EspaceGuide = {
       titre: "« Ce que j'ai mangé »",
       texte:
         "Le journal de ce repas. Chaque aliment ajouté y apparaît tout de suite : il n'y a pas de bouton « Enregistrer le repas » à chercher ensuite, l'enregistrement a déjà eu lieu à l'ajout.",
+      texteSansCible:
+        "Ce bloc apparaît sous chaque repas de votre plan, prêt à recevoir ce que vous avez mangé.",
       attenteMs: 2000,
     },
     {
@@ -434,6 +539,8 @@ const NUTRITION_PLAN: EspaceGuide = {
       titre: "Corriger ou retirer un aliment",
       texte:
         "Appuyez sur une ligne pour en ouvrir le détail : vous pouvez y corriger la quantité, ou supprimer l'aliment de ce repas. C'est la seule façon de revenir sur un ajout, et elle agit tout de suite.",
+      texteSansCible:
+        "Vous n'avez encore rien noté sur cette journée : une ligne apparaîtra ici dès votre premier aliment ajouté.",
       attenteMs: 2000,
     },
     {
@@ -443,45 +550,41 @@ const NUTRITION_PLAN: EspaceGuide = {
       titre: "Vérifier que c'est bien pris en compte",
       texte:
         "Sous les lignes, le consommé de ce repas — et, sur un repas prescrit, ce qu'il reste par rapport à sa cible. C'est ici, et dans le bilan du jour, qu'un ajout se vérifie.",
+      texteSansCible:
+        "Ce récapitulatif apparaît dès qu'un aliment a été ajouté à ce repas.",
       attenteMs: 2000,
     },
 
     /* ══════════════════════════════════════════════════════════════════════
-       AJOUTER UN ALIMENT — LE DÉTAIL, ET SES DEUX EMBRANCHEMENTS
+       AJOUTER UN ALIMENT — UNE DÉMONSTRATION, PAS UNE CHASSE AU TRÉSOR
        ══════════════════════════════════════════════════════════════════════
-       ⚠️ LA VISITE N'OUVRE PAS LA FEUILLE ELLE-MÊME. « Ajouter un aliment »
-       crée un conteneur de repas en base quand il n'en existe pas encore pour
-       ce créneau : `ouvrirVia` ferait donc écrire le guide. L'étape déclare
-       `gesteAttendu`, met le bouton en lumière, et l'élève appuie — ou n'appuie
-       pas, et les étapes suivantes sont simplement sautées.
+       ⚠️ CE QUI NE MARCHAIT PAS, ET POURQUOI. La version précédente demandait
+       à l'élève d'appuyer LUI-MÊME sur « Ajouter un aliment », parce que ce
+       bouton crée un repas en base quand il n'en existe pas encore. Qui
+       appuyait simplement sur « Suivant » voyait la visite s'arrêter là :
+       treize étapes plus loin n'avaient plus de cible, et l'ancien moteur les
+       sautait en silence. La visite annonçait 23 étapes et en montrait 10.
 
-       ⚠️ TOUTES LES ÉTAPES QUI SUIVENT SONT CONDITIONNELLES, et c'est assumé.
-       La feuille d'ajout n'a pas une forme mais plusieurs :
-         · champ vide              → favoris, récents, encart « cherche un
-                                     aliment », scanner, saisie manuelle ;
-         · un nom tapé             → résultats, et le bouton de recherche des
-                                     produits de marque ;
-         · un aliment choisi       → l'étape quantité remplace la liste ;
-         · le scanner ouvert       → il remplace toute la vue de recherche.
-       Aucun parcours linéaire ne peut montrer les quatre à la fois. Le moteur
-       attend la cible un temps borné puis saute l'étape : l'élève voit ce qui
-       est réellement devant lui, et la visite n'attend jamais quelque chose qui
-       ne viendra pas. Le rapport de fin de chantier dit lesquelles sont
-       conditionnelles ; les tests vérifient que chacune a une ancre réelle dans
-       le dépôt, pas qu'elle est visible en permanence.
+       ⚠️ CE QUI LE REMPLACE. Les étapes déclarent un SCÉNARIO DE DÉMONSTRATION
+       (`demo`). Le guide monte alors la vraie feuille d'ajout —
+       `AddFoodSheet`, le composant de production — avec des aliments de
+       fixture et des fonctions d'écriture débranchées. Rien n'est ouvert dans
+       le journal réel, rien n'est créé en base, et le parcours va jusqu'au
+       bout avec le seul bouton « Suivant ».
 
-       ⚠️ AUCUNE ÉTAPE NE PRESSE QUOI QUE CE SOIT. Ni « Ajouter cet aliment »,
-       ni « Ouvrir la caméra ». Les deux sont mis en lumière et expliqués, et
-       c'est tout. ══════════════════════════════════════════════════════════ */
+       ⚠️ UNE ÉTAPE SANS `demo` ÉTEINT LA DÉMONSTRATION. C'est pour cela que la
+       liste de courses, plus bas, n'en déclare aucun : la feuille se referme
+       d'elle-même en y arrivant.
+       ══════════════════════════════════════════════════════════════════════ */
     {
       id: "nut-ajout-ouvrir",
       cible: "nutrition-ajout-ouvrir",
       href: "/nutrition",
       titre: "Ajouter un aliment",
       texte:
-        "Le bouton qui ouvre la feuille d'ajout, sous chaque repas de la journée. Appuyez dessus vous-même pour continuer la visite à l'intérieur : la visite ne l'ouvre pas à votre place, parce qu'ouvrir ce repas le crée dans votre journal.",
-      exemple: "Rien n'est encore enregistré : vous ouvrez un repas vide.",
-      gesteAttendu: true,
+        "Le bouton qui ouvre la feuille d'ajout, sous chaque repas de la journée. Les étapes suivantes vous en montrent l'intérieur, avec des aliments d'exemple : rien n'est ajouté à votre journal pendant la visite.",
+      texteSansCible:
+        "Ce bouton apparaît sous chaque repas dès que votre coach vous a affecté un plan alimentaire.",
     },
     {
       id: "nut-ajout-modes",
@@ -490,7 +593,8 @@ const NUTRITION_PLAN: EspaceGuide = {
       titre: "Deux façons d'ajouter",
       texte:
         "« Rechercher » pour trouver un aliment déjà connu de l'application, « Saisir à la main » pour recopier les valeurs d'un emballage. Les deux sont au même rang : aucune n'est un pis-aller.",
-      attenteMs: 4000,
+      demo: "feuille-vide",
+      attenteMs: 2000,
     },
     {
       id: "nut-ajout-recherche",
@@ -500,7 +604,7 @@ const NUTRITION_PLAN: EspaceGuide = {
       texte:
         "Tapez un nom. La frappe ne consulte que les banques de l'application : les aliments génériques de la table Ciqual de l'Anses, et les produits déjà rencontrés. Rien n'est demandé à l'extérieur pendant que vous tapez.",
       exemple: "« banane », « riz », « poulet ».",
-      attenteMs: 3000,
+      demo: "feuille-vide",
     },
     {
       id: "nut-liste-favoris",
@@ -509,7 +613,7 @@ const NUTRITION_PLAN: EspaceGuide = {
       titre: "Vos favoris",
       texte:
         "Tant que le champ est vide, vos favoris s'affichent ici : les aliments que vous avez marqués d'une étoile. L'étoile se met et s'enlève depuis n'importe quelle ligne de résultat.",
-      attenteMs: 2000,
+      demo: "feuille-vide",
     },
     {
       id: "nut-liste-recents",
@@ -518,7 +622,7 @@ const NUTRITION_PLAN: EspaceGuide = {
       titre: "Vos récents",
       texte:
         "Juste en dessous, ce que vous avez ajouté récemment. Favoris et récents sont les deux seules listes toutes prêtes : il n'y a pas de rayons ni de catégories à parcourir.",
-      attenteMs: 2000,
+      demo: "feuille-vide",
     },
     {
       id: "nut-ajout-resultats",
@@ -526,8 +630,8 @@ const NUTRITION_PLAN: EspaceGuide = {
       href: "/nutrition",
       titre: "Les résultats",
       texte:
-        "Les aliments génériques d'abord, les produits de marque ensuite. Appuyer sur une ligne n'enregistre rien : cela ouvre l'étape de la quantité.",
-      attenteMs: 3000,
+        "Les aliments génériques d'abord, les produits de marque ensuite. Chaque ligne montre les calories et les macros pour 100 g. Appuyer sur une ligne n'enregistre rien : cela ouvre l'étape de la quantité.",
+      demo: "recherche-resultats",
     },
     {
       id: "nut-ajout-produits",
@@ -536,7 +640,7 @@ const NUTRITION_PLAN: EspaceGuide = {
       titre: "Chercher aussi les produits",
       texte:
         "Les produits de marque sont cherchés sur demande, par ce bouton, et jamais au fil de la frappe. Ce bouton n'apparaît qu'une fois trois lettres tapées.",
-      attenteMs: 2000,
+      demo: "recherche-resultats",
     },
     {
       id: "nut-ajout-quantite",
@@ -544,9 +648,9 @@ const NUTRITION_PLAN: EspaceGuide = {
       href: "/nutrition",
       titre: "La quantité",
       texte:
-        "Combien vous en avez mangé, et dans quelle unité. Les unités proposées sont celles que l'application sait convertir pour cet aliment — un produit dont la fiche est donnée « pour 100 ml » ne se saisit pas en grammes.",
-      exemple: "Cette étape n'apparaît qu'après avoir choisi un aliment.",
-      attenteMs: 2000,
+        "Un aliment choisi, l'écran demande combien vous en avez mangé, et dans quelle unité. Les unités proposées sont celles que l'application sait convertir pour cet aliment — un produit donné « pour 100 ml » ne se saisit pas en grammes.",
+      exemple: "Ici, 120 g de banane : les valeurs rappelées au-dessus sont celles pour 100 g.",
+      demo: "quantite",
     },
     {
       id: "nut-ajout-confirmer",
@@ -554,8 +658,8 @@ const NUTRITION_PLAN: EspaceGuide = {
       href: "/nutrition",
       titre: "Le seul moment où l'on enregistre",
       texte:
-        "Tout ce qui précède reste dans le formulaire. C'est cet appui, et lui seul, qui écrit la ligne dans votre journal. La visite ne le presse pas : elle vous le montre.",
-      attenteMs: 2000,
+        "Tout ce qui précède reste dans le formulaire. C'est cet appui, et lui seul, qui écrit la ligne dans votre journal. Pendant la visite il ne mène nulle part : la feuille affichée est une démonstration.",
+      demo: "quantite",
     },
     {
       id: "nut-ajout-manuel",
@@ -563,8 +667,27 @@ const NUTRITION_PLAN: EspaceGuide = {
       href: "/nutrition",
       titre: "Saisir depuis l'emballage",
       texte:
-        "Quand rien ne correspond, recopiez le nom et les valeurs pour 100 g ou 100 ml lues sur le paquet. L'aliment est marqué « saisi à la main » et reste à vous : il n'entre pas dans le catalogue partagé.",
-      attenteMs: 2000,
+        "Quand rien ne correspond, ce bouton bascule sur la saisie à la main. C'est aussi la sortie de secours offerte partout : après un scan raté, sans caméra, ou quand la recherche ne rend rien.",
+      demo: "recherche-resultats",
+    },
+    {
+      id: "nut-manuel-champs",
+      cible: "nutrition-manuel-champs",
+      href: "/nutrition",
+      titre: "Les champs de la saisie manuelle",
+      texte:
+        "Le nom, puis les valeurs POUR 100 g ou 100 ml lues sur le paquet — protéines, glucides, lipides — et enfin la quantité mangée. Les calories ne se saisissent pas : elles se déduisent des trois macros.",
+      exemple: "Recopiez le tableau nutritionnel tel quel, sans le ramener à votre portion.",
+      demo: "saisie-manuelle",
+    },
+    {
+      id: "nut-manuel-enregistrer",
+      cible: "nutrition-manuel-enregistrer",
+      href: "/nutrition",
+      titre: "Un aliment qui reste à vous",
+      texte:
+        "L'aliment saisi est marqué « saisi à la main » et n'entre pas dans le catalogue partagé. Là encore, rien ne part tant que ce bouton n'a pas été pressé.",
+      demo: "saisie-manuelle",
     },
     {
       id: "nut-scan-ouvrir",
@@ -572,9 +695,8 @@ const NUTRITION_PLAN: EspaceGuide = {
       href: "/nutrition",
       titre: "Scanner un code-barres",
       texte:
-        "Le geste le plus rapide pour un produit emballé. Appuyez vous-même si vous voulez voir l'écran du scanner : la visite ne touche pas à votre appareil photo.",
-      attenteMs: 2000,
-      gesteAttendu: true,
+        "Le geste le plus rapide pour un produit emballé : viser vaut mieux que taper une marque au clavier d'une main, l'autre tenant le paquet.",
+      demo: "feuille-vide",
     },
     {
       id: "nut-scan-intro",
@@ -583,17 +705,26 @@ const NUTRITION_PLAN: EspaceGuide = {
       titre: "Avant d'allumer la caméra",
       texte:
         "L'écran du scanner commence par cette phrase, et elle est exacte : la caméra ne s'ouvre qu'à votre demande, et l'image ne quitte pas votre téléphone. Seul le code-barres lu sert ensuite à retrouver le produit.",
-      attenteMs: 3000,
+      demo: "scanner",
     },
     {
       id: "nut-scan-camera",
       cible: "nutrition-scan-camera",
       href: "/nutrition",
-      titre: "Ouvrir la caméra, puis viser",
+      titre: "Ouvrir la caméra",
       texte:
-        "Ce bouton allume la caméra — la visite ne le presse pas. Placez ensuite le code-barres dans le cadre blanc : dès qu'il est lu, vous arrivez à la même étape de quantité que pour un aliment choisi dans la liste.",
+        "C'est ce bouton qui allume la caméra, et le navigateur vous demandera alors l'autorisation. Pendant la visite il est désactivé : aucune caméra n'est allumée, aucune autorisation n'est demandée.",
+      demo: "scanner",
+    },
+    {
+      id: "nut-scan-cadre",
+      cible: "nutrition-scan-cadre",
+      href: "/nutrition",
+      titre: "Viser le code-barres",
+      texte:
+        "Placez le code-barres dans le cadre blanc, à une vingtaine de centimètres. Dès qu'il est lu, vous arrivez à la même étape de quantité que pour un aliment choisi dans la liste.",
       exemple: "Si la caméra est refusée ou absente, l'écran propose toujours la recherche par nom et la saisie à la main.",
-      attenteMs: 2000,
+      demo: "scanner",
     },
     {
       id: "nut-courses",
@@ -602,6 +733,8 @@ const NUTRITION_PLAN: EspaceGuide = {
       titre: "Votre liste de courses",
       texte:
         "La liste construite à partir de votre plan, que vous cochez au fur et à mesure dans le magasin.",
+      texteSansCible:
+        "La liste de courses apparaît lorsque votre plan contient des aliments à acheter.",
     },
   ],
 };
@@ -652,6 +785,8 @@ const NUTRITION_RECETTES: EspaceGuide = {
       titre: "Ce que vise ce créneau",
       texte:
         "Les calories et les macros attribuées à ce seul créneau, réparties depuis les objectifs du jour. C'est la cible que les recettes essaient d'atteindre.",
+      texteSansCible:
+        "Les objectifs de ce créneau apparaissent une fois un jour et un créneau choisis.",
       attenteMs: 1500,
     },
     {
@@ -661,6 +796,8 @@ const NUTRITION_RECETTES: EspaceGuide = {
       titre: "Les recettes proposées",
       texte:
         "Les recettes de votre coach compatibles avec ce créneau. Appuyer sur une recette ouvre son détail : cela ne l'enregistre ni ne la choisit pour vous.",
+      texteSansCible:
+        "Les recettes proposées apparaissent une fois un créneau choisi.",
       attenteMs: 1500,
     },
     {
@@ -670,6 +807,8 @@ const NUTRITION_RECETTES: EspaceGuide = {
       titre: "Les ingrédients et leurs quantités",
       texte:
         "Chaque ingrédient avec la quantité recalculée pour approcher la cible, et ce qu'il apporte. « Plancher » ou « plafond » signale un ingrédient bloqué à une limite fixée par votre coach.",
+      texteSansCible:
+        "Les quantités adaptées apparaissent une fois une recette ouverte.",
       attenteMs: 1500,
     },
     {
@@ -679,6 +818,8 @@ const NUTRITION_RECETTES: EspaceGuide = {
       titre: "L'écart qui reste",
       texte:
         "La différence entre le total de la recette ainsi dosée et la cible du créneau. Un écart nul est rare ; le bandeau coloré au-dessus dit si l'approximation est acceptable.",
+      texteSansCible:
+        "Cet écart apparaît une fois une recette ouverte.",
       attenteMs: 1500,
     },
     {
@@ -688,6 +829,8 @@ const NUTRITION_RECETTES: EspaceGuide = {
       titre: "Rien n'est enregistré ici",
       texte:
         "Ces trois boutons sont les seules actions de la page, et ils ne font que revenir en arrière. Cette page calcule et affiche : elle n'écrit ni dans votre journal, ni dans votre plan, et tout disparaît si vous rechargez.",
+      texteSansCible:
+        "Ces boutons apparaissent une fois une recette ouverte.",
       exemple: "Pour noter ce que vous avez vraiment mangé, passez par « Ajouter un aliment » sur la page du plan.",
       attenteMs: 1500,
     },
@@ -756,6 +899,8 @@ const DASHBOARD: EspaceGuide = {
       titre: "Votre prochaine séance",
       texte:
         "La séance mise en avant par votre programme assigné, avec son jour et sa durée prévue. « Aucun programme attribué » veut dire exactement cela — rien n'est masqué.",
+      texteSansCible:
+        "Ce bloc apparaît dès qu'un programme vous est affecté.",
     },
     {
       id: "dash-plan-alimentaire",
@@ -764,6 +909,8 @@ const DASHBOARD: EspaceGuide = {
       titre: "Votre plan alimentaire actif",
       texte:
         "Le plan que votre coach vous a affecté. Le détail des objectifs, le journal et les recettes sont dans la rubrique Alimentation.",
+      texteSansCible:
+        "Ce bloc apparaît dès qu'un plan alimentaire vous est affecté.",
     },
     {
       id: "dash-rendez-vous",
@@ -772,6 +919,8 @@ const DASHBOARD: EspaceGuide = {
       titre: "Votre prochain rendez-vous",
       texte:
         "Le premier rendez-vous à venir qui est confirmé ou en attente. Les rendez-vous passés et la prise de créneau sont dans la rubriques Rendez-vous.",
+      texteSansCible:
+        "Ce bloc apparaît lorsque votre espace rendez-vous est actif.",
       attenteMs: 1500,
     },
   ],
@@ -800,6 +949,8 @@ const PROGRESSION: EspaceGuide = {
       titre: "Où vous en êtes",
       texte:
         "Le résumé : votre situation actuelle, en quelques chiffres. C'est un instantané — l'historique qui y mène se trouve dans les sections suivantes.",
+      texteSansCible:
+        "Le résumé apparaît dès qu'une première mesure a été enregistrée.",
       attenteMs: 1500,
     },
     {
@@ -870,6 +1021,8 @@ const DOCUMENTS: EspaceGuide = {
       titre: "Retrouver un document",
       texte:
         "La recherche porte sur le titre et la description courte de vos documents. Elle filtre la liste au fil de la frappe.",
+      texteSansCible:
+        "La recherche apparaît dès qu'au moins un document vous est affecté.",
       attenteMs: 1500,
     },
     {
@@ -879,6 +1032,8 @@ const DOCUMENTS: EspaceGuide = {
       titre: "Les filtres",
       texte:
         "Les raccourcis par nature de document. Ils se combinent avec la recherche : un filtre actif et un mot tapé s'appliquent tous les deux.",
+      texteSansCible:
+        "Les filtres apparaissent dès qu'au moins un document vous est affecté.",
     },
     {
       id: "doc-liste",
@@ -887,6 +1042,8 @@ const DOCUMENTS: EspaceGuide = {
       titre: "Vos documents",
       texte:
         "Une carte par document affecté par votre coach. Le bandeau « Nouveau » ou « Consulté » dit si vous l'avez déjà ouvert.",
+      texteSansCible:
+        "Vos documents apparaîtront ici dès que votre coach vous en aura affecté.",
     },
     {
       id: "doc-carte",
@@ -895,6 +1052,8 @@ const DOCUMENTS: EspaceGuide = {
       titre: "Lire une carte",
       texte:
         "Le titre, puis la nature et la catégorie du document, puis sa description. Un document peut être marqué important, ou encore verrouillé jusqu'à une date — son contenu n'est alors pas accessible.",
+      texteSansCible:
+        "Une carte par document : il n'y en a aucune tant qu'aucun document ne vous est affecté.",
     },
     {
       id: "doc-actions",
@@ -903,6 +1062,8 @@ const DOCUMENTS: EspaceGuide = {
       titre: "Ouvrir le document",
       texte:
         "Les actions disponibles pour ce document : selon sa nature, ouvrir le PDF, voir la vidéo, ou ouvrir le fichier. Un document verrouillé n'en propose aucune tant que sa date n'est pas atteinte.",
+      texteSansCible:
+        "Les actions apparaissent sur chaque document déverrouillé.",
       attenteMs: 1500,
     },
   ],

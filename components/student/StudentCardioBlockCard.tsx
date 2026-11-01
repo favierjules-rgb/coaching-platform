@@ -54,7 +54,14 @@ export function StudentCardioBlockCard({
 }) {
   const color = BLOCK_COLOR_STYLES[normalizeColorKey(block.colorKey, "blue")];
   return (
-    <section className={`rounded-card border border-l-4 border-border ${color.borderLeft} ${color.softBg} p-5 shadow-soft`}>
+    /* ANCRE DE VISITE GUIDÉE, posée sur TOUTES les cartes cardio : le guide
+       vise la n-ième par son rang dans le document, ce qui suit l'ordre du
+       rail. Une séance sans cardio n'en rend aucune, et l'étape le dit en
+       repli au lieu de disparaître. */
+    <section
+      data-guide="seance-carte-cardio"
+      className={`rounded-card border border-l-4 border-border ${color.borderLeft} ${color.softBg} p-5 shadow-soft`}
+    >
       <div className="mb-1 flex flex-wrap items-center gap-2">
         <span className={`h-2.5 w-2.5 flex-shrink-0 rounded-full ${color.dot}`} aria-hidden="true" />
         <Activity size={15} className="flex-shrink-0 text-muted-foreground" aria-hidden="true" />

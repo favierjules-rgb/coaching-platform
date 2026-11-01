@@ -1,4 +1,5 @@
 import { sectionAdminVisible, type DroitsNavigationAdmin } from "@/lib/admin-shell-nav";
+import type { CleDemonstration } from "@/lib/guide-demonstration";
 
 /**
  * ════════════════════════════════════════════════════════════════════════════
@@ -78,6 +79,83 @@ export interface EtapeGuide {
    * interdits qu'à `ouvrirVia`.
    */
   readonly gesteAttendu?: boolean;
+  /**
+   * Scénario de démonstration à appliquer en arrivant sur cette étape.
+   *
+   * ⚠️ DÉCLARATIF, ET « AUCUN » PAR DÉFAUT. Une étape qui ne déclare rien
+   * ÉTEINT la démonstration. C'est l'inverse d'un drapeau qu'on oublierait de
+   * baisser : pour qu'une feuille de démonstration reste à l'écran, il faut
+   * que chaque étape concernée le redemande. Aucune fuite possible vers la
+   * suite du parcours.
+   */
+  readonly demo?: CleDemonstration;
+  /**
+   * Ce qu'on affiche quand la cible reste introuvable après préparation et
+   * attente.
+   *
+   * ⚠️ IL N'Y A PLUS DE SAUT SILENCIEUX. L'ancien moteur passait à l'étape
+   * suivante atteignable, et une visite pouvait se terminer sans rien avoir
+   * montré — c'est exactement ce qui faisait s'arrêter la nutrition à
+   * l'étape 10 sur 23. Désormais l'étape S'AFFICHE quand même, sans découpe,
+   * avec ce texte s'il est fourni. L'utilisateur sait qu'il y a quelque chose
+   * là, et pourquoi il ne le voit pas.
+   */
+  readonly texteSansCible?: string;
+  /**
+   * Répéter cette étape pour chaque élément portant cette ancre.
+   *
+   * ⚠️ C'EST CE QUI PERMET DE PARCOURIR TOUS LES EXERCICES. Les cartes du rail
+   * portent toutes la même ancre : sans répétition, `querySelector` rendait
+   * éternellement la première, et la visite ne montrait qu'un exercice sur
+   * sept. Le déploiement a lieu UNE fois, à l'ouverture de la visite, depuis
+   * le nombre réel d'éléments présents.
+   *
+   * `{n}` et `{total}` sont remplacés dans le titre, le texte et l'exemple.
+   */
+  readonly repeterPour?: CibleGuide;
+  /** Rang de l'élément visé, posé par le déploiement. 0 par défaut. */
+  readonly occurrence?: number;
+}
+
+/**
+ * Déploie les étapes répétées, une fois, au démarrage de la visite.
+ *
+ * `compter` rend le nombre d'éléments réellement présents pour une ancre.
+ *
+ * ⚠️ ZÉRO ÉLÉMENT NE SUPPRIME PAS L'ÉTAPE. Elle est conservée, en un seul
+ * exemplaire, et c'est le repli qui l'expliquera — une séance sans exercice de
+ * musculation doit dire « il n'y en a pas », pas faire disparaître la question.
+ */
+export function deployerEtapes(
+  etapes: readonly EtapeGuide[],
+  compter: (cible: CibleGuide) => number,
+): readonly EtapeGuide[] {
+  const deployees: EtapeGuide[] = [];
+  for (const etape of etapes) {
+    if (!etape.repeterPour) {
+      deployees.push(etape);
+      continue;
+    }
+    const total = Math.max(1, compter(etape.repeterPour));
+    for (let rang = 0; rang < total; rang += 1) {
+      deployees.push(substituer(etape, rang, total));
+    }
+  }
+  return deployees;
+}
+
+function substituer(etape: EtapeGuide, rang: number, total: number): EtapeGuide {
+  const remplacer = (texte: string) =>
+    texte.replaceAll("{n}", String(rang + 1)).replaceAll("{total}", String(total));
+  return {
+    ...etape,
+    id: total > 1 ? `${etape.id}-${rang + 1}` : etape.id,
+    occurrence: rang,
+    titre: remplacer(etape.titre),
+    texte: remplacer(etape.texte),
+    ...(etape.exemple ? { exemple: remplacer(etape.exemple) } : {}),
+    ...(etape.texteSansCible ? { texteSansCible: remplacer(etape.texteSansCible) } : {}),
+  };
 }
 
 /** Attente par défaut d'une cible déclarée tardive. */
