@@ -10,6 +10,7 @@ import { ProgressBar } from "@/components/student/ProgressBar";
 import { WeekAnalysisSection } from "@/components/student/WeekAnalysisSection";
 import { Loader } from "@/components/ui/Loader";
 import { usePlanningLive } from "@/hooks/usePlanningLive";
+import { progressionDuProgramme } from "@/lib/progression-programme";
 import {
   buildScheduleForWeek,
   computeCurrentWeekNumber,
@@ -90,6 +91,31 @@ export function PlanningLiveContenu({
     ? `${etat.eleve.firstName} ${etat.eleve.lastName}`.trim() || "Élève"
     : "Élève";
 
+  /*
+   * ════════════════════════════════════════════════════════════════════════
+   * TROIS INDICATEURS, TROIS SOURCES DE VÉRITÉ — ET ILS NE SE PARLENT PAS
+   * ════════════════════════════════════════════════════════════════════════
+   * C'est la règle la plus facile à enfreindre sans le voir, parce que les
+   * trois réponses se ressemblent (« où en est-on ? ») alors que les questions
+   * sont différentes :
+   *
+   *   1. LE JOUR EN SURBRILLANCE ← le CALENDRIER. `semaineCourante` vient de
+   *      `computeCurrentWeekNumber`, qui ne lit que la date de début de
+   *      l'affectation et la date du jour. Aucune séance validée n'entre dans
+   *      ce calcul : nous sommes mardi de la semaine 3, donc le mardi de la
+   *      semaine 3 est marqué — que l'élève ait fait deux séances ou douze.
+   *   2. LE CONTOUR VERT ← la SÉANCE, enregistrée en base.
+   *      `etat.seancesTerminees` est l'ensemble des `session_id` ayant un
+   *      `workout_feedback.completed = true`. Rien d'autre n'y entre.
+   *   3. LA BARRE ← le COMPTE. Séances enregistrées / séances prévues, les
+   *      jours de repos exclus, calculé par `progressionDuProgramme`.
+   *
+   * ⚠️ IL EXISTE DEUX « SEMAINES » DANS CETTE APPLICATION, et les confondre est
+   * l'erreur classique : la semaine CALENDAIRE (ci-dessus) et la semaine de
+   * PROGRESSION (`progression.semaineDeProgression`, la première qui porte
+   * encore une séance à faire). Elles divergent dès qu'un élève prend du
+   * retard. Seule la première décide de la surbrillance.
+   */
   const semaineCourante = computeCurrentWeekNumber(programme, etat.eleve);
   const vueEleve = toEleveTrainingProgram(
     programme,
@@ -97,6 +123,28 @@ export function PlanningLiveContenu({
     undefined,
     etat.seancesTerminees,
   );
+  /*
+   * Le même calcul que la barre, mais détaillé : on affiche « 6 / 15 séances »
+   * à côté du pourcentage.
+   *
+   * ⚠️ MÊME MODULE, PAS UN SECOND CALCUL. `toEleveTrainingProgram` appelle déjà
+   * `progressionDuProgramme` pour obtenir son pourcentage ; on l'appelle ici
+   * pour obtenir les deux nombres qui le composent. Recompter à la main aurait
+   * fait apparaître un jour « 7 / 15 » à côté de « 40 % ».
+   */
+  const progression = progressionDuProgramme({
+    seances: programme.sessions,
+    seancesTerminees: etat.seancesTerminees ?? new Set<string>(),
+  });
+  /*
+   * ⚠️ `etat.jourCourant` EST LU ICI POUR UNE SEULE RAISON : rendre la
+   * dépendance au jour explicite. Les fonctions de calendrier relisent
+   * l'horloge elles-mêmes à chaque rendu ; ce qui manquait, c'était un rendu à
+   * minuit. Le hook en provoque un en changeant cette valeur, et la clé de la
+   * liste de semaines la porte — sans elle, un lecteur pressé conclurait que
+   * `jourCourant` ne sert à rien et le retirerait.
+   */
+  const jour = etat.jourCourant;
   const semaines = Array.from(new Set(programme.sessions.map((s) => s.weekNumber))).sort(
     (a, b) => a - b,
   );
@@ -132,12 +180,28 @@ export function PlanningLiveContenu({
         </p>
       </div>
 
-      {/* Même règle que la page élève : progression inconnue ⇒ rien, jamais 0 %. */}
+      {/*
+        LA BARRE — séances enregistrées / séances prévues.
+
+        ⚠️ MÊME RÈGLE QUE LA PAGE ÉLÈVE : progression INCONNUE ⇒ on se taît,
+        jamais 0 %. `seancesTerminees` vaut `null` quand la lecture de
+        l'historique a échoué, et une barre à zéro annoncerait « rien de fait »
+        à un élève qui a tout fait.
+
+        ⚠️ ET ELLE NE COMPTE QUE DU PERSISTÉ. Un brouillon local n'a jamais
+        atteint `workout_feedback` ; un retour envoyé sans la case « séance
+        terminée » y est avec `completed = false`. Ni l'un ni l'autre ne
+        compte, et aucun des deux n'a besoin d'être écarté ici : ils ne sont
+        tout simplement pas dans l'ensemble.
+      */}
       {vueEleve.progressionConnue !== false && (
         <div className="mb-8 rounded-card border border-border bg-card p-6">
-          <div className="mb-3 flex items-center justify-between text-xs text-muted-foreground">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs text-muted-foreground">
             <span className="uppercase tracking-wide">Progression du programme</span>
-            <span>{vueEleve.progressPercent}%</span>
+            <span>
+              {progression.seancesTerminees} / {progression.seancesPrevues} séances ·{" "}
+              {vueEleve.progressPercent}%
+            </span>
           </div>
           <ProgressBar percent={vueEleve.progressPercent} />
         </div>
@@ -168,7 +232,7 @@ export function PlanningLiveContenu({
           <p className="text-sm text-muted-foreground">Aucune séance planifiée pour le moment.</p>
         ) : (
           semaines.map((semaine) => (
-            <div key={semaine}>
+            <div key={`${jour}-${semaine}`}>
               <h2 className="mb-4 flex flex-wrap items-center gap-2 font-heading text-lg font-bold uppercase text-foreground">
                 Semaine {semaine}
                 {semaine === semaineCourante ? (
@@ -191,6 +255,10 @@ export function PlanningLiveContenu({
                    restent alors proposées, jamais masquées. */
                 seancesTerminees={etat.seancesTerminees ?? new Set<string>()}
                 libelleAction="Démarrer en mode Live"
+                /* Le repère du jour est NOMMÉ, pas seulement teinté : dès que
+                   des contours verts apparaissent, deux informations se
+                   disputeraient la couleur. */
+                marqueAujourdhui
               />
             </div>
           ))

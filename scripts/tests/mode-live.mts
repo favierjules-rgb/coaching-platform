@@ -43,7 +43,13 @@ import {
   programmeEstLivrableEnLive,
   type EleveLive,
 } from "../../lib/presentiel-live";
-import { buildScheduleForWeek, toEleveWorkoutSession } from "../../lib/training-schedule";
+import { msJusquauProchainJour } from "../../lib/clock";
+import { progressionDuProgramme } from "../../lib/progression-programme";
+import {
+  buildScheduleForWeek,
+  computeCurrentWeekNumber,
+  toEleveWorkoutSession,
+} from "../../lib/training-schedule";
 import type { AdminProgram, AdminWorkoutSession } from "../../types";
 
 const RACINE = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -360,6 +366,33 @@ await test("L6/L7/L8 — la route ne décide rien elle-même : elle délègue à
   }
 });
 
+await test("P2/P3-bis — la checklist SQL éprouve bien « élève ET coach » sur une base", async () => {
+  /*
+   * ⚠️ CE CONTRÔLE NE PROUVE RIEN PAR LUI-MÊME, et c'est assumé : il garantit
+   * que la preuve existe ailleurs. « Une séance saisie par le coach compte-t-
+   * elle comme une séance de l'élève ? » ne se répond qu'en écrivant les deux
+   * lignes sous les deux identités, donc dans PostgreSQL. Ce que ce contrôle
+   * empêche, c'est que la section correspondante disparaisse de la checklist
+   * sans que personne ne le remarque.
+   */
+  const checklist = await lire("supabase", "tests", "mode_live_affectations_checklist.sql");
+  for (const marqueur of [
+    "P1. aucune séance enregistrée au départ",
+    "P2. une séance validée par l''ÉLÈVE",
+    "P3. une séance validée par le COACH",
+    "P4. une séance corrigée reste comptée UNE fois",
+    "P5. un retour non terminé (completed = false) ne compte pas",
+    "P6. une séance dévalidée quitte l''ensemble",
+  ]) {
+    assert.ok(checklist.includes(marqueur), `contrôle absent de la checklist SQL : ${marqueur}`);
+  }
+  // Et la requête éprouvée est bien celle que l'application utilise.
+  assert.ok(
+    checklist.includes("completed is true and session_id is not null"),
+    "la checklist doit éprouver la requête réelle de seancesTermineesDeLEleve",
+  );
+});
+
 await test("L2-bis — la fenêtre s'intitule « Choisir un élève » et liste les élèves", async () => {
   const code = await lire(...ETIQUETTE);
   assert.ok(code.includes("Choisir un élève"), "le titre exact du cahier des charges");
@@ -504,9 +537,14 @@ await test("L9-bis — le parcours ÉLÈVE n'a pas bougé d'un caractère", asyn
   assert.ok(!html.includes("data-seance-realisee"), "aucun marquage sans historique fourni");
   assert.ok(!html.includes("Réalisée"), "aucune mention de complétion côté élève");
   assert.ok(!html.includes("À réaliser"), "aucune action ajoutée côté élève");
+  // Les deux signaux du mode Live sont absents : ni contour vert, ni pastille.
+  assert.ok(!html.includes("border-success"), "aucun contour vert côté élève");
+  assert.ok(!html.includes("Aujourd&#x27;hui"), "aucune pastille ajoutée côté élève");
+  // Le repère du jour, lui, est INCHANGÉ : il existait déjà, teinté.
+  assert.ok(html.includes("border-primary/40"), "le repère du jour reste celui d'avant");
   // Et la page de programme de l'élève ne passe aucune des nouvelles propriétés.
   const pageEleve = codeSeul(await lire(...PAGE_SEANCE_ELEVE));
-  for (const prop of ["lienSeance", "seancesTerminees=", "libelleAction"]) {
+  for (const prop of ["lienSeance", "seancesTerminees=", "libelleAction", "marqueAujourdhui"]) {
     assert.ok(!pageEleve.includes(prop), `la page élève ne doit pas passer « ${prop} »`);
   }
 });
@@ -680,6 +718,286 @@ await test("L17-bis — le chronomètre suit le coach du planning à la séance"
 });
 
 /* ════════════════════════════════════════════════════════════════════════════
+ * F. LES TROIS INDICATEURS — calendrier, contour vert, barre
+ * ════════════════════════════════════════════════════════════════════════════
+ * ⚠️ TROIS QUESTIONS DIFFÉRENTES QUI SE RESSEMBLENT. « Quel jour sommes-nous »,
+ * « cette séance est-elle enregistrée » et « où en est le programme » ont trois
+ * sources distinctes, et les mélanger ne produit pas une erreur visible : ça
+ * produit un écran plausible et faux. Ces contrôles éprouvent la séparation.
+ */
+
+/** Rend une semaine du planning Live, à une date et avec un historique donnés. */
+function rendreSemaineLive(options: {
+  readonly semaine: number;
+  readonly aujourdhui: Date;
+  readonly semaineCourante: number;
+  readonly terminees?: ReadonlySet<string>;
+}): string {
+  const seances = PROGRAMME_FACTICE.sessions.filter((s) => s.weekNumber === options.semaine);
+  return renderToString(
+    createElement(ProgramWeekCalendar, {
+      schedule: buildScheduleForWeek(
+        PROGRAMME_FACTICE,
+        options.semaine,
+        options.aujourdhui,
+        options.semaineCourante,
+      ),
+      sessions: seances.map(toEleveWorkoutSession),
+      lienSeance: (s) => `/admin/eleves/${ELEVE_A}/seance/${s.id}?programme=${PROGRAMME}`,
+      seancesTerminees: options.terminees ?? new Set<string>(),
+      libelleAction: "Démarrer en mode Live",
+      marqueAujourdhui: true,
+    }),
+  );
+}
+
+/** Le 5 janvier 2026 est un LUNDI ; le 6, un mardi. */
+const LUNDI = new Date("2026-01-05T12:00:00Z");
+const MARDI = new Date("2026-01-06T12:00:00Z");
+
+await test("P1 — une séance NON enregistrée a l'apparence normale", () => {
+  const html = rendreSemaineLive({ semaine: 1, aujourdhui: MARDI, semaineCourante: 1 });
+  assert.ok(html.includes('data-seance-realisee="non"'), "elle doit être marquée non réalisée");
+  assert.ok(!html.includes("border-success"), "aucun contour vert");
+  assert.ok(!html.includes("Réalisée"), "aucune mention de complétion");
+  assert.ok(html.includes("Démarrer en mode Live"), "et l'action reste proposée");
+});
+
+await test("P2/P3 — une séance enregistrée porte un contour VERT, par l'élève comme par le coach", async () => {
+  const html = rendreSemaineLive({
+    semaine: 1,
+    aujourdhui: MARDI,
+    semaineCourante: 1,
+    terminees: new Set([SEANCE_S1]),
+  });
+  assert.ok(html.includes("border-success"), "le contour vert est absent");
+  assert.ok(html.includes('data-seance-realisee="oui"'));
+  assert.ok(html.includes("Réalisée · consulter"), "la couleur seule ne suffit pas : il faut le mot");
+
+  /*
+   * ⚠️ ÉLÈVE ET COACH SONT RECONNUS DE LA MÊME MANIÈRE, ET C'EST UNE PROPRIÉTÉ
+   * DE LA LECTURE, PAS UN CAS À TRAITER. `seancesTermineesDeLEleve` filtre sur
+   * `student_id` et `completed`, et ne regarde NI `saisie_mode`, NI `saisie_par`.
+   * Une séance saisie en présentiel est donc dans le même ensemble que celle
+   * de l'élève — rien à distinguer, donc rien à oublier de distinguer.
+   */
+  const lecture = await lire("lib", "supabase", "workout-feedback.ts");
+  const bloc = lecture.slice(
+    lecture.indexOf("export async function seancesTermineesDeLEleve"),
+    lecture.indexOf("/* ─── Écriture ─── */"),
+  );
+  assert.ok(bloc.includes('.eq("completed", true)'), "la source est le retour COMPLÉTÉ");
+  assert.ok(bloc.includes('.eq("student_id", studentId)'));
+  for (const mot of ["saisie_mode", "saisie_par", "coach"]) {
+    assert.ok(
+      !bloc.includes(mot),
+      `la lecture ne doit pas distinguer l'auteur de la saisie (« ${mot} » trouvé)`,
+    );
+  }
+});
+
+await test("P4 — une séance modifiée ne compte qu'UNE fois", () => {
+  /*
+   * ⚠️ UN ENSEMBLE D'IDENTIFIANTS, PAS UNE LISTE DE LIGNES. `workout_feedback`
+   * porte un index unique sur (student_id, session_id) : une correction MET À
+   * JOUR la ligne, elle n'en ajoute pas. Et même si deux lignes existaient, le
+   * dénominateur comme le numérateur dédoublonnent par identifiant.
+   */
+  const une = progressionDuProgramme({
+    seances: PROGRAMME_FACTICE.sessions,
+    seancesTerminees: new Set([SEANCE_S1]),
+  });
+  assert.equal(une.seancesTerminees, 1);
+  assert.equal(une.seancesPrevues, 2);
+  assert.equal(une.pourcentage, 50);
+
+  // Le même identifiant « deux fois » : un Set ne le compte qu'une fois.
+  const deuxFois = progressionDuProgramme({
+    seances: [...PROGRAMME_FACTICE.sessions, PROGRAMME_FACTICE.sessions[0]],
+    seancesTerminees: new Set([SEANCE_S1, SEANCE_S1]),
+  });
+  assert.equal(deuxFois.seancesTerminees, 1, "la séance validée ne compte qu'une fois");
+  assert.equal(deuxFois.seancesPrevues, 2, "et la séance dupliquée ne gonfle pas le total");
+});
+
+await test("P5 — un brouillon local ne vaut NI contour vert, NI progression", async () => {
+  /*
+   * Le brouillon vit dans IndexedDB et n'atteint jamais `workout_feedback` : il
+   * ne peut donc pas entrer dans l'ensemble. Ce contrôle vérifie qu'aucun
+   * chemin du planning ne va le chercher — c'est la seule manière dont il
+   * pourrait s'y inviter.
+   */
+  for (const fichier of [CONTENU_PLANNING, HOOK, GRILLE]) {
+    const code = codeSeul(await lire(...fichier));
+    for (const mot of ["brouillon", "Brouillon", "IndexedDB", "DepotOffline", "localStorage"]) {
+      assert.ok(
+        !code.includes(mot),
+        `${fichier.join("/")} : le planning ne doit rien lire d'un état local (« ${mot} »)`,
+      );
+    }
+  }
+  // Et la source reste le persisté : `completed = true`, rien d'autre.
+  const hook = codeSeul(await lire(...HOOK));
+  assert.ok(
+    hook.includes("seancesTermineesDeLEleve(supabase, studentId)"),
+    "l'historique doit venir de la base",
+  );
+  assert.ok(
+    hook.includes("validees.complet ? validees.seances : null"),
+    "une lecture incomplète doit rendre « inconnu », jamais « aucune »",
+  );
+});
+
+await test("P6 — le repère du jour SE DÉPLACE avec la date réelle", () => {
+  const lundi = rendreSemaineLive({ semaine: 1, aujourdhui: LUNDI, semaineCourante: 1 });
+  const mardi = rendreSemaineLive({ semaine: 1, aujourdhui: MARDI, semaineCourante: 1 });
+
+  // Lundi porte la séance ; mardi est un jour de repos dans ce décor.
+  assert.ok(lundi.includes('data-jour-courant="oui"'), "le lundi doit être repéré");
+  assert.ok(lundi.includes("Aujourd&#x27;hui"), "et nommé");
+  assert.notEqual(lundi, mardi, "le rendu doit changer avec la date");
+
+  // ⚠️ ET LE REPÈRE NE DÉPEND PAS DE LA PROGRESSION : même date, historique
+  // différent, même jour marqué.
+  const avecHistorique = rendreSemaineLive({
+    semaine: 1,
+    aujourdhui: LUNDI,
+    semaineCourante: 1,
+    terminees: new Set([SEANCE_S1, SEANCE_S2]),
+  });
+  assert.ok(
+    avecHistorique.includes('data-jour-courant="oui"'),
+    "une séance validée ne doit pas déplacer le repère du jour",
+  );
+  assert.ok(
+    avecHistorique.includes("border-success") && avecHistorique.includes('data-jour-courant="oui"'),
+    "les deux signaux doivent COEXISTER sur une séance faite aujourd'hui",
+  );
+});
+
+await test("P6-bis — le repère n'existe QUE dans la semaine calendaire", () => {
+  // Semaine 2 affichée alors que la semaine courante est la 1 : aucun repère.
+  const autreSemaine = rendreSemaineLive({ semaine: 2, aujourdhui: LUNDI, semaineCourante: 1 });
+  assert.ok(
+    !autreSemaine.includes('data-jour-courant="oui"'),
+    "sans le quatrième argument de buildScheduleForWeek, chaque semaine aurait son « aujourd'hui »",
+  );
+  const bonneSemaine = rendreSemaineLive({ semaine: 2, aujourdhui: LUNDI, semaineCourante: 2 });
+  assert.ok(bonneSemaine.includes('data-jour-courant="oui"'));
+});
+
+await test("P6-ter — la semaine calendaire vient des DATES, jamais des séances faites", () => {
+  /*
+   * `computeCurrentWeekNumber` ne prend que le programme et une date d'ancrage.
+   * Il n'existe aucun paramètre par lequel la progression pourrait entrer : le
+   * contrôle le prouve en faisant varier l'historique à l'extérieur et en
+   * constatant que la semaine ne bouge pas (elle ne peut pas : l'historique
+   * n'est pas un argument).
+   */
+  const programmeAncre = { ...PROGRAMME_FACTICE, programStartDate: "2026-01-05" } as typeof PROGRAMME_FACTICE;
+  const semaine1 = computeCurrentWeekNumber(programmeAncre, { startDate: "2026-01-05" }, LUNDI);
+  const semaine3 = computeCurrentWeekNumber(
+    programmeAncre,
+    { startDate: "2026-01-05" },
+    new Date("2026-01-20T12:00:00Z"),
+  );
+  assert.equal(semaine1, 1, "le jour du début, on est en semaine 1");
+  assert.equal(semaine3, 3, "quinze jours plus tard, en semaine 3 — sans qu'aucune séance soit faite");
+});
+
+await test("P7 — plusieurs séances enregistrées : chacune porte son contour", () => {
+  // Les deux séances du décor sont sur des semaines différentes ; on en fait
+  // une troisième sur la semaine 1 pour éprouver le cumul dans UNE semaine.
+  const s3 = seanceFactice("55555555-0000-4000-8000-000000000053", "Milieu", 1, "Mercredi");
+  const programme = { ...PROGRAMME_FACTICE, sessions: [...PROGRAMME_FACTICE.sessions, s3] };
+  const html = renderToString(
+    createElement(ProgramWeekCalendar, {
+      schedule: buildScheduleForWeek(programme, 1, MARDI, 1),
+      sessions: programme.sessions.filter((s) => s.weekNumber === 1).map(toEleveWorkoutSession),
+      lienSeance: (s) => `/X/${s.id}`,
+      seancesTerminees: new Set([SEANCE_S1, s3.id]),
+      libelleAction: "Démarrer en mode Live",
+      marqueAujourdhui: true,
+    }),
+  );
+  assert.equal(
+    (html.match(/border-success/g) ?? []).length,
+    2,
+    "deux séances enregistrées = deux contours verts",
+  );
+  assert.equal((html.match(/data-seance-realisee="oui"/g) ?? []).length, 2);
+});
+
+await test("P8 — programme terminé : 100 %, et les jours de repos n'y entrent pas", () => {
+  const toutes = new Set(PROGRAMME_FACTICE.sessions.map((s) => s.id));
+  const fini = progressionDuProgramme({
+    seances: PROGRAMME_FACTICE.sessions,
+    seancesTerminees: toutes,
+  });
+  assert.equal(fini.pourcentage, 100);
+  assert.equal(fini.termine, true);
+
+  // ⚠️ LE DÉNOMINATEUR EST LE NOMBRE DE SÉANCES, PAS DE JOURS. Trois jours de
+  // repos ajoutés ne doivent pas faire retomber la barre à 40 %.
+  const avecRepos = progressionDuProgramme({
+    seances: [
+      ...PROGRAMME_FACTICE.sessions,
+      { id: "repos-1", weekNumber: 1, isRestDay: true },
+      { id: "repos-2", weekNumber: 1, isRestDay: true },
+      { id: "repos-3", weekNumber: 2, isRestDay: true },
+    ],
+    seancesTerminees: toutes,
+  });
+  assert.equal(avecRepos.seancesPrevues, 2, "les jours de repos ne sont pas des séances");
+  assert.equal(avecRepos.pourcentage, 100, "un programme fini reste à 100 % malgré les repos");
+
+  // L'exemple du cahier des charges : 6 sur 15 → 40 %.
+  const quinze = Array.from({ length: 15 }, (_, i) => ({
+    id: `s${i}`,
+    weekNumber: Math.floor(i / 3) + 1,
+    isRestDay: false,
+  }));
+  const six = progressionDuProgramme({
+    seances: quinze,
+    seancesTerminees: new Set(quinze.slice(0, 6).map((s) => s.id)),
+  });
+  assert.equal(six.pourcentage, 40, "6 / 15 = 40 %");
+});
+
+await test("P8-bis — l'écran affiche le compte, et se tait quand il ne sait pas", async () => {
+  const contenu = codeSeul(await lire(...CONTENU_PLANNING));
+  assert.ok(
+    contenu.includes("progressionDuProgramme({"),
+    "la barre doit réutiliser le module de progression, pas recompter",
+  );
+  assert.ok(
+    contenu.includes("{progression.seancesTerminees} / {progression.seancesPrevues} séances"),
+    "le compte doit être lisible à côté du pourcentage",
+  );
+  assert.ok(
+    contenu.includes("vueEleve.progressionConnue !== false"),
+    "progression inconnue ⇒ aucune barre, jamais 0 %",
+  );
+});
+
+await test("P9 — le planning se réveille à minuit, et au retour sur la page", async () => {
+  const hook = codeSeul(await lire(...HOOK));
+  assert.ok(hook.includes("msJusquauProchainJour()"), "un réveil doit être programmé");
+  assert.ok(hook.includes("setJourCourant"), "et faire changer le jour courant");
+  assert.ok(
+    hook.includes('document.addEventListener("visibilitychange"'),
+    "le retour sur la page doit relire l'historique : c'est ce qui met la barre à jour",
+  );
+  // La distance au prochain minuit, exécutée.
+  const unJour = 24 * 60 * 60 * 1000;
+  const juste = msJusquauProchainJour(new Date(2026, 0, 5, 23, 59, 30));
+  assert.equal(juste, 30_000, "trente secondes avant minuit, on attend trente secondes");
+  const minuitPile = msJusquauProchainJour(new Date(2026, 0, 5, 0, 0, 0));
+  assert.equal(minuitPile, unJour, "à minuit pile, on attend un jour entier");
+  assert.ok(msJusquauProchainJour() > 0, "jamais zéro : un minuteur à 0 boucle");
+});
+
+/* ════════════════════════════════════════════════════════════════════════════
  * SABOTAGES
  * ════════════════════════════════════════════════════════════════════════════ */
 
@@ -741,6 +1059,93 @@ await test("SAB 5 — une grille qui ignore l'injection de lien est détectée",
   );
   assert.ok(html.includes("/admin/sentinelle"), "la grille doit réellement utiliser lienSeance");
   assert.ok(!html.includes("/entrainement/seance/"), "et abandonner la destination par défaut");
+});
+
+await test("SAB 6 — un contour vert qui REMPLACE le repère du jour est détecté", () => {
+  /*
+   * L'erreur plausible : `realisee ? vert : (isToday ? aujourdhui : neutre)`.
+   * Elle fait disparaître le repère du jour dès que la séance du jour est
+   * validée — c'est-à-dire au moment précis où le coach cherche où il en est.
+   */
+  const classesFautives = (realisee: boolean, isToday: boolean) =>
+    realisee ? "border-success bg-card" : isToday ? "border-primary/40 bg-primary/5" : "border-border bg-card";
+  assert.ok(
+    !classesFautives(true, true).includes("bg-primary/5"),
+    "le sabotage doit perdre le fond du jour…",
+  );
+  // …là où le vrai rendu garde les deux.
+  const html = rendreSemaineLive({
+    semaine: 1,
+    aujourdhui: LUNDI,
+    semaineCourante: 1,
+    terminees: new Set([SEANCE_S1]),
+  });
+  assert.ok(
+    html.includes("border-success") && html.includes("bg-primary/5"),
+    "le vrai rendu doit cumuler contour vert et fond du jour",
+  );
+});
+
+await test("SAB 7 — une progression comptée en SEMAINES est détectée", () => {
+  // L'ancienne formule, retirée le 24/09/2026 : le temps écoulé, pas le travail.
+  const enSemaines = (semaineCourante: number, dureeSemaines: number) =>
+    Math.round((Math.min(semaineCourante, dureeSemaines) / dureeSemaines) * 100);
+  // Semaine 2 d'un programme de 4, AUCUNE séance faite.
+  assert.equal(enSemaines(2, 4), 50, "le sabotage annonce 50 %…");
+  const reel = progressionDuProgramme({
+    seances: PROGRAMME_FACTICE.sessions,
+    seancesTerminees: new Set<string>(),
+  });
+  assert.equal(reel.pourcentage, 0, "…là où rien n'a été fait");
+});
+
+await test("SAB 8 — un dénominateur qui compte les JOURS DE REPOS est détecté", () => {
+  const seances = [
+    ...PROGRAMME_FACTICE.sessions,
+    { id: "repos-a", weekNumber: 1, isRestDay: true },
+    { id: "repos-b", weekNumber: 1, isRestDay: true },
+    { id: "repos-c", weekNumber: 2, isRestDay: true },
+  ];
+  const toutes = new Set(PROGRAMME_FACTICE.sessions.map((s) => s.id));
+  // Le sabotage : compter toutes les lignes, repos compris.
+  const fautif = Math.round((toutes.size / seances.length) * 100);
+  assert.equal(fautif, 40, "le sabotage plafonne un programme fini à 40 %…");
+  assert.equal(
+    progressionDuProgramme({ seances, seancesTerminees: toutes }).pourcentage,
+    100,
+    "…là où la vraie règle le déclare terminé",
+  );
+});
+
+await test("SAB 9 — une surbrillance pilotée par la PROGRESSION est détectée", () => {
+  /*
+   * L'erreur la plus coûteuse, parce qu'elle produit un écran plausible : poser
+   * le repère sur `semaineDeProgression` (la première semaine qui porte encore
+   * une séance à faire) au lieu de la semaine calendaire. Un élève en retard
+   * verrait « aujourd'hui » dans une semaine passée.
+   */
+  const enRetard = progressionDuProgramme({
+    seances: PROGRAMME_FACTICE.sessions,
+    seancesTerminees: new Set<string>(),
+  });
+  assert.equal(enRetard.semaineDeProgression, 1, "la progression dit : semaine 1");
+
+  const programmeAncre = { ...PROGRAMME_FACTICE, programStartDate: "2026-01-05" } as typeof PROGRAMME_FACTICE;
+  const calendaire = computeCurrentWeekNumber(
+    programmeAncre,
+    { startDate: "2026-01-05" },
+    new Date("2026-01-14T12:00:00Z"),
+  );
+  assert.equal(calendaire, 2, "le calendrier dit : semaine 2");
+  assert.notEqual(
+    enRetard.semaineDeProgression,
+    calendaire,
+    "les deux semaines DIVERGENT dès qu'il y a du retard : c'est pourquoi elles ne doivent pas se substituer",
+  );
+
+  // Et c'est bien la calendaire que le planning utilise.
+  const html = rendreSemaineLive({ semaine: 2, aujourdhui: new Date("2026-01-14T12:00:00Z"), semaineCourante: calendaire });
+  assert.ok(html.includes('data-jour-courant="oui"'), "le repère est dans la semaine CALENDAIRE");
 });
 
 console.log(`\n${reussis} réussis, ${echecs} échecs`);

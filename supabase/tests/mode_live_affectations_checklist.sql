@@ -46,6 +46,8 @@
 --   L8  le collaborateur entraînement/LECTURE : visible, NON saisissable
 --   L9  un coach étranger ne voit ni la programmation, ni ses séances
 --   L10 URL forgée : écriture refusée pour un élève hors périmètre
+--   P1-P6 ce qui compte comme « séance enregistrée » : élève ET coach, pas un
+--         brouillon, pas un retour non terminé, une correction compte une fois
 --   S.  SABOTAGES — la règle « affectation directe » est-elle nécessaire ?
 --   Z.  rien ne survit au ROLLBACK
 --
@@ -88,20 +90,43 @@ begin perform set_config('request.jwt.claims', '', true); reset role; end $$;
 
 /*
  * Une tentative d'écriture de retour de séance, sous le rôle courant.
- * Rend 'acceptée' / 'refusée (<sqlstate>)'. La ligne est retirée aussitôt
- * pour que la contrainte unique (élève, séance) ne gêne pas l'essai suivant.
+ * Rend 'acceptée' / 'refusée (<sqlstate>)'.
+ *
+ * ⚠️ LA LIGNE EST RETIRÉE PAR (élève, séance), PAS PAR `session_key`.
+ * Le gardien DÉRIVE `session_key` de la séance (`new.session_key :=
+ * new.session_id::text`, migration 20260822090000) : la valeur 'essai' qu'on
+ * envoie n'arrive jamais en base, et un `delete where session_key = 'essai'`
+ * n'efface donc RIEN. La première version de ce fichier faisait exactement
+ * cela, et la section P suivante butait sur la contrainte unique (élève,
+ * séance) en essayant de réécrire une ligne censée avoir disparu. C'est le
+ * même piège que celui noté en tête de
+ * mode_presentiel_tracabilite_checklist.sql, à un endroit différent.
+ *
+ * Le nettoyage passe par un rôle sans RLS (`reset role`) : il doit effacer
+ * même ce que l'acteur testé ne pourrait pas voir.
  */
 create or replace function pg_temp.essai_saisie(p_student uuid, p_session uuid)
 returns text language plpgsql as $$
+declare v_resultat text;
 begin
   begin
     insert into public.workout_feedback
       (student_id, session_id, session_key, session_ref_label, completed)
     values (p_student, p_session, 'essai', 'essai', true);
+    v_resultat := 'acceptée';
   exception when others then
     return 'refusée (' || sqlstate || ')';
   end;
-  return 'acceptée';
+  return v_resultat;
+end $$;
+
+/** Efface une tentative, hors RLS, par ses clés réelles. */
+create or replace function pg_temp.nettoyer_essai(p_student uuid, p_session uuid)
+returns void language plpgsql as $$
+begin
+  perform set_config('request.jwt.claims', '', true);
+  reset role;
+  delete from public.workout_feedback where student_id = p_student and session_id = p_session;
 end $$;
 
 
@@ -183,6 +208,9 @@ begin
     -- Le modèle : deux semaines, donc des séances PASSÉES et FUTURES.
     ('c6000000-0000-4000-8000-000000000001','c4000000-0000-4000-8000-000000000001','c5000000-0000-4000-8000-000000000001','lundi','Modèle S1','pectoraux'),
     ('c6000000-0000-4000-8000-000000000002','c4000000-0000-4000-8000-000000000001','c5000000-0000-4000-8000-000000000002','lundi','Modèle S2','dos'),
+    -- Une troisième séance du MODÈLE, pour éprouver le retour non terminé sans
+    -- emprunter une séance de la copie — que la base refuserait, à juste titre.
+    ('c6000000-0000-4000-8000-000000000005','c4000000-0000-4000-8000-000000000001','c5000000-0000-4000-8000-000000000002','mardi','Modèle S2 bis','jambes'),
     -- La copie : SES propres séances, d'autres identifiants.
     ('c6000000-0000-4000-8000-000000000003','c4000000-0000-4000-8000-000000000002','c5000000-0000-4000-8000-000000000003','lundi','Copie S1','pectoraux'),
     ('c6000000-0000-4000-8000-000000000004','c4000000-0000-4000-8000-000000000003','c5000000-0000-4000-8000-000000000004','lundi','Jamais S1','jambes');
@@ -200,6 +228,9 @@ declare v_n int;
 begin
   select count(*) into v_n from public.programs where name like 'Modèle%' or name like 'Copie%';
   perform pg_temp.noter('A', 'A1. le décor est en place (3 programmations)', v_n = 3);
+  select count(*) into v_n from public.workout_sessions
+   where program_id = 'c4000000-0000-4000-8000-000000000001';
+  perform pg_temp.noter('A', 'A1b. le modèle porte trois séances', v_n = 3);
   select count(*) into v_n from public.assignments
    where content_type = 'programme'
      and content_id in ('c4000000-0000-4000-8000-000000000001','c4000000-0000-4000-8000-000000000002');
@@ -239,7 +270,8 @@ begin
     v_r = 'acceptée');
 
   perform pg_temp.systeme();
-  delete from public.workout_feedback where session_key = 'essai';
+  perform pg_temp.nettoyer_essai('c2000000-0000-4000-8000-000000000013', 'c6000000-0000-4000-8000-000000000003');
+  perform pg_temp.nettoyer_essai('c2000000-0000-4000-8000-000000000011', 'c6000000-0000-4000-8000-000000000001');
 end $$;
 
 
@@ -283,10 +315,10 @@ declare
   v_modele uuid := 'c4000000-0000-4000-8000-000000000001';
 begin
   for a in select * from (values
-      ('coach',                      'c0000000-0000-4000-8000-000000000002'::uuid, 2, 2, 2, 1),
-      ('administrateur',             'c0000000-0000-4000-8000-000000000001'::uuid, 2, 2, 2, 1),
-      ('collaborateur ÉCRITURE',     'c0000000-0000-4000-8000-000000000003'::uuid, 1, 1, 2, 1),
-      ('collaborateur LECTURE seule','c0000000-0000-4000-8000-000000000004'::uuid, 1, 0, 2, 1),
+      ('coach',                      'c0000000-0000-4000-8000-000000000002'::uuid, 2, 2, 3, 1),
+      ('administrateur',             'c0000000-0000-4000-8000-000000000001'::uuid, 2, 2, 3, 1),
+      ('collaborateur ÉCRITURE',     'c0000000-0000-4000-8000-000000000003'::uuid, 1, 1, 3, 1),
+      ('collaborateur LECTURE seule','c0000000-0000-4000-8000-000000000004'::uuid, 1, 0, 3, 1),
       ('coach ÉTRANGER',             'c0000000-0000-4000-8000-000000000005'::uuid, 0, 0, 0, 0)
     ) t(nom, compte, att_vus, att_ecriture, att_seances, att_prog)
   loop
@@ -326,7 +358,97 @@ begin
   perform pg_temp.noter('L', 'L10. saisir pour un élève hors périmètre est refusé',
     v_r like 'refusée%');
   perform pg_temp.systeme();
-  delete from public.workout_feedback where session_key = 'essai';
+  perform pg_temp.nettoyer_essai('c2000000-0000-4000-8000-000000000014', 'c6000000-0000-4000-8000-000000000001');
+end $$;
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- P. CE QUI COMPTE COMME « SÉANCE ENREGISTRÉE »
+-- ════════════════════════════════════════════════════════════════════════════
+-- Le planning Live tire DEUX indicateurs du même ensemble : le contour vert
+-- d'une séance et la barre de progression. Cet ensemble est exactement le
+-- résultat de la requête de `seancesTermineesDeLEleve` :
+--
+--     select session_id from workout_feedback
+--      where student_id = :eleve and completed = true and session_id is not null
+--
+-- ⚠️ ELLE NE REGARDE NI `saisie_mode`, NI `saisie_par` — et c'est tout l'objet
+-- de cette section. « Une séance enregistrée par le coach est-elle reconnue
+-- comme une séance enregistrée par l'élève ? » ne se répond pas en lisant du
+-- TypeScript : il faut écrire les deux lignes sous les deux identités et
+-- constater qu'elles ressortent ensemble.
+create or replace function pg_temp.seances_enregistrees(p_student uuid)
+returns int language sql as $$
+  select count(*)::int from public.workout_feedback
+   where student_id = p_student and completed is true and session_id is not null
+$$;
+
+do $$
+declare
+  v_e1 uuid := 'c2000000-0000-4000-8000-000000000011';
+  v_s1 uuid := 'c6000000-0000-4000-8000-000000000001';
+  v_s2 uuid := 'c6000000-0000-4000-8000-000000000002';
+  v_n int;
+  v_mode1 text;
+  v_mode2 text;
+begin
+  -- P1. Rien d'enregistré : l'ensemble est vide. Un brouillon local, par
+  --     construction, n'a jamais atteint cette table — il n'y a donc rien à
+  --     écarter ici, et c'est la meilleure garantie possible.
+  v_n := pg_temp.seances_enregistrees(v_e1);
+  perform pg_temp.noter('P', 'P1. aucune séance enregistrée au départ (un brouillon local n''y est pas)',
+    v_n = 0);
+
+  -- P2. L'ÉLÈVE valide sa séance.
+  perform pg_temp.devenir('c0000000-0000-4000-8000-000000000011');
+  insert into public.workout_feedback (student_id, session_id, session_key, session_ref_label, completed)
+  values (v_e1, v_s1, 'x', 'x', true);
+  perform pg_temp.systeme();
+  perform pg_temp.noter('P', 'P2. une séance validée par l''ÉLÈVE entre dans l''ensemble',
+    pg_temp.seances_enregistrees(v_e1) = 1);
+
+  -- P3. LE COACH valide une autre séance du même élève, en présentiel.
+  perform pg_temp.devenir('c0000000-0000-4000-8000-000000000002');
+  insert into public.workout_feedback (student_id, session_id, session_key, session_ref_label, completed)
+  values (v_e1, v_s2, 'y', 'y', true);
+  perform pg_temp.systeme();
+  perform pg_temp.noter('P', 'P3. une séance validée par le COACH entre dans le MÊME ensemble',
+    pg_temp.seances_enregistrees(v_e1) = 2);
+
+  -- Et la traçabilité les distingue, elle — sans que la progression s'en serve.
+  select saisie_mode into v_mode1 from public.workout_feedback where session_id = v_s1;
+  select saisie_mode into v_mode2 from public.workout_feedback where session_id = v_s2;
+  perform pg_temp.noter('P',
+    'P3b. la trace distingue les deux auteurs, alors que le COMPTE les traite pareil',
+    v_mode1 = 'autonome' and v_mode2 = 'presentiel');
+
+  -- P4. Une CORRECTION ne crée pas de seconde ligne : l'index unique
+  --     (student_id, session_id) l'interdit, et le compte ne bouge pas.
+  perform pg_temp.devenir('c0000000-0000-4000-8000-000000000002');
+  update public.workout_feedback set global_rpe = 9 where session_id = v_s1;
+  perform pg_temp.systeme();
+  perform pg_temp.noter('P', 'P4. une séance corrigée reste comptée UNE fois',
+    pg_temp.seances_enregistrees(v_e1) = 2);
+
+  -- P5. Un retour envoyé SANS la case « séance terminée » ne compte pas.
+  perform pg_temp.devenir('c0000000-0000-4000-8000-000000000011');
+  insert into public.workout_feedback (student_id, session_id, session_key, session_ref_label, completed)
+  values (v_e1, 'c6000000-0000-4000-8000-000000000005', 'z', 'z', false);
+  perform pg_temp.systeme();
+  perform pg_temp.noter('P', 'P5. un retour non terminé (completed = false) ne compte pas',
+    pg_temp.seances_enregistrees(v_e1) = 2);
+
+  -- P6. Et une séance dévalidée en ressort : l'ensemble décrit l'état, pas
+  --     l'histoire.
+  perform pg_temp.devenir('c0000000-0000-4000-8000-000000000011');
+  update public.workout_feedback set completed = false where session_id = v_s1;
+  perform pg_temp.systeme();
+  perform pg_temp.noter('P', 'P6. une séance dévalidée quitte l''ensemble',
+    pg_temp.seances_enregistrees(v_e1) = 1);
+
+  -- Remise en état pour les sections suivantes.
+  perform pg_temp.systeme();
+  delete from public.workout_feedback where student_id = v_e1;
 end $$;
 
 
@@ -350,7 +472,7 @@ begin
   v_r := pg_temp.essai_saisie('c2000000-0000-4000-8000-000000000013',
                               'c6000000-0000-4000-8000-000000000001');
   perform pg_temp.systeme();
-  delete from public.workout_feedback where session_key = 'essai';
+  perform pg_temp.nettoyer_essai('c2000000-0000-4000-8000-000000000013', 'c6000000-0000-4000-8000-000000000001');
   delete from public.assignments
    where student_id = 'c2000000-0000-4000-8000-000000000013'
      and content_id = 'c4000000-0000-4000-8000-000000000001';
@@ -377,7 +499,7 @@ begin
   v_r := pg_temp.essai_saisie('c2000000-0000-4000-8000-000000000014',
                               'c6000000-0000-4000-8000-000000000001');
   perform pg_temp.systeme();
-  delete from public.workout_feedback where session_key = 'essai';
+  perform pg_temp.nettoyer_essai('c2000000-0000-4000-8000-000000000014', 'c6000000-0000-4000-8000-000000000001');
 
   perform pg_temp.noter('S',
     'SAB-L10. rattaché au coach, le même élève devient saisissable : L10 mesure bien le périmètre',
@@ -413,7 +535,13 @@ begin
     raise warning 'ÉCHEC   — Z1. des élèves de test survivent au ROLLBACK';
   elsif exists (select 1 from public.programs where name like 'Modèle%' or name like 'Copie de Ml%') then
     raise warning 'ÉCHEC   — Z2. des programmations de test survivent au ROLLBACK';
-  elsif exists (select 1 from public.workout_feedback where session_key = 'essai') then
+  elsif exists (
+    select 1 from public.workout_feedback f
+     where f.student_id in ('c2000000-0000-4000-8000-000000000011',
+                            'c2000000-0000-4000-8000-000000000012',
+                            'c2000000-0000-4000-8000-000000000013',
+                            'c2000000-0000-4000-8000-000000000014')
+  ) then
     raise warning 'ÉCHEC   — Z3. des retours d''essai survivent au ROLLBACK';
   else
     raise notice 'OK      — Z1/Z2/Z3. aucune donnée de test après le ROLLBACK';

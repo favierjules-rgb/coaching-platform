@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { currentDate, msJusquauProchainJour } from "@/lib/clock";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { getAssignedProgramsForStudent } from "@/lib/supabase/programs";
 import { getStudentById } from "@/lib/supabase/students";
@@ -70,6 +71,23 @@ export interface EtatPlanningLive {
    */
   readonly affectationIntrouvable: boolean;
   readonly recharger: () => void;
+  /**
+   * Le jour courant, en `YYYY-MM-DD`, qui CHANGE à minuit.
+   *
+   * ⚠️ IL NE SERT PAS À CALCULER QUOI QUE CE SOIT — les fonctions de calendrier
+   * relisent l'horloge elles-mêmes. Il sert à provoquer un rendu : sans lui,
+   * un planning laissé ouvert pendant la nuit garderait son repère
+   * « aujourd'hui » collé au jour de son ouverture. L'exposer plutôt que de le
+   * garder privé rend la dépendance visible à la lecture.
+   */
+  readonly jourCourant: string;
+}
+
+/** `YYYY-MM-DD` local — la granularité à laquelle le repère du jour change. */
+function cleDuJour(reference: Date): string {
+  const mois = String(reference.getMonth() + 1).padStart(2, "0");
+  const jour = String(reference.getDate()).padStart(2, "0");
+  return `${reference.getFullYear()}-${mois}-${jour}`;
 }
 
 export function usePlanningLive(programId: string, studentId: string): EtatPlanningLive {
@@ -79,8 +97,49 @@ export function usePlanningLive(programId: string, studentId: string): EtatPlann
   const [seancesTerminees, setSeancesTerminees] = useState<ReadonlySet<string> | null>(null);
   const [affectationIntrouvable, setAffectationIntrouvable] = useState(false);
   const [tour, setTour] = useState(0);
+  const [jourCourant, setJourCourant] = useState(() => cleDuJour(currentDate()));
 
   const recharger = useCallback(() => setTour((t) => t + 1), []);
+
+  /*
+   * ── LE RÉVEIL DE MINUIT ─────────────────────────────────────────────────
+   *
+   * ⚠️ UN `setState` DANS UN RAPPEL DE MINUTEUR, PAS DANS LE CORPS D'UN EFFET :
+   * la règle `react-hooks/set-state-in-effect` l'autorise, et c'est la seule
+   * forme correcte ici — on ne connaît le nouveau jour qu'au moment où il
+   * arrive.
+   *
+   * On reprogramme à chaque passage plutôt que de poser un intervalle de 24 h :
+   * un intervalle dériverait aux changements d'heure, et un onglet suspendu par
+   * le navigateur se réveillerait au mauvais moment. `msJusquauProchainJour`
+   * recalcule la distance exacte au prochain minuit local à chaque fois.
+   */
+  useEffect(() => {
+    const minuteur = setTimeout(() => {
+      setJourCourant(cleDuJour(currentDate()));
+    }, msJusquauProchainJour());
+    return () => clearTimeout(minuteur);
+  }, [jourCourant]);
+
+  /*
+   * ── LE RETOUR SUR LA PAGE ───────────────────────────────────────────────
+   *
+   * ⚠️ CE QUI MET LA BARRE À JOUR APRÈS UN ENREGISTREMENT, C'EST D'ABORD LE
+   * CHANGEMENT DE ROUTE : valider une séance puis revenir au planning remonte
+   * ce composant, qui relit tout. Cet écouteur couvre l'autre cas, celui d'un
+   * onglet laissé en arrière-plan pendant qu'on saisit ailleurs — sur le
+   * téléphone, c'est la situation normale.
+   *
+   * Même convention que `useSynchronisation` et `useNotificationsPush`, qui
+   * écoutent déjà cet événement.
+   */
+  useEffect(() => {
+    const auRetour = () => {
+      if (document.visibilityState === "visible") setTour((t) => t + 1);
+    };
+    document.addEventListener("visibilitychange", auRetour);
+    return () => document.removeEventListener("visibilitychange", auRetour);
+  }, []);
 
   useEffect(() => {
     let annule = false;
@@ -121,5 +180,6 @@ export function usePlanningLive(programId: string, studentId: string): EtatPlann
     seancesTerminees,
     affectationIntrouvable,
     recharger,
+    jourCourant,
   };
 }
