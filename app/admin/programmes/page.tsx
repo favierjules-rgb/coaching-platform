@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Copy, Dumbbell, Loader2, Plus, Trash2 } from "lucide-react";
 
 import { AssignStudentsModal } from "@/components/admin/AssignStudentsModal";
+import { EtiquetteModeLive } from "@/components/admin/presentiel/EtiquetteModeLive";
 import { ExerciseLibraryManager } from "@/components/admin/ExerciseLibraryManager";
 import { PilluleVerification } from "@/components/admin/PilluleVerification";
 import { ProgressionElevesProgramme } from "@/components/admin/ProgressionElevesProgramme";
@@ -19,6 +20,7 @@ import { useVerificationsProgrammes } from "@/hooks/useVerificationsProgrammes";
 import { useSupabaseProgramsSummary } from "@/hooks/useSupabaseProgramsSummary";
 import { useSupabaseStudents } from "@/hooks/useSupabaseStudents";
 import { contentStatusLabels, matchesTextSearch, totalSessions, totalWeeks } from "@/lib/admin";
+import { programmeEstLivrableEnLive } from "@/lib/presentiel-live";
 import { currentDate } from "@/lib/clock";
 import { cleDeSemaine, dateDuJour } from "@/lib/verification-programme";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -396,6 +398,31 @@ export default function AdminProgramsPage() {
                   reference={reference}
                 />
               </div>
+              {/*
+                MODE LIVE — DIRECTEMENT SOUS LA PROGRAMMATION, pas dans un menu.
+                C'est le geste du coach en salle : il ouvre sa liste de
+                programmations, il appuie, il choisit l'élève, il commence.
+
+                ⚠️ DEUX CONDITIONS, ET AUCUNE N'EST COSMÉTIQUE.
+
+                1. `supabaseActive` : sur le chemin de DÉMONSTRATION il n'y a ni
+                   compte, ni droits, ni base où écrire. Une étiquette y
+                   mènerait à une page qui refuse.
+                2. `programmeEstLivrableEnLive` : un MODÈLE non affecté n'a
+                   personne à saisir, et surtout `assignedStudentIds` mélange
+                   les affectations directes avec les propriétaires d'une COPIE
+                   — ces derniers s'entraînent sur une AUTRE structure. Voir
+                   lib/presentiel-live.ts : la règle retenue est celle de la
+                   base (`student_owns_workout_session`), pas une ressemblance
+                   de nom.
+
+                La liste réelle des élèves, elle, est résolue par le SERVEUR au
+                clic : ce qui est décidé ici ne décide que l'affichage.
+              */}
+              {supabaseActive && programmeEstLivrableEnLive(program) ? (
+                <EtiquetteModeLive programId={program.id} nomProgramme={program.name} />
+              ) : null}
+
               <div className="flex flex-wrap gap-2">
                 <Link
                   href={`/admin/programmes/${program.id}`}

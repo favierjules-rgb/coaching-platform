@@ -27,6 +27,7 @@ import { renderToString } from "react-dom/server";
 import { ChronometreSeance } from "../../components/student/ChronometreSeance";
 import * as moduleLayoutSeance from "../../app/(student)/entrainement/seance/[sessionId]/layout";
 import * as moduleLayoutPresentiel from "../../app/admin/eleves/[studentId]/seance/[sessionId]/layout";
+import * as moduleLayoutPlanningLive from "../../app/admin/programmes/[programId]/live/[studentId]/layout";
 import {
   ajuster,
   cadran,
@@ -59,6 +60,7 @@ function deballer(brut: unknown): ComposantLayout {
 }
 const SeanceLayout = deballer(moduleLayoutSeance.default as unknown);
 const SeancePresentielLayout = deballer(moduleLayoutPresentiel.default as unknown);
+const PlanningLiveLayout = deballer(moduleLayoutPlanningLive.default as unknown);
 
 const RACINE = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -435,8 +437,22 @@ const LAYOUT_PRESENTIEL = join(
   "app", "admin", "eleves", "[studentId]", "seance", "[sessionId]", "layout.tsx",
 );
 
+/**
+ * LE TROISIÈME — le PLANNING en mode Live.
+ *
+ * ⚠️ MÊME RAISONNEMENT, UN CRAN PLUS TÔT. En salle, le minuteur de repos tourne
+ * ENTRE deux séances autant que pendant : le coach finit une série, revient au
+ * planning vérifier la suite, et un chronomètre qui se remonterait à chaque
+ * changement de page ne servirait à rien. La règle reste « les routes de
+ * SÉANCE, et la route qui les ouvre » — pas « n'importe quel écran admin », ce
+ * que E3 et SAB S9-bis continuent d'interdire.
+ */
+const LAYOUT_PLANNING_LIVE = join(
+  "app", "admin", "programmes", "[programId]", "live", "[studentId]", "layout.tsx",
+);
+
 /** Les seuls fichiers autorisés à rendre le chronomètre. */
-const MONTAGES_AUTORISES = [LAYOUT_SEANCE, LAYOUT_PRESENTIEL] as const;
+const MONTAGES_AUTORISES = [LAYOUT_SEANCE, LAYOUT_PRESENTIEL, LAYOUT_PLANNING_LIVE] as const;
 
 /**
  * Les seuls fichiers autorisés à rendre le chronomètre sont les layouts des
@@ -480,9 +496,10 @@ await test("E2 — le layout de séance le rend RÉELLEMENT (rendu, pas import m
 await test("E3 — ABSENT du Builder et de tout app/admin, SAUF la séance en présentiel", async () => {
   for (const { chemin, contenu } of await fichiersSource()) {
     if (!chemin.startsWith(join("app", "admin")) && !chemin.startsWith(join("components", "admin"))) continue;
-    // La seule exception, et elle est nommée une par une : la route de séance
-    // du mode présentiel. Toute AUTRE page admin reste interdite.
-    if (chemin === LAYOUT_PRESENTIEL) continue;
+    // Les seules exceptions, et elles sont nommées une par une : la route de
+    // séance du mode présentiel et le planning qui y mène. Toute AUTRE page
+    // admin reste interdite.
+    if (chemin === LAYOUT_PRESENTIEL || chemin === LAYOUT_PLANNING_LIVE) continue;
     assert.ok(
       !/ChronometreSeance|lib\/chronometre|@\/lib\/chronometre/.test(codeSeul(contenu)),
       `${chemin} : le chronomètre ne doit exister nulle part côté admin`,
@@ -490,7 +507,7 @@ await test("E3 — ABSENT du Builder et de tout app/admin, SAUF la séance en pr
   }
 });
 
-await test("E4 — exactement DEUX layouts le montent, et ce sont les deux routes de séance", async () => {
+await test("E4 — exactement TROIS layouts le montent, et ce sont les routes de séance", async () => {
   const fichiers = await fichiersSource();
   const porteurs = fichiers
     .filter(
@@ -517,13 +534,25 @@ await test("E5 — le layout PRÉSENTIEL le rend RÉELLEMENT (rendu, pas import 
   );
 });
 
-await test("E6 — le chronomètre ne démarre de lui-même sur AUCUNE des deux routes", () => {
+await test("E5-bis — le layout du PLANNING LIVE le rend RÉELLEMENT", () => {
+  const rendu = renderToString(
+    createElement(PlanningLiveLayout, null, createElement("p", null, "planning du coach")),
+  );
+  assert.ok(rendu.includes("planning du coach"), "le layout doit laisser passer la page");
+  assert.ok(
+    rendu.includes('aria-label="Ouvrir le chronomètre"'),
+    "le chronomètre n'est pas rendu sur le planning Live",
+  );
+});
+
+await test("E6 — le chronomètre ne démarre de lui-même sur AUCUNE des routes", () => {
   // Le composant rend le même état initial dans les deux arborescences : le
   // compte à rebours est à l'arrêt, et c'est l'état initial du moteur qui le
   // décide — aucun des deux layouts ne passe de propriété.
   for (const [nom, Layout] of [
     ["élève", SeanceLayout],
     ["présentiel", SeancePresentielLayout],
+    ["planning Live", PlanningLiveLayout],
   ] as const) {
     const rendu = renderToString(createElement(Layout, null, createElement("p", null, "x")));
     assert.ok(
@@ -621,6 +650,7 @@ await test("SAB S9-bis — une AUTRE page admin que la séance présentielle est
   const corpus = [
     { chemin: LAYOUT_SEANCE, contenu: "<ChronometreSeance />" },
     { chemin: LAYOUT_PRESENTIEL, contenu: "<ChronometreSeance />" },
+    { chemin: LAYOUT_PLANNING_LIVE, contenu: "<ChronometreSeance />" },
     { chemin: join("app", "admin", "eleves", "[studentId]", "page.tsx"), contenu: "<ChronometreSeance />" },
   ];
   const violations = porteesInterdites(corpus);

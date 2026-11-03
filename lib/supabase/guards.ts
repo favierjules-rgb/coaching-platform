@@ -351,6 +351,61 @@ export async function requireOnboarding(): Promise<void> {
  * L'exigence de catégorie n'est pas décorative : sans elle,
  * `requireStaffForStudent` refuse TOUT collaborateur, par construction.
  */
+/**
+ * MODE LIVE — la programmation est-elle RÉELLEMENT affectée à cet élève ?
+ *
+ * ⚠️ C'EST UN CONTRÔLE DE DONNÉES, ET IL NE REMPLACE PAS CELUI DES DROITS.
+ * `requirePresentielAccess` dit « ce compte peut saisir pour cet élève » ;
+ * celui-ci dit « cette programmation est bien la sienne ». Les deux sont
+ * nécessaires : un coach a parfaitement le droit de saisir pour son élève, et
+ * cela ne l'autorise pas pour autant à lui ouvrir le planning d'une
+ * programmation qu'il ne suit pas — on y choisirait des séances qu'il ne fait
+ * pas, et la base refuserait l'enregistrement au moment de valider.
+ *
+ * ⚠️ AFFECTATION DIRECTE, OU PROPRIÉTÉ DE LA COPIE — exactement les deux cas
+ * que `student_owns_workout_session()` accepte en base. La règle est reprise
+ * telle quelle, et pas réinventée : si l'écran proposait quelque chose que la
+ * base refuse, le refus arriverait en salle, après la séance.
+ *
+ * Un propriétaire de COPIE n'a donc PAS accès au planning du MODÈLE dont elle
+ * dérive : il s'entraîne sur sa copie, qui a ses propres séances.
+ */
+export async function requireAffectationDirecte(
+  programId: string,
+  studentId: string,
+): Promise<void> {
+  if (shouldSkipGuards()) {
+    return;
+  }
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) {
+    redirect("/admin/programmes");
+  }
+
+  const [{ data: affectation }, { data: programme }] = await Promise.all([
+    supabase
+      .from("assignments")
+      .select("id")
+      .eq("student_id", studentId)
+      .eq("content_type", "programme")
+      .eq("content_id", programId)
+      .maybeSingle(),
+    supabase
+      .from("programs")
+      .select("owner_student_id")
+      .eq("id", programId)
+      .maybeSingle(),
+  ]);
+
+  const proprietaireDeLaCopie = programme?.owner_student_id === studentId;
+  if (!affectation && !proprietaireDeLaCopie) {
+    // On ne distingue pas « programmation inexistante » de « pas affectée à cet
+    // élève » : la différence ferait de cette page un oracle sur les
+    // programmations des autres coachs.
+    redirect("/admin/programmes");
+  }
+}
+
 export async function requirePresentielAccess(studentId: string): Promise<void> {
   await requireAdminOrCoach();
   if (shouldSkipGuards()) {

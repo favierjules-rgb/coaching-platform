@@ -34,6 +34,11 @@ import { formaterDureeMinutes } from "@/lib/duree";
  * appartient à un programme, mais remonter de l'un à l'autre sans le dire
  * aurait voulu dire choisir « un » programme parmi ceux de l'élève. On préfère
  * une page qui dit ce qui lui manque à une page qui devine.
+ *
+ * ⚠️ ET C'EST LE PLANNING QUI LE TRANSMET désormais (chantier Mode Live) :
+ * `/admin/programmes/[programId]/live/[studentId]` construit chaque lien de
+ * séance avec son programme. Cette page n'a pas changé d'un caractère pour
+ * autant — elle recevait déjà `?programme=`, et c'est tout ce qu'elle demande.
  */
 export function SeancePresentielContenu({
   studentId,
@@ -74,13 +79,24 @@ export function SeancePresentielContenu({
   const nomEleve = eleve ? `${eleve.firstName} ${eleve.lastName}`.trim() : "Élève";
   const seance = programme.program?.sessions.find((s) => s.id === sessionId) ?? null;
 
+  /*
+   * ⚠️ LE RETOUR MÈNE AU PLANNING, PLUS À LA FICHE — chantier Mode Live.
+   *
+   * En salle, on enchaîne : on valide une séance, on revient au planning, on
+   * ouvre la suivante. Renvoyer vers la fiche de l'élève obligeait à refaire
+   * tout le chemin (fiche → programmations → étiquette → élève → planning)
+   * entre deux séances.
+   *
+   * Sans programme dans l'URL il n'y a pas de planning où revenir : on retombe
+   * alors sur la liste des programmations, qui est le début du parcours.
+   */
   const retour = (
     <Link
-      href={`/admin/eleves/${studentId}`}
+      href={programId ? `/admin/programmes/${programId}/live/${studentId}` : "/admin/programmes"}
       className="mb-6 inline-flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-foreground"
     >
       <ArrowLeft size={14} />
-      Retour à la fiche
+      {programId ? "Retour au planning" : "Programmations"}
     </Link>
   );
 
@@ -89,8 +105,9 @@ export function SeancePresentielContenu({
       <div>
         {retour}
         <p className="text-sm text-muted-foreground">
-          Le programme de cette séance n&apos;est pas précisé. Ouvrez le mode présentiel depuis la
-          fiche de l&apos;élève, qui le transmet.
+          Le programme de cette séance n&apos;est pas précisé. Ouvre le mode Live depuis la
+          programmation, dans la liste des programmations : le planning transmet le programme avec
+          la séance.
         </p>
       </div>
     );

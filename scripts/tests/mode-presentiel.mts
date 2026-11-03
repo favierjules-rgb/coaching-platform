@@ -47,18 +47,16 @@
  *     fonction pure (`cleSeanceBrouillon`), et c'est elle qui est exécutée.
  */
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 
 import { BandeauPresentiel } from "../../components/admin/presentiel/BandeauPresentiel";
-import { BoutonPresentiel } from "../../components/admin/presentiel/BoutonPresentiel";
 import { cleSeanceBrouillon } from "../../hooks/useBrouillonSeance";
 import { DepotOffline, MoteurMemoire } from "../../lib/offline/depot";
 import { workoutFeedbackPayloadSchema } from "../../lib/api/schemas/workout-feedback";
-import type { AdminProgram, AdminWorkoutSession } from "../../types";
 
 const RACINE = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -113,7 +111,8 @@ const PAGE_PRESENTIEL = ["app", "admin", "eleves", "[studentId]", "seance", "[se
 const LAYOUT_PRESENTIEL = ["app", "admin", "eleves", "[studentId]", "seance", "[sessionId]", "layout.tsx"];
 const CONTENU_PRESENTIEL = ["components", "admin", "presentiel", "SeancePresentielContenu.tsx"];
 const BANDEAU = ["components", "admin", "presentiel", "BandeauPresentiel.tsx"];
-const BOUTON = ["components", "admin", "presentiel", "BoutonPresentiel.tsx"];
+/* L'entrée du mode Live, qui a remplacé l'ancien bouton de la fiche élève. */
+const ETIQUETTE = ["components", "admin", "presentiel", "EtiquetteModeLive.tsx"];
 const ROUTE_PRESENTIEL = ["app", "api", "admin", "presentiel", "workout-feedback", "route.ts"];
 const ROUTE_ELEVE = ["app", "api", "student", "workout-feedback", "route.ts"];
 const SECTION_RETOUR = ["components", "student", "SessionFeedbackSection.tsx"];
@@ -134,82 +133,55 @@ const COACH = "cccccccc-0000-4000-8000-00000000000c";
 const SEANCE = "55555555-0000-4000-8000-000000000055";
 const PROGRAMME = "77777777-0000-4000-8000-000000000077";
 
-function seanceFactice(id: string, nom: string, semaine: number, jour: string): AdminWorkoutSession {
-  return {
-    id,
-    programId: PROGRAMME,
-    weekNumber: semaine,
-    day: jour,
-    isRestDay: false,
-    name: nom,
-    muscleGroup: "pectoraux",
-    durationMinutes: 60,
-    warmup: "",
-    coachNotes: "",
-    exercises: [],
-  };
-}
-
-const PROGRAMME_FACTICE: AdminProgram = {
-  id: PROGRAMME,
-  name: "Programme de test",
-  goal: "force",
-  level: "intermédiaire",
-  durationWeeks: 4,
-  description: "",
-  status: "actif",
-  assignedStudentIds: [ELEVE_A, ELEVE_B],
-  sessions: [
-    seanceFactice(SEANCE, "Haut du corps A", 1, "lundi"),
-    seanceFactice("66666666-0000-4000-8000-000000000066", "Bas du corps A", 1, "mercredi"),
-  ],
-  createdAt: "2026-01-01T00:00:00.000Z",
-  updatedAt: "2026-01-01T00:00:00.000Z",
-};
+/*
+ * ⚠️ LE DÉCOR DE PROGRAMME A DÉMÉNAGÉ dans `scripts/tests/mode-live.mts`, avec
+ * le parcours qu'il éprouve : l'ancien bouton de la fiche élève rendait un
+ * programme complet, l'étiquette Mode Live ne rend qu'un libellé. Ce qui reste
+ * ici sert aux contrôles de brouillon, qui n'ont besoin que d'identifiants.
+ */
 
 /* ════════════════════════════════════════════════════════════════════════════
  * A. ACCÈS — T1 à T3
  * ════════════════════════════════════════════════════════════════════════════ */
 
-await test("T1 — la fiche de l'élève monte le bouton, et SEULEMENT pour un élève réel", async () => {
+/*
+ * ⚠️ LE POINT D'ENTRÉE A DÉMÉNAGÉ — CHANTIER MODE LIVE.
+ *
+ * T1, T2 et T2-bis éprouvaient `BoutonPresentiel`, une liste de toutes les
+ * séances du programme posée sur la FICHE de l'élève. Le geste réel en salle
+ * n'était pas celui-là : on part de la PROGRAMMATION du jour, on choisit
+ * l'élève, et on navigue dans son planning comme il le fait lui-même.
+ *
+ * Le composant a donc été retiré, et l'entrée vit sous chaque programmation de
+ * `/admin/programmes`. Ces trois contrôles sont REMPLACÉS, pas supprimés : ils
+ * vérifient désormais que l'ancienne entrée a bien disparu de la fiche (sinon
+ * deux parcours coexisteraient, dont un qui ne dit ni la semaine ni ce qui est
+ * déjà réalisé), et le nouveau parcours est éprouvé de bout en bout par
+ * `scripts/tests/mode-live.mts`.
+ */
+await test("T1 — l'ancienne entrée a quitté la fiche de l'élève", async () => {
   const code = codeSeul(await lire(...FICHE_ELEVE));
-  assert.ok(code.includes("<BoutonPresentiel"), "la fiche ne monte pas le bouton");
-  assert.match(
-    code,
-    /isSupabaseStudent \?\s*\(?\s*<BoutonPresentiel/,
-    "le bouton doit être conditionné à un élève RÉEL : sur le chemin de démonstration il n'y a ni compte ni droits",
-  );
   assert.ok(
-    /<BoutonPresentiel[^>]*studentId=\{student\.id\}/.test(code),
-    "le bouton doit recevoir l'identifiant de l'élève de la fiche ouverte",
+    !code.includes("BoutonPresentiel"),
+    "la fiche ne doit plus porter l'entrée séance par séance : elle vit sous la programmation",
+  );
+  // Et le composant lui-même n'existe plus : un import mort aurait cassé la
+  // compilation, mais un fichier orphelin aurait survécu en silence.
+  const fichiers = await readdir(join(RACINE, "components", "admin", "presentiel"));
+  assert.ok(
+    !fichiers.includes("BoutonPresentiel.tsx"),
+    "le composant retiré ne doit pas rester dans le dépôt",
   );
 });
 
-await test("T2 — le bouton mène à la séance CHOISIE, avec l'élève et le programme dans l'URL", () => {
-  const html = renderToString(
-    createElement(BoutonPresentiel, { studentId: ELEVE_A, programme: PROGRAMME_FACTICE }),
-  );
-  assert.ok(
-    html.includes("Démarrer en mode présentiel"),
-    "le libellé exact du cahier des charges doit être à l'écran",
-  );
-  // Le panneau est replié au premier rendu : c'est la liste des séances qui
-  // porte les liens, et elle ne s'ouvre qu'au clic. On vérifie donc la forme
-  // du lien sur la source — et T2-bis prouve que le rendu les produit.
-  assert.ok(html.includes('aria-expanded="false"'), "le panneau doit être replié à l'ouverture");
-});
-
-await test("T2-bis — chaque séance du programme produit un lien complet", async () => {
-  const code = codeSeul(await lire(...BOUTON));
-  assert.match(
-    code,
-    /\/admin\/eleves\/\$\{studentId\}\/seance\/\$\{seance\.id\}\?programme=\$\{programme\.id\}/,
-    "le lien doit transporter l'élève, la séance ET le programme",
-  );
-  assert.ok(
-    code.includes("seances.map("),
-    "un lien par séance : choisir la séance est le propre du présentiel en salle",
-  );
+await test("T2 — la fiche de l'élève ne propose plus aucune saisie présentielle directe", async () => {
+  const code = codeSeul(await lire(...FICHE_ELEVE));
+  for (const trace of ["/seance/", "presentiel", "Mode Live", "mode Live"]) {
+    assert.ok(
+      !code.includes(trace),
+      `la fiche ne doit plus construire de lien de saisie (« ${trace} » trouvé)`,
+    );
+  }
 });
 
 await test("T3 — aucune usurpation d'identité : jamais de connexion à la place de l'élève", async () => {
@@ -223,7 +195,7 @@ await test("T3 — aucune usurpation d'identité : jamais de connexion à la pla
     "SERVICE_ROLE",
     "service_role",
   ];
-  for (const fichier of [PAGE_PRESENTIEL, LAYOUT_PRESENTIEL, CONTENU_PRESENTIEL, BANDEAU, BOUTON, ROUTE_PRESENTIEL]) {
+  for (const fichier of [PAGE_PRESENTIEL, LAYOUT_PRESENTIEL, CONTENU_PRESENTIEL, BANDEAU, ETIQUETTE, ROUTE_PRESENTIEL]) {
     const code = codeSeul(await lire(...fichier));
     for (const mot of suspects) {
       assert.ok(
@@ -526,7 +498,7 @@ await test("T13 — les prescriptions ne sont JAMAIS écrasées par le réalisé
     "la réécriture du trigger doit CONSERVER la construction du snapshot",
   );
   // 3. Et rien du présentiel n'écrit dans les tables de prescription.
-  for (const fichier of [ROUTE_PRESENTIEL, CONTENU_PRESENTIEL, BOUTON, BANDEAU]) {
+  for (const fichier of [ROUTE_PRESENTIEL, CONTENU_PRESENTIEL, ETIQUETTE, BANDEAU]) {
     const code = codeSeul(await lire(...fichier));
     for (const table of ["workout_exercises", "workout_sets", "exercise_sets"]) {
       assert.ok(
@@ -1144,7 +1116,7 @@ await test("T24 — la migration n'a PAS été appliquée depuis ce dépôt", as
  * ════════════════════════════════════════════════════════════════════════════ */
 
 await test("T25 — les trois composants suivent les conventions du dépôt (et tiennent sur un téléphone)", async () => {
-  for (const fichier of [BANDEAU, BOUTON]) {
+  for (const fichier of [BANDEAU, ETIQUETTE]) {
     const code = codeSeul(await lire(...fichier));
     const nom = fichier.join("/");
     // Aucune couleur en dur : les jetons sémantiques portent le thème sombre.
@@ -1153,11 +1125,10 @@ await test("T25 — les trois composants suivent les conventions du dépôt (et 
     assert.ok(/rounded-(control|card|panel)/.test(code), `${nom} : rayons non sémantiques`);
     assert.ok(code.includes("focus-visible:ring"), `${nom} : focus clavier non visible`);
   }
-  const bouton = codeSeul(await lire(...BOUTON));
-  assert.ok(bouton.includes("pressable"), "le bouton doit avoir le retour d'appui du dépôt");
-  assert.ok(bouton.includes("min-h-[44px]"), "cible tactile insuffisante");
-  assert.ok(bouton.includes("truncate"), "un nom de séance long ne doit pas élargir la fiche");
-  assert.ok(bouton.includes("motion-reduce:transition-none"), "mouvement réduit non respecté");
+  const etiquette = codeSeul(await lire(...ETIQUETTE));
+  assert.ok(etiquette.includes("pressable"), "l'étiquette doit avoir le retour d'appui du dépôt");
+  assert.ok(etiquette.includes("min-h-[44px]"), "cible tactile insuffisante");
+  assert.ok(etiquette.includes("truncate"), "un nom long ne doit pas élargir la fenêtre");
 
   const bandeau = codeSeul(await lire(...BANDEAU));
   assert.ok(bandeau.includes("truncate"), "un nom d'élève long ne doit pas élargir le bandeau");
