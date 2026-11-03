@@ -9,6 +9,7 @@ import {
 } from "@/lib/workout-feedback-payload";
 import { choisirOrigineFormulaire } from "@/lib/offline/priorite-etat";
 import { soumettreRetour } from "@/lib/offline/soumission";
+import { BandeauPresentiel } from "@/components/admin/presentiel/BandeauPresentiel";
 import { useBrouillonSeance } from "@/hooks/useBrouillonSeance";
 import { useSynchronisation } from "@/hooks/useSynchronisation";
 import type { DepotOffline } from "@/lib/offline/depot";
@@ -233,6 +234,23 @@ function PlannedVsActualSummary({
 
 interface SessionFeedbackSectionProps {
   studentId: string;
+  /**
+   * MODE PRÉSENTIEL — la séance est saisie par un coach POUR cet élève.
+   *
+   * ⚠️ UN SEUL DRAPEAU, ET IL NE CHANGE RIEN AU FORMULAIRE. Les champs, les
+   * règles de saisie, les blocs, le cardio et la validation finale restent
+   * identiques au parcours élève : c'est tout l'intérêt de réutiliser ce
+   * composant plutôt que d'en écrire un second qui divergerait au premier
+   * ajout de champ.
+   *
+   * Il fait exactement trois choses : il transmet l'identité de l'élève au
+   * hook (qui passera par la route présentielle, elle-même gardée par
+   * `requireStaffForStudent`), il isole le brouillon local par élève, et il
+   * affiche en permanence à qui appartient la séance en cours.
+   */
+  presentiel?: boolean;
+  /** Nom affiché dans le bandeau permanent du mode présentiel. */
+  nomEleve?: string;
   sessionId: string;
   programId: string | null;
   sessionRefLabel: string;
@@ -323,6 +341,8 @@ interface SessionFeedbackSectionProps {
  */
 export function SessionFeedbackSection({
   studentId,
+  presentiel = false,
+  nomEleve = "",
   sessionId,
   programId,
   sessionRefLabel,
@@ -391,7 +411,10 @@ export function SessionFeedbackSection({
   // l'utilisateur connecté ; sinon (Supabase non configuré, personne
   // connecté, ou compte sans fiche élève) on continue sur le mock/localStorage
   // existant (useAdminData) — voir hooks/useSupabaseWorkoutFeedback.ts.
-  const supabaseFeedback = useSupabaseWorkoutFeedback(sessionId);
+  const supabaseFeedback = useSupabaseWorkoutFeedback(sessionId, {
+    // Élève : absent, l'identité vient du compte connecté, comme toujours.
+    pourEleve: presentiel ? studentId : null,
+  });
   /**
    * Y a-t-il une opération EN ATTENTE pour cette séance ?
    *
@@ -596,8 +619,16 @@ export function SessionFeedbackSection({
 
 
   const brouillonLocal = useBrouillonSeance<EtatBrouillonSeance>({
-    userId: horsLigne || source === "supabase" ? authUserId : null,
+    /* ⚠️ LE BROUILLON APPARTIENT À CELUI QUI SAISIT, pas à l'élève. En
+       présentiel, c'est donc le compte du coach : ses saisies en cours ne
+       peuvent ni écraser celles de l'élève, ni être lues depuis son appareil. */
+    userId: presentiel ? authUserId : horsLigne || source === "supabase" ? authUserId : null,
     sessionId,
+    /* ⚠️ ET IL EST CLOISONNÉ PAR ÉLÈVE. Un `sessionId` appartient à un
+       programme, et un programme peut être affecté à plusieurs élèves : sans
+       cette portée, un coach qui enchaîne deux élèves sur la même séance
+       verrait le brouillon du second écraser celui du premier. */
+    ...(presentiel ? { portee: studentId } : {}),
     businessDate: businessDate ?? "",
     ...(depot ? { depot } : {}),
   });
@@ -1366,6 +1397,19 @@ export function SessionFeedbackSection({
     // Refonte apple-ui : formulaire recentré dans une colonne principale à
     // largeur maximale cohérente (grand écran) — purement visuel.
     <form onSubmit={handleSubmit} className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+      {/* ⚠️ RENDU ICI, ET PAS DANS LA PAGE. Le bandeau affiche l'état du
+          brouillon et porte son effacement : ces deux choses vivent dans ce
+          composant, et les remonter à la page aurait demandé d'exposer le
+          dépôt local à l'extérieur — c'est-à-dire d'ouvrir une seconde porte
+          sur les saisies en cours. */}
+      {presentiel ? (
+        <BandeauPresentiel
+          nomEleve={nomEleve}
+          brouillonEnregistre={brouillonLocal.enregistreLocalement}
+          brouillonIndisponible={brouillonLocal.indisponible}
+          onViderBrouillon={() => void brouillonLocal.purger()}
+        />
+      ) : null}
       {/*
         LA COURSE D'HYDRATATION, FERMÉE PAR LE NAVIGATEUR LUI-MÊME.
 

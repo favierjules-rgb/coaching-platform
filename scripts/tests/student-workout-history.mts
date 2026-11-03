@@ -664,8 +664,31 @@ await (async () => {
     assert.ok(/saveWorkoutFeedback\(supabase, \{ \.\.\.payload, studentId: studentRow\.id \}\)/.test(route),
       "l'écriture impose le studentId serveur");
     // Et le hook client ne fait plus d'écriture directe : il POSTe vers la route.
+    //
+    // ⚠️ LA ROUTE EST DÉSORMAIS CHOISIE, PLUS ÉCRITE EN DUR — mode présentiel.
+    // Le hook sert deux appelants : l'élève (route élève, identité dérivée de
+    // l'authentification) et le coach en présentiel (route présentielle, élève
+    // DÉCLARÉ puis confronté à ses droits côté serveur). Chercher
+    // `fetch("/api/student/...")` ne dirait donc plus rien — et surtout pas ce
+    // qui compte. Ce qui compte, et qui est vérifié ici : le corps de l'élève
+    // ne transporte JAMAIS d'identité, et seul `pourEleve` fait basculer de
+    // route. Un hook qui enverrait un `studentId` sur la route élève serait
+    // refusé par le schéma strict de celle-ci — c'est la garantie suivante.
     const hook = readFileSync(new URL("../../hooks/useSupabaseWorkoutFeedback.ts", import.meta.url), "utf8");
-    assert.ok(/fetch\("\/api\/student\/workout-feedback"/.test(hook), "le client passe par la route");
+    const hookSansCommentaires = hook.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+    assert.ok(/fetch\(route/.test(hookSansCommentaires), "le client passe par une route, pas par Supabase");
+    assert.ok(
+      /"\/api\/student\/workout-feedback"/.test(hookSansCommentaires),
+      "la route élève doit rester celle du parcours élève",
+    );
+    assert.ok(
+      /pourEleve\s*\?\s*"\/api\/admin\/presentiel\/workout-feedback"/.test(hookSansCommentaires),
+      "seule la présence d'un élève DÉCLARÉ fait basculer de route",
+    );
+    assert.ok(
+      /\{ \.\.\.payload, sessionKey \}/.test(hookSansCommentaires),
+      "le corps envoyé sur la route élève ne transporte aucune identité",
+    );
     assert.ok(!/saveWorkoutFeedback\(/.test(hook), "plus d'écriture Supabase directe depuis le navigateur");
   });
 

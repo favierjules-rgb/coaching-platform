@@ -26,6 +26,7 @@ import { renderToString } from "react-dom/server";
 
 import { ChronometreSeance } from "../../components/student/ChronometreSeance";
 import * as moduleLayoutSeance from "../../app/(student)/entrainement/seance/[sessionId]/layout";
+import * as moduleLayoutPresentiel from "../../app/admin/eleves/[studentId]/seance/[sessionId]/layout";
 import {
   ajuster,
   cadran,
@@ -51,10 +52,13 @@ import {
  * mort d'un composant réellement rendu.
  */
 type ComposantLayout = (props: { children?: ReactNode }) => ReactElement;
-const brutLayout = moduleLayoutSeance.default as unknown;
-const SeanceLayout = (typeof brutLayout === "function"
-  ? brutLayout
-  : (brutLayout as { default: ComposantLayout }).default) as ComposantLayout;
+function deballer(brut: unknown): ComposantLayout {
+  return (typeof brut === "function"
+    ? brut
+    : (brut as { default: ComposantLayout }).default) as ComposantLayout;
+}
+const SeanceLayout = deballer(moduleLayoutSeance.default as unknown);
+const SeancePresentielLayout = deballer(moduleLayoutPresentiel.default as unknown);
 
 const RACINE = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -417,8 +421,26 @@ async function fichiersSource(): Promise<{ chemin: string; contenu: string }[]> 
 const LAYOUT_SEANCE = join("app", "(student)", "entrainement", "seance", "[sessionId]", "layout.tsx");
 
 /**
- * Le seul fichier autorisé à rendre le chronomètre est le layout de la route
- * de séance. Retourne les violations.
+ * LE SECOND POINT DE MONTAGE — la séance en MODE PRÉSENTIEL.
+ *
+ * ⚠️ CE N'EST PAS UN ASSOUPLISSEMENT DE LA RÈGLE, C'EST SON PÉRIMÈTRE EXACT.
+ * La règle d'origine disait « jamais dans app/admin », parce qu'`app/admin`
+ * voulait dire le Builder et les écrans de gestion. Le mode présentiel y
+ * ouvre une route qui est une SÉANCE en salle, où le coach minute les repos
+ * comme l'élève. La règle lue correctement est : le chronomètre vit sur les
+ * routes de SÉANCE. Les deux chemins ci-dessous sont la liste complète, et
+ * E4 vérifie qu'il n'y en a pas un troisième.
+ */
+const LAYOUT_PRESENTIEL = join(
+  "app", "admin", "eleves", "[studentId]", "seance", "[sessionId]", "layout.tsx",
+);
+
+/** Les seuls fichiers autorisés à rendre le chronomètre. */
+const MONTAGES_AUTORISES = [LAYOUT_SEANCE, LAYOUT_PRESENTIEL] as const;
+
+/**
+ * Les seuls fichiers autorisés à rendre le chronomètre sont les layouts des
+ * deux routes de séance. Retourne les violations.
  */
 function porteesInterdites(fichiers: { chemin: string; contenu: string }[]): string[] {
   const violations: string[] = [];
@@ -430,11 +452,14 @@ function porteesInterdites(fichiers: { chemin: string; contenu: string }[]): str
     // vit son seul point de montage, et ce n'est pas une infraction.
     const code = codeSeul(contenu);
     if (!/<ChronometreSeance[\s/>]|ChronometreSeance\s*\}?\s*from|import\s+ChronometreSeance/.test(code)) continue;
-    if (chemin === LAYOUT_SEANCE) {
-      monte = true;
+    if ((MONTAGES_AUTORISES as readonly string[]).includes(chemin)) {
+      // ⚠️ Seul le layout ÉLÈVE satisfait l'exigence de présence : c'est le
+      // parcours principal, et S10 doit continuer à détecter sa disparition
+      // sur un corpus qui ne contient que lui.
+      if (chemin === LAYOUT_SEANCE) monte = true;
       continue;
     }
-    violations.push(`${chemin} : rend ou importe le chronomètre hors de la route de séance`);
+    violations.push(`${chemin} : rend ou importe le chronomètre hors d'une route de séance`);
   }
   if (!monte) violations.push("aucun fichier ne monte le chronomètre dans la route de séance");
   return violations;
@@ -452,9 +477,12 @@ await test("E2 — le layout de séance le rend RÉELLEMENT (rendu, pas import m
   assert.ok(rendu.includes('aria-label="Ouvrir le chronomètre"'), "le chronomètre n'est pas rendu");
 });
 
-await test("E3 — ABSENT du Builder et de tout app/admin", async () => {
+await test("E3 — ABSENT du Builder et de tout app/admin, SAUF la séance en présentiel", async () => {
   for (const { chemin, contenu } of await fichiersSource()) {
     if (!chemin.startsWith(join("app", "admin")) && !chemin.startsWith(join("components", "admin"))) continue;
+    // La seule exception, et elle est nommée une par une : la route de séance
+    // du mode présentiel. Toute AUTRE page admin reste interdite.
+    if (chemin === LAYOUT_PRESENTIEL) continue;
     assert.ok(
       !/ChronometreSeance|lib\/chronometre|@\/lib\/chronometre/.test(codeSeul(contenu)),
       `${chemin} : le chronomètre ne doit exister nulle part côté admin`,
@@ -462,14 +490,47 @@ await test("E3 — ABSENT du Builder et de tout app/admin", async () => {
   }
 });
 
-await test("E4 — exactement UN layout monte le chronomètre, et c'est celui de la séance", async () => {
+await test("E4 — exactement DEUX layouts le montent, et ce sont les deux routes de séance", async () => {
   const fichiers = await fichiersSource();
-  const porteurs = fichiers.filter(
-    ({ chemin, contenu }) =>
-      chemin.endsWith("layout.tsx") && /<ChronometreSeance[\s/>]/.test(codeSeul(contenu)),
+  const porteurs = fichiers
+    .filter(
+      ({ chemin, contenu }) =>
+        chemin.endsWith("layout.tsx") && /<ChronometreSeance[\s/>]/.test(codeSeul(contenu)),
+    )
+    .map((f) => f.chemin)
+    .sort();
+  assert.deepEqual(
+    porteurs,
+    [...MONTAGES_AUTORISES].sort(),
+    `layouts porteurs : ${porteurs.join(", ") || "aucun"}`,
   );
-  assert.equal(porteurs.length, 1, `layouts porteurs : ${porteurs.map((f) => f.chemin).join(", ") || "aucun"}`);
-  assert.equal(porteurs[0].chemin, LAYOUT_SEANCE, "le point de montage a changé de route");
+});
+
+await test("E5 — le layout PRÉSENTIEL le rend RÉELLEMENT (rendu, pas import mort)", () => {
+  const rendu = renderToString(
+    createElement(SeancePresentielLayout, null, createElement("p", null, "séance du coach")),
+  );
+  assert.ok(rendu.includes("séance du coach"), "le layout doit laisser passer la page");
+  assert.ok(
+    rendu.includes('aria-label="Ouvrir le chronomètre"'),
+    "le chronomètre n'est pas rendu sur la séance en présentiel",
+  );
+});
+
+await test("E6 — le chronomètre ne démarre de lui-même sur AUCUNE des deux routes", () => {
+  // Le composant rend le même état initial dans les deux arborescences : le
+  // compte à rebours est à l'arrêt, et c'est l'état initial du moteur qui le
+  // décide — aucun des deux layouts ne passe de propriété.
+  for (const [nom, Layout] of [
+    ["élève", SeanceLayout],
+    ["présentiel", SeancePresentielLayout],
+  ] as const) {
+    const rendu = renderToString(createElement(Layout, null, createElement("p", null, "x")));
+    assert.ok(
+      !/aria-label="(Mettre en pause|Reprendre)/.test(rendu),
+      `route ${nom} : le chronomètre semble déjà lancé`,
+    );
+  }
 });
 
 /* ════════════════════════════════════════════════════════════════════════
@@ -553,6 +614,18 @@ await test("SAB S9 — le chronomètre rendu dans une AUTRE page élève est dé
     { chemin: join("app", "(student)", "nutrition", "page.tsx"), contenu: "<ChronometreSeance />" },
   ];
   assert.equal(porteesInterdites(corpus).length, 1);
+});
+
+await test("SAB S9-bis — une AUTRE page admin que la séance présentielle est détectée", () => {
+  // L'exception du mode présentiel porte sur UN chemin, pas sur le dossier.
+  const corpus = [
+    { chemin: LAYOUT_SEANCE, contenu: "<ChronometreSeance />" },
+    { chemin: LAYOUT_PRESENTIEL, contenu: "<ChronometreSeance />" },
+    { chemin: join("app", "admin", "eleves", "[studentId]", "page.tsx"), contenu: "<ChronometreSeance />" },
+  ];
+  const violations = porteesInterdites(corpus);
+  assert.equal(violations.length, 1, violations.join(" | "));
+  assert.ok(violations[0].includes("[studentId]"), violations[0]);
 });
 
 await test("SAB S10 — le chronomètre RETIRÉ du layout de séance est détecté", () => {

@@ -129,7 +129,8 @@
     "20261026090000_entrainement_index_cles_etrangeres.sql",
     "20261027090000_save_training_program_sessions_rpc.sql",
     "20261028090000_entrainement_predicats_rls_scalaires.sql",
-    "20261029090000_training_prescriptions_synchronisation_differentielle.sql"
+    "20261029090000_training_prescriptions_synchronisation_differentielle.sql",
+    "20261102090000_mode_presentiel_tracabilite.sql"
   ],
   "garanties_de_contenu": {
     "insert_de_donnees_metier": 0,

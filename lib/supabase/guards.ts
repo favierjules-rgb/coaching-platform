@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
+import { requireStaffForStudent } from "@/lib/api/authz";
 
 import { getCurrentUser, getCurrentUserRole } from "@/lib/supabase/auth";
 import { isMockModeAllowed, isSupabaseConfigured } from "@/lib/supabase/env";
@@ -329,5 +330,39 @@ export async function requireOnboarding(): Promise<void> {
   const completed = await getOnboardingCompleted(supabase, studentId);
   if (completed) {
     redirect("/dashboard");
+  }
+}
+
+/**
+ * MODE PRÉSENTIEL — la page de saisie d'une séance POUR un élève.
+ *
+ * ⚠️ LE CONTRÔLE EST ICI, CÔTÉ SERVEUR, AVANT LE MOINDRE RENDU. L'identifiant
+ * de l'élève vient de l'URL : c'est une donnée fournie par le client, et elle
+ * ne vaut rien tant qu'elle n'a pas été confrontée aux droits réels du compte
+ * connecté. Un garde côté navigateur n'aurait rien gardé du tout.
+ *
+ * ⚠️ ON DÉLÈGUE À `requireStaffForStudent`, ON NE REJOUE PAS SA LOGIQUE. Elle
+ * connaît les trois rôles de staff et le modèle de permissions par catégorie
+ * de P13-B : un admin de cabinet passe, un coach autonome seulement sur ses
+ * élèves, un collaborateur seulement sur un élève affecté ET avec la
+ * permission d'écriture en entraînement. Réécrire ces règles ici les aurait
+ * laissées diverger au premier ajustement.
+ *
+ * L'exigence de catégorie n'est pas décorative : sans elle,
+ * `requireStaffForStudent` refuse TOUT collaborateur, par construction.
+ */
+export async function requirePresentielAccess(studentId: string): Promise<void> {
+  await requireAdminOrCoach();
+  if (shouldSkipGuards()) {
+    return;
+  }
+  const autorisation = await requireStaffForStudent(studentId, {
+    categorie: "entrainement",
+    niveau: "ecriture",
+  });
+  if (!autorisation.ok) {
+    // On ne dit pas « cet élève existe mais tu n'y as pas droit » : la liste
+    // des élèves est elle-même une information.
+    redirect("/admin/eleves");
   }
 }

@@ -11,6 +11,7 @@ import { AdminOnboardingDetailModal } from "@/components/admin/AdminOnboardingDe
 import { AdminSection, InfoRow, TagList } from "@/components/admin/AdminSection";
 import { RappelsEleveSection } from "@/components/admin/RappelsEleveSection";
 import { ProfilPhysiologiqueSection } from "@/components/admin/physio/ProfilPhysiologiqueSection";
+import { BoutonPresentiel } from "@/components/admin/presentiel/BoutonPresentiel";
 import { StudentPerformanceSection } from "@/components/admin/StudentPerformanceSection";
 import { StudentProfilePanel, StudentProfileTabs } from "@/components/admin/StudentProfileTabs";
 import { AssignContentToStudentModal } from "@/components/admin/AssignContentToStudentModal";
@@ -1067,6 +1068,12 @@ export default function AdminStudentDetailPage() {
                   actif={isSupabaseStudent}
                   onChargee={setDebutProgrammeActif}
                 />
+                {/* MODE PRÉSENTIEL — réservé aux élèves RÉELS. Sur le chemin
+                    de démonstration il n'y a ni compte, ni droits, ni base où
+                    écrire : un bouton y mènerait à une page qui refuse. */}
+                {isSupabaseStudent ? (
+                  <BoutonPresentiel studentId={student.id} programme={assignedProgram} />
+                ) : null}
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">Aucun programme attribué.</p>
