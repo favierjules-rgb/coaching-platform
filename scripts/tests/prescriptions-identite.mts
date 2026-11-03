@@ -21,7 +21,7 @@
  *     RÉELLEMENT, qui n'est pas ce qu'on pourrait croire (voir la section 4).
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -325,7 +325,28 @@ await test("12. chacune des 25 colonnes porte sa garde de présence", () => {
 
 await test("13. la migration est déclarée au contrat et au manifeste", () => {
   const contrat = lire("../../scripts/tests/contrat-migrations.mts");
-  assert.match(contrat, /NOMBRE_DE_MIGRATIONS = 123/, "le compte attendu doit suivre");
+  /*
+   * ⚠️ LE COMPTE N'EST PLUS FIGÉ À UN LITTÉRAL, ET LA GARANTIE EST PLUS FORTE.
+   *
+   * Il était écrit `= 123` : le nombre de migrations du jour où CE lot a été
+   * écrit. Tout chantier ultérieur le faisait rougir sans qu'aucune garantie
+   * des prescriptions ne soit en cause — un test qui échoue pour une raison
+   * étrangère à son objet finit par être désarmé, et c'est pire que pas de
+   * test. (Constaté au chantier MODE PRÉSENTIEL, qui ajoute une migration.)
+   *
+   * Ce que ce contrôle voulait vraiment dire : « le compte déclaré au contrat
+   * SUIT le dossier des migrations ». On le vérifie donc tel quel, en
+   * comparant le nombre déclaré au nombre de fichiers réellement présents.
+   */
+  const declare = /NOMBRE_DE_MIGRATIONS = (\d+)/.exec(contrat);
+  assert.ok(declare, "le contrat doit déclarer un compte");
+  const surDisque = readdirSync(new URL("../../supabase/migrations/", import.meta.url))
+    .filter((f) => f.endsWith(".sql")).length;
+  assert.equal(
+    Number(declare[1]),
+    surDisque,
+    `le compte attendu doit suivre : ${declare[1]} déclarées pour ${surDisque} sur le disque`,
+  );
   assert.match(contrat, /MIGRATION_PRESCRIPTIONS_DIFF/, "la migration doit être nommée");
   assert.match(contrat, /20261029090000_training_prescriptions_synchronisation_differentielle\.sql/);
   const manifeste = JSON.parse(lire("../../supabase/baseline/manifest.json")) as {

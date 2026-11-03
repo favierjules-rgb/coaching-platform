@@ -16,7 +16,35 @@ import type { AdminStudentFeedback, WorkoutFeedbackPayload } from "@/types";
  * (Supabase non configuré, personne connecté, ou compte sans fiche élève),
  * l'appelant doit continuer avec useAdminData comme actuellement.
  */
-export function useSupabaseWorkoutFeedback(sessionKey: string) {
+/**
+ * MODE PRÉSENTIEL — le même hook, pour un élève DÉCLARÉ.
+ *
+ * ⚠️ DEUX CHOSES SEULEMENT CHANGENT, et elles sont ici : d'où vient l'identité
+ * de l'élève, et quelle route reçoit la soumission. Les lectures
+ * (`getWorkoutFeedbackBySession`, `getWorkoutFeedbackForStudent`) sont
+ * strictement les mêmes : elles filtrent par `student_id`, et la RLS
+ * `..._select` autorise déjà le staff sur ses élèves via
+ * `student_ids_entrainement_lecture()`. Rien à dupliquer.
+ *
+ * ⚠️ `pourEleve` N'OUVRE AUCUN DROIT. Un identifiant transmis par le client
+ * ne vaut rien en soi : la lecture reste sous RLS, et l'écriture est tranchée
+ * par `requireStaffForStudent` côté serveur. Au pire, un coach curieux qui
+ * forgerait un identifiant obtiendrait des listes vides et un 403.
+ */
+export interface OptionsFeedbackSeance {
+  /**
+   * `students.id` de l'élève dont on saisit la séance. Absent — le cas de
+   * TOUS les montages élève —, l'identité est dérivée du compte connecté,
+   * exactement comme avant.
+   */
+  readonly pourEleve?: string | null;
+}
+
+export function useSupabaseWorkoutFeedback(
+  sessionKey: string,
+  options: OptionsFeedbackSeance = {},
+) {
+  const pourEleve = options.pourEleve ?? null;
   const [ready, setReady] = useState(false);
   const [studentId, setStudentId] = useState<string | null>(null);
   const [existingFeedback, setExistingFeedback] = useState<AdminStudentFeedback | null>(null);
@@ -46,7 +74,10 @@ export function useSupabaseWorkoutFeedback(sessionKey: string) {
         if (!cancelled) applyResult(null, null, []);
         return;
       }
-      const id = await getCurrentStudentId(supabase);
+      /* Mode présentiel : l'élève est celui de la fiche ouverte, pas le
+         compte connecté — un coach n'a pas de ligne `students`, et
+         `getCurrentStudentId` rendrait `null`, ce qui désactiverait tout. */
+      const id = pourEleve ?? (await getCurrentStudentId(supabase));
       if (!id) {
         if (!cancelled) applyResult(null, null, []);
         return;
@@ -61,7 +92,7 @@ export function useSupabaseWorkoutFeedback(sessionKey: string) {
     return () => {
       cancelled = true;
     };
-  }, [sessionKey, applyResult]);
+  }, [sessionKey, applyResult, pourEleve]);
 
   const submit = useCallback(
     async (payload: Omit<WorkoutFeedbackPayload, "studentId" | "sessionKey">) => {
@@ -70,11 +101,21 @@ export function useSupabaseWorkoutFeedback(sessionKey: string) {
       // n'envoie que le réalisé ; l'identité élève est dérivée de la session
       // authentifiée côté serveur et le snapshot du prescrit y est construit
       // à partir des lignes réelles — jamais depuis le navigateur.
+      /* ⚠️ DEUX ROUTES, DEUX CONTRATS. Celle de l'élève refuse la clé
+         `studentId` par son schéma strict — c'est sa promesse, et on n'y
+         touche pas. Celle du présentiel l'exige, et la valide par
+         `requireStaffForStudent` avant la moindre lecture. */
+      const route = pourEleve
+        ? "/api/admin/presentiel/workout-feedback"
+        : "/api/student/workout-feedback";
+      const corps = pourEleve
+        ? { ...payload, sessionKey, studentId: pourEleve }
+        : { ...payload, sessionKey };
       try {
-        const response = await fetch("/api/student/workout-feedback", {
+        const response = await fetch(route, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...payload, sessionKey }),
+          body: JSON.stringify(corps),
         });
         if (!response.ok) return false;
         const { feedback } = (await response.json()) as { feedback: AdminStudentFeedback | null };
@@ -86,7 +127,7 @@ export function useSupabaseWorkoutFeedback(sessionKey: string) {
         return false;
       }
     },
-    [studentId, sessionKey],
+    [studentId, sessionKey, pourEleve],
   );
 
   return { ready, active: ready && studentId !== null, studentId, existingFeedback, history, submit };

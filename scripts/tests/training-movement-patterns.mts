@@ -102,7 +102,19 @@ const MIGRATION_METADONNEES = lire("../../supabase/migrations/20260822090000_wor
  */
 const MIGRATION_VIDEO = lire("../../supabase/migrations/20260826090000_student_feedback_video.sql");
 const MIGRATION_REPONSE_VIDEO = lire("../../supabase/migrations/20260827090000_coach_reply_video.sql");
-const MATRICE = [MIGRATION_AUTORITAIRE, MIGRATION_METADONNEES, MIGRATION_VIDEO, MIGRATION_REPONSE_VIDEO].join("\n");
+/**
+ * Et la traçabilité de la saisie (mode présentiel) : trois colonnes de plus
+ * sur `workout_feedback`, classées dans la migration qui les ajoute — c'est
+ * exactement le mécanisme d'extension décrit ci-dessus.
+ */
+const MIGRATION_PRESENTIEL = lire("../../supabase/migrations/20261102090000_mode_presentiel_tracabilite.sql");
+const MATRICE = [
+  MIGRATION_AUTORITAIRE,
+  MIGRATION_METADONNEES,
+  MIGRATION_VIDEO,
+  MIGRATION_REPONSE_VIDEO,
+  MIGRATION_PRESENTIEL,
+].join("\n");
 const COUCHE_ECRITURE = lire("../../lib/supabase/workout-feedback.ts");
 const CHECKLIST = lire("../../supabase/tests/training_movement_patterns_checklist.sql");
 const CARTE = lire("../../components/student/ExerciseFeedbackCard.tsx");
@@ -896,23 +908,51 @@ await test("C4. l'ancien contrat reste valide — aucun payload existant n'est c
   assert.ok(analyse.success, analyse.success ? "" : JSON.stringify(analyse.error.issues));
 });
 
-await test("C5. la route rejoue la règle du remplacement AVANT toute écriture", () => {
-  const route = sansCommentairesTs(ROUTE);
-  const iFiltre = route.indexOf("payload.exercises.filter((e) => e.substituteExerciseLibraryId)");
-  const iÉcriture = route.indexOf("saveWorkoutFeedback(");
-  assert.ok(iFiltre > 0, "la route ne repère pas les remplacements");
-  assert.ok(iÉcriture > iFiltre, "la vérification doit précéder l'écriture, pas la suivre");
+/**
+ * ⚠️ LA RÈGLE A ÉTÉ EXTRAITE DE LA ROUTE, PAS SUPPRIMÉE — mode présentiel.
+ *
+ * Elle vivait dans `app/api/student/workout-feedback/route.ts` tant qu'il
+ * n'existait qu'UNE voie d'écriture. Le mode présentiel en ouvre une seconde
+ * (`app/api/admin/presentiel/workout-feedback/route.ts`), et deux copies de
+ * ces quatre contrôles auraient divergé : on en corrigerait une sans l'autre,
+ * et la voie oubliée deviendrait la porte d'entrée.
+ *
+ * Le contrôle est donc RENFORCÉ, pas déplacé : on vérifie que la règle existe
+ * dans le module partagé, qu'elle y précède toujours l'écriture, et que
+ * CHACUNE des deux routes l'appelle. Chercher la règle dans une seule route
+ * aurait laissé l'autre sans garantie.
+ */
+const CONTROLES_PARTAGES = lire("../../lib/api/workout-feedback-controles.ts");
+const ROUTE_PRESENTIEL = lire("../../app/api/admin/presentiel/workout-feedback/route.ts");
+
+await test("C5. la règle du remplacement est rejouée AVANT toute écriture, sur les DEUX voies", () => {
+  const partages = sansCommentairesTs(CONTROLES_PARTAGES);
+  const iFiltre = partages.indexOf("payload.exercises.filter((e) => e.substituteExerciseLibraryId)");
+  assert.ok(iFiltre > 0, "le module partagé ne repère pas les remplacements");
 
   // Elle restreint les lignes prescrites à la séance visée : un identifiant
   // emprunté à une autre séance ne remonte pas.
-  assert.ok(route.includes('.eq("session_id", payload.sessionId)'));
+  assert.ok(partages.includes('.eq("session_id", payload.sessionId)'));
   // Elle compare les patterns, et refuse un pattern source absent.
-  assert.ok(route.includes("!source.movement_pattern || source.movement_pattern !== substitut.movement_pattern"));
+  assert.ok(partages.includes("!source.movement_pattern || source.movement_pattern !== substitut.movement_pattern"));
   // Elle refuse le remplacement par soi-même et le remplaçant archivé.
-  assert.ok(route.includes("sourceId === substitutId"));
-  assert.ok(route.includes('substitut.status !== "active"'));
+  assert.ok(partages.includes("sourceId === substitutId"));
+  assert.ok(partages.includes('substitut.status !== "active"'));
   // Et elle ne fabrique JAMAIS de nom.
-  assert.ok(!/substitute_exercise_name/.test(route), "la route ne doit jamais écrire le nom du remplaçant");
+  assert.ok(!/substitute_exercise_name/.test(partages),
+    "les contrôles ne doivent jamais écrire le nom du remplaçant");
+
+  // Les deux routes l'appellent, et AVANT d'écrire.
+  for (const [nom, source] of [["élève", ROUTE], ["présentiel", ROUTE_PRESENTIEL]] as const) {
+    const route = sansCommentairesTs(source);
+    const iControle = route.indexOf("controlerContenuRetour(");
+    const iÉcriture = route.indexOf("saveWorkoutFeedback(");
+    assert.ok(iControle > 0, `la route ${nom} n'appelle pas les contrôles partagés`);
+    assert.ok(iÉcriture > iControle,
+      `route ${nom} : la vérification doit précéder l'écriture, pas la suivre`);
+    assert.ok(!/movement_pattern/.test(route),
+      `route ${nom} : la règle ne doit pas être recopiée — deux copies divergent`);
+  }
 });
 
 

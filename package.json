@@ -187,7 +187,9 @@
     "test:guide-decouverte": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/guide-decouverte.mts",
     "test:guide-categories": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/guide-categories.mts",
     "test:guide-demonstration": "npx tsx scripts/tests/guide-demonstration-render.mts",
-    "test:nutrition-mobile-largeur": "npx tsx scripts/tests/nutrition-mobile-largeur.mts"
+    "test:nutrition-mobile-largeur": "npx tsx scripts/tests/nutrition-mobile-largeur.mts",
+    "test:mode-presentiel": "npx tsx scripts/tests/mode-presentiel.mts",
+    "test:mode-live": "npx tsx scripts/tests/mode-live.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

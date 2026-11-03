@@ -1067,6 +1067,22 @@ export default function AdminStudentDetailPage() {
                   actif={isSupabaseStudent}
                   onChargee={setDebutProgrammeActif}
                 />
+                {/*
+                  MODE LIVE — L'ENTRÉE N'EST PLUS ICI, ET C'EST VOULU.
+
+                  Elle vivait sur cette fiche, sous la forme d'une liste de
+                  toutes les séances du programme. Le geste réel en salle n'est
+                  pas celui-là : on part de la PROGRAMMATION qu'on fait
+                  aujourd'hui, on choisit l'élève s'il y en a plusieurs, et on
+                  navigue dans son planning comme il le fait lui-même. Une liste
+                  de séances à plat ne disait ni la semaine, ni ce qui était
+                  déjà réalisé.
+
+                  L'entrée est donc l'étiquette « Mode Live » sous chaque
+                  programmation de /admin/programmes, qui mène à
+                  /admin/programmes/[programId]/live/[studentId]. La route de
+                  saisie, elle, n'a pas changé d'un caractère.
+                */}
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">Aucun programme attribué.</p>

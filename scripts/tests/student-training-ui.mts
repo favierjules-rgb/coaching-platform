@@ -242,7 +242,19 @@ await (async () => {
       assert.ok(!/from \"@\/lib\/supabase/.test(source), "aucun import Supabase dans les composants purement visuels");
     }
     const section = sansCommentaires(sourceSection);
-    assert.ok(section.includes("useSupabaseWorkoutFeedback(sessionId)"), "hook métier inchangé");
+    // ⚠️ LE HOOK PREND UN SECOND ARGUMENT DEPUIS LE MODE PRÉSENTIEL, et c'est
+    // le seul changement : `pourEleve` vaut `null` sur TOUT montage élève, donc
+    // le comportement du parcours élève est rigoureusement celui d'avant. On
+    // vérifie les deux choses — l'appel, et le fait que l'élève reste sur le
+    // chemin sans identité déclarée.
+    assert.ok(
+      /useSupabaseWorkoutFeedback\(sessionId[,)]/.test(section),
+      "hook métier inchangé",
+    );
+    assert.ok(
+      /pourEleve: presentiel \? studentId : null/.test(section),
+      "hors présentiel, l'identité reste dérivée du compte connecté",
+    );
     assert.ok(section.includes("supabaseFeedback.submit("), "chemin de sauvegarde inchangé");
   });
 
