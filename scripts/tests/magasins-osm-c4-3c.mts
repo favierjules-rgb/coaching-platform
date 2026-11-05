@@ -767,18 +767,49 @@ await test("OSM-MARQUE-UI — l'écran APPELLE la règle, il ne la réécrit pas
   // ⚠️ UNE RÈGLE RECOPIÉE DANS LE JSX SERAIT UNE SECONDE RÈGLE. Elle
   // divergerait de celle-ci au premier ajustement, et c'est précisément ce que
   // la fonction pure existe pour empêcher.
-  const ui = lire("../../components/student/ChoixMagasinProche.tsx").replace(/\/\*[\s\S]*?\*\//g, " ");
+  /*
+   * ⚠️ LA LISTE A CHANGÉ DE FICHIER — elle vit dans `RechercheDeCommerces`
+   * depuis la refonte — ET LA RÈGLE DOIT ÊTRE APPELÉE DANS LES DEUX ENDROITS
+   * QUI AFFICHENT UNE MARQUE : la liste, et la CARTE. C'est la même faute
+   * « LidlLidl » qui reviendrait sinon sur les marqueurs.
+   */
+  const ui = [
+    lire("../../components/student/ChoixMagasinProche.tsx"),
+    lire("../../components/student/RechercheDeCommerces.tsx"),
+    lire("../../lib/cartographie/vue-magasins.ts"),
+  ]
+    .join("\n")
+    .replace(/\/\*[\s\S]*?\*\//g, " ");
   assert.match(ui, /marqueAAfficher\(magasin\.name, magasin\.brand\)/, "l'écran appelle la règle pure");
+  assert.match(
+    lire("../../lib/cartographie/vue-magasins.ts"),
+    /marqueDistincte\(magasin\.name, magasin\.brand\)/,
+    "et la carte applique la même règle sur ses marqueurs",
+  );
   assert.equal(
     /\{magasin\.brand \?/.test(ui),
     false,
     "l'ancien rendu direct de la marque ne doit plus exister",
   );
-  assert.equal(
-    /toLowerCase\(\)/.test(ui),
-    false,
-    "aucune comparaison de marque réécrite dans le composant",
-  );
+  /*
+   * ⚠️ LA COMPARAISON EST INTERDITE DANS LES COMPOSANTS, PAS DANS LE MODULE
+   * PUR — et la distinction est le fond du contrôle. `marqueDistincte`
+   * (`lib/cartographie/vue-magasins.ts`) compare bien en minuscules : c'est LA
+   * règle, et elle est testée par exécution. Ce qu'il faut interdire, c'est
+   * qu'un COMPOSANT la réécrive, parce que la copie divergerait.
+   */
+  for (const chemin of [
+    "../../components/student/ChoixMagasinProche.tsx",
+    "../../components/student/RechercheDeCommerces.tsx",
+    "../../components/student/CarteDesMagasins.tsx",
+  ]) {
+    const composant = lire(chemin).replace(/\/\*[\s\S]*?\*\//g, " ");
+    assert.equal(
+      /\.toLowerCase\(\)[\s\S]{0,120}(brand|marque)/i.test(composant),
+      false,
+      `aucune comparaison de marque réécrite dans ${chemin}`,
+    );
+  }
 });
 
 console.log("\n✅ C4.3c — couche pure OpenStreetMap : suite verte.");

@@ -436,6 +436,7 @@ const INTERDITS_C4_2: ReadonlyArray<readonly [string, string]> = [
   ["disponib", "aucun lot — la donnée n'existe pas chez Open Prices"],
   ["inventory", "aucun lot — la donnée n'existe pas chez Open Prices"],
   ["price_count", "C4.3 — signal de découverte, transitoire"],
+  ["communes", "COURSES — annuaire des communes"],
   ["nearby", "C4.3a — découverte"],
   ["radius_km", "C4.3a — découverte"],
   ["geoloc", "C4.3a — découverte"],
@@ -497,6 +498,7 @@ await test("C4.2-PERIMETRE — aucun code applicatif, aucun réseau, aucune géo
   // le 18/08/2026 par C4.3b (recherche manuelle par ville) ; elle est déclarée
   // ici, pas tolérée par un joker.
   const ROUTES_MAGASIN: ReadonlyArray<readonly [string, string]> = [
+    ["communes", "COURSES — annuaire des communes, l'étape de géocodage"],
     ["nearby", "C4.3a — découverte des magasins proches"],
     ["search", "C4.3b — recherche manuelle par ville"],
     ["select", "C4.3a — sélection du magasin"],

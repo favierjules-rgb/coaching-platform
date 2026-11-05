@@ -2,9 +2,14 @@ import { NextResponse } from "next/server";
 
 import { magasinsParVilleBodySchema } from "@/lib/api/schemas/magasins";
 import { parseJsonBody } from "@/lib/api/validate";
+import { codeInseeValide } from "@/lib/communes/bornes";
 import { PAYS_CODE, villeValide } from "@/lib/nutrition/magasin-proche";
 import { estOffNonConfigure } from "@/lib/open-food-facts/client";
-import { decouvrirParVille, httpDecouverte } from "@/lib/openstreetmap/decouverte";
+import {
+  decouvrirParCodeInsee,
+  decouvrirParVille,
+  httpDecouverte,
+} from "@/lib/openstreetmap/decouverte";
 import { consumeRateLimit, rateLimitKey, refusDeLimite } from "@/lib/security/rate-limit";
 import { STORES_SEARCH } from "@/lib/security/rules";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -85,12 +90,33 @@ export async function POST(request: Request) {
   const parsed = await parseJsonBody(request, magasinsParVilleBodySchema);
   if (!parsed.success) return parsed.response;
 
-  // Seconde barrière, volontairement redondante — même doctrine que le rayon en
-  // C4.3a. Le schéma connaît les bornes ; ce sont ces fonctions qui portent la
-  // RÈGLE, et c'est la règle qui doit gagner si les deux venaient à diverger.
-  const ville = parsed.data.ville.trim();
-  if (!villeValide(ville)) {
-    return NextResponse.json({ error: "Nom de ville invalide." }, { status: 400 });
+  /*
+   * ════════════════════════════════════════════════════════════════════════
+   * DEUX ENTRÉES, ET LA PREMIÈRE EST LA BONNE
+   * ════════════════════════════════════════════════════════════════════════
+   * `codeInsee` — l'élève a CHOISI une commune dans les suggestions. Une
+   * commune, un code, aucune ambiguïté possible : c'est le chemin normal, et
+   * c'est l'étape de géocodage que l'énoncé demande.
+   *
+   * `ville` — le repli, quand l'annuaire des communes était indisponible. La
+   * résolution par nom reste possible, et peut encore répondre « plusieurs
+   * communes portent ce nom » : c'est moins bien, et c'est mieux que rien.
+   *
+   * ⚠️ LE CODE EST REVÉRIFIÉ ICI. Le schéma l'a déjà filtré ; cette barrière
+   * est volontairement redondante — même doctrine que le rayon en C4.3a. Le
+   * schéma connaît la forme, c'est cette fonction qui porte la RÈGLE, et c'est
+   * la règle qui doit gagner si les deux venaient à diverger.
+   */
+  const codeInsee = parsed.data.codeInsee;
+  const villeSaisie = parsed.data.ville?.trim();
+
+  if (codeInsee !== undefined && !codeInseeValide(codeInsee)) {
+    return NextResponse.json({ error: "Commune invalide." }, { status: 400 });
+  }
+  if (codeInsee === undefined) {
+    if (villeSaisie === undefined || !villeValide(villeSaisie)) {
+      return NextResponse.json({ error: "Nom de ville invalide." }, { status: 400 });
+    }
   }
 
   // ⚠️ LE PAYS N'EST PAS LU DANS LA REQUÊTE — IL N'Y EST PAS. C'est une
@@ -98,7 +124,10 @@ export async function POST(request: Request) {
   // navigateur ne choisit donc pas le pays de recherche d'un lot qui n'en
   // connaît qu'un.
   try {
-    const resultat = await decouvrirParVille(ville);
+    const resultat =
+      codeInsee !== undefined
+        ? await decouvrirParCodeInsee(codeInsee)
+        : await decouvrirParVille(villeSaisie as string);
 
     // ⚠️ SEPT ISSUES, SEPT RÉPONSES — ET AUCUNE PANNE NE DIT « INTROUVABLE ».
     // C'est la correction faite en C4.3a sur la sélection, appliquée ici : un
@@ -113,7 +142,10 @@ export async function POST(request: Request) {
     return NextResponse.json({
       magasins: resultat.magasins,
       tronque: resultat.tronque,
-      ville,
+      // ⚠️ CE QUI EST RENVOYÉ EST CE QUI A SERVI À CHERCHER, pas ce que l'élève
+      // a tapé : l'écran doit pouvoir dire sur quelle commune il affiche.
+      ville: villeSaisie ?? null,
+      codeInsee: codeInsee ?? null,
       // Renvoyé pour que l'écran puisse le dire, jamais reçu : c'est le serveur
       // qui l'énonce.
       pays: PAYS_CODE,

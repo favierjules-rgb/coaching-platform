@@ -18,6 +18,7 @@ import {
   type CompositionConnue,
   type RepasDeLaPeriode,
 } from "@/lib/nutrition/repas-de-la-periode";
+import { creerValidateurEnSerie } from "@/lib/nutrition/validation-en-serie";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { validerChoixRepas } from "@/lib/supabase/consumed-meals";
 import { lireRepasPlanifiesSurPeriode, type RepasPlanifie } from "@/lib/supabase/repas-planifies";
@@ -200,6 +201,8 @@ export function useListeDeCourses(
           quantity: item.quantity,
           unit: item.unit,
           displayName: item.displayName,
+          // COURSES — le rayon se déduit de ce code, hydraté à la lecture.
+          codeCiqual: item.codeCiqual,
           colorKey: couleurs.get(item.choiceSlotId) ?? null,
           plannedOn: item.plannedOn,
           mealId: item.mealId,
@@ -213,88 +216,147 @@ export function useListeDeCourses(
 
   const recharger = useCallback(() => setRafraichissement((n) => n + 1), []);
 
-  const validerRepas = useCallback<EtatListeDeCourses["validerRepas"]>(
-    async (repasCible, items) => {
-      const supabase = createSupabaseBrowserClient();
-      if (!supabase) return false;
-      setEnCours(true);
-      setErreur(null);
-      try {
-        await validerChoixRepas(
-          supabase,
-          repasCible.mealId,
-          repasCible.date,
-          identitesDeChoix(repasCible.occurrences, items),
-        );
-        setRafraichissement((n) => n + 1);
-        return true;
-      } catch (e) {
-        // ⚠️ LE MOTIF DE LA BASE EST AFFICHÉ, PAS AVALÉ. `REPAS_DEJA_CONSOMME`
-        // (verrou C0.1) doit se lire à l'écran : sans lui, l'élève réessaierait
-        // indéfiniment un geste que la base refuse pour une bonne raison.
-        setErreur(messageDeRefus(e));
-        return false;
-      } finally {
-        setEnCours(false);
-      }
-    },
-    [],
-  );
+  /*
+   * ════════════════════════════════════════════════════════════════════════
+   * LE VERROU D'ÉCRITURE — DANS LE VALIDATEUR, PAS DANS UN ÉTAT REACT
+   * ════════════════════════════════════════════════════════════════════════
+   * ⚠️ `enCours` NE PROTÈGE RIEN CONTRE UN DOUBLE CLIC, ET C'ÉTAIT LA CAUSE
+   * PRINCIPALE DES VALIDATIONS INTERMITTENTES.
+   *
+   * C'est un état React : il désactive le bouton AU RENDU SUIVANT. Entre le
+   * premier clic et ce rendu, un second clic — ou le double événement qu'un
+   * navigateur mobile émet parfois sur un appui — passait sans obstacle. Deux
+   * validations de semaine partaient alors en parallèle : quarante-deux appels
+   * RPC au lieu de vingt-et-un, le `finally` de la première réactivant le
+   * bouton pendant que la seconde tournait encore, et deux relectures qui se
+   * couraient. L'élève voyait tantôt ses repas validés, tantôt l'écran d'avant.
+   *
+   * Le verrou vit désormais dans `creerValidateurEnSerie` : une variable de
+   * clôture, lue et écrite synchroniquement, donc visible du second appel dans
+   * le même tour de boucle d'événements. `enCours` reste, mais pour ce qu'il
+   * sait faire : désactiver le bouton et afficher « Validation… ».
+   */
+
+  /**
+   * Relit la période et ATTEND la réponse.
+   *
+   * ⚠️ POURQUOI ATTENDRE, ALORS QUE `setRafraichissement` SUFFISAIT. Parce que
+   * l'appelant avance d'écran sur le résultat de la validation : il doit
+   * pouvoir le faire en sachant que ce qui est affiché vient de la BASE, et
+   * non du rapport d'écriture. L'énoncé le dit : « après succès, l'état
+   * affiché doit correspondre aux données réellement enregistrées ».
+   */
+  const relire = useCallback(async () => {
+    await charger();
+  }, [charger]);
 
   /**
    * Valide une semaine entière — repas par repas, SANS transaction globale.
    *
-   * ⚠️ AUCUN REPAS N'EST LAISSÉ « NON TENTÉ ». Un échec au douzième n'arrête
-   * pas les neuf suivants : l'élève doit savoir en UNE fois ce qui reste à
-   * corriger, plutôt que de relancer et de découvrir un nouvel échec à chaque
-   * tour.
+   * ⚠️ LA BOUCLE N'EST PLUS ÉCRITE ICI. Elle vit dans
+   * `lib/nutrition/validation-en-serie.ts`, avec le verrou, l'ordre
+   * relecture → déverrouillage, et le rapport. Tant qu'elle était dans ce
+   * hook, aucun test Node ne pouvait la faire tourner : ni le double clic, ni
+   * la réponse lente, ni l'erreur réseau, ni la nouvelle tentative — c'est-à-
+   * dire précisément les cas où elle se trompait.
    *
-   * ⚠️ UNE SEULE RELECTURE, À LA FIN. Recharger après chaque repas ferait
-   * vingt et une lectures inutiles et ferait clignoter l'écran.
+   * Ce qui reste ici est ce qui appartient à React : l'état d'affichage.
    */
+  /*
+   * ⚠️ CONSTRUIT UNE SEULE FOIS, ET SANS AUCUNE DÉPENDANCE D'ÉCRAN. Il ne
+   * porte que le verrou et la traduction des refus. Ce qui dépend de la
+   * période affichée — écrire, relire — lui est passé AU MOMENT DU GESTE :
+   * capturé ici, `relire` relirait la semaine d'il y a trois écrans.
+   */
+  const validateur = useMemo(
+    () => creerValidateurEnSerie<RepasAValider>({ traduireErreur: messageDeRefus }),
+    [],
+  );
+
+  /** Les dépendances effectives, reconstruites à chaque geste. */
+  const dependances = useCallback(
+    () => ({
+      ecrire: async (entree: RepasAValider) => {
+        const supabase = createSupabaseBrowserClient();
+        if (!supabase) throw new Error("CONNEXION_INDISPONIBLE");
+        await validerChoixRepas(
+          supabase,
+          entree.repas.mealId,
+          entree.repas.date,
+          identitesDeChoix(entree.repas.occurrences, entree.items),
+        );
+      },
+      relire,
+      surChangementDEtat: setEnCours,
+    }),
+    [relire],
+  );
+
   const validerSemaine = useCallback<EtatListeDeCourses["validerSemaine"]>(
     async (entrees) => {
-      const supabase = createSupabaseBrowserClient();
-      if (!supabase) {
-        return {
-          valides: 0,
-          complet: false,
-          echecs: entrees.map((e) => ({
-            cle: e.repas.cle,
-            libelle: e.libelle,
-            message: "Connexion indisponible.",
-          })),
-        };
-      }
-      setEnCours(true);
       setErreur(null);
-      const echecs: EchecDeRepas[] = [];
-      let valides = 0;
-      try {
-        for (const entree of entrees) {
-          try {
-            await validerChoixRepas(
-              supabase,
-              entree.repas.mealId,
-              entree.repas.date,
-              identitesDeChoix(entree.repas.occurrences, entree.items),
-            );
-            valides += 1;
-          } catch (e) {
-            echecs.push({
-              cle: entree.repas.cle,
-              libelle: entree.libelle,
-              message: messageDeRefus(e),
-            });
-          }
-        }
-      } finally {
-        setEnCours(false);
-        setRafraichissement((n) => n + 1);
+      const rapport = await validateur.valider(
+        entrees.map((entree) => ({
+          cle: entree.repas.cle,
+          libelle: entree.libelle,
+          charge: entree,
+        })),
+        dependances(),
+      );
+      /*
+       * ⚠️ L'ERREUR GLOBALE EST POSÉE QUAND RIEN N'EST PASSÉ. Le rapport
+       * détaillé vit dans l'écran de proposition ; l'écran des repas, lui, ne
+       * lit que `erreur`. Sans cette ligne, une semaine entièrement refusée ne
+       * disait rien du tout sur cet écran-là.
+       *
+       * ⚠️ SAUF SI L'APPEL A ÉTÉ REFUSÉ POUR CAUSE D'ÉCRITURE EN COURS : rien
+       * n'a été tenté, il n'y a donc rien à corriger ni à signaler comme une
+       * panne.
+       */
+      if (!rapport.refuseCarEnCours && rapport.valides === 0 && rapport.echecs.length > 0) {
+        setErreur(rapport.echecs[0]!.message);
       }
-      return { valides, echecs, complet: echecs.length === 0 && entrees.length > 0 };
+      return {
+        valides: rapport.valides,
+        echecs: rapport.echecs,
+        complet: rapport.complet,
+      };
     },
-    [],
+    [validateur, dependances],
+  );
+
+  /*
+   * ⚠️ UN REPAS SEUL PASSE PAR LE MÊME VALIDATEUR, DONC PAR LE MÊME VERROU.
+   *
+   * Deux boutons, deux chemins, et jusqu'ici un seul drapeau d'état que le
+   * premier `finally` éteignait pour tout le monde : valider un repas pendant
+   * une validation de semaine était possible. Une série d'UN élément, c'est la
+   * même garantie sans second mécanisme à maintenir.
+   */
+  const validerRepas = useCallback<EtatListeDeCourses["validerRepas"]>(
+    async (repasCible, items) => {
+      setErreur(null);
+      const rapport = await validateur.valider(
+        [
+          {
+            cle: repasCible.cle,
+            libelle: repasCible.cle,
+            charge: { repas: repasCible, libelle: repasCible.cle, items },
+          },
+        ],
+        dependances(),
+      );
+      if (rapport.refuseCarEnCours) return false;
+      if (rapport.echecs.length > 0) {
+        // ⚠️ LE MOTIF DE LA BASE EST AFFICHÉ, PAS AVALÉ. `REPAS_DEJA_CONSOMME`
+        // (verrou C0.1) doit se lire à l'écran : sans lui, l'élève réessaierait
+        // indéfiniment un geste que la base refuse pour une bonne raison.
+        setErreur(rapport.echecs[0]!.message);
+        return false;
+      }
+      return rapport.valides === 1;
+    },
+    [validateur, dependances],
   );
 
   return {
@@ -314,6 +376,17 @@ export function useListeDeCourses(
 /** Traduit les refus connus de la RPC. Fonction PURE, testable sans Supabase. */
 export function messageDeRefus(erreur: unknown): string {
   const texte = erreur instanceof Error ? erreur.message : String(erreur ?? "");
+  /*
+   * ⚠️ LA PANNE DE CONNEXION A SON PROPRE MESSAGE, ET IL DIT CE QUI RESTE.
+   * Le message générique (« vérifie ta connexion ») laissait croire que les
+   * choix pouvaient avoir été perdus. Ils ne le sont pas : rien n'a été
+   * envoyé, la sélection est toujours à l'écran, et une nouvelle tentative
+   * suffit. L'énoncé demande des erreurs clairement identifiées — celle-ci
+   * est la plus fréquente.
+   */
+  if (texte.includes("CONNEXION_INDISPONIBLE")) {
+    return "Connexion indisponible : rien n'a été envoyé. Tes choix sont conservés, réessaie.";
+  }
   if (texte.includes("REPAS_DEJA_CONSOMME")) {
     return "Ce repas a déjà été enregistré comme consommé : sa composition ne peut plus être modifiée.";
   }

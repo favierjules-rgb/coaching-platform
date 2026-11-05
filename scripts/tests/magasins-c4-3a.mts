@@ -70,10 +70,34 @@ const SCHEMAS = lireOuVide("../../lib/api/schemas/magasins.ts");
 const BASE = lireOuVide("../../lib/supabase/magasins.ts");
 const ROUTE_NEARBY = lireOuVide("../../app/api/student/stores/nearby/route.ts");
 const ROUTE_SELECT = lireOuVide("../../app/api/student/stores/select/route.ts");
-const UI = lireOuVide("../../components/student/ChoixMagasinProche.tsx");
+/*
+ * ⚠️ L'INTERFACE DU SÉLECTEUR EST DEUX FICHIERS DEPUIS LA REFONTE, ET `UI` EST
+ * LEUR SOMME. `ChoixMagasinProche` garde la ligne repliée et l'ÉCRITURE du
+ * choix ; `RechercheDeCommerces` porte les deux modes de recherche, le rayon,
+ * les suggestions de communes et la carte.
+ *
+ * Les propriétés mesurées ici portent sur l'interface prise dans son ensemble
+ * — « la permission n'est demandée qu'au geste », « aucune position
+ * persistée » — et les mesurer sur la paire est donc exact. Pour toutes les
+ * assertions d'ABSENCE, c'est même plus strict qu'avant : elles balaient
+ * maintenant deux fois plus de code.
+ */
+const UI_LIGNE = lireOuVide("../../components/student/ChoixMagasinProche.tsx");
+const UI_RECHERCHE = lireOuVide("../../components/student/RechercheDeCommerces.tsx");
+const UI = `${UI_LIGNE}\n${UI_RECHERCHE}`;
 const ECRAN_COURSES = lireOuVide("../../app/(student)/nutrition/courses/page.tsx");
 
-const LOT_C4_3A = [MODULE_PUR, ADAPTATEUR, SCHEMAS, BASE, ROUTE_NEARBY, ROUTE_SELECT, UI, ECRAN_COURSES];
+const LOT_C4_3A = [
+  MODULE_PUR,
+  ADAPTATEUR,
+  SCHEMAS,
+  BASE,
+  ROUTE_NEARBY,
+  ROUTE_SELECT,
+  UI_LIGNE,
+  UI_RECHERCHE,
+  ECRAN_COURSES,
+];
 const NOMS_LOT = [
   "lib/nutrition/magasin-proche.ts",
   "lib/open-prices/locations.ts",
@@ -82,6 +106,7 @@ const NOMS_LOT = [
   "app/api/student/stores/nearby/route.ts",
   "app/api/student/stores/select/route.ts",
   "components/student/ChoixMagasinProche.tsx",
+  "components/student/RechercheDeCommerces.tsx",
   "app/(student)/nutrition/courses/page.tsx",
 ];
 
@@ -1420,23 +1445,79 @@ await test("C4.3a-25 — le magasin actuel est lu par le MÉCANISME du lot, sans
   assert.ok(!/getCurrentPosition/.test(bloc), "aucune géolocalisation au montage");
 });
 
-await test("C4.3a-23 — la permission n'est demandée qu'au geste, et tous les états existent", () => {
+await test("C4.3a-23 — la permission n'est demandée qu'au geste, et tous les états existent", async () => {
   const code = sansCommentaires(UI);
   assert.match(code, /navigator\.geolocation/, "la géolocalisation navigateur doit être utilisée");
   // Elle n'est PAS demandée au montage — même doctrine que le scanner A4.
   // ⚠️ `[\s\S]` plutôt que le drapeau `s` : la cible TypeScript du dépôt est
-  // antérieure à ES2018, et `tsc` refuse ce drapeau. La classe explicite dit
-  // exactement la même chose et compile partout.
+  // antérieure à ES2018, et `tsc` refuse ce drapeau.
   assert.ok(
     !/useEffect\([^)]*\)[\s\S]{0,80}getCurrentPosition/.test(code),
     "la permission ne doit pas être demandée au chargement de l'écran",
   );
-  for (const etat of [
-    "inactif", "demande_permission", "chargement", "permission_refusee",
-    "indisponible", "expire", "aucun_resultat", "erreur", "succes",
-  ]) {
-    assert.ok(code.includes(etat), `l'état « ${etat} » doit être traité explicitement`);
+  // ⚠️ ET ELLE EST DEMANDÉE DEPUIS UN GESTE : le bouton, et lui seul.
+  assert.match(code, /onClick=\{\(\) => void chercherAutour\(\)\}/, "un bouton déclenche la demande");
+
+  /*
+   * ⚠️ LES NEUF ÉTATS D'ÉCRAN N'EXISTENT PLUS, ET LEUR DISPARITION EST LE
+   * CORRECTIF. « inactif », « chargement », « succes »… mêlaient le MODE de
+   * recherche et la SITUATION dans une union de treize valeurs (après C4.3b) :
+   * chaque ajout obligeait à relire les douze autres, et un chemin d'erreur qui
+   * oubliait de poser son état laissait l'écran charger indéfiniment.
+   *
+   * Les deux questions sont désormais séparées, dans
+   * `lib/nutrition/recherche-commerces.ts`, et chaque situation issue de la
+   * GÉOLOCALISATION a toujours son traitement explicite — c'est ce que ce
+   * contrôle vérifie, par exécution plutôt que par lecture.
+   */
+  const { enChargement, issueDeGeolocalisation, messageDeSituation, situationApres } = await import(
+    "../../lib/nutrition/recherche-commerces"
+  );
+
+  // Les trois refus du navigateur, distingués — et aucun traité comme une panne.
+  for (const [codeNavigateur, attendue] of [
+    [1, "permission_refusee"],
+    [2, "position_indisponible"],
+    [3, "position_expiree"],
+  ] as const) {
+    const situation = situationApres(issueDeGeolocalisation(codeNavigateur));
+    assert.equal(situation, attendue, `code ${codeNavigateur}`);
+    const message = messageDeSituation(situation, { mode: "autour", tronque: false });
+    assert.ok(message !== null && message.texte.trim() !== "", `« ${attendue} » doit se dire`);
+    assert.equal(message!.role, "status", "un refus n'est pas une panne");
   }
-  // ⚠️ LE REPLI MANUEL N'EST PAS ENCORE ÉCRIT : l'écran le DIT, il ne le fait pas.
-  assert.ok(!/code postal|codePostal|osm_address_city/i.test(sansCommentaires(UI)), "C4.3b n'est pas commencé");
+
+  // Et les trois issues de la recherche elle-même.
+  assert.equal(situationApres({ type: "trouves", nombre: 3 }), "resultats");
+  assert.equal(situationApres({ type: "trouves", nombre: 0 }), "aucun_resultat");
+  assert.equal(situationApres({ type: "echec" }), "erreur");
+
+  // ⚠️ ET AUCUNE NE LAISSE UN CHARGEMENT EN COURS, ce que les neuf états ne
+  // permettaient pas d'exprimer.
+  for (const issue of [
+    { type: "trouves", nombre: 0 },
+    { type: "echec" },
+    { type: "permission_refusee" },
+    { type: "position_indisponible" },
+    { type: "position_expiree" },
+  ] as const) {
+    assert.ok(!enChargement(situationApres(issue)), `${issue.type} ne doit pas rester en chargement`);
+  }
+
+  /*
+   * ⚠️ LA DERNIÈRE LIGNE DE CE CONTRÔLE DISAIT « C4.3b N'EST PAS COMMENCÉ », ET
+   * ELLE EST PÉRIMÉE : la recherche par ville existe depuis C4.3b, et les
+   * suggestions de communes AFFICHENT désormais un code postal — c'est ce qui
+   * distingue deux Saint-Martin. Ce qui reste vrai, et qui est donc mesuré ici,
+   * c'est qu'aucun code postal n'est CHERCHABLE : le serveur résout la commune
+   * par son code INSEE ou par son nom, jamais par un postal.
+   */
+  assert.ok(
+    !/osm_address_city/i.test(code),
+    "aucune recherche par étiquette d'adresse : c'est la zone administrative qui décide",
+  );
+  assert.ok(
+    !/codePostal:/.test(code.split("stores/search")[1]?.slice(0, 400) ?? ""),
+    "aucun code postal dans le corps de recherche",
+  );
 });

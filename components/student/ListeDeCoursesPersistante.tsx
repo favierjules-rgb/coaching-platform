@@ -8,9 +8,9 @@ import {
   type LigneAffichee,
 } from "@/lib/nutrition/liste-persistante";
 import {
-  libellePeriode,
   type PeriodeCourses,
 } from "@/lib/nutrition/periode-courses";
+import { grouperParRayon } from "@/lib/nutrition/rayons";
 import { useListePersistante } from "@/hooks/useListePersistante";
 import { useBudgetCourses } from "@/hooks/useBudgetCourses";
 import { BlocBudget } from "@/components/student/BlocBudget";
@@ -76,15 +76,13 @@ export function ListeDeCoursesPersistante({
 
   return (
     <div className="flex flex-col gap-5">
-      <header className="flex flex-col gap-1">
-        <h2 className="text-lg font-semibold tracking-tight">
-          MA LISTE DE COURSES
-        </h2>
-        <p className="text-sm text-muted-foreground">
-          {libellePeriode(periode)}
-        </p>
-      </header>
-
+      {/*
+        ⚠️ AUCUN EN-TÊTE ICI, ET C'EST UNE SUPPRESSION VOULUE.
+        Ce composant affichait « MA LISTE DE COURSES » et la période, juste
+        sous le `h1` « MA LISTE DE COURSE » du parcours et sa propre ligne de
+        période : deux titres et deux périodes pour un seul écran. Le titre
+        appartient au parcours (`EnTete`), qui le pose une fois.
+      */}
       {restants > 0 && (
         <p
           className="rounded-panel border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning"
@@ -205,20 +203,40 @@ export function ListeDeCoursesPersistante({
           aucun article ajouté à la main.
         </p>
       ) : (
-        <ul className="flex flex-col divide-y divide-border rounded-card border border-border bg-card">
-          {etat.lignes.map((ligne) => (
-            <LigneDeListe
-              key={ligne.id}
-              ligne={ligne}
-              onBasculer={(coche) => void etat.basculer(ligne.id, coche)}
-              onSupprimer={
-                ligne.source === "manual"
-                  ? () => void etat.supprimer(ligne.id)
-                  : null
-              }
-            />
+        /*
+          ⚠️ LES RAYONS SONT DES INTERTITRES, PAS UNE AGRÉGATION.
+          `grouperParRayon` répartit les lignes DÉJÀ agrégées et DÉJÀ triées :
+          il n'en fusionne aucune, n'en additionne aucune, et n'en cache
+          aucune. Un rayon vide ne s'affiche pas — sept intertitres dont cinq
+          vides, c'est cinq fois la place perdue sur un téléphone.
+        */
+        <div className="flex flex-col gap-4">
+          {grouperParRayon(etat.lignes).map((groupe) => (
+            <section key={groupe.rayon} className="flex flex-col gap-2">
+              <h3 className="px-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                {groupe.libelle}
+                <span className="ml-2 font-normal normal-case tracking-normal text-muted-foreground/70">
+                  {groupe.lignes.length}
+                  {groupe.lignes.length > 1 ? " articles" : " article"}
+                </span>
+              </h3>
+              <ul className="flex flex-col divide-y divide-border rounded-card border border-border bg-card">
+                {groupe.lignes.map((ligne) => (
+                  <LigneDeListe
+                    key={ligne.id}
+                    ligne={ligne}
+                    onBasculer={(coche) => void etat.basculer(ligne.id, coche)}
+                    onSupprimer={
+                      ligne.source === "manual"
+                        ? () => void etat.supprimer(ligne.id)
+                        : null
+                    }
+                  />
+                ))}
+              </ul>
+            </section>
           ))}
-        </ul>
+        </div>
       )}
 
       {etat.liste !== null && (

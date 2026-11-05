@@ -56,16 +56,34 @@ const ADAPTATEUR = lireOuVide("../../lib/open-prices/locations.ts");
 const SCHEMAS = lireOuVide("../../lib/api/schemas/magasins.ts");
 const ROUTE_SEARCH = lireOuVide("../../app/api/student/stores/search/route.ts");
 const ROUTE_SELECT = lireOuVide("../../app/api/student/stores/select/route.ts");
-const UI = lireOuVide("../../components/student/ChoixMagasinProche.tsx");
+/*
+ * ⚠️ L'INTERFACE DU SÉLECTEUR EST DÉSORMAIS DEUX FICHIERS, ET `UI` EST LEUR
+ * SOMME.
+ *
+ * `ChoixMagasinProche` gardait tout : la ligne repliée, l'écriture du choix, ET
+ * les deux recherches avec leurs treize états. La refonte a sorti la RECHERCHE
+ * dans `RechercheDeCommerces` — deux modes nommés, un rayon réglable, des
+ * suggestions de communes avec anti-rafale, et une carte.
+ *
+ * Les propriétés que cette suite mesure portent sur l'interface du sélecteur
+ * PRISE DANS SON ENSEMBLE : « aucun fournisseur nommé côté client », « aucune
+ * persistance de la position », « le champ dit Ville ». Les mesurer sur la
+ * paire est donc exact — et plus strict qu'avant pour toutes les assertions
+ * d'ABSENCE, qui balaient maintenant deux fois plus de code.
+ */
+const UI_LIGNE = lireOuVide("../../components/student/ChoixMagasinProche.tsx");
+const UI_RECHERCHE = lireOuVide("../../components/student/RechercheDeCommerces.tsx");
+const UI = `${UI_LIGNE}\n${UI_RECHERCHE}`;
 const ECRAN = lireOuVide("../../app/(student)/nutrition/courses/page.tsx");
 
-const LOT_C4_3B = [MODULE_PUR, ADAPTATEUR, SCHEMAS, ROUTE_SEARCH, UI, ECRAN];
+const LOT_C4_3B = [MODULE_PUR, ADAPTATEUR, SCHEMAS, ROUTE_SEARCH, UI_LIGNE, UI_RECHERCHE, ECRAN];
 const NOMS_LOT = [
   "lib/nutrition/magasin-proche.ts",
   "lib/open-prices/locations.ts",
   "lib/api/schemas/magasins.ts",
   "app/api/student/stores/search/route.ts",
   "components/student/ChoixMagasinProche.tsx",
+  "components/student/RechercheDeCommerces.tsx",
   "app/(student)/nutrition/courses/page.tsx",
 ];
 
@@ -173,10 +191,22 @@ await test("C4.3b-02 — le pays est une CONSTANTE PRODUIT France, jamais un cho
       `la route lit ${lu} dans le corps`,
     );
   }
-  // Et le composant n'en envoie aucun : son corps est la ville, et rien d'autre.
+  /*
+   * Et le composant n'envoie aucun pays. Son corps a DEUX formes depuis
+   * l'ajout de l'étape de géocodage, et aucune ne porte de pays :
+   *   · `{ codeInsee }` — la commune CHOISIE dans les suggestions, le chemin
+   *     normal, qui supprime l'ambiguïté des homonymes ;
+   *   · `{ ville }`     — le repli, quand l'annuaire des communes est muet.
+   */
   const ui = sansCommentaires(UI);
-  assert.match(ui, /body: JSON\.stringify\(\{ ville: saisie \}\)/, "le client n'envoie que la ville");
+  assert.match(ui, /\{ codeInsee: commune\.code \}/, "le chemin normal : un code INSEE");
+  assert.match(ui, /\{ ville: villeLibre\.trim\(\) \}/, "le repli : la ville seule");
   assert.ok(!/pays|country/i.test(ui.split("stores/search")[1]?.slice(0, 400) ?? ""), "aucun pays côté client");
+  // ⚠️ ET LE SCHÉMA REFUSE UN CORPS VIDE : une recherche sans objet ferait
+  // partir une requête Overpass pour rien.
+  assert.equal(magasinsParVilleBodySchema.safeParse({}).success, false);
+  assert.equal(magasinsParVilleBodySchema.safeParse({ codeInsee: "83137" }).success, true);
+  assert.equal(magasinsParVilleBodySchema.safeParse({ codeInsee: "83" }).success, false);
 });
 
 await test("C4.3b-03 — aucun caractère joker ne traverse", () => {
@@ -688,7 +718,18 @@ await test("C4.3b-17 — le DTO reste celui de C4.3a, postcode compris, sans pri
    ══════════════════════════════════════════════════════════════════════════ */
 
 await test("C4.3b-18 — un résultat manuel se choisit par la route /select de C4.3a", () => {
-  const ui = sansCommentaires(UI);
+  /*
+   * ⚠️ MESURÉ SUR LA LIGNE REPLIÉE SEULE, ET C'EST PLUS FORT. L'écriture est
+   * restée dans `ChoixMagasinProche` : la recherche PROPOSE, elle n'écrit pas.
+   * Balayer la paire laisserait passer un second appel à `/select` depuis
+   * l'écran de recherche ; mesurer le seul fichier qui a le droit d'écrire
+   * interdit ce second chemin.
+   */
+  const ui = sansCommentaires(UI_LIGNE);
+  assert.ok(
+    !/\/api\/student\/stores\/select/.test(sansCommentaires(UI_RECHERCHE)),
+    "la recherche n'écrit rien : chercher n'est pas choisir",
+  );
   assert.equal(
     (ui.match(/\/api\/student\/stores\/select/g) ?? []).length,
     1,
@@ -737,6 +778,7 @@ await test("C4.3b-18 — un résultat manuel se choisit par la route /select de 
    * faire rougir le lot qui l'aurait dupliquée.
    */
   const ROUTES_MAGASIN: ReadonlyArray<readonly [string, string]> = [
+    ["communes", "COURSES — annuaire des communes, l'étape de géocodage"],
     ["nearby", "C4.3a — découverte géographique"],
     ["search", "C4.3b — recherche manuelle par ville"],
     ["select", "C4.3a — sélection, ET ELLE EST LA SEULE"],
@@ -872,123 +914,211 @@ await test("C4.3b-20 — le champ manuel dit « Ville », jamais « code postal 
   // ⚠️ L'AMONT N'EXPOSE AUCUN FILTRE POSTAL — vérifié dans `LocationFilter` le
   // 18/08/2026. Écrire « Ville ou code postal » promettrait une recherche que
   // rien ne peut honorer, et l'élève conclurait que l'application est cassée.
-  const brut = UI;
-  assert.ok(!/code postal|codePostal|code_postal/i.test(brut.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, "")),
-    "aucun libellé ne doit promettre une recherche par code postal");
-  assert.match(brut, /Ville/, "le champ doit s'appeler Ville");
+  /*
+   * ⚠️ CE CONTRÔLE DISTINGUE MAINTENANT DEUX CHOSES QU'IL CONFONDAIT, ET LA
+   * DISTINCTION ÉTAIT DÉJÀ DANS SON PROPRE COMMENTAIRE : « le code postal
+   * reste AFFICHÉ dans les résultats, il n'est simplement pas cherchable. »
+   *
+   * Les suggestions de communes affichent désormais le code postal — c'est ce
+   * qui permet de distinguer deux Saint-Martin. Ce qui reste interdit, c'est de
+   * PROMETTRE une recherche par code postal : ni dans le libellé du champ, ni
+   * dans son indication de saisie, ni dans le corps envoyé au serveur.
+   */
+  const code = sansCommentaires(UI);
+
+  // A — le libellé du champ dit « Commune » ou « Ville », jamais « code postal ».
+  const libelle = /<label htmlFor="commerce-ville"[\s\S]{0,300}?<\/label>/.exec(code)?.[0] ?? "";
+  assert.notEqual(libelle, "", "le champ doit porter un libellé");
+  assert.ok(!/code postal/i.test(libelle), "le libellé ne promet pas le code postal");
+  assert.match(code, /Commune|Ville/, "le champ s'appelle Commune (ou Ville)");
+
+  // B — l'indication de saisie ne propose que des noms de commune.
+  const indication = /placeholder="([^"]*)"/.exec(code)?.[1] ?? "";
+  assert.ok(!/\d{5}/.test(indication), `l'exemple de saisie ne doit pas montrer un code postal : ${indication}`);
+
+  // C — et aucun code postal ne part dans un corps de recherche. Le serveur
+  // résout la commune par son code INSEE ou par son nom, jamais par un postal.
+  for (const corps of [/\{ codeInsee: commune\.code \}/, /\{ ville: villeLibre\.trim\(\) \}/]) {
+    assert.match(code, corps, "les deux seules formes de corps admises");
+  }
+  assert.ok(!/codePostal:/.test(code.split("stores/search")[1]?.slice(0, 400) ?? ""),
+    "aucun code postal dans le corps de recherche");
+
+  // D — le schéma d'entrée le refuse aussi, et c'est la barrière qui compte.
+  assert.ok(!/codePostal|code_postal/.test(sansCommentaires(SCHEMAS)),
+    "le schéma n'accepte aucun champ postal");
 });
 
 await test("C4.3b-21 — la recherche manuelle n'appelle JAMAIS la géolocalisation", () => {
-  const code = sansCommentaires(UI);
-  // La fonction de recherche par ville doit exister et ne pas toucher au GPS.
-  const bloc = /const chercherParVille[\s\S]{0,1600}?\n  \}, \[/.exec(code)?.[0] ?? "";
-  assert.notEqual(bloc, "", "une fonction de recherche par ville doit exister");
+  /*
+   * ⚠️ LA FONCTION A CHANGÉ DE NOM ET DE FICHIER — `chercherParVille` dans
+   * `ChoixMagasinProche` est devenue `chercherCommune` dans
+   * `RechercheDeCommerces`. La PROPRIÉTÉ, elle, est inchangée : le chemin
+   * manuel ne doit toucher à aucune position, sinon un refus de
+   * géolocalisation fermerait aussi ce chemin-là.
+   */
+  const code = sansCommentaires(UI_RECHERCHE);
+  const bloc = /const chercherCommune = useCallback\([\s\S]{0,2400}?\n    \}, *\n?/.exec(code)?.[0] ?? "";
+  assert.notEqual(bloc, "", "une fonction de recherche par commune doit exister");
   assert.ok(!/getCurrentPosition|geolocation/.test(bloc), "la recherche ville ne demande aucune position");
   assert.match(bloc, /\/api\/student\/stores\/search/, "elle passe par notre route");
   assert.match(bloc, /method: "POST"/, "en POST : la saisie ne va pas dans une chaîne de requête");
+  // ⚠️ ET ELLE N'A AUCUN POINT DE DÉPART : en fabriquer un afficherait des
+  // distances que rien ne fonde.
+  assert.match(bloc, /setDepart\(null\)/, "aucune position inventée en mode ville");
 });
 
-/**
- * Le bloc JSX gardé par une condition donnée, extrait du composant.
- *
- * ⚠️ ON LIT LA GARDE, PAS LE TEXTE. Chercher une phrase prouverait qu'elle
- * existe quelque part ; ce qui compte est SOUS QUELLE CONDITION elle s'affiche.
- * C'est exactement la faute corrigée ici : la phrase définitive existait, et
- * elle s'affichait aussi quand nous ne savions rien.
+/*
+ * ⚠️ `blocGarde` A ÉTÉ RETIRÉ, ET C'EST UN PROGRÈS. Il extrayait un bloc JSX
+ * sous sa condition pour prouver qu'un texte s'affichait au bon moment — la
+ * seule méthode disponible quand la décision vivait au fond d'un composant.
+ * Les messages de la recherche viennent maintenant de `messageDeSituation`,
+ * une fonction pure : on EXÉCUTE la décision au lieu de relire sa garde, ce qui
+ * prouve ce que l'élève lit et non ce qui est écrit dans le fichier.
  */
-function blocGarde(source: string, garde: string): string {
-  const debut = source.indexOf(garde);
-  assert.ok(debut >= 0, `garde absente du composant : ${garde}`);
-  const ouvrante = source.indexOf("(", debut + garde.length);
-  assert.ok(ouvrante >= 0, `bloc introuvable après ${garde}`);
-  let profondeur = 0;
-  for (let i = ouvrante; i < source.length; i += 1) {
-    if (source[i] === "(") profondeur += 1;
-    else if (source[i] === ")") {
-      profondeur -= 1;
-      if (profondeur === 0) return source.slice(ouvrante, i + 1);
-    }
-  }
-  assert.fail(`parenthèse fermante introuvable pour ${garde}`);
-}
 
 /** « Il n'en existe aucun » — les tournures définitives, celles qui mentent. */
-const AFFIRME_ABSENCE = /Aucun magasin connu/;
+/*
+ * ⚠️ CES CINQ CONTRÔLES ONT CHANGÉ DE MÉTHODE, ET ILS Y GAGNENT.
+ *
+ * Ils lisaient les GARDES du JSX : `état === "ville_aucun_resultat" && tronqué`.
+ * C'était la seule façon de mesurer la propriété quand elle vivait dans treize
+ * états mêlés au fond d'un composant. La propriété, elle, n'a pas bougé :
+ *
+ *     quand la recherche a été ÉCOURTÉE, l'absence ne doit pas être affirmée.
+ *
+ * Elle vit maintenant dans `messageDeSituation` — une fonction PURE. On ne lit
+ * donc plus une garde, on EXÉCUTE la décision. Une garde qu'on relit prouve
+ * qu'un texte est écrit sous une condition ; une fonction qu'on appelle prouve
+ * ce que l'élève LIT. C'est plus fort, et c'est moins fragile : renommer une
+ * variable ne fera plus rougir ces tests.
+ */
+const AFFIRME_ABSENCE = /Aucun commerce cartographié/;
 
-await test("C4.3b-22b — VILLE · 0 résultat + NON tronqué : l'absence peut être affirmée", () => {
-  const code = sansCommentaires(UI);
-  const bloc = blocGarde(code, 'état === "ville_aucun_resultat" && !tronqué');
-  assert.match(bloc, AFFIRME_ABSENCE, "cas A : là, et là seulement, l'absence est vraie");
+await test("C4.3b-22b — VILLE · 0 résultat + NON tronqué : l'absence peut être affirmée", async () => {
+  const { messageDeSituation } = await import("../../lib/nutrition/recherche-commerces");
+  const message = messageDeSituation("aucun_resultat", { mode: "ville", tronque: false });
+  assert.ok(message !== null, "une absence constatée doit se dire");
+  assert.match(message!.texte, AFFIRME_ABSENCE, "cas A : là, et là seulement, l'absence est vraie");
+  // ⚠️ ET ELLE N'EST PAS UNE ERREUR. Une base collaborative incomplète n'est
+  // pas une panne de la plateforme, et l'afficher en rouge le laisserait croire.
+  assert.equal(message!.role, "status");
+  assert.match(message!.texte, /collaborative/i, "l'élève sait POURQUOI c'est vide");
 });
 
-await test("C4.3b-22c — VILLE · 0 résultat + TRONQUÉ : rien n'est affirmé", () => {
-  const code = sansCommentaires(UI);
-  const bloc = blocGarde(code, 'état === "ville_aucun_resultat" && tronqué');
+await test("C4.3b-22c — VILLE · 0 résultat + TRONQUÉ : rien n'est affirmé", async () => {
+  const { messageDeSituation } = await import("../../lib/nutrition/recherche-commerces");
+  const message = messageDeSituation("aucun_resultat", { mode: "ville", tronque: true });
   // ⚠️ CAS B — LE DÉFAUT CORRIGÉ. Nous n'avons vu qu'une portion : dire
-  // « aucun magasin dans cette ville » ferait renoncer l'élève à un magasin
+  // « aucun commerce dans cette commune » ferait renoncer l'élève à un magasin
   // qui existe, sur la foi d'une mesure que nous n'avons pas faite.
-  assert.ok(!AFFIRME_ABSENCE.test(bloc), "cas B : l'absence ne doit PAS être affirmée");
-  assert.match(bloc, /premiers résultats consultés/, "il faut dire ce qui a été consulté");
-  assert.match(bloc, /limitée/, "et dire que la recherche a été limitée");
+  assert.ok(!AFFIRME_ABSENCE.test(message!.texte), "cas B : l'absence ne doit PAS être affirmée");
+  assert.match(message!.texte, /premiers résultats consultés/, "il faut dire ce qui a été consulté");
+  assert.match(message!.texte, /écourtée/, "et dire que la recherche a été écourtée");
+  assert.match(message!.texte, /peut-être d'autres/, "et ne pas conclure");
 });
 
-await test("C4.3b-22d — 0 résultat : les deux cas sont mutuellement exclusifs", () => {
-  const code = sansCommentaires(UI);
-  // Aucun troisième bloc `ville_aucun_resultat` sans garde de troncature : ce
-  // serait le message définitif revenu par une autre porte.
-  const gardes = [...code.matchAll(/état === "ville_aucun_resultat"([^&]*&&[^&(]*)?/g)].map((m) =>
-    (m[1] ?? "").trim(),
-  );
-  assert.deepEqual(
-    gardes.filter((g) => g !== "").sort(),
-    ["&& !tronqué", "&& tronqué"],
-    "les deux seules formes admises, et rien d'autre",
-  );
+await test("C4.3b-22d — 0 résultat : les deux cas sont mutuellement exclusifs", async () => {
+  const { messageDeSituation } = await import("../../lib/nutrition/recherche-commerces");
+  /*
+   * ⚠️ IL N'EXISTE PLUS DE « TROISIÈME PORTE » POSSIBLE, et c'est désormais
+   * structurel plutôt que surveillé. Le message définitif revenait auparavant
+   * par un bloc JSX sans garde de troncature ; maintenant, une seule fonction
+   * répond, et son résultat dépend du seul booléen `tronque`.
+   */
+  for (const mode of ["autour", "ville"] as const) {
+    const franc = messageDeSituation("aucun_resultat", { mode, tronque: false })!;
+    const prudent = messageDeSituation("aucun_resultat", { mode, tronque: true })!;
+    assert.notEqual(franc.texte, prudent.texte, `${mode} : deux situations, deux phrases`);
+    assert.ok(AFFIRME_ABSENCE.test(franc.texte), `${mode} : l'absence constatée est dicible`);
+    assert.ok(!AFFIRME_ABSENCE.test(prudent.texte), `${mode} : l'absence supposée ne l'est pas`);
+  }
 });
 
 await test("C4.3b-22e — résultats + tronqué : liste ET avertissement ; sinon liste seule", () => {
-  const code = sansCommentaires(UI);
-  const liste = blocGarde(code, "magasins.length > 0 &&");
-  // Cas C — l'avertissement est présent dans le bloc de liste…
-  assert.match(liste, /tronqué && \(/, "l'avertissement doit exister avec la liste");
-  assert.match(liste, /Recherche écourtée/, "et dire que la recherche a été écourtée");
-  // …et cas D — il est GARDÉ par `tronqué`, donc absent quand tout a été rendu.
+  const code = sansCommentaires(UI_RECHERCHE);
+  // Cas C — l'avertissement existe à côté de la liste…
+  assert.match(code, /\{tronque && \(/, "l'avertissement doit exister avec les résultats");
+  assert.match(code, /Recherche écourtée/, "et dire que la recherche a été écourtée");
+  // …et cas D — il est GARDÉ par `tronque`, donc absent quand tout a été rendu.
+  assert.equal(
+    (code.match(/Recherche écourtée/g) ?? []).length,
+    1,
+    "une seule occurrence : pas de variante inconditionnelle",
+  );
+  const avantLAvertissement = code.slice(0, code.indexOf("Recherche écourtée"));
   assert.ok(
-    !/Recherche écourtée[\s\S]{0,200}<\/p>\s*\)\}\s*<\/>/.test(liste.replace(/tronqué && \(/, "")),
-    "l'avertissement ne doit pas être inconditionnel",
+    avantLAvertissement.lastIndexOf("{tronque && (") > avantLAvertissement.lastIndexOf("</p>"),
+    "l'avertissement est bien sous la garde de troncature",
   );
 });
 
-await test("C4.3b-22f — NEARBY · 0 résultat + tronqué : C4.3a ne ment plus non plus", () => {
+await test("C4.3b-22f — NEARBY · 0 résultat + tronqué : C4.3a ne ment plus non plus", async () => {
   // ⚠️ CE N'EST PAS UNE MODIFICATION FONCTIONNELLE DE C4.3a. Le booléen
   // `tronque` était DÉJÀ calculé correctement par la découverte géographique ;
   // seul l'écran l'ignorait dès que la liste était vide.
-  const code = sansCommentaires(UI);
-  const franc = blocGarde(code, 'état === "aucun_resultat" && !tronqué');
-  assert.match(franc, /Aucun magasin connu autour de toi/, "l'absence reste dicible quand elle est vraie");
+  const { messageDeSituation } = await import("../../lib/nutrition/recherche-commerces");
+  const franc = messageDeSituation("aucun_resultat", { mode: "autour", tronque: false })!;
+  assert.match(franc.texte, /autour de toi/, "l'absence reste dicible quand elle est vraie");
+  assert.ok(AFFIRME_ABSENCE.test(franc.texte));
 
-  const prudent = blocGarde(code, 'état === "aucun_resultat" && tronqué');
-  assert.ok(!/Aucun magasin connu autour de toi/.test(prudent), "ne pas affirmer qu'il n'en existe aucun");
-  assert.match(prudent, /premiers résultats consultés/);
-  assert.match(prudent, /limitée/);
+  const prudent = messageDeSituation("aucun_resultat", { mode: "autour", tronque: true })!;
+  assert.ok(!AFFIRME_ABSENCE.test(prudent.texte), "ne pas affirmer qu'il n'en existe aucun");
+  assert.match(prudent.texte, /premiers résultats consultés/);
+  assert.match(prudent.texte, /écourtée/);
 });
 
-await test("C4.3b-22 — tous les états de la recherche manuelle existent", () => {
-  const code = sansCommentaires(UI);
-  for (const etat of [
-    "ville_saisie",
-    "ville_chargement",
-    "ville_aucun_resultat",
-    "ville_invalide",
-    "ville_erreur",
-  ]) {
-    assert.ok(code.includes(etat), `l'état « ${etat} » doit être traité explicitement`);
+await test("C4.3b-22 — tous les états de la recherche manuelle existent", async () => {
+  /*
+   * ⚠️ LES CINQ ÉTATS « ville_* » N'EXISTENT PLUS, ET LEUR DISPARITION EST LE
+   * CORRECTIF. Ils mêlaient le MODE et la SITUATION dans une union de treize
+   * valeurs : chaque ajout obligeait à relire les douze autres, et un chemin
+   * d'erreur qui oubliait de poser son état laissait l'écran charger
+   * indéfiniment.
+   *
+   * Ce qu'ils garantissaient est conservé, et séparé en deux questions :
+   * le mode (`ModeRecherche`) et la situation (`Situation`).
+   */
+  const { MODES, SITUATIONS_DE_CHARGEMENT, enChargement, messageDeSituation, situationApres } =
+    await import("../../lib/nutrition/recherche-commerces");
+
+  assert.deepEqual(MODES.map((m) => m.id), ["autour", "ville"], "le mode est une question à part");
+
+  // Chaque situation de la recherche par ville a son traitement explicite.
+  for (const situation of [
+    "chargement_ville",
+    "aucun_resultat",
+    "erreur",
+    "permission_refusee",
+    "position_indisponible",
+    "position_expiree",
+  ] as const) {
+    const message = messageDeSituation(situation, { mode: "ville", tronque: false });
+    assert.ok(message !== null && message.texte.trim() !== "", `« ${situation} » doit se dire`);
   }
-  // Le repli reste disponible quand la géolocalisation a été refusée.
+
+  // ⚠️ ET AUCUNE ISSUE NE LAISSE UN CHARGEMENT EN COURS — l'invariant que les
+  // treize états ne permettaient pas d'exprimer.
+  for (const issue of [
+    { type: "trouves", nombre: 0 },
+    { type: "trouves", nombre: 4 },
+    { type: "echec" },
+    { type: "permission_refusee" },
+    { type: "position_indisponible" },
+    { type: "position_expiree" },
+  ] as const) {
+    assert.ok(!enChargement(situationApres(issue)), `${issue.type} ne doit pas rester en chargement`);
+  }
+  assert.equal(SITUATIONS_DE_CHARGEMENT.size, 3);
+
+  // Le repli reste disponible quand la géolocalisation a été refusée : les deux
+  // modes sont des onglets, pas une cascade.
+  const code = sansCommentaires(UI_RECHERCHE);
   assert.ok(
     !/permission_refusee[\s\S]{0,400}return null/.test(code),
     "un refus de géolocalisation ne doit pas masquer le champ manuel",
   );
+  assert.match(code, /role="tablist"/, "les deux modes sont offerts côte à côte");
 });
 
 await test("C4.3b-23 — le composant reste monté, et le repli manuel reste offert", () => {
@@ -1008,10 +1138,27 @@ await test("C4.3b-23 — le composant reste monté, et le repli manuel reste off
   // bouton de géolocalisation : la cacher derrière un échec ferait de la
   // géolocalisation un passage obligé. C'est la doctrine de C4.3b, et le
   // repliement ne la change pas.
-  const code = sansCommentaires(UI);
+  const code = sansCommentaires(UI_LIGNE);
   const ouverture = code.indexOf("panneauOuvert && (");
   assert.ok(ouverture > 0, "le panneau doit être conditionné à un geste");
   const panneau = code.slice(ouverture);
-  assert.match(panneau, /getCurrentPosition|void chercher\(\)/, "le panneau porte la géolocalisation");
-  assert.match(panneau, /chercherParVille/, "et la recherche par ville, dans le MÊME panneau");
+  /*
+   * ⚠️ LE PANNEAU MONTE MAINTENANT UN SEUL COMPOSANT, et c'est lui qui porte
+   * les DEUX modes — côte à côte, nommés, et choisis par onglet. Le champ ville
+   * n'est donc pas devenu un secours : il est à égalité avec la géolocalisation,
+   * ce qui est exactement la doctrine de C4.3b, poussée plus loin.
+   */
+  assert.match(panneau, /<RechercheDeCommerces\b/, "le panneau monte la recherche");
+  const recherche = sansCommentaires(UI_RECHERCHE);
+  assert.match(recherche, /getCurrentPosition/, "elle porte la géolocalisation");
+  assert.match(recherche, /chercherCommune/, "et la recherche par commune, dans le MÊME écran");
+  /*
+   * ⚠️ LES LIBELLÉS VIVENT DANS LE MODULE, PAS DANS LE JSX. Le composant rend
+   * `{m.libelle}` : chercher le texte dans le composant prouverait seulement
+   * qu'on l'y a recopié. On lit donc la source de vérité.
+   */
+  const modules = sansCommentaires(lireOuVide("../../lib/nutrition/recherche-commerces.ts"));
+  assert.match(modules, /"Autour de moi"/, "les deux modes sont nommés");
+  assert.match(modules, /"Par ville"/);
+  assert.match(recherche, /MODES\.map\(/, "et le composant les rend tous, sans en oublier un");
 });

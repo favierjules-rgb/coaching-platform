@@ -149,6 +149,39 @@ export function requeteZoneCommune(ville: string): string {
 }
 
 /**
+ * LA commune française portant ce code INSEE.
+ *
+ * ════════════════════════════════════════════════════════════════════════════
+ * ⚠️ POURQUOI UN CODE PLUTÔT QU'UN NOM, ET CE QUE ÇA CHANGE
+ * ════════════════════════════════════════════════════════════════════════════
+ * `requeteZoneCommune` cherche par NOM, et peut donc rendre plusieurs communes
+ * homonymes : l'appelant doit alors répondre « ambigu », et l'élève de
+ * Saint-Martin reste sans magasins. Le code INSEE, lui, désigne UNE commune et
+ * une seule. Il n'y a plus d'ambiguïté à trancher, parce qu'il n'y en a plus.
+ *
+ * ⚠️ `ref:INSEE` EST UNE ÉTIQUETTE OSM RÉELLE, pas une convention inventée ici :
+ * les relations de communes françaises la portent. Si elle manquait sur une
+ * commune, la requête rendrait zéro — ce qui se traduit par « commune
+ * introuvable » et laisse le chemin par nom disponible. Aucun repli silencieux.
+ *
+ * ⚠️ LE CODE EST FILTRÉ AVANT D'ENTRER DANS LA REQUÊTE. Cinq caractères,
+ * chiffres et lettres (la Corse s'écrit 2A/2B) : rien d'autre ne peut atteindre
+ * Overpass depuis ce chemin.
+ */
+export function requeteZoneCommuneParInsee(codeInsee: string): string {
+  const code = codeInsee.trim().toUpperCase();
+  if (!/^[0-9][0-9AB][0-9]{3}$/.test(code)) {
+    throw new RangeError("code INSEE invalide");
+  }
+  return [
+    `${ENTETE};`,
+    `area["ISO3166-1"="FR"]["admin_level"="2"]->.fr;`,
+    `rel(area.fr)["boundary"="administrative"]["admin_level"="8"]["ref:INSEE"="${code}"];`,
+    `out ids tags 5;`,
+  ].join("\n");
+}
+
+/**
  * Relation N → zone Overpass 3600000000 + N.
  *
  * ⚠️ REFUS PLUTÔT QUE CALCUL SUR UNE VALEUR DOUTEUSE. Un identifiant non entier

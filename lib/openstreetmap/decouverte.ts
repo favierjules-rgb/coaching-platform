@@ -18,6 +18,7 @@ import {
   requeteElement,
   requeteMagasinsDansZone,
   requeteZoneCommune,
+  requeteZoneCommuneParInsee,
 } from "@/lib/openstreetmap/overpass";
 import { type ReponseElementOsm, lireNoeudOsm } from "@/lib/openstreetmap/osm-api";
 
@@ -141,6 +142,66 @@ export async function decouvrirParVille(
   );
   // ⚠️ UNE PANNE DE LA SECONDE REQUÊTE N'EST PAS UNE VILLE INTROUVABLE. La
   // commune a été résolue ; ce qui a échoué, c'est la lecture de ses commerces.
+  if (commerces.statut === "echec") return { statut: "echec", raison: commerces.raison };
+  if (commerces.statut === "zero_results") return { statut: "ok", magasins: [], tronque: false };
+
+  return { statut: "ok", ...magasinsDepuis(commerces) };
+}
+
+/**
+ * Les commerces alimentaires d'UNE commune, désignée par son code INSEE.
+ *
+ * ════════════════════════════════════════════════════════════════════════════
+ * ⚠️ C'EST L'ÉTAPE DE GÉOCODAGE, ET ELLE EST EXPLICITE
+ * ════════════════════════════════════════════════════════════════════════════
+ * Une ville tapée par un élève n'est pas un identifiant : « Saint-Martin »
+ * désigne une trentaine de communes françaises, et `decouvrirParVille` ne peut
+ * que répondre « précise ta recherche » — c'est-à-dire renvoyer l'élève à une
+ * question qu'il ne sait pas trancher.
+ *
+ * Le chemin complet est donc : l'élève tape, il CHOISIT une commune dans une
+ * liste de suggestions (nom, code postal, département), et c'est le CODE INSEE
+ * de son choix qui part chercher les commerces. Aucune chaîne brute n'arrive
+ * jamais au moteur de recherche de commerces.
+ *
+ * ⚠️ `decouvrirParVille` RESTE, ET N'EST PAS DÉPRÉCIÉE. Elle sert quand aucune
+ * suggestion n'a pu être obtenue — annuaire des communes en panne, réseau
+ * capricieux — et c'est précisément pour cela qu'elle ne doit pas disparaître :
+ * une panne de l'annuaire ne doit pas fermer la recherche.
+ *
+ * ⚠️ DEUX TEMPS, ICI AUSSI, ET POUR LA MÊME RAISON. « Cette commune n'est pas
+ * cartographiée » et « cette commune n'a aucun commerce cartographié » sont
+ * deux situations, et elles appellent deux conduites.
+ */
+export async function decouvrirParCodeInsee(
+  codeInsee: string,
+  options: OptionsOverpass = {},
+): Promise<ResultatDecouverte> {
+  const zones = await interrogerOverpass(requeteZoneCommuneParInsee(codeInsee), options);
+  if (zones.statut === "echec") return { statut: "echec", raison: zones.raison };
+  if (zones.statut === "zero_results") return { statut: "echec", raison: "ville_introuvable" };
+
+  /*
+   * ⚠️ UN CODE INSEE NE DÉSIGNE QU'UNE COMMUNE, ET ON LE VÉRIFIE QUAND MÊME.
+   * Si OpenStreetMap en portait deux — doublon de saisie, relation périmée non
+   * supprimée — prendre la première rendrait les commerces d'une commune sous
+   * le nom d'une autre. « Ambigu » est la réponse honnête, et elle est
+   * improbable, pas impossible.
+   */
+  const candidates = zones.elements.slice(0, ZONES_MAX);
+  if (candidates.length === 0) return { statut: "echec", raison: "ville_introuvable" };
+  if (candidates.length > 1) return { statut: "echec", raison: "ville_ambigue" };
+
+  const relation = candidates[0]!.id;
+  if (typeof relation !== "number" || !Number.isSafeInteger(relation) || relation <= 0) {
+    return { statut: "echec", raison: "ville_introuvable" };
+  }
+
+  const commerces = await interrogerOverpass(
+    requeteMagasinsDansZone(idZoneDepuisRelation(relation)),
+    options,
+  );
+  // Une panne de la seconde requête n'est pas une commune introuvable.
   if (commerces.statut === "echec") return { statut: "echec", raison: commerces.raison };
   if (commerces.statut === "zero_results") return { statut: "ok", magasins: [], tronque: false };
 
