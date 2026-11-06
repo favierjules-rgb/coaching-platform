@@ -4,6 +4,7 @@ import {
   type IdentityType,
   type LigneDeCourses,
 } from "@/lib/nutrition/liste-de-courses";
+import { rayonDuCodeCiqual, type RayonId } from "@/lib/nutrition/rayons";
 import { NBSP } from "@/lib/nutrition/basis-points";
 import { MOIS_FR, partiesDeDate } from "@/lib/nutrition/historique";
 import type { ColorKey } from "@/lib/ui/color-keys";
@@ -88,6 +89,18 @@ export interface LigneAffichee {
   readonly quantite: string | null;
   readonly colorKey: ColorKey | null;
   readonly checked: boolean;
+  /**
+   * COURSES — le rayon sous lequel ranger cette ligne.
+   *
+   * ⚠️ UN ARTICLE MANUEL VA TOUJOURS DANS « DIVERS ». Il n'a pas d'identité,
+   * donc aucun code Ciqual, donc aucun rayon connu : deviner « Épicerie »
+   * parce que l'élève a tapé « éponges » serait une catégorie inventée.
+   *
+   * ⚠️ UNE LIGNE PLAN DONT L'IDENTITÉ A DISPARU DE L'AGRÉGATION DU JOUR VA
+   * AUSSI DANS « DIVERS ». Elle n'a déjà plus de libellé (« Article à
+   * rafraîchir ») : lui donner un rayon serait affirmer plus que ce qu'on sait.
+   */
+  readonly rayon: RayonId;
 }
 
 export interface Progression {
@@ -226,6 +239,7 @@ export function lignesAAfficher(
               ? String(ligne.quantity)
               : formatQuantite(ligne.quantity, ligne.unit),
         colorKey: null,
+        rayon: "divers",
         checked: ligne.checked,
       });
       continue;
@@ -243,6 +257,7 @@ export function lignesAAfficher(
       libelle: duPlan?.displayName ?? "Article à rafraîchir",
       quantite: formatQuantite(ligne.quantity, ligne.unit),
       colorKey: duPlan?.colorKey ?? null,
+      rayon: rayonDuCodeCiqual(duPlan?.codeCiqual ?? null),
       checked: ligne.checked,
     });
   }

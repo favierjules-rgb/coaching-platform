@@ -182,6 +182,7 @@ function item(p: Partial<ItemPourAgregation>): ItemPourAgregation {
     quantity: 100,
     unit: "g",
     displayName: "Poulet",
+    codeCiqual: null,
     colorKey: null,
     plannedOn: LUNDI,
     mealId: "repas-pdj-lundi",

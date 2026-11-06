@@ -235,12 +235,21 @@ function EnTete({
   readonly periode: ReturnType<typeof construirePeriode>;
   readonly onReculer: () => void;
 }) {
+  /*
+   * ⚠️ UN SEUL INTITULÉ PAR ÉCRAN, ET AU PLURIEL.
+   *
+   * L'écran de la liste en portait DEUX, l'un sous l'autre : « MA LISTE DE
+   * COURSE » (ici, au singulier) puis « MA LISTE DE COURSES » (dans
+   * `ListeDeCoursesPersistante`, au pluriel), suivis DEUX FOIS de la même
+   * période. Le titre et la période vivent désormais ici seulement — c'est le
+   * `h1` du parcours, et l'écran monté en dessous n'a pas à se renommer.
+   */
   const titre =
     etape === "liste"
-      ? "MA LISTE DE COURSE"
+      ? "MA LISTE DE COURSES"
       : etape === "proposition"
         ? "TA SEMAINE PROPOSÉE"
-        : "GÉNÉRER MA LISTE DE COURSE";
+        : "GÉNÉRER MA LISTE DE COURSES";
   return (
     <div className="flex flex-col gap-3">
       {/* Le retour de la PREMIÈRE étape sort du parcours ; les suivants

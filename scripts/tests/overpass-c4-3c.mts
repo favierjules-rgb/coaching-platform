@@ -22,6 +22,7 @@ import test from "node:test";
 
 import {
   OVERPASS_ELEMENTS_MAX,
+  OVERPASS_REESSAIS_MAX,
   OVERPASS_TIMEOUT_MS,
   OVERPASS_TIMEOUT_S,
   echapperValeurOverpass,
@@ -30,6 +31,7 @@ import {
   requeteElement,
   requeteMagasinsAutour,
   requeteMagasinsDansZone,
+  RAISONS_TEMPORAIRES,
   requeteZoneCommune,
 } from "../../lib/openstreetmap/overpass";
 import { SHOP_ALCOOL_EXCLUS, SHOP_ALIMENTAIRES } from "../../lib/nutrition/magasins-osm";
@@ -256,23 +258,60 @@ await test("OVP-27/28 — succès, borne de troncature, et zéro résultat ≠ p
   assert.equal(vide.statut, "zero_results");
 });
 
-await test("OVP-29/30 — 429 → rate_limited, 503 → unavailable, et AUCUN retry", async () => {
+await test("OVP-29/30 — 429 → rate_limited et AUCUN retry ; 503 → unavailable, réessayé mais BORNÉ", async () => {
+  /*
+   * ════════════════════════════════════════════════════════════════════════
+   * ⚠️ CE CONTRÔLE A CHANGÉ, PARCE QUE L'ADAPTATEUR A CHANGÉ — ET LA PARTIE
+   * QUI COMPTE N'A PAS BOUGÉ D'UN POUCE
+   * ════════════════════════════════════════════════════════════════════════
+   * Il disait « et AUCUN retry », pour les deux codes. C'était juste tant que
+   * l'adaptateur ne réessayait jamais. Deux faits mesurés le 05/11/2026 ont
+   * fait changer cette doctrine, et SEULEMENT pour les pannes temporaires :
+   *
+   *   · le corps du 502 d'`overpass-api.de` dit, textuellement : « Retry your
+   *     request using exponential backoff » — c'est l'amont qui le prescrit ;
+   *   · la saturation est fréquente et brève, et l'élève lisait « la recherche
+   *     n'a pas abouti » pour une panne qui n'existait déjà plus.
+   *
+   * ⚠️ LE 429 N'EST TOUJOURS PAS RÉESSAYÉ, ET C'EST LE CŒUR DE CE TEST. La
+   * politique d'Overpass demande une PAUSE de 30 s après un 429 ; réessayer
+   * immédiatement est exactement ce qui fait bannir. Cette garantie-là est
+   * inchangée, et elle est mesurée en premier.
+   */
   const { transport, appels } = transportFige(new Response("", { status: 429 }));
   const limite = await avecUserAgent(() => interrogerOverpass("[out:json];", { transport }));
   assert.deepEqual(limite, { statut: "echec", raison: "rate_limited" });
-  // ⚠️ AUCUN RETRY AGRESSIF. La politique d'Overpass demande de faire une PAUSE
-  // après un 429 ; réessayer immédiatement est exactement ce qui fait bannir.
-  assert.equal(appels.length, 1, "un seul appel, jamais de réessai");
+  assert.equal(appels.length, 1, "un seul appel : un 429 ne se réessaie JAMAIS");
 
+  // Un 503 est une panne temporaire : il est réessayé, et le classement ne
+  // change pas pour autant.
   const { transport: t2, appels: a2 } = transportFige(new Response("", { status: 503 }));
-  assert.deepEqual(await avecUserAgent(() => interrogerOverpass("[out:json];", { transport: t2 })), {
-    statut: "echec",
-    raison: "unavailable",
-  });
-  assert.equal(a2.length, 1);
+  assert.deepEqual(
+    await avecUserAgent(() =>
+      interrogerOverpass("[out:json];", { transport: t2, attendre: async () => {} }),
+    ),
+    { statut: "echec", raison: "unavailable" },
+  );
 
-  // ⚠️ ET 429 ≠ 503. Deux causes, deux conduites : attendre, ou réessayer.
-  assert.notEqual("rate_limited", "unavailable");
+  /*
+   * ⚠️ RÉESSAYÉ, MAIS BORNÉ — ET C'EST CETTE BORNE QUI REMPLACE L'ANCIENNE
+   * GARANTIE. « Aucun réessai » protégeait d'un adaptateur qui multiplierait
+   * la charge dans le dos de l'appelant. Le compte exact la protège tout
+   * autant : une boucle sans fin ferait rougir ce test.
+   */
+  assert.equal(
+    a2.length,
+    OVERPASS_REESSAIS_MAX + 1,
+    "au plus deux tentatives supplémentaires, jamais une boucle",
+  );
+  assert.ok(a2.length <= 3, "et le plafond reste petit");
+
+  // ⚠️ ET 429 ≠ 503 : deux causes, deux conduites — attendre, ou réessayer.
+  assert.ok(!RAISONS_TEMPORAIRES.has("rate_limited"), "attendre");
+  assert.ok(RAISONS_TEMPORAIRES.has("unavailable"), "réessayer");
+  // Une réponse mal formée ne se répare pas en la redemandant.
+  assert.ok(!RAISONS_TEMPORAIRES.has("invalid_json"));
+  assert.ok(!RAISONS_TEMPORAIRES.has("invalid_envelope"));
 });
 
 await test("OVP-31 — l'expiration est un timeout, pas une indisponibilité", async () => {
