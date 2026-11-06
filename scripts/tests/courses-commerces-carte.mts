@@ -611,7 +611,15 @@ test("S-34 — SIX SITUATIONS DISTINCTES, ET AUCUNE NE SE CONFOND", () => {
       assert.ok(message !== null && message.texte.trim() !== "", situation);
     }
   }
-  assert.equal(SITUATIONS_DE_CHARGEMENT.size, 3);
+  /*
+   * ⚠️ QUATRE DEPUIS LA CORRECTION, ET LA QUATRIÈME EST UN AJOUT DÉLIBÉRÉ.
+   * `chargement_commune` manquait : la résolution d'une saisie en communes
+   * n'avait aucun état, donc aucun indicateur, et rien ne garantissait qu'elle
+   * se termine. L'élève voyait les suggestions apparaître sans savoir qu'on
+   * cherchait, et appuyait sur « Rechercher » sans avoir choisi sa commune.
+   */
+  assert.equal(SITUATIONS_DE_CHARGEMENT.size, 4);
+  assert.ok(SITUATIONS_DE_CHARGEMENT.has("chargement_commune"));
 });
 
 test("S-35 — UN REFUS DE LOCALISATION N'EST PAS UNE PANNE", () => {

@@ -18,7 +18,7 @@ import {
   requeteElement,
   requeteMagasinsDansZone,
   requeteZoneCommune,
-  requeteZoneCommuneParInsee,
+  requeteCommercesDansCommune,
 } from "@/lib/openstreetmap/overpass";
 import { type ReponseElementOsm, lireNoeudOsm } from "@/lib/openstreetmap/osm-api";
 
@@ -177,31 +177,30 @@ export async function decouvrirParCodeInsee(
   codeInsee: string,
   options: OptionsOverpass = {},
 ): Promise<ResultatDecouverte> {
-  const zones = await interrogerOverpass(requeteZoneCommuneParInsee(codeInsee), options);
-  if (zones.statut === "echec") return { statut: "echec", raison: zones.raison };
-  if (zones.statut === "zero_results") return { statut: "echec", raison: "ville_introuvable" };
-
   /*
-   * ⚠️ UN CODE INSEE NE DÉSIGNE QU'UNE COMMUNE, ET ON LE VÉRIFIE QUAND MÊME.
-   * Si OpenStreetMap en portait deux — doublon de saisie, relation périmée non
-   * supprimée — prendre la première rendrait les commerces d'une commune sous
-   * le nom d'une autre. « Ambigu » est la réponse honnête, et elle est
-   * improbable, pas impossible.
+   * ════════════════════════════════════════════════════════════════════════
+   * ⚠️ UNE SEULE REQUÊTE, ET C'EST LE CORRECTIF DE L'INTERMITTENCE
+   * ════════════════════════════════════════════════════════════════════════
+   * Ce chemin en faisait DEUX : résoudre la zone, puis lire ses commerces.
+   * C'était la copie de `decouvrirParVille`, où les deux temps servent à
+   * détecter l'ambiguïté des homonymes. Mais un CODE INSEE NE PEUT PAS ÊTRE
+   * AMBIGU : le premier temps ne décidait rien, il ne faisait qu'attendre.
+   *
+   * Et attendre coûte cher : mesuré le 05/11/2026, `overpass-api.de` n'accorde
+   * que DEUX créneaux par adresse IP, et une requête triviale a mis 20,4 s en
+   * pure attente. Deux requêtes = deux attentes = 40 à 60 s, contre une borne
+   * de 30 s. Le chemin GPS, lui, n'en fait qu'une — d'où « le GPS marche, la
+   * ville échoue une fois sur deux » observé en Preview.
+   *
+   * ⚠️ « COMMUNE INTROUVABLE » RESTE DISTINCT DE « AUCUN COMMERCE ». En une
+   * requête, Overpass rend zéro élément dans les deux cas. On ne peut donc plus
+   * les distinguer PAR LA RÉPONSE — mais on n'en a plus besoin : le code INSEE
+   * vient d'être choisi dans l'annuaire officiel de l'État, la commune existe
+   * donc avec certitude. Zéro élément veut dire zéro commerce cartographié, et
+   * rien d'autre. Inventer un « introuvable » ici enverrait l'élève corriger
+   * une saisie correcte.
    */
-  const candidates = zones.elements.slice(0, ZONES_MAX);
-  if (candidates.length === 0) return { statut: "echec", raison: "ville_introuvable" };
-  if (candidates.length > 1) return { statut: "echec", raison: "ville_ambigue" };
-
-  const relation = candidates[0]!.id;
-  if (typeof relation !== "number" || !Number.isSafeInteger(relation) || relation <= 0) {
-    return { statut: "echec", raison: "ville_introuvable" };
-  }
-
-  const commerces = await interrogerOverpass(
-    requeteMagasinsDansZone(idZoneDepuisRelation(relation)),
-    options,
-  );
-  // Une panne de la seconde requête n'est pas une commune introuvable.
+  const commerces = await interrogerOverpass(requeteCommercesDansCommune(codeInsee), options);
   if (commerces.statut === "echec") return { statut: "echec", raison: commerces.raison };
   if (commerces.statut === "zero_results") return { statut: "ok", magasins: [], tronque: false };
 
@@ -289,6 +288,16 @@ export function httpDecouverte(raison: EchecDecouverte): { status: number; code:
       return { status: 503, code: "REPONSE_INATTENDUE" };
     case "unavailable":
       return { status: 503, code: "ANNUAIRE_INDISPONIBLE" };
+    /*
+     * ⚠️ LA SATURATION A SON PROPRE CODE, ET SON PROPRE SENS.
+     * `at_capacity` = le serveur cartographique est momentanément plein, et il
+     * demande lui-même de réessayer. Nous avons déjà réessayé ; le dire
+     * autrement qu'« indisponible » permet à l'élève de savoir que réessayer
+     * dans une minute a de bonnes chances de marcher, et à nos journaux de
+     * distinguer une saturation passagère d'une panne.
+     */
+    case "at_capacity":
+      return { status: 503, code: "ANNUAIRE_SATURE" };
   }
 }
 

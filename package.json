@@ -136,6 +136,7 @@
     "test:courses-validation": "npx tsx scripts/tests/courses-validation-fiable.mts",
     "test:courses-rayons": "npx tsx scripts/tests/courses-rayons.mts",
     "test:courses-commerces": "npx tsx scripts/tests/courses-commerces-carte.mts",
+    "test:courses-fiabilite": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/courses-commerces-fiabilite.mts",
     "test:liste-de-courses": "npx tsx scripts/tests/liste-de-courses-c1.mts",
     "test:liste-de-courses-ux": "npx tsx scripts/tests/liste-de-courses-ux.mts",
     "test:liste-de-courses-c2": "npx tsx scripts/tests/liste-de-courses-c2.mts",

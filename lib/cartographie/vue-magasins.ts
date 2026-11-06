@@ -100,6 +100,16 @@ function marqueDistincte(nom: string, marque: string | null): string | null {
 const MARGE_POINT_UNIQUE = 0.003;
 
 /**
+ * La marge autour du centre d'une commune, quand il n'y a rien d'autre à
+ * encadrer.
+ *
+ * ⚠️ BEAUCOUP PLUS LARGE QUE CELLE D'UN COMMERCE UNIQUE — environ 5 km. Cadrer
+ * une commune à 350 m de son centre montrerait un carrefour, pas une ville, et
+ * l'élève ne saurait pas où il regarde.
+ */
+export const MARGE_COMMUNE = 0.045;
+
+/**
  * Le cadre qui contient tous les points donnés, ou `null` s'il n'y en a aucun.
  *
  * ⚠️ LE CADRAGE SE CALCULE SUR LES RÉSULTATS, PAS SUR UN CENTRE DE VILLE.
@@ -154,10 +164,36 @@ export function cadreDesPoints(points: readonly Point[]): Cadre | null {
 export function cadreDeLaRecherche(
   magasins: readonly MagasinOsm[],
   depart: Point | null,
+  /**
+   * Le centre de la commune cherchée, quand il est connu.
+   *
+   * ⚠️ IL N'EST PAS UNE TROISIÈME SOURCE DE CADRAGE, IL EST LE DERNIER RECOURS.
+   * Tant qu'il y a des commerces, ce sont eux qui décident : ils sont ce que
+   * l'élève est venu voir, et un centre administratif peut tomber loin d'eux
+   * dans une commune étendue. Le centre ne sert QUE lorsqu'il n'y a encore —
+   * ou plus — rien à encadrer.
+   */
+  centreCommune: Point | null = null,
 ): Cadre | null {
   const points: Point[] = magasins.map((m) => ({ lat: m.lat, lon: m.lon }));
   if (depart !== null) points.push(depart);
-  return cadreDesPoints(points);
+  const surLesResultats = cadreDesPoints(points);
+  if (surLesResultats !== null) return surLesResultats;
+  /*
+   * ⚠️ C'EST CE REPLI QUI REND LA CARTE UTILISABLE SANS GPS. Une recherche par
+   * ville n'a aucune position de départ ; sans ce point, la carte n'aurait
+   * rien à montrer tant qu'aucun commerce n'est revenu — et rien du tout si la
+   * commune n'en a aucun de cartographié.
+   *
+   * ⚠️ ET IL NE REMPLACE JAMAIS UNE POSITION GPS. Le mode « autour de moi »
+   * n'a pas de centre de commune à lui donner : les deux modes gardent leur
+   * propre source de centrage, et aucun n'emprunte celle de l'autre.
+   */
+  if (centreCommune === null) return null;
+  return {
+    sudOuest: { lat: centreCommune.lat - MARGE_COMMUNE, lon: centreCommune.lon - MARGE_COMMUNE },
+    nordEst: { lat: centreCommune.lat + MARGE_COMMUNE, lon: centreCommune.lon + MARGE_COMMUNE },
+  };
 }
 
 /* ══════════════════════════════════════════════════════════════════════════

@@ -52,6 +52,15 @@ export const MODES: readonly { readonly id: ModeRecherche; readonly libelle: str
 export type Situation =
   /** Aucune recherche n'a encore été lancée. */
   | "repos"
+  /**
+   * L'annuaire des communes est interrogé, pendant la frappe.
+   *
+   * ⚠️ C'EST UNE SITUATION DE CHARGEMENT À PART ENTIÈRE, et pas un détail du
+   * champ de saisie. L'élève doit voir que quelque chose se passe entre sa
+   * frappe et l'apparition des suggestions, sinon il appuie sur « Rechercher »
+   * sans avoir choisi de commune.
+   */
+  | "chargement_commune"
   /** La permission de géolocalisation est demandée au navigateur. */
   | "permission"
   /** Géolocalisation obtenue, commerces en cours de lecture. */
@@ -77,6 +86,7 @@ export type Situation =
  * c'est-à-dire qu'un chargement permanent est impossible.
  */
 export const SITUATIONS_DE_CHARGEMENT: ReadonlySet<Situation> = new Set<Situation>([
+  "chargement_commune",
   "permission",
   "chargement_autour",
   "chargement_ville",
@@ -157,6 +167,8 @@ export function messageDeSituation(
       return null;
     case "resultats":
       return null;
+    case "chargement_commune":
+      return { texte: "Recherche de la commune…", role: "status" };
     case "permission":
       return { texte: "Autorise la localisation pour continuer.", role: "status" };
     case "chargement_autour":
@@ -227,4 +239,65 @@ export function rayonUtilisable(km: number): number {
   if (km < RAYON_KM_MIN) return RAYON_KM_MIN;
   if (km > RAYON_KM_MAX) return RAYON_KM_MAX;
   return km;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   5. CE QUE L'ÉCRAN DOIT DIRE PENDANT QU'IL TRAVAILLE
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Le libellé du BOUTON pendant une recherche.
+ *
+ * ⚠️ IL DIT L'ÉTAPE, PAS « EN COURS ». « Recherche en cours… » sous un message
+ * « Recherche des commerces autour de toi… » faisait deux fois la même phrase à
+ * deux endroits — c'est le doublon vu en Preview. Le bouton nomme désormais
+ * l'étape atteinte, et le message détaillé disparaît : une seule voix.
+ */
+export function libelleDuBouton(situation: Situation, mode: ModeRecherche): string {
+  switch (situation) {
+    case "chargement_commune":
+      return "Recherche de la commune…";
+    case "permission":
+      return "Localisation…";
+    case "chargement_autour":
+      return "Recherche des commerces…";
+    case "chargement_ville":
+      return "Recherche des commerces…";
+    default:
+      return mode === "autour" ? "Chercher autour de moi" : "Rechercher";
+  }
+}
+
+/**
+ * Le message d'état à ANNONCER aux lecteurs d'écran, et à montrer à l'écran.
+ *
+ * ⚠️ IL NE DOUBLE PAS LE BOUTON. Pendant un chargement, le bouton porte déjà
+ * l'étape : répéter la même phrase juste en dessous est du bruit, et pour un
+ * lecteur d'écran c'est la même information annoncée deux fois.
+ */
+export function messageHorsBouton(
+  situation: Situation,
+  contexte: { readonly mode: ModeRecherche; readonly tronque: boolean },
+): MessageDeSituation | null {
+  if (enChargement(situation)) return null;
+  return messageDeSituation(situation, contexte);
+}
+
+/**
+ * « 12 commerces à moins de 5 km » / « 12 commerces à Toulon ».
+ *
+ * ⚠️ ON DIT CE QUI A ÉTÉ CHERCHÉ, PAS SEULEMENT CE QUI A ÉTÉ TROUVÉ. Une liste
+ * de douze lignes sans rappel du rayon ni de la commune oblige l'élève à
+ * remonter pour savoir ce qu'il regarde.
+ */
+export function resumeDeLaRecherche(
+  nombre: number,
+  contexte:
+    | { readonly mode: "autour"; readonly rayonKm: number }
+    | { readonly mode: "ville"; readonly commune: string },
+): string {
+  const commerces = nombre > 1 ? `${nombre} commerces` : `${nombre} commerce`;
+  return contexte.mode === "autour"
+    ? `${commerces} à moins de ${contexte.rayonKm} km`
+    : `${commerces} à ${contexte.commune}`;
 }

@@ -67,6 +67,16 @@ export interface CarteDesMagasinsProps {
   readonly selectionnee: string | null;
   /** La position de l'élève, quand il l'a partagée pour CETTE recherche. */
   readonly depart: Point | null;
+  /**
+   * Le centre de la commune cherchée, en mode « par ville ».
+   *
+   * ⚠️ IL N'EST PAS UN SUBSTITUT DE GPS, ET LA CARTE NE DÉPEND D'AUCUN DES
+   * DEUX. Chaque mode a sa source de centrage : la position pour « autour de
+   * moi », le centre officiel de la commune pour « par ville ». Aucun des deux
+   * n'emprunte celle de l'autre, et la carte s'affiche dès que l'un existe —
+   * ou dès qu'il y a des commerces à encadrer.
+   */
+  readonly centreCommune?: Point | null;
   readonly onSelectionner: (cle: string) => void;
   /** Rendu de la fiche, au-dessus de la carte. Le parent la fournit. */
   readonly ficheDuSelectionne?: React.ReactNode;
@@ -78,6 +88,7 @@ export function CarteDesMagasins({
   magasins,
   selectionnee,
   depart,
+  centreCommune = null,
   onSelectionner,
   ficheDuSelectionne,
   configuration,
@@ -216,7 +227,7 @@ export function CarteDesMagasins({
        * `cadreDeLaRecherche` est pur et testé : voir
        * `lib/cartographie/vue-magasins.ts` pour la raison.
        */
-      const cadre = cadreDeLaRecherche(magasins, depart);
+      const cadre = cadreDeLaRecherche(magasins, depart, centreCommune);
       if (cadre !== null) {
         instance.fitBounds(
           [
@@ -233,15 +244,29 @@ export function CarteDesMagasins({
       for (const pose of poses) pose.remove();
       poses = [];
     };
-  }, [prete, magasins, selectionnee, depart]);
+  }, [prete, magasins, selectionnee, depart, centreCommune]);
 
   /* ── Les états d'affichage ──────────────────────────────────────────────── */
 
+  /*
+   * ⚠️ TROIS CAUSES, TROIS MESSAGES, ET SURTOUT PAS UN SEUL.
+   *
+   * « Pas de clé cartographique » et « pas de coordonnées à montrer » sont
+   * deux choses sans rapport, et les confondre envoie chercher le problème au
+   * mauvais endroit : on irait vérifier une variable d'environnement alors que
+   * c'est la recherche qui n'a rien rendu, ou l'inverse. L'ordre compte aussi —
+   * sans clé, la question des coordonnées ne se pose même pas.
+   */
   if (config.statut === "indisponible") {
     return <CadreMessage texte={messageCarteIndisponible(config.raison)} />;
   }
   if (echec !== null) {
     return <CadreMessage texte={messageEchec(echec)} />;
+  }
+  if (cadreDeLaRecherche(magasins, depart, centreCommune) === null) {
+    return (
+      <CadreMessage texte="Rien à afficher sur la carte pour l'instant : lance une recherche pour voir les commerces." />
+    );
   }
 
   return (

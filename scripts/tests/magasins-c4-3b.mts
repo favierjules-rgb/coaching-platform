@@ -1109,7 +1109,10 @@ await test("C4.3b-22 — tous les états de la recherche manuelle existent", asy
   ] as const) {
     assert.ok(!enChargement(situationApres(issue)), `${issue.type} ne doit pas rester en chargement`);
   }
-  assert.equal(SITUATIONS_DE_CHARGEMENT.size, 3);
+  // ⚠️ QUATRE DEPUIS LA CORRECTION : `chargement_commune` a été ajoutée, pour
+  // que la résolution d'une saisie en communes ait elle aussi un état qui se
+  // termine. Voir `courses-commerces-fiabilite` pour la mesure complète.
+  assert.equal(SITUATIONS_DE_CHARGEMENT.size, 4);
 
   // Le repli reste disponible quand la géolocalisation a été refusée : les deux
   // modes sont des onglets, pas une cascade.

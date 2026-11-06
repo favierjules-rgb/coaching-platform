@@ -12,6 +12,21 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 export const dynamic = "force-dynamic";
 
 /**
+ * ⚠️ LA FONCTION DOIT POUVOIR ATTENDRE OVERPASS, SINON LA BORNE NE SERT À RIEN.
+ *
+ * Mesuré le 05/11/2026 : `overpass-api.de` n'accorde que DEUX créneaux par
+ * adresse IP, et une requête triviale a mis 20,4 s en pure attente de créneau.
+ * Notre borne interne est à 45 s, avec un budget de 55 s réessais compris.
+ * Si la plateforme coupe la fonction à 10 s — le défaut de Vercel — tout ce
+ * travail est annulé par l'hébergeur, et l'élève lit « la recherche n'a pas
+ * abouti » sans qu'aucun de nos messages n'ait eu la parole.
+ *
+ * ⚠️ 60 s EST LE PLAFOND DES OFFRES D'ENTRÉE. Le demander plus haut ferait
+ * échouer le déploiement au lieu d'allonger le délai.
+ */
+export const maxDuration = 60;
+
+/**
  * COURSES C4.3c — POST /api/student/stores/nearby
  *
  * Les magasins alimentaires autour d'une position, pour que l'élève en
@@ -91,6 +106,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Rayon de recherche hors bornes." }, { status: 400 });
   }
 
+  const debutMs = Date.now();
   try {
     const resultat = await decouvrirAutour({
       lat: parsed.data.lat,
@@ -104,7 +120,22 @@ export async function POST(request: Request) {
     // Chaque panne garde ici son code propre : attendre, réessayer, ou signaler.
     if (resultat.statut === "echec") {
       const { status, code } = httpDecouverte(resultat.raison);
-      return NextResponse.json({ error: "La recherche de magasins a échoué.", code }, { status });
+      /*
+       * ⚠️ UNE TRACE SANS AUCUNE POSITION, ET SANS LE RAYON NON PLUS.
+       *
+       * La latitude et la longitude n'ont évidemment rien à faire dans un
+       * journal. Le rayon, lui, ne dit rien de personne — mais `DEC-35b/36b`
+       * l'interdit aussi, et cette sévérité-là mérite d'être conservée plutôt
+       * que relâchée pour faire tenir une trace : la raison et la durée
+       * suffisent à répondre à « pourquoi ça échoue ? ».
+       */
+      console.warn(
+        `[Magasins] recherche autour échouée raison=${resultat.raison} code=${code} ` +
+          `duree_ms=${Date.now() - debutMs}`,
+      );
+      // ⚠️ UN MESSAGE PAR SITUATION, PLUS UN SEUL POUR TOUTES. « Saturé »,
+      // « trop long » et « en panne » appellent trois conduites différentes.
+      return NextResponse.json({ error: messageDe(resultat.raison), code }, { status });
     }
 
     // ⚠️ LA POSITION REÇUE NE REVIENT PAS DANS LA RÉPONSE. La renvoyer la
@@ -127,5 +158,24 @@ export async function POST(request: Request) {
     // qu'on s'interdit.
     console.error("[Magasins] échec inattendu de la recherche de magasins proches");
     return NextResponse.json({ error: "Service indisponible." }, { status: 503 });
+  }
+}
+
+/**
+ * Un message pour l'élève — et rien qui décrive notre plomberie.
+ *
+ * ⚠️ LA MÊME TABLE QUE LA RECHERCHE PAR VILLE, AUX MOTS PRÈS. Deux écrans qui
+ * nomment différemment la même panne font douter que ce soit la même.
+ */
+function messageDe(raison: Parameters<typeof httpDecouverte>[0]): string {
+  switch (raison) {
+    case "rate_limited":
+      return "Trop de recherches en cours. Réessaie dans une minute.";
+    case "at_capacity":
+      return "Le service de cartographie est saturé en ce moment. Réessaie dans quelques secondes.";
+    case "timeout":
+      return "La recherche a été trop longue. Réessaie.";
+    default:
+      return "La recherche de commerces a échoué.";
   }
 }

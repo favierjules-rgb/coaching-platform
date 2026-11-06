@@ -17,6 +17,21 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 export const dynamic = "force-dynamic";
 
 /**
+ * ⚠️ LA FONCTION DOIT POUVOIR ATTENDRE OVERPASS, SINON LA BORNE NE SERT À RIEN.
+ *
+ * Mesuré le 05/11/2026 : `overpass-api.de` n'accorde que DEUX créneaux par
+ * adresse IP, et une requête triviale a mis 20,4 s en pure attente de créneau.
+ * Notre borne interne est à 45 s, avec un budget de 55 s réessais compris.
+ * Si la plateforme coupe la fonction à 10 s — le défaut de Vercel — tout ce
+ * travail est annulé par l'hébergeur, et l'élève lit « la recherche n'a pas
+ * abouti » sans qu'aucun de nos messages n'ait eu la parole.
+ *
+ * ⚠️ 60 s EST LE PLAFOND DES OFFRES D'ENTRÉE. Le demander plus haut ferait
+ * échouer le déploiement au lieu d'allonger le délai.
+ */
+export const maxDuration = 60;
+
+/**
  * COURSES C4.3c — POST /api/student/stores/search
  *
  * Les magasins alimentaires d'une VILLE — le chemin de repli de l'élève qui a
@@ -123,6 +138,7 @@ export async function POST(request: Request) {
   // constante serveur, et le corps `.strict()` refuse tout champ `pays`. Le
   // navigateur ne choisit donc pas le pays de recherche d'un lot qui n'en
   // connaît qu'un.
+  const debutMs = Date.now();
   try {
     const resultat =
       codeInsee !== undefined
@@ -136,7 +152,37 @@ export async function POST(request: Request) {
     // pu chercher » et « aucun magasin cartographié » sont quatre phrases.
     if (resultat.statut === "echec") {
       const { status, code } = httpDecouverte(resultat.raison);
+      /*
+       * ⚠️ UNE TRACE EXPLOITABLE, ET AUCUNE DONNÉE PERSONNELLE DEDANS.
+       *
+       * On journalise la RAISON, le mode, la durée et le département — de quoi
+       * répondre à « pourquoi ça échoue ? » et « est-ce une saturation ou une
+       * panne ? » dans les journaux Vercel.
+       *
+       * ⚠️ NI LE NOM DE LA COMMUNE, NI LE CODE INSEE COMPLET, NI L'IDENTITÉ DE
+       * L'ÉLÈVE. Une commune n'est pas une adresse, mais c'est une indication
+       * d'endroit, et associée à un identifiant d'élève elle en devient une.
+       * Le département suffit à voir si un territoire est plus touché qu'un
+       * autre, et ne désigne personne.
+       */
+      console.warn(
+        `[Magasins] recherche échouée raison=${resultat.raison} code=${code} ` +
+          `mode=${codeInsee !== undefined ? "insee" : "nom"} ` +
+          `dept=${codeInsee !== undefined ? codeInsee.slice(0, 2) : "?"} ` +
+          `duree_ms=${Date.now() - debutMs}`,
+      );
       return NextResponse.json({ error: messageDe(resultat.raison), code }, { status });
+    }
+
+    // ⚠️ LES SUCCÈS LENTS SE JOURNALISENT AUSSI. Une recherche qui aboutit en
+    // 40 s n'est pas une panne, mais c'est le signe avant-coureur de celle de
+    // demain : sans trace, on ne la verrait qu'une fois cassée.
+    const dureeMs = Date.now() - debutMs;
+    if (dureeMs > 15_000) {
+      console.warn(
+        `[Magasins] recherche lente duree_ms=${dureeMs} ` +
+          `mode=${codeInsee !== undefined ? "insee" : "nom"} resultats=${resultat.magasins.length}`,
+      );
     }
 
     return NextResponse.json({
@@ -177,6 +223,14 @@ function messageDe(raison: Parameters<typeof httpDecouverte>[0]): string {
       return "Plusieurs communes portent ce nom. Précise ta recherche.";
     case "rate_limited":
       return "Trop de recherches en cours. Réessaie dans une minute.";
+    /*
+     * ⚠️ « SATURÉ » N'EST PAS « EN PANNE », ET LA NUANCE EST UTILE. Le serveur
+     * cartographique est plein pour quelques secondes ; nous avons déjà
+     * réessayé. Dire à l'élève que réessayer a des chances de marcher lui
+     * évite de conclure que la fonctionnalité est cassée.
+     */
+    case "at_capacity":
+      return "Le service de cartographie est saturé en ce moment. Réessaie dans quelques secondes.";
     case "timeout":
       return "La recherche a été trop longue. Réessaie.";
     default:

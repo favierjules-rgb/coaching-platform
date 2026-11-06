@@ -55,6 +55,19 @@ export interface CommuneSuggeree {
   readonly codePostal: string | null;
   /** Le code du département, déduit du code INSEE. */
   readonly departement: string;
+  /**
+   * Le centre géographique officiel de la commune.
+   *
+   * ⚠️ IL VIENT DE L'ANNUAIRE, PAS D'UN CALCUL SUR LES COMMERCES, et c'est ce
+   * qui permet à la carte de se centrer SANS GPS. Une recherche par ville n'a
+   * aucune position de départ : sans ce point, la carte n'aurait rien à
+   * montrer tant qu'aucun commerce n'est revenu.
+   *
+   * ⚠️ `null` SI L'ANNUAIRE NE LE DONNE PAS. On ne le remplace par aucun
+   * centre de repli : une carte centrée sur un point inventé est pire qu'une
+   * carte qui attend ses résultats.
+   */
+  readonly centre: { readonly lat: number; readonly lon: number } | null;
 }
 
 export type RaisonEchecAnnuaire = "saisie_trop_courte" | "indisponible" | "timeout";
@@ -92,7 +105,10 @@ export async function suggererCommunes(
     return { statut: "echec", raison: "saisie_trop_courte" };
   }
 
-  const url = `${BASE}?nom=${encodeURIComponent(texte)}&fields=nom,code,codesPostaux&boost=population&limit=${SUGGESTIONS_MAX}`;
+  // ⚠️ `centre` EST DEMANDÉ ICI, et c'est ce qui permet à la carte de se
+  // centrer en mode ville. Il ne coûte rien de plus : c'est un champ de la
+  // même réponse, pas un second appel.
+  const url = `${BASE}?nom=${encodeURIComponent(texte)}&fields=nom,code,codesPostaux,centre&boost=population&limit=${SUGGESTIONS_MAX}`;
   const executer = options.fetchImpl ?? fetch;
   const controleur = new AbortController();
   const minuteur = setTimeout(() => controleur.abort(), options.delaiMs ?? DELAI_MS);
@@ -139,8 +155,33 @@ function normaliser(brut: unknown): readonly CommuneSuggeree[] {
       nom,
       codePostal: codePostal ?? null,
       departement: departementDuCodeInsee(code),
+      centre: centreValide(o["centre"]),
     });
     if (retenues.length >= SUGGESTIONS_MAX) break;
   }
   return retenues;
 }
+
+/**
+ * Le centre d'une commune, tel que l'annuaire le rend — ou `null`.
+ *
+ * ⚠️ UN POINT GeoJSON : `{ type: "Point", coordinates: [lon, lat] }`, dans CET
+ * ordre. L'inverser placerait Toulon en Somalie — c'est l'erreur classique, et
+ * elle est silencieuse, parce que les deux nombres sont plausibles.
+ *
+ * ⚠️ ET RIEN N'EST CRU SUR PAROLE, MÊME VENANT DE L'ÉTAT. Un couple hors
+ * bornes est ÉCARTÉ, pas corrigé : une carte centrée sur un point inventé est
+ * pire qu'une carte qui attend ses résultats.
+ */
+function centreValide(brut: unknown): { lat: number; lon: number } | null {
+  if (typeof brut !== "object" || brut === null) return null;
+  const coords = (brut as { coordinates?: unknown }).coordinates;
+  if (!Array.isArray(coords) || coords.length < 2) return null;
+  const [lon, lat] = coords;
+  if (typeof lon !== "number" || typeof lat !== "number") return null;
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+  return { lat, lon };
+}
+
+export { SAISIE_MAX, SAISIE_MIN, SUGGESTIONS_MAX, codeInseeValide, departementDuCodeInsee };
