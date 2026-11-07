@@ -14,6 +14,7 @@ import {
   type Point,
 } from "@/lib/cartographie/vue-magasins";
 import type { MagasinOsm } from "@/lib/nutrition/magasins-osm";
+import { WORKER_MAPLIBRE_URL } from "@/lib/cartographie/worker-maplibre.generated";
 
 /**
  * COURSES — LA CARTE DES COMMERCES.
@@ -140,8 +141,35 @@ export function CarteDesMagasins({
      * de type à la compilation. Les classes se prennent par leur nom.
      */
     void import("maplibre-gl")
-      .then(({ Map: CarteGL }) => {
+      .then(({ Map: CarteGL, getWorkerUrl, setWorkerUrl }) => {
         if (!vivant) return;
+        /*
+         * ════════════════════════════════════════════════════════════════
+         * ⚠️ L'URL DU WORKER EST IMPOSÉE, PARCE QUE CELLE QUE MAPLIBRE
+         * DÉDUIT EST FAUSSE DANS NEXT
+         * ════════════════════════════════════════════════════════════════
+         * MapLibre 6 déduit l'URL de son worker de `import.meta.url` :
+         * « le fichier frère, à côté de moi ». Turbopack, lui, copie les
+         * `.mjs` du paquet dans `/_next/static/media/` AVEC UNE EMPREINTE.
+         * Le frère déduit n'existe donc pas :
+         *
+         *   déployé  …/maplibre-gl-worker.247mnn5i12bew.mjs  → 200
+         *   déduit   …/maplibre-gl-worker.mjs                → 404
+         *
+         * Mesuré sur le build de ce dépôt. D'où, en console, autant de fois
+         * qu'il y a de tentatives : « Worker failed to load. Check that the
+         * worker URL is correct. » — et une carte qui ne s'affiche jamais.
+         *
+         * ⚠️ CE N'ÉTAIT PAS LA CSP. Le fichier est bien déployé, et la
+         * politique de ce site n'est qu'en `Report-Only` sur les pages :
+         * rien n'était bloqué. L'URL était simplement fausse.
+         *
+         * ⚠️ ET C'EST POSÉ ICI, PAS AU CHARGEMENT DU MODULE. `setWorkerUrl`
+         * écrit dans un état global de MapLibre ; le faire au moment où l'on
+         * va construire la carte garantit que c'est fait avant, sans rien
+         * exécuter sur les écrans qui n'ouvrent jamais de carte.
+         */
+        if (getWorkerUrl() !== WORKER_MAPLIBRE_URL) setWorkerUrl(WORKER_MAPLIBRE_URL);
         /*
          * ⚠️ WEBGL N'EST PAS GARANTI. Navigateur ancien, accélération
          * matérielle coupée, machine virtuelle : le constructeur lève. Sans ce

@@ -67,8 +67,25 @@ const CSP_SOURCES = {
   youtubeFrames: "https://www.youtube-nocookie.com",
   // L'origine EXACTE du projet, jamais `*.supabase.co` : voir ci-dessus.
   supabaseFrames: SUPABASE_FRAME ?? "",
+  // CARTOGRAPHIE — le fond de carte de la recherche de commerces.
+  //
+  // ⚠️ L'ORIGINE EXACTE, PAS `*.maptiler.com`. Un joker couvrirait aussi
+  // `cloud.maptiler.com` (la console du compte) et tout sous-domaine futur ;
+  // l'API des cartes est `api.maptiler.com`, et c'est tout ce dont le
+  // navigateur a besoin.
+  //
+  // Ce qui passe par là : `style.json`, `tiles.json`, les tuiles vectorielles
+  // `.pbf`, les planches de symboles `sprite@2x.json` et `sprite@2x.png`, et
+  // les polices `.pbf`. MapLibre les récupère toutes par `fetch` — elles
+  // relèvent donc de `connect-src`, pas de `img-src`, même l'image de sprite.
+  // C'est ce que disaient les violations relevées : « Refused to CONNECT ».
+  maptiler: "https://api.maptiler.com",
   // Images : Storage Supabase, Stripe, et data:/blob: pour les aperçus
   // locaux (upload d'une photo de progression).
+  //
+  // ⚠️ `blob:` SERT AUSSI À LA CARTE, et il était déjà là. MapLibre décode les
+  // planches de symboles en `Blob([...], { type: "image/png" })` puis les pose
+  // en `img.src` : sans `blob:`, la carte s'afficherait sans aucune icône.
   images: "'self' data: blob: https://*.supabase.co https://*.stripe.com",
   // Vercel Analytics / Speed Insights, si activés plus tard.
   vercel: "https://*.vercel-insights.com https://*.vercel-scripts.com",
@@ -81,7 +98,7 @@ const contentSecurityPolicy = [
   // gain justifiera la complexité.
   `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${CSP_SOURCES.stripe} ${CSP_SOURCES.vercel}`,
   `style-src 'self' 'unsafe-inline'`,
-  `img-src ${CSP_SOURCES.images}`,
+  `img-src ${CSP_SOURCES.images} ${CSP_SOURCES.maptiler}`,
   // `media-src` n'était pas déclaré : les `<video>` retombaient donc sur
   // `default-src 'self'`, qui bloque à la fois l'aperçu local (`blob:`) et
   // l'URL signée du Storage. Sans cette ligne, la CSP passée en mode
@@ -89,7 +106,26 @@ const contentSecurityPolicy = [
   // lecteur noir.
   `media-src 'self' blob: ${CSP_SOURCES.supabase}`,
   `font-src 'self' data:`,
-  `connect-src 'self' ${CSP_SOURCES.supabase} ${CSP_SOURCES.stripe} ${CSP_SOURCES.vercel}`,
+  // LE WORKER DE MAPLIBRE — ET POURQUOI IL N'Y A PAS DE `blob:` ICI.
+  //
+  // `worker-src` n'était pas déclaré : les workers retombaient sur
+  // `default-src 'self'`, ce qui suffisait déjà. On le déclare quand même,
+  // pour que la règle soit lisible plutôt que déduite.
+  //
+  // ⚠️ `blob:` SERAIT UNE PERMISSION ACCORDÉE POUR RIEN, et c'est vérifié dans
+  // le code de MapLibre, pas supposé : il teste si l'URL du worker est
+  // CROSS-ORIGIN. Si oui — et seulement si oui — il fabrique un `blob:` qui
+  // ré-importe l'URL distante, parce qu'un worker ne peut pas être chargé
+  // depuis une autre origine. Si non, il appelle directement
+  // `new Worker(url, { type: "module" })`.
+  //
+  // Notre worker est copié dans `public/maplibre/` et servi depuis NOTRE
+  // origine (voir `scripts/cartographie/copier-worker-maplibre.mts`) : le
+  // chemin `blob:` n'est jamais emprunté. L'ouvrir affaiblirait la politique
+  // sans rien débloquer — et `blob:` dans `worker-src` est précisément ce qui
+  // permet d'exécuter du code fabriqué à la volée.
+  `worker-src 'self'`,
+  `connect-src 'self' ${CSP_SOURCES.supabase} ${CSP_SOURCES.stripe} ${CSP_SOURCES.vercel} ${CSP_SOURCES.maptiler}`,
   // Les documents privés (PDF) sont affichés dans une modale SETH à partir
   // d'une URL SIGNÉE du Storage : sans cette origine, la CSP passée en mode
   // bloquant afficherait un cadre vide, sans autre symptôme.
@@ -130,7 +166,27 @@ const securityHeaders = [
     // seul. Aucune iframe tierce, Stripe comprise, n'hérite du droit, et le
     // navigateur redemande de toute façon son accord à l'utilisateur — cet
     // en-tête ne donne pas le micro, il cesse de l'interdire.
-    value: "camera=(self), microphone=(self), geolocation=(), payment=(), usb=(), interest-cohort=()",
+    // `geolocation=(self)` depuis la recherche de commerces. C'EST UN
+    // ASSOUPLISSEMENT, ET IL DOIT ÊTRE RELU.
+    //
+    // ⚠️ MESURÉ, PAS SUPPOSÉ. Avec `geolocation=()`, Chromium répond, sur
+    // l'en-tête exact de ce fichier :
+    //
+    //     code 1 — « Geolocation has been disabled in this document by
+    //               permissions policy. »
+    //
+    // Autrement dit : le mode « Autour de moi » de la liste de courses ne
+    // pouvait PAS fonctionner, et l'écran affichait « Localisation refusée »
+    // sans que l'élève ait rien refusé. Que cela ait semblé marcher en recette
+    // n'y change rien : Safari n'applique pas cette politique pour la
+    // géolocalisation, Chrome et Firefox si.
+    //
+    // `(self)`, donc — ce site et lui seul, comme la caméra et le micro avant
+    // lui. Aucune iframe tierce, Stripe comprise, n'hérite du droit, et le
+    // navigateur redemande de toute façon son accord à l'élève : cet en-tête
+    // ne donne pas sa position, il cesse de l'interdire. Et rien n'est
+    // demandé au chargement de l'écran — c'est le bouton qui déclenche.
+    value: "camera=(self), microphone=(self), geolocation=(self), payment=(), usb=(), interest-cohort=()",
   },
   { key: "Content-Security-Policy-Report-Only", value: contentSecurityPolicy },
 ];
