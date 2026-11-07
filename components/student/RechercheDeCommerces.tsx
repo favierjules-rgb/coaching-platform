@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Crosshair, MapPin, Navigation, Search, Store } from "lucide-react";
+import { Crosshair, MapPin, Search, Store } from "lucide-react";
 
 import { CarteDesMagasins } from "@/components/student/CarteDesMagasins";
+import { ChoixItineraire } from "@/components/student/ChoixItineraire";
 /*
  * ⚠️ L'INDICATEUR DU DÉPÔT, PAS UN CERCLE ÉCRIT POUR L'OCCASION.
  * `components/ui/Loader.tsx` porte une doctrine explicite : « un spinner
@@ -13,7 +14,7 @@ import { CarteDesMagasins } from "@/components/student/CarteDesMagasins";
  * ici donnerait deux indicateurs qui divergeraient au premier ajustement.
  */
 import { Loader } from "@/components/ui/Loader";
-import { urlItineraire, type Point } from "@/lib/cartographie/vue-magasins";
+import { coordonneesFiables, type Point } from "@/lib/cartographie/vue-magasins";
 import { ANTI_RAFALE_MS, SAISIE_MIN } from "@/lib/communes/bornes";
 import { cleIdentiteOsm, marqueAAfficher, type MagasinOsm } from "@/lib/nutrition/magasins-osm";
 import {
@@ -672,7 +673,6 @@ export function RechercheDeCommerces({
                   selectionne !== null ? (
                     <FicheCommerce
                       magasin={selectionne}
-                      depart={depart}
                       enregistrement={choixEnCours === cleIdentiteOsm(selectionne)}
                       onChoisir={() => onChoisir(selectionne)}
                       onFermer={() => setSelectionnee(null)}
@@ -765,7 +765,15 @@ function ListeDesCommerces({
                     <MapPin size={14} aria-hidden="true" />
                     {choixEnCours === cle ? "Enregistrement…" : "Choisir ce commerce"}
                   </button>
-                  <LienItineraire magasin={magasin} depart={null} />
+                  {/* ⚠️ PAS DE BOUTON SANS COORDONNÉES. Un itinéraire vers
+                      un point inconnu n'existe pas ; la ligne reste, le
+                      bouton disparaît. */}
+                  {coordonneesFiables(magasin) && (
+                    <ChoixItineraire
+                      vers={{ lat: magasin.lat, lon: magasin.lon }}
+                      nomDuCommerce={magasin.name}
+                    />
+                  )}
                 </div>
               )}
             </div>
@@ -780,15 +788,20 @@ function ListeDesCommerces({
    LA FICHE, SUR LA CARTE
    ══════════════════════════════════════════════════════════════════════════ */
 
+/*
+ * ⚠️ LA FICHE NE REÇOIT PLUS LE POINT DE DÉPART, ET C'EST VOULU. Elle le
+ * transmettait au lien d'itinéraire ; le sélecteur n'en veut pas, parce que
+ * les applications de navigation déterminent la position de l'appareil
+ * elles-mêmes. Garder la propriété « au cas où » laisserait croire qu'elle
+ * sert encore, et inviterait à la renvoyer un jour à un tiers.
+ */
 function FicheCommerce({
   magasin,
-  depart,
   enregistrement,
   onChoisir,
   onFermer,
 }: {
   readonly magasin: MagasinOsm;
-  readonly depart: Point | null;
   readonly enregistrement: boolean;
   readonly onChoisir: () => void;
   readonly onFermer: () => void;
@@ -824,35 +837,30 @@ function FicheCommerce({
           <MapPin size={14} aria-hidden="true" />
           {enregistrement ? "Enregistrement…" : "Choisir ce commerce"}
         </button>
-        <LienItineraire magasin={magasin} depart={depart} />
+        {coordonneesFiables(magasin) && (
+          <ChoixItineraire
+            vers={{ lat: magasin.lat, lon: magasin.lon }}
+            nomDuCommerce={magasin.name}
+            compact
+          />
+        )}
       </div>
     </div>
   );
 }
 
-/**
- * Le bouton d'itinéraire.
+/*
+ * ⚠️ `LienItineraire` A ÉTÉ REMPLACÉ PAR `ChoixItineraire`.
  *
- * ⚠️ `rel="noopener noreferrer"` ET `target="_blank"`. Sans `noreferrer`,
- * l'URL de la page de courses partirait dans l'en-tête `Referer` du service
- * d'itinéraire — et cette URL dit que l'élève fait ses courses.
+ * Il ouvrait OpenStreetMap directement, en y joignant la position de l'élève
+ * comme point de départ. Le sélecteur fait deux choses de mieux :
+ *
+ *   · il laisse choisir Google Maps, Waze ou Plans — les applications que les
+ *     gens ont réellement installées, et dont le guidage vocal fonctionne ;
+ *   · il n'envoie plus AUCUN point de départ. Les trois savent déterminer la
+ *     position de l'appareil elles-mêmes : ne rien transmettre veut dire
+ *     qu'aucune n'apprend d'où part cet élève.
+ *
+ * Conséquence : ouvrir un itinéraire ne dépend plus de la géolocalisation.
+ * Un élève qui a cherché par ville peut se faire guider comme les autres.
  */
-function LienItineraire({
-  magasin,
-  depart,
-}: {
-  readonly magasin: MagasinOsm;
-  readonly depart: Point | null;
-}) {
-  return (
-    <a
-      href={urlItineraire({ lat: magasin.lat, lon: magasin.lon }, depart)}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="pressable inline-flex min-h-[44px] items-center gap-2 rounded-control border border-border px-3 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-info hover:text-info focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 motion-reduce:transition-none"
-    >
-      <Navigation size={14} aria-hidden="true" />
-      Itinéraire
-    </a>
-  );
-}

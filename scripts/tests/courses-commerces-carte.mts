@@ -280,43 +280,81 @@ test("S-14 — UN MARQUEUR PAR COMMERCE, NI PLUS NI MOINS", () => {
   );
 });
 
-test("S-15 — AUCUN REGROUPEMENT, AUCUN FILTRE DE ZOOM", () => {
+test("S-15 — LE REGROUPEMENT NE CACHE AUCUN COMMERCE POUR DE BON", async () => {
   /*
-   * ⚠️ PAS DE « CLUSTER ». Trois magasins masqués derrière un chiffre, c'est
-   * trois commerces que l'élève ne peut pas choisir, et l'énoncé demande que
-   * les marqueurs correspondent EXACTEMENT aux résultats.
+   * ════════════════════════════════════════════════════════════════════════
+   * ⚠️ CE CONTRÔLE A ÉTÉ RETOURNÉ, ET LE REVIREMENT EST ASSUMÉ
+   * ════════════════════════════════════════════════════════════════════════
+   * Il interdisait tout regroupement, et sa raison était bonne : trois
+   * magasins masqués derrière un chiffre, ce sont trois commerces que l'élève
+   * ne peut pas choisir. Le regroupement est désormais DEMANDÉ — parce que
+   * dans une ville dense, soixante pastilles superposées ne se choisissent pas
+   * davantage.
+   *
+   * Le risque n'a pas disparu, il est écarté autrement. Ce qu'il faut
+   * garantir n'est plus « aucun amas » mais : TOUT AMAS SE DÉPLIE, et au zoom
+   * rapproché il n'y en a plus du tout. C'est ce que ce contrôle mesure
+   * maintenant, et `M-08` le mesure dans le détail.
    */
   const colles = Array.from({ length: 12 }, (_, i) =>
     magasin({ osmId: i + 1, name: `M${i}`, lat: 43.1364 + i * 0.00001, lon: 5.9334 }),
   );
-  assert.equal(marqueursDepuisMagasins(colles, null).length, 12);
-  for (const interdit of ["cluster", "Cluster", "supercluster"]) {
-    assert.ok(!CODE_CARTE.includes(interdit) && !CODE_VUE.includes(interdit), interdit);
-  }
+  // ⚠️ LES DOUZE SONT DANS LA SOURCE. Le regroupement est une affaire
+  // d'AFFICHAGE : il ne retire aucune entité, il les dessine ensemble.
+  const { collectionDeMagasins } = await import("../../lib/cartographie/vue-magasins");
+  assert.equal(collectionDeMagasins(colles).features.length, 12);
+
+  // Un amas mène toujours quelque part : on demande à la source le zoom où il
+  // éclate, plutôt qu'un zoom fixe qui le laisserait parfois intact.
+  assert.match(CODE_CARTE, /getClusterExpansionZoom/);
+  // Et au-delà de ce zoom, plus aucun amas : chaque commerce redevient une
+  // pastille qu'on peut toucher.
+  assert.match(CODE_CARTE, /clusterMaxZoom: 13/);
+  // La liste, elle, n'a jamais regroupé quoi que ce soit : les douze y sont.
+  assert.ok(!CODE_RECHERCHE.includes("cluster"), "la liste ne regroupe rien");
 });
 
-test("S-16 — LA SÉLECTION CIRCULE DANS LES DEUX SENS, SUR LA MÊME CLÉ", () => {
+test("S-16 — LA SÉLECTION CIRCULE DANS LES DEUX SENS, SUR LA MÊME CLÉ", async () => {
+  const { collectionDeMagasins } = await import("../../lib/cartographie/vue-magasins");
   const trouves = [magasin({ osmId: 7, name: "Choisi" }), magasin({ osmId: 8, name: "Autre" })];
   const cible = cleIdentiteOsm(trouves[0]!);
-  const marqueurs = marqueursDepuisMagasins(trouves, cible);
+  /*
+   * ⚠️ LA CLÉ DE L'ENTITÉ EST L'IDENTITÉ OSM, comme celle de la ligne de
+   * liste. C'est ce qui fait circuler la sélection dans les deux sens sans
+   * table de correspondance à maintenir — et cela n'a pas changé en passant
+   * des marqueurs du DOM à une source GeoJSON.
+   */
+  const collection = collectionDeMagasins(trouves);
   assert.deepEqual(
-    marqueurs.map((m) => m.selectionne),
-    [true, false],
-    "sélectionner dans la liste met en évidence sur la carte",
+    collection.features.map((f) => f.properties.cle),
+    trouves.map((m) => cleIdentiteOsm(m)),
   );
-  // Et le marqueur rend la même clé au clic : aucune table de correspondance.
-  assert.ok(CODE_CARTE.includes("selection.current(marqueur.cle)"));
+  assert.equal(collection.features[0]!.properties.cle, cible);
+
+  // Carte → liste : le clic lit la clé de l'entité et la remonte au parent.
+  assert.ok(CODE_CARTE.includes("selection.current(cle)"));
+  assert.ok(CODE_CARTE.includes("properties?.cle"));
+  // Liste → carte : la mise en évidence passe par un filtre sur cette clé.
+  assert.ok(CODE_CARTE.includes('["==", ["get", "cle"], selectionnee ?? ""]'));
   assert.ok(CODE_RECHERCHE.includes("onSelectionner={(cle) => {"));
 });
 
-test("S-17 — LE MARQUEUR SÉLECTIONNÉ EST DISTINCT, ET PAS SEULEMENT PAR LA COULEUR", () => {
-  // Une simple différence de teinte disparaît quand deux marqueurs se
-  // chevauchent : le sélectionné est plus GRAND et passe AU-DESSUS.
-  assert.ok(CODE_CARTE.includes("marqueur.selectionne ? 38 : 28"), "taille distincte");
-  assert.ok(CODE_CARTE.includes('marqueur.selectionne ? "2" : "1"'), "empilement distinct");
-  // Et la position de l'élève est une forme différente, pas une autre couleur.
-  assert.ok(CODE_CARTE.includes("borderRadius"), "un disque pour l'élève");
-  assert.ok(CODE_CARTE.includes("elementDeDepart"));
+test("S-17 — LE COMMERCE CHOISI EST DISTINCT, ET PAS SEULEMENT PAR LA COULEUR", () => {
+  /*
+   * ⚠️ MESURÉ SUR LES COUCHES, PLUS SUR DES ÉLÉMENTS DU DOM. La propriété n'a
+   * pas changé : une simple différence de teinte disparaît quand deux
+   * pastilles se chevauchent. Le choisi est donc PLUS GROS, et sa couche est
+   * ajoutée APRÈS les autres — donc dessinée au-dessus.
+   */
+  assert.match(CODE_CARTE, /"circle-radius": 13/, "le choisi est plus grand");
+  assert.match(CODE_CARTE, /"circle-radius": 9/, "les autres sont plus petits");
+  const iPoint = CODE_CARTE.indexOf("id: COUCHE_POINT");
+  const iChoisi = CODE_CARTE.indexOf("id: COUCHE_CHOISI");
+  assert.ok(iPoint > 0 && iChoisi > iPoint, "le choisi est dessiné par-dessus");
+  // Et la position de l'élève reste une forme différente, pas une autre
+  // couleur : un disque du DOM, jamais une pastille de la source.
+  assert.match(CODE_CARTE, /borderRadius/);
+  assert.match(CODE_CARTE, /elementDeDepart/);
 });
 
 test("S-18 — LA MARQUE N'EST PAS RÉPÉTÉE QUAND LE NOM LA DIT DÉJÀ", () => {
@@ -442,10 +480,15 @@ test("S-25 — SANS POSITION PARTAGÉE, L'ITINÉRAIRE NE DIVULGUE RIEN", () => {
 });
 
 test("S-26 — LE LIEN D'ITINÉRAIRE NE FUIT PAS L'URL DE LA PAGE", () => {
-  // Sans `noreferrer`, l'URL de la page de courses partirait dans le `Referer`
-  // du service d'itinéraire — et cette URL dit que l'élève fait ses courses.
-  assert.ok(CODE_RECHERCHE.includes('rel="noopener noreferrer"'));
-  assert.ok(CODE_RECHERCHE.includes('target="_blank"'));
+  // ⚠️ LE LIEN A CHANGÉ DE FICHIER : il vit dans le sélecteur d'application
+  // (`ChoixItineraire`) depuis que l'élève choisit entre Google Maps, Waze et
+  // Plans. La garantie, elle, est la même — sans `noreferrer`, l'URL de la
+  // page de courses partirait dans le `Referer` du service de navigation, et
+  // cette URL dit que l'élève fait ses courses.
+  const choix = sansProse(lire("../../components/student/ChoixItineraire.tsx"));
+  assert.ok(choix.includes('rel="noopener noreferrer"'));
+  assert.ok(choix.includes('target="_blank"'));
+  assert.ok(CODE_RECHERCHE.includes("<ChoixItineraire"), "et il est bien monté par l'écran");
 });
 
 /* ══════════════════════════════════════════════════════════════════════════

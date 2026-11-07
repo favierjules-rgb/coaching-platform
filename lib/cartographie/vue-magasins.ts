@@ -221,3 +221,98 @@ export function urlItineraire(vers: Point, depuis: Point | null): string {
   const route = `${n(depuis.lat)},${n(depuis.lon)};${n(vers.lat)},${n(vers.lon)}`;
   return `https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=${encodeURIComponent(route)}`;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   4. LES COMMERCES, EN GeoJSON — POUR LE REGROUPEMENT
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Des coordonnées EXPLOITABLES, ou rien.
+ *
+ * ⚠️ UN COMMERCE SANS COORDONNÉES FIABLES RESTE DANS LA LISTE, SANS MARQUEUR.
+ * Il a un nom, une adresse, et l'élève peut le choisir : l'écarter de la liste
+ * lui retirerait un commerce qui existe. Mais le poser sur la carte
+ * demanderait d'inventer un point, et un marqueur faux est pire qu'un marqueur
+ * absent — il envoie quelqu'un au mauvais endroit.
+ *
+ * ⚠️ EN PRATIQUE, AUCUN N'ARRIVE JUSQU'ICI : `normaliserElementOsm` écarte dès
+ * la lecture tout élément sans latitude ni longitude valides. Ce filtre est
+ * donc une SECONDE BARRIÈRE, pas le garde-fou principal — et c'est délibéré :
+ * le jour où la source changera, la carte ne doit pas se mettre à inventer.
+ */
+export function coordonneesFiables(magasin: {
+  readonly lat: number;
+  readonly lon: number;
+}): boolean {
+  return (
+    Number.isFinite(magasin.lat) &&
+    Number.isFinite(magasin.lon) &&
+    Math.abs(magasin.lat) <= 90 &&
+    Math.abs(magasin.lon) <= 180 &&
+    // ⚠️ L'ÎLE NULLE. `0,0` est au large du golfe de Guinée : c'est la valeur
+    // qu'on obtient quand deux champs vides ont été additionnés quelque part,
+    // jamais celle d'une épicerie française.
+    !(magasin.lat === 0 && magasin.lon === 0)
+  );
+}
+
+/** Ce qu'une entité GeoJSON porte, et que les couches savent lire. */
+export interface ProprietesDeCommerce {
+  readonly cle: string;
+  readonly nom: string;
+  readonly marque: string | null;
+}
+
+export interface EntiteDeCommerce {
+  readonly type: "Feature";
+  readonly geometry: { readonly type: "Point"; readonly coordinates: readonly [number, number] };
+  readonly properties: ProprietesDeCommerce;
+}
+
+export interface CollectionDeCommerces {
+  readonly type: "FeatureCollection";
+  readonly features: readonly EntiteDeCommerce[];
+}
+
+/**
+ * Les commerces en GeoJSON, prêts pour une source à regroupement.
+ *
+ * ════════════════════════════════════════════════════════════════════════════
+ * ⚠️ POURQUOI UNE SOURCE ET NON PLUS UN MARQUEUR PAR COMMERCE
+ * ════════════════════════════════════════════════════════════════════════════
+ * Chaque marqueur était un élément du DOM, créé, posé, puis retiré à chaque
+ * changement de sélection. Soixante commerces, soixante éléments recréés au
+ * moindre clic — et un oubli de nettoyage suffisait à les empiler en double.
+ *
+ * Une source GeoJSON renverse le problème : on lui DONNE la liste, elle
+ * s'occupe du reste. Il ne peut pas y avoir de doublon, parce qu'il n'y a pas
+ * d'accumulation : `setData` remplace. Et c'est elle qui sait regrouper les
+ * points qui se chevauchent, ce qu'aucun marqueur DOM ne sait faire.
+ *
+ * ⚠️ `cle` EST L'IDENTITÉ OSM, la MÊME que celle de la liste. C'est ce qui
+ * fait circuler la sélection dans les deux sens sans table de correspondance.
+ */
+export function collectionDeMagasins(magasins: readonly MagasinOsm[]): CollectionDeCommerces {
+  const vues = new Set<string>();
+  const features: EntiteDeCommerce[] = [];
+  for (const magasin of magasins) {
+    if (!coordonneesFiables(magasin)) continue;
+    const cle = cleIdentiteOsm(magasin);
+    // ⚠️ UNE ENTITÉ PAR IDENTITÉ. La déduplication a déjà eu lieu en amont ;
+    // celle-ci garantit qu'un doublon qui passerait ne devienne pas deux
+    // points superposés, impossibles à distinguer et à choisir.
+    if (vues.has(cle)) continue;
+    vues.add(cle);
+    features.push({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [magasin.lon, magasin.lat] },
+      properties: { cle, nom: magasin.name, marque: marqueDistincte(magasin.name, magasin.brand) },
+    });
+  }
+  return { type: "FeatureCollection", features };
+}
+
+/** Les commerces que la carte ne peut pas montrer — pour pouvoir le DIRE. */
+export function magasinsSansPoint(magasins: readonly MagasinOsm[]): readonly MagasinOsm[] {
+  return magasins.filter((m) => !coordonneesFiables(m));
+}
