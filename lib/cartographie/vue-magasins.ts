@@ -9,7 +9,8 @@ import { cleIdentiteOsm, type MagasinOsm } from "@/lib/nutrition/magasins-osm";
  * Le cadrage, les marqueurs et l'itinéraire sont des DÉCISIONS, et une décision
  * se teste. Tant qu'elles vivaient dans le composant, il fallait un navigateur
  * avec WebGL pour prouver qu'un marqueur correspond bien au commerce qu'il
- * désigne. Ici, tout est pur : ni MapLibre, ni MapTiler, ni DOM, ni réseau.
+ * désigne. Ici, tout est pur : ni MapLibre, ni fournisseur de fond, ni DOM,
+ * ni réseau.
  *
  * ⚠️ AUCUNE RÉFÉRENCE À UN FOURNISSEUR DE CARTE. Ce module ne sait pas qui
  * dessine. Il dit seulement « voilà les points, voilà le cadre ».

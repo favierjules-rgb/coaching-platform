@@ -47,7 +47,11 @@ import {
   requeteCommercesDansCommune,
 } from "../../lib/openstreetmap/overpass";
 import { cadreDeLaRecherche } from "../../lib/cartographie/vue-magasins";
-import { configurationCarte, messageCarteIndisponible } from "../../lib/cartographie/maptiler";
+import {
+  STYLE_PAR_DEFAUT,
+  configurationCarte,
+  messageCarteIndisponible,
+} from "../../lib/cartographie/fond-de-carte";
 import {
   SITUATIONS_DE_CHARGEMENT,
   enChargement,
@@ -390,36 +394,52 @@ test("F-18 — LE MODE GPS N'EMPRUNTE PAS LE CENTRE DE COMMUNE, ET RÉCIPROQUEME
   );
 });
 
-test("F-19 — « PAS DE CLÉ » ET « PAS DE COORDONNÉES » SONT DEUX MESSAGES", () => {
+test("F-19 — « FOND MAL CONFIGURÉ » ET « AUCUN POINT » SONT DEUX MESSAGES", () => {
   /*
    * ⚠️ LES CONFONDRE ENVOIE CHERCHER LE PROBLÈME AU MAUVAIS ENDROIT : on irait
    * vérifier une variable d'environnement alors que c'est la recherche qui n'a
    * rien rendu, ou l'inverse. C'est exactement ce qui s'est passé en Preview.
+   *
+   * ⚠️ CE TEST A SURVÉCU AU CHANGEMENT DE FOURNISSEUR, ET IL A CHANGÉ DE
+   * PORTÉE. Il opposait « pas de clé » à « pas de coordonnées » ; il n'y a
+   * plus de clé, donc plus de première cause. Ce qui reste à distinguer, c'est
+   * un fond MAL CONFIGURÉ — seule une surcharge d'environnement peut encore le
+   * provoquer — d'une recherche sans résultat géolocalisable.
    */
-  const sansCle = messageCarteIndisponible("cle_absente");
-  assert.match(sansCle, /n'est pas configurée/i);
+  const malConfigure = messageCarteIndisponible("style_invalide");
+  assert.match(malConfigure, /mal configuré/i);
   assert.match(CODE_CARTE, /Rien à afficher sur la carte/, "le cas « aucun point » a son message");
   assert.ok(
     !new RegExp("Rien à afficher[^\"]*configur", "i").test(CODE_CARTE),
     "et il ne parle pas de configuration",
   );
-  // L'ordre compte : sans clé, la question des coordonnées ne se pose pas.
-  const iCle = CODE_CARTE.indexOf('config.statut === "indisponible"');
+  // L'ordre compte : un fond refusé rend la question des coordonnées sans objet.
+  const iFond = CODE_CARTE.indexOf('config.statut === "indisponible"');
   const iPoints = CODE_CARTE.indexOf("cadreDeLaRecherche(magasins, depart, centreCommune) === null");
-  assert.ok(iCle > 0 && iPoints > iCle, "la clé est jugée avant les coordonnées");
+  assert.ok(iFond > 0 && iPoints > iFond, "le fond est jugé avant les coordonnées");
 });
 
-test("F-20 — SANS CLÉ, LA LISTE RESTE UTILISABLE ET LA CARTE LE DIT", () => {
-  for (const raison of ["cle_absente", "cle_par_defaut", "style_interdit"] as const) {
+test("F-20 — UN FOND REFUSÉ LAISSE LA LISTE UTILISABLE, ET LA CARTE LE DIT", () => {
+  for (const raison of ["style_invalide", "origine_interdite"] as const) {
     assert.match(messageCarteIndisponible(raison), /liste des commerces reste utilisable/i);
   }
-  // Une clé invalide côté fournisseur (restriction d'origine, quota) se voit à
-  // l'exécution : MapLibre émet `error`, et l'écran bascule sur un message.
+  /*
+   * Une panne côté fournisseur (tuile absente, service arrêté, refus) ne se
+   * voit qu'à l'exécution : MapLibre émet `error`, et l'écran bascule sur un
+   * message au lieu de rester gris.
+   *
+   * ⚠️ ET CE RISQUE A GRANDI AVEC LA MIGRATION, PAS DIMINUÉ. Le fournisseur
+   * actuel ne promet aucune disponibilité et peut s'arrêter sans préavis : le
+   * repli n'est plus un garde-fou théorique, c'est le plan de secours réel.
+   */
   assert.match(CODE_CARTE, /instance\.on\("error"/);
   assert.match(CODE_CARTE, /momentanément indisponible/);
-  // Et la configuration distingue bien une clé absente d'une clé de démo.
-  assert.equal(configurationCarte({ cle: "" }).statut, "indisponible");
-  assert.equal(configurationCarte({ cle: "une-vraie-cle" }).statut, "prete");
+  assert.match(CODE_CARTE, /a été refusé/, "un refus amont a son propre message");
+  // Et la configuration par défaut, elle, n'exige rien pour être prête.
+  const defaut = configurationCarte({ styleUrl: undefined });
+  assert.equal(defaut.statut, "prete");
+  if (defaut.statut === "prete") assert.equal(defaut.urlDuStyle, STYLE_PAR_DEFAUT);
+  assert.equal(configurationCarte({ styleUrl: "https://exemple.fr/s" }).statut, "indisponible");
 });
 
 /* ══════════════════════════════════════════════════════════════════════════

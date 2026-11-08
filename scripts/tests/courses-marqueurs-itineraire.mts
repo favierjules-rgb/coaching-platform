@@ -159,10 +159,40 @@ test("M-05 — LE COMMERCE CHOISI A SA PROPRE COUCHE, AU-DESSUS DES AUTRES", () 
   const iPoint = CODE_CARTE.indexOf("id: COUCHE_POINT");
   const iChoisi = CODE_CARTE.indexOf("id: COUCHE_CHOISI");
   assert.ok(iPoint > 0 && iChoisi > iPoint, "la couche du choisi est ajoutée APRÈS, donc au-dessus");
-  // Vert pour le choisi, neutre pour les autres — et les deux viennent du thème.
-  assert.match(CODE_CARTE, /const CHOISI = "var\(--success\)"/);
-  assert.match(CODE_CARTE, /const NEUTRE = "var\(--primary\)"/);
-  assert.ok(!/#[0-9a-fA-F]{6}/.test(CODE_CARTE.split("elementDeDepart")[0] ?? ""), "aucune couleur en dur");
+  /*
+   * Vert pour le choisi, neutre pour les autres — et les deux viennent du
+   * thème.
+   *
+   * ⚠️ CE TEST VERROUILLAIT UN DÉFAUT, ET IL A ÉTÉ CORRIGÉ AVEC LUI. Il
+   * exigeait littéralement `const CHOISI = "var(--success)"`. Or MapLibre
+   * analyse les couleurs lui-même, hors du moteur de style du navigateur : il
+   * refuse `var(--…)` et REJETTE LA COUCHE ENTIÈRE. Mesuré dans Chromium —
+   * sept erreurs de validation, aucune couche ajoutée, aucun marqueur, aucun
+   * amas. L'intention du test était juste (la couleur vient du thème), le
+   * mécanisme exigé ne l'était pas.
+   *
+   * CE QUI EST EXIGÉ DÉSORMAIS : le jeton reste la source, et il est RÉSOLU à
+   * l'exécution sur le conteneur de la carte.
+   */
+  assert.match(CODE_CARTE, /const JETON_CHOISI = "--success"/);
+  assert.match(CODE_CARTE, /const JETON_NEUTRE = "--primary"/);
+  assert.match(CODE_CARTE, /const CHOISI = couleurDuJeton\(racine, JETON_CHOISI, REPLI_CHOISI\)/);
+  assert.match(CODE_CARTE, /const NEUTRE = couleurDuJeton\(racine, JETON_NEUTRE, REPLI_NEUTRE\)/);
+  assert.match(CODE_CARTE, /getComputedStyle\(element\)\.getPropertyValue\(jeton\)/);
+  /*
+   * ⚠️ LES SEULES COULEURS LITTÉRALES SONT LES REPLIS, ET ELLES SONT NOMMÉES.
+   * Un hexadécimal posé directement dans une couche contournerait le thème ;
+   * un repli nommé ne sert que si la feuille de style n'est pas appliquée.
+   */
+  const avantLeMarqueur = CODE_CARTE.split("elementDeDepart")[0] ?? "";
+  for (const ligne of avantLeMarqueur.split("\n").filter((l) => /#[0-9a-fA-F]{6}/.test(l))) {
+    assert.match(ligne, /^const REPLI_[A-Z]+ = "#[0-9a-fA-F]{6}";$/, `couleur en dur : ${ligne.trim()}`);
+  }
+  assert.equal(
+    (avantLeMarqueur.match(/#[0-9a-fA-F]{6}/g) ?? []).length,
+    3,
+    "trois replis, un par jeton, et rien d'autre",
+  );
   // Et il est PLUS GROS : une différence de teinte seule disparaît au
   // chevauchement.
   assert.match(CODE_CARTE, /"circle-radius": 13/);

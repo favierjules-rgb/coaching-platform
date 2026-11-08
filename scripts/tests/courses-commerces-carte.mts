@@ -30,11 +30,12 @@ import {
 } from "../../lib/cartographie/vue-magasins";
 import {
   ATTRIBUTIONS_REQUISES,
+  ORIGINE_FOND_DE_CARTE,
   STYLE_PAR_DEFAUT,
-  cleEstParDefaut,
+  classerErreurDeCarte,
   configurationCarte,
   messageCarteIndisponible,
-} from "../../lib/cartographie/maptiler";
+} from "../../lib/cartographie/fond-de-carte";
 import {
   ANTI_RAFALE_MS,
   SAISIE_MAX,
@@ -67,7 +68,7 @@ function sansProse(source: string): string {
 
 const CODE_CARTE = sansProse(lire("../../components/student/CarteDesMagasins.tsx"));
 const CODE_RECHERCHE = sansProse(lire("../../components/student/RechercheDeCommerces.tsx"));
-const CODE_MAPTILER = sansProse(lire("../../lib/cartographie/maptiler.ts"));
+const CODE_FOND = sansProse(lire("../../lib/cartographie/fond-de-carte.ts"));
 const CODE_VUE = sansProse(lire("../../lib/cartographie/vue-magasins.ts"));
 const CODE_ANNUAIRE = sansProse(lire("../../lib/communes/annuaire.ts"));
 const CODE_DECOUVERTE = sansProse(lire("../../lib/openstreetmap/decouverte.ts"));
@@ -98,7 +99,7 @@ function magasin(p: Partial<MagasinOsm>): MagasinOsm {
    ══════════════════════════════════════════════════════════════════════════ */
 
 test("S-01 — AUCUNE MIGRATION, AUCUNE TABLE NOUVELLE DANS CE LOT", () => {
-  for (const code of [CODE_MAPTILER, CODE_VUE, CODE_ANNUAIRE]) {
+  for (const code of [CODE_FOND, CODE_VUE, CODE_ANNUAIRE]) {
     for (const interdit of ["alter table", "create table", "insert into", ".upsert(", ".insert("]) {
       assert.ok(!code.toLowerCase().includes(interdit), `aucune écriture (${interdit})`);
     }
@@ -126,36 +127,59 @@ test("S-02 — LA CARTE NE CHERCHE RIEN : aucun appel, aucune route, aucune comm
 });
 
 test("S-03 — LE MOTEUR DE RECHERCHE NE CONNAÎT PAS LE FOURNISSEUR DE CARTE", () => {
-  // Réciproque du précédent : aucun module de recherche ne nomme MapTiler ni
-  // MapLibre. Changer de fournisseur ne doit toucher qu'un seul fichier.
+  /*
+   * Réciproque du précédent : aucun module de recherche ne nomme le
+   * fournisseur de fond ni MapLibre.
+   *
+   * ⚠️ CETTE SÉPARATION VIENT D'ÊTRE ÉPROUVÉE POUR DE BON. Passer de MapTiler
+   * à OpenFreeMap n'a touché ni `lib/openstreetmap/`, ni `lib/communes/`, ni
+   * les routes : un seul fichier de configuration a été réécrit. C'est
+   * exactement ce que ce contrôle protège.
+   */
   for (const [nom, code] of [
     ["découverte", CODE_DECOUVERTE],
     ["annuaire des communes", CODE_ANNUAIRE],
     ["route /communes", CODE_ROUTE_COMMUNES],
     ["route /search", CODE_ROUTE_SEARCH],
   ] as const) {
-    for (const interdit of ["maptiler", "maplibre", "MapTiler", "MapLibre", "tuile"]) {
+    for (const interdit of ["openfreemap", "OpenFreeMap", "maptiler", "maplibre", "MapLibre", "tuile"]) {
       assert.ok(!code.includes(interdit), `${nom} ignore la cartographie (${interdit})`);
     }
   }
 });
 
-test("S-04 — UN SEUL ENDROIT CONSTRUIT L'URL DU FOURNISSEUR", () => {
+test("S-04 — UN SEUL ENDROIT CONNAÎT L'ORIGINE DU FOURNISSEUR", () => {
+  /*
+   * ⚠️ LA MIGRATION A PROUVÉ L'INTÉRÊT DE CE CONTRÔLE. L'origine n'est citée
+   * qu'à un seul endroit du code applicatif : changer de fournisseur, c'est
+   * réécrire ce fichier-là, et rien d'autre.
+   */
   assert.equal(
-    (CODE_MAPTILER.match(/api\.maptiler\.com/g) ?? []).length,
+    (CODE_FOND.match(/tiles\.openfreemap\.org/g) ?? []).length,
     1,
-    "une seule occurrence : changer de fournisseur, c'est réécrire une fonction",
+    "une seule occurrence : la constante d'origine",
   );
-  assert.ok(!CODE_CARTE.includes("api.maptiler.com"), "le composant ne compose aucune URL");
-  assert.ok(!CODE_RECHERCHE.includes("api.maptiler.com"));
+  assert.equal(ORIGINE_FOND_DE_CARTE, "https://tiles.openfreemap.org");
+  assert.ok(STYLE_PAR_DEFAUT.startsWith(ORIGINE_FOND_DE_CARTE), "le style en découle");
+  assert.ok(!CODE_CARTE.includes("openfreemap"), "le composant ne compose aucune URL");
+  assert.ok(!CODE_RECHERCHE.includes("openfreemap"));
+  // Et l'ancien fournisseur a complètement disparu du code applicatif.
+  for (const [nom, code] of [
+    ["fond de carte", CODE_FOND],
+    ["composant carte", CODE_CARTE],
+    ["recherche", CODE_RECHERCHE],
+  ] as const) {
+    assert.ok(!/maptiler/i.test(code), `${nom} ne mentionne plus l'ancien fournisseur`);
+  }
 });
 
 test("S-05 — AUCUN GÉOCODAGE CHEZ LE FOURNISSEUR DE CARTE", () => {
   // Les coordonnées viennent d'OSM, déjà présentes dans `MagasinOsm`. Un
-  // géocodage chez MapTiler ferait payer des « sessions de recherche » ET lui
-  // ferait connaître chaque commerce affiché et chaque ville tapée.
+  // géocodage chez le fournisseur de fond lui ferait connaître chaque
+  // commerce affiché et chaque ville tapée — exactement le mélange que
+  // l'architecture refuse.
   for (const interdit of ["geocoding", "geocode", "/geocoding/"]) {
-    assert.ok(!CODE_MAPTILER.includes(interdit) && !CODE_CARTE.includes(interdit), interdit);
+    assert.ok(!CODE_FOND.includes(interdit) && !CODE_CARTE.includes(interdit), interdit);
   }
   // ⚠️ LUE DANS LA SOURCE BRUTE : cette garantie est écrite en commentaire, et
   // `sansProse` retire précisément les commentaires.
@@ -166,99 +190,379 @@ test("S-05 — AUCUN GÉOCODAGE CHEZ LE FOURNISSEUR DE CARTE", () => {
 });
 
 /* ══════════════════════════════════════════════════════════════════════════
-   17 à 19. LA CLÉ, SES RESTRICTIONS, ET L'INDISPONIBILITÉ
+   17 à 19. UN FOURNISSEUR SANS CLÉ, SES SEULES PANNES, ET L'ATTRIBUTION
+
+   ⚠️ CETTE SECTION A CHANGÉ DE NATURE AVEC LA MIGRATION. Elle vérifiait une
+   clé : sa présence, sa validité, son encodage, sa restriction d'origine, son
+   plafond de dépense. Il n'y a plus de clé. Ce qui se vérifie désormais, c'est
+   que l'absence de clé est RÉELLE — rien à renseigner pour que la carte
+   marche — et que la seule porte restée ouverte, la surcharge de style, ne
+   laisse pas sortir de l'origine déclarée dans la CSP.
    ══════════════════════════════════════════════════════════════════════════ */
 
-test("S-06 — SANS CLÉ, LA CARTE EST « INDISPONIBLE » ET LA LISTE RESTE UTILISABLE", () => {
-  for (const cle of [undefined, "", "   "]) {
-    const config = configurationCarte({ cle });
-    assert.equal(config.statut, "indisponible");
-    if (config.statut === "indisponible") {
-      assert.equal(config.raison, "cle_absente");
-      assert.match(messageCarteIndisponible(config.raison), /liste des commerces reste utilisable/i);
-    }
-  }
-});
-
-test("S-07 — LA CLÉ DE DÉMONSTRATION EST REFUSÉE", () => {
-  // MapTiler : « la clé par défaut n'a aucune protection ». L'accepter
-  // mettrait en production une clé que n'importe qui peut épuiser.
-  assert.ok(cleEstParDefaut("get_your_own_key"));
-  assert.ok(cleEstParDefaut("  GET_YOUR_OWN_KEY  "), "casse et espaces comprises");
-  assert.ok(!cleEstParDefaut("vraie_cle_123"));
-  const config = configurationCarte({ cle: "get_your_own_key" });
-  assert.equal(config.statut, "indisponible");
-  if (config.statut === "indisponible") assert.equal(config.raison, "cle_par_defaut");
-});
-
-test("S-08 — AVEC UNE CLÉ, L'URL EST COMPOSÉE ET LA CLÉ ENCODÉE", () => {
-  const config = configurationCarte({ cle: "abc 123" });
-  assert.equal(config.statut, "prete");
-  if (config.statut !== "prete") return;
-  assert.equal(
-    config.urlDuStyle,
-    `https://api.maptiler.com/maps/${STYLE_PAR_DEFAUT}/style.json?key=abc%20123`,
-  );
-  assert.ok(!config.urlDuStyle.includes("abc 123"), "aucune espace brute dans une URL");
-});
-
-test("S-09 — UN STYLE 3D EST REFUSÉ : facturé à part, et logo imposé", () => {
-  for (const style of ["3d", "terrain-3d", "basic-3d"]) {
-    const config = configurationCarte({ cle: "k", style });
-    assert.equal(config.statut, "indisponible", style);
-    if (config.statut === "indisponible") assert.equal(config.raison, "style_interdit");
-  }
-  // Un style vide retombe sur le défaut, il n'est pas une erreur.
-  const defaut = configurationCarte({ cle: "k", style: "  " });
-  assert.equal(defaut.statut, "prete");
-});
-
-test("S-10 — LES DEUX ATTRIBUTIONS EXIGÉES SONT PRÉSENTES ET CLIQUABLES", () => {
+test("S-06 — SANS AUCUNE VARIABLE, LA CARTE EST PRÊTE", () => {
   /*
-   * MapTiler impose « © MapTiler » lié à sa page de copyright, et
-   * « © OpenStreetMap » lié à la sienne dès que les données viennent d'OSM —
-   * ce qui est le cas de tous ses fonds standards. Les deux, pas une.
+   * ⚠️ C'EST LE TEST DE NON-RÉGRESSION DE LA PANNE LA PLUS LONGUE DE CE
+   * CHANTIER. L'ancien fournisseur rendait « indisponible » dès que sa clé
+   * manquait, et elle manquait en Preview. Cet état n'existe plus : il n'y a
+   * rien à renseigner. Si un jour quelqu'un réintroduit une variable
+   * obligatoire, ce test tombe.
+   */
+  for (const styleUrl of [undefined, "", "   "]) {
+    const config = configurationCarte({ styleUrl });
+    assert.equal(config.statut, "prete", `sans surcharge (${JSON.stringify(styleUrl)})`);
+    if (config.statut !== "prete") continue;
+    assert.equal(config.urlDuStyle, STYLE_PAR_DEFAUT);
+    assert.equal(config.urlDuStyle, "https://tiles.openfreemap.org/styles/liberty");
+  }
+  // Et la lecture d'environnement n'exige pas davantage : la variable est
+  // facultative, ce que `configurationDepuisEnv` doit refléter sans détour.
+  assert.ok(
+    CODE_FOND.includes("process.env.NEXT_PUBLIC_CARTE_STYLE_URL"),
+    "la variable est lue littéralement, sinon Next ne la remplace pas",
+  );
+  assert.ok(!/process\.env\.NEXT_PUBLIC_[A-Z_]*(KEY|CLE|TOKEN)/.test(CODE_FOND), "aucune clé lue");
+});
+
+test("S-07 — UNE SURCHARGE ILLISIBLE OU NON CHIFFRÉE EST REFUSÉE", () => {
+  // Une variable publique est modifiable par qui déploie, pas seulement par
+  // qui écrit le code. Elle doit être validée comme une entrée.
+  for (const styleUrl of [
+    "pas une url",
+    "/styles/liberty",
+    "http://tiles.openfreemap.org/styles/liberty",
+    "javascript:alert(1)",
+  ]) {
+    const config = configurationCarte({ styleUrl });
+    assert.equal(config.statut, "indisponible", styleUrl);
+    if (config.statut === "indisponible") assert.equal(config.raison, "style_invalide", styleUrl);
+  }
+});
+
+test("S-08 — UNE SURCHARGE HORS DE L'ORIGINE DÉCLARÉE EST REFUSÉE, ET LE DIT", () => {
+  /*
+   * ⚠️ POURQUOI REFUSER PLUTÔT QUE LAISSER PASSER : la CSP n'ouvre qu'un
+   * hôte. Une URL ailleurs partirait, la politique la bloquerait, et il ne
+   * resterait qu'un cadre gris à déboguer. Le code préfère le dire.
+   */
+  for (const styleUrl of [
+    "https://api.maptiler.com/maps/streets/style.json",
+    "https://tiles.openfreemap.org.exemple.fr/styles/liberty",
+    "https://exemple.fr/styles/liberty",
+  ]) {
+    const config = configurationCarte({ styleUrl });
+    assert.equal(config.statut, "indisponible", styleUrl);
+    if (config.statut === "indisponible") assert.equal(config.raison, "origine_interdite", styleUrl);
+  }
+  // Un autre style SUR la bonne origine, lui, est accepté : la restriction
+  // porte sur l'hôte, pas sur le chemin.
+  const autre = configurationCarte({ styleUrl: `${ORIGINE_FOND_DE_CARTE}/styles/bright` });
+  assert.equal(autre.statut, "prete");
+});
+
+test("S-09 — CHAQUE INDISPONIBILITÉ GARDE LA LISTE UTILISABLE, SANS NOMMER PERSONNE", () => {
+  const raisons = ["style_invalide", "origine_interdite"] as const;
+  for (const raison of raisons) {
+    const message = messageCarteIndisponible(raison);
+    assert.match(message, /liste des commerces reste utilisable/i, raison);
+    // L'élève n'a que faire du nom du fournisseur : ce n'est pas son problème.
+    assert.ok(!/openfreemap/i.test(message), raison);
+    assert.ok(!/maptiler/i.test(message), raison);
+    assert.ok(!message.includes("http"), `aucune URL affichée (${raison})`);
+  }
+  // ⚠️ ET LA LISTE DES RAISONS EST EXHAUSTIVE : le type les énumère, et aucune
+  // n'est traitée par un joker.
+  assert.ok(
+    CODE_FOND.includes('export type RaisonFondIndisponible = "style_invalide" | "origine_interdite"'),
+    "les raisons sont nommées une par une",
+  );
+  assert.ok(!/default\s*:/.test(CODE_FOND), "aucun joker : ajouter une raison casse la compilation");
+});
+
+test("S-10 — LES ATTRIBUTIONS EXIGÉES SONT PRÉSENTES, CLIQUABLES, ET NON REPLIÉES", () => {
+  /*
+   * Le TileJSON d'OpenFreeMap porte « OpenFreeMap © OpenMapTiles Data from
+   * OpenStreetMap », et MapLibre l'affiche de lui-même. Cette liste est le
+   * filet : elle vérifie que les trois crédits sont exigés côté code, et
+   * qu'aucun n'est un texte mort.
    */
   const libelles = ATTRIBUTIONS_REQUISES.map((a) => a.libelle);
-  assert.ok(libelles.some((l) => l.includes("MapTiler")), "crédit MapTiler");
-  assert.ok(libelles.some((l) => l.includes("OpenStreetMap")), "crédit OpenStreetMap");
-  for (const attribution of ATTRIBUTIONS_REQUISES) {
-    assert.match(attribution.href, /^https:\/\//, "un lien, pas un texte mort");
+  for (const credit of ["OpenFreeMap", "OpenMapTiles", "OpenStreetMap"]) {
+    assert.ok(libelles.some((l) => l.includes(credit)), `crédit ${credit}`);
   }
-  // Et l'attribution n'est pas repliée : MapTiler exige qu'elle reste visible.
+  assert.equal(ATTRIBUTIONS_REQUISES.length, 3, "trois crédits, pas deux");
+  for (const attribution of ATTRIBUTIONS_REQUISES) {
+    assert.match(attribution.href, /^https:\/\//, `un lien, pas un texte mort (${attribution.libelle})`);
+  }
+  // Et l'attribution n'est pas repliée derrière un bouton.
   assert.ok(CODE_CARTE.includes("compact: false"), "attribution non repliée");
 });
 
-test("S-11 — LA CLÉ EST DOCUMENTÉE AVEC SA RESTRICTION D'ORIGINE", () => {
-  // Une clé publique sans restriction d'origine est une facture ouverte.
+test("S-11 — L'ABSENCE DE CLÉ EST DOCUMENTÉE, ET LE MARCHÉ CONCLU AVEC ELLE", () => {
+  /*
+   * ⚠️ UN SERVICE GRATUIT SANS SLA N'EST PAS UNE BONNE NOUVELLE SANS RÉSERVE.
+   * La documentation doit porter les deux faces : rien à renseigner, et aucune
+   * garantie de disponibilité. Celui qui déploiera dans six mois a le droit de
+   * savoir ce qui a été accepté.
+   */
   const exemple = lire("../../.env.example");
-  assert.ok(exemple.includes("NEXT_PUBLIC_MAPTILER_KEY"));
-  assert.ok(exemple.includes("NEXT_PUBLIC_MAPTILER_STYLE"));
-  assert.match(exemple, /Allowed HTTP origins/i, "la restriction d'origine est écrite");
-  assert.match(exemple, /plafond de dépense/i, "le plafond de dépense est écrit");
-  assert.match(exemple, /non commercial/i, "la limite de la formule gratuite est écrite");
+  // ⚠️ LE TEXTE EST UN COMMENTAIRE SUR PLUSIEURS LIGNES : « sans » et
+  // « garantie » peuvent être séparés par un retour à la ligne ET un `#`.
+  const prose = exemple.replace(/\n\s*#\s?/g, " ");
+  assert.ok(!exemple.includes("NEXT_PUBLIC_MAPTILER_KEY"), "l'ancienne clé a disparu");
+  assert.ok(!exemple.includes("NEXT_PUBLIC_MAPTILER_STYLE"), "l'ancien style a disparu");
+  assert.match(prose, /AUCUNE VARIABLE N'EST REQUISE/i, "l'absence d'obligation est écrite");
+  assert.match(prose, /sans\s+garantie/i, "l'absence de garantie est écrite");
+  assert.match(prose, /pr[eé]avis/i, "l'arrêt possible sans préavis est écrit");
+  assert.match(prose, /auto-h[eé]bergement/i, "la sortie de secours est écrite");
+  assert.ok(exemple.includes("NEXT_PUBLIC_CARTE_STYLE_URL"), "la surcharge facultative est nommée");
 });
 
-test("S-12 — AUCUNE CLÉ EN DUR DANS LE CODE", () => {
+test("S-12 — AUCUNE CLÉ NI JETON, NULLE PART", () => {
   for (const [nom, code] of [
-    ["config", CODE_MAPTILER],
+    ["fond de carte", CODE_FOND],
     ["carte", CODE_CARTE],
     ["recherche", CODE_RECHERCHE],
   ] as const) {
     assert.ok(!/key=[A-Za-z0-9]{8,}/.test(code), `aucune clé littérale (${nom})`);
+    assert.ok(!/[?&](key|apikey|api_key|access_token)=/i.test(code), `aucun paramètre de clé (${nom})`);
+    assert.ok(!/MAPTILER/.test(code), `aucune variable de l'ancien fournisseur (${nom})`);
   }
-  assert.ok(CODE_MAPTILER.includes("process.env.NEXT_PUBLIC_MAPTILER_KEY"));
+  /*
+   * ⚠️ ET C'EST STRUCTUREL, PAS UNE HYGIÈNE : il n'y a aucune clé à cacher.
+   * Ce test ne vérifie donc plus « la clé n'est pas en dur » mais « il n'y a
+   * pas de clé du tout » — ce qui est une garantie plus forte, et la raison
+   * pour laquelle l'URL du style peut être journalisée sans précaution.
+   */
+  assert.ok(!/\bcle\b/i.test(CODE_FOND), "le module ne parle plus de clé");
 });
 
-test("S-13 — LA CARTE A UN ÉTAT D'ÉCHEC POUR CHAQUE PANNE POSSIBLE", () => {
-  // Clé révoquée ou quota dépassé (`error`), lot non téléchargé (`catch`),
-  // WebGL absent (`try` autour du constructeur). Un cadre gris muet se lirait
-  // comme un bogue de la plateforme.
-  assert.ok(CODE_CARTE.includes('"webgl"'));
-  assert.ok(CODE_CARTE.includes('"chargement"'));
-  assert.ok(CODE_CARTE.includes('"style"'));
+test("S-13 — CHAQUE PANNE A UN ÉTAT, ET CHAQUE ÉTAT EST JOURNALISÉ AVEC SON ÉTAPE", () => {
+  /*
+   * Trois endroits peuvent échouer, et ils échouent différemment :
+   *   · le module MapLibre ne se télécharge pas         → "chargement" ;
+   *   · le constructeur jette (WebGL absent)            → "webgl" ;
+   *   · le style ou une tuile échoue (`error`)          → "style" ;
+   *   · … et si l'amont REFUSE (401/403/404)            → "refus_amont".
+   *
+   * ⚠️ LE QUATRIÈME ÉTAT EST NÉ D'UNE PANNE RÉELLE. Un 403 du fournisseur
+   * s'affichait comme « momentanément indisponible » : un message qui invitait
+   * à attendre alors qu'attendre ne servait à rien. Un refus n'est pas une
+   * indisponibilité passagère, et il ne doit pas se lire comme telle.
+   */
+  for (const etat of ['"webgl"', '"chargement"', '"style"', '"refus_amont"']) {
+    assert.ok(CODE_CARTE.includes(etat), etat);
+  }
+  assert.ok(
+    CODE_CARTE.includes('type EchecCarte = "webgl" | "chargement" | "style" | "refus_amont"'),
+    "les états sont énumérés, pas devinés",
+  );
   assert.ok(CODE_CARTE.includes('instance.on("error"'), "les erreurs du fournisseur sont écoutées");
   assert.ok(CODE_CARTE.includes("catch {"), "WebGL absent est rattrapé");
+
+  /*
+   * ⚠️ ET L'ERREUR D'ORIGINE N'EST PAS MASQUÉE. Le repli explique la panne à
+   * l'élève ; la console, elle, doit dire à quelle ÉTAPE on a échoué, avec le
+   * statut et l'URL. Sans cela, diagnostiquer une carte grise en production
+   * revient à deviner — ce qui a déjà coûté deux tours de ce chantier.
+   */
+  for (const etape of ['etape: "import"', 'etape: "new Map"', 'etape: fatal ? "style" : "ressource"']) {
+    assert.ok(CODE_CARTE.includes(etape), `l'étape est journalisée (${etape})`);
+  }
+  assert.ok(CODE_CARTE.includes("fatal,"), "la trace dit si l'échec est fatal");
+  assert.ok(CODE_CARTE.includes("sourceId: analyse.sourceId"), "et la source, quand il y en a une");
+  assert.equal(
+    (CODE_CARTE.match(/console\.error\(/g) ?? []).length,
+    3,
+    "une trace par étape faillible, et pas une de plus",
+  );
+  assert.ok(CODE_CARTE.includes("statut:"), "le statut HTTP est journalisé");
+  assert.ok(CODE_CARTE.includes("url:"), "l'URL fautive est journalisée");
+  // Journaliser l'URL n'est possible QUE parce qu'elle ne porte aucune clé.
+  assert.ok(!/key=/.test(CODE_FOND), "aucune clé ne peut fuir dans une trace");
+});
+
+const STYLE = STYLE_PAR_DEFAUT;
+
+/**
+ * Les formes EXACTES relevées dans Chromium sur MapLibre 6.16.0, une panne à la
+ * fois. Les clés sont celles que l'événement portait réellement.
+ */
+function evenementAjax(url: string, statut: number, extra: Record<string, unknown> = {}) {
+  const erreur = Object.assign(new Error(`AJAXError: (${statut}): ${url}`), {
+    status: statut,
+    statusText: "Erreur",
+    url,
+    body: null,
+  });
+  return { error: erreur, type: "error", target: {}, style: {}, ...extra };
+}
+
+test("S-13b — UNE ERREUR DU STYLE EST FATALE, ET ELLE SEULE", () => {
+  /*
+   * ⚠️ MESURÉ, PAS SUPPOSÉ. Chaque panne a été provoquée séparément dans un
+   * navigateur, et les clés de l'événement énumérées à l'exécution :
+   *
+   *   style 404 / 403   load NON émis   error, type, target, style        url = style
+   *   style illisible   load NON émis   error, type, target, style        pas d'url
+   *
+   * Un échec du document de style est le seul cas où il n'y a rien à montrer.
+   */
+  for (const statut of [401, 403, 404]) {
+    const a = classerErreurDeCarte({ evenement: evenementAjax(STYLE, statut), urlDuStyle: STYLE, chargee: false });
+    assert.equal(a.issue, "refus_amont", `${statut} sur le style est un refus`);
+    assert.equal(a.statut, statut, "le statut HTTP est conservé");
+    assert.equal(a.url, STYLE, "l'URL fautive est conservée");
+  }
+  // Un 500 ou un 503 sur le style est une panne, pas un refus : attendre a un sens.
+  for (const statut of [500, 502, 503]) {
+    const a = classerErreurDeCarte({ evenement: evenementAjax(STYLE, statut), urlDuStyle: STYLE, chargee: false });
+    assert.equal(a.issue, "style", `${statut} sur le style est une panne`);
+  }
+  // Un style illisible : ni source, ni URL, et `load` n'arrivera jamais.
+  const illisible = classerErreurDeCarte({
+    evenement: { error: new SyntaxError("Expected property name"), type: "error", target: {}, style: {} },
+    urlDuStyle: STYLE,
+    chargee: false,
+  });
+  assert.equal(illisible.issue, "style");
+  assert.equal(illisible.statut, null);
+  assert.equal(illisible.url, null);
+  assert.match(illisible.message, /Expected property name/, "le message d'origine n'est pas masqué");
+});
+
+test("S-13b2 — UNE RESSOURCE SECONDAIRE NE DÉTRUIT RIEN, MÊME AVANT LE PREMIER load", () => {
+  /*
+   * ════════════════════════════════════════════════════════════════════════
+   * ⚠️ LE DÉFAUT QUE CE TEST VERROUILLE
+   * ════════════════════════════════════════════════════════════════════════
+   * La règle précédente était `const fatal = !charge` : TOUT ce qui précédait
+   * le premier `load` était fatal. C'est faux, et mesuré comme tel —
+   *
+   *   sprite 404 / 500   erreur émise AVANT `load`… et `load` émis ensuite
+   *
+   * Une planche de symboles absente détruisait donc une carte en train de se
+   * charger normalement. `chargee: false` ci-dessous reproduit exactement ce
+   * moment-là.
+   */
+  const avantEtApres = [false, true];
+
+  // Sprite : pas de `sourceId`, une URL qui n'est pas celle du style.
+  for (const chargee of avantEtApres) {
+    for (const statut of [404, 500]) {
+      const a = classerErreurDeCarte({
+        evenement: evenementAjax("https://tiles.openfreemap.org/sprites/ofm_f384/ofm.json", statut),
+        urlDuStyle: STYLE,
+        chargee,
+      });
+      assert.equal(a.issue, "ressource", `sprite ${statut} (chargee=${chargee})`);
+    }
+  }
+
+  // Polices : même forme, autre chemin.
+  for (const chargee of avantEtApres) {
+    const a = classerErreurDeCarte({
+      evenement: evenementAjax("https://tiles.openfreemap.org/fonts/Noto%20Sans%20Regular/0-255.pbf", 404),
+      urlDuStyle: STYLE,
+      chargee,
+    });
+    assert.equal(a.issue, "ressource", `glyphes (chargee=${chargee})`);
+  }
+
+  /*
+   * Tuiles et TileJSON : MapLibre y ajoute `sourceId`, `source` et
+   * `isSourceLoaded`, et pour une tuile un `tile`. Relevé tel quel.
+   */
+  for (const chargee of avantEtApres) {
+    const tuile = classerErreurDeCarte({
+      evenement: evenementAjax("https://tiles.openfreemap.org/planet/12/2115/1503.pbf", 500, {
+        sourceId: "openmaptiles",
+        source: {},
+        isSourceLoaded: false,
+        tile: {},
+      }),
+      urlDuStyle: STYLE,
+      chargee,
+    });
+    assert.equal(tuile.issue, "ressource", `tuile 500 (chargee=${chargee})`);
+    assert.equal(tuile.sourceId, "openmaptiles", "la source est journalisée");
+
+    const tilejson = classerErreurDeCarte({
+      evenement: evenementAjax("https://tiles.openfreemap.org/planet", 404, {
+        sourceId: "openmaptiles",
+        source: {},
+        isSourceLoaded: false,
+      }),
+      urlDuStyle: STYLE,
+      chargee,
+    });
+    /*
+     * ⚠️ UN 404 QUI N'EST PAS UN REFUS. C'est l'autre moitié du défaut : la
+     * règle « 401/403/404 ⟹ refus de l'amont » s'appliquait à n'importe
+     * quelle requête. Un TileJSON absent affichait « le fond de carte a été
+     * refusé », qui envoie vérifier une configuration sans faute.
+     */
+    assert.equal(tilejson.issue, "ressource", `TileJSON 404 (chargee=${chargee})`);
+    assert.notEqual(tilejson.issue, "refus_amont");
+  }
+
+  // Et une erreur sans source ni URL APRÈS `load` : le style est acquis.
+  const apres = classerErreurDeCarte({
+    evenement: { error: new Error("circle-color: color expected"), type: "error", target: {}, style: {} },
+    urlDuStyle: STYLE,
+    chargee: true,
+  });
+  assert.equal(apres.issue, "ressource", "après `load`, ce n'est plus le style");
+});
+
+test("S-13b3 — LE CLASSEMENT NE SUPPOSE RIEN QUE L'ÉVÉNEMENT N'EXPOSE", () => {
+  /*
+   * ⚠️ `error.name` VAUT « Error » ET LE CONSTRUCTEUR EST MINIFIÉ (`Pn` dans
+   * le lot publié). Relevé à l'exécution : rien ne doit reposer sur le nom de
+   * la classe. Les seules propriétés lues sont celles que les typages du
+   * paquet déclarent — `status`, `statusText`, `url`, `body` — plus `sourceId`
+   * sur l'événement.
+   */
+  for (const interdit of ["AJAXError", "instanceof AJAXError", ".name ===", "constructor.name"]) {
+    assert.ok(!CODE_FOND.includes(interdit), `le classement ne lit pas ${interdit}`);
+  }
+  // Un événement vide, nul, ou d'une forme inattendue ne doit pas lever.
+  for (const evenement of [null, undefined, {}, { error: null }, { error: "texte" }, { error: { status: "404" } }]) {
+    const a = classerErreurDeCarte({ evenement, urlDuStyle: STYLE, chargee: true });
+    assert.equal(a.issue, "ressource", JSON.stringify(evenement) + " : bénin par défaut");
+    assert.equal(a.statut, null, "un statut non numérique n'est pas un statut");
+  }
+  // ⚠️ ET LE DÉFAUT EST LE MOINS DESTRUCTEUR : face à l'inconnu, on garde la
+  // carte et on journalise, plutôt que de détruire ce qui marche peut-être.
+  const inconnu = classerErreurDeCarte({ evenement: { error: new Error("?") }, urlDuStyle: STYLE, chargee: true });
+  assert.equal(inconnu.issue, "ressource");
+  // L'URL du style est reconnue même écrite autrement (barre finale, casse de l'hôte).
+  const variante = classerErreurDeCarte({
+    evenement: evenementAjax("https://TILES.openfreemap.org/styles/liberty", 403),
+    urlDuStyle: STYLE,
+    chargee: false,
+  });
+  assert.equal(variante.issue, "refus_amont", "l'hôte se compare sans tenir compte de la casse");
+});
+
+test("S-13c — UN REPLI FATAL NE LAISSE AUCUNE INSTANCE ORPHELINE", () => {
+  /*
+   * ⚠️ UN CONTEXTE WEBGL ET UN WORKER ABANDONNÉS NE SE RÉCUPÈRENT PAS. Le
+   * conteneur quitte le DOM avec le repli ; l'instance doit partir avec lui,
+   * sinon elle continue de tourner sans surface et sans propriétaire.
+   */
+  assert.ok(CODE_CARTE.includes("const aDetruire = instance;"), "l'instance est saisie");
+  assert.ok(CODE_CARTE.includes("aDetruire?.remove()"), "puis détruite");
+  const iDestruction = CODE_CARTE.indexOf("aDetruire?.remove()");
+  const iBascule = CODE_CARTE.indexOf("setEchec((actuel) => actuel ?? echecFatal)");
+  assert.ok(iDestruction > 0 && iBascule > iDestruction, "détruite AVANT de basculer l'écran");
+  // Et les deux références sont remises à zéro, pour que le démontage ne
+  // retombe pas sur une carte déjà détruite.
+  assert.ok(CODE_CARTE.includes("instance = null;"));
+  assert.ok(CODE_CARTE.includes("carte.current = null;"));
+  // ⚠️ LE DÉMONTAGE EST DONC DEVENU FAILLIBLE, et il est protégé.
+  const demontage = CODE_CARTE.slice(CODE_CARTE.indexOf("vivant = false;"));
+  assert.match(demontage.slice(0, 300), /try \{\s*instance\?\.remove\(\);/, "le démontage est protégé");
 });
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -312,6 +616,90 @@ test("S-15 — LE REGROUPEMENT NE CACHE AUCUN COMMERCE POUR DE BON", async () =>
   assert.match(CODE_CARTE, /clusterMaxZoom: 13/);
   // La liste, elle, n'a jamais regroupé quoi que ce soit : les douze y sont.
   assert.ok(!CODE_RECHERCHE.includes("cluster"), "la liste ne regroupe rien");
+});
+
+test("S-15b — AUCUNE COULEUR DE COUCHE N'EST UNE VARIABLE CSS", () => {
+  /*
+   * ════════════════════════════════════════════════════════════════════════
+   * ⚠️ MAPLIBRE N'EST PAS DU CSS, ET CE TEST EXISTE PARCE QUE ÇA A COÛTÉ CHER
+   * ════════════════════════════════════════════════════════════════════════
+   * Les couches passaient les jetons sémantiques tels quels :
+   * `"circle-color": "var(--primary)"`. MapLibre analyse les couleurs
+   * lui-même, hors du moteur de style du navigateur. Il refuse la chaîne et
+   * REJETTE LA COUCHE ENTIÈRE.
+   *
+   * Mesuré dans Chromium sur cette configuration exacte — sept erreurs, puis
+   * `couchesAjoutees = []`, `amasRendus = 0`, `pointsRendus = 0`. Autrement
+   * dit : aucun marqueur n'avait jamais été dessiné. Et chacune de ces sept
+   * erreurs émettait `error`, ce qui faisait basculer l'écran sur « le fond de
+   * carte est momentanément indisponible » — le symptôme rapporté.
+   *
+   * ⚠️ AUCUN HARNAIS NODE NE POUVAIT LE VOIR : il n'y a pas de WebGL ici, et
+   * un jeton mal placé ressemble à une chaîne comme une autre. Ce contrôle est
+   * textuel, et c'est assumé : il interdit la forme qui a échoué.
+   */
+  for (const propriete of [
+    "circle-color",
+    "circle-stroke-color",
+    "text-color",
+    "fill-color",
+    "line-color",
+  ]) {
+    const motif = new RegExp(`"${propriete}":\\\\s*(NEUTRE|CHOISI|CONTOUR|[A-Z_]+|"[^"]*")`, "g");
+    for (const trouve of CODE_CARTE.match(motif) ?? []) {
+      assert.ok(!trouve.includes("var(--"), `jeton CSS non résolu : ${trouve}`);
+    }
+  }
+  /*
+   * ⚠️ ET LA DISTINCTION EST LE POINT : `var(--…)` reste LÉGITIME dans le DOM.
+   * Le marqueur de la position de l'élève est un élément HTML ordinaire, posé
+   * par-dessus la carte : son style passe par le navigateur, qui résout les
+   * jetons. Ce qui est interdit, c'est de les donner à MapLibre.
+   */
+  assert.match(CODE_CARTE, /point\.style\.background = "var\(--/, "le marqueur DOM garde ses jetons");
+  const objetsDeCouche = CODE_CARTE.match(/paint:\s*\{[^}]*\}/g) ?? [];
+  assert.ok(objetsDeCouche.length >= 4, "les quatre couches ont un bloc `paint`");
+  for (const bloc of objetsDeCouche) {
+    assert.ok(!bloc.includes("var(--"), `jeton CSS donné à MapLibre : ${bloc.slice(0, 80)}`);
+  }
+
+  // ⚠️ ET LE JETON RESTE LA SOURCE DE VÉRITÉ : il est RÉSOLU, pas remplacé par
+  // une couleur écrite en dur — sans quoi le thème sombre serait perdu.
+  assert.ok(CODE_CARTE.includes("function couleurDuJeton("), "la résolution existe");
+  assert.ok(CODE_CARTE.includes("getComputedStyle("), "elle lit le style calculé");
+  for (const jeton of ['JETON_NEUTRE = "--primary"', 'JETON_CHOISI = "--success"', 'JETON_CONTOUR = "--card"']) {
+    assert.ok(CODE_CARTE.includes(jeton), jeton);
+  }
+  // Un repli existe pour chaque jeton : un style pas encore appliqué rendrait
+  // une chaîne vide, que MapLibre refuserait tout autant.
+  for (const repli of ["REPLI_NEUTRE", "REPLI_CHOISI", "REPLI_CONTOUR"]) {
+    assert.ok(CODE_CARTE.includes(`${repli} = "#`), `${repli} est une couleur littérale`);
+  }
+  // Et les couleurs sont relues à chaque passage, pour suivre un changement de
+  // thème plutôt que de figer la palette du premier rendu.
+  assert.ok(CODE_CARTE.includes("setPaintProperty("), "les couches existantes sont repeintes");
+});
+
+test("S-15c — LA PILE DE POLICES EST CELLE QUE LE FOURNISSEUR SERT", () => {
+  /*
+   * ⚠️ MAPLIBRE NE DEMANDE PAS LES POLICES UNE PAR UNE. Il assemble la liste
+   * en un seul nom de pile séparé par des virgules :
+   *
+   *     …/fonts/Noto Sans Regular,Open Sans Regular/0-255.pbf
+   *
+   * Et le serveur de polices ne sert que les piles simples. Mesuré :
+   *
+   *     Noto Sans Regular                     → 200, 76 580 o
+   *     Noto Sans Regular,Open Sans Regular   → 404
+   *
+   * Une seconde police « de secours » ne secourt donc rien : elle casse la
+   * requête. Avec deux noms, 404 à chaque plage et des chiffres rendus
+   * localement, en approximation.
+   */
+  const texte = CODE_CARTE.match(/"text-font":\s*\[[^\]]*\]/g) ?? [];
+  assert.equal(texte.length, 1, "une seule couche de texte");
+  assert.equal(texte[0], '"text-font": ["Noto Sans Regular"]', "une pile simple, et celle qui existe");
+  assert.ok(!texte[0]!.includes(","), "aucune pile composite : elle rendrait 404");
 });
 
 test("S-16 — LA SÉLECTION CIRCULE DANS LES DEUX SENS, SUR LA MÊME CLÉ", async () => {
@@ -745,10 +1133,16 @@ test("S-40 — LA CARTE NE REMPLACE JAMAIS LA LISTE", () => {
   // le chemin accessible, et elle existe toujours.
   assert.ok(CODE_CARTE.includes('aria-hidden="true"'), "le canevas est masqué aux lecteurs");
   assert.ok(CODE_RECHERCHE.includes("<ListeDesCommerces"), "la liste est toujours montée");
-  // Et chaque message d'indisponibilité le dit à l'élève.
-  for (const raison of ["cle_absente", "cle_par_defaut", "style_interdit"] as const) {
+  // Et chaque message d'indisponibilité le dit à l'élève — y compris les
+  // échecs d'exécution, qui ne passent pas par `messageCarteIndisponible`.
+  for (const raison of ["style_invalide", "origine_interdite"] as const) {
     assert.match(messageCarteIndisponible(raison), /liste des commerces reste utilisable/i);
   }
+  assert.equal(
+    (CODE_CARTE.match(/liste des commerces reste utilisable/g) ?? []).length,
+    4,
+    "les quatre échecs d'exécution le disent aussi",
+  );
 });
 
 test("S-41 — CHERCHER N'EST PAS CHOISIR : l'écriture reste où elle était", () => {

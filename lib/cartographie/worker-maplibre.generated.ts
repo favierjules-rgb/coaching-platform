@@ -11,14 +11,22 @@
  * appelle `new Worker(url, { type: "module" })` directement : `worker-src
  * 'self'` suffit, et `blob:` serait une permission accordée pour rien.
  *
- * SHA-256 du worker : 0bf06492bdb7ba3d4132b78e435621bfba60d5250967991c02b1a73affea8cd5
+ * SHA-256 du worker copié : f4650f17aa791e15a800278c1e8499d913ff802907a5ad2eb4b8c3cefe68b7ed
+ * (le renvoi `sourceMappingURL` a été retiré — voir le script)
  */
 
 /** La version de `maplibre-gl` dont ce worker provient. */
 export const WORKER_MAPLIBRE_VERSION = "6.16.0";
 
-/** L'empreinte du fichier copié — comparée au paquet installé par un test. */
-export const WORKER_MAPLIBRE_SHA256 = "0bf06492bdb7ba3d4132b78e435621bfba60d5250967991c02b1a73affea8cd5";
+/**
+ * L'empreinte du fichier COPIÉ.
+ *
+ * ⚠️ ELLE DIFFÈRE DE CELLE DU PAQUET, d'une ligne : le renvoi vers la carte
+ * des sources est retiré à la copie (voir le script). Le test compare donc
+ * cette empreinte au fichier servi, et la VERSION au paquet installé — deux
+ * contrôles, parce que ce sont deux dérives différentes.
+ */
+export const WORKER_MAPLIBRE_SHA256 = "f4650f17aa791e15a800278c1e8499d913ff802907a5ad2eb4b8c3cefe68b7ed";
 
 /** L'URL publique du worker, sur notre propre origine. */
 export const WORKER_MAPLIBRE_URL = "/maplibre/maplibre-gl-worker-6.16.0.mjs";

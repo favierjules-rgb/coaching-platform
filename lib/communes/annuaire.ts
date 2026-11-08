@@ -35,11 +35,13 @@ import {
  *   Données : Base officielle des codes postaux, COG INSEE, admin-express IGN
  *   Aucune clé d'API, aucune inscription, aucun quota publié.
  *
- * ⚠️ POURQUOI PAS NOMINATIM, ni le géocodeur du fournisseur de carte. Nominatim
- * a une politique d'usage stricte et n'est pas un annuaire de communes. Le
- * géocodeur de MapTiler, lui, ferait payer des « sessions de recherche » ET
- * ferait connaître à notre fournisseur de cartes chaque ville tapée par chaque
- * élève : exactement le mélange que l'architecture refuse.
+ * ⚠️ POURQUOI PAS NOMINATIM, ni le géocodeur d'un fournisseur de carte.
+ * Nominatim a une politique d'usage stricte et n'est pas un annuaire de
+ * communes. Un géocodeur fourni avec le fond de carte, lui, ferait connaître à
+ * celui qui DESSINE chaque ville tapée par chaque élève — et se facturerait le
+ * plus souvent en « sessions de recherche » : exactement le mélange que
+ * l'architecture refuse. Le fond de carte actuel n'en propose d'ailleurs
+ * aucun, ce qui rend la frontière plus facile à tenir.
  *
  * ⚠️ CE MODULE EST `server-only`. La saisie de l'élève ne doit pas partir de son
  * navigateur vers un tiers : elle passe par NOTRE route, qui porte la limite de

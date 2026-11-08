@@ -3,10 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 
 import {
+  classerErreurDeCarte,
   configurationDepuisEnv,
   messageCarteIndisponible,
   type ConfigurationCarte,
-} from "@/lib/cartographie/maptiler";
+} from "@/lib/cartographie/fond-de-carte";
 import {
   cadreDeLaRecherche,
   collectionDeMagasins,
@@ -77,12 +78,55 @@ const COUCHE_CHOISI = "commerces-choisi";
  * thème. `--primary` pour le neutre, `--success` pour le choisi, `--card` pour
  * le contour — exactement ce que portaient les anciens marqueurs.
  */
-const NEUTRE = "var(--primary)";
-const CHOISI = "var(--success)";
-const CONTOUR = "var(--card)";
+/*
+ * ════════════════════════════════════════════════════════════════════════════
+ * ⚠️ MAPLIBRE N'EST PAS DU CSS : IL NE RÉSOUT AUCUNE VARIABLE
+ * ════════════════════════════════════════════════════════════════════════════
+ * Les couleurs des couches passaient les jetons sémantiques tels quels —
+ * `"var(--primary)"`. MapLibre analyse lui-même les couleurs, hors du moteur
+ * de style du navigateur : il refuse la chaîne et REJETTE LA COUCHE ENTIÈRE.
+ *
+ * Mesuré dans Chromium sur cette configuration exacte, sept erreurs :
+ *
+ *     layers.commerces-amas.paint.circle-color:
+ *       color expected, "var(--primary)" found
+ *
+ * Conséquence : aucune couche n'était ajoutée, donc AUCUN marqueur, AUCUN
+ * amas, AUCUNE mise en évidence du commerce choisi — et chacune de ces sept
+ * erreurs émettait `error`, ce qui faisait basculer l'écran sur « le fond de
+ * carte est momentanément indisponible » alors que le fond, lui, était chargé.
+ *
+ * ⚠️ LA RÉPONSE N'EST PAS D'ÉCRIRE DES COULEURS EN DUR. Le jeton reste la
+ * source de vérité — il change avec le thème clair ou sombre. On le RÉSOUT
+ * donc à l'exécution, sur le conteneur de la carte, et le repli ne sert que si
+ * la feuille de style n'est pas encore appliquée.
+ */
+const JETON_NEUTRE = "--primary";
+const JETON_CHOISI = "--success";
+const JETON_CONTOUR = "--card";
+/** Replis : les valeurs du thème clair, lues dans `app/globals.css`. */
+const REPLI_NEUTRE = "#111111";
+const REPLI_CHOISI = "#16a34a";
+const REPLI_CONTOUR = "#ffffff";
+
+/**
+ * La valeur RÉELLE d'un jeton, telle que le navigateur l'a calculée.
+ *
+ * ⚠️ `getPropertyValue` REND UNE CHAÎNE VIDE quand la propriété n'est pas
+ * définie — pas `null`, et sans lever. Le repli couvre ce cas, ainsi qu'un
+ * rendu serveur où il n'y a pas de style calculé du tout.
+ */
+function couleurDuJeton(element: HTMLElement, jeton: string, repli: string): string {
+  try {
+    const valeur = getComputedStyle(element).getPropertyValue(jeton).trim();
+    return valeur === "" ? repli : valeur;
+  } catch {
+    return repli;
+  }
+}
 
 /** Ce que la carte peut ne pas réussir à faire, après que la clé a été jugée bonne. */
-type EchecCarte = "webgl" | "chargement" | "style";
+type EchecCarte = "webgl" | "chargement" | "style" | "refus_amont";
 
 export interface CarteDesMagasinsProps {
   readonly magasins: readonly MagasinOsm[];
@@ -203,41 +247,161 @@ export function CarteDesMagasins({
             style: urlDuStyle,
             center: [2.3522, 48.8566],
             zoom: 5,
-            // ⚠️ L'ATTRIBUTION EST OBLIGATOIRE ET NON REPLIABLE : MapTiler
-            // comme OpenStreetMap exigent un crédit visible et cliquable.
+            // ⚠️ L'ATTRIBUTION EST OBLIGATOIRE ET NON REPLIABLE. Le fond
+            // porte son propre crédit (OpenFreeMap · OpenMapTiles · données
+            // OpenStreetMap) et MapLibre l'affiche de lui-même : il reste à ne
+            // pas le replier derrière un bouton.
             attributionControl: { compact: false },
             // ⚠️ SUR TÉLÉPHONE, UN DOIGT FAIT DÉFILER LA PAGE, PAS LA CARTE.
             // Sans cela, l'élève qui veut descendre dans la liste reste
             // prisonnier de la carte.
             cooperativeGestures: true,
           });
-        } catch {
+        } catch (erreur) {
+          // ⚠️ L'EXCEPTION EST DITE, PAS AVALÉE. Sans elle, « ton navigateur
+          // n'arrive pas à afficher la carte » est un constat sans cause.
+          console.error("[Carte] échec à la création de l'instance", {
+            etape: "new Map",
+            message: erreur instanceof Error ? erreur.message : String(erreur),
+          });
           setEchec("webgl");
           return;
         }
         carte.current = instance;
 
+        /*
+         * ⚠️ CE DRAPEAU NE DÉCIDE PLUS À LUI SEUL, et c'est le correctif. Il
+         * dit si la carte a UNE FOIS atteint l'état « chargée », ce qui ne
+         * départage que le dernier cas du classement (voir
+         * `classerErreurDeCarte`) : un sprite absent échoue AVANT `load` et
+         * `load` arrive quand même — « avant load » ne veut donc pas dire
+         * « fatal ».
+         *
+         * ⚠️ UN DRAPEAU LOCAL, PAS L'ÉTAT REACT : l'écouteur d'erreur est une
+         * fermeture posée une seule fois, et `prete` y resterait éternellement
+         * à la valeur du premier rendu.
+         */
+        let charge = false;
         instance.on("load", () => {
+          charge = true;
           if (vivant) setPrete(true);
         });
         /*
-         * ⚠️ UNE ERREUR DE CARTE NE DOIT PAS ÊTRE SILENCIEUSE. Clé révoquée,
-         * quota dépassé, fournisseur en panne : MapLibre émet `error` et laisse
-         * un cadre gris. Un cadre gris sans explication se lit comme un bogue
-         * de la plateforme.
+         * ════════════════════════════════════════════════════════════════════
+         * ⚠️ TOUTES LES ERREURS DE MAPLIBRE NE SONT PAS DES PANNES — ET LES
+         * CONFONDRE ÉTAIT LA CAUSE DE LA CARTE ABSENTE EN PREVIEW
+         * ════════════════════════════════════════════════════════════════════
+         * MapLibre émet `error` pour TOUT ce qui échoue à se charger : une
+         * tuile, un TileJSON, une planche de symboles. Ce sont des incidents de
+         * ressource, et la carte se dessine autour.
+         *
+         * Or le repli basculait sur le MOINDRE `error`. Et le repli REMPLACE le
+         * conteneur de la carte dans le rendu : le `<div>` référencé quittait
+         * le DOM, l'instance restait derrière sans conteneur, et rien ne la
+         * remontait jamais. Une requête ratée sur plusieurs centaines détruisait
+         * définitivement une carte qui marchait.
+         *
+         * ⚠️ C'EST EXACTEMENT CE QUE MONTRAIT SAFARI : le cadre de secours
+         * présent en 626 × 460, aucun `.maplibregl-map`, aucun canevas. Pas une
+         * carte qui n'a jamais démarré — une carte démolie après coup.
+         *
+         * ⚠️ LE TRI N'EST PAS FAIT ICI, ET CE N'EST PAS UN DÉTAIL. Il vit dans
+         * `classerErreurDeCarte`, fonction pure : la règle repose sur les
+         * propriétés RÉELLEMENT exposées par l'événement — relevées une à une
+         * dans un navigateur — et elle se teste avec ces formes exactes, ce
+         * qu'un écouteur enfermé dans un composant WebGL ne permet pas.
          */
-        instance.on("error", () => {
-          if (vivant) setEchec((actuel) => actuel ?? "style");
+        instance.on("error", (evenement: unknown) => {
+          if (!vivant) return;
+          /*
+           * ════════════════════════════════════════════════════════════════
+           * ⚠️ L'ERREUR D'ORIGINE N'EST JAMAIS MASQUÉE
+           * ════════════════════════════════════════════════════════════════
+           * L'écran bascule sur un cadre de secours, et c'est voulu : une
+           * carte grise sans explication se lit comme un bogue. Mais ce
+           * basculement effaçait la seule trace du POURQUOI — et l'on
+           * cherchait ensuite la panne dans le worker, dans la CSP, partout
+           * sauf là où elle était.
+           *
+           * On journalise donc l'étape, le statut HTTP et l'URL fautive.
+           * ⚠️ ET C'EST SANS DANGER DEPUIS LA MIGRATION : il n'y a plus de
+           * clé dans les URL de ce fournisseur. Avec une clé, cette trace
+           * aurait publié un secret dans la console de chaque élève.
+           */
+          const analyse = classerErreurDeCarte({ evenement, urlDuStyle, chargee: charge });
+          const fatal = analyse.issue !== "ressource";
+          console.error("[Carte] erreur du fond de carte", {
+            // ⚠️ L'ÉTAPE DISTINGUE LES DEUX CAS, dans la console comme dans le
+            // code : « style » = le document de style lui-même a échoué ;
+            // « ressource » = un objet secondaire a manqué.
+            etape: fatal ? "style" : "ressource",
+            fatal,
+            issue: analyse.issue,
+            statut: analyse.statut,
+            url: analyse.url,
+            sourceId: analyse.sourceId,
+            message: analyse.message,
+          });
+          /*
+           * ⚠️ UNE TUILE MANQUANTE N'EST PAS UNE PANNE DE CARTE. La trace est
+           * écrite — on ne masque rien — mais l'écran ne bascule pas : la carte
+           * reste affichée, et le trou se remplira au prochain déplacement.
+           * Cela vaut AVANT comme APRÈS le premier `load`.
+           */
+          if (analyse.issue === "ressource") return;
+          /*
+           * ⚠️ CE TYPAGE EST UN CONTRÔLE, PAS UNE CÉRÉMONIE. Il relie les
+           * issues fatales du classement aux états d'échec de l'écran : en
+           * ajouter une d'un côté sans l'autre ne compile pas.
+           */
+          const echecFatal: EchecCarte = analyse.issue;
+          /*
+           * ⚠️ ET SI L'ÉCRAN BASCULE, L'INSTANCE EST DÉTRUITE AVEC LUI. Le
+           * repli remplace le conteneur : laisser l'instance derrière
+           * abandonnerait un contexte WebGL et un worker vivants, sans aucun
+           * moyen de les récupérer.
+           */
+          const aDetruire = instance;
+          instance = null;
+          carte.current = null;
+          try {
+            aDetruire?.remove();
+          } catch {
+            // Déjà détruite : il n'y a rien à faire, et insister ferait tomber
+            // le rendu de secours pour rien.
+          }
+          /*
+           * ⚠️ UN REFUS DE L'AMONT N'EST PAS UNE PANNE PASSAGÈRE. « Le fond de
+           * carte est momentanément indisponible » envoie attendre une panne
+           * qui n'existe pas. Mais ce refus ne se lit QUE sur la requête du
+           * style : un 404 de tuile n'est pas un refus, et le classement l'a
+           * déjà écarté plus haut.
+           */
+          setEchec((actuel) => actuel ?? echecFatal);
         });
       })
-      .catch(() => {
+      .catch((erreur: unknown) => {
         // Le lot n'a pas pu être téléchargé : réseau coupé, ou blocage.
+        console.error("[Carte] échec au chargement du module MapLibre", {
+          etape: "import",
+          message: erreur instanceof Error ? erreur.message : String(erreur),
+        });
         if (vivant) setEchec("chargement");
       });
 
     return () => {
       vivant = false;
-      instance?.remove();
+      /*
+       * ⚠️ `instance` PEUT DÉJÀ ÊTRE `null` : l'écouteur d'erreur détruit la
+       * carte lui-même quand il bascule sur le repli. Le `try` couvre le reste,
+       * car un démontage qui lève ferait tomber l'écran entier.
+       */
+      try {
+        instance?.remove();
+      } catch {
+        // Déjà détruite ; il n'y a plus rien à détacher.
+      }
+      instance = null;
       carte.current = null;
       setPrete(false);
     };
@@ -254,6 +418,17 @@ export function CarteDesMagasins({
 
     void import("maplibre-gl").then(({ Marker }) => {
       if (!vivant || carte.current === null) return;
+
+      /*
+       * ⚠️ LES JETONS SONT RÉSOLUS ICI, PAS AU CHARGEMENT DU MODULE. Lus sur
+       * le conteneur de la carte, ils suivent le thème effectif — et ils sont
+       * relus à chaque passage de cet effet, pour qu'un changement de thème
+       * repeigne les pastilles au lieu de les laisser à l'ancienne couleur.
+       */
+      const racine = instance.getContainer();
+      const NEUTRE = couleurDuJeton(racine, JETON_NEUTRE, REPLI_NEUTRE);
+      const CHOISI = couleurDuJeton(racine, JETON_CHOISI, REPLI_CHOISI);
+      const CONTOUR = couleurDuJeton(racine, JETON_CONTOUR, REPLI_CONTOUR);
 
       /*
        * ════════════════════════════════════════════════════════════════════
@@ -318,7 +493,22 @@ export function CarteDesMagasins({
             filter: ["has", "point_count"],
             layout: {
               "text-field": ["get", "point_count_abbreviated"],
-              "text-font": ["Noto Sans Regular", "Open Sans Regular"],
+              /*
+               * ⚠️ UNE SEULE POLICE, ET CE N'EST PAS UN APPAUVRISSEMENT.
+               * MapLibre ne demande pas les polices une par une : il assemble
+               * la liste en UN SEUL nom de pile, séparé par des virgules —
+               * `…/fonts/Noto Sans Regular,Open Sans Regular/0-255.pbf`. Le
+               * serveur de polices ne sert que les piles simples :
+               *
+               *     Noto Sans Regular                     → 200, 76 580 o
+               *     Noto Sans Regular,Open Sans Regular   → 404
+               *
+               * Mesuré dans Chromium : avec deux noms, 404 à chaque plage, et
+               * MapLibre se rabattait sur un rendu local approximatif des
+               * chiffres. Avec le seul nom que le fournisseur sert, les
+               * glyphes arrivent et le compteur est net.
+               */
+              "text-font": ["Noto Sans Regular"],
               "text-size": 13,
               "text-allow-overlap": true,
             },
@@ -417,6 +607,24 @@ export function CarteDesMagasins({
           setData: (d: unknown) => void;
         };
         source.setData(collectionDeMagasins(magasins));
+        /*
+         * ⚠️ ET ON REPEINT, parce que le thème a pu changer depuis que les
+         * couches ont été posées. Sans cela, passer en mode sombre laisserait
+         * des pastilles de la palette claire sur un fond sombre.
+         */
+        for (const [couche, propriete, couleur] of [
+          [COUCHE_AMAS, "circle-color", NEUTRE],
+          [COUCHE_AMAS, "circle-stroke-color", CONTOUR],
+          [COUCHE_POINT, "circle-color", NEUTRE],
+          [COUCHE_POINT, "circle-stroke-color", CONTOUR],
+          [COUCHE_CHOISI, "circle-color", CHOISI],
+          [COUCHE_CHOISI, "circle-stroke-color", CONTOUR],
+          [COUCHE_AMAS_NOMBRE, "text-color", CONTOUR],
+        ] as const) {
+          if (instance.getLayer(couche) !== undefined) {
+            instance.setPaintProperty(couche, propriete, couleur);
+          }
+        }
       }
 
       // La mise en évidence du choisi, par filtre — aucun marqueur recréé.
@@ -501,11 +709,19 @@ export function CarteDesMagasins({
   /*
    * ⚠️ TROIS CAUSES, TROIS MESSAGES, ET SURTOUT PAS UN SEUL.
    *
-   * « Pas de clé cartographique » et « pas de coordonnées à montrer » sont
-   * deux choses sans rapport, et les confondre envoie chercher le problème au
-   * mauvais endroit : on irait vérifier une variable d'environnement alors que
-   * c'est la recherche qui n'a rien rendu, ou l'inverse. L'ordre compte aussi —
-   * sans clé, la question des coordonnées ne se pose même pas.
+   * « Le fond de carte est mal configuré », « la carte n'a pas pu se charger »
+   * et « il n'y a aucun point à montrer » sont trois choses sans rapport, et
+   * les confondre envoie chercher le problème au mauvais endroit : on irait
+   * vérifier une variable d'environnement alors que c'est la recherche qui n'a
+   * rien rendu, ou l'inverse.
+   *
+   * L'ordre compte aussi : si le fond est refusé, la question des coordonnées
+   * ne se pose même pas.
+   *
+   * ⚠️ ET CE RENDU-CI REMPLACE LE CONTENEUR DE LA CARTE. C'est pour cela que
+   * seul un échec FATAL peut y mener, et que l'instance est détruite avant —
+   * voir l'écouteur `error`. Un repli déclenché par une tuile manquante
+   * démolissait une carte qui fonctionnait.
    */
   if (config.statut === "indisponible") {
     return <CadreMessage texte={messageCarteIndisponible(config.raison)} />;
@@ -557,6 +773,14 @@ function messageEchec(echec: EchecCarte): string {
       return "La carte n'a pas pu être téléchargée. La liste des commerces reste utilisable.";
     case "style":
       return "Le fond de carte est momentanément indisponible. La liste des commerces reste utilisable.";
+    case "refus_amont":
+      /*
+       * ⚠️ CE MESSAGE S'ADRESSE À L'ÉLÈVE, PAS À L'ADMINISTRATEUR. Il ne
+       * nomme ni le fournisseur, ni l'URL : ce sont des détails de notre
+       * installation, et les afficher ne l'aiderait en rien. Le diagnostic
+       * précis, lui, est dans la console — voir le gestionnaire d'erreur.
+       */
+      return "Le fond de carte a été refusé. La liste des commerces reste utilisable.";
   }
 }
 

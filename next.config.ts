@@ -69,23 +69,29 @@ const CSP_SOURCES = {
   supabaseFrames: SUPABASE_FRAME ?? "",
   // CARTOGRAPHIE — le fond de carte de la recherche de commerces.
   //
-  // ⚠️ L'ORIGINE EXACTE, PAS `*.maptiler.com`. Un joker couvrirait aussi
-  // `cloud.maptiler.com` (la console du compte) et tout sous-domaine futur ;
-  // l'API des cartes est `api.maptiler.com`, et c'est tout ce dont le
-  // navigateur a besoin.
+  // ⚠️ UN SEUL HÔTE, ET IL EST VÉRIFIÉ SUR LE STYLE LUI-MÊME. Le document
+  // `liberty` d'OpenFreeMap ne cite aucune autre origine : le style, les
+  // polices (`/fonts/`), les planches de symboles (`/sprites/`), les tuiles
+  // vectorielles (`/planet/`) et le relief ombré (`/natural_earth/`) en
+  // viennent tous. Aucun joker : ni `*.openfreemap.org`, ni `https:`.
   //
-  // Ce qui passe par là : `style.json`, `tiles.json`, les tuiles vectorielles
-  // `.pbf`, les planches de symboles `sprite@2x.json` et `sprite@2x.png`, et
-  // les polices `.pbf`. MapLibre les récupère toutes par `fetch` — elles
-  // relèvent donc de `connect-src`, pas de `img-src`, même l'image de sprite.
-  // C'est ce que disaient les violations relevées : « Refused to CONNECT ».
-  maptiler: "https://api.maptiler.com",
+  // Ce qui passe par là : le style, le TileJSON, les tuiles `.pbf`, les
+  // polices `.pbf`, les planches de symboles. MapLibre les récupère toutes
+  // par `fetch` — elles relèvent donc de `connect-src`, pas de `img-src`,
+  // l'image de sprite comprise.
+  //
+  // ⚠️ LE RELIEF OMBRÉ EST UNE SOURCE RASTER (`.png`). MapLibre la récupère
+  // aussi par `fetch`, puis la décode en `blob:` avant de l'afficher — d'où
+  // l'hôte dans `img-src` également, par sécurité, et le `blob:` qui y était
+  // déjà pour les aperçus de photos.
+  fondDeCarte: "https://tiles.openfreemap.org",
   // Images : Storage Supabase, Stripe, et data:/blob: pour les aperçus
   // locaux (upload d'une photo de progression).
   //
   // ⚠️ `blob:` SERT AUSSI À LA CARTE, et il était déjà là. MapLibre décode les
-  // planches de symboles en `Blob([...], { type: "image/png" })` puis les pose
-  // en `img.src` : sans `blob:`, la carte s'afficherait sans aucune icône.
+  // planches de symboles et les tuiles raster en
+  // `Blob([...], { type: "image/png" })` puis les pose en `img.src` : sans
+  // `blob:`, la carte s'afficherait sans icônes et sans relief.
   images: "'self' data: blob: https://*.supabase.co https://*.stripe.com",
   // Vercel Analytics / Speed Insights, si activés plus tard.
   vercel: "https://*.vercel-insights.com https://*.vercel-scripts.com",
@@ -98,7 +104,7 @@ const contentSecurityPolicy = [
   // gain justifiera la complexité.
   `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${CSP_SOURCES.stripe} ${CSP_SOURCES.vercel}`,
   `style-src 'self' 'unsafe-inline'`,
-  `img-src ${CSP_SOURCES.images} ${CSP_SOURCES.maptiler}`,
+  `img-src ${CSP_SOURCES.images} ${CSP_SOURCES.fondDeCarte}`,
   // `media-src` n'était pas déclaré : les `<video>` retombaient donc sur
   // `default-src 'self'`, qui bloque à la fois l'aperçu local (`blob:`) et
   // l'URL signée du Storage. Sans cette ligne, la CSP passée en mode
@@ -124,8 +130,11 @@ const contentSecurityPolicy = [
   // chemin `blob:` n'est jamais emprunté. L'ouvrir affaiblirait la politique
   // sans rien débloquer — et `blob:` dans `worker-src` est précisément ce qui
   // permet d'exécuter du code fabriqué à la volée.
+  //
+  // ⚠️ CECI N'A PAS CHANGÉ EN CHANGEANT DE FOURNISSEUR DE FOND DE CARTE : le
+  // worker est à nous, il l'a toujours été, et il ne vient d'aucun tiers.
   `worker-src 'self'`,
-  `connect-src 'self' ${CSP_SOURCES.supabase} ${CSP_SOURCES.stripe} ${CSP_SOURCES.vercel} ${CSP_SOURCES.maptiler}`,
+  `connect-src 'self' ${CSP_SOURCES.supabase} ${CSP_SOURCES.stripe} ${CSP_SOURCES.vercel} ${CSP_SOURCES.fondDeCarte}`,
   // Les documents privés (PDF) sont affichés dans une modale SETH à partir
   // d'une URL SIGNÉE du Storage : sans cette origine, la CSP passée en mode
   // bloquant afficherait un cadre vide, sans autre symptôme.

@@ -62,7 +62,38 @@ const SORTIE_TS = new URL("lib/cartographie/worker-maplibre.generated.ts", RACIN
 const version = (JSON.parse(readFileSync(PAQUET, "utf8")) as { version: string }).version;
 if (!/^\d+\.\d+\.\d+/.test(version)) throw new Error(`version maplibre-gl inattendue : ${version}`);
 
-const contenu = readFileSync(SOURCE);
+const original = readFileSync(SOURCE, "utf8");
+
+/*
+ * ════════════════════════════════════════════════════════════════════════════
+ * ⚠️ LE RENVOI VERS LA CARTE DES SOURCES EST RETIRÉ, ET VOICI POURQUOI
+ * ════════════════════════════════════════════════════════════════════════════
+ * Le worker publié par MapLibre se termine par :
+ *
+ *     //# sourceMappingURL=maplibre-gl-worker.mjs.map
+ *
+ * C'est un chemin RELATIF. Résolu à côté de notre copie, il devient
+ * `/maplibre/maplibre-gl-worker.mjs.map` — un fichier que nous ne déployons
+ * pas, et que le navigateur réclame dès que les outils de développement sont
+ * ouverts. D'où, dans la console, un 404 sur un chemin qui ressemble à s'y
+ * méprendre au nom générique du worker, et qui laisse croire que
+ * `setWorkerUrl` n'a pas pris.
+ *
+ * ⚠️ CE 404 EST INOFFENSIF — il ne concerne que le confort de débogage, jamais
+ * l'exécution. Mais un 404 qui apparaît à chaque chargement de carte et qui
+ * MIME la panne qu'on vient de corriger est pire qu'inutile : il envoie
+ * chercher au mauvais endroit. On le supprime donc à la source.
+ *
+ * ⚠️ ET ON NE COPIE PAS LA CARTE DES SOURCES À LA PLACE. Elle pèse 2,6 Mo,
+ * pour déboguer du code tiers minifié que nous ne modifions pas.
+ */
+const contenu = Buffer.from(
+  original.replace(/\n?\/\/# sourceMappingURL=[^\n]*\n?$/, "\n"),
+  "utf8",
+);
+if (/sourceMappingURL/.test(contenu.toString("utf8"))) {
+  throw new Error("le renvoi vers la carte des sources n'a pas été retiré");
+}
 const empreinte = createHash("sha256").update(contenu).digest("hex");
 
 /*
@@ -96,13 +127,21 @@ writeFileSync(
  * appelle \`new Worker(url, { type: "module" })\` directement : \`worker-src
  * 'self'\` suffit, et \`blob:\` serait une permission accordée pour rien.
  *
- * SHA-256 du worker : ${empreinte}
+ * SHA-256 du worker copié : ${empreinte}
+ * (le renvoi \`sourceMappingURL\` a été retiré — voir le script)
  */
 
 /** La version de \`maplibre-gl\` dont ce worker provient. */
 export const WORKER_MAPLIBRE_VERSION = ${JSON.stringify(version)};
 
-/** L'empreinte du fichier copié — comparée au paquet installé par un test. */
+/**
+ * L'empreinte du fichier COPIÉ.
+ *
+ * ⚠️ ELLE DIFFÈRE DE CELLE DU PAQUET, d'une ligne : le renvoi vers la carte
+ * des sources est retiré à la copie (voir le script). Le test compare donc
+ * cette empreinte au fichier servi, et la VERSION au paquet installé — deux
+ * contrôles, parce que ce sont deux dérives différentes.
+ */
 export const WORKER_MAPLIBRE_SHA256 = ${JSON.stringify(empreinte)};
 
 /** L'URL publique du worker, sur notre propre origine. */
