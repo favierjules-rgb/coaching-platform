@@ -11,6 +11,7 @@ import {
 import {
   cadreDeLaRecherche,
   collectionDeMagasins,
+  collectionDuChoisi,
   coordonneesFiables,
   type Point,
 } from "@/lib/cartographie/vue-magasins";
@@ -70,7 +71,34 @@ const SOURCE = "commerces";
 const COUCHE_AMAS = "commerces-amas";
 const COUCHE_AMAS_NOMBRE = "commerces-amas-nombre";
 const COUCHE_POINT = "commerces-point";
+/*
+ * ════════════════════════════════════════════════════════════════════════════
+ * ⚠️ LE COMMERCE CHOISI A SA PROPRE SOURCE, ET C'EST UNE CORRECTION DE PANNE
+ * ════════════════════════════════════════════════════════════════════════════
+ * La pastille verte vivait dans la source REGROUPÉE, filtrée par
+ * `["!", ["has", "point_count"]]`. Un commerce avalé dans un amas n'a alors
+ * aucune entité individuelle à colorer : il ne POUVAIT PAS devenir vert.
+ *
+ * Reproduit en Chromium, sur les trois commerces signalés — et le type OSM n'y
+ * est pour rien :
+ *
+ *   dans un amas (zoom 11,7)   Spar NODE / Carrefour Market WAY / Utile RELATION
+ *                              → marqueur vert : 0, 0, 0
+ *   hors amas  (zoom 14)       les mêmes
+ *                              → marqueur vert : 1, 1, 1
+ *
+ * Spar passait au vert par accident de géographie : isolé, il n'était jamais
+ * groupé. Les deux autres, dans le tissu dense, l'étaient toujours.
+ *
+ * ⚠️ LA RÉPONSE N'EST PAS DE DÉZOOMER AUTREMENT, mais de sortir le choisi du
+ * regroupement. Une source à part, sans `cluster`, ne contient que lui : il est
+ * donc toujours dessiné, à tous les zooms, quoi que fassent les amas.
+ */
+const SOURCE_CHOISI = "commerce-choisi";
 const COUCHE_CHOISI = "commerces-choisi";
+
+/** Une collection GeoJSON vide : l'état de naissance des deux sources. */
+const COLLECTION_VIDE = { type: "FeatureCollection", features: [] } as const;
 
 /*
  * ⚠️ LES COULEURS VIENNENT DU THÈME, et non d'un code écrit ici. Les écrire en
@@ -165,6 +193,24 @@ export function CarteDesMagasins({
   const carte = useRef<import("maplibre-gl").Map | null>(null);
   const [echec, setEchec] = useState<EchecCarte | null>(null);
   const [prete, setPrete] = useState(false);
+  /*
+   * ════════════════════════════════════════════════════════════════════════
+   * ⚠️ LE DERNIER CADRE APPLIQUÉ — ET C'EST UNE CORRECTION DE PANNE
+   * ════════════════════════════════════════════════════════════════════════
+   * Le cadrage vit dans l'effet des marqueurs, dont `selectionnee` est une
+   * dépendance : il se rejouait donc à CHAQUE sélection. Et comme cet effet
+   * est asynchrone — il attend l'import de MapLibre — son `fitBounds`
+   * atterrissait APRÈS le `easeTo` de l'effet de recentrage, et l'annulait.
+   *
+   * Mesuré en Chromium : le zoom restait à 11,7 au lieu de monter à 14, les
+   * amas ne se défaisaient jamais, et la carte sautait en arrière à chaque
+   * clic dans la liste.
+   *
+   * ⚠️ LE CADRAGE RÉPOND AUX RÉSULTATS, PAS À LA SÉLECTION. Cette référence
+   * garde le cadre déjà appliqué : tant qu'il n'a pas changé, on n'y touche
+   * plus — ni pour une sélection, ni pour un simple nouveau rendu.
+   */
+  const cadreApplique = useRef<string | null>(null);
 
   /*
    * ⚠️ LE RAPPEL VIT DANS UNE RÉFÉRENCE, ET CE N'EST PAS UN CONTOURNEMENT DE
@@ -404,286 +450,439 @@ export function CarteDesMagasins({
       instance = null;
       carte.current = null;
       setPrete(false);
+      /*
+       * ⚠️ LE CADRE APPLIQUÉ MEURT AVEC LA CARTE. Le garder ferait croire à la
+       * carte suivante qu'elle est déjà cadrée, et elle s'ouvrirait sur la
+       * France entière.
+       */
+      cadreApplique.current = null;
     };
   }, [urlDuStyle]);
 
-  /* ── Les commerces : une source qui regroupe, et non des marqueurs ────── */
+  /* ────────────────────────────────────────────────────────────────────────
+     LE CYCLE DE VIE, EN CINQ EFFETS QUI NE SE MARCHENT PAS DESSUS
+
+     ⚠️ UN SEUL EFFET FAISAIT TOUT, ET IL AVAIT UNE PANNE SILENCIEUSE.
+     Il dépendait de `[prete, magasins, selectionnee, depart, centreCommune]`,
+     son nettoyage retirait les écouteurs À CHAQUE PASSAGE, mais leur POSE
+     était enfermée dans `if (instance.getSource(SOURCE) === undefined)`.
+
+     Conséquence : au deuxième passage — c'est-à-dire dès la première
+     sélection — la source existait, la branche de création était sautée, et
+     les écouteurs retirés n'étaient jamais reposés. Cliquer un commerce SUR
+     la carte ne sélectionnait plus rien, définitivement. Un clic marchait,
+     puis plus aucun.
+
+     ⚠️ ET LE DÉCOUPAGE RÈGLE AUSSI UNE COURSE. L'ancien effet attendait
+     l'import de MapLibre avant de toucher à la carte : son cadrage
+     atterrissait après le recentrage et l'annulait. Seul le marqueur de
+     position a besoin de cet import ; tout le reste se fait sur l'instance
+     qu'on tient déjà, donc SYNCHRONEMENT, dans l'ordre de déclaration.
+
+     Chaque effet a désormais exactement les dépendances de ce qu'il fait :
+
+       A. sources et couches      [prete]                         une fois
+       B. données des commerces   [prete, magasins]
+       C. commerce choisi         [prete, magasins, selectionnee]
+       D. position de l'élève     [prete, depart]
+       E. écouteurs               [prete]                         une fois
+       F. cadrage                 [prete, magasins, depart, centreCommune]
+     ──────────────────────────────────────────────────────────────────────── */
+
+  /* ── A. Les sources et les couches : posées une fois par carte ─────────── */
   useEffect(() => {
     const instance = carte.current;
     if (!prete || instance === null) return;
-    let vivant = true;
-    let marqueurDepart: import("maplibre-gl").Marker | null = null;
-    /** Les écouteurs posés, pour pouvoir les retirer un par un au démontage. */
-    const ecouteurs: { couche: string; type: string; f: (e: never) => void }[] = [];
+    // ⚠️ IDEMPOTENT : si les couches sont déjà là, il n'y a rien à refaire.
+    if (instance.getSource(SOURCE) !== undefined) return;
 
+    /*
+     * ⚠️ LES JETONS SONT RÉSOLUS SUR LE CONTENEUR DE LA CARTE. MapLibre
+     * analyse les couleurs lui-même et refuse `var(--…)` : lui passer le jeton
+     * brut faisait rejeter la couche entière. Voir `couleurDuJeton`.
+     */
+    const racine = instance.getContainer();
+    const NEUTRE = couleurDuJeton(racine, JETON_NEUTRE, REPLI_NEUTRE);
+    const CHOISI = couleurDuJeton(racine, JETON_CHOISI, REPLI_CHOISI);
+    const CONTOUR = couleurDuJeton(racine, JETON_CONTOUR, REPLI_CONTOUR);
+
+    /*
+     * ════════════════════════════════════════════════════════════════════
+     * ⚠️ UNE SOURCE, PAS SOIXANTE MARQUEURS — ET LE REGROUPEMENT VIENT AVEC
+     * ════════════════════════════════════════════════════════════════════
+     * Chaque commerce était un élément du DOM, créé puis retiré à chaque
+     * changement de sélection : soixante éléments recréés au moindre clic, et
+     * un oubli de nettoyage suffisait à les empiler en double.
+     *
+     * Une source GeoJSON renverse le problème. On lui DONNE la liste, elle
+     * s'occupe du reste : il ne peut pas y avoir de doublon, parce qu'il n'y a
+     * pas d'accumulation — `setData` remplace. Et c'est elle qui sait
+     * regrouper les points qui se chevauchent.
+     *
+     * ⚠️ ELLE NAÎT VIDE, ET C'EST VOULU. Les données arrivent par l'effet B,
+     * qui seul connaît `magasins` : cet effet-ci ne doit pas dépendre de la
+     * liste, sans quoi il reposerait tout à chaque recherche.
+     *
+     * ⚠️ `clusterMaxZoom: 13` — AU-DELÀ, PLUS AUCUN AMAS. Au zoom rapproché,
+     * chaque commerce redevient choisissable. `clusterRadius: 44` est un peu
+     * plus large que le rayon d'un doigt : en dessous, deux pastilles se
+     * touchent sans fusionner et l'on vise l'une pour atteindre l'autre.
+     */
+    instance.addSource(SOURCE, {
+      type: "geojson",
+      data: COLLECTION_VIDE as never,
+      cluster: true,
+      clusterMaxZoom: 13,
+      clusterRadius: 44,
+    });
+
+    instance.addLayer({
+      id: COUCHE_AMAS,
+      type: "circle",
+      source: SOURCE,
+      filter: ["has", "point_count"],
+      paint: {
+        "circle-color": NEUTRE,
+        "circle-opacity": 0.92,
+        /*
+         * ⚠️ RÉDUITS D'UN QUART : les pastilles mangeaient la carte. Les trois
+         * paliers sont conservés — deux commerces et douze ne méritent pas la
+         * même pastille — mais ramenés de 16 / 20 / 26 à 12 / 15 / 19, et le
+         * contour de 2 à 1,5.
+         */
+        "circle-radius": ["step", ["get", "point_count"], 12, 5, 15, 15, 19],
+        "circle-stroke-width": 1.5,
+        "circle-stroke-color": CONTOUR,
+      },
+    });
+
+    /*
+     * ⚠️ LE NOMBRE N'EST AJOUTÉ QUE SI LE STYLE SAIT DESSINER DU TEXTE. Une
+     * couche `symbol` exige des glyphes, que le style déclare par son entrée
+     * `glyphs`. Sur un style qui n'en a pas, MapLibre émet une erreur par amas
+     * et n'affiche rien. Les pastilles restent lisibles sans, puisque leur
+     * taille dit déjà la densité.
+     */
+    if (typeof instance.getStyle()?.glyphs === "string") {
+      instance.addLayer({
+        id: COUCHE_AMAS_NOMBRE,
+        type: "symbol",
+        source: SOURCE,
+        filter: ["has", "point_count"],
+        layout: {
+          "text-field": ["get", "point_count_abbreviated"],
+          /*
+           * ⚠️ UNE SEULE POLICE, ET CE N'EST PAS UN APPAUVRISSEMENT. MapLibre
+           * ne demande pas les polices une par une : il assemble la liste en
+           * UN SEUL nom de pile, séparé par des virgules. Le serveur ne sert
+           * que les piles simples — `Noto Sans Regular` rend 200,
+           * `Noto Sans Regular,Open Sans Regular` rend 404.
+           */
+          "text-font": ["Noto Sans Regular"],
+          /*
+           * ⚠️ 11 px, PAS MOINS. La plus petite pastille fait 24 px de
+           * diamètre : en dessous de 11, le chiffre cesse d'être lisible, et
+           * un amas dont on ne lit pas le nombre ne sert à rien.
+           */
+          "text-size": 11,
+          "text-allow-overlap": true,
+        },
+        paint: { "text-color": CONTOUR },
+      });
+    }
+
+    // Les commerces isolés : neutres.
+    instance.addLayer({
+      id: COUCHE_POINT,
+      type: "circle",
+      source: SOURCE,
+      filter: ["!", ["has", "point_count"]],
+      paint: {
+        "circle-color": NEUTRE,
+        // ⚠️ 9 → 6,5 : un tiers de surface en moins, et la carte respire.
+        "circle-radius": 6.5,
+        "circle-stroke-width": 2,
+        "circle-stroke-color": CONTOUR,
+      },
+    });
+
+    /*
+     * ⚠️ LE COMMERCE CHOISI A SA PROPRE COUCHE, AU-DESSUS DES AUTRES, ET SA
+     * PROPRE SOURCE, HORS DU REGROUPEMENT.
+     *
+     * Sa propre COUCHE : le teinter dans la couche précédente par une
+     * expression suffirait à le colorer, mais pas à le faire passer devant —
+     * deux pastilles qui se chevauchent cacheraient justement celle qu'on
+     * vient de choisir.
+     *
+     * Sa propre SOURCE : voir `SOURCE_CHOISI`. C'est ce qui garantit qu'il est
+     * vert À TOUS LES ZOOMS, même quand ses voisins sont regroupés sur lui.
+     */
+    instance.addSource(SOURCE_CHOISI, { type: "geojson", data: COLLECTION_VIDE as never });
+    instance.addLayer({
+      id: COUCHE_CHOISI,
+      type: "circle",
+      source: SOURCE_CHOISI,
+      paint: {
+        "circle-color": CHOISI,
+        // ⚠️ 13 → 9,5, dans la même proportion que les autres — mais il reste
+        // nettement plus gros qu'un commerce ordinaire (6,5).
+        "circle-radius": 9.5,
+        "circle-stroke-width": 2.5,
+        "circle-stroke-color": CONTOUR,
+      },
+    });
+
+    return () => {
+      /*
+       * ⚠️ LES COUCHES AVANT LES SOURCES, ET DANS L'ORDRE INVERSE DE LA POSE.
+       * Une source encore référencée par une couche ne se retire pas. Et si la
+       * carte a déjà été détruite, il n'y a plus rien à défaire.
+       */
+      const vivante = carte.current;
+      if (vivante === null) return;
+      for (const couche of [COUCHE_CHOISI, COUCHE_POINT, COUCHE_AMAS_NOMBRE, COUCHE_AMAS]) {
+        try {
+          if (vivante.getLayer(couche) !== undefined) vivante.removeLayer(couche);
+        } catch {
+          // La carte peut être en cours de destruction : insister ferait
+          // tomber le démontage pour un nettoyage que `remove()` fera seul.
+        }
+      }
+      for (const source of [SOURCE_CHOISI, SOURCE]) {
+        try {
+          if (vivante.getSource(source) !== undefined) vivante.removeSource(source);
+        } catch {
+          // Idem.
+        }
+      }
+    };
+  }, [prete]);
+
+  /* ── B. Les données des commerces, et la couleur du thème ──────────────── */
+  useEffect(() => {
+    const instance = carte.current;
+    if (!prete || instance === null) return;
+    const source = instance.getSource(SOURCE) as unknown as
+      | { setData: (d: unknown) => void }
+      | undefined;
+    if (source === undefined) return;
+
+    // ⚠️ MISE À JOUR, PAS RECONSTRUCTION. C'est ce qui rend les doublons
+    // impossibles : la source est remplacée, jamais complétée.
+    source.setData(collectionDeMagasins(magasins));
+
+    /*
+     * ⚠️ ET ON REPEINT, parce que le thème a pu changer depuis que les couches
+     * ont été posées. Sans cela, passer en mode sombre laisserait des
+     * pastilles de la palette claire sur un fond sombre.
+     */
+    const racine = instance.getContainer();
+    const NEUTRE = couleurDuJeton(racine, JETON_NEUTRE, REPLI_NEUTRE);
+    const CHOISI = couleurDuJeton(racine, JETON_CHOISI, REPLI_CHOISI);
+    const CONTOUR = couleurDuJeton(racine, JETON_CONTOUR, REPLI_CONTOUR);
+    for (const [couche, propriete, couleur] of [
+      [COUCHE_AMAS, "circle-color", NEUTRE],
+      [COUCHE_AMAS, "circle-stroke-color", CONTOUR],
+      [COUCHE_POINT, "circle-color", NEUTRE],
+      [COUCHE_POINT, "circle-stroke-color", CONTOUR],
+      [COUCHE_CHOISI, "circle-color", CHOISI],
+      [COUCHE_CHOISI, "circle-stroke-color", CONTOUR],
+      [COUCHE_AMAS_NOMBRE, "text-color", CONTOUR],
+    ] as const) {
+      if (instance.getLayer(couche) !== undefined) {
+        instance.setPaintProperty(couche, propriete, couleur);
+      }
+    }
+  }, [prete, magasins]);
+
+  /* ── C. Le commerce choisi : une source qui n'en contient qu'un ────────── */
+  useEffect(() => {
+    const instance = carte.current;
+    if (!prete || instance === null) return;
+    const source = instance.getSource(SOURCE_CHOISI) as unknown as
+      | { setData: (d: unknown) => void }
+      | undefined;
+    if (source === undefined) return;
+    /*
+     * ⚠️ LA MISE EN ÉVIDENCE REMPLACE DES DONNÉES — aucun marqueur recréé,
+     * aucun filtre à tenir. Et elle part de `cleIdentiteOsm`, la seule
+     * identité du dépôt : `NODE/123`, `WAY/456`, `RELATION/789`. Ni le nom —
+     * deux commerces peuvent s'appeler « Spar » — ni le seul numéro, qui se
+     * répète d'un type OSM à l'autre.
+     */
+    source.setData(collectionDuChoisi(magasins, selectionnee));
+  }, [prete, magasins, selectionnee]);
+
+  /* ── D. La position de l'élève ─────────────────────────────────────────── */
+  /*
+   * ⚠️ ON DÉPEND DES COORDONNÉES, PAS DE L'OBJET. React compare les
+   * dépendances par RÉFÉRENCE : si le parent reconstruisait `depart` à chaque
+   * rendu — ce qu'il ne fait pas aujourd'hui, mais rien ne l'en empêche — le
+   * marqueur serait détruit et reposé à chaque sélection, pour une position
+   * qui n'a pas bougé. Mesuré sur un harnais qui recrée l'objet : cinq poses
+   * pour une seule position. Deux nombres ne mentent pas.
+   */
+  const lonDepart = depart?.lon ?? null;
+  const latDepart = depart?.lat ?? null;
+  useEffect(() => {
+    const instance = carte.current;
+    if (!prete || instance === null || lonDepart === null || latDepart === null) return;
+    let vivant = true;
+    let marqueur: import("maplibre-gl").Marker | null = null;
+
+    /*
+     * ⚠️ C'EST LE SEUL ENDROIT QUI A BESOIN DE L'IMPORT, donc le seul effet
+     * asynchrone. `Marker` est une classe du paquet ; tout le reste se fait
+     * sur l'instance qu'on tient déjà.
+     *
+     * ⚠️ ET IL NE DÉPEND QUE DE `depart`. Avant, le marqueur était détruit et
+     * reconstruit à chaque sélection, pour une position qui n'avait pas bougé.
+     *
+     * ⚠️ AUCUNE NOUVELLE DEMANDE DE GÉOLOCALISATION : les coordonnées viennent
+     * du parcours « autour de moi », par la propriété `depart`. Et en
+     * recherche par ville, `depart` vaut `null` — `centreCommune` est un
+     * centre de RECHERCHE, pas l'élève, et l'afficher inventerait une
+     * position.
+     *
+     * ⚠️ IL NE VIT DANS AUCUNE SOURCE GEOJSON, donc il ne peut jamais être
+     * regroupé dans un amas ni cliqué à la place d'un commerce.
+     */
     void import("maplibre-gl").then(({ Marker }) => {
       if (!vivant || carte.current === null) return;
-
-      /*
-       * ⚠️ LES JETONS SONT RÉSOLUS ICI, PAS AU CHARGEMENT DU MODULE. Lus sur
-       * le conteneur de la carte, ils suivent le thème effectif — et ils sont
-       * relus à chaque passage de cet effet, pour qu'un changement de thème
-       * repeigne les pastilles au lieu de les laisser à l'ancienne couleur.
-       */
-      const racine = instance.getContainer();
-      const NEUTRE = couleurDuJeton(racine, JETON_NEUTRE, REPLI_NEUTRE);
-      const CHOISI = couleurDuJeton(racine, JETON_CHOISI, REPLI_CHOISI);
-      const CONTOUR = couleurDuJeton(racine, JETON_CONTOUR, REPLI_CONTOUR);
-
-      /*
-       * ════════════════════════════════════════════════════════════════════
-       * ⚠️ UNE SOURCE, PAS SOIXANTE MARQUEURS — ET LE REGROUPEMENT VIENT AVEC
-       * ════════════════════════════════════════════════════════════════════
-       * Chaque commerce était un élément du DOM, créé puis retiré à chaque
-       * changement de sélection : soixante éléments recréés au moindre clic,
-       * et un oubli de nettoyage suffisait à les empiler en double.
-       *
-       * Une source GeoJSON renverse le problème. On lui DONNE la liste, elle
-       * s'occupe du reste : il ne peut pas y avoir de doublon, parce qu'il n'y
-       * a pas d'accumulation — `setData` remplace. Et c'est elle qui sait
-       * regrouper les points qui se chevauchent, ce qu'aucun marqueur DOM ne
-       * sait faire.
-       *
-       * ⚠️ `clusterMaxZoom: 13` — AU-DELÀ, PLUS AUCUN AMAS. C'est la règle
-       * demandée : au zoom rapproché, chaque commerce redevient choisissable.
-       * `clusterRadius: 44` est un peu plus large que le rayon d'un doigt :
-       * en dessous, deux pastilles se touchent sans fusionner et l'on vise
-       * l'une pour atteindre l'autre.
-       */
-      if (instance.getSource(SOURCE) === undefined) {
-        instance.addSource(SOURCE, {
-          type: "geojson",
-          data: collectionDeMagasins(magasins) as never,
-          cluster: true,
-          clusterMaxZoom: 13,
-          clusterRadius: 44,
-        });
-
-        instance.addLayer({
-          id: COUCHE_AMAS,
-          type: "circle",
-          source: SOURCE,
-          filter: ["has", "point_count"],
-          paint: {
-            "circle-color": NEUTRE,
-            "circle-opacity": 0.92,
-            // Trois paliers : deux commerces et douze ne méritent pas la
-            // même pastille, mais une échelle continue les rendrait toutes
-            // semblables.
-            "circle-radius": ["step", ["get", "point_count"], 16, 5, 20, 15, 26],
-            "circle-stroke-width": 2,
-            "circle-stroke-color": CONTOUR,
-          },
-        });
-
-        /*
-         * ⚠️ LE NOMBRE N'EST AJOUTÉ QUE SI LE STYLE SAIT DESSINER DU TEXTE.
-         * Une couche `symbol` exige des glyphes, que le style déclare par son
-         * entrée `glyphs`. Sur un style qui n'en a pas, MapLibre émet une
-         * erreur par amas et n'affiche rien — notre écouteur d'erreur
-         * basculerait alors l'écran sur « fond de carte indisponible » pour
-         * un simple chiffre manquant. Les pastilles restent lisibles sans,
-         * puisque leur taille dit déjà la densité.
-         */
-        if (typeof instance.getStyle()?.glyphs === "string") {
-          instance.addLayer({
-            id: COUCHE_AMAS_NOMBRE,
-            type: "symbol",
-            source: SOURCE,
-            filter: ["has", "point_count"],
-            layout: {
-              "text-field": ["get", "point_count_abbreviated"],
-              /*
-               * ⚠️ UNE SEULE POLICE, ET CE N'EST PAS UN APPAUVRISSEMENT.
-               * MapLibre ne demande pas les polices une par une : il assemble
-               * la liste en UN SEUL nom de pile, séparé par des virgules —
-               * `…/fonts/Noto Sans Regular,Open Sans Regular/0-255.pbf`. Le
-               * serveur de polices ne sert que les piles simples :
-               *
-               *     Noto Sans Regular                     → 200, 76 580 o
-               *     Noto Sans Regular,Open Sans Regular   → 404
-               *
-               * Mesuré dans Chromium : avec deux noms, 404 à chaque plage, et
-               * MapLibre se rabattait sur un rendu local approximatif des
-               * chiffres. Avec le seul nom que le fournisseur sert, les
-               * glyphes arrivent et le compteur est net.
-               */
-              "text-font": ["Noto Sans Regular"],
-              "text-size": 13,
-              "text-allow-overlap": true,
-            },
-            paint: { "text-color": CONTOUR },
-          });
-        }
-
-        // Les commerces isolés : neutres.
-        instance.addLayer({
-          id: COUCHE_POINT,
-          type: "circle",
-          source: SOURCE,
-          filter: ["!", ["has", "point_count"]],
-          paint: {
-            "circle-color": NEUTRE,
-            "circle-radius": 9,
-            "circle-stroke-width": 2.5,
-            "circle-stroke-color": CONTOUR,
-          },
-        });
-
-        /*
-         * ⚠️ LE COMMERCE CHOISI A SA PROPRE COUCHE, AU-DESSUS DES AUTRES.
-         * Le colorer dans la couche précédente par une expression suffirait à
-         * le teinter, mais pas à le faire passer devant : deux pastilles qui
-         * se chevauchent cacheraient justement celle qu'on vient de choisir.
-         */
-        instance.addLayer({
-          id: COUCHE_CHOISI,
-          type: "circle",
-          source: SOURCE,
-          filter: ["all", ["!", ["has", "point_count"]], ["==", ["get", "cle"], ""]],
-          paint: {
-            "circle-color": CHOISI,
-            "circle-radius": 13,
-            "circle-stroke-width": 3,
-            "circle-stroke-color": CONTOUR,
-          },
-        });
-
-        const surPoint = (evenement: {
-          features?: { properties?: { cle?: unknown } }[];
-        }) => {
-          const cle = evenement.features?.[0]?.properties?.cle;
-          if (typeof cle === "string" && cle !== "") selection.current(cle);
-        };
-        const surAmas = (evenement: {
-          features?: { properties?: { cluster_id?: unknown } }[];
-          lngLat?: { lng: number; lat: number };
-        }) => {
-          /*
-           * ⚠️ UN AMAS SE DÉPLIE, IL NE SE CHOISIT PAS. On demande à la source
-           * le zoom auquel il éclate, et on y va : c'est le seul geste qui
-           * ait un sens, et il mène toujours quelque part — contrairement à
-           * un zoom fixe, qui laisserait parfois l'amas intact.
-           */
-          const id = evenement.features?.[0]?.properties?.cluster_id;
-          const centre = evenement.lngLat;
-          if (typeof id !== "number" || centre === undefined) return;
-          const source = instance.getSource(SOURCE) as unknown as {
-            getClusterExpansionZoom?: (id: number) => Promise<number>;
-          };
-          void source
-            .getClusterExpansionZoom?.(id)
-            .then((zoom) => {
-              if (vivant) instance.easeTo({ center: centre, zoom, duration: 420 });
-            })
-            .catch(() => {
-              // Un amas qui refuse de dire son zoom : on s'approche quand même.
-              if (vivant) instance.easeTo({ center: centre, zoom: instance.getZoom() + 2, duration: 420 });
-            });
-        };
-        const mainOuverte = () => {
-          instance.getCanvas().style.cursor = "pointer";
-        };
-        const mainFermee = () => {
-          instance.getCanvas().style.cursor = "";
-        };
-
-        for (const [couche, type, f] of [
-          [COUCHE_POINT, "click", surPoint],
-          [COUCHE_CHOISI, "click", surPoint],
-          [COUCHE_AMAS, "click", surAmas],
-          [COUCHE_POINT, "mouseenter", mainOuverte],
-          [COUCHE_AMAS, "mouseenter", mainOuverte],
-          [COUCHE_POINT, "mouseleave", mainFermee],
-          [COUCHE_AMAS, "mouseleave", mainFermee],
-        ] as const) {
-          instance.on(type as never, couche, f as never);
-          ecouteurs.push({ couche, type, f: f as never });
-        }
-      } else {
-        // ⚠️ MISE À JOUR, PAS RECONSTRUCTION. C'est ce qui rend les doublons
-        // impossibles : la source est remplacée, jamais complétée.
-        const source = instance.getSource(SOURCE) as unknown as {
-          setData: (d: unknown) => void;
-        };
-        source.setData(collectionDeMagasins(magasins));
-        /*
-         * ⚠️ ET ON REPEINT, parce que le thème a pu changer depuis que les
-         * couches ont été posées. Sans cela, passer en mode sombre laisserait
-         * des pastilles de la palette claire sur un fond sombre.
-         */
-        for (const [couche, propriete, couleur] of [
-          [COUCHE_AMAS, "circle-color", NEUTRE],
-          [COUCHE_AMAS, "circle-stroke-color", CONTOUR],
-          [COUCHE_POINT, "circle-color", NEUTRE],
-          [COUCHE_POINT, "circle-stroke-color", CONTOUR],
-          [COUCHE_CHOISI, "circle-color", CHOISI],
-          [COUCHE_CHOISI, "circle-stroke-color", CONTOUR],
-          [COUCHE_AMAS_NOMBRE, "text-color", CONTOUR],
-        ] as const) {
-          if (instance.getLayer(couche) !== undefined) {
-            instance.setPaintProperty(couche, propriete, couleur);
-          }
-        }
-      }
-
-      // La mise en évidence du choisi, par filtre — aucun marqueur recréé.
-      if (instance.getLayer(COUCHE_CHOISI) !== undefined) {
-        instance.setFilter(COUCHE_CHOISI, [
-          "all",
-          ["!", ["has", "point_count"]],
-          ["==", ["get", "cle"], selectionnee ?? ""],
-        ] as never);
-      }
-
-      // La position de l'élève reste un marqueur DOM : il n'y en a qu'un, et
-      // c'est un disque, pas une goutte — on ne le confond pas avec un
-      // commerce (voir `elementDeDepart`).
-      if (depart !== null) {
-        marqueurDepart = new Marker({ element: elementDeDepart(), anchor: "center" })
-          .setLngLat([depart.lon, depart.lat])
-          .addTo(instance);
-      }
-
-      /*
-       * ⚠️ LE CADRAGE SE FAIT SUR LES RÉSULTATS, PAS SUR UN CENTRE DE VILLE.
-       * `cadreDeLaRecherche` est pur et testé : voir
-       * `lib/cartographie/vue-magasins.ts` pour la raison.
-       */
-      const cadre = cadreDeLaRecherche(magasins, depart, centreCommune);
-      if (cadre !== null) {
-        instance.fitBounds(
-          [
-            [cadre.sudOuest.lon, cadre.sudOuest.lat],
-            [cadre.nordEst.lon, cadre.nordEst.lat],
-          ],
-          { padding: 48, maxZoom: 16, duration: 0 },
-        );
-      }
+      marqueur = new Marker({ element: elementDeDepart(), anchor: "center" })
+        .setLngLat([lonDepart, latDepart])
+        .addTo(instance);
     });
 
     return () => {
       vivant = false;
-      marqueurDepart?.remove();
+      try {
+        marqueur?.remove();
+      } catch {
+        // La carte peut déjà être détruite ; le marqueur est parti avec elle.
+      }
+      marqueur = null;
+    };
+  }, [prete, lonDepart, latDepart]);
+
+  /* ── E. Les écouteurs : posés une fois, retirés une fois ───────────────── */
+  useEffect(() => {
+    const instance = carte.current;
+    if (!prete || instance === null) return;
+    let vivant = true;
+
+    /*
+     * ⚠️ CES FERMETURES NE CAPTURENT NI `magasins` NI `selectionnee`, et c'est
+     * ce qui permet à cet effet de ne dépendre que de `prete`. La sélection
+     * remonte par `selection.current`, une référence toujours à jour : les
+     * écouteurs n'ont donc jamais besoin d'être reposés.
+     */
+    const surPoint = (evenement: { features?: { properties?: { cle?: unknown } }[] }) => {
+      if (!vivant) return;
+      const cle = evenement.features?.[0]?.properties?.cle;
+      if (typeof cle === "string" && cle !== "") selection.current(cle);
+    };
+    const surAmas = (evenement: {
+      features?: { properties?: { cluster_id?: unknown } }[];
+      lngLat?: { lng: number; lat: number };
+    }) => {
       /*
-       * ⚠️ LES ÉCOUTEURS SONT RETIRÉS UN PAR UN, ET LES COUCHES AVANT LA
-       * SOURCE. `map.remove()` nettoierait tout, mais ce nettoyage-ci tourne
-       * AUSSI quand seule la liste change : sans lui, chaque recherche
-       * ajouterait une nouvelle paire d'écouteurs sur les mêmes couches, et
-       * un clic finirait par sélectionner sept fois.
+       * ⚠️ UN AMAS SE DÉPLIE, IL NE SE CHOISIT PAS. On demande à la source le
+       * zoom auquel il éclate, et on y va : c'est le seul geste qui ait un
+       * sens, et il mène toujours quelque part — contrairement à un zoom fixe,
+       * qui laisserait parfois l'amas intact.
        */
-      const instance = carte.current;
-      if (instance === null) return;
+      if (!vivant) return;
+      const id = evenement.features?.[0]?.properties?.cluster_id;
+      const centre = evenement.lngLat;
+      if (typeof id !== "number" || centre === undefined) return;
+      const source = instance.getSource(SOURCE) as unknown as {
+        getClusterExpansionZoom?: (id: number) => Promise<number>;
+      };
+      void source
+        .getClusterExpansionZoom?.(id)
+        .then((zoom) => {
+          if (vivant) instance.easeTo({ center: centre, zoom, duration: 420 });
+        })
+        .catch(() => {
+          // Un amas qui refuse de dire son zoom : on s'approche quand même.
+          if (vivant) instance.easeTo({ center: centre, zoom: instance.getZoom() + 2, duration: 420 });
+        });
+    };
+    const mainOuverte = () => {
+      instance.getCanvas().style.cursor = "pointer";
+    };
+    const mainFermee = () => {
+      instance.getCanvas().style.cursor = "";
+    };
+
+    /*
+     * ⚠️ UN SEUL ÉCOUTEUR PAR COUCHE ET PAR ÉVÉNEMENT. Cet effet ne dépend que
+     * de `prete` : il ne se rejoue pas, donc rien ne s'empile. Si ses
+     * dépendances s'élargissaient un jour, le nettoyage ci-dessous reste la
+     * garantie qu'un clic ne sélectionne jamais sept fois.
+     */
+    const ecouteurs: { couche: string; type: string; f: (e: never) => void }[] = [];
+    for (const [couche, type, f] of [
+      [COUCHE_POINT, "click", surPoint],
+      [COUCHE_CHOISI, "click", surPoint],
+      [COUCHE_AMAS, "click", surAmas],
+      [COUCHE_POINT, "mouseenter", mainOuverte],
+      [COUCHE_AMAS, "mouseenter", mainOuverte],
+      [COUCHE_POINT, "mouseleave", mainFermee],
+      [COUCHE_AMAS, "mouseleave", mainFermee],
+    ] as const) {
+      instance.on(type as never, couche, f as never);
+      ecouteurs.push({ couche, type, f: f as never });
+    }
+
+    return () => {
+      vivant = false;
+      /*
+       * ⚠️ LES ÉCOUTEURS SONT RETIRÉS UN PAR UN. `map.remove()` nettoierait
+       * tout, mais ce nettoyage-ci peut tourner sans que la carte meure.
+       */
+      const vivante = carte.current;
+      if (vivante === null) return;
       for (const { couche, type, f } of ecouteurs) {
         try {
-          instance.off(type as never, couche, f as never);
+          vivante.off(type as never, couche, f as never);
         } catch {
-          // La carte peut déjà être détruite : il n'y a alors plus rien à
-          // détacher, et insister ferait tomber le démontage.
+          // La carte peut déjà être détruite : il n'y a plus rien à détacher.
         }
       }
     };
-  }, [prete, magasins, selectionnee, depart, centreCommune]);
+  }, [prete]);
+
+  /* ── F. Le cadrage, qui répond aux RÉSULTATS et non à la sélection ─────── */
+  useEffect(() => {
+    const instance = carte.current;
+    if (!prete || instance === null) return;
+    /*
+     * ⚠️ LE CADRAGE SE FAIT SUR LES RÉSULTATS, PAS SUR UN CENTRE DE VILLE.
+     * `cadreDeLaRecherche` est pur et testé : voir
+     * `lib/cartographie/vue-magasins.ts` pour la raison.
+     *
+     * ⚠️ ET `selectionnee` N'EST PAS UNE DÉPENDANCE. Recadrer à chaque clic
+     * ramenait la carte sur l'ensemble des résultats et remettait le commerce
+     * choisi dans son amas, où il ne pouvait plus être vert. La référence
+     * `cadreApplique` double la garantie : même cadre, aucun mouvement — y
+     * compris si un rendu rejoue cet effet pour une autre raison.
+     */
+    const cadre = cadreDeLaRecherche(magasins, depart, centreCommune);
+    if (cadre === null) return;
+    const signature = JSON.stringify(cadre);
+    if (signature === cadreApplique.current) return;
+    cadreApplique.current = signature;
+    instance.fitBounds(
+      [
+        [cadre.sudOuest.lon, cadre.sudOuest.lat],
+        [cadre.nordEst.lon, cadre.nordEst.lat],
+      ],
+      { padding: 48, maxZoom: 16, duration: 0 },
+    );
+  }, [prete, magasins, depart, centreCommune]);
 
   /* ── Le recentrage sur le commerce choisi ──────────────────────────────── */
   useEffect(() => {
@@ -826,14 +1025,49 @@ function CadreMessage({ texte }: { readonly texte: string }) {
  * couleur : c'est un disque, pas une goutte. Un élève qui confond sa position
  * avec un magasin se déplace pour rien.
  */
+/**
+ * Le marqueur de la position de l'élève : un disque bleu cerné de blanc.
+ *
+ * ⚠️ TROIS APPARENCES, TROIS SENS, ET AUCUN RECOUVREMENT POSSIBLE :
+ *   · commerce ordinaire — disque `--primary`, 13 px ;
+ *   · commerce choisi    — disque `--success`, 19 px ;
+ *   · position de l'élève — disque `--info`, 14 px, CERNÉ D'UN HALO.
+ * La couleur sépare déjà les trois ; le halo et la forme les séparent encore
+ * pour qui distingue mal le vert du bleu.
+ *
+ * ⚠️ LE HALO N'EST PAS UN CERCLE DE PRÉCISION, et il ne doit pas être pris
+ * pour tel. Le parcours ne conserve que la latitude et la longitude : le
+ * `accuracy` du navigateur n'est jamais transmis. Dessiner un rayon le ferait
+ * croire mesuré alors qu'il serait inventé. Ce halo est donc DÉCORATIF, de
+ * taille fixe, et il sert seulement à faire ressortir le point sur un fond
+ * chargé.
+ *
+ * ⚠️ `aria-hidden` : la carte entière l'est. La liste reste le chemin
+ * accessible, et elle dit déjà les distances.
+ */
 function elementDeDepart(): HTMLElement {
+  const enveloppe = document.createElement("div");
+  enveloppe.setAttribute("aria-hidden", "true");
+  enveloppe.style.position = "relative";
+  enveloppe.style.width = "14px";
+  enveloppe.style.height = "14px";
+
+  const halo = document.createElement("div");
+  halo.style.position = "absolute";
+  halo.style.inset = "-9px";
+  halo.style.borderRadius = "9999px";
+  halo.style.background = "var(--info, #60a5fa)";
+  halo.style.opacity = "0.18";
+  enveloppe.appendChild(halo);
+
   const point = document.createElement("div");
-  point.setAttribute("aria-hidden", "true");
-  point.style.width = "16px";
-  point.style.height = "16px";
+  point.style.position = "absolute";
+  point.style.inset = "0";
   point.style.borderRadius = "9999px";
   point.style.background = "var(--info, #60a5fa)";
   point.style.border = "3px solid var(--card)";
-  point.style.boxShadow = "0 0 0 2px rgba(0,0,0,0.25)";
-  return point;
+  point.style.boxShadow = "0 0 0 1px rgba(0,0,0,0.25)";
+  enveloppe.appendChild(point);
+
+  return enveloppe;
 }

@@ -722,8 +722,19 @@ test("S-16 — LA SÉLECTION CIRCULE DANS LES DEUX SENS, SUR LA MÊME CLÉ", asy
   // Carte → liste : le clic lit la clé de l'entité et la remonte au parent.
   assert.ok(CODE_CARTE.includes("selection.current(cle)"));
   assert.ok(CODE_CARTE.includes("properties?.cle"));
-  // Liste → carte : la mise en évidence passe par un filtre sur cette clé.
-  assert.ok(CODE_CARTE.includes('["==", ["get", "cle"], selectionnee ?? ""]'));
+  /*
+   * Liste → carte : la mise en évidence passe par les DONNÉES d'une source qui
+   * ne contient que le choisi.
+   *
+   * ⚠️ ELLE PASSAIT PAR UN FILTRE, ET C'ÉTAIT LA PANNE : le filtre devait
+   * exclure les amas, donc excluait tout commerce groupé. La clé, elle, n'a
+   * pas changé — c'est toujours l'identité OSM.
+   */
+  const { collectionDuChoisi } = await import("../../lib/cartographie/vue-magasins");
+  assert.ok(CODE_CARTE.includes("setData(collectionDuChoisi(magasins, selectionnee))"));
+  const vert = collectionDuChoisi(trouves, cible);
+  assert.equal(vert.features.length, 1, "exactement le commerce choisi");
+  assert.equal(vert.features[0]!.properties.cle, cible, "et sur la même clé qu'à l'aller");
   assert.ok(CODE_RECHERCHE.includes("onSelectionner={(cle) => {"));
 });
 
@@ -734,8 +745,9 @@ test("S-17 — LE COMMERCE CHOISI EST DISTINCT, ET PAS SEULEMENT PAR LA COULEUR"
    * pastilles se chevauchent. Le choisi est donc PLUS GROS, et sa couche est
    * ajoutée APRÈS les autres — donc dessinée au-dessus.
    */
-  assert.match(CODE_CARTE, /"circle-radius": 13/, "le choisi est plus grand");
-  assert.match(CODE_CARTE, /"circle-radius": 9/, "les autres sont plus petits");
+  // ⚠️ LES DEUX RAYONS ONT ÉTÉ RÉDUITS D'UN QUART, le rapport est préservé.
+  assert.match(CODE_CARTE, /"circle-radius": 9\.5/, "le choisi est plus grand");
+  assert.match(CODE_CARTE, /"circle-radius": 6\.5/, "les autres sont plus petits");
   const iPoint = CODE_CARTE.indexOf("id: COUCHE_POINT");
   const iChoisi = CODE_CARTE.indexOf("id: COUCHE_CHOISI");
   assert.ok(iPoint > 0 && iChoisi > iPoint, "le choisi est dessiné par-dessus");

@@ -30,6 +30,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+  collectionDuChoisi,
   cadreDeLaRecherche,
   collectionDeMagasins,
   coordonneesFiables,
@@ -141,7 +142,21 @@ test("M-04 — LES MARQUEURS NE S'ACCUMULENT PAS D'UNE RECHERCHE À L'AUTRE", ()
    * se REMPLACE : il n'y a pas d'accumulation possible.
    */
   assert.match(CODE_CARTE, /source\.setData\(collectionDeMagasins\(magasins\)\)/);
-  assert.match(CODE_CARTE, /instance\.getSource\(SOURCE\) === undefined/, "créée une seule fois");
+  /*
+   * ⚠️ LA CRÉATION A QUITTÉ L'EFFET DES DONNÉES. Elle vit dans un effet qui ne
+   * dépend que de `prete`, et sa garde est un RETOUR ANTICIPÉ : si la source
+   * est là, il n'y a rien à faire. Elle n'enferme plus rien d'autre — c'est
+   * précisément ce qui avait fait disparaître les écouteurs (voir `M-10`).
+   */
+  assert.match(
+    CODE_CARTE,
+    /if \(instance\.getSource\(SOURCE\) !== undefined\) return;/,
+    "créée une seule fois, par retour anticipé",
+  );
+  assert.ok(
+    !CODE_CARTE.includes("instance.getSource(SOURCE) === undefined"),
+    "plus aucune branche de création qui enferme autre chose",
+  );
   assert.ok(
     !CODE_CARTE.includes("marqueursDepuisMagasins"),
     "plus aucun marqueur DOM par commerce",
@@ -193,17 +208,267 @@ test("M-05 — LE COMMERCE CHOISI A SA PROPRE COUCHE, AU-DESSUS DES AUTRES", () 
     3,
     "trois replis, un par jeton, et rien d'autre",
   );
-  // Et il est PLUS GROS : une différence de teinte seule disparaît au
-  // chevauchement.
-  assert.match(CODE_CARTE, /"circle-radius": 13/);
-  assert.match(CODE_CARTE, /"circle-radius": 9/);
+  /*
+   * Et il est PLUS GROS : une différence de teinte seule disparaît au
+   * chevauchement.
+   *
+   * ⚠️ LES DEUX RAYONS ONT ÉTÉ RÉDUITS D'UN QUART (voir `M-05g`), mais le
+   * RAPPORT entre eux est ce qui compte ici, et il est préservé.
+   */
+  assert.match(CODE_CARTE, /"circle-radius": 9\.5/, "le choisi");
+  assert.match(CODE_CARTE, /"circle-radius": 6\.5/, "un commerce ordinaire");
+  assert.ok(9.5 > 6.5, "le choisi reste le plus gros des deux");
 });
 
-test("M-06 — SÉLECTIONNER DANS LA LISTE MET EN ÉVIDENCE SUR LA CARTE, SANS RIEN RECRÉER", () => {
-  // La mise en évidence passe par un FILTRE sur la couche : aucun marqueur
-  // détruit ni reconstruit à chaque clic.
-  assert.match(CODE_CARTE, /instance\.setFilter\(COUCHE_CHOISI/);
-  assert.match(CODE_CARTE, /\["==", \["get", "cle"\], selectionnee \?\? ""\]/);
+test("M-05b — LE VERT SUIT LE COMMERCE ACTIF, QUEL QUE SOIT SON TYPE OSM", () => {
+  /*
+   * ════════════════════════════════════════════════════════════════════════
+   * ⚠️ LA PANNE QUE CE TEST VERROUILLE
+   * ════════════════════════════════════════════════════════════════════════
+   * En Preview, Spar devenait vert ; Carrefour Market et Utile, jamais — alors
+   * que leur fiche s'ouvrait bien. Le réflexe était d'accuser l'identité
+   * (« WAY et RELATION ne seraient pas gérés »). C'était faux, et mesuré comme
+   * tel dans un navigateur :
+   *
+   *   dans un amas (zoom 11,7)   NODE, WAY, RELATION → vert : 0, 0, 0
+   *   hors amas  (zoom 14)       les mêmes           → vert : 1, 1, 1
+   *
+   * Le type OSM n'y était pour rien : la pastille verte était filtrée hors des
+   * amas, et seul un commerce ISOLÉ pouvait donc l'obtenir. Spar l'était.
+   *
+   * ⚠️ CE QUI SE VÉRIFIE ICI : que la collection du choisi contienne toujours
+   * exactement le commerce actif, pour les trois types, et qu'elle SUIVE les
+   * sélections successives au lieu de rester sur la première.
+   */
+  const trois = [
+    magasin({ osmType: "NODE", osmId: 1003, name: "Spar", lat: 43.141, lon: 6.002 }),
+    magasin({ osmType: "WAY", osmId: 1001, name: "Carrefour Market", lat: 43.13, lon: 5.929 }),
+    magasin({ osmType: "RELATION", osmId: 1002, name: "Utile", lat: 43.1312, lon: 5.931 }),
+  ];
+
+  // Spar, Carrefour Market, Utile, PUIS Spar de nouveau : le vert ne doit
+  // jamais rester bloqué sur le premier choisi.
+  for (const attendu of [trois[0]!, trois[1]!, trois[2]!, trois[0]!]) {
+    const cle = cleIdentiteOsm(attendu);
+    const collection = collectionDuChoisi(trois, cle);
+    assert.equal(collection.features.length, 1, `${attendu.name} : exactement un point vert`);
+    const entite = collection.features[0]!;
+    assert.equal(entite.properties.cle, cle, `${attendu.name} : la bonne clé`);
+    assert.deepEqual(entite.geometry.coordinates, [attendu.lon, attendu.lat], attendu.name);
+    // ⚠️ ET UN SEUL : le vert désigne le commerce choisi, pas tous les commerces.
+    assert.equal(collection.features.length, 1);
+  }
+
+  // Les trois types produisent bien trois clés distinctes, et le même numéro
+  // sous deux types n'est pas le même commerce.
+  const memeNumero = [
+    magasin({ osmType: "NODE", osmId: 42, name: "Spar" }),
+    magasin({ osmType: "WAY", osmId: 42, name: "Spar" }),
+  ];
+  assert.equal(collectionDuChoisi(memeNumero, "WAY/42").features[0]!.properties.cle, "WAY/42");
+  assert.equal(collectionDuChoisi(memeNumero, "NODE/42").features[0]!.properties.cle, "NODE/42");
+  // Le NOM ne sélectionne rien : deux commerces peuvent le porter.
+  assert.equal(collectionDuChoisi(memeNumero, "Spar").features.length, 0);
+  assert.equal(collectionDuChoisi(memeNumero, "42").features.length, 0);
+});
+
+test("M-05c — AUCUNE SÉLECTION, AUCUN VERT ; AUCUNE COORDONNÉE, AUCUN VERT", () => {
+  const trois = [
+    magasin({ osmType: "NODE", osmId: 1, name: "A" }),
+    magasin({ osmType: "WAY", osmId: 2, name: "B" }),
+  ];
+  for (const rien of [null, ""]) {
+    assert.equal(collectionDuChoisi(trois, rien).features.length, 0, JSON.stringify(rien));
+  }
+  // Un commerce absent de la liste affichée ne colore rien.
+  assert.equal(collectionDuChoisi(trois, "RELATION/9").features.length, 0);
+  /*
+   * ⚠️ ET UN COMMERCE SANS COORDONNÉES FIABLES NON PLUS. Le dessiner en `0,0`
+   * le poserait au large du golfe de Guinée ; la liste, elle, le montre
+   * toujours.
+   */
+  const sansPoint = [magasin({ osmType: "NODE", osmId: 3, name: "C", lat: 0, lon: 0 })];
+  assert.equal(collectionDuChoisi(sansPoint, "NODE/3").features.length, 0);
+});
+
+test("M-05d — LE VERT SORT DU REGROUPEMENT : SA PROPRE SOURCE, SANS FILTRE D'AMAS", () => {
+  /*
+   * ⚠️ C'EST LE CORRECTIF LUI-MÊME. Tant que la couche verte lisait la source
+   * REGROUPÉE, elle devait se filtrer par `["!", ["has", "point_count"]]` —
+   * et un commerce dans un amas n'avait aucune entité à colorer.
+   */
+  assert.match(CODE_CARTE, /const SOURCE_CHOISI = "commerce-choisi"/);
+  assert.match(
+    CODE_CARTE,
+    /instance\.addSource\(SOURCE_CHOISI, \{ type: "geojson", data: COLLECTION_VIDE as never \}\)/,
+    "une source à part, et SANS `cluster`",
+  );
+  // La couche verte lit cette source-là, pas la source regroupée.
+  const bloc = CODE_CARTE.slice(CODE_CARTE.indexOf("id: COUCHE_CHOISI"));
+  const declaration = bloc.slice(0, 400);
+  assert.match(declaration, /source: SOURCE_CHOISI/, "la couche verte lit sa propre source");
+  assert.ok(!declaration.includes("point_count"), "plus aucun filtre d'amas sur le vert");
+  assert.ok(!declaration.includes("filter:"), "plus aucun filtre du tout : la source ne contient que lui");
+  // Et seule la source des commerces regroupe.
+  const sourceCommerces = CODE_CARTE.slice(CODE_CARTE.indexOf("instance.addSource(SOURCE,"));
+  assert.match(sourceCommerces.slice(0, 300), /cluster: true/);
+  assert.equal((CODE_CARTE.match(/cluster: true/g) ?? []).length, 1, "une seule source regroupe");
+  // La mise à jour passe par la fonction pure, pas par un filtre.
+  assert.match(CODE_CARTE, /setData\(collectionDuChoisi\(magasins, selectionnee\)\)/);
+  assert.ok(!CODE_CARTE.includes("setFilter(COUCHE_CHOISI"), "la couche verte ne se filtre plus");
+});
+
+test("M-05e — LE CADRAGE NE SE REJOUE PAS POUR UNE SÉLECTION", () => {
+  /*
+   * ⚠️ LA SECONDE MOITIÉ DE LA PANNE. `fitBounds` vivait dans l'effet des
+   * marqueurs, dont `selectionnee` est une dépendance, et cet effet est
+   * ASYNCHRONE : son cadrage atterrissait après le `easeTo` de l'effet de
+   * recentrage et l'annulait. Mesuré : le zoom restait à 11,7 au lieu de
+   * monter à 14, donc les amas ne se défaisaient jamais — et la carte sautait
+   * en arrière à chaque clic dans la liste.
+   */
+  assert.match(CODE_CARTE, /const cadreApplique = useRef<string \| null>\(null\)/);
+  assert.match(CODE_CARTE, /signature === cadreApplique\.current/, "le cadre déjà appliqué est reconnu");
+  assert.match(CODE_CARTE, /cadreApplique\.current = signature;/);
+  const iGarde = CODE_CARTE.indexOf("signature === cadreApplique.current");
+  const iCadrage = CODE_CARTE.indexOf("instance.fitBounds(");
+  assert.ok(iGarde > 0 && iCadrage > iGarde, "la garde précède le cadrage");
+  /*
+   * ⚠️ ET `selectionnee` N'EST PLUS UNE DÉPENDANCE DU CADRAGE. La garde seule
+   * suffisait à ne pas bouger, mais laisser la dépendance aurait gardé un
+   * effet qui se rejoue pour rien à chaque clic.
+   */
+  assert.match(CODE_CARTE, /\}, \[prete, magasins, depart, centreCommune\]\);/, "cadrage : sans la sélection");
+  // ⚠️ ET IL MEURT AVEC LA CARTE : sinon la suivante se croirait déjà cadrée.
+  assert.match(CODE_CARTE, /cadreApplique\.current = null;/);
+  // Le recentrage sur le choisi, lui, reste animé et ne dézoome pas.
+  assert.match(CODE_CARTE, /zoom: Math\.max\(instance\.getZoom\(\), 14\)/);
+});
+
+test("M-05f — LA POSITION DE L'ÉLÈVE : PRÉSENTE AVEC LE GPS, ABSENTE SANS LUI", () => {
+  /*
+   * ⚠️ ELLE NE VIT DANS AUCUNE SOURCE GEOJSON, et c'est ce qui la rend
+   * INGROUPABLE. Le regroupement ne s'applique qu'à `SOURCE` ; un marqueur DOM
+   * est posé par-dessus la carte et ne peut donc ni entrer dans un amas, ni
+   * être compté parmi les commerces, ni être cliqué à leur place.
+   */
+  assert.match(
+    CODE_CARTE,
+    /if \(!prete \|\| instance === null \|\| lonDepart === null \|\| latDepart === null\) return;/,
+    "aucun marqueur sans position réelle",
+  );
+  assert.match(CODE_CARTE, /new Marker\(\{ element: elementDeDepart\(\), anchor: "center" \}\)/);
+  assert.equal((CODE_CARTE.match(/new Marker\(/g) ?? []).length, 1, "un seul marqueur DOM");
+  /*
+   * ⚠️ ET IL NE DÉPEND QUE DE `depart`. Il était détruit et reconstruit à
+   * chaque sélection, pour une position qui n'avait pas bougé.
+   */
+  /*
+   * ⚠️ ET LES DÉPENDANCES SONT LES COORDONNÉES, PAS L'OBJET. React compare par
+   * référence : dépendre de `depart` rendrait le marqueur otage de la façon
+   * dont le parent construit cet objet. Mesuré sur un harnais qui le recrée à
+   * chaque rendu — cinq poses pour une seule position.
+   */
+  assert.match(CODE_CARTE, /\}, \[prete, lonDepart, latDepart\]\);/, "les coordonnées seules le recréent");
+  assert.match(CODE_CARTE, /const lonDepart = depart\?\.lon \?\? null;/);
+  assert.match(CODE_CARTE, /const latDepart = depart\?\.lat \?\? null;/);
+  /*
+   * ⚠️ ET AUCUNE SECONDE DEMANDE DE GÉOLOCALISATION. Les coordonnées viennent
+   * du parcours « autour de moi », par la propriété `depart`. Redemander
+   * ferait réapparaître l'invite du navigateur au milieu d'une recherche.
+   */
+  assert.ok(!CODE_CARTE.includes("navigator.geolocation"), "la carte ne géolocalise jamais");
+  /*
+   * ⚠️ ET LE CENTRE DE COMMUNE N'EST PAS UNE POSITION. En recherche par ville,
+   * il n'y a pas d'élève à placer : afficher un point bleu sur le centre de la
+   * commune inventerait une position.
+   */
+  const iPose = CODE_CARTE.indexOf("new Marker({ element: elementDeDepart()");
+  const poseDuMarqueur = CODE_CARTE.slice(iPose, iPose + 200);
+  assert.ok(!poseDuMarqueur.includes("centreCommune"), "le centre de commune ne pose aucun marqueur");
+  assert.match(poseDuMarqueur, /setLngLat\(\[lonDepart, latDepart\]\)/);
+  // Le point est bleu, cerné, et distinct des deux autres apparences.
+  assert.match(CODE_CARTE, /background = "var\(--info, #60a5fa\)"/);
+  assert.match(CODE_CARTE, /border = "3px solid var\(--card\)"/);
+  // ⚠️ LE HALO EST DÉCORATIF ET DOIT LE RESTER : le parcours ne transmet
+  // aucune précision, un rayon « de précision » serait inventé.
+  assert.match(CODE_CARTE, /opacity = "0\.18"/, "un halo discret");
+  assert.ok(!/accuracy/i.test(CODE_CARTE), "aucune précision affichée : elle n'est pas connue");
+});
+
+test("M-05g — LES MARQUEURS ONT ÉTÉ RÉDUITS, ET LE CHIFFRE RESTE LISIBLE", () => {
+  // Commerce ordinaire : 9 → 6,5 (−28 %). Choisi : 13 → 9,5 (−27 %).
+  assert.match(CODE_CARTE, /"circle-radius": 6\.5/, "commerce ordinaire réduit");
+  assert.match(CODE_CARTE, /"circle-radius": 9\.5/, "commerce choisi réduit");
+  assert.ok(!/"circle-radius": 9,/.test(CODE_CARTE), "l'ancien rayon a disparu");
+  assert.ok(!/"circle-radius": 13,/.test(CODE_CARTE), "l'ancien rayon du choisi a disparu");
+  // Amas : 16/20/26 → 12/15/19, soit un quart de moins.
+  assert.match(
+    CODE_CARTE,
+    /"circle-radius": \["step", \["get", "point_count"\], 12, 5, 15, 15, 19\]/,
+    "les trois paliers sont conservés, et réduits",
+  );
+  // Contours légèrement affinés.
+  assert.match(CODE_CARTE, /"circle-stroke-width": 1\.5/, "contour des amas");
+  assert.match(CODE_CARTE, /"circle-stroke-width": 2,/, "contour des points");
+  assert.match(CODE_CARTE, /"circle-stroke-width": 2\.5/, "contour du choisi");
+  assert.ok(!/"circle-stroke-width": 3,/.test(CODE_CARTE), "aucun contour épais ne subsiste");
+  // ⚠️ LE CHIFFRE RESTE LISIBLE : 11 px dans une pastille de 24 px de diamètre.
+  assert.match(CODE_CARTE, /"text-size": 11,/);
+  /*
+   * ⚠️ ET LA HIÉRARCHIE EST PRÉSERVÉE : choisi > ordinaire, et le plus petit
+   * amas reste plus gros que le commerce choisi.
+   */
+  assert.ok(9.5 > 6.5, "le choisi reste plus gros qu'un commerce ordinaire");
+  assert.ok(12 > 9.5, "le plus petit amas reste plus gros que le choisi");
+  /*
+   * ⚠️ ET LA FICHE N'EST PAS CONCERNÉE, PAR CONSTRUCTION. Elle n'est pas
+   * dessinée ici : le parent la fournit en `ficheDuSelectionne`, et la carte
+   * se contente de la POSITIONNER. Réduire les marqueurs ne pouvait donc pas
+   * toucher ses boutons — et ce contrôle dit pourquoi, au lieu de prétendre
+   * le vérifier.
+   */
+  assert.match(CODE_CARTE, /readonly ficheDuSelectionne\?: React\.ReactNode;/, "la fiche vient du parent");
+  assert.match(CODE_CARTE, /\{ficheDuSelectionne\}/, "la carte ne fait que la placer");
+  for (const dessin of ["<button", "CHOISIR CE COMMERCE", "ITINÉRAIRE"]) {
+    assert.ok(!CODE_CARTE.includes(dessin), `la carte ne dessine pas la fiche (${dessin})`);
+  }
+});
+
+test("M-06 — LA LISTE ET LA CARTE SE SUIVENT, SANS RIEN RECRÉER", () => {
+  /*
+   * ⚠️ LA MISE EN ÉVIDENCE A CHANGÉ DE MÉCANISME, ET LA RAISON EST UNE PANNE.
+   * Elle passait par un FILTRE sur la couche, filtre qui devait exclure les
+   * amas — et excluait donc tout commerce groupé. Elle passe désormais par les
+   * DONNÉES d'une source qui ne contient que le choisi : aucun filtre à tenir,
+   * et aucun marqueur détruit ni reconstruit à chaque clic.
+   */
+  assert.match(CODE_CARTE, /setData\(collectionDuChoisi\(magasins, selectionnee\)\)/);
+  assert.ok(!CODE_CARTE.includes("setFilter(COUCHE_CHOISI"), "plus de filtre sur la couche verte");
+
+  // ── Liste → carte ────────────────────────────────────────────────────────
+  // `selectionnee` est une dépendance de l'effet : tout choix dans la liste
+  // réalimente la source, donc déplace le vert.
+  assert.match(CODE_CARTE, /\}, \[prete, magasins, selectionnee\]\);/, "l'effet du choisi suit la sélection");
+
+  // ── Carte → liste ────────────────────────────────────────────────────────
+  // Un clic sur un point rend la CLÉ au parent, qui tient la sélection.
+  assert.match(CODE_CARTE, /const cle = evenement\.features\?\.\[0\]\?\.properties\?\.cle;/);
+  assert.match(CODE_CARTE, /selection\.current\(cle\)/);
+  // Et la couche verte est elle-même cliquable : re-cliquer le commerce actif
+  // ne doit pas tomber dans le vide.
+  assert.match(CODE_CARTE, /\[COUCHE_CHOISI, "click", surPoint\]/);
+  /*
+   * ⚠️ ET LA CLÉ VOYAGE DANS LES DEUX SENS, IDENTIQUE — vérifié sur les
+   * données, pas sur le texte du composant. Ce que la carte rend au parent au
+   * clic est exactement ce que le parent lui redonne comme sélection.
+   */
+  const aller = magasin({ osmType: "WAY", osmId: 77, name: "Carrefour Market" });
+  const cleRendue = collectionDeMagasins([aller]).features[0]!.properties.cle;
+  assert.equal(cleRendue, cleIdentiteOsm(aller), "la carte rend la clé d'identité");
+  const retour = collectionDuChoisi([aller], cleRendue);
+  assert.equal(retour.features.length, 1, "et la même clé rallume le vert");
+  assert.equal(retour.features[0]!.properties.cle, cleRendue);
 });
 
 test("M-07 — SÉLECTIONNER RECENTRE PROGRESSIVEMENT, SANS DÉZOOMER", () => {
@@ -245,17 +510,129 @@ test("M-09 — TOUCHER UN MARQUEUR SÉLECTIONNE LE COMMERCE, ET LA LISTE SUIT", 
   assert.match(CODE_CARTE, /style\.cursor = "pointer"/);
 });
 
-test("M-10 — LES ÉCOUTEURS SONT RETIRÉS, PAS SEULEMENT LA CARTE DÉTRUITE", () => {
+/**
+ * Le corps de l'effet qui pose les écouteurs, isolé du reste du composant.
+ *
+ * ⚠️ C'EST LE DÉCOUPAGE LUI-MÊME QUI SE VÉRIFIE ICI, et il n'y a pas d'autre
+ * moyen que de lire le source : cette machine n'a pas de WebGL, et la panne
+ * qu'on verrouille est une panne de CYCLE DE VIE, pas de calcul.
+ */
+function effetDesEcouteurs(): string {
+  const ancre = CODE_CARTE.indexOf("instance.on(type as never, couche, f as never);");
+  assert.ok(ancre > 0, "la pose des écouteurs doit exister");
+  const debut = CODE_CARTE.lastIndexOf("useEffect(() => {", ancre);
+  const fin = CODE_CARTE.indexOf("}, [", ancre);
+  assert.ok(debut > 0 && fin > ancre, "l'effet doit être délimité");
+  return CODE_CARTE.slice(debut, CODE_CARTE.indexOf(");", fin) + 2);
+}
+
+test("M-10 — LES ÉCOUTEURS SURVIVENT À N'IMPORTE QUEL NOMBRE DE SÉLECTIONS", () => {
   /*
-   * ⚠️ LE NETTOYAGE TOURNE AUSSI QUAND SEULE LA LISTE CHANGE. Sans lui, chaque
-   * recherche ajouterait une paire d'écouteurs sur les mêmes couches, et un
-   * clic finirait par sélectionner sept fois.
+   * ════════════════════════════════════════════════════════════════════════
+   * ⚠️ LA PANNE QUE CE TEST VERROUILLE — ELLE ÉTAIT SILENCIEUSE
+   * ════════════════════════════════════════════════════════════════════════
+   * Un seul effet faisait tout. Il dépendait de
+   * `[prete, magasins, selectionnee, depart, centreCommune]`, son nettoyage
+   * retirait les écouteurs À CHAQUE PASSAGE, mais leur POSE était enfermée
+   * dans `if (instance.getSource(SOURCE) === undefined)`.
+   *
+   * Au deuxième passage — donc dès la première sélection — la source existait,
+   * la branche était sautée, et les écouteurs retirés n'étaient jamais
+   * reposés. Cliquer un commerce SUR la carte ne sélectionnait plus rien.
+   * Un clic marchait, puis plus aucun. Mesuré dans Chromium :
+   *
+   *   avant  clic 1 → 1 sélection ; clics 2 à 6 → 0 sélection
+   *   après  clics 1 à 6 → 1 sélection chacun, ni zéro ni deux
+   *
+   * ⚠️ AUCUN TEST NE POUVAIT LE VOIR : ils vérifiaient que `instance.on(…)` et
+   * `instance.off(…)` existaient. Les deux existaient. C'est leur CYCLE qui
+   * était faux.
    */
-  assert.match(CODE_CARTE, /ecouteurs\.push\(\{ couche, type, f/);
-  assert.match(CODE_CARTE, /instance\.off\(type as never, couche, f as never\)/);
-  assert.match(CODE_CARTE, /marqueurDepart\?\.remove\(\)/);
-  // Et le démontage de la carte elle-même reste en place.
+  const effet = effetDesEcouteurs();
+
+  // 1. Pose et retrait vivent dans le MÊME effet.
+  assert.match(effet, /instance\.on\(type as never, couche, f as never\);/, "la pose");
+  assert.match(effet, /vivante\.off\(type as never, couche, f as never\);/, "le retrait");
+
+  /*
+   * 2. ⚠️ ET CET EFFET NE DÉPEND QUE DE `prete`. C'est ce qui garantit qu'il
+   * ne se rejoue pas : les écouteurs sont posés une fois et retirés une fois.
+   * Une dépendance de plus ici, et la panne revient.
+   */
+  assert.ok(effet.trimEnd().endsWith("}, [prete]);"), "les écouteurs ne dépendent que de `prete`");
+
+  /*
+   * 3. ⚠️ ET LA POSE N'EST ENFERMÉE DANS AUCUNE BRANCHE DE CRÉATION. C'était
+   * la cause exacte : une condition sur l'existence de la source.
+   */
+  assert.ok(!effet.includes("getSource(SOURCE) !== undefined"), "aucune garde de création");
+  assert.ok(!effet.includes("getSource(SOURCE) === undefined"), "aucune garde de création");
+  assert.ok(!effet.includes("addSource("), "cet effet ne crée rien");
+  assert.ok(!effet.includes("addLayer("), "cet effet ne crée rien");
+
+  /*
+   * 4. ⚠️ ET IL NE CAPTURE NI `magasins` NI `selectionnee`. S'il le faisait,
+   * il DEVRAIT les déclarer en dépendances — donc se rejouer — et l'on
+   * retomberait sur un cycle fragile. La sélection remonte par une référence.
+   */
+  for (const capture of ["magasins", "selectionnee", "collectionDeMagasins", "collectionDuChoisi", "fitBounds"]) {
+    assert.ok(!effet.includes(capture), `l'effet des écouteurs ne touche pas à ${capture}`);
+  }
+  assert.match(effet, /selection\.current\(cle\)/, "la sélection remonte par la référence");
+
+  // 5. Un seul enregistrement dans tout le composant : rien ne peut s'empiler.
+  assert.equal(
+    (CODE_CARTE.match(/instance\.on\(type as never/g) ?? []).length,
+    1,
+    "une seule boucle d'enregistrement",
+  );
+  assert.equal((CODE_CARTE.match(/ecouteurs\.push\(/g) ?? []).length, 1);
+
+  // 6. Le démontage de la carte elle-même reste en place.
   assert.match(CODE_CARTE, /instance\?\.remove\(\)/);
+});
+
+test("M-10b — CHAQUE RESPONSABILITÉ A SON EFFET, ET SES DÉPENDANCES", () => {
+  /*
+   * ⚠️ LE DÉCOUPAGE EST LA CORRECTION, pas un rangement. Tant qu'un seul effet
+   * créait les couches, posait les écouteurs, mettait à jour deux sources,
+   * plaçait un marqueur DOM et cadrait la carte, ses dépendances étaient
+   * forcément l'union de tout cela — et chaque passage défaisait ce que la
+   * branche de création ne refaisait pas.
+   *
+   * Les listes ci-dessous sont celles que chaque responsabilité exige. Ni
+   * plus — ce serait rejouer pour rien — ni moins — ce serait rester en
+   * retard.
+   */
+  const attendues = [
+    "}, [prete]);", // A. sources et couches, E. écouteurs
+    "}, [prete, magasins]);", // B. données des commerces
+    "}, [prete, magasins, selectionnee]);", // C. commerce choisi
+    "}, [prete, lonDepart, latDepart]);", // D. position de l'élève
+    "}, [prete, magasins, depart, centreCommune]);", // F. cadrage
+    "}, [prete, selectionnee, magasins]);", // recentrage sur le choisi
+  ];
+  for (const deps of attendues) {
+    assert.ok(CODE_CARTE.includes(deps), `aucun effet ne déclare ${deps}`);
+  }
+  // `[prete]` deux fois : les couches, et les écouteurs.
+  assert.equal((CODE_CARTE.match(/\}, \[prete\]\);/g) ?? []).length, 2, "A et E");
+  /*
+   * ⚠️ ET L'EFFET FOURRE-TOUT A DISPARU. Sa signature était cette liste-là ;
+   * la revoir voudrait dire qu'on a tout refusionné.
+   */
+  assert.ok(
+    !CODE_CARTE.includes("}, [prete, magasins, selectionnee, depart, centreCommune]);"),
+    "l'effet unique ne doit pas revenir",
+  );
+  /*
+   * ⚠️ ET UN SEUL EFFET EST ASYNCHRONE : celui du marqueur, qui a besoin de la
+   * classe `Marker`. Les autres agissent sur l'instance qu'on tient déjà, donc
+   * dans l'ordre de déclaration — c'est ce qui empêche le cadrage d'atterrir
+   * après le recentrage et de l'annuler.
+   */
+  const imports = CODE_CARTE.match(/void import\("maplibre-gl"\)/g) ?? [];
+  assert.equal(imports.length, 2, "le chargement de la carte, et le marqueur — rien d'autre");
 });
 
 test("M-11 — LE CADRAGE N'A PAS CHANGÉ DE RÈGLE", () => {

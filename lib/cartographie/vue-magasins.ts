@@ -313,6 +313,59 @@ export function collectionDeMagasins(magasins: readonly MagasinOsm[]): Collectio
   return { type: "FeatureCollection", features };
 }
 
+/**
+ * Le commerce CHOISI, seul, dans sa propre collection — ou une collection vide.
+ *
+ * ════════════════════════════════════════════════════════════════════════════
+ * ⚠️ POURQUOI IL EST À PART, ET PAS UN FILTRE SUR LA COLLECTION GÉNÉRALE
+ * ════════════════════════════════════════════════════════════════════════════
+ * La pastille verte vivait dans la source REGROUPÉE, filtrée par
+ * `["!", ["has", "point_count"]]`. Un commerce avalé dans un amas n'a alors
+ * aucune entité individuelle à colorer : il ne POUVAIT PAS devenir vert.
+ *
+ * Mesuré dans un navigateur, sur les trois commerces signalés — et le type OSM
+ * n'y était pour rien :
+ *
+ *   dans un amas (zoom 11,7)   Spar NODE, Carrefour Market WAY, Utile RELATION
+ *                              → marqueur vert : 0, 0, 0
+ *   hors amas  (zoom 14)       les mêmes → 1, 1, 1
+ *
+ * Un seul des trois passait au vert en production, et par accident de
+ * géographie : isolé, il n'était jamais groupé.
+ *
+ * ⚠️ L'IDENTITÉ VIENT DE `cleIdentiteOsm`, ET D'ELLE SEULE. `NODE/123`,
+ * `WAY/456`, `RELATION/789` : ni le nom — deux commerces peuvent s'appeler
+ * « Spar » — ni le seul numéro, qui se répète d'un type OSM à l'autre.
+ *
+ * ⚠️ ET UN COMMERCE SANS COORDONNÉES FIABLES NE DONNE AUCUNE ENTITÉ. Le
+ * dessiner en `0,0` le placerait au large du golfe de Guinée ; le laisser
+ * invisible est la seule réponse honnête, et la liste le montre toujours.
+ */
+export function collectionDuChoisi(
+  magasins: readonly MagasinOsm[],
+  selectionnee: string | null,
+): CollectionDeCommerces {
+  if (selectionnee === null || selectionnee === "") return { type: "FeatureCollection", features: [] };
+  const choisi = magasins.find(
+    (magasin) => cleIdentiteOsm(magasin) === selectionnee && coordonneesFiables(magasin),
+  );
+  if (choisi === undefined) return { type: "FeatureCollection", features: [] };
+  return {
+    type: "FeatureCollection",
+    features: [
+      {
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [choisi.lon, choisi.lat] },
+        properties: {
+          cle: cleIdentiteOsm(choisi),
+          nom: choisi.name,
+          marque: marqueDistincte(choisi.name, choisi.brand),
+        },
+      },
+    ],
+  };
+}
+
 /** Les commerces que la carte ne peut pas montrer — pour pouvoir le DIRE. */
 export function magasinsSansPoint(magasins: readonly MagasinOsm[]): readonly MagasinOsm[] {
   return magasins.filter((m) => !coordonneesFiables(m));
