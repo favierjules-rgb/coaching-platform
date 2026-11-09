@@ -18,6 +18,7 @@ import {
   requeteElement,
   requeteMagasinsDansZone,
   requeteZoneCommune,
+  requeteCommercesDansCommune,
 } from "@/lib/openstreetmap/overpass";
 import { type ReponseElementOsm, lireNoeudOsm } from "@/lib/openstreetmap/osm-api";
 
@@ -147,6 +148,65 @@ export async function decouvrirParVille(
   return { statut: "ok", ...magasinsDepuis(commerces) };
 }
 
+/**
+ * Les commerces alimentaires d'UNE commune, désignée par son code INSEE.
+ *
+ * ════════════════════════════════════════════════════════════════════════════
+ * ⚠️ C'EST L'ÉTAPE DE GÉOCODAGE, ET ELLE EST EXPLICITE
+ * ════════════════════════════════════════════════════════════════════════════
+ * Une ville tapée par un élève n'est pas un identifiant : « Saint-Martin »
+ * désigne une trentaine de communes françaises, et `decouvrirParVille` ne peut
+ * que répondre « précise ta recherche » — c'est-à-dire renvoyer l'élève à une
+ * question qu'il ne sait pas trancher.
+ *
+ * Le chemin complet est donc : l'élève tape, il CHOISIT une commune dans une
+ * liste de suggestions (nom, code postal, département), et c'est le CODE INSEE
+ * de son choix qui part chercher les commerces. Aucune chaîne brute n'arrive
+ * jamais au moteur de recherche de commerces.
+ *
+ * ⚠️ `decouvrirParVille` RESTE, ET N'EST PAS DÉPRÉCIÉE. Elle sert quand aucune
+ * suggestion n'a pu être obtenue — annuaire des communes en panne, réseau
+ * capricieux — et c'est précisément pour cela qu'elle ne doit pas disparaître :
+ * une panne de l'annuaire ne doit pas fermer la recherche.
+ *
+ * ⚠️ DEUX TEMPS, ICI AUSSI, ET POUR LA MÊME RAISON. « Cette commune n'est pas
+ * cartographiée » et « cette commune n'a aucun commerce cartographié » sont
+ * deux situations, et elles appellent deux conduites.
+ */
+export async function decouvrirParCodeInsee(
+  codeInsee: string,
+  options: OptionsOverpass = {},
+): Promise<ResultatDecouverte> {
+  /*
+   * ════════════════════════════════════════════════════════════════════════
+   * ⚠️ UNE SEULE REQUÊTE, ET C'EST LE CORRECTIF DE L'INTERMITTENCE
+   * ════════════════════════════════════════════════════════════════════════
+   * Ce chemin en faisait DEUX : résoudre la zone, puis lire ses commerces.
+   * C'était la copie de `decouvrirParVille`, où les deux temps servent à
+   * détecter l'ambiguïté des homonymes. Mais un CODE INSEE NE PEUT PAS ÊTRE
+   * AMBIGU : le premier temps ne décidait rien, il ne faisait qu'attendre.
+   *
+   * Et attendre coûte cher : mesuré le 05/11/2026, `overpass-api.de` n'accorde
+   * que DEUX créneaux par adresse IP, et une requête triviale a mis 20,4 s en
+   * pure attente. Deux requêtes = deux attentes = 40 à 60 s, contre une borne
+   * de 30 s. Le chemin GPS, lui, n'en fait qu'une — d'où « le GPS marche, la
+   * ville échoue une fois sur deux » observé en Preview.
+   *
+   * ⚠️ « COMMUNE INTROUVABLE » RESTE DISTINCT DE « AUCUN COMMERCE ». En une
+   * requête, Overpass rend zéro élément dans les deux cas. On ne peut donc plus
+   * les distinguer PAR LA RÉPONSE — mais on n'en a plus besoin : le code INSEE
+   * vient d'être choisi dans l'annuaire officiel de l'État, la commune existe
+   * donc avec certitude. Zéro élément veut dire zéro commerce cartographié, et
+   * rien d'autre. Inventer un « introuvable » ici enverrait l'élève corriger
+   * une saisie correcte.
+   */
+  const commerces = await interrogerOverpass(requeteCommercesDansCommune(codeInsee), options);
+  if (commerces.statut === "echec") return { statut: "echec", raison: commerces.raison };
+  if (commerces.statut === "zero_results") return { statut: "ok", magasins: [], tronque: false };
+
+  return { statut: "ok", ...magasinsDepuis(commerces) };
+}
+
 /* ── 3. LA RECHERCHE AUTOUR D'UN POINT ───────────────────────────────────── */
 
 export interface AutourDeLEleve {
@@ -228,6 +288,16 @@ export function httpDecouverte(raison: EchecDecouverte): { status: number; code:
       return { status: 503, code: "REPONSE_INATTENDUE" };
     case "unavailable":
       return { status: 503, code: "ANNUAIRE_INDISPONIBLE" };
+    /*
+     * ⚠️ LA SATURATION A SON PROPRE CODE, ET SON PROPRE SENS.
+     * `at_capacity` = le serveur cartographique est momentanément plein, et il
+     * demande lui-même de réessayer. Nous avons déjà réessayé ; le dire
+     * autrement qu'« indisponible » permet à l'élève de savoir que réessayer
+     * dans une minute a de bonnes chances de marcher, et à nos journaux de
+     * distinguer une saturation passagère d'une panne.
+     */
+    case "at_capacity":
+      return { status: 503, code: "ANNUAIRE_SATURE" };
   }
 }
 

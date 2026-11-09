@@ -4,6 +4,7 @@ import type { EtatCouverture } from "@/lib/nutrition/couverture-magasin";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { BudgetObserve, ComparaisonBudget } from "@/lib/nutrition/budget-observe";
+import type { RaisonIndisponible } from "@/lib/nutrition/prix-observes";
 
 /**
  * COURSES C4.6 — LE MINIMUM OBSERVÉ D'UNE LISTE, CÔTÉ ÉCRAN.
@@ -29,6 +30,13 @@ export interface EtatBudgetObserve {
   readonly budget: BudgetObserve | null;
   readonly comparaison: ComparaisonBudget | null;
   readonly couvertureMagasin: EtatCouverture;
+  /**
+   * Pourquoi la lecture n'a pas abouti, quand c'est le cas.
+   *
+   * ⚠️ `null` NE VEUT PAS DIRE « TOUT VA BIEN » : il veut dire « la lecture a
+   * eu lieu ». L'absence de prix se lit ailleurs, dans le budget.
+   */
+  readonly raisonIndisponible: RaisonIndisponible | null;
   readonly recharger: () => void;
 }
 
@@ -36,6 +44,7 @@ interface Reponse {
   readonly budget?: BudgetObserve;
   readonly comparaison?: ComparaisonBudget;
   readonly couvertureMagasin?: unknown;
+  readonly raisonIndisponible?: unknown;
 }
 
 export function useBudgetObserve(listId: string | null): EtatBudgetObserve {
@@ -43,6 +52,7 @@ export function useBudgetObserve(listId: string | null): EtatBudgetObserve {
   const [comparaison, setComparaison] = useState<ComparaisonBudget | null>(null);
   const [couvertureMagasin, setCouvertureMagasin] = useState<EtatCouverture>("aucun_magasin");
   const [ok, setOk] = useState(true);
+  const [raisonIndisponible, setRaison] = useState<RaisonIndisponible | null>(null);
   const [chargement, setChargement] = useState(false);
   const [rafraichissement, setRafraichissement] = useState(0);
   const requete = useRef(0);
@@ -52,6 +62,7 @@ export function useBudgetObserve(listId: string | null): EtatBudgetObserve {
       setBudget(null);
       setComparaison(null);
       setOk(true);
+      setRaison(null);
       return;
     }
     const numero = ++requete.current;
@@ -68,6 +79,8 @@ export function useBudgetObserve(listId: string | null): EtatBudgetObserve {
         setOk(false);
         setBudget(null);
         setComparaison(null);
+        // ⚠️ UN ÉCHEC HTTP NE NOMME AUCUNE RAISON : la route n'a rien pu dire.
+        setRaison(null);
         return;
       }
       const corps = (await reponse.json()) as Reponse;
@@ -75,6 +88,17 @@ export function useBudgetObserve(listId: string | null): EtatBudgetObserve {
       setOk(true);
       setBudget(corps.budget ?? null);
       setComparaison(corps.comparaison ?? null);
+      /*
+       * ⚠️ TROIS RAISONS NOMMÉES, ET RIEN D'AUTRE. Une valeur inattendue
+       * retombe sur `null` — « la lecture a eu lieu » — plutôt que d'inventer
+       * une panne que l'amont n'a pas annoncée.
+       */
+      const raison = corps.raisonIndisponible;
+      setRaison(
+        raison === "rate_limited" || raison === "unavailable" || raison === "non_configure"
+          ? raison
+          : null,
+      );
       // ⚠️ TROIS VALEURS ATTENDUES, ET RIEN D'AUTRE N'EST ACCEPTÉ. Un corps
       // inattendu retombe sur `aucun_magasin` — le seul état qui n'affirme
       // rien sur le magasin ni sur les prix.
@@ -89,6 +113,7 @@ export function useBudgetObserve(listId: string | null): EtatBudgetObserve {
       setOk(false);
       setBudget(null);
       setComparaison(null);
+      setRaison(null);
     } finally {
       if (numero === requete.current) setChargement(false);
     }
@@ -122,5 +147,5 @@ export function useBudgetObserve(listId: string | null): EtatBudgetObserve {
    */
   const recharger = useCallback(() => setRafraichissement((n) => n + 1), []);
 
-  return { chargement, ok, budget, comparaison, couvertureMagasin, recharger };
+  return { chargement, ok, budget, comparaison, couvertureMagasin, raisonIndisponible, recharger };
 }

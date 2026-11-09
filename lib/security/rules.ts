@@ -261,6 +261,21 @@ export const STORES_SEARCH: RateLimitRule = {
 };
 
 /**
+ * COURSES — les suggestions de communes pendant la frappe.
+ *
+ * ⚠️ PLUS PERMISSIVE QUE LA RECHERCHE DE COMMERCES, ET BEAUCOUP MOINS QUE LA
+ * FRAPPE. Une suggestion est un appel léger ; une recherche de commerces
+ * interroge Overpass. Mais 40/min ne tolère pas une requête par caractère pour
+ * autant : c'est l'anti-rafale du client qui fait ce travail, et cette limite
+ * est le garde-fou de dernier recours si l'anti-rafale venait à sauter.
+ */
+export const STORES_COMMUNES: RateLimitRule = {
+  name: "stores_communes",
+  limit: 40,
+  windowMs: MINUTE,
+};
+
+/**
  * COURSES C4.6 — le minimum observé d'une liste de courses.
  *
  * L'appel le plus COÛTEUX du lot Courses côté amont : une liste de vingt

@@ -70,6 +70,14 @@ const CODE_PARCOURS = sansProse(lire("../../components/student/ListeDeCoursesPar
 const CODE_PROPOSITION = sansProse(lire("../../lib/nutrition/proposition-rapide.ts"));
 const CODE_PAR_JOUR = sansProse(lire("../../lib/nutrition/repas-par-jour.ts"));
 const CODE_HOOK = sansProse(lire("../../hooks/useListeDeCourses.ts"));
+/*
+ * ⚠️ LA BOUCLE DE VALIDATION A QUITTÉ LE HOOK (phase 2). Elle vit dans
+ * `lib/nutrition/validation-en-serie.ts`, avec le verrou et le rapport, parce
+ * que tant qu'elle était dans React aucun test Node ne pouvait la faire
+ * tourner. Les contrats mesurés ici n'ont pas changé : seule leur ADRESSE a
+ * changé, et les assertions suivent le code plutôt que de se relâcher.
+ */
+const CODE_SERIE = sansProse(lire("../../lib/nutrition/validation-en-serie.ts"));
 const SRC_PARCOURS = lire("../../components/student/ListeDeCoursesParcours.tsx");
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -500,10 +508,27 @@ await test("UX-17. une proposition n'écrit RIEN avant validation", () => {
 
 await test("UX-18. la validation passe par C0, et C2 n'en est PAS un chemin alternatif", () => {
   assert.ok(CODE_HOOK.includes("validerChoixRepas("), "la fonction C0");
+  /*
+   * ⚠️ UN SEUL SITE D'APPEL DEPUIS LA PHASE 2, ET C'EST PLUS FORT QU'AVANT.
+   *
+   * Il y en avait deux — un par geste — et donc deux chemins à maintenir
+   * d'accord. Les deux gestes passent maintenant par la MÊME dépendance
+   * `ecrire` injectée dans l'orchestrateur : il ne peut plus exister de
+   * chemin unitaire qui diverge de celui de la semaine.
+   */
   assert.equal(
     (CODE_HOOK.match(/await validerChoixRepas\(/g) ?? []).length,
+    1,
+    "un seul site d'écriture C0, partagé par les deux gestes",
+  );
+  assert.equal(
+    (CODE_HOOK.match(/validateur\.valider\(/g) ?? []).length,
     2,
-    "deux appels : le geste unitaire et celui de semaine — aucun autre chemin",
+    "les deux gestes, et tous les deux par le validateur à verrou",
+  );
+  assert.ok(
+    !CODE_SERIE.includes("validerChoixRepas") && !CODE_SERIE.includes("supabase"),
+    "l'orchestrateur ne connaît aucune écriture : elle lui est injectée",
   );
   // Aucune écriture directe des tables, aucune RPC nouvelle DANS CE HOOK.
   assert.ok(!CODE_HOOK.includes('.from("planned_meals").insert'), "aucune écriture directe");
@@ -582,11 +607,12 @@ await test("UX-18. la validation passe par C0, et C2 n'en est PAS un chemin alte
 await test("UX-19. une erreur partielle ne produit JAMAIS un faux succès", () => {
   // Le contrat du résultat est explicite : `complet` n'est vrai que si rien
   // n'a échoué ET qu'il y avait quelque chose à valider.
-  assert.ok(CODE_HOOK.includes("complet: echecs.length === 0 && entrees.length > 0"));
+  assert.ok(CODE_SERIE.includes("complet: echecs.length === 0 && entrees.length > 0"));
+  // ⚠️ ET LE HOOK LE RECOPIE SANS LE RÉÉCRIRE : un second calcul de `complet`
+  // serait un second contrat, libre de divergence.
+  assert.ok(CODE_HOOK.includes("complet: rapport.complet"), "le hook rapporte, il ne recalcule pas");
   // Aucun repas n'est laissé « non tenté » : la boucle ne s'arrête pas.
-  const corps = lire("../../hooks/useListeDeCourses.ts");
-  // ⚠️ LA BORNE DE FIN EST CHERCHÉE **APRÈS** LA BOUCLE : `validerRepas` a lui
-  // aussi un `} finally {`, plus haut dans le fichier.
+  const corps = lire("../../lib/nutrition/validation-en-serie.ts");
   const debut = corps.indexOf("for (const entree of entrees)");
   const bloc = corps.slice(debut, corps.indexOf("} finally {", debut));
   assert.ok(bloc.includes("catch"), "un échec est capturé");
@@ -597,7 +623,9 @@ await test("UX-19. une erreur partielle ne produit JAMAIS un faux succès", () =
   assert.ok(SRC_PARCOURS.includes("{echec.libelle}"), "les repas en échec sont nommés");
   assert.ok(SRC_PARCOURS.includes('role="alert"'), "l'échec partiel est annoncé");
   // ⚠️ ET AUCUNE FAUSSE TRANSACTION CLIENT n'est inventée.
-  assert.ok(!CODE_HOOK.includes("rollback") && !CODE_HOOK.includes("annuler"));
+  for (const [nom, code] of [["hook", CODE_HOOK], ["orchestrateur", CODE_SERIE]] as const) {
+    assert.ok(!code.includes("rollback") && !code.includes("annuler"), `aucune fausse transaction (${nom})`);
+  }
 });
 
 await test("UX-20. les deux modes convergent vers LA MÊME liste persistante C2", () => {

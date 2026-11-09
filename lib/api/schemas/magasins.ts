@@ -6,6 +6,12 @@ import {
   VILLE_LONGUEUR_MAX,
   VILLE_LONGUEUR_MIN,
 } from "@/lib/nutrition/magasin-proche";
+/*
+ * ⚠️ LES BORNES DE LA SAISIE VIENNENT DE L'ANNUAIRE, PAS D'UN NOMBRE RECOPIÉ.
+ * Deux copies de « au moins deux caractères » divergeraient le jour où l'une
+ * change, et le schéma accepterait alors ce que l'annuaire refuse.
+ */
+import { SAISIE_MAX, SAISIE_MIN } from "@/lib/communes/bornes";
 
 /**
  * COURSES C4.3a — les corps de requête de la découverte des magasins.
@@ -92,11 +98,51 @@ export type ChoixMagasinBody = z.infer<typeof choixMagasinBodySchema>;
  */
 export const magasinsParVilleBodySchema = z
   .object({
-    ville: z.string().trim().min(VILLE_LONGUEUR_MIN).max(VILLE_LONGUEUR_MAX),
+    ville: z.string().trim().min(VILLE_LONGUEUR_MIN).max(VILLE_LONGUEUR_MAX).optional(),
+    /**
+     * COURSES — LE CODE INSEE DE LA COMMUNE CHOISIE, ET C'EST LE CHEMIN NORMAL.
+     *
+     * ⚠️ IL NE REMPLACE PAS `ville`, IL LA PRÉCÈDE. L'élève tape, l'annuaire
+     * des communes lui propose des communes NOMMÉES, il en choisit une : c'est
+     * son code INSEE qui part d'ici. Une chaîne brute n'arrive au moteur de
+     * commerces que si l'annuaire était indisponible — et dans ce cas, le
+     * moteur peut encore répondre « plusieurs communes portent ce nom ».
+     *
+     * ⚠️ L'UN OU L'AUTRE, MAIS PAS NI L'UN NI L'AUTRE. Un corps vide serait une
+     * recherche sans objet ; le refuser ici évite un appel Overpass pour rien.
+     */
+    codeInsee: z
+      .string()
+      .trim()
+      .transform((v) => v.toUpperCase())
+      .pipe(z.string().regex(/^[0-9][0-9AB][0-9]{3}$/))
+      .optional(),
+  })
+  .strict()
+  .refine((corps) => corps.codeInsee !== undefined || corps.ville !== undefined, {
+    message: "Indique une commune.",
+  });
+
+export type MagasinsParVilleBody = z.infer<typeof magasinsParVilleBodySchema>;
+
+/**
+ * COURSES — LA SAISIE À RÉSOUDRE EN COMMUNES.
+ *
+ * ⚠️ UN POST, COMME TOUT LE RESTE DE CE CHANTIER. Une saisie partielle de nom
+ * de ville est une indication d'endroit : elle n'a rien à faire dans une chaîne
+ * de requête, donc dans les journaux d'accès et l'historique du navigateur.
+ *
+ * ⚠️ ET SURTOUT PAS DE CHAMP « LIMITE ». Le nombre de suggestions est une
+ * décision produit (cinq), pas un paramètre que le navigateur négocie : le
+ * laisser passer permettrait de demander mille communes par frappe.
+ */
+export const communesBodySchema = z
+  .object({
+    saisie: z.string().trim().min(SAISIE_MIN).max(SAISIE_MAX),
   })
   .strict();
 
-export type MagasinsParVilleBody = z.infer<typeof magasinsParVilleBodySchema>;
+export type CommunesBody = z.infer<typeof communesBodySchema>;
 
 /**
  * COURSES C4.3c — L'IDENTITÉ OSM D'UN MAGASIN CHOISI.

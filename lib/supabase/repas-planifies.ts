@@ -109,6 +109,19 @@ export interface ItemPlanifie {
   readonly position: number;
   /** Hydraté. AFFICHAGE SEUL — n'entre dans aucune clé. */
   readonly displayName: string;
+  /**
+   * COURSES — le code Ciqual (`food_catalog.source_ref` quand
+   * `source = 'ciqual'`), d'où se déduit le RAYON de la liste de courses.
+   *
+   * ⚠️ HYDRATÉ, ET N'ENTRE DANS AUCUNE CLÉ D'AGRÉGATION — exactement comme
+   * `displayName`. Deux aliments du même rayon restent deux lignes.
+   *
+   * ⚠️ POUR UN PRODUIT COMMERCIAL, c'est le code de l'aliment du catalogue
+   * auquel il est RAPPROCHÉ (`food_products.food_id`), et `null` s'il ne l'est
+   * pas. Un produit non rapproché n'a pas de rayon connu : il va dans
+   * « Divers », visiblement, plutôt que dans un rayon plausible.
+   */
+  readonly codeCiqual: string | null;
 }
 
 /** Un repas planifié de la période. */
@@ -220,7 +233,7 @@ export async function lireRepasPlanifiesSurPeriode(
   // ── Hydratation des noms — DEUX requêtes, jamais une par ligne ────────────
   const idsAliments = [...new Set(lignesItems.map((i) => i.catalog_food_id).filter((v): v is string => v !== null))];
   const idsProduits = [...new Set(lignesItems.map((i) => i.product_id).filter((v): v is string => v !== null))];
-  const noms = await lireNomsAffichables(supabase, idsAliments, idsProduits);
+  const noms = await lireIdentitesAffichables(supabase, idsAliments, idsProduits);
   if (!noms.ok) return LECTURE_VIDE;
 
   const parRepas = new Map<string, ItemPlanifie[]>();
@@ -257,7 +270,8 @@ export async function lireRepasPlanifiesSurPeriode(
       quantity: quantite,
       unit: brut.unit,
       position: brut.position,
-      displayName: noms.parCle.get(`${identityType}:${identityId}`) ?? "",
+      displayName: noms.parCle.get(`${identityType}:${identityId}`)?.nom ?? "",
+      codeCiqual: noms.parCle.get(`${identityType}:${identityId}`)?.codeCiqual ?? null,
     });
     parRepas.set(brut.planned_meal_id, liste);
   }
@@ -278,28 +292,56 @@ export async function lireRepasPlanifiesSurPeriode(
   return { ok: true, repas };
 }
 
+/** Ce qu'une identité porte pour l'affichage : son nom, et son rayon. */
+interface IdentiteAffichable {
+  readonly nom: string;
+  /** `food_catalog.source_ref` quand `source = 'ciqual'`, sinon `null`. */
+  readonly codeCiqual: string | null;
+}
+
 /**
- * Les noms affichables, en DEUX requêtes.
+ * Les identités affichables, en DEUX OU TROIS requêtes — jamais une par ligne.
  *
  * La règle de nommage est celle de `readNutritionPlanV2Week` : `name` pour un
  * aliment du catalogue, `Marque — Produit` pour un produit commercial. Elle
  * est reprise à l'identique, à dessein — deux écrans qui nomment le même
  * aliment autrement font douter que ce soit le même.
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * POURQUOI LE CODE CIQUAL REMONTE ICI
+ * ────────────────────────────────────────────────────────────────────────────
+ * C'est lui qui donne le RAYON (`lib/nutrition/rayons.ts`), et il est déjà
+ * dans la ligne qu'on lit : deux colonnes de plus sur une requête qui part de
+ * toute façon, contre une colonne « catégorie » à créer et à remplir pour
+ * 3 330 lignes. Aucune migration n'accompagne donc les rayons.
+ *
+ * ⚠️ LE CODE N'EST REPRIS QUE SI LA SOURCE EST BIEN CIQUAL. Un `source_ref`
+ * d'une autre provenance n'est pas un `alim_code` : le lire comme tel
+ * rangerait l'aliment dans le rayon d'un homonyme numérique. Même règle que
+ * `lireAlimentDuPont` (`lib/supabase/pont-retail.ts`).
+ *
+ * ⚠️ LA TROISIÈME REQUÊTE N'EXISTE QUE S'IL Y A DES PRODUITS RAPPROCHÉS. Un
+ * produit commercial tient son rayon de l'aliment du catalogue auquel il est
+ * apparié (`food_products.food_id`) ; sans appariement, pas de rayon, et on ne
+ * va pas chercher ailleurs une catégorie qui n'est pas stockée.
  */
-async function lireNomsAffichables(
+async function lireIdentitesAffichables(
   supabase: TypedSupabaseClient,
   idsAliments: readonly string[],
   idsProduits: readonly string[],
-): Promise<{ ok: boolean; parCle: ReadonlyMap<string, string> }> {
-  const parCle = new Map<string, string>();
+): Promise<{ ok: boolean; parCle: ReadonlyMap<string, IdentiteAffichable> }> {
+  const parCle = new Map<string, IdentiteAffichable>();
   if (idsAliments.length === 0 && idsProduits.length === 0) return { ok: true, parCle };
 
   const [aliments, produits] = await Promise.all([
     idsAliments.length > 0
-      ? supabase.from("food_catalog").select("id, name").in("id", [...idsAliments])
+      ? supabase.from("food_catalog").select("id, name, source, source_ref").in("id", [...idsAliments])
       : Promise.resolve({ data: [], error: null }),
     idsProduits.length > 0
-      ? supabase.from("food_products").select("id, product_name, brand").in("id", [...idsProduits])
+      ? supabase
+          .from("food_products")
+          .select("id, product_name, brand, food_id")
+          .in("id", [...idsProduits])
       : Promise.resolve({ data: [], error: null }),
   ]);
 
@@ -307,15 +349,47 @@ async function lireNomsAffichables(
   devWarn("food_products", produits.error);
   if (aliments.error || produits.error) return { ok: false, parCle };
 
-  for (const f of (aliments.data ?? []) as unknown as { id: string; name: string }[]) {
-    parCle.set(`catalog_food:${f.id}`, f.name);
+  type LigneCatalogue = { id: string; name: string; source: string | null; source_ref: string | null };
+  type LigneProduit = { id: string; product_name: string; brand: string | null; food_id: string | null };
+
+  const lignesAliments = (aliments.data ?? []) as unknown as LigneCatalogue[];
+  const lignesProduits = (produits.data ?? []) as unknown as LigneProduit[];
+
+  /** Le code Ciqual d'une ligne de catalogue, ou `null`. */
+  const codeDe = (ligne: LigneCatalogue): string | null =>
+    ligne.source === "ciqual" ? ligne.source_ref : null;
+
+  const codeParAliment = new Map<string, string | null>();
+  for (const f of lignesAliments) {
+    codeParAliment.set(f.id, codeDe(f));
+    parCle.set(`catalog_food:${f.id}`, { nom: f.name, codeCiqual: codeDe(f) });
   }
-  for (const p of (produits.data ?? []) as unknown as {
-    id: string;
-    product_name: string;
-    brand: string | null;
-  }[]) {
-    parCle.set(`product:${p.id}`, p.brand ? `${p.brand} — ${p.product_name}` : p.product_name);
+
+  // ── Les aliments de rapprochement qui n'étaient pas déjà demandés ─────────
+  const idsAApparier = [
+    ...new Set(
+      lignesProduits
+        .map((p) => p.food_id)
+        .filter((v): v is string => v !== null && !codeParAliment.has(v)),
+    ),
+  ];
+  if (idsAApparier.length > 0) {
+    const apparies = await supabase
+      .from("food_catalog")
+      .select("id, name, source, source_ref")
+      .in("id", idsAApparier);
+    devWarn("food_catalog (rapprochements produits)", apparies.error);
+    if (apparies.error) return { ok: false, parCle };
+    for (const f of (apparies.data ?? []) as unknown as LigneCatalogue[]) {
+      codeParAliment.set(f.id, codeDe(f));
+    }
+  }
+
+  for (const p of lignesProduits) {
+    parCle.set(`product:${p.id}`, {
+      nom: p.brand ? `${p.brand} — ${p.product_name}` : p.product_name,
+      codeCiqual: p.food_id ? (codeParAliment.get(p.food_id) ?? null) : null,
+    });
   }
   return { ok: true, parCle };
 }

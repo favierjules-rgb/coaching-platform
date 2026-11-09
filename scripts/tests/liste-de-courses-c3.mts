@@ -125,6 +125,7 @@ function lignePlan(over: Partial<LigneAffichee> = {}): LigneAffichee {
     libelle: "Riz",
     quantite: "1 000 g",
     colorKey: null,
+    rayon: "feculents-cereales",
     checked: false,
     ...over,
   };
@@ -137,6 +138,7 @@ function ligneManuelle(over: Partial<LigneAffichee> = {}): LigneAffichee {
     libelle: "Papier toilette",
     quantite: null,
     colorKey: null,
+    rayon: "divers",
     checked: false,
     ...over,
   };

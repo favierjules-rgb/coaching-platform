@@ -132,6 +132,7 @@ function duPlan(over: Partial<LigneDeCourses> = {}): LigneDeCourses {
     unit: "g",
     quantite: 300,
     displayName: "Poulet",
+    codeCiqual: null,
     colorKey: null,
     sources: [],
     ...over,
@@ -273,16 +274,45 @@ test("C2-19 la charge utile RPC ne porte NI nom NI couleur", () => {
 
 const PERIODE = construirePeriode("2026-03-02", 3);
 
-test("C2-20 l'écran porte le titre « MA LISTE DE COURSES »", () => {
-  const html = renderToString(
-    createElement(ListeDeCoursesPersistante, {
-      periode: PERIODE,
-      lignesDuPlan: [],
-      studentId: null,
-      restants: 0,
-    }),
+test("C2-20 le titre de l'écran est posé UNE FOIS, et par le parcours", () => {
+  /*
+   * ⚠️ CE CONTRÔLE A CHANGÉ DE CÔTÉ, ET C'EST LE CORRECTIF QU'IL MESURE.
+   *
+   * L'écran portait son propre titre « MA LISTE DE COURSES » — sous le `h1`
+   * « MA LISTE DE COURSE » du parcours, au singulier, suivi DEUX FOIS de la
+   * même période. Deux titres pour un écran, et deux orthographes. Le titre
+   * appartient maintenant au parcours seul ; le composant monté en dessous
+   * commence par le contenu.
+   */
+  const html = texteRendu(
+    renderToString(
+      createElement(ListeDeCoursesPersistante, {
+        periode: PERIODE,
+        lignesDuPlan: [],
+        studentId: null,
+        restants: 0,
+      }),
+    ),
   );
-  assert.ok(texteRendu(html).includes("MA LISTE DE COURSES"));
+  for (const doublon of ["MA LISTE DE COURSES", "MA LISTE DE COURSE"]) {
+    assert.ok(!html.includes(doublon), `l'écran ne se renomme plus (${doublon})`);
+  }
+
+  // Et le parcours le pose UNE fois, au pluriel, dans son `h1`.
+  const parcours = readFileSync(
+    new URL("../../components/student/ListeDeCoursesParcours.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.equal(
+    (parcours.match(/"MA LISTE DE COURSES"/g) ?? []).length,
+    1,
+    "un seul intitulé d'écran de liste dans le parcours",
+  );
+  assert.equal(
+    (parcours.match(/"MA LISTE DE COURSE"/g) ?? []).length,
+    0,
+    "et plus aucune occurrence au singulier",
+  );
 });
 
 test("C2-21 sans liste, l'écran propose « GÉNÉRER MA LISTE » et rien d'autre", () => {

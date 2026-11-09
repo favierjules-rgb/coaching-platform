@@ -37,6 +37,15 @@ import {
   selectionnerDernierScenarioParGtin,
 } from "../../lib/nutrition/budget-observe";
 import type { Scenario, ScenarioAchat } from "../../lib/nutrition/conditionnements";
+/*
+ * ⚠️ LES LIBELLÉS DES MODES VIENNENT DE LA SOURCE, PAS D'UNE COPIE. Les tests
+ * cherchaient « Trouver un magasin près de moi » et un champ « Ville » : deux
+ * libellés que la refonte de `RechercheDeCommerces` a fait disparaître. Les
+ * recopier une seconde fois rejouerait la même panne au prochain renommage ;
+ * en les important, un changement de libellé casse le composant ET le test au
+ * même instant, ce qui est exactement ce qu'on veut.
+ */
+import { MODES } from "../../lib/nutrition/recherche-commerces";
 
 const lire = (chemin: string) => readFileSync(new URL(chemin, import.meta.url), "utf8");
 const sceau = (chemin: string) =>
@@ -754,21 +763,66 @@ await test("C4.6-37/38/39 — C4.4, C4.5 et le budget C3 sont SCELLÉS", () => {
   // ⚠️ CINQ SCEAUX, ET C4.6 N'A AUCUNE RAISON DE LES REMONTER. Le lot consomme
   // ces modules ; il ne les réécrit pas.
   //
-  // ⚠️ UN SEUL A ÉTÉ REMONTÉ, ET PAR C4.3c, PAS PAR C4.6. `prix-observes.ts`
-  // passe de `270353a621aa645b` à `9d60bec4c140ef75` parce que C4.3c y a ajouté
-  // l'état `magasin_sans_couverture_prix` et remplacé le paramètre
-  // `opLocationId: number | null` par une `CouvertureMagasin` discriminée. Le
-  // sceau a rougi exactement quand il devait rougir ; on le REDÉCLARE, on ne
-  // le retire pas.
+  // ⚠️ DEUX SCEAUX ONT ÉTÉ REMONTÉS, ET CHAQUE FOIS POUR UNE RAISON ÉCRITE.
+  // Un sceau qui rougit n'est pas un test cassé : c'est la question « est-ce
+  // voulu ? » posée au bon moment. On y répond, on ne la supprime pas.
   //
-  // ⚠️ ET LES QUATRE AUTRES N'ONT PAS BOUGÉ D'UN OCTET. C'est ce qui prouve que
-  // C4.3c s'est arrêté là où il devait : ni le budget C3, ni les
-  // conditionnements C4.5, ni l'adaptateur réseau de C4.4 n'ont été touchés
-  // pour faire passer ce lot.
+  //   `prix-observes.ts`
+  //     270353a621aa645b → 9d60bec4c140ef75  (C4.3c) état
+  //       `magasin_sans_couverture_prix`, et `CouvertureMagasin` discriminée ;
+  //     9d60bec4c140ef75 → 92300c5e381ab0a6  (C5/C1) la raison
+  //       `non_configure` — une installation incomplète n'est pas une panne —,
+  //       et le type `ObservationCategorie`, DISTINCT d'`ObservationPrix` pour
+  //       qu'une estimation ne puisse jamais s'additionner à un prix exact ;
+  //     92300c5e381ab0a6 → 218785083e7d3299  (audit 09/11) `instantCalendaire`
+  //       refuse les dates au bon FORMAT mais impossibles — `2026-02-31` passe
+  //       la régulière, et `Date.UTC` la reporte en silence au 3 mars. Une date
+  //       inexistante devenait un relevé ordinaire, ou « trop ancien ».
+  //
+  //   `open-prices/observations.ts`
+  //     6269628e0e994f9d → dc95d05597bc04ab  (C1) `type=PRODUCT` n'est plus
+  //       figé dans l'URL : les relevés par catégorie deviennent lisibles, le
+  //       filtre `duplicate_of__isnull=true` est posé, et les portées
+  //       `identite_osm` / `magasins` / `zone` existent. ⚠️ Le chemin du PRIX
+  //       EXACT, lui, n'a pas bougé : `urlObservations` est réécrite au-dessus
+  //       du nouveau constructeur et rend exactement la même URL ;
+  //     dc95d05597bc04ab → 02d1df0710412e50  (revue) la GARDE DE PORTÉE. Chaque
+  //       relevé rendu doit prouver qu'il vient de la portée demandée —
+  //       `location_id`, l'identité OSM, ou les coordonnées selon le cas. Un
+  //       filtre ignoré par l'amont ne se voit pas autrement : `osm_address_city`
+  //       et `location_osm_id__in` sont ignorés en silence, pas rejetés.
+  //       ⚠️ Et ce qui ne peut PAS être prouvé est refusé : les 144 lieux
+  //       `type: "ONLINE"` n'ont ni identité OSM ni coordonnées ;
+  //     02d1df0710412e50 → f6029d8f5e399fe2  (revue) la marge de zone passe
+  //       de 5 % à 0,5 %, et les coordonnées sont bornées (±90, ±180).
+  //       ⚠️ LA TOLÉRANCE EST DÉMONTRÉE, pas concédée : par bisection du rayon,
+  //       l'amont rend une distance géodésique supérieure de 0,03 % à 0,10 % à
+  //       notre haversine (lieux 167 et 363 depuis Toulon). Une vérification
+  //       stricte rejetterait des relevés légitimes ;
+  //     f6029d8f5e399fe2 → ff9ecf4ad6ca943f  (revue) la validation du centre
+  //       et du rayon REMONTE AVANT la boucle sur les relevés. Elle y vivait, et
+  //       sur une réponse `items: []` le corps de boucle ne s'exécutait jamais :
+  //       la fonction rendait `null` — « tout est en règle » — pour un rayon
+  //       `NaN`. Le garde-fou se taisait précisément quand rien ne le réveillait.
+  //       Le rayon est désormais exigé STRICTEMENT positif ;
+  //     ff9ecf4ad6ca943f → d548081ea14d1919  (audit 09/11) trois corrections :
+  //       `duplicate_of__isnull` est RÉSERVÉ à `CATEGORY` — il avait été posé
+  //       sur le chemin du prix exact, qui n'avait rien demandé et dont l'URL
+  //       redevient celle d'avant ce lot, au caractère près ; la portée est
+  //       validée AVANT tout appel réseau, et son refus s'appelle
+  //       `portee_invalide`, pas `unavailable` ; et le `category_tag` de chaque
+  //       ligne est EXIGÉ (chaîne non vide, égale après `trim`) au lieu d'être
+  //       comparé seulement s'il existait — une réponse incohérente devenait
+  //       une lecture réussie à zéro observation.
+  //
+  // ⚠️ ET LES TROIS AUTRES N'ONT PAS BOUGÉ D'UN OCTET. C'est ce qui prouve que
+  // ce lot s'est arrêté là où il devait : ni le budget C3, ni les
+  // conditionnements C4.5, ni leur lecture n'ont été touchés pour le faire
+  // passer.
   assert.equal(sceau("../../lib/nutrition/budget-courses.ts"), "becd06ded213d14a", "C3 modifié");
-  assert.equal(sceau("../../lib/nutrition/prix-observes.ts"), "9d60bec4c140ef75", "C4.4 modifié hors C4.3c");
+  assert.equal(sceau("../../lib/nutrition/prix-observes.ts"), "218785083e7d3299", "C4.4 modifié hors C5/audit");
   assert.equal(sceau("../../lib/nutrition/conditionnements.ts"), "99b7f5a9cd91c332", "C4.5 modifié");
-  assert.equal(sceau("../../lib/open-prices/observations.ts"), "6269628e0e994f9d", "C4.4 adaptateur modifié");
+  assert.equal(sceau("../../lib/open-prices/observations.ts"), "d548081ea14d1919", "C4.4 adaptateur modifié hors C1/revue");
   assert.equal(sceau("../../lib/supabase/conditionnements.ts"), "3ff60b0e286cb940", "C4.5 lecture modifiée");
 });
 
@@ -1040,16 +1094,31 @@ await test("C4.6-CABLAGE — après un changement de magasin, la zone des prix e
     assert.match(await page.innerText("body"), /aucun magasin choisi/);
     assert.match(await page.innerText("body"), /Choisis un magasin/);
 
-    // 2. Le panneau est REPLIÉ : les commandes complètes n'occupent pas l'écran.
+    /*
+     * 2. Le panneau est REPLIÉ : les commandes complètes n'occupent pas l'écran.
+     *
+     * ⚠️ CETTE ASSERTION ÉTAIT DEVENUE VIDE. Elle comptait les occurrences de
+     * « Trouver un magasin près de moi », un libellé que la refonte a supprimé :
+     * le compte valait donc zéro quoi qu'il arrive, panneau ouvert ou fermé.
+     * Un test qui ne peut plus échouer ne protège plus rien. On interroge
+     * désormais le sélecteur de mode, qui n'existe QUE panneau ouvert.
+     */
     assert.equal(
-      await page.getByText("Trouver un magasin près de moi").count(),
+      await page.getByRole("tablist", { name: "Mode de recherche" }).count(),
       0,
       "les commandes de recherche ne doivent pas être visibles au repos",
     );
 
     // 3. On ouvre, on cherche par ville — sans passer par la géolocalisation.
     await page.getByRole("button", { name: "Choisir un magasin" }).click();
-    await page.getByLabel("Ville").fill("Toulon");
+    /*
+     * ⚠️ LE MODE PAR DÉFAUT EST « AUTOUR DE MOI » : il faut basculer sur l'autre
+     * onglet pour que le champ de commune existe. Le composant ne le rend que
+     * sous `mode === "ville"`.
+     */
+    await page.getByRole("tab", { name: MODES[1]!.libelle }).click();
+    // ⚠️ LE CHAMP S'APPELLE « COMMUNE », PAS « VILLE ».
+    await page.getByLabel("Commune").fill("Toulon");
     await page.getByRole("button", { name: "Rechercher" }).click();
     await page.waitForFunction(() => document.body.innerText.includes("Lidl"));
 
@@ -1059,8 +1128,22 @@ await test("C4.6-CABLAGE — après un changement de magasin, la zone des prix e
     assert.equal(/LidlLidl/.test(texteListe), false, "la marque ne doit pas doubler le nom");
     assert.equal(/NaturaliaNaturalia/.test(texteListe), false);
 
-    // 4. LE GESTE. On choisit un magasin.
-    await page.getByRole("button", { name: /Lidl/ }).first().click();
+    // 4. LE GESTE. On choisit un magasin — EN DEUX TEMPS.
+    /*
+     * ⚠️ SÉLECTIONNER N'EST PAS CHOISIR, ET LA REFONTE A SCINDÉ LE GESTE. La
+     * ligne de résultat n'enregistre rien : elle ouvre la fiche
+     * (`onSelectionner`). C'est un SECOND bouton, révélé par cette sélection,
+     * qui choisit le magasin (`onChoisir`). L'ancien test ne cliquait que le
+     * premier — le magasin n'était donc jamais choisi.
+     *
+     * ⚠️ ET CE SECOND BOUTON EST CHERCHÉ DANS LA LIGNE, PAS DANS LA PAGE. Sur
+     * un écran large la fiche de la carte porte le MÊME libellé « Choisir ce
+     * commerce » : viser la page entière rendrait le sélecteur ambigu.
+     */
+    const ligneLidl = page.getByRole("listitem").filter({ hasText: /Lidl/ });
+    assert.equal(await ligneLidl.count(), 1, "une seule ligne Lidl dans les résultats");
+    await ligneLidl.getByRole("button", { name: /Lidl/ }).click();
+    await ligneLidl.getByRole("button", { name: "Choisir ce commerce" }).click();
     await page.waitForFunction(
       (n) =>
         (window as unknown as { __harnais: { lectures: (f: string) => number } }).__harnais.lectures(
@@ -1079,7 +1162,15 @@ await test("C4.6-CABLAGE — après un changement de magasin, la zone des prix e
     const final = await page.innerText("body");
     assert.match(final, /Magasin\s*:\s*Lidl/, "le magasin choisi s'affiche");
     assert.match(final, /Changer/, "et le bouton propose d'en changer");
-    assert.equal(/Trouver un magasin près de moi/.test(final), false, "le panneau s'est refermé");
+    /*
+     * ⚠️ MÊME DÉFAUT QU'À L'ÉTAPE 2 : ce motif ne pouvait plus apparaître. Le
+     * repli se constate sur le sélecteur de mode, qui disparaît avec le panneau.
+     */
+    assert.equal(
+      await page.getByRole("tablist", { name: "Mode de recherche" }).count(),
+      0,
+      "le panneau s'est refermé",
+    );
     assert.equal(/Naturalia/.test(final), false, "les résultats de recherche ont été vidés");
     assert.match(
       final,
@@ -1120,16 +1211,62 @@ await test("C4.6-SANS-LISTE — pas encore de liste : le sélecteur reste, et RI
     // l'arbitrage : afficher le sélecteur ne doit pas faire parler l'amont.
     assert.equal(await lectures(), 0, "aucune requête /observed-prices sans liste");
 
-    // 3. LE PANNEAU S'OUVRE, avec ses deux chemins.
+    /*
+     * 3. LE PANNEAU S'OUVRE, AVEC SES DEUX CHEMINS.
+     *
+     * ⚠️ CE QUE CE TEST VÉRIFIAIT N'EXISTE PLUS SOUS CETTE FORME. Il cherchait
+     * un bouton « Trouver un magasin près de moi » et un champ « Ville » ; la
+     * refonte a remplacé les deux chemins par un sélecteur de MODE à deux
+     * onglets, et le champ s'appelle désormais « Commune ».
+     *
+     * ⚠️ L'ASSERTION MÉTIER, ELLE, EST INCHANGÉE : les deux chemins doivent
+     * rester offerts sans liste. C'est leur forme qui a changé, pas la règle.
+     */
     await page.getByRole("button", { name: "Choisir un magasin" }).click();
-    assert.equal(await page.getByRole("button", { name: "Trouver un magasin près de moi" }).count(), 1);
-    assert.equal(await page.getByLabel("Ville").count(), 1, "la saisie manuelle reste offerte");
+    assert.equal(
+      await page.getByRole("tablist", { name: "Mode de recherche" }).count(),
+      1,
+      "le sélecteur de mode est là",
+    );
+    // ⚠️ LES DEUX MODES SONT ÉNUMÉRÉS DEPUIS `MODES` : si l'un disparaissait
+    // ou changeait de nom, c'est ici que cela se verrait.
+    assert.equal(MODES.length, 2, "deux modes, pas davantage");
+    for (const m of MODES) {
+      assert.equal(
+        await page.getByRole("tab", { name: m.libelle }).count(),
+        1,
+        `le mode « ${m.libelle} » doit être proposé`,
+      );
+    }
+
+    /*
+     * ⚠️ ET LE CHAMP DE COMMUNE N'APPARAÎT QU'APRÈS LE CHANGEMENT DE MODE. Le
+     * mode par défaut est « Autour de moi » ; le vérifier AVANT de basculer
+     * ferait passer le test pour une mauvaise raison.
+     */
+    assert.equal(await page.getByLabel("Commune").count(), 0, "pas de commune avant de basculer");
+    await page.getByRole("tab", { name: MODES[1]!.libelle }).click();
+    assert.equal(await page.getByLabel("Commune").count(), 1, "la saisie manuelle reste offerte");
 
     // 4. ET LE MAGASIN EST RÉELLEMENT SÉLECTIONNABLE.
-    await page.getByLabel("Ville").fill("Toulon");
+    await page.getByLabel("Commune").fill("Toulon");
     await page.getByRole("button", { name: "Rechercher" }).click();
     await page.waitForFunction(() => document.body.innerText.includes("Lidl"));
-    await page.getByRole("button", { name: /Lidl/ }).first().click();
+    /*
+     * ⚠️ SÉLECTIONNER N'EST PAS CHOISIR, ET LA REFONTE A SCINDÉ LE GESTE. La
+     * ligne de résultat n'enregistre rien : elle ouvre la fiche
+     * (`onSelectionner`). C'est un SECOND bouton, révélé par cette sélection,
+     * qui choisit le magasin (`onChoisir`). L'ancien test ne cliquait que le
+     * premier — le magasin n'était donc jamais choisi.
+     *
+     * ⚠️ ET CE SECOND BOUTON EST CHERCHÉ DANS LA LIGNE, PAS DANS LA PAGE. Sur
+     * un écran large la fiche de la carte porte le MÊME libellé « Choisir ce
+     * commerce » : viser la page entière rendrait le sélecteur ambigu.
+     */
+    const ligneLidl = page.getByRole("listitem").filter({ hasText: /Lidl/ });
+    assert.equal(await ligneLidl.count(), 1, "une seule ligne Lidl dans les résultats");
+    await ligneLidl.getByRole("button", { name: /Lidl/ }).click();
+    await ligneLidl.getByRole("button", { name: "Choisir ce commerce" }).click();
     await page.waitForFunction(() => /Magasin\s*:\s*Lidl/.test(document.body.innerText));
 
     const apres = await page.innerText("body");
@@ -1150,4 +1287,10 @@ await test("C4.6-SANS-LISTE — pas encore de liste : le sélecteur reste, et RI
 
 await atelier.fermer();
 
-console.log("\n✅ C4.6 — minimum observé : suite verte.");
+/*
+ * ⚠️ CETTE LIGNE ANNONÇAIT « SUITE VERTE » INCONDITIONNELLEMENT. Elle
+ * s'imprimait même sur un run à deux échecs, juste avant le « # fail 2 » :
+ * exactement le genre de résumé qui fait conclure trop vite. On annonce donc
+ * la fin de la suite, pas son verdict — le verdict est le compte rendu TAP.
+ */
+console.log("\n— C4.6 — minimum observé : fin de la suite (verdict : voir « # fail » ci-dessous).");

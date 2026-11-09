@@ -281,14 +281,35 @@ await test("12. en-têtes de sécurité déclarés", async () => {
   const permissions = parCle.get("Permissions-Policy") ?? "";
   assert.equal(
     permissions,
-    "camera=(self), microphone=(self), geolocation=(), payment=(), usb=(), interest-cohort=()",
+    "camera=(self), microphone=(self), geolocation=(self), payment=(), usb=(), interest-cohort=()",
     "la politique de permissions doit être exactement celle-ci — ni plus ouverte, ni réordonnée sans décision",
   );
   assert.ok(permissions.includes("camera=(self)"), "la caméra doit être ouverte à ce site seul");
   assert.ok(!/camera=\*/.test(permissions), "la caméra ne doit jamais être ouverte à toutes les origines");
   assert.ok(permissions.includes("microphone=(self)"), "le micro doit être ouvert à ce site seul");
   assert.ok(!/microphone=\*/.test(permissions), "le micro ne doit jamais être ouvert à toutes les origines");
-  for (const api of ["geolocation=()", "payment=()", "usb=()", "interest-cohort=()"]) {
+  /*
+   * ⚠️ LA GÉOLOCALISATION A ÉTÉ OUVERTE À CE SITE SEUL, ET C'EST UNE DÉCISION
+   * QUI SE RELIT.
+   *
+   * Elle était fermée à tous (`geolocation=()`). Mesuré dans Chromium sur
+   * l'en-tête exact de ce dépôt : `getCurrentPosition` répondait « code 1 —
+   * Geolocation has been disabled in this document by permissions policy ».
+   * Le mode « Autour de moi » de la liste de courses ne pouvait donc pas
+   * fonctionner, et l'élève lisait « Localisation refusée » sans avoir rien
+   * refusé. Safari n'applique pas cette politique pour la géolocalisation,
+   * ce qui a longtemps masqué le défaut en recette.
+   *
+   * Le contrôle ne s'est pas assoupli, il s'est DÉPLACÉ — et il reste strict
+   * sur ce qui compte : `(self)` et rien d'autre.
+   */
+  assert.ok(permissions.includes("geolocation=(self)"), "la position doit être ouverte à ce site seul");
+  assert.ok(!/geolocation=\*/.test(permissions), "la position ne doit jamais être ouverte à toutes les origines");
+  assert.ok(
+    !/geolocation=\([^)]*https?:/.test(permissions),
+    "aucune origine tierce ne doit hériter de la position",
+  );
+  for (const api of ["payment=()", "usb=()", "interest-cohort=()"]) {
     assert.ok(permissions.includes(api), `${api} ne doit pas avoir été rouvert`);
   }
 

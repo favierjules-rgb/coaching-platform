@@ -24,6 +24,7 @@ import {
   decouvrirParVille,
   httpDecouverte,
 } from "../../lib/openstreetmap/decouverte";
+import { OVERPASS_REESSAIS_MAX } from "../../lib/openstreetmap/overpass";
 import { OFF_USER_AGENT_ENV } from "../../lib/open-food-facts/contrat";
 
 const lire = (chemin: string) => readFileSync(new URL(chemin, import.meta.url), "utf8");
@@ -246,10 +247,32 @@ await test("DEC-29/30/31 — 429, 503 et timeout restent distincts jusqu'au HTTP
   ] as const;
 
   for (const [statutAmont, raison, statutSortie] of cas) {
-    const { transport, appels } = transportScripte([new Response("", { status: statutAmont })]);
-    const r = await avecUserAgent(() => decouvrirParVille("Toulon", { transport }));
+    /*
+     * ⚠️ LA MÊME PANNE À CHAQUE TENTATIVE, ET C'EST CE QUE LE SCÉNARIO DOIT
+     * DIRE. Le transport scripté rend `{ elements: [] }` quand sa liste est
+     * épuisée : avec une seule réponse d'erreur, un réessai tombait sur un
+     * faux « zéro résultat » et la panne se déguisait en « ville
+     * introuvable ». C'est le scénario qui était incomplet, pas le classement.
+     */
+    const { transport, appels } = transportScripte(
+      Array.from({ length: OVERPASS_REESSAIS_MAX + 1 }, () => new Response("", { status: statutAmont })),
+    );
+    const r = await avecUserAgent(() =>
+      decouvrirParVille("Toulon", { transport, attendre: async () => {} }),
+    );
     assert.deepEqual(r, { statut: "echec", raison }, `${statutAmont} → ${raison}`);
-    assert.equal(appels(), 1, "aucun réessai");
+    /*
+     * ⚠️ « AUCUN RÉESSAI » EST DEVENU « RÉESSAI BORNÉ », SAUF SUR 429.
+     *
+     * Le corps du 502 d'`overpass-api.de` demande explicitement un backoff
+     * exponentiel, et la saturation est fréquente et brève : l'élève lisait
+     * « la recherche n'a pas abouti » pour une panne déjà passée. La garantie
+     * qui comptait — ne pas marteler l'amont — est conservée par le PLAFOND,
+     * et le 429 reste intouchable : la politique demande une pause de 30 s, et
+     * réessayer tout de suite est exactement ce qui fait bannir.
+     */
+    const attendus = raison === "rate_limited" ? 1 : OVERPASS_REESSAIS_MAX + 1;
+    assert.equal(appels(), attendus, `${statutAmont} : réessais bornés`);
     assert.equal(httpDecouverte(raison).status, statutSortie);
   }
 
@@ -262,28 +285,38 @@ await test("DEC-29/30/31 — 429, 503 et timeout restent distincts jusqu'au HTTP
   }
 
   // Chaque raison porte un code lisible, distinct, et sans détail interne.
-  const codes = new Set(
-    (
-      [
-        "rate_limited",
-        "unavailable",
-        "timeout",
-        "invalid_json",
-        "invalid_envelope",
-        "ville_introuvable",
-        "ville_ambigue",
-      ] as const
-    ).map((r) => httpDecouverte(r).code),
-  );
-  assert.equal(codes.size, 7, "sept raisons, sept codes");
+  const raisons = [
+    "rate_limited",
+    // ⚠️ HUITIÈME RAISON : la saturation passagère de l'amont, distincte d'une
+    // indisponibilité. Le serveur la nomme lui-même (« currently at capacity »)
+    // et demande un réessai, là où un 503 ordinaire n'engage à rien.
+    "at_capacity",
+    "unavailable",
+    "timeout",
+    "invalid_json",
+    "invalid_envelope",
+    "ville_introuvable",
+    "ville_ambigue",
+  ] as const;
+  const codes = new Set(raisons.map((r) => httpDecouverte(r).code));
+  assert.equal(codes.size, raisons.length, "huit raisons, huit codes");
+  for (const panne of raisons) {
+    if (panne === "ville_introuvable" || panne === "ville_ambigue") continue;
+    assert.notEqual(httpDecouverte(panne).status, 404, `${panne} ne doit jamais dire « introuvable »`);
+  }
 });
 
 await test("DEC-31c — une panne de la SECONDE requête n'invente pas une ville introuvable", async () => {
+  // ⚠️ LA PANNE PERSISTE SUR LES RÉESSAIS. Sans cela, le transport scripté
+  // rendrait un faux « zéro résultat » au second tour, et la panne se
+  // déguiserait en « ville introuvable » — exactement ce que ce test interdit.
   const { transport } = transportScripte([
     ENV([zone(74283, "Toulon")]),
-    new Response("", { status: 503 }),
+    ...Array.from({ length: OVERPASS_REESSAIS_MAX + 1 }, () => new Response("", { status: 503 })),
   ]);
-  const r = await avecUserAgent(() => decouvrirParVille("Toulon", { transport }));
+  const r = await avecUserAgent(() =>
+    decouvrirParVille("Toulon", { transport, attendre: async () => {} }),
+  );
   assert.deepEqual(r, { statut: "echec", raison: "unavailable" });
 });
 

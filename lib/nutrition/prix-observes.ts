@@ -157,6 +157,48 @@ export interface ObservationPrix {
   readonly pricePer: PricePer;
 }
 
+/**
+ * Une date `AAAA-MM-JJ` RÉELLE → son instant UTC, ou `null`.
+ *
+ * ════════════════════════════════════════════════════════════════════════════
+ * ⚠️ LE FORMAT NE PROUVE PAS LA DATE, ET C'ÉTAIT LE DÉFAUT
+ * ════════════════════════════════════════════════════════════════════════════
+ * `2026-02-31` passe l'expression régulière sans difficulté. Et `Date.UTC`
+ * n'échoue pas : il REPORTE silencieusement au 3 mars. La fonction rendait
+ * donc un nombre de jours parfaitement plausible pour une date qui n'existe
+ * pas — et un relevé impossible était traité comme un relevé ordinaire, ou,
+ * pire, comme un relevé « trop ancien ».
+ *
+ * ⚠️ L'ALLER-RETOUR EST LA SEULE VÉRIFICATION FIABLE. On reconstruit la date
+ * depuis l'instant obtenu : si les trois composantes ne reviennent pas
+ * identiques, c'est que `Date.UTC` a reporté. `2026-02-31` revient en
+ * `2026-03-03`, les composantes diffèrent, on refuse.
+ *
+ * ⚠️ ET `getUTC*`, JAMAIS `get*`. Les secondes se liraient dans le fuseau de
+ * la machine, et un serveur à l'ouest de Greenwich ferait reculer la date d'un
+ * jour — donc échouer des dates valides.
+ */
+export function instantCalendaire(brut: string): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(brut.trim());
+  if (m === null) return null;
+  const annee = Number(m[1]);
+  const mois = Number(m[2]);
+  const jour = Number(m[3]);
+  // ⚠️ BORNES GROSSIÈRES D'ABORD : `Date.UTC(2026, -1, 10)` recule d'un an.
+  if (mois < 1 || mois > 12 || jour < 1 || jour > 31) return null;
+  const t = Date.UTC(annee, mois - 1, jour);
+  if (!Number.isFinite(t)) return null;
+  const d = new Date(t);
+  if (
+    d.getUTCFullYear() !== annee ||
+    d.getUTCMonth() !== mois - 1 ||
+    d.getUTCDate() !== jour
+  ) {
+    return null;
+  }
+  return t;
+}
+
 /** Pourquoi une ligne d'Open Prices n'est pas devenue une observation. */
 export const REFUS_OBSERVATION = [
   "type_non_produit",
@@ -471,7 +513,21 @@ export type EtatPrixObserves =
   | "releves"
   | "indisponible";
 
-export type RaisonIndisponible = "rate_limited" | "unavailable";
+/**
+ * Pourquoi une lecture de relevés n'a pas abouti.
+ *
+ * ⚠️ `non_configure` N'EST PAS UNE PANNE, ET LES CONFONDRE ENVOIE CHERCHER LE
+ * PROBLÈME AU MAUVAIS ENDROIT. `rate_limited` et `unavailable` décrivent un
+ * amont qui va mal : réessayer plus tard a un sens. `non_configure` décrit
+ * NOTRE installation — l'en-tête `User-Agent` exigé par Open Food Facts n'a
+ * pas été renseigné —, et réessayer dans une heure donnera exactement le même
+ * résultat. L'élève n'a rien à attendre ; c'est à l'administrateur d'agir.
+ *
+ * Avant ce lot, ce cas rendait un 503 que l'écran affichait comme « les
+ * relevés n'ont pas pu être lus » : une panne annoncée pour une variable
+ * d'environnement absente.
+ */
+export type RaisonIndisponible = "rate_limited" | "unavailable" | "non_configure";
 
 export interface LectureObservations {
   /** `false` = LA LECTURE A ÉCHOUÉ. Ce n'est PAS « aucun prix ». */
@@ -585,4 +641,151 @@ export function etatPrixObserves(params: {
     ignores: lecture.ignores,
     raison: null,
   };
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   LES RELEVÉS PAR CATÉGORIE
+
+   ⚠️ UNE AUTRE ESPÈCE DE PRIX, ET ELLE NE SE MÉLANGE PAS À LA PREMIÈRE.
+   Un relevé `PRODUCT` dit « CE produit, dans CE magasin, coûtait 3,85 € ». Un
+   relevé `CATEGORY` dit « les carottes coûtaient 2,90 € le kilo ». Le premier
+   est un prix EXACT ; le second ne peut servir qu'à une ESTIMATION.
+
+   ⚠️ ILS NE PARTAGENT DÉLIBÉRÉMENT AUCUN TYPE. `ObservationPrix` porte un
+   `gtin` ; `ObservationCategorie` porte un `categoryTag` et un `pricePer`
+   OBLIGATOIRE. Les réunir derrière un type commun rendrait possible, d'une
+   ligne de code distraite, d'additionner une estimation à un prix exact.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/** Pourquoi une ligne CATEGORY d'Open Prices n'est pas devenue une observation. */
+export const REFUS_CATEGORIE = [
+  "type_non_categorie",
+  "devise_non_eur",
+  "remise",
+  "categorie_absente",
+  "date_absente",
+  "montant_illisible",
+  /**
+   * ⚠️ UN PRIX DE CATÉGORIE SANS UNITÉ EST INUTILISABLE. « Les carottes : 2,90 »
+   * ne dit pas si c'est le kilo, la botte ou le sachet. Pour un relevé PRODUIT,
+   * `price_per` absent est normal — le conditionnement est connu par ailleurs.
+   * Ici, il n'y a pas de produit : l'unité est la seule chose qui donne un sens
+   * au nombre.
+   */
+  "price_per_absent",
+  "identifiant_absent",
+] as const;
+export type RefusCategorie = (typeof REFUS_CATEGORIE)[number];
+
+/** Un prix rattaché à une catégorie Open Food Facts, jamais à un code-barres. */
+export interface ObservationCategorie {
+  readonly priceId: number;
+  /** Le tag Open Food Facts, par exemple `en:carrots`. */
+  readonly categoryTag: string;
+  /** `price × 1000`, entier. Jamais un flottant, jamais des centimes. */
+  readonly montantMilli: number;
+  readonly devise: "EUR";
+  /** ⚠️ NON NULL : sans unité, le montant ne veut rien dire. */
+  readonly pricePer: Exclude<PricePer, null>;
+  /** La date d'observation EN MAGASIN. C'est elle, et elle seule, qui dit la fraîcheur. */
+  readonly observeLe: string;
+  readonly opLocationId: number;
+  /** La commune du relevé, quand l'amont la porte — pour dire d'où vient une estimation. */
+  readonly ville: string | null;
+}
+
+export type ResultatNormalisationCategorie =
+  | { readonly ok: true; readonly observation: ObservationCategorie }
+  | { readonly ok: false; readonly refus: RefusCategorie };
+
+/**
+ * Une ligne brute d'Open Prices → une observation de catégorie, ou un refus.
+ *
+ * ⚠️ MÊME DOCTRINE QUE `normaliserObservation` : on refuse plutôt que de
+ * deviner. Un champ absent n'est jamais remplacé par une valeur par défaut.
+ */
+export function normaliserObservationCategorie(brut: unknown): ResultatNormalisationCategorie {
+  if (typeof brut !== "object" || brut === null) {
+    return { ok: false, refus: "categorie_absente" };
+  }
+  const l = brut as Record<string, unknown>;
+
+  if (l["type"] !== "CATEGORY") return { ok: false, refus: "type_non_categorie" };
+  if (l["currency"] !== "EUR") return { ok: false, refus: "devise_non_eur" };
+  if (l["price_is_discounted"] !== false) return { ok: false, refus: "remise" };
+
+  const categoryTag = typeof l["category_tag"] === "string" ? l["category_tag"].trim() : "";
+  if (categoryTag === "") return { ok: false, refus: "categorie_absente" };
+
+  const date = typeof l["date"] === "string" ? l["date"].trim() : "";
+  /*
+   * ⚠️ UNE DATE IMPOSSIBLE EST REFUSÉE COMME UNE DATE ABSENTE. `2026-02-31` a
+   * la bonne forme et n'existe pas ; `Date.UTC` la reporterait en silence au
+   * 3 mars, et le relevé entrerait dans une médiane avec une fraîcheur
+   * inventée. `instantCalendaire` fait l'aller-retour et refuse.
+   */
+  if (date === "" || instantCalendaire(date) === null) {
+    return { ok: false, refus: "date_absente" };
+  }
+
+  const montantMilli = montantMilliDepuis(l["price"]);
+  if (montantMilli === null) return { ok: false, refus: "montant_illisible" };
+
+  const pricePerBrut = l["price_per"];
+  if (typeof pricePerBrut !== "string" || !PRICE_PER_CONNUS.has(pricePerBrut)) {
+    return { ok: false, refus: "price_per_absent" };
+  }
+  const pricePer = pricePerBrut as Exclude<PricePer, null>;
+
+  const priceId = typeof l["id"] === "number" && Number.isSafeInteger(l["id"]) ? l["id"] : null;
+  if (priceId === null) return { ok: false, refus: "identifiant_absent" };
+
+  const opLocationId =
+    typeof l["location_id"] === "number" && Number.isSafeInteger(l["location_id"])
+      ? l["location_id"]
+      : null;
+  if (opLocationId === null) return { ok: false, refus: "identifiant_absent" };
+
+  /*
+   * ⚠️ LA PROVENANCE EST FACULTATIVE, PAS INVENTÉE. L'amont n'imbrique le lieu
+   * que sur certains sérialiseurs ; son absence n'invalide pas le relevé, mais
+   * elle doit se voir — une estimation sans provenance le dira.
+   */
+  const lieu = l["location"];
+  const ville =
+    typeof lieu === "object" && lieu !== null &&
+    typeof (lieu as Record<string, unknown>)["osm_address_city"] === "string"
+      ? ((lieu as Record<string, unknown>)["osm_address_city"] as string).trim() || null
+      : null;
+
+  return {
+    ok: true,
+    observation: { priceId, categoryTag, montantMilli, devise: "EUR", pricePer, observeLe: date, opLocationId, ville },
+  };
+}
+
+/**
+ * Pourquoi une lecture de relevés par catégorie n'a pas abouti.
+ *
+ * ⚠️ `portee_invalide` N'EST PAS UNE PANNE, ET LES CONFONDRE MASQUERAIT UN
+ * BOGUE. `rate_limited` et `unavailable` décrivent un amont qui va mal ;
+ * `portee_invalide` décrit un APPEL MAL FORMÉ de notre côté — un rayon `NaN`,
+ * un centre hors bornes. Aucune requête n'est partie, et aucune ne doit partir.
+ * L'annoncer comme une panne réseau enverrait chercher un incident chez
+ * quelqu'un d'autre.
+ *
+ * ⚠️ ET CE TYPE EST PROPRE À CETTE LECTURE. Élargir `RaisonIndisponible`, qui
+ * est partagé avec le chemin du prix exact, imposerait à `causePrincipale` de
+ * traiter un cas qui ne peut pas l'atteindre.
+ */
+export type RaisonLectureCategorie = RaisonIndisponible | "portee_invalide";
+
+/** Ce qu'une lecture de relevés par catégorie rend. */
+export interface LectureCategorie {
+  /** `false` = LA LECTURE A ÉCHOUÉ. Ce n'est PAS « aucun relevé ». */
+  readonly ok: boolean;
+  readonly raison?: RaisonLectureCategorie;
+  readonly observations: readonly ObservationCategorie[];
+  readonly tronque: boolean;
+  readonly ignores: number;
 }

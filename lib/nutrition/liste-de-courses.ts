@@ -73,6 +73,11 @@ export interface ItemPourAgregation {
   readonly unit: string;
   /** Hydraté depuis `food_catalog.name` / `food_products`. AFFICHAGE SEUL. */
   readonly displayName: string;
+  /**
+   * Hydraté depuis `food_catalog.source_ref` (si `source = 'ciqual'`). SERT
+   * AU RAYON, et à rien d'autre : il n'entre dans AUCUNE clé d'agrégation.
+   */
+  readonly codeCiqual: string | null;
   /** `meal_choice_slots.color_key` de l'occurrence d'origine, ou `null`. */
   readonly colorKey: ColorKey | null;
   readonly plannedOn: string;
@@ -90,6 +95,15 @@ export interface LigneDeCourses {
   /** Somme des quantités des sources. Aucune autre arithmétique. */
   readonly quantite: number;
   readonly displayName: string;
+  /**
+   * Le code Ciqual de l'identité — porté pour que `rayonDeLigne` puisse
+   * ranger la ligne sans refaire une requête.
+   *
+   * ⚠️ IL NE PARTICIPE PAS À LA CLÉ. Deux aliments du même rayon, du même
+   * sous-groupe, voire du même code, restent distingués par leur IDENTITÉ et
+   * leur UNITÉ et rien d'autre.
+   */
+  readonly codeCiqual: string | null;
   /**
    * Accent visuel UNIQUEMENT si TOUTES les sources partagent la même couleur.
    * `null` dès qu'elles divergent — ou dès qu'une seule est nulle.
@@ -150,6 +164,7 @@ export function agregerListeDeCourses(
       unit: string;
       quantite: number;
       displayName: string;
+      codeCiqual: string | null;
       couleurs: (ColorKey | null)[];
       sources: SourceDeLigne[];
     }
@@ -176,6 +191,9 @@ export function agregerListeDeCourses(
       if (existante.displayName === "" && item.displayName !== "") {
         existante.displayName = item.displayName;
       }
+      if (existante.codeCiqual === null && item.codeCiqual !== null) {
+        existante.codeCiqual = item.codeCiqual;
+      }
       continue;
     }
     parCle.set(cle, {
@@ -184,6 +202,7 @@ export function agregerListeDeCourses(
       unit: item.unit,
       quantite: item.quantity,
       displayName: item.displayName,
+      codeCiqual: item.codeCiqual,
       couleurs: [item.colorKey],
       sources: [source],
     });
@@ -197,6 +216,7 @@ export function agregerListeDeCourses(
       unit: v.unit,
       quantite: v.quantite,
       displayName: v.displayName,
+      codeCiqual: v.codeCiqual,
       colorKey: couleurUnanime(v.couleurs),
       sources: v.sources,
     }))
@@ -207,19 +227,56 @@ export function agregerListeDeCourses(
 }
 
 /**
- * « 330 g », « 1 500 ml », « 2 pièces ».
+ * Le libellé d'une unité, tel qu'on l'écrit sur une liste de courses.
  *
- * Les quantités arrivent entières (l'élève a validé l'entier affiché) ; on
- * arrondit tout de même, parce qu'une somme de décimaux hérités d'anciennes
- * lignes ne doit pas afficher « 329.99999 ». L'espace fine insécable évite
- * qu'un nombre à quatre chiffres se coupe de son unité en fin de ligne.
+ * ⚠️ UN LIBELLÉ, PAS UNE CONVERSION. Cette table ne change AUCUNE valeur :
+ * elle ne fait que choisir comment s'écrit l'unité déjà stockée. « L »
+ * majuscule parce que le « l » minuscule se confond avec un 1 sur un écran de
+ * téléphone ; « pièce » au singulier ou au pluriel selon la quantité.
+ *
+ * ⚠️ ET SURTOUT : JAMAIS DE g → kg, NI DE ml → L. 1 500 g restent 1 500 g.
+ * Convertir obligerait à choisir un seuil, puis un arrondi, et l'élève
+ * lirait une quantité qu'il n'a pas validée. `planned_meal_items.unit` est la
+ * vérité ; on l'écrit, on ne la traduit pas.
+ */
+const LIBELLE_PAR_UNITE: Readonly<Record<string, string>> = {
+  g: "g",
+  kg: "kg",
+  mg: "mg",
+  ml: "ml",
+  cl: "cl",
+  l: "L",
+  L: "L",
+};
+
+/** « 330 g », « 1 500 ml », « 1,5 kg », « 2 pièces ». */
+export function libelleDUnite(unit: string, quantite: number): string {
+  if (unit === "piece" || unit === "unite" || unit === "unité") {
+    return Math.abs(quantite) > 1 ? "pièces" : "pièce";
+  }
+  return LIBELLE_PAR_UNITE[unit] ?? unit;
+}
+
+/**
+ * « 330 g », « 1 500 ml », « 1,5 kg », « 2 pièces ».
+ *
+ * ⚠️ L'ARRONDI DÉPEND DE L'UNITÉ, parce qu'un gramme et un kilogramme ne se
+ * lisent pas à la même précision. En g, ml, mg et cl, les quantités arrivent
+ * entières (l'élève a validé l'entier affiché) et on arrondit tout de même,
+ * pour qu'une somme de décimaux hérités d'anciennes lignes n'affiche pas
+ * « 329.99999 ». En kg et en L, arrondir à l'entier rendrait « 0 kg » pour
+ * 400 g : on garde donc jusqu'à trois décimales, sans en ajouter d'inutiles.
+ *
+ * ⚠️ AUCUNE CONVERSION, dans un sens ni dans l'autre. Voir `LIBELLE_PAR_UNITE`.
+ *
+ * L'espace fine insécable évite qu'un nombre à quatre chiffres se coupe de son
+ * unité en fin de ligne : un nombre coupé de son unité se lit comme une autre
+ * quantité.
  */
 export function formatQuantite(quantite: number, unit: string): string {
-  const valeur = Math.round(quantite);
-  const nombre = valeur.toLocaleString("fr-FR");
-  const libelle = unit === "piece" ? (valeur > 1 ? "pièces" : "pièce") : unit;
-  // ⚠️ ESPACE INSÉCABLE EXPLICITE, la constante du projet. « 1 500 » et « g »
-  // ne doivent pas se retrouver sur deux lignes : un nombre coupé de son unité
-  // se lit comme une autre quantité.
-  return `${nombre}${NBSP}${libelle}`;
+  const fin = unit === "kg" || unit === "l" || unit === "L";
+  const valeur = fin ? Math.round(quantite * 1000) / 1000 : Math.round(quantite);
+  const nombre = valeur.toLocaleString("fr-FR", fin ? { maximumFractionDigits: 3 } : undefined);
+  // ⚠️ ESPACE INSÉCABLE EXPLICITE, la constante du projet.
+  return `${nombre}${NBSP}${libelleDUnite(unit, valeur)}`;
 }
