@@ -29,3 +29,25 @@ export function currentDate(): Date {
 export function startOfToday(reference: Date = currentDate()): Date {
   return new Date(reference.getFullYear(), reference.getMonth(), reference.getDate());
 }
+
+/**
+ * Millisecondes restantes jusqu'au PROCHAIN minuit local.
+ *
+ * ⚠️ POURQUOI UNE FONCTION, ET POURQUOI PURE. Un écran qui dessine « le jour
+ * d'aujourd'hui » reste ouvert plus longtemps qu'on ne le croit — un coach
+ * laisse son planning affiché pendant toute une séance, et un onglet survit la
+ * nuit. Sans réveil, le repère reste collé au jour où la page a été ouverte.
+ *
+ * Le calcul passe par un constructeur `Date` à trois champs : il franchit les
+ * changements d'heure correctement, là où `+ 86_400_000` décalerait d'une
+ * heure deux fois par an. Et il rend toujours au moins 1 ms, pour qu'un
+ * minuteur programmé avec ce délai ne se déclenche jamais en boucle serrée.
+ */
+export function msJusquauProchainJour(reference: Date = currentDate()): number {
+  const minuitSuivant = new Date(
+    reference.getFullYear(),
+    reference.getMonth(),
+    reference.getDate() + 1,
+  );
+  return Math.max(1, minuitSuivant.getTime() - reference.getTime());
+}

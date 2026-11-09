@@ -40,12 +40,42 @@ export interface EtatBrouillon<T> {
   revision: number;
   /** Le stockage local est-il hors service ? (l'écran continue quand même) */
   indisponible: boolean;
+  /**
+   * Y a-t-il, MAINTENANT, un brouillon de cette saisie sur cet appareil ?
+   *
+   * ⚠️ CE N'EST PAS `revision > 0`. `revision` est la révision RESTAURÉE à
+   * l'ouverture : elle vaut 0 sur une saisie commencée à l'instant, et elle
+   * ne bouge plus ensuite — c'est voulu, l'arbitrage de priorité à
+   * l'hydratation compare des révisions figées. Un écran qui annoncerait
+   * « brouillon enregistré » d'après `revision` resterait donc muet pendant
+   * toute la première séance, c'est-à-dire exactement quand le coach a
+   * besoin de savoir que sa saisie est à l'abri.
+   *
+   * Ce drapeau, lui, passe à `true` à la première écriture ACCEPTÉE par le
+   * dépôt, et ne redescend pas.
+   */
+  enregistreLocalement: boolean;
 }
 
 export interface OptionsBrouillon {
   /** Id Auth — clé d'isolation. `null` ⇒ le hook ne lit ni n'écrit RIEN. */
   userId: string | null;
   sessionId: string;
+  /**
+   * Portée supplémentaire de la clé, quand une même séance peut être saisie
+   * pour PLUSIEURS personnes par le même compte.
+   *
+   * ⚠️ LE CAS QUI L'EXIGE : le mode présentiel. Un `sessionId` appartient à un
+   * programme, et un programme peut être affecté à plusieurs élèves. La clé
+   * `(compte, séance)` suffisait tant que le compte était l'élève lui-même ;
+   * elle ne suffit plus quand c'est un coach qui enchaîne deux élèves sur la
+   * MÊME séance — le brouillon du second écraserait celui du premier.
+   *
+   * ⚠️ ABSENTE, LA CLÉ EST RIGOUREUSEMENT INCHANGÉE. Le parcours élève ne
+   * passe pas ce champ : il retrouve donc ses brouillons existants, sans
+   * migration ni perte.
+   */
+  portee?: string;
   /** Date métier de la séance, figée à la première écriture. */
   businessDate: string;
   delaiMs?: number;
@@ -53,8 +83,26 @@ export interface OptionsBrouillon {
   depot?: DepotOffline;
 }
 
+/**
+ * La clé de séance réellement remise au dépôt.
+ *
+ * ⚠️ EXPORTÉE EXPRÈS, ET PURE EXPRÈS. C'est la seule décision de ce fichier
+ * qui ait des conséquences sur des données : une clé trop large fait écraser
+ * le brouillon d'un élève par celui du suivant. Une décision pareille ne doit
+ * pas vivre dans un `useMemo` qu'aucun test Node ne peut exécuter.
+ *
+ * ⚠️ SANS PORTÉE, LA CLÉ EST LE `sessionId` NU. C'est ce qui garantit qu'un
+ * élève retrouve les brouillons écrits avant ce lot : aucune migration de
+ * stockage local, aucune perte.
+ */
+export function cleSeanceBrouillon(sessionId: string, portee?: string): string {
+  return portee ? `${sessionId}::${portee}` : sessionId;
+}
+
 export function useBrouillonSeance<T>(options: OptionsBrouillon) {
-  const { userId, sessionId, businessDate } = options;
+  const { userId, sessionId, businessDate, portee } = options;
+
+  const cleSeance = cleSeanceBrouillon(sessionId, portee);
 
   const depot = useMemo(
     () => options.depot ?? new DepotOffline(new MoteurIndexedDB()),
@@ -66,6 +114,7 @@ export function useBrouillonSeance<T>(options: OptionsBrouillon) {
     restaure: null,
     revision: 0,
     indisponible: false,
+    enregistreLocalement: false,
   });
 
   // La révision de départ doit être connue AVANT la première écriture
@@ -87,12 +136,18 @@ export function useBrouillonSeance<T>(options: OptionsBrouillon) {
     (async () => {
       if (!userId) {
         if (!annule) {
-          setEtat({ chargement: false, restaure: null, revision: 0, indisponible: false });
+          setEtat({
+            chargement: false,
+            restaure: null,
+            revision: 0,
+            indisponible: false,
+            enregistreLocalement: false,
+          });
         }
         return;
       }
       try {
-        const brouillon = await depot.lireBrouillon(userId, sessionId);
+        const brouillon = await depot.lireBrouillon(userId, cleSeance);
         if (annule) return;
         revisionInitiale.current = brouillon?.revision ?? 0;
         setEtat({
@@ -100,19 +155,27 @@ export function useBrouillonSeance<T>(options: OptionsBrouillon) {
           restaure: (brouillon?.payload as T | undefined) ?? null,
           revision: brouillon?.revision ?? 0,
           indisponible: false,
+          // Un brouillon retrouvé EST un brouillon présent sur l'appareil.
+          enregistreLocalement: (brouillon?.revision ?? 0) > 0,
         });
       } catch {
         if (annule) return;
         // Stockage local hors service : l'écran continue, simplement sans
         // restauration. Ce n'est pas une panne de l'application.
         revisionInitiale.current = 0;
-        setEtat({ chargement: false, restaure: null, revision: 0, indisponible: true });
+        setEtat({
+          chargement: false,
+          restaure: null,
+          revision: 0,
+          indisponible: true,
+          enregistreLocalement: false,
+        });
       }
     })();
     return () => {
       annule = true;
     };
-  }, [depot, userId, sessionId]);
+  }, [depot, userId, cleSeance]);
 
   /* ── PLANIFICATEUR ─────────────────────────────────────────────────── */
   useEffect(() => {
@@ -125,14 +188,27 @@ export function useBrouillonSeance<T>(options: OptionsBrouillon) {
       delaiMs: options.delaiMs,
       ecrire: async (payload, revision) => {
         try {
-          return await depot.ecrireBrouillon({
+          const accepte = await depot.ecrireBrouillon({
             userId,
-            sessionId,
+            sessionId: cleSeance,
             businessDate,
             payload,
             maintenant: Date.now(),
             revision,
           });
+          /* ⚠️ ON NE TOUCHE PAS À `revision` : elle sert d'arbitre à
+             l'hydratation, et la faire varier en cours de saisie relancerait
+             cet arbitrage. On ne lève qu'un drapeau, une seule fois. Et
+             seulement si le dépôt a ACCEPTÉ : une écriture refusée par la
+             garde de révision n'a rien laissé sur l'appareil. */
+          if (accepte) {
+            setEtat((precedent) =>
+              precedent.enregistreLocalement
+                ? precedent
+                : { ...precedent, enregistreLocalement: true },
+            );
+          }
+          return accepte;
         } catch {
           // Une sauvegarde locale impossible ne doit pas casser la saisie.
           // Le retour final, lui, dira la vérité (voir `soumettreRetour`).
@@ -148,7 +224,7 @@ export function useBrouillonSeance<T>(options: OptionsBrouillon) {
       void instance.viderMaintenant();
       planificateur.current = null;
     };
-  }, [depot, userId, sessionId, businessDate, etat.chargement, options.delaiMs]);
+  }, [depot, userId, cleSeance, businessDate, etat.chargement, options.delaiMs]);
 
   const enregistrer = useCallback((payload: T) => {
     planificateur.current?.planifier(payload);
@@ -179,11 +255,18 @@ export function useBrouillonSeance<T>(options: OptionsBrouillon) {
   const purger = useCallback(async () => {
     if (!userId) return;
     try {
-      await depot.supprimerBrouillon(userId, sessionId);
+      await depot.supprimerBrouillon(userId, cleSeance);
+      // Il n'y a plus rien sur l'appareil : le dire, sinon le bandeau
+      // continuerait d'annoncer un brouillon effacé.
+      setEtat((precedent) =>
+        precedent.enregistreLocalement
+          ? { ...precedent, enregistreLocalement: false }
+          : precedent,
+      );
     } catch {
       // Volontairement silencieux : voir ci-dessus.
     }
-  }, [depot, userId, sessionId]);
+  }, [depot, userId, cleSeance]);
 
   return { ...etat, depot, enregistrer, abandonnerDiffere, purger };
 }

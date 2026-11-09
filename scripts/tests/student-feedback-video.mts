@@ -352,25 +352,63 @@ await test("C4. le schéma strict accepte un chemin conforme et refuse le reste"
   assert.equal(workoutFeedbackPayloadSchema.safeParse(avecDate).success, false);
 });
 
-await test("C5. la ROUTE refuse le chemin d'un autre élève avant toute écriture", () => {
-  const route = sansCommentairesTs(ROUTE);
-  assert.ok(route.includes("videoEtrangere"), "contrôle d'appartenance absent de la route");
+/**
+ * ⚠️ LE CONTRÔLE A ÉTÉ EXTRAIT DE LA ROUTE, PAS SUPPRIMÉ — mode présentiel.
+ *
+ * Il vivait dans la route élève tant qu'elle était la seule voie d'écriture.
+ * Le mode présentiel en ouvre une seconde, et deux copies de la règle
+ * auraient divergé. La règle est donc dans
+ * `lib/api/workout-feedback-controles.ts`, et les deux routes l'appellent.
+ *
+ * Le contrôle est RENFORCÉ : on vérifie la règle dans le module partagé, ET
+ * que chacune des deux routes l'invoque AVANT d'écrire. Le chercher dans une
+ * seule route aurait laissé l'autre sans garantie.
+ */
+const CONTROLES_PARTAGES = lire("../../lib/api/workout-feedback-controles.ts");
+const ROUTE_PRESENTIEL = lire("../../app/api/admin/presentiel/workout-feedback/route.ts");
+
+await test("C5. le chemin d'un autre élève est refusé avant toute écriture, sur les DEUX voies", () => {
+  const partages = sansCommentairesTs(CONTROLES_PARTAGES);
   assert.ok(
-    /e\.videoPath\.split\("\/"\)\[0\] !== studentRow\.id/.test(route),
+    /controlerVideos\(/.test(partages),
+    "contrôle d'appartenance absent du module partagé",
+  );
+  assert.ok(
+    /e\.videoPath\.split\("\/"\)\[0\] !== studentId/.test(partages),
     "l'appartenance doit se comparer à l'identité fournie par le SERVEUR",
   );
+  assert.ok(partages.includes("403"), "le refus doit être un 403, pas un 400 vague");
+
+  // ⚠️ `studentId` est un PARAMÈTRE du module, et chaque route le remplit
+  // depuis le serveur : `studentRow.id` (dérivé de auth.uid()) pour l'élève,
+  // l'élève AUTORISÉ par `requireStaffForStudent` pour le présentiel. Le
+  // module ne lit jamais le corps de la requête pour connaître l'élève.
+  assert.ok(
+    /from\("students"\)[\s\S]*eq\("user_id", user\.id\)/.test(ROUTE),
+    "route élève : l'identité reste dérivée de l'authentification",
+  );
+  assert.ok(
+    /controlerContenuRetour\(supabase, studentRow\.id, payload\)/.test(sansCommentairesTs(ROUTE)),
+    "route élève : les contrôles reçoivent l'identité du serveur",
+  );
+  assert.ok(
+    /requireStaffForStudent\(studentId, \{/.test(sansCommentairesTs(ROUTE_PRESENTIEL)),
+    "route présentielle : l'élève déclaré est confronté aux droits réels",
+  );
+
   // Avant l'écriture, pas après : un refus au niveau du trigger arriverait
   // au milieu de l'enregistrement, exercice par exercice.
   // On vise l'APPEL, pas l'import : `saveWorkoutFeedback` figure aussi en
   // tête de fichier, et comparer à cet index-là rendrait le test toujours
   // faux — donc toujours suspect pour la mauvaise raison.
-  const appelÉcriture = route.indexOf("await saveWorkoutFeedback(");
-  assert.ok(appelÉcriture > 0, "appel d'écriture introuvable");
-  assert.ok(
-    route.indexOf("videoEtrangere") < appelÉcriture,
-    "le contrôle doit précéder l'écriture",
-  );
-  assert.ok(route.includes("403"), "le refus doit être un 403, pas un 400 vague");
+  for (const [nom, source] of [["élève", ROUTE], ["présentiel", ROUTE_PRESENTIEL]] as const) {
+    const route = sansCommentairesTs(source);
+    const appelÉcriture = route.indexOf("await saveWorkoutFeedback(");
+    const appelControle = route.indexOf("controlerContenuRetour(");
+    assert.ok(appelÉcriture > 0, `route ${nom} : appel d'écriture introuvable`);
+    assert.ok(appelControle > 0, `route ${nom} : contrôles de contenu non appelés`);
+    assert.ok(appelControle < appelÉcriture, `route ${nom} : le contrôle doit précéder l'écriture`);
+  }
 });
 
 /* ════════════════════════════════════════════════════════════════════════

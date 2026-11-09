@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { workoutFeedbackPayloadSchema } from "@/lib/api/schemas/workout-feedback";
 import { parseJsonBody } from "@/lib/api/validate";
+import { controlerContenuRetour } from "@/lib/api/workout-feedback-controles";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { saveWorkoutFeedback } from "@/lib/supabase/workout-feedback";
 
@@ -72,149 +73,20 @@ export async function POST(request: Request) {
   if (!parsedBody.success) return parsedBody.response;
   const payload = parsedBody.data;
 
-  // 3. La séance appartient-elle bien à un programme de CET élève ?
-  //    (programme possédé, ou assigné — les deux formes légitimes.)
-  if (payload.sessionId) {
-    const { data: sessionRow } = await supabase
-      .from("workout_sessions")
-      .select("id, program_id")
-      .eq("id", payload.sessionId)
-      .maybeSingle();
-    if (!sessionRow) {
-      return NextResponse.json({ error: "Séance introuvable." }, { status: 404 });
-    }
-    const [{ data: owned }, { data: assigned }] = await Promise.all([
-      supabase
-        .from("programs")
-        .select("id")
-        .eq("id", sessionRow.program_id)
-        .eq("owner_student_id", studentRow.id)
-        .maybeSingle(),
-      supabase
-        .from("assignments")
-        .select("id")
-        .eq("student_id", studentRow.id)
-        .eq("content_type", "programme")
-        .eq("content_id", sessionRow.program_id)
-        .maybeSingle(),
-    ]);
-    if (!owned && !assigned) {
-      return NextResponse.json({ error: "Cette séance ne t'est pas accessible." }, { status: 403 });
-    }
-  }
-
-  // 4-bis. REMPLACEMENTS D'EXERCICE — vérifiés ici ET en base.
-  //
-  //   Le trigger `enforce_exercise_feedback_substitution` est le dernier
-  //   rempart : il refuserait de toute façon un remplacement illégitime, et
-  //   il protège aussi les appels PostgREST directs qui ne passent jamais
-  //   par cette route. Mais un refus au niveau du trigger arriverait en
-  //   plein milieu de l'écriture, exercice par exercice. On répète donc la
-  //   règle ICI, avant la moindre écriture, pour rendre un 400 explicite
-  //   plutôt qu'un enregistrement partiel.
-  //
-  //   La règle, identique des deux côtés : l'exercice prescrit doit être
-  //   identifié, appartenir à CETTE séance, venir de la banque ; le
-  //   remplaçant doit être un AUTRE exercice, actif, de MÊME pattern.
-  const remplacements = payload.exercises.filter((e) => e.substituteExerciseLibraryId);
-  if (remplacements.length > 0) {
-    if (!payload.sessionId) {
-      return NextResponse.json(
-        { error: "Un remplacement ne peut être déclaré que sur une séance réelle." },
-        { status: 400 },
-      );
-    }
-    const idsPrescrits = remplacements.map((e) => e.exerciseId);
-    if (idsPrescrits.some((id) => !id)) {
-      return NextResponse.json(
-        { error: "Remplacement sans exercice prescrit identifié." },
-        { status: 400 },
-      );
-    }
-
-    // Les lignes prescrites, lues sous RLS et RESTREINTES à la séance visée :
-    // un identifiant emprunté à une autre séance ne remonte tout simplement pas.
-    const { data: lignesPrescrites } = await supabase
-      .from("workout_exercises")
-      .select("id, exercise_library_id")
-      .eq("session_id", payload.sessionId)
-      .in("id", idsPrescrits as string[]);
-    const parExerciceId = new Map((lignesPrescrites ?? []).map((r) => [r.id, r.exercise_library_id]));
-
-    const idsBanque = new Set<string>();
-    for (const e of remplacements) {
-      const source = parExerciceId.get(e.exerciseId as string);
-      if (source === undefined) {
-        return NextResponse.json(
-          { error: "Cet exercice n'appartient pas à la séance." },
-          { status: 400 },
-        );
-      }
-      if (!source) {
-        return NextResponse.json(
-          { error: "Cet exercice n'a pas de fiche de banque : aucun remplacement possible." },
-          { status: 400 },
-        );
-      }
-      idsBanque.add(source);
-      idsBanque.add(e.substituteExerciseLibraryId as string);
-    }
-
-    // Statuts et patterns, en UNE lecture pour toute la séance.
-    const { data: fiches } = await supabase
-      .from("exercise_library")
-      .select("id, movement_pattern, status")
-      .in("id", [...idsBanque]);
-    const parFiche = new Map((fiches ?? []).map((r) => [r.id, r]));
-
-    for (const e of remplacements) {
-      const sourceId = parExerciceId.get(e.exerciseId as string) as string;
-      const substitutId = e.substituteExerciseLibraryId as string;
-      if (sourceId === substitutId) {
-        return NextResponse.json(
-          { error: "Le remplaçant est l'exercice prescrit lui-même." },
-          { status: 400 },
-        );
-      }
-      const source = parFiche.get(sourceId);
-      const substitut = parFiche.get(substitutId);
-      // `substitut` absent = fiche inexistante OU archivée (la RLS élève ne
-      // montre que les fiches actives) : les deux se refusent pareil.
-      if (!source || !substitut || substitut.status !== "active") {
-        return NextResponse.json(
-          { error: "Exercice de remplacement indisponible." },
-          { status: 400 },
-        );
-      }
-      if (!source.movement_pattern || source.movement_pattern !== substitut.movement_pattern) {
-        return NextResponse.json(
-          { error: "Ce remplaçant ne partage pas le pattern de mouvement de l'exercice prescrit." },
-          { status: 400 },
-        );
-      }
-    }
-  }
-
-  // 4-ter. VIDÉOS DE TECHNIQUE — le chemin doit désigner le dossier de CET élève.
-  //
-  //   Le schéma a déjà validé la FORME ; il ne peut rien dire de
-  //   l'APPARTENANCE, parce qu'il ne connaît pas l'élève. Le trigger
-  //   `enforce_exercise_feedback_write` est le dernier rempart et refuserait
-  //   de toute façon — mais, comme pour les remplacements, un refus au
-  //   niveau du trigger arriverait au milieu de l'écriture, exercice par
-  //   exercice. On tranche donc ici, avant la moindre ligne écrite.
-  //
-  //   `studentRow.id` vient du SERVEUR, jamais du corps de la requête :
-  //   c'est ce qui rend ce contrôle non contournable.
-  const videoEtrangere = payload.exercises.find(
-    (e) => e.videoPath && e.videoPath.split("/")[0] !== studentRow.id,
-  );
-  if (videoEtrangere) {
-    return NextResponse.json(
-      { error: "Cette vidéo n'est pas la tienne." },
-      { status: 403 },
-    );
-  }
+  /* 3, 4-bis et 4-ter. LES CONTRÔLES DE CONTENU, PARTAGÉS.
+   *
+   * ⚠️ EXTRAITS, PAS RÉÉCRITS. Ils vivaient ici tant qu'il n'existait qu'une
+   * voie d'écriture ; le mode présentiel en ouvre une seconde. Deux copies de
+   * ces quatre règles auraient divergé — on en corrigerait une sans l'autre,
+   * et la voie oubliée deviendrait la porte d'entrée. Le contenu exact est
+   * dans `lib/api/workout-feedback-controles.ts`, et les deux routes
+   * l'appellent.
+   *
+   * `studentRow.id` vient du SERVEUR, jamais du corps : c'est ce qui rend ces
+   * contrôles non contournables.
+   */
+  const refus = await controlerContenuRetour(supabase, studentRow.id, payload);
+  if (refus) return refus;
 
   // 5. Écriture : student_id imposé par le serveur, snapshot construit par la
   //    couche à partir des lignes réelles, immutabilité garantie en aval.

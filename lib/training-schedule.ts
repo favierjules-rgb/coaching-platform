@@ -64,7 +64,22 @@ export interface AncreDeSemaine {
  * ayant reçu son programme le jour même se voyait annoncer « Semaine 5 / 12 ».
  * L'interface admin peut désormais signaler le repli au lieu de le subir.
  */
-export function ancreDeSemaine(program: AdminProgram, student: AdminStudent | null): AncreDeSemaine {
+/**
+ * LE STRICT NÉCESSAIRE D'UN ÉLÈVE POUR ANCRER UNE SEMAINE.
+ *
+ * ⚠️ UNE DATE, ET RIEN D'AUTRE. Ces deux fonctions ne lisent que `startDate` —
+ * le reste d'`AdminStudent` ne les intéresse pas. Exiger la fiche entière
+ * obligeait les appelants qui n'ont qu'une date à fabriquer un faux élève : le
+ * cron des rappels le fait encore, par un `as unknown as AdminStudent` dont le
+ * commentaire dit précisément « la fonction ne lit que startDate ».
+ *
+ * `AdminStudent` satisfait ce type structurellement : aucun appelant existant
+ * ne change. Ce qui change, c'est que les suivants n'auront plus à mentir sur
+ * ce qu'ils ont.
+ */
+export type AncreEleve = Pick<AdminStudent, "startDate">;
+
+export function ancreDeSemaine(program: AdminProgram, student: AncreEleve | null): AncreDeSemaine {
   if (program.programMode === "groupe") {
     return program.groupStartDate
       ? { origine: "groupe", date: program.groupStartDate }
@@ -97,7 +112,7 @@ export function ancreDeSemaine(program: AdminProgram, student: AdminStudent | nu
  */
 export function computeCurrentWeekNumber(
   program: AdminProgram,
-  student: AdminStudent | null,
+  student: AncreEleve | null,
   reference: Date = currentDate(),
 ): number {
   if (program.status !== "actif") {

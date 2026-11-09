@@ -786,6 +786,19 @@ export interface Database {
           coach_reply_video_path: string | null;
           coach_reply_video_uploaded_at: string | null;
           coach_reply_video_annotations: unknown[] | null;
+          // TRAÇABILITÉ DE LA SAISIE (migration 20261102090000).
+          // ⚠️ ABSENTES DE `Insert` ET DE `Update`, DÉLIBÉRÉMENT. Ces trois
+          // colonnes sont DÉRIVÉES par enforce_workout_feedback_write() :
+          // l'application ne les écrit jamais, elle les lit. Le type porte la
+          // règle au lieu de la commenter — exactement comme
+          // `coach_reply_video_uploaded_at` juste au-dessus.
+          //
+          // `null` sur `saisie_mode` n'est pas un trou : c'est « on ne sait
+          // pas ». Les retours antérieurs à cette migration, et les écritures
+          // système, le valent.
+          saisie_mode: "autonome" | "presentiel" | null;
+          saisie_par: string | null;
+          saisie_le: string | null;
           submitted_at: string;
           created_at: string;
           updated_at: string;

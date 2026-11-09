@@ -670,6 +670,28 @@ export const MIGRATION_ENTRAINEMENT_PREDICATS_RLS =
 export const MIGRATION_PRESCRIPTIONS_DIFF =
   "20261029090000_training_prescriptions_synchronisation_differentielle.sql";
 
+/**
+ * La SEULE migration que le MODE PRÉSENTIEL a le droit d'ajouter — la
+ * traçabilité de l'auteur d'une saisie de séance.
+ *
+ * ⚠️ ADDITIVE SUR LES DONNÉES, RÉÉCRITURE SUR UNE FONCTION. Elle ajoute trois
+ * colonnes nullables sans défaut à `workout_feedback` (`saisie_mode`,
+ * `saisie_par`, `saisie_le`) et une contrainte de vocabulaire ; elle ne
+ * touche AUCUNE policy, n'accorde AUCUN privilège, et ne réécrit AUCUNE
+ * donnée — les lignes antérieures restent à NULL, délibérément.
+ *
+ * Le point délicat est ailleurs : elle remplace
+ * `enforce_workout_feedback_write()`, qui garde déjà quatre règles majeures
+ * (immutabilité du snapshot du prescrit, colonnes figées, appartenance de la
+ * séance, protection des colonnes de coach). Le corps est repris MOT POUR MOT
+ * de `20260827090000_coach_reply_video.sql`, et les blocs A et Z de la
+ * migration échouent si l'une de ces gardes manque à l'arrivée.
+ * `scripts/tests/mode-presentiel.mts` le revérifie sur le texte, et
+ * `supabase/tests/mode_presentiel_tracabilite_checklist.sql` sur une base.
+ */
+export const MIGRATION_MODE_PRESENTIEL =
+  "20261102090000_mode_presentiel_tracabilite.sql";
+
 export const MIGRATIONS_COURSES: readonly string[] = [
   MIGRATION_C2,
   MIGRATION_C3,
@@ -727,17 +749,18 @@ export const MIGRATIONS_APRES_C0_1: readonly string[] = [
   MIGRATION_ENREGISTREMENT_GROUPE,
   MIGRATION_ENTRAINEMENT_PREDICATS_RLS,
   MIGRATION_PRESCRIPTIONS_DIFF,
+  MIGRATION_MODE_PRESENTIEL,
 ];
 
 /**
  * Le compte attendu — nécessaire, jamais suffisant.
  *
- * 123 = 84 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 37
+ * 124 = 84 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 38
  * migrations nommées dans `MIGRATIONS_APRES_C0_1`. Le point 6 recalcule
  * l'historique à partir de ce nombre : il ne peut pas être remonté seul sans
  * qu'une migration soit nommée en face.
  */
-export const NOMBRE_DE_MIGRATIONS = 123;
+export const NOMBRE_DE_MIGRATIONS = 124;
 
 /**
  * L'empreinte des 79 migrations ANTÉRIEURES à C0.1, dans l'ordre.
