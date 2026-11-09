@@ -37,6 +37,15 @@ import {
   selectionnerDernierScenarioParGtin,
 } from "../../lib/nutrition/budget-observe";
 import type { Scenario, ScenarioAchat } from "../../lib/nutrition/conditionnements";
+/*
+ * ⚠️ LES LIBELLÉS DES MODES VIENNENT DE LA SOURCE, PAS D'UNE COPIE. Les tests
+ * cherchaient « Trouver un magasin près de moi » et un champ « Ville » : deux
+ * libellés que la refonte de `RechercheDeCommerces` a fait disparaître. Les
+ * recopier une seconde fois rejouerait la même panne au prochain renommage ;
+ * en les important, un changement de libellé casse le composant ET le test au
+ * même instant, ce qui est exactement ce qu'on veut.
+ */
+import { MODES } from "../../lib/nutrition/recherche-commerces";
 
 const lire = (chemin: string) => readFileSync(new URL(chemin, import.meta.url), "utf8");
 const sceau = (chemin: string) =>
@@ -1085,16 +1094,31 @@ await test("C4.6-CABLAGE — après un changement de magasin, la zone des prix e
     assert.match(await page.innerText("body"), /aucun magasin choisi/);
     assert.match(await page.innerText("body"), /Choisis un magasin/);
 
-    // 2. Le panneau est REPLIÉ : les commandes complètes n'occupent pas l'écran.
+    /*
+     * 2. Le panneau est REPLIÉ : les commandes complètes n'occupent pas l'écran.
+     *
+     * ⚠️ CETTE ASSERTION ÉTAIT DEVENUE VIDE. Elle comptait les occurrences de
+     * « Trouver un magasin près de moi », un libellé que la refonte a supprimé :
+     * le compte valait donc zéro quoi qu'il arrive, panneau ouvert ou fermé.
+     * Un test qui ne peut plus échouer ne protège plus rien. On interroge
+     * désormais le sélecteur de mode, qui n'existe QUE panneau ouvert.
+     */
     assert.equal(
-      await page.getByText("Trouver un magasin près de moi").count(),
+      await page.getByRole("tablist", { name: "Mode de recherche" }).count(),
       0,
       "les commandes de recherche ne doivent pas être visibles au repos",
     );
 
     // 3. On ouvre, on cherche par ville — sans passer par la géolocalisation.
     await page.getByRole("button", { name: "Choisir un magasin" }).click();
-    await page.getByLabel("Ville").fill("Toulon");
+    /*
+     * ⚠️ LE MODE PAR DÉFAUT EST « AUTOUR DE MOI » : il faut basculer sur l'autre
+     * onglet pour que le champ de commune existe. Le composant ne le rend que
+     * sous `mode === "ville"`.
+     */
+    await page.getByRole("tab", { name: MODES[1]!.libelle }).click();
+    // ⚠️ LE CHAMP S'APPELLE « COMMUNE », PAS « VILLE ».
+    await page.getByLabel("Commune").fill("Toulon");
     await page.getByRole("button", { name: "Rechercher" }).click();
     await page.waitForFunction(() => document.body.innerText.includes("Lidl"));
 
@@ -1104,8 +1128,22 @@ await test("C4.6-CABLAGE — après un changement de magasin, la zone des prix e
     assert.equal(/LidlLidl/.test(texteListe), false, "la marque ne doit pas doubler le nom");
     assert.equal(/NaturaliaNaturalia/.test(texteListe), false);
 
-    // 4. LE GESTE. On choisit un magasin.
-    await page.getByRole("button", { name: /Lidl/ }).first().click();
+    // 4. LE GESTE. On choisit un magasin — EN DEUX TEMPS.
+    /*
+     * ⚠️ SÉLECTIONNER N'EST PAS CHOISIR, ET LA REFONTE A SCINDÉ LE GESTE. La
+     * ligne de résultat n'enregistre rien : elle ouvre la fiche
+     * (`onSelectionner`). C'est un SECOND bouton, révélé par cette sélection,
+     * qui choisit le magasin (`onChoisir`). L'ancien test ne cliquait que le
+     * premier — le magasin n'était donc jamais choisi.
+     *
+     * ⚠️ ET CE SECOND BOUTON EST CHERCHÉ DANS LA LIGNE, PAS DANS LA PAGE. Sur
+     * un écran large la fiche de la carte porte le MÊME libellé « Choisir ce
+     * commerce » : viser la page entière rendrait le sélecteur ambigu.
+     */
+    const ligneLidl = page.getByRole("listitem").filter({ hasText: /Lidl/ });
+    assert.equal(await ligneLidl.count(), 1, "une seule ligne Lidl dans les résultats");
+    await ligneLidl.getByRole("button", { name: /Lidl/ }).click();
+    await ligneLidl.getByRole("button", { name: "Choisir ce commerce" }).click();
     await page.waitForFunction(
       (n) =>
         (window as unknown as { __harnais: { lectures: (f: string) => number } }).__harnais.lectures(
@@ -1124,7 +1162,15 @@ await test("C4.6-CABLAGE — après un changement de magasin, la zone des prix e
     const final = await page.innerText("body");
     assert.match(final, /Magasin\s*:\s*Lidl/, "le magasin choisi s'affiche");
     assert.match(final, /Changer/, "et le bouton propose d'en changer");
-    assert.equal(/Trouver un magasin près de moi/.test(final), false, "le panneau s'est refermé");
+    /*
+     * ⚠️ MÊME DÉFAUT QU'À L'ÉTAPE 2 : ce motif ne pouvait plus apparaître. Le
+     * repli se constate sur le sélecteur de mode, qui disparaît avec le panneau.
+     */
+    assert.equal(
+      await page.getByRole("tablist", { name: "Mode de recherche" }).count(),
+      0,
+      "le panneau s'est refermé",
+    );
     assert.equal(/Naturalia/.test(final), false, "les résultats de recherche ont été vidés");
     assert.match(
       final,
@@ -1165,16 +1211,62 @@ await test("C4.6-SANS-LISTE — pas encore de liste : le sélecteur reste, et RI
     // l'arbitrage : afficher le sélecteur ne doit pas faire parler l'amont.
     assert.equal(await lectures(), 0, "aucune requête /observed-prices sans liste");
 
-    // 3. LE PANNEAU S'OUVRE, avec ses deux chemins.
+    /*
+     * 3. LE PANNEAU S'OUVRE, AVEC SES DEUX CHEMINS.
+     *
+     * ⚠️ CE QUE CE TEST VÉRIFIAIT N'EXISTE PLUS SOUS CETTE FORME. Il cherchait
+     * un bouton « Trouver un magasin près de moi » et un champ « Ville » ; la
+     * refonte a remplacé les deux chemins par un sélecteur de MODE à deux
+     * onglets, et le champ s'appelle désormais « Commune ».
+     *
+     * ⚠️ L'ASSERTION MÉTIER, ELLE, EST INCHANGÉE : les deux chemins doivent
+     * rester offerts sans liste. C'est leur forme qui a changé, pas la règle.
+     */
     await page.getByRole("button", { name: "Choisir un magasin" }).click();
-    assert.equal(await page.getByRole("button", { name: "Trouver un magasin près de moi" }).count(), 1);
-    assert.equal(await page.getByLabel("Ville").count(), 1, "la saisie manuelle reste offerte");
+    assert.equal(
+      await page.getByRole("tablist", { name: "Mode de recherche" }).count(),
+      1,
+      "le sélecteur de mode est là",
+    );
+    // ⚠️ LES DEUX MODES SONT ÉNUMÉRÉS DEPUIS `MODES` : si l'un disparaissait
+    // ou changeait de nom, c'est ici que cela se verrait.
+    assert.equal(MODES.length, 2, "deux modes, pas davantage");
+    for (const m of MODES) {
+      assert.equal(
+        await page.getByRole("tab", { name: m.libelle }).count(),
+        1,
+        `le mode « ${m.libelle} » doit être proposé`,
+      );
+    }
+
+    /*
+     * ⚠️ ET LE CHAMP DE COMMUNE N'APPARAÎT QU'APRÈS LE CHANGEMENT DE MODE. Le
+     * mode par défaut est « Autour de moi » ; le vérifier AVANT de basculer
+     * ferait passer le test pour une mauvaise raison.
+     */
+    assert.equal(await page.getByLabel("Commune").count(), 0, "pas de commune avant de basculer");
+    await page.getByRole("tab", { name: MODES[1]!.libelle }).click();
+    assert.equal(await page.getByLabel("Commune").count(), 1, "la saisie manuelle reste offerte");
 
     // 4. ET LE MAGASIN EST RÉELLEMENT SÉLECTIONNABLE.
-    await page.getByLabel("Ville").fill("Toulon");
+    await page.getByLabel("Commune").fill("Toulon");
     await page.getByRole("button", { name: "Rechercher" }).click();
     await page.waitForFunction(() => document.body.innerText.includes("Lidl"));
-    await page.getByRole("button", { name: /Lidl/ }).first().click();
+    /*
+     * ⚠️ SÉLECTIONNER N'EST PAS CHOISIR, ET LA REFONTE A SCINDÉ LE GESTE. La
+     * ligne de résultat n'enregistre rien : elle ouvre la fiche
+     * (`onSelectionner`). C'est un SECOND bouton, révélé par cette sélection,
+     * qui choisit le magasin (`onChoisir`). L'ancien test ne cliquait que le
+     * premier — le magasin n'était donc jamais choisi.
+     *
+     * ⚠️ ET CE SECOND BOUTON EST CHERCHÉ DANS LA LIGNE, PAS DANS LA PAGE. Sur
+     * un écran large la fiche de la carte porte le MÊME libellé « Choisir ce
+     * commerce » : viser la page entière rendrait le sélecteur ambigu.
+     */
+    const ligneLidl = page.getByRole("listitem").filter({ hasText: /Lidl/ });
+    assert.equal(await ligneLidl.count(), 1, "une seule ligne Lidl dans les résultats");
+    await ligneLidl.getByRole("button", { name: /Lidl/ }).click();
+    await ligneLidl.getByRole("button", { name: "Choisir ce commerce" }).click();
     await page.waitForFunction(() => /Magasin\s*:\s*Lidl/.test(document.body.innerText));
 
     const apres = await page.innerText("body");
@@ -1195,4 +1287,10 @@ await test("C4.6-SANS-LISTE — pas encore de liste : le sélecteur reste, et RI
 
 await atelier.fermer();
 
-console.log("\n✅ C4.6 — minimum observé : suite verte.");
+/*
+ * ⚠️ CETTE LIGNE ANNONÇAIT « SUITE VERTE » INCONDITIONNELLEMENT. Elle
+ * s'imprimait même sur un run à deux échecs, juste avant le « # fail 2 » :
+ * exactement le genre de résumé qui fait conclure trop vite. On annonce donc
+ * la fin de la suite, pas son verdict — le verdict est le compte rendu TAP.
+ */
+console.log("\n— C4.6 — minimum observé : fin de la suite (verdict : voir « # fail » ci-dessous).");
