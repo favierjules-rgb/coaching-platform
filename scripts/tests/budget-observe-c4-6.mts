@@ -754,21 +754,66 @@ await test("C4.6-37/38/39 — C4.4, C4.5 et le budget C3 sont SCELLÉS", () => {
   // ⚠️ CINQ SCEAUX, ET C4.6 N'A AUCUNE RAISON DE LES REMONTER. Le lot consomme
   // ces modules ; il ne les réécrit pas.
   //
-  // ⚠️ UN SEUL A ÉTÉ REMONTÉ, ET PAR C4.3c, PAS PAR C4.6. `prix-observes.ts`
-  // passe de `270353a621aa645b` à `9d60bec4c140ef75` parce que C4.3c y a ajouté
-  // l'état `magasin_sans_couverture_prix` et remplacé le paramètre
-  // `opLocationId: number | null` par une `CouvertureMagasin` discriminée. Le
-  // sceau a rougi exactement quand il devait rougir ; on le REDÉCLARE, on ne
-  // le retire pas.
+  // ⚠️ DEUX SCEAUX ONT ÉTÉ REMONTÉS, ET CHAQUE FOIS POUR UNE RAISON ÉCRITE.
+  // Un sceau qui rougit n'est pas un test cassé : c'est la question « est-ce
+  // voulu ? » posée au bon moment. On y répond, on ne la supprime pas.
   //
-  // ⚠️ ET LES QUATRE AUTRES N'ONT PAS BOUGÉ D'UN OCTET. C'est ce qui prouve que
-  // C4.3c s'est arrêté là où il devait : ni le budget C3, ni les
-  // conditionnements C4.5, ni l'adaptateur réseau de C4.4 n'ont été touchés
-  // pour faire passer ce lot.
+  //   `prix-observes.ts`
+  //     270353a621aa645b → 9d60bec4c140ef75  (C4.3c) état
+  //       `magasin_sans_couverture_prix`, et `CouvertureMagasin` discriminée ;
+  //     9d60bec4c140ef75 → 92300c5e381ab0a6  (C5/C1) la raison
+  //       `non_configure` — une installation incomplète n'est pas une panne —,
+  //       et le type `ObservationCategorie`, DISTINCT d'`ObservationPrix` pour
+  //       qu'une estimation ne puisse jamais s'additionner à un prix exact ;
+  //     92300c5e381ab0a6 → 218785083e7d3299  (audit 09/11) `instantCalendaire`
+  //       refuse les dates au bon FORMAT mais impossibles — `2026-02-31` passe
+  //       la régulière, et `Date.UTC` la reporte en silence au 3 mars. Une date
+  //       inexistante devenait un relevé ordinaire, ou « trop ancien ».
+  //
+  //   `open-prices/observations.ts`
+  //     6269628e0e994f9d → dc95d05597bc04ab  (C1) `type=PRODUCT` n'est plus
+  //       figé dans l'URL : les relevés par catégorie deviennent lisibles, le
+  //       filtre `duplicate_of__isnull=true` est posé, et les portées
+  //       `identite_osm` / `magasins` / `zone` existent. ⚠️ Le chemin du PRIX
+  //       EXACT, lui, n'a pas bougé : `urlObservations` est réécrite au-dessus
+  //       du nouveau constructeur et rend exactement la même URL ;
+  //     dc95d05597bc04ab → 02d1df0710412e50  (revue) la GARDE DE PORTÉE. Chaque
+  //       relevé rendu doit prouver qu'il vient de la portée demandée —
+  //       `location_id`, l'identité OSM, ou les coordonnées selon le cas. Un
+  //       filtre ignoré par l'amont ne se voit pas autrement : `osm_address_city`
+  //       et `location_osm_id__in` sont ignorés en silence, pas rejetés.
+  //       ⚠️ Et ce qui ne peut PAS être prouvé est refusé : les 144 lieux
+  //       `type: "ONLINE"` n'ont ni identité OSM ni coordonnées ;
+  //     02d1df0710412e50 → f6029d8f5e399fe2  (revue) la marge de zone passe
+  //       de 5 % à 0,5 %, et les coordonnées sont bornées (±90, ±180).
+  //       ⚠️ LA TOLÉRANCE EST DÉMONTRÉE, pas concédée : par bisection du rayon,
+  //       l'amont rend une distance géodésique supérieure de 0,03 % à 0,10 % à
+  //       notre haversine (lieux 167 et 363 depuis Toulon). Une vérification
+  //       stricte rejetterait des relevés légitimes ;
+  //     f6029d8f5e399fe2 → ff9ecf4ad6ca943f  (revue) la validation du centre
+  //       et du rayon REMONTE AVANT la boucle sur les relevés. Elle y vivait, et
+  //       sur une réponse `items: []` le corps de boucle ne s'exécutait jamais :
+  //       la fonction rendait `null` — « tout est en règle » — pour un rayon
+  //       `NaN`. Le garde-fou se taisait précisément quand rien ne le réveillait.
+  //       Le rayon est désormais exigé STRICTEMENT positif ;
+  //     ff9ecf4ad6ca943f → d548081ea14d1919  (audit 09/11) trois corrections :
+  //       `duplicate_of__isnull` est RÉSERVÉ à `CATEGORY` — il avait été posé
+  //       sur le chemin du prix exact, qui n'avait rien demandé et dont l'URL
+  //       redevient celle d'avant ce lot, au caractère près ; la portée est
+  //       validée AVANT tout appel réseau, et son refus s'appelle
+  //       `portee_invalide`, pas `unavailable` ; et le `category_tag` de chaque
+  //       ligne est EXIGÉ (chaîne non vide, égale après `trim`) au lieu d'être
+  //       comparé seulement s'il existait — une réponse incohérente devenait
+  //       une lecture réussie à zéro observation.
+  //
+  // ⚠️ ET LES TROIS AUTRES N'ONT PAS BOUGÉ D'UN OCTET. C'est ce qui prouve que
+  // ce lot s'est arrêté là où il devait : ni le budget C3, ni les
+  // conditionnements C4.5, ni leur lecture n'ont été touchés pour le faire
+  // passer.
   assert.equal(sceau("../../lib/nutrition/budget-courses.ts"), "becd06ded213d14a", "C3 modifié");
-  assert.equal(sceau("../../lib/nutrition/prix-observes.ts"), "9d60bec4c140ef75", "C4.4 modifié hors C4.3c");
+  assert.equal(sceau("../../lib/nutrition/prix-observes.ts"), "218785083e7d3299", "C4.4 modifié hors C5/audit");
   assert.equal(sceau("../../lib/nutrition/conditionnements.ts"), "99b7f5a9cd91c332", "C4.5 modifié");
-  assert.equal(sceau("../../lib/open-prices/observations.ts"), "6269628e0e994f9d", "C4.4 adaptateur modifié");
+  assert.equal(sceau("../../lib/open-prices/observations.ts"), "d548081ea14d1919", "C4.4 adaptateur modifié hors C1/revue");
   assert.equal(sceau("../../lib/supabase/conditionnements.ts"), "3ff60b0e286cb940", "C4.5 lecture modifiée");
 });
 

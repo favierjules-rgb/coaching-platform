@@ -182,11 +182,28 @@ export async function POST(request: Request) {
     try {
       lecture = await lireObservationsPrix({ gtins: tousLesGtins, opLocationId });
     } catch (erreur) {
+      /*
+       * ⚠️ UNE CONFIGURATION MANQUANTE N'EST PAS UNE PANNE, ET RENDRE 503 LE
+       * FAISAIT CROIRE. L'écran affichait « les relevés n'ont pas pu être
+       * lus » — une phrase qui invite à réessayer — pour une variable
+       * d'environnement absente, où réessayer ne changera jamais rien.
+       *
+       * La lecture devient donc une INDISPONIBILITÉ NOMMÉE, transmise telle
+       * quelle : l'élève apprend que le problème est chez nous, et
+       * l'administrateur sait quoi corriger. La trace serveur reste.
+       */
       if (estOffNonConfigure(erreur)) {
         console.error(`[PrixObserves] ${erreur.message}`);
-        return NextResponse.json({ error: "Service indisponible." }, { status: 503 });
+        lecture = {
+          ok: false,
+          raison: "non_configure",
+          observations: [],
+          tronque: false,
+          ignores: 0,
+        };
+      } else {
+        throw erreur;
       }
-      throw erreur;
     }
   }
 
@@ -252,6 +269,12 @@ export async function POST(request: Request) {
   return NextResponse.json({
     budget,
     comparaison: comparerAuBudget(budget, budgetCents),
+    /*
+     * ⚠️ LA RAISON REMONTE JUSQU'À L'ÉCRAN. Sans elle, « panne de l'amont » et
+     * « installation incomplète » arrivaient au navigateur sous la même forme
+     * — un échec sans nom — et l'écran n'avait aucun moyen de les distinguer.
+     */
+    raisonIndisponible: lecture?.ok === false ? (lecture.raison ?? "unavailable") : null,
     // ⚠️ L'ÉTAT, PAS UN BOOLÉEN. `magasinChoisi: true/false` réintroduirait
     // exactement l'ambiguïté que C4.3c supprime : « magasin sans pont » y
     // vaudrait `true` et l'écran n'aurait plus aucun moyen de le dire.

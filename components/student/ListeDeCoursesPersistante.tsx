@@ -15,6 +15,7 @@ import { useListePersistante } from "@/hooks/useListePersistante";
 import { useBudgetCourses } from "@/hooks/useBudgetCourses";
 import { BlocBudget } from "@/components/student/BlocBudget";
 import { BlocMinimumObserve } from "@/components/student/BlocMinimumObserve";
+import { causePrincipale } from "@/lib/nutrition/causes-prix";
 import { ChoixMagasinProche } from "@/components/student/ChoixMagasinProche";
 import { useBudgetObserve } from "@/hooks/useBudgetObserve";
 import { COLOR_STYLES } from "@/lib/ui/color-keys";
@@ -138,6 +139,28 @@ export function ListeDeCoursesPersistante({
         couvertureMagasin={observe.couvertureMagasin}
         chargement={observe.chargement}
         ok={observe.ok}
+        /*
+          ⚠️ LA CAUSE EST DÉCIDÉE ICI, PAS DANS LE BLOC, et la date du jour est
+          lue ici aussi. Le bloc reste un rendu : il se teste sur ses phrases
+          sans qu'on ait à figer l'horloge du navigateur.
+
+          ⚠️ NI `estimation` NI `categorieAssociee` NE SONT TRANSMIS, ET C'EST
+          EXACT PLUTÔT QU'INCOMPLET. La lecture des relevés par catégorie n'est
+          pas raccordée : elle exigerait une correspondance CIQUAL →
+          `category_tag` qui n'existe pas, et qu'on n'invente pas. Transmettre
+          une estimation nulle ou un `categorieAssociee: false` arbitraire
+          ferait afficher des phrases sur des données qu'on n'a jamais lues.
+
+          Conséquence assumée : SEPT causes sur douze sont atteignables
+          aujourd'hui (voir `CAUSES_ACTIVES`). Les cinq autres attendent ce
+          raccordement, et un test l'exige explicitement.
+        */
+        cause={causePrincipale({
+          couvertureMagasin: observe.couvertureMagasin,
+          budget: observe.budget,
+          raisonIndisponible: observe.raisonIndisponible,
+          aujourdHui: new Date().toISOString().slice(0, 10),
+        })}
         // ⚠️ UN ÉTAT D'ÉCRAN, PAS UN SEPTIÈME ÉTAT DE COUVERTURE. Les six
         // valeurs d'`EtatCouverture` continuent de dire exactement ce
         // qu'elles disaient ; « pas encore de liste » est une autre question.
