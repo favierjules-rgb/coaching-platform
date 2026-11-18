@@ -9,8 +9,9 @@ import { useSupabaseAppointmentsForStudent } from "@/hooks/useSupabaseAppointmen
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
   cancelAppointment,
-  createAppointment,
   getMyCoachPublicInfo,
+  MOTIFS_DE_REFUS,
+  reserverCreneauEleve,
   notifyAppointmentCancellation,
   notifyAppointmentConfirmation,
 } from "@/lib/supabase/appointments";
@@ -19,9 +20,27 @@ import { Loader } from "@/components/ui/Loader";
 
 export default function RendezVousPage() {
   const supabaseAppointments = useSupabaseAppointmentsForStudent();
-  const [coachInfo, setCoachInfo] = useState({ name: "Ton coach", email: "" });
+  /*
+   * ⚠️ `coachId` EST L'ÉLÉMENT UTILE, PAS LE NOM. Le repli « Ton coach » est
+   * un libellé d'attente, pas une identité : avec `coachId` à `null`, la
+   * carte de rendez-vous ne l'écrit JAMAIS dans l'intitulé d'une invitation
+   * (voir components/student/AppointmentCard.tsx).
+   */
+  const [coachInfo, setCoachInfo] = useState<{ coachId: string | null; name: string; email: string }>({
+    coachId: null,
+    name: "Ton coach",
+    email: "",
+  });
   const [booking, setBooking] = useState(false);
   const [confirmedSlot, setConfirmedSlot] = useState<AvailableSlot | null>(null);
+  /*
+   * ⚠️ UN REFUS DOIT SE VOIR. Avant le lot 1, `handleBook` testait `if (id)`
+   * et ne faisait RIEN quand la création échouait : le créneau restait à
+   * l'écran, l'élève recliquait. La RPC distingue désormais sept causes
+   * (créneau désactivé, supprimé, horaire incohérent, coach différent…) et
+   * chacune a sa phrase dans `MOTIFS_DE_REFUS`.
+   */
+  const [echecReservation, setEchecReservation] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -71,21 +90,25 @@ export default function RendezVousPage() {
     const supabase = createSupabaseBrowserClient();
     if (!supabase || !supabaseAppointments.studentId) return;
     setBooking(true);
-    const id = await createAppointment(supabase, {
-      studentId: supabaseAppointments.studentId,
-      title: slot.appointmentType,
-      description: "",
-      appointmentType: slot.appointmentType,
+    setEchecReservation(null);
+    /*
+     * ⚠️ ON N'ENVOIE QUE LE CRÉNEAU. Ni élève, ni coach, ni type, ni lieu : la
+     * RPC `reserver_creneau_eleve` prend l'élève sur la session
+     * (`current_student_id()`) et tout le reste sur la disponibilité qu'elle
+     * relit et verrouille. C'est ce qui rend impossible, depuis cet écran, la
+     * création d'un rendez-vous hors disponibilité — y compris pour un compte
+     * qui porterait aussi une fiche `coaches`.
+     */
+    const { id, motif } = await reserverCreneauEleve(supabase, {
+      availabilityId: slot.availabilityId,
       startAt: slot.startAt,
       endAt: slot.endAt,
-      location: slot.location,
-      meetingUrl: "",
     });
     if (id) {
       const created: AdminAppointment = {
         id,
         studentId: supabaseAppointments.studentId,
-        coachId: null,
+        coachId: slot.coachId,
         title: slot.appointmentType,
         description: "",
         appointmentType: slot.appointmentType,
@@ -110,6 +133,11 @@ export default function RendezVousPage() {
         });
       }
       setConfirmedSlot(slot);
+      await supabaseAppointments.refetch();
+    } else {
+      setEchecReservation(MOTIFS_DE_REFUS[motif ?? "autre"]);
+      // Le référentiel a bougé sous les pieds de l'élève : on le recharge
+      // pour que l'écran cesse de proposer un créneau qui n'existe plus.
       await supabaseAppointments.refetch();
     }
     setBooking(false);
@@ -137,6 +165,16 @@ export default function RendezVousPage() {
         <p className="mt-1 text-sm text-muted-foreground">Réserve un créneau avec ton coach et gère tes rendez-vous.</p>
       </div>
 
+      {echecReservation && (
+        <div
+          role="status"
+          className="mb-6 flex items-center gap-3 border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-foreground"
+        >
+          <CalendarPlus size={18} className="flex-shrink-0" />
+          {echecReservation}
+        </div>
+      )}
+
       {confirmedSlot && (
         <div className="mb-6 flex items-center gap-3 border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-400">
           <CheckCircle size={18} className="flex-shrink-0" />
@@ -163,6 +201,7 @@ export default function RendezVousPage() {
                 studentEmail={supabaseAppointments.studentEmail}
                 coachName={coachInfo.name}
                 coachEmail={coachInfo.email}
+                coachTitulaireId={coachInfo.coachId}
                 onCancel={(reason) => handleCancel(a, reason)}
               />
             ))}
@@ -182,6 +221,7 @@ export default function RendezVousPage() {
                 studentEmail={supabaseAppointments.studentEmail}
                 coachName={coachInfo.name}
                 coachEmail={coachInfo.email}
+                coachTitulaireId={coachInfo.coachId}
               />
             ))}
           </div>

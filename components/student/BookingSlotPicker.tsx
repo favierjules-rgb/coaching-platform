@@ -198,7 +198,11 @@ export function BookingSlotPicker({
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {daySlots.map((slot) => (
               <button
-                key={slot.startAt}
+                // ⚠️ L'HORAIRE SEUL NE SUFFIT PLUS COMME CLÉ. Deux
+                // disponibilités d'un même coach peuvent couvrir le même
+                // horaire avec des types différents ; avec plusieurs coachs,
+                // la collision devient banale.
+                key={`${slot.availabilityId}-${slot.startAt}`}
                 type="button"
                 onClick={() => onBook(slot)}
                 className="pressable flex min-h-[44px] flex-col items-center justify-center gap-1 rounded-panel border border-border px-3 py-3 text-sm text-foreground hover:border-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"

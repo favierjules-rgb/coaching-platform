@@ -293,7 +293,6 @@ export async function markDocumentViewed(
   supabase: TypedSupabaseClient,
   input: MarkDocumentViewedInput,
 ): Promise<boolean> {
-  // @ts-expect-error — RPC ajoutée par la migration 20261001090000, pas encore dans les types générés (`Functions: Record<string, never>`). Même convention que `createCoachUnavailability` (lib/supabase/appointments.ts) : la directive tombera d'elle-même quand `supabase gen types` sera rejoué après le db push, ce qui FORCERA sa suppression au lieu de la laisser pourrir.
   const { data, error } = await supabase.rpc("mark_document_viewed", {
     p_document_id: input.documentId,
   });

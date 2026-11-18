@@ -692,6 +692,40 @@ export const MIGRATION_PRESCRIPTIONS_DIFF =
 export const MIGRATION_MODE_PRESENTIEL =
   "20261102090000_mode_presentiel_tracabilite.sql";
 
+/**
+ * LOT 1 / M1 — AFFECTATION MULTI-COACH, PARTIE ADDITIVE (15/11/2026).
+ *
+ * ⚠️ DÉCLARATION CONSCIENTE, AVEC SA RAISON. Cette migration fait deux choses
+ * qu'un simple compte n'aurait pas distinguées : elle REPREND des données
+ * (tout l'opérationnel du compte de test est rattaché au coach réel) et elle
+ * ouvre DEUX nouveaux points d'entrée — `reserver_creneau_eleve` et
+ * `creer_rendez_vous_staff` — là où `create_appointment_atomic` servait deux
+ * intentions derrière un discriminant.
+ *
+ * ⚠️ ELLE NE SUPPRIME RIEN, ET C'EST VOLONTAIRE. L'application en service
+ * appelle encore `create_appointment_atomic` sur sa signature à 10 arguments :
+ * M1 la conserve, réduite à un garde-fou qui refuse tout porteur de fiche élève
+ * et délègue le chemin staff. Le retrait est une SECONDE migration (M2),
+ * volontairement absente du dossier — son SQL est préparé dans
+ * `docs/lot1-m2-retrait-ancienne-rpc.md`, et le fichier ne sera créé qu'après
+ * le déploiement de M1 et une décision explicite de fermer le retour arrière.
+ * Tant qu'il n'existe pas, aucun `supabase db push` ne peut appliquer les deux
+ * ensemble.
+ *
+ * ⚠️ LE NOM A CHANGÉ (ancien : `..._lot1_affectation_multi_coach.sql`). Le
+ * fichier a été renommé pour nommer sa moitié : toute base de test où l'ancien
+ * nom avait été appliqué doit être remise à plat avant de rejouer M1.
+ *
+ * Mesures qui l'ont motivée (base réelle, 15/11/2026) : 7 rendez-vous sur 9
+ * sans `coach_id`, 5 disponibilités sur 7 sans propriétaire, aucun rendez-vous
+ * attribuable depuis sa disponibilité d'origine, et 0 compte à double identité.
+ *
+ * Revérifiée sur base par `supabase/tests/lot1_affectation_multi_coach_checklist.sql`
+ * et sur le texte par `scripts/tests/affectation-multi-coach.mts`.
+ */
+export const MIGRATION_LOT1_M1_AJOUT =
+  "20261115090000_lot1_multi_coach_ajout.sql";
+
 export const MIGRATIONS_COURSES: readonly string[] = [
   MIGRATION_C2,
   MIGRATION_C3,
@@ -750,17 +784,23 @@ export const MIGRATIONS_APRES_C0_1: readonly string[] = [
   MIGRATION_ENTRAINEMENT_PREDICATS_RLS,
   MIGRATION_PRESCRIPTIONS_DIFF,
   MIGRATION_MODE_PRESENTIEL,
+  MIGRATION_LOT1_M1_AJOUT,
 ];
 
 /**
  * Le compte attendu — nécessaire, jamais suffisant.
  *
- * 124 = 84 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 38
+ * 125 = 84 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 39
  * migrations nommées dans `MIGRATIONS_APRES_C0_1`. Le point 6 recalcule
  * l'historique à partir de ce nombre : il ne peut pas être remonté seul sans
  * qu'une migration soit nommée en face.
+ *
+ * ⚠️ AJOUTÉ DE 124 À 125 LE 15/11/2026, en face de
+ * `MIGRATION_LOT1_M1_AJOUT`. M1 est la nouvelle migration de ce lot.
+ * M2 reste documentée hors du répertoire des migrations et ne sera
+ * comptabilisée qu'au moment de sa création effective.
  */
-export const NOMBRE_DE_MIGRATIONS = 124;
+export const NOMBRE_DE_MIGRATIONS = 125;
 
 /**
  * L'empreinte des 79 migrations ANTÉRIEURES à C0.1, dans l'ordre.

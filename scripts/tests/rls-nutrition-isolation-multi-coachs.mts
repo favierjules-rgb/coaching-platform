@@ -2581,10 +2581,28 @@ test("P13B-APP 13. l'espace admin ne lit plus `coaches` dans le navigateur pour 
   assert.ok(!/"Ton coach"/.test(calendrier),
     "le repli trompeur « Ton coach » ne doit plus exister côté admin");
 
-  // Le serveur reste la seule autorité : la route relit le coach au service role.
+  /*
+   * Le serveur reste la seule autorité : la route relit le coach au service
+   * role.
+   *
+   * ⚠️ EXIGENCE RÉORIENTÉE, PAS LEVÉE (lot 2, 16/11/2026). Jusque-là, cette
+   * assertion exigeait `getPrimaryCoachInfo(adminSupabase)` — « le coach le
+   * plus ancien », juste par accident tant qu'un seul coach est actif. La
+   * route résout désormais le coach PROPRIÉTAIRE du rendez-vous
+   * (`appointments.coach_id`), toujours avec le client service role et
+   * toujours sans rien accepter du navigateur. La contrainte de sécurité est
+   * la même, et elle est même resserrée : on vérifie en plus qu'aucun repli
+   * sur le coach principal ni aucune lecture directe de `coaches` ne subsiste
+   * dans la route.
+   */
   const route = lire("app/api/email/appointment-notification/route.ts");
-  assert.ok(/getPrimaryCoachInfo\(adminSupabase\)/.test(route),
-    "la route d'envoi doit continuer de résoudre le coach avec le client service role");
+  const routeCode = sansCommentairesTs(route);
+  assert.ok(/getCoachProprietaireRendezVous\(adminSupabase, appointment\.coachId\)/.test(route),
+    "la route d'envoi doit résoudre le coach PROPRIÉTAIRE avec le client service role");
+  assert.ok(!/getPrimaryCoachInfo/.test(routeCode),
+    "la route ne doit plus retomber sur le coach principal");
+  assert.ok(!/from\("coaches"\)/.test(routeCode),
+    "la route passe par la fonction dédiée, jamais par une lecture directe de coaches");
   // Et seul l'identifiant du rendez-vous quitte le navigateur.
   const emails = lire("lib/email/appointment-emails.ts");
   assert.ok(/body: JSON\.stringify\(\{ appointmentId \}\)/.test(emails),

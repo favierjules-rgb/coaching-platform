@@ -16,6 +16,20 @@ import type { AppointmentType, AvailableSlot, Weekday } from "@/types";
  */
 
 export interface AvailabilityForSlots {
+  /** Identifiant réel de la ligne `coach_availabilities` — repris tel quel dans le créneau. */
+  id: string;
+  /**
+   * Propriétaire de la disponibilité.
+   *
+   * ⚠️ `null` EST UNE DONNÉE HISTORIQUE, PAS UN JOKER. Avant le trigger
+   * `poser_proprietaire_staff` (migration du 22/10/2026), une disponibilité
+   * pouvait naître sans propriétaire : 5 des 7 lignes mesurées le 15/11/2026
+   * étaient dans ce cas, et la policy élève les rendait visibles à TOUS les
+   * élèves (`coach_id IS NULL OR coach_id = …`). Un tel créneau ne peut pas
+   * produire de rendez-vous attribuable : il est écarté, pas replié sur un
+   * coach par défaut.
+   */
+  coachId: string | null;
   weekday: Weekday;
   startTime: string; // "HH:mm" ou "HH:mm:ss"
   endTime: string;
@@ -70,7 +84,15 @@ export function computeAvailableSlots(params: ComputeAvailableSlotsParams): Avai
     end: new Date(b.endAt).getTime(),
   }));
 
-  const activeAvailabilities = params.availabilities.filter((a) => a.isActive);
+  /*
+   * ⚠️ DEUX FILTRES, PAS UN. `isActive` était déjà là ; `coachId !== null`
+   * est la règle du lot 1 : aucun créneau sans propriétaire n'est proposé.
+   * La RPC refuse également ces créneaux — la double barrière est voulue,
+   * l'une protège l'affichage, l'autre la base.
+   */
+  const activeAvailabilities = params.availabilities.filter(
+    (a): a is AvailabilityForSlots & { coachId: string } => a.isActive && a.coachId !== null,
+  );
   const slots: AvailableSlot[] = [];
 
   for (let dayOffset = 0; dayOffset <= params.maxDaysAhead; dayOffset += 1) {
@@ -105,6 +127,8 @@ export function computeAvailableSlots(params: ComputeAvailableSlotsParams): Avai
         if (blockedByBooking) continue;
 
         slots.push({
+          availabilityId: availability.id,
+          coachId: availability.coachId,
           startAt: slotStartAt.toISOString(),
           endAt: slotEndAt.toISOString(),
           appointmentType: availability.appointmentType,

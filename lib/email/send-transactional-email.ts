@@ -97,23 +97,45 @@ export async function wasEmailAlreadySent(
   return !!data;
 }
 
-/** `true` si un email identique a été envoyé il y a moins de `windowSeconds` — garde-fou contre un double-clic/double appel réseau, sans bloquer une vraie nouvelle attribution plus tard. */
+/**
+ * `true` si un email identique a été envoyé il y a moins de `windowSeconds` —
+ * garde-fou contre un double-clic/double appel réseau, sans bloquer une vraie
+ * nouvelle attribution plus tard.
+ *
+ * ⚠️ SEUL `status = 'sent'` COMPTE. Une tentative échouée ne bloque donc
+ * jamais un retry : c'est ce qui permet de relancer la seconde notification
+ * d'un report sans perdre la première (voir
+ * app/api/email/appointment-notification/route.ts).
+ *
+ * `recipientEmail` est FACULTATIF et n'existe que depuis le lot 3-bis
+ * (17/11/2026) : sans lui, le comportement est celui d'origine — un envoi
+ * réussi vers N'IMPORTE QUEL destinataire masque les suivants pour ce couple
+ * (type, entité). Les flux qui envoient le même type d'email à PLUSIEURS
+ * destinataires pour une même entité doivent le renseigner, sinon le premier
+ * envoi réussi fait sauter les autres.
+ */
 export async function wasEmailRecentlySent(
   supabase: TypedSupabaseClient,
-  params: { emailType: EmailType; relatedEntityType: string; relatedEntityId: string; windowSeconds?: number },
+  params: {
+    emailType: EmailType;
+    relatedEntityType: string;
+    relatedEntityId: string;
+    recipientEmail?: string;
+    windowSeconds?: number;
+  },
 ): Promise<boolean> {
   const windowSeconds = params.windowSeconds ?? 30;
   const since = new Date(Date.now() - windowSeconds * 1000).toISOString();
-  const { data, error } = await supabase
+  let requete = supabase
     .from("email_logs")
     .select("id")
     .eq("email_type", params.emailType)
     .eq("related_entity_type", params.relatedEntityType)
     .eq("related_entity_id", params.relatedEntityId)
     .eq("status", "sent")
-    .gte("created_at", since)
-    .limit(1)
-    .maybeSingle();
+    .gte("created_at", since);
+  if (params.recipientEmail) requete = requete.eq("recipient_email", params.recipientEmail);
+  const { data, error } = await requete.limit(1).maybeSingle();
   devWarn("wasEmailRecentlySent", error);
   return !!data;
 }

@@ -6,6 +6,7 @@ import { Calendar, Download, MapPin, Video, XCircle } from "lucide-react";
 import { StatusBadge } from "@/components/admin/StatusBadge";
 import { appointmentStatusLabels, appointmentStatusTone, formatDateTime } from "@/lib/admin";
 import { buildConfirmationIcs, downloadIcsFile } from "@/lib/ics";
+import { construireIntituleIcs, formaterIdentiteCoach } from "@/lib/ics-intitules";
 import type { AdminAppointment } from "@/types";
 
 export function StudentAppointmentCard({
@@ -14,6 +15,7 @@ export function StudentAppointmentCard({
   studentEmail,
   coachName,
   coachEmail,
+  coachTitulaireId,
   onCancel,
 }: {
   appointment: AdminAppointment;
@@ -21,15 +23,40 @@ export function StudentAppointmentCard({
   studentEmail: string;
   coachName: string;
   coachEmail: string;
+  /**
+   * Identifiant du coach rattaché à la FICHE de l'élève (`students.coach_id`),
+   * rendu par la RPC `get_my_coach_public_profile` — `null` tant qu'elle n'a
+   * pas répondu.
+   *
+   * ⚠️ IL SERT À VÉRIFIER, PAS À CHOISIR. `coachName` est le nom de ce
+   * coach-là ; il ne devient le titre de l'invitation que si cet identifiant
+   * est bien celui du PROPRIÉTAIRE du rendez-vous (`appointment.coachId`).
+   * Sinon le titre de secours s'applique : un navigateur d'élève ne peut pas
+   * lire `coaches` (policy `coaches_select_staff`, migration 20260726220000),
+   * donc il n'a aucun moyen de nommer un autre coach — et il ne doit surtout
+   * pas retomber sur le coach principal.
+   */
+  coachTitulaireId: string | null;
   onCancel?: (reason: string) => void;
 }) {
   const [showCancelForm, setShowCancelForm] = useState(false);
   const isActive = appointment.status === "pending" || appointment.status === "confirmed";
 
   function handleDownloadIcs() {
+    /*
+     * ⚠️ MÊME INTITULÉ QUE L'INVITATION REÇUE PAR EMAIL. Ce bouton produisait
+     * `appointment.title`, soit « Coaching en salle » : l'élève téléchargeait
+     * un titre différent de celui que son agenda avait reçu.
+     */
+    const proprietaireConnu = !!appointment.coachId && !!coachTitulaireId && appointment.coachId === coachTitulaireId;
+    const titre = construireIntituleIcs({
+      destinataire: "eleve",
+      identiteEleve: "",
+      identiteCoach: proprietaireConnu ? formaterIdentiteCoach(coachName) : "",
+    });
     const ics = buildConfirmationIcs({
       uid: appointment.icsUid,
-      title: appointment.title,
+      title: titre,
       description: appointment.description,
       startAt: appointment.startAt,
       endAt: appointment.endAt,

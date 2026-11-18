@@ -1817,7 +1817,6 @@ async function cloneIndividualProgramCopy(
   overrides: DuplicateOverrides,
 ): Promise<string | null> {
   if (overrides.ownerStudentId) {
-    // @ts-expect-error — RPC ajoutée par la migration 20260801120000, pas encore dans les types générés.
     const { data, error } = await supabase.rpc("provision_program_copy", {
       p_program_id: programId,
       p_student_id: overrides.ownerStudentId,
