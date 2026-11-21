@@ -424,6 +424,65 @@ await test("CONF-16 aucune donnée personnelle superflue dans le fichier", () =>
   assert.deepEqual([...new Set(adresses)].sort(), [COACH_A.email, ELEVE.email].sort());
 });
 
+await test("CONF-17 deux ATTENDEE : l'élève puis le coach, chacun plié dans les 75 octets", () => {
+  /*
+   * ⚠️ V1, 21/11/2026 : LE COACH EST AUSSI PARTICIPANT. Il reste
+   * `ORGANIZER` — ce test vérifie qu'il est les DEUX, et dans l'ordre. La
+   * ligne est dérivée des champs `organizer*`, donc identique dans le fichier
+   * de l'élève et dans celui du coach (invariant du lot 2, `ICS-01`).
+   *
+   * ⚠️ CE TEST NE PROUVE PAS LE COMPORTEMENT D'APPLE. Il prouve la forme du
+   * fichier. V1 est une hypothèse technique à valider sur un client réel.
+   */
+  for (const destinataire of ["eleve", "coach"] as const) {
+    const ics = invitation(CRENEAU_INITIAL, destinataire, COACH_A).content;
+    const participants = deplie(ics).filter((l) => l.startsWith("ATTENDEE;") || l.startsWith("ATTENDEE:"));
+    assert.equal(participants.length, 2, `${destinataire} : deux participants attendus`);
+    assert.match(participants[0], /^ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE;CN=Thomas:mailto:eleve@example\.test$/);
+    assert.match(participants[1], /^ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED;RSVP=FALSE;CN=Jules FAVIER:mailto:jules@example\.test$/);
+    // L'organisateur n'a pas changé de nature.
+    assert.match(champ(ics, "ORGANIZER"), /^ORGANIZER;CN=Jules FAVIER:mailto:jules@example\.test$/);
+    // Pliage : la ligne du coach dépasse 75 octets non pliée, elle doit l'être.
+    for (const ligne of lignesPhysiques(ics)) {
+      assert.ok(ENCODEUR.encode(ligne).length <= 75, `${destinataire} : ligne de ${ENCODEUR.encode(ligne).length} octets`);
+    }
+    assert.ok(lignesPhysiques(ics).some((l) => l.startsWith(" ")), "le jeu de données doit provoquer un pliage");
+  }
+  // L'annulation porte les mêmes deux participants.
+  const ann = annulation(CRENEAU_INITIAL, "coach", COACH_A).content;
+  assert.equal(deplie(ann).filter((l) => l.startsWith("ATTENDEE;")).length, 2, "annulation : deux participants aussi");
+});
+
+await test("CONF-18 aucune CAL-ADDRESS vide, quelle que soit l'adresse manquante", () => {
+  /*
+   * ⚠️ DÉFAUT MESURÉ LE 21/11/2026, PUIS CORRIGÉ. Avec un élève introuvable
+   * (`getStudentById` rendant `null` sur une fiche supprimée), la ligne
+   * `ATTENDEE` n'était pas gardée et sortait en `CN=:mailto:` — un `mailto:`
+   * sans adresse n'est pas une CAL-ADDRESS valide. `ORGANIZER` avait déjà sa
+   * garde ; les deux `ATTENDEE` l'ont désormais.
+   *
+   * Contre-épreuve : `CONTRE-A7`.
+   */
+  const vide = (ics: string) => deplie(ics).filter((l) => /mailto:\s*$/.test(l));
+  const cas: { nom: string; mutation: Partial<IcsAppointmentInput>; attendues: number }[] = [
+    { nom: "élève introuvable", mutation: { attendeeEmail: "", attendeeName: "" }, attendues: 1 },
+    { nom: "coach sans adresse", mutation: { organizerEmail: "", organizerName: "" }, attendues: 1 },
+    { nom: "les deux absents", mutation: { attendeeEmail: "", attendeeName: "", organizerEmail: "", organizerName: "" }, attendues: 0 },
+  ];
+  for (const { nom, mutation, attendues } of cas) {
+    for (const builder of [buildConfirmationIcs, buildCancellationIcs]) {
+      const ics = builder({ ...entree(CRENEAU_INITIAL, "coach", COACH_A), ...mutation });
+      assert.deepEqual(vide(ics), [], `${nom} : CAL-ADDRESS vide émise`);
+      const participants = deplie(ics).filter((l) => l.startsWith("ATTENDEE;") || l.startsWith("ATTENDEE:"));
+      assert.equal(participants.length, attendues, `${nom} : ${attendues} participant(s) attendu(s)`);
+    }
+  }
+  // Et le cas nominal n'a pas régressé : deux participants, aucune adresse vide.
+  const nominal = invitation(CRENEAU_INITIAL, "coach", COACH_A).content;
+  assert.deepEqual(vide(nominal), []);
+  assert.equal(deplie(nominal).filter((l) => l.startsWith("ATTENDEE;")).length, 2);
+});
+
 /* ═══════ 2. AGENDA iTIP SIMULÉ — un MODÈLE, pas Apple (AGENDA-*) ═══════ */
 
 interface EvenementAgenda {
@@ -751,6 +810,31 @@ await test("CONTRE-A6 flux sans CRLF final : CONF-04 passe au rouge", () => {
   const fautif = piece.content.replace(/\r\n$/, "");
   assert.ok(!fautif.endsWith("END:VCALENDAR\r\n"));
   assert.throws(() => assert.ok(fautif.endsWith("END:VCALENDAR\r\n")), "CONF-04 doit échouer");
+});
+
+await test("CONTRE-A7 ligne ATTENDEE non gardée : CONF-18 passe au rouge", () => {
+  /*
+   * ⚠️ CONTRE-ÉPREUVE DU DÉFAUT RÉEL. Elle reconstitue l'expression
+   * d'avant V1 — une ligne `ATTENDEE` écrite sans test ternaire — et prouve
+   * qu'avec un élève introuvable elle produit la CAL-ADDRESS vide que
+   * `CONF-18` interdit. Sans cette épreuve, `CONF-18` pourrait rester vert
+   * pour une raison étrangère à la garde.
+   */
+  const garde = buildConfirmationIcs({ ...entree(CRENEAU_INITIAL, "coach", COACH_A), attendeeEmail: "", attendeeName: "" });
+  assert.equal(deplie(garde).filter((l) => /mailto:\s*$/.test(l)).length, 0, "version gardée : rien de vide");
+
+  // Reconstitution de la ligne non gardée, telle qu'elle s'écrivait avant V1.
+  const fautif = garde.replace(
+    "STATUS:CONFIRMED",
+    "ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE;CN=:mailto:\r\nSTATUS:CONFIRMED",
+  );
+  const vides = deplie(fautif).filter((l) => /mailto:\s*$/.test(l));
+  assert.equal(vides.length, 1, "la version non gardée émet bien une CAL-ADDRESS vide");
+  assert.match(vides[0], /^ATTENDEE;.*CN=:mailto:$/);
+  assert.throws(
+    () => assert.deepEqual(deplie(fautif).filter((l) => /mailto:\s*$/.test(l)), []),
+    "CONF-18 doit échouer sur une ligne non gardée",
+  );
 });
 
 console.log(`\n${passed} test(s) réussi(s), ${failed} échec(s).`);

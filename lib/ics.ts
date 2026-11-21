@@ -157,8 +157,52 @@ function buildEvent(input: IcsAppointmentInput, status: "CONFIRMED" | "CANCELLED
      * traite plus volontiers la pièce jointe comme un simple fichier que
      * comme une invitation à accepter ou refuser. Les deux paramètres sont
      * purement additifs : aucun client ne perd d'information.
+     *
+     * ⚠️ LA LIGNE EST DÉSORMAIS CONDITIONNÉE À L'ADRESSE (V1). Sans garde, un
+     * élève introuvable produisait `CN=:mailto:` — mesuré par exécution le
+     * 21/11/2026 — soit une CAL-ADDRESS vide, que `ORGANIZER` évitait déjà
+     * juste au-dessus par le même test ternaire.
      */
-    `ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE;CN=${echapperParametre(input.attendeeName)}:mailto:${input.attendeeEmail}`,
+    input.attendeeEmail
+      ? `ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE;CN=${echapperParametre(input.attendeeName)}:mailto:${input.attendeeEmail}`
+      : null,
+    /*
+     * ⚠️ LE COACH EST AUSSI `ATTENDEE`, EN SECOND — V1, 21/11/2026.
+     *
+     * ⚠️ FAIT MESURÉ, ET HYPOTHÈSE NON VÉRIFIÉE : NE PAS CONFONDRE.
+     * Ce qui est mesuré : création (16:09:03) puis annulation (16:09:16) du
+     * rendez-vous du 23/11 reçues dans Gmail par le coach, les deux en `sent`
+     * dans `email_logs`, même UID, SEQUENCE 0 puis 1 — et AUCUN événement
+     * ajouté à son Google Agenda. Son adresse ne figurait que dans
+     * `ORGANIZER`.
+     * Ce qui n'est PAS mesuré : que l'absence d'`ATTENDEE` soit LA cause. Deux
+     * autres explications restent ouvertes — le réglage « ajouter
+     * automatiquement les invitations » du compte, non relevé, et surtout
+     * l'ÉCART ENTRE L'ADRESSE D'EXPÉDITION (`RESEND_FROM_EMAIL`, domaine de la
+     * plateforme) ET L'`ORGANIZER` (domaine du coach), que Gmail peut prendre
+     * en compte. Cette ligne est donc une HYPOTHÈSE TECHNIQUE à valider sur
+     * Google réel, pas une correction démontrée. Si l'essai réel échoue
+     * malgré les deux `ATTENDEE`, c'est l'écart d'expéditeur qu'il faut
+     * instruire, et non empiler un troisième changement de format.
+     *
+     * ⚠️ DÉRIVÉE DES CHAMPS `organizer*`, PAS D'UNE NOUVELLE ENTRÉE. C'est ce
+     * qui garantit sans arbitrage que les DEUX fichiers d'un même rendez-vous
+     * portent la MÊME ligne : l'organisateur est identique de part et
+     * d'autre, donc l'invariant « seul le SUMMARY diffère » (lot 2, `ICS-01`)
+     * tient par construction — vérifié par exécution, 1 seule ligne d'écart.
+     *
+     * ⚠️ APRÈS CELLE DE L'ÉLÈVE, JAMAIS AVANT. Plusieurs assertions lisent la
+     * PREMIÈRE ligne `ATTENDEE` (`champ()`) : elle doit rester celle de
+     * l'élève.
+     *
+     * `ROLE=CHAIR;PARTSTAT=ACCEPTED;RSVP=FALSE` : il préside, il a déjà
+     * accepté, et on ne lui demande pas de répondre à sa propre séance. Le
+     * coach reste `ORGANIZER` — l'autorité sur l'annulation est inchangée, et
+     * l'appariement (UID, ORGANIZER) de `GCONF-05` reste vrai.
+     */
+    input.organizerEmail
+      ? `ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED;RSVP=FALSE;CN=${echapperParametre(input.organizerName)}:mailto:${input.organizerEmail}`
+      : null,
     `STATUS:${status}`,
     `SEQUENCE:${input.sequence ?? 0}`,
     "END:VEVENT",

@@ -108,6 +108,20 @@ function champ(ics: string, nom: string): string {
   return trouve;
 }
 
+/**
+ * Toutes les lignes `ATTENDEE`, DÉPLIÉES et dans l'ordre d'émission.
+ *
+ * ⚠️ `lignes()` NE DÉPLIE PAS, ET `champ()` NE REND QUE LA PREMIÈRE. Depuis
+ * V1 il y a deux participants, tous deux sur des lignes pliées à 75 octets :
+ * il faut déplier avant de comparer, sinon on compare des moitiés de ligne.
+ */
+function lignesAttendee(ics: string): string[] {
+  return ics
+    .replace(/\r\n[ \t]/g, "")
+    .split("\r\n")
+    .filter((l) => l.startsWith("ATTENDEE;") || l.startsWith("ATTENDEE:"));
+}
+
 function sommaire(ics: string): string {
   return champ(ics, "SUMMARY").slice("SUMMARY:".length);
 }
@@ -295,6 +309,16 @@ await test("ICS-02 UID, horaires, durée, lieu, visio, statut et séquence parta
   for (const nom of ["UID", "DTSTAMP", "DTSTART", "DTEND", "DESCRIPTION", "LOCATION", "URL", "ORGANIZER", "ATTENDEE", "STATUS", "SEQUENCE"]) {
     assert.equal(champ(eleve, nom), champ(coach, nom), `${nom} doit être identique dans les deux invitations`);
   }
+  /*
+   * ⚠️ LA BOUCLE CI-DESSUS NE COMPARE QUE LA PREMIÈRE LIGNE `ATTENDEE`.
+   * Depuis V1 il y en a deux — l'élève puis le coach — et `champ()` s'arrête
+   * à la première trouvée. Sans cette assertion, ce test resterait VERT si le
+   * coach n'était ajouté qu'à l'un des deux fichiers, c'est-à-dire si
+   * l'invariant du lot 2 était rompu par le participant surnuméraire plutôt
+   * que par le `SUMMARY`. `ICS-01` le verrait ; celui-ci doit le voir aussi.
+   */
+  assert.deepEqual(lignesAttendee(eleve), lignesAttendee(coach), "les DEUX participants doivent être identiques");
+  assert.equal(lignesAttendee(eleve).length, 2, "élève et coach, deux participants depuis V1");
   // La durée est recalculée depuis les fichiers, pas supposée depuis l'entrée.
   const dureeEleve = instant(champ(eleve, "DTEND")) - instant(champ(eleve, "DTSTART"));
   const dureeCoach = instant(champ(coach, "DTEND")) - instant(champ(coach, "DTSTART"));

@@ -4,10 +4,19 @@
 `npm run test:google-calendar` vérifie la **conformité** du format et le
 comportement d'un **modèle** de client Gmail — pas celui de Google.
 
+⚠️ **ARBITRAGE RENDU LE 21/11/2026 : V1 EST IMPLÉMENTÉE** (coach `ORGANIZER`
+**et** second `ATTENDEE`). Voir « Arbitrage ORGANIZER » plus bas. **V1 est une
+hypothèse technique à valider sur Google réel, pas une correction garantie** :
+elle répond à un échec constaté, mais la cause de cet échec n'est pas
+démontrée et au moins une autre explication reste ouverte (l'écart entre
+l'adresse d'expédition et l'`ORGANIZER`, détaillé plus bas).
+
 Les fichiers des scénarios A à E sont ceux du lot 4 :
-`docs/lot4-apple-calendar/`. Le format émis est identique pour Apple et pour
-Google, le lot 5 n'ayant modifié aucun format. Ce dossier ne contient que les
-**deux fichiers de l'expérience ORGANIZER**, décrite plus bas.
+`docs/lot4-apple-calendar/`, **régénérés pour V1**. Le format émis est
+identique pour Apple et pour Google. Les deux prototypes manuels qui avaient
+servi à démontrer l'option sont désormais dans
+[`historique-avant-v1/`](historique-avant-v1/) : ils sont **périmés**, la
+sortie de production portant maintenant la ligne nativement.
 
 Les adresses sont en `.invalid`, non routables.
 
@@ -71,68 +80,185 @@ Dans cet ordre : `B1` puis `C1`.
 
 ---
 
-# Expérience ORGANIZER — à mener avant tout arbitrage
+# Arbitrage ORGANIZER — rendu le 21/11/2026 : V1
 
-## Le problème
+## Le fait qui a tranché
 
-Dans le fichier destiné au coach, le coach est `ORGANIZER` et le **seul**
-`ATTENDEE` est l'élève. Son adresse n'apparaît donc nulle part comme
-participant.
+Jusqu'ici, le fichier destiné au coach le portait comme `ORGANIZER` et ne
+donnait qu'un seul `ATTENDEE`, l'élève :
 
 ```
 ORGANIZER;CN=Jules FAVIER:mailto:coach-a@exemple.invalid
 ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE;CN=Thomas:mailto:eleve@…
 ```
 
-Gmail ne traite une invitation que lorsque l'adresse du titulaire de la boîte
-y figure. Il reconnaît aussi l'organisateur, mais le comportement varie selon
-le compte et le réglage « ajouter automatiquement les invitations », et un
-organisateur ne reçoit normalement pas d'invitation à son propre événement.
-**Conséquence redoutée : l'agenda du coach n'est jamais alimenté, et ses
-annulations ne sont jamais appliquées.** C'est le risque hérité du lot 4, et
-il est au moins aussi sérieux côté Google que côté Apple.
+**Ce qui a été mesuré**, sur le compte Google réel du coach :
 
-## Le protocole
+| | |
+|---|---|
+| création du rendez-vous du lun. 23/11 09:00 | envoyée le 21/11 à **16:09:03**, `sent` |
+| annulation du même rendez-vous | envoyée le 21/11 à **16:09:16**, `sent` |
+| même UID, `SEQUENCE` 0 puis 1, `ORGANIZER` identique | oui |
+| les deux e-mails reçus dans Gmail | oui |
+| événement ajouté au Google Agenda du coach | **non** |
 
-1. **Scénario A2 tel quel** (`docs/lot4-apple-calendar/A2-…`) dans la boîte du coach.
-   - [ ] carte d'invitation affichée ?
-   - [ ] événement ajouté à l'agenda ?
-2. **Puis `B2` tel quel.**
-   - [ ] l'événement disparaît ?
-3. **Variante : `V1-variante-coach-attendee-invitation.ics`** (ce dossier).
-   - [ ] carte affichée ?
-   - [ ] événement ajouté ?
-4. **Puis `V2-variante-coach-attendee-annulation.ics`.**
-   - [ ] l'événement disparaît ?
+Les deux envois sont journalisés en `sent` dans `email_logs` : l'e-mail est
+parti et il est arrivé. L'agenda, lui, est resté vide. Avant cette date,
+**15 notifications** avaient déjà été adressées au coach depuis le 19/07/2026,
+toutes en `sent`, dans ce même format.
 
-La variante ajoute une ligne, sans rien retirer :
+## La décision
+
+Les trois options étaient :
+
+| | Description | Issue |
+|---|---|---|
+| **1 — V1, retenue** | ajouter le coach comme `ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED;RSVP=FALSE` **en plus** de son rôle d'`ORGANIZER` | **implémentée le 21/11/2026** |
+| 2 | faire de la plateforme l'`ORGANIZER` et mettre coach **et** élève en `ATTENDEE` | écartée : annule la décision du lot 2, expose une adresse de plateforme, et **invalide l'appariement sur l'historique** — les 11 créations déjà émises portent un autre organisateur, donc leurs annulations futures seraient signées d'un tiers et ignorées (`GCONTRE-02` le reproduit) |
+| 3 | ne rien changer | écartée : le défaut est désormais constaté, pas seulement redouté |
+
+V1 est **purement additive** : elle n'enlève rien, le coach reste `ORGANIZER`,
+donc `GCONF-05` (organisateur identique entre une invitation et son
+annulation) reste vrai et l'historique reste appariable.
+
+Ce qui part maintenant, dans **les deux** fichiers d'un même rendez-vous :
 
 ```
-ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED;RSVP=FALSE;CN=Jules FAVIER:mailto:coach-a@…
+ORGANIZER;CN=Jules FAVIER:mailto:coach-a@exemple.invalid
+ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE;CN=Thomas:mai
+ lto:eleve@exemple.invalid
+ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED;RSVP=FALSE;CN=Jules FAVIER:mailto:coa
+ ch-a@exemple.invalid
 ```
 
-Le coach reste `ORGANIZER` — donc l'autorité sur l'annulation est inchangée —
-et devient en plus participant de son propre événement, déjà accepté et sans
-RSVP demandé. C'est la forme que Google émet lui-même pour l'organisateur.
+La ligne du coach est **dérivée des champs `organizer*`**, pas d'une nouvelle
+entrée : elle est donc identique dans le fichier de l'élève et dans celui du
+coach, et l'invariant du lot 2 — « les deux fichiers ne diffèrent que par
+`SUMMARY` » — tient par construction. Vérifié par exécution : **une seule
+ligne d'écart** entre les deux fichiers.
 
-## Les trois options, et ma recommandation
+## V1 : hypothèse, pas correction garantie
 
-| | Description | Pour | Contre |
-|---|---|---|---|
-| **1 — recommandée** | Ajouter le coach comme `ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED` en plus de son rôle d'`ORGANIZER` | purement additif ; n'enlève rien ; forme canonique de Google ; `GCONF-05` reste vrai (organisateur inchangé entre invitation et annulation) | une ligne de plus dans le fichier ; aucune autre contrepartie identifiée |
-| 2 | Faire de la plateforme l'`ORGANIZER` (`no-reply@…`) et mettre coach **et** élève en `ATTENDEE` | le plus conforme à iTIP ; les deux agendas sont alimentés de la même façon | annule la décision du lot 2 (le coach est l'organisateur) ; expose une adresse de plateforme ; invalide `GCONF-05` sur l'historique, car les anciens événements ont un autre organisateur |
-| 3 | Ne rien changer | zéro risque de régression | si l'expérience échoue, l'agenda du coach n'est jamais à jour — le défaut que les lots 3 et 4 cherchaient à supprimer reste entier de son côté |
+⚠️ **À NE PAS PRÉSENTER COMME RÉSOLU.** Ce qui est établi, c'est l'**échec** :
+l'agenda du coach n'a pas été alimenté. Ce qui n'est **pas** établi, c'est que
+l'absence d'`ATTENDEE` en soit la cause. Trois explications restent ouvertes,
+et V1 n'en traite qu'une :
 
-**Je recommande l'option 1, mais seulement après l'expérience ci-dessus.**
-Si l'étape 1 réussit chez toi (carte affichée, événement ajouté), le
-changement est inutile et l'option 3 s'impose : Google reconnaît
-l'organisateur sur ton compte, et il ne faut pas toucher au format sans
-défaut constaté. Si l'étape 1 échoue et l'étape 3 réussit, l'option 1 est
-démontrée et je l'applique — c'est une ligne dans `lib/ics.ts`, plus un
-paramètre indiquant si le destinataire est l'organisateur.
+1. **l'`ATTENDEE` manquant** — l'hypothèse retenue. Gmail ne traiterait une
+   invitation que si l'adresse du titulaire y figure comme participant. C'est
+   la règle que le modèle `GSIM-*` applique, et **le modèle n'est pas Google**.
+2. **l'écart entre l'adresse d'expédition et l'`ORGANIZER`** — hypothèse
+   **maintenue, non écartée**. Les e-mails partent du domaine de la plateforme
+   (`RESEND_FROM_EMAIL`), tandis que l'`ORGANIZER` porte le domaine du coach.
+   Un organisateur dont le domaine n'est pas celui de l'expéditeur **pourrait**
+   suffire à faire ignorer la pièce. **Rien n'a été mesuré sur ce point, et
+   aucun comportement de Gmail n'est affirmé ici** : c'est une piste à
+   instruire, pas un mécanisme constaté. Si l'essai de validation
+   ci-dessous échoue malgré les deux `ATTENDEE`, **c'est cette piste qu'il
+   faut instruire** — en vérifiant dans « Afficher l'original » l'en-tête
+   `From`, l'alignement SPF/DKIM/DMARC du domaine d'envoi, et en comparant
+   avec une invitation envoyée depuis l'adresse du coach lui-même. Ne pas
+   empiler un troisième changement de format avant d'avoir tranché celle-là.
+3. **le réglage du compte** — Agenda → Paramètres → « Ajouter
+   automatiquement les invitations ». **Non relevé** au moment du constat. Un
+   compte réglé sur « seulement si j'ai répondu » n'ajoute rien tant que
+   personne n'a cliqué : l'agenda serait vide sans qu'aucun défaut de format
+   soit en cause.
 
-`GSIM-05` fige l'état actuel dans la suite de tests et **rougira** le jour où
-l'arbitrage sera appliqué : c'est voulu, pour que la décision soit visible
-dans l'historique plutôt que silencieuse.
+Un seul compte Google a été observé, une seule fois. Ce n'est pas un
+comportement général de Google, c'est un constat sur ce compte-là.
+
+## L'essai de validation — à faire après déploiement
+
+Tant que cet essai n'a pas abouti, V1 reste une hypothèse.
+
+1. Crée un rendez-vous de test dans l'application.
+2. Dans Gmail → « Afficher l'original », vérifie que la pièce jointe porte
+   `Content-Type: text/calendar; charset=utf-8; method=REQUEST` **et deux
+   lignes `ATTENDEE`**, la tienne en seconde. Relève aussi l'en-tête `From`.
+   - [ ] deux `ATTENDEE` présents, le coach en second
+   - [ ] `method=REQUEST` annoncé
+   - [ ] `From` relevé (hypothèse 2)
+3. Gmail affiche-t-il une **carte d'invitation** (Oui / Peut-être / Non) ?
+   - [ ] oui / non
+4. L'événement est-il dans ton agenda, avec ou sans clic ?
+   - [ ] sans clic / après clic / jamais
+5. Annule-le : l'événement **disparaît**-il ?
+   - [ ] oui / non
+6. Relève Agenda → Paramètres → « Ajouter automatiquement les invitations »
+   et le fuseau du compte (hypothèse 3).
+   - [ ] valeur notée
+
+**Si l'étape 4 échoue malgré les deux `ATTENDEE`** : l'hypothèse 1 est
+écartée, et il faut instruire les hypothèses 2 puis 3 — pas ajouter un
+troisième changement de format.
+
+## Ce que l'arbitrage a coûté en tests
+
+**Cinq** tests de cette suite ont été révisés, chacun avec une raison écrite
+dans le fichier : quatre ont changé de sens et rougissaient avant d'être
+adaptés (`GSIM-05`, `GSIM-06`, `GCONF-07`, `CODE-02`), le cinquième
+(`GSIM-07`) est resté vert mais a été nettoyé de sa mutation à la main.
+
+| Test | Avant | Après |
+|---|---|---|
+| `GSIM-05` | figeait « le coach n'est que ORGANIZER » et annonçait qu'il rougirait le jour de l'arbitrage | vérifie les deux `ATTENDEE`, l'ordre, et que l'agenda du coach est alimenté |
+| `GSIM-06` | construisait la variante **à la main** par `replace` | joue la sortie réelle : cycle création → annulation, et le pliage à 75 octets |
+| `GSIM-07` | passait les pièces coach par une aide `avecCoachAttendee` | aide retirée, les trois agendas jouent la sortie réelle |
+| `GCONF-07` | exigeait `[élève]` comme seule adresse | exige `[élève, coach]` dans cet ordre, et les paramètres des deux lignes |
+| `CODE-02` | scellé à **une** ligne `ATTENDEE` dans `lib/ics.ts` | scellé à **deux**, gardées par une adresse, élève avant coach |
+
+Trois contre-épreuves ont été ajoutées : `GCONTRE-06` (une implementation à
+un seul `ATTENDEE` fait bien rougir `GSIM-05` et `GSIM-06`), `GCONTRE-07`
+(l'ordre élève-puis-coach est contraint), `GCONTRE-08` (la ligne du coach sans
+garde d'adresse fait réapparaître une `mailto:` vide).
+
+⚠️ **CE QUE LES TESTS ATTRAPENT RÉELLEMENT, MESURÉ PAR MUTATION** le
+21/11/2026, en mutant `lib/ics.ts` dans une copie jetable :
+
+| Mutation de `lib/ics.ts` | Tests qui rougissent |
+|---|---|
+| un seul `ATTENDEE` (l'état d'avant V1) | **9** — `CONF-17`, `CONF-18`, `GCONF-07`, `GSIM-05`, `GSIM-06`, `GSIM-07`, `CODE-02`, `GCONTRE-07`, `ICS-02` |
+| coach placé en premier | **6** — `CONF-13`, `CONF-17`, `GCONF-07`, `GSIM-05`, `CODE-02`, `GCONTRE-07` |
+| ligne de l'élève non gardée | **3** — `CONF-18`, `CONTRE-A7`, `CODE-02` |
+
+Le nettoyage de `GSIM-07` en a fait un détecteur à part entière : il rougit
+désormais sur un retour à un seul `ATTENDEE`, ce qu'il ne faisait pas tant
+qu'il ajoutait la ligne à la main. À l'inverse, `ics-cycle-de-vie` reste
+**aveugle** aux trois mutations (57/57 dans tous les cas) : cette suite ne
+porte aucune assertion sur `ATTENDEE`, et c'est précisément pourquoi
+`CONF-17`/`CONF-18` ont été ajoutés au lot 4.
+
+Côté lot 4, `CONF-17` et `CONF-18` couvrent désormais les deux participants et
+l'absence de CAL-ADDRESS vide, avec `CONTRE-A7` pour contre-épreuve.
+
+## Correctif joint — CAL-ADDRESS vide
+
+Indépendant de l'arbitrage, mesuré le 21/11/2026 par exécution : avec un
+élève introuvable, `lib/ics.ts` émettait
+
+```
+ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE;CN=:mailto:
+```
+
+soit un `mailto:` sans adresse, qui n'est pas une CAL-ADDRESS valide.
+`ORGANIZER` avait déjà sa garde ; les **deux** lignes `ATTENDEE` l'ont
+désormais. Cas latent en production (aucun élève ni coach sans adresse sur les
+41 fiches), couvert par `CONF-18` et contre-éprouvé par `CONTRE-A7`.
+
+## Ce que V1 ne corrige pas
+
+- **Le bouton « Télécharger .ics » de l'espace élève.**
+  `getMyCoachPublicInfo` rend `email: ""` en dur, la RPC
+  `get_my_coach_public_profile` ne renvoyant pas d'adresse : le fichier
+  téléchargé n'a **ni `ORGANIZER` ni le coach en `ATTENDEE`**. L'exposer au
+  navigateur reviendrait sur un choix de confidentialité du lot 2 et toucherait
+  une RPC. Hors périmètre.
+- **Les séances sans élève.** La route refuse en 404 dès que `student_id` est
+  nul : les séances d'agenda du staff n'atteignent jamais l'agenda du coach.
+  Latent (aucun cas en production).
+- **La dérive des exemples de ce dossier.** Aucun test ne compare les `.ics`
+  de `docs/` à la sortie réelle de `lib/ics.ts` : la régénération du
+  21/11/2026 a été faite à la main. Un scellé reste à ajouter, sur décision.
 
 Note ce que tu observes en face de chaque case, et renvoie-moi les écarts.

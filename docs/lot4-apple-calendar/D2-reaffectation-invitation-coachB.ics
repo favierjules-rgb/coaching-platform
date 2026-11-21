@@ -16,6 +16,8 @@ URL:https://visio.exemple.invalid/abc
 ORGANIZER;CN=Sophie BERNARD:mailto:coach-b@exemple.invalid
 ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE;CN=Thomas:mai
  lto:eleve@exemple.invalid
+ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED;RSVP=FALSE;CN=Sophie BERNARD:mailto:c
+ oach-b@exemple.invalid
 STATUS:CONFIRMED
 SEQUENCE:0
 END:VEVENT

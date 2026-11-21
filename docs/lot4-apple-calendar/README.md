@@ -6,6 +6,21 @@ macOS, iPhone et iPad reste à faire à la main. La suite automatisée
 `npm run test:apple-calendar` vérifie la **conformité** du format et le
 comportement d'un **modèle** de client iTIP — pas celui d'Apple.
 
+⚠️ **RÉGÉNÉRÉS POUR V1 — 21/11/2026.** Les huit fichiers portent désormais
+**deux lignes `ATTENDEE`** : l'élève (`ROLE=REQ-PARTICIPANT`) puis le coach
+(`ROLE=CHAIR;PARTSTAT=ACCEPTED;RSVP=FALSE`), le coach restant `ORGANIZER`.
+C'est le seul écart avec la version précédente : vérifié fichier par fichier,
+deux lignes physiques d'écart, celles de la ligne du coach pliée à 75 octets.
+Les fichiers d'avant sont conservés tels quels dans
+[`historique-avant-v1/`](historique-avant-v1/) : ce sont eux qui
+correspondent aux invitations **déjà envoyées** en production avant cette date.
+
+⚠️ **V1 EST UNE HYPOTHÈSE TECHNIQUE, PAS UNE CORRECTION GARANTIE.** Elle
+répond à un échec constaté côté Google (voir
+[`../lot5-google-calendar/README.md`](../lot5-google-calendar/README.md)), et
+rien ne prouve à ce jour qu'Apple ou Google l'accepteront. Tant qu'un essai
+réel n'a pas abouti, ne présente pas le sujet comme clos.
+
 Les adresses utilisées (`*.exemple.invalid`) ne sont pas routables : rien ne
 peut partir vers un vrai destinataire.
 
@@ -29,8 +44,13 @@ fichier depuis le Finder ne teste PAS le même chemin.
 
 Les deux UID en jeu :
 
-- `1f0c9e22-…` — créneau initial, **lundi 8 décembre 2026 à 10:00** (Paris)
-- `9b7d4411-…` — créneau reporté, **jeudi 11 décembre 2026 à 15:00**, 1 h 30
+- `1f0c9e22-…` — créneau initial, **mardi 8 décembre 2026 à 10:00** (Paris)
+- `9b7d4411-…` — créneau reporté, **vendredi 11 décembre 2026 à 15:00**, 1 h 30
+
+⚠️ Les jours de la semaine étaient faux ici jusqu'au 21/11/2026 (« lundi 8 »
+et « jeudi 11 »), vérifié par calcul : le 8 décembre 2026 est un **mardi**, le
+11 un **vendredi**. Les dates et heures, elles, étaient justes —
+`20261208T090000Z` vaut bien 10:00 à Paris.
 
 ## Scénario A — Création
 
@@ -89,11 +109,16 @@ Deux boîtes distinctes sont nécessaires.
 
 ## Points de vigilance connus
 
-1. **Le coach est `ORGANIZER` de son propre fichier.** iTIP prévoit qu'un
-   organisateur ne reçoive pas d'invitation à son propre événement : Apple peut
-   l'importer sans problème, ou l'ignorer. **C'est le risque principal à
-   lever** — si l'agenda du coach reste vide en A2, il faudra inverser les
-   rôles pour le fichier du coach (lot suivant, sur décision).
+1. **Le coach est `ORGANIZER` ET `ATTENDEE` de son propre fichier** depuis V1.
+   Le risque hérité — « un organisateur ne reçoit pas d'invitation à son
+   propre événement, Apple peut l'importer ou l'ignorer » — s'est **matérialisé
+   côté Google** le 21/11/2026 : création puis annulation reçues dans Gmail,
+   aucun événement dans l'agenda du coach. V1 ajoute son adresse comme second
+   participant sans lui retirer son rôle d'organisateur. **Reste à vérifier sur
+   Apple** : le comportement d'Apple Mail face à un fichier où le titulaire est
+   à la fois organisateur et participant déjà accepté n'a pas été mesuré.
+   Deux issues possibles à noter en recette : l'invitation s'affiche et
+   s'importe, ou Apple la considère comme sa propre émission et la masque.
 2. **Sans `ORGANIZER`, le fichier n'est pas une invitation.** La ligne est
    omise quand l'adresse du coach est inconnue (choix de confidentialité du
    lot 2, et cas du `coach_id` nul avant M1). À vérifier séparément.

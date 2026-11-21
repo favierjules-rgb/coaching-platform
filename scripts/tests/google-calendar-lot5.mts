@@ -204,6 +204,15 @@ function adresse(ics: string, propriete: "ORGANIZER" | "ATTENDEE"): string | nul
   const v = ligne.slice(indexValeur(ligne) + 1);
   return v.startsWith("mailto:") ? v.slice("mailto:".length).toLowerCase() : null;
 }
+/**
+ * Toutes les lignes `ATTENDEE`, dépliées, DANS L'ORDRE D'ÉMISSION.
+ *
+ * ⚠️ `champ()` NE REND QUE LA PREMIÈRE. Depuis V1 il y en a deux, et l'ordre
+ * fait partie du contrat : l'élève d'abord, le coach ensuite.
+ */
+function lignesAttendee(ics: string): string[] {
+  return deplie(ics).filter((l) => l.startsWith("ATTENDEE;") || l.startsWith("ATTENDEE:"));
+}
 function adressesAttendees(ics: string): string[] {
   return deplie(ics)
     .filter((l) => l.startsWith("ATTENDEE;") || l.startsWith("ATTENDEE:"))
@@ -300,13 +309,28 @@ await test("GCONF-06 ORGANIZER présent dans TOUTES les notifications d'un repor
   assert.equal(adresse(sans, "ORGANIZER"), null);
 });
 
-await test("GCONF-07 ATTENDEE : RSVP, PARTSTAT et ROLE renseignés, adresse exploitable", () => {
+await test("GCONF-07 ATTENDEE : élève puis coach, paramètres renseignés, adresses exploitables", () => {
   const inv = buildConfirmationIcs(entree(INITIAL, "eleve", COACH_A));
   const ligne = champ(inv, "ATTENDEE");
   for (const parametre of ["ROLE=REQ-PARTICIPANT", "PARTSTAT=NEEDS-ACTION", "RSVP=TRUE"]) {
     assert.ok(ligne.includes(parametre), `${parametre} manquant : ${ligne}`);
   }
-  assert.deepEqual(adressesAttendees(inv), [ELEVE.email]);
+  /*
+   * ⚠️ DEUX PARTICIPANTS DEPUIS V1, L'ÉLÈVE EN PREMIER. L'ordre n'est pas
+   * décoratif : `champ()` rend la PREMIÈRE ligne `ATTENDEE`, et `CONF-13`
+   * (lot 4) comme `ICS-02` (lot 2) s'appuient sur le fait que c'est celle de
+   * l'élève. Voir `GCONTRE-07` pour la contre-épreuve de cet ordre.
+   */
+  assert.deepEqual(adressesAttendees(inv), [ELEVE.email, COACH_A.email], "élève puis coach");
+  const participants = lignesAttendee(inv);
+  assert.equal(participants.length, 2, "exactement deux participants");
+  const [ligneEleve, ligneCoach] = participants;
+  assert.ok(ligneEleve.includes("ROLE=REQ-PARTICIPANT"), ligneEleve);
+  for (const parametre of ["ROLE=CHAIR", "PARTSTAT=ACCEPTED", "RSVP=FALSE"]) {
+    assert.ok(ligneCoach.includes(parametre), `${parametre} manquant : ${ligneCoach}`);
+  }
+  // Le coach n'a PAS perdu son rôle : il est organisateur ET participant.
+  assert.equal(adresse(inv, "ORGANIZER"), COACH_A.email, "ORGANIZER inchangé");
 });
 
 await test("GCONF-08 DTSTAMP présent, en UTC, non antérieur à celui de l'invitation", () => {
@@ -495,67 +519,63 @@ await test("GSIM-04 scénario E — réémission : ni doublon, ni effet de bord"
   assert.deepEqual(agenda.ignores, [`CANCEL sur un UID inconnu : ${UID_INITIAL}`]);
 });
 
-await test("GSIM-05 ⚠️ LE FICHIER DU COACH N'A PAS LE COACH COMME ATTENDEE", () => {
+await test("GSIM-05 V1 : le fichier du coach le porte comme ATTENDEE, en second", () => {
   /*
-   * ⚠️ LA DIVERGENCE GOOGLE / APPLE, MESURÉE. Dans le fichier destiné au
-   * coach, le coach est `ORGANIZER` et le seul `ATTENDEE` est l'élève. Le
-   * modèle Apple du lot 4 l'acceptait ; ce modèle, qui exige une
-   * correspondance d'ATTENDEE comme Gmail, l'ignore.
+   * ⚠️ RETOURNEMENT ASSUMÉ DE CE TEST — V1, 21/11/2026. Sa version
+   * précédente figeait l'état « le coach n'est que ORGANIZER » et annonçait
+   * qu'elle rougirait le jour de l'arbitrage. L'arbitrage est rendu, sur un
+   * FAIT et non sur le modèle : création (16:09:03) puis annulation
+   * (16:09:16) du rendez-vous du 23/11 reçues dans Gmail par le coach, les
+   * deux en `sent` dans `email_logs`, et aucun événement dans son agenda.
    *
-   * CE TEST CONSTATE L'ÉTAT ACTUEL, il ne le réprouve pas : changer les rôles
-   * est un arbitrage produit, pas un correctif. Il échouera le jour où cet
-   * arbitrage sera rendu — et c'est voulu, pour que la décision soit visible.
+   * ⚠️ CE TEST NE PROUVE PAS QUE GOOGLE ACCEPTERA. Il prouve que le format
+   * satisfait désormais la règle du MODÈLE. V1 reste une hypothèse technique
+   * à valider sur Google réel — voir docs/lot5-google-calendar/README.md,
+   * section « V1 : hypothèse, pas correction garantie ».
    */
   const pourCoach = envoi("evenement_courant", "coach", COACH_A.email, INITIAL, COACH_A).piece;
-  assert.deepEqual(adressesAttendees(pourCoach.content), [ELEVE.email], "seul l'élève est attendee");
-  assert.equal(adresse(pourCoach.content, "ORGANIZER"), COACH_A.email, "le coach n'est QUE organisateur");
+  assert.deepEqual(adressesAttendees(pourCoach.content), [ELEVE.email, COACH_A.email], "élève puis coach");
+  assert.equal(lignesAttendee(pourCoach.content).length, 2, "exactement deux participants");
+  assert.equal(adresse(pourCoach.content, "ORGANIZER"), COACH_A.email, "il reste ORGANIZER");
 
   const agendaCoach = new AgendaGoogle(COACH_A.email);
   agendaCoach.recevoir(pourCoach);
-  assert.deepEqual(agendaCoach.uids(), [], "sous la règle Gmail, rien n'est importé");
-  assert.deepEqual(agendaCoach.ignores, [`le titulaire ${COACH_A.email} ne figure pas comme ATTENDEE`]);
+  assert.deepEqual(agendaCoach.uids(), [UID_INITIAL], "sous la règle Gmail, son agenda est alimenté");
+  assert.deepEqual(agendaCoach.ignores, []);
 });
 
-await test("GSIM-06 l'option recommandée lève le blocage, sans retirer son rôle au coach", () => {
+await test("GSIM-06 V1 : cycle complet dans l'agenda du coach, création puis annulation", () => {
   /*
-   * Démonstration de l'option 1 de la recommandation : AJOUTER le coach comme
-   * `ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED` tout en le laissant `ORGANIZER`.
-   * C'est la forme que Google lui-même émet pour l'organisateur d'un
-   * événement. Construit ici À LA MAIN : le code de production n'est PAS
-   * modifié tant que l'arbitrage n'est pas rendu.
+   * ⚠️ PLUS AUCUNE MUTATION À LA MAIN. Sa version précédente insérait la
+   * ligne `CHAIR` par `replace` pour démontrer l'option sans toucher au code
+   * de production. Appliquée à la sortie de V1, cette insertion DUPLIQUERAIT
+   * le coach — mesuré : trois adresses au lieu de deux. On joue donc la
+   * sortie réelle de `lib/ics.ts`, qui porte la ligne et la PLIE à 75 octets.
    */
-  const base = envoi("evenement_courant", "coach", COACH_A.email, INITIAL, COACH_A).piece;
-  /*
-   * ⚠️ LIGNE INSÉRÉE NON PLIÉE, ET C'EST SANS CONSÉQUENCE ICI : le modèle
-   * déplie avant de lire, et la variante ne sert qu'à démontrer la règle
-   * d'appariement. Les fichiers que la recette enverra réellement à Gmail,
-   * eux, sont pliés à 75 octets — vérifié à la génération
-   * (docs/lot5-google-calendar/).
-   */
-  const ligneCoach = `ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED;RSVP=FALSE;CN=${formaterIdentiteCoach(COACH_A.name)}:mailto:${COACH_A.email}`;
-  const variante = {
-    content: base.content.replace("STATUS:CONFIRMED", `${ligneCoach}\r\nSTATUS:CONFIRMED`),
-    contentType: base.contentType,
-  };
-  assert.deepEqual(adressesAttendees(variante.content).sort(), [COACH_A.email, ELEVE.email].sort());
+  const invitation = envoi("evenement_courant", "coach", COACH_A.email, INITIAL, COACH_A).piece;
   const agendaCoach = new AgendaGoogle(COACH_A.email);
-  agendaCoach.recevoir(variante);
+  agendaCoach.recevoir(invitation);
   assert.deepEqual(agendaCoach.uids(), [UID_INITIAL], "le coach importe son propre créneau");
   assert.deepEqual(agendaCoach.ignores, []);
-  // Et l'annulation correspondante s'applique, l'organisateur étant inchangé.
-  const baseAnn = envoi("annulation_ancien", "coach", COACH_A.email, INITIAL, COACH_A).piece;
-  agendaCoach.recevoir({
-    content: baseAnn.content.replace("STATUS:CANCELLED", `${ligneCoach}\r\nSTATUS:CANCELLED`),
-    contentType: baseAnn.contentType,
-  });
+
+  // L'annulation s'applique, l'organisateur étant inchangé (GCONF-05).
+  agendaCoach.recevoir(envoi("annulation_ancien", "coach", COACH_A.email, INITIAL, COACH_A).piece);
   assert.deepEqual(agendaCoach.uids(), [], "annulation appliquée");
+  assert.deepEqual(agendaCoach.ignores, []);
+
+  // La ligne du coach est bien PLIÉE dans la sortie réelle, à 75 octets.
+  for (const ligne of lignesPhysiques(invitation.content)) {
+    assert.ok(ENCODEUR.encode(ligne).length <= 75, `ligne de ${ENCODEUR.encode(ligne).length} octets`);
+  }
 });
 
 await test("GSIM-07 scénario D — réaffectation : les trois agendas restent cohérents", () => {
   /*
-   * Joué sur l'élève, seul agenda que le format actuel alimente de façon
-   * certaine sous la règle Gmail. Les deux agendas coach sont évalués avec la
-   * variante de GSIM-06, pour montrer l'état visé par la recommandation.
+   * ⚠️ LES TROIS AGENDAS SONT DÉSORMAIS JOUÉS SUR LA SORTIE RÉELLE — V1. Sa
+   * version précédente passait les pièces des coachs par une aide
+   * `avecCoachAttendee` qui ajoutait la ligne `CHAIR` à la main, parce que le
+   * code de production ne la produisait pas. Elle la produit : l'aide est
+   * retirée, et ce test évalue ce qui part vraiment.
    */
   const envois = envoisDuReport(COACH_A, COACH_B);
   const agendaEleve = new AgendaGoogle(ELEVE.email);
@@ -565,21 +585,17 @@ await test("GSIM-07 scénario D — réaffectation : les trois agendas restent c
   assert.deepEqual(agendaEleve.uids(), [UID_REPORT]);
   assert.deepEqual(agendaEleve.titres(), ["Séance de coaching — Sophie BERNARD @ 20261211T140000Z"]);
 
-  const avecCoachAttendee = (piece: { content: string; contentType: string }, coach: { name: string; email: string }) => ({
-    content: piece.content.replace(
-      /STATUS:(CONFIRMED|CANCELLED)/,
-      `ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED;RSVP=FALSE;CN=${formaterIdentiteCoach(coach.name)}:mailto:${coach.email}\r\n$&`,
-    ),
-    contentType: piece.contentType,
-  });
   const agendaA = new AgendaGoogle(COACH_A.email);
-  agendaA.recevoir(avecCoachAttendee(envoi("evenement_courant", "coach", COACH_A.email, INITIAL, COACH_A).piece, COACH_A));
-  agendaA.recevoir(avecCoachAttendee(envois[1].piece, COACH_A));
+  agendaA.recevoir(envoi("evenement_courant", "coach", COACH_A.email, INITIAL, COACH_A).piece);
+  agendaA.recevoir(envois[1].piece);
   assert.deepEqual(agendaA.uids(), [], "l'ancien coach n'a plus rien");
 
   const agendaB = new AgendaGoogle(COACH_B.email);
-  agendaB.recevoir(avecCoachAttendee(envois[3].piece, COACH_B));
+  agendaB.recevoir(envois[3].piece);
   assert.deepEqual(agendaB.uids(), [UID_REPORT], "le nouveau coach a le nouveau créneau, et lui seul");
+  // L'ancien coach ne reçoit JAMAIS le nouveau créneau, le nouveau jamais l'annulation.
+  assert.equal(adresse(envois[1].piece.content, "ORGANIZER"), COACH_A.email, "annulation signée de l'ANCIEN coach");
+  assert.equal(adresse(envois[3].piece.content, "ORGANIZER"), COACH_B.email, "invitation signée du NOUVEAU coach");
   assert.deepEqual([...agendaEleve.ignores, ...agendaA.ignores, ...agendaB.ignores], []);
 });
 
@@ -638,12 +654,15 @@ await test("CODE-01 les acquis des lots 2 à 4 sont intacts", () => {
   assert.match(ROUTE_CODE, /idempotencyKey: envoi\.idempotencyKey/);
 });
 
-await test("CODE-02 le lot 5 n'a modifié aucun format : lib/ics.ts est inchangé depuis le lot 4", () => {
+await test("CODE-02 lib/ics.ts : format figé à l'état V1, exactement deux ATTENDEE gardées", () => {
   /*
-   * ⚠️ ASSERTION DÉLIBÉRÉMENT CONSERVATRICE. La consigne du lot 5 est de ne
-   * pas toucher au format sans défaut PROUVÉ. Aucun défaut n'a été prouvé :
-   * ces marqueurs figent donc l'état du lot 4, et rougissent si une
-   * modification de format se glisse sans décision.
+   * ⚠️ SCELLÉ MIS À JOUR CONSCIEMMENT — V1, 21/11/2026, RAISON ÉCRITE. Sa
+   * version précédente exigeait UNE seule ligne `ATTENDEE` et portait la
+   * consigne « ne pas toucher au format sans défaut PROUVÉ ». Le défaut est
+   * prouvé : agenda Google du coach non alimenté par la création ni vidé par
+   * l'annulation du rendez-vous du 23/11, les deux e-mails étant pourtant en
+   * `sent`. Le compteur passe donc de 1 à 2, et continue de rougir pour toute
+   * modification de format qui ne serait pas décidée.
    */
   const ics = sansCommentairesTs(lire("../../lib/ics.ts"));
   assert.match(ics, /function envelopper\(methode: MethodeIcs, evenement: string\)/);
@@ -651,8 +670,19 @@ await test("CODE-02 le lot 5 n'a modifié aucun format : lib/ics.ts est inchang�
   assert.match(ics, /function echapperParametre\(valeur: string\): string/);
   assert.match(ics, /const LIMITE_OCTETS_PAR_LIGNE = 75/);
   assert.ok(!ics.includes('method === "CANCEL" ? "METHOD:CANCEL" : null'));
-  // Aucune ligne ATTENDEE supplémentaire pour le coach : l'arbitrage n'est pas rendu.
-  assert.equal((ics.match(/`ATTENDEE;/g) ?? []).length, 1, "une seule ligne ATTENDEE émise");
+  assert.equal((ics.match(/`ATTENDEE;/g) ?? []).length, 2, "exactement deux lignes ATTENDEE émises");
+  /*
+   * ⚠️ LES DEUX SONT GARDÉES PAR UNE ADRESSE, comme `ORGANIZER`. Sans la
+   * garde sur l'élève, `CN=:mailto:` ressortait — défaut mesuré le
+   * 21/11/2026, contre-éprouvé par `CONTRE-A7` (lot 4).
+   */
+  assert.match(ics, /input\.attendeeEmail\s*\n?\s*\?\s*`ATTENDEE;ROLE=REQ-PARTICIPANT/);
+  assert.match(ics, /input\.organizerEmail\s*\n?\s*\?\s*`ATTENDEE;ROLE=CHAIR/);
+  // Et l'élève est écrit AVANT le coach dans le tableau de lignes.
+  assert.ok(
+    ics.indexOf("`ATTENDEE;ROLE=REQ-PARTICIPANT") < ics.indexOf("`ATTENDEE;ROLE=CHAIR"),
+    "la ligne de l'élève doit précéder celle du coach",
+  );
 });
 
 /* ═══════════════════════ 4. Contre-épreuves ═══════════════════════ */
@@ -711,6 +741,89 @@ await test("GCONTRE-05 UID non unique entre deux rendez-vous : l'un écrase l'au
   assert.equal(agenda.evenements.size, 1, "un seul événement là où il en faudrait deux");
   assert.deepEqual(agenda.titres(), ["Séance de coaching — Jules FAVIER @ 20261211T140000Z"], "le second a écrasé le premier");
   assert.throws(() => assert.equal(agenda.evenements.size, 2), "GCONF-03 doit échouer sur un UID réutilisé");
+});
+
+await test("GCONTRE-06 implementation à UN SEUL ATTENDEE : GSIM-05 et GSIM-06 repassent au rouge", () => {
+  /*
+   * ⚠️ CONTRE-ÉPREUVE DE V1. Elle reconstitue l'état d'avant — le coach
+   * seulement `ORGANIZER` — en retirant la ligne `CHAIR` de la pièce
+   * réellement produite, et prouve que le modèle Gmail l'ignore à nouveau.
+   * Sans elle, `GSIM-05` pourrait passer au vert pour une raison étrangère à
+   * la présence du coach.
+   */
+  const bonne = envoi("evenement_courant", "coach", COACH_A.email, INITIAL, COACH_A).piece;
+  // On retire la ligne CHAIR, pliage compris (`\r\n ` = continuation).
+  const contenuFautif = bonne.content.replace(/ATTENDEE;ROLE=CHAIR[^\r]*(\r\n [^\r]*)*\r\n/, "");
+  const fautive = { content: contenuFautif, contentType: bonne.contentType };
+
+  assert.deepEqual(adressesAttendees(fautive.content), [ELEVE.email], "la mutation doit retirer le coach");
+  assert.equal(lignesAttendee(fautive.content).length, 1, "un seul participant dans la version fautive");
+  // L'ORGANIZER, lui, est intact : c'est bien l'ATTENDEE qui manque.
+  assert.equal(adresse(fautive.content, "ORGANIZER"), COACH_A.email);
+
+  const agendaCoach = new AgendaGoogle(COACH_A.email);
+  agendaCoach.recevoir(fautive);
+  assert.deepEqual(agendaCoach.uids(), [], "sous la règle Gmail, rien n'est importé");
+  assert.deepEqual(agendaCoach.ignores, [`le titulaire ${COACH_A.email} ne figure pas comme ATTENDEE`]);
+
+  // Et les assertions de GSIM-05 / GSIM-06 échouent bien sur cette pièce.
+  assert.throws(
+    () => assert.deepEqual(adressesAttendees(fautive.content), [ELEVE.email, COACH_A.email]),
+    "GSIM-05 doit échouer sur une implementation à un seul ATTENDEE",
+  );
+  assert.throws(
+    () => assert.deepEqual(agendaCoach.uids(), [UID_INITIAL]),
+    "GSIM-06 doit échouer : l'agenda du coach reste vide",
+  );
+});
+
+await test("GCONTRE-07 coach placé EN PREMIER : champ() lirait la mauvaise ligne", () => {
+  /*
+   * ⚠️ L'ORDRE EST UN CONTRAT, PAS UNE PRÉFÉRENCE. `champ()` rend la
+   * PREMIÈRE ligne `ATTENDEE` ; `CONF-13` (lot 4) y vérifie
+   * `ROLE=REQ-PARTICIPANT` et la citation du `CN` de l'ÉLÈVE. Si le coach
+   * passait devant, ces assertions liraient sa ligne à lui et deviendraient
+   * muettes sur l'élève. Cette contre-épreuve le démontre.
+   */
+  const bonne = envoi("evenement_courant", "coach", COACH_A.email, INITIAL, COACH_A).piece.content;
+  const [ligneEleve, ligneCoach] = lignesAttendee(bonne);
+  assert.ok(ligneEleve.includes("ROLE=REQ-PARTICIPANT"), "dans le bon ordre, l'élève est lu en premier");
+
+  // Inversion des deux lignes, sur le texte déplié pour rester lisible.
+  const deplieBonne = bonne.replace(/\r\n[ \t]/g, "");
+  const inverse = deplieBonne.replace(`${ligneEleve}\r\n${ligneCoach}`, `${ligneCoach}\r\n${ligneEleve}`);
+  assert.notEqual(inverse, deplieBonne, "l'inversion doit s'appliquer");
+  assert.deepEqual(adressesAttendees(inverse), [COACH_A.email, ELEVE.email], "ordre inversé");
+
+  const premiere = lignesAttendee(inverse)[0];
+  assert.ok(premiere.includes("ROLE=CHAIR"), "champ() lirait désormais la ligne du coach");
+  assert.throws(
+    () => assert.deepEqual(adressesAttendees(inverse), [ELEVE.email, COACH_A.email]),
+    "GCONF-07 doit échouer si le coach passe devant",
+  );
+});
+
+await test("GCONTRE-08 ligne CHAIR SANS garde d'adresse : la CAL-ADDRESS vide réapparaît", () => {
+  /*
+   * ⚠️ CONTRE-ÉPREUVE DE LA GARDE. Elle reconstitue la ligne non gardée,
+   * telle qu'elle s'écrirait sans le test ternaire, et prouve qu'avec un
+   * organisateur sans adresse elle produit `mailto:` vide — exactement le
+   * défaut mesuré le 21/11/2026 sur la ligne de l'élève.
+   */
+  const sansAdresse = buildConfirmationIcs({ ...entree(INITIAL, "coach", COACH_A), organizerEmail: "", organizerName: "" });
+  // Version gardée : ni ORGANIZER ni ligne CHAIR, et surtout aucun mailto vide.
+  assert.equal(adresse(sansAdresse, "ORGANIZER"), null, "ORGANIZER omis");
+  assert.deepEqual(adressesAttendees(sansAdresse), [ELEVE.email], "seul l'élève reste");
+  assert.equal(deplie(sansAdresse).filter((l) => /mailto:\s*$/.test(l)).length, 0, "aucune CAL-ADDRESS vide");
+
+  // Version NON gardée, reconstituée : le défaut est de retour.
+  const fautif = sansAdresse.replace("STATUS:CONFIRMED", "ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED;RSVP=FALSE;CN=:mailto:\r\nSTATUS:CONFIRMED");
+  const vides = deplie(fautif).filter((l) => /mailto:\s*$/.test(l));
+  assert.equal(vides.length, 1, "la version non gardée produit une CAL-ADDRESS vide");
+  assert.throws(
+    () => assert.equal(deplie(fautif).filter((l) => /mailto:\s*$/.test(l)).length, 0),
+    "CONF-18 doit échouer sur une ligne non gardée",
+  );
 });
 
 console.log(`\n${passed} test(s) réussi(s), ${failed} échec(s).`);
