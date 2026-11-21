@@ -33,6 +33,8 @@
     "test:ics-cycle-de-vie": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/ics-cycle-de-vie.mts",
     "test:apple-calendar": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/apple-calendar-lot4.mts",
     "test:google-calendar": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/google-calendar-lot5.mts",
+    "test:stabilisation-b1-b2": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/stabilisation-b1-b2.mts",
+    "test:stabilisation-b1-b2-sql": "bash scripts/tests/sql/b1b2-base-jetable.sh",
     "test:calendar-render": "npx tsx scripts/tests/calendar-render.mts",
     "test:time-reference": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/time-reference.mts",
     "test:home-method-pillars": "npx tsx scripts/tests/home-method-pillars.mts",

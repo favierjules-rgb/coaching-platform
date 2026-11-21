@@ -726,6 +726,25 @@ export const MIGRATION_MODE_PRESENTIEL =
 export const MIGRATION_LOT1_M1_AJOUT =
   "20261115090000_lot1_multi_coach_ajout.sql";
 
+/**
+ * B2 — révocation de `anon` sur les trois fonctions ajoutées par M1.
+ *
+ * ⚠️ ELLE NE TOUCHE QUE DES PRIVILÈGES. Aucun corps de fonction, aucune
+ * donnée : `scripts/tests/stabilisation-b1-b2.mts` (ACL-05, ACL-06) le fige.
+ */
+export const MIGRATION_B2_REVOCATION_ANON =
+  "20261119090000_b2_revoquer_anon_fonctions_m1.sql";
+
+/**
+ * B1 — découpage du nom du coach dans `get_my_coach_public_profile`.
+ *
+ * ⚠️ ELLE REMPLACE UNE EXPRESSION, PAS UNE DONNÉE. `coaches.name` n'est pas
+ * modifié : la correction du libellé réel de ce champ est une opération de
+ * donnée, présentée séparément et hors de toute migration.
+ */
+export const MIGRATION_B1_DECOUPAGE_NOM_COACH =
+  "20261119091000_b1_decoupage_nom_coach.sql";
+
 export const MIGRATIONS_COURSES: readonly string[] = [
   MIGRATION_C2,
   MIGRATION_C3,
@@ -785,22 +804,44 @@ export const MIGRATIONS_APRES_C0_1: readonly string[] = [
   MIGRATION_PRESCRIPTIONS_DIFF,
   MIGRATION_MODE_PRESENTIEL,
   MIGRATION_LOT1_M1_AJOUT,
+  MIGRATION_B2_REVOCATION_ANON,
+  MIGRATION_B1_DECOUPAGE_NOM_COACH,
 ];
 
 /**
  * Le compte attendu — nécessaire, jamais suffisant.
  *
- * 125 = 84 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 39
- * migrations nommées dans `MIGRATIONS_APRES_C0_1`. Le point 6 recalcule
- * l'historique à partir de ce nombre : il ne peut pas être remonté seul sans
- * qu'une migration soit nommée en face.
+ * 127 = 79 avant C0.1 (figées par `EMPREINTE_HISTORIQUE`) + C0.1 + les 47
+ * entrées de `MIGRATIONS_APRES_C0_1`. Le point 6 recalcule l'historique à
+ * partir de ce nombre : il ne peut pas être remonté seul sans qu'une migration
+ * soit nommée en face.
+ *
+ * ⚠️ 47 ENTRÉES, PAS 42 LIGNES. La liste commence par `...MIGRATIONS_COURSES`,
+ * qui en apporte 5 : la compter à l'œil en donne 42 et fait croire à une
+ * incohérence. Valeurs VÉRIFIÉES le 19/11/2026 en exécutant le module —
+ * `MIGRATIONS_APRES_C0_1.length` rend 47, l'historique antérieur à C0.1 compte
+ * 79 fichiers, et `127 − 1 − 47 = 79` : le point 6 est cohérent.
+ *
+ * ⚠️ LE TEXTE PRÉCÉDENT ÉTAIT FAUX, et il l'était avant ce chantier : il
+ * annonçait « 84 + C0.1 + 39 » pour 125, soit 124. L'erreur a été reconduite
+ * une fois (« 84 + C0.1 + 41 » pour 127, soit 126) avant d'être mesurée. Les
+ * assertions, elles, n'ont jamais utilisé ces nombres : elles lisent `.length`.
  *
  * ⚠️ AJOUTÉ DE 124 À 125 LE 15/11/2026, en face de
  * `MIGRATION_LOT1_M1_AJOUT`. M1 est la nouvelle migration de ce lot.
  * M2 reste documentée hors du répertoire des migrations et ne sera
  * comptabilisée qu'au moment de sa création effective.
+ *
+ * ⚠️ AJOUTÉ DE 125 À 127 LE 19/11/2026, en face de
+ * `MIGRATION_B2_REVOCATION_ANON` et `MIGRATION_B1_DECOUPAGE_NOM_COACH` — les
+ * deux correctifs de stabilisation B2 et B1. RAISON ÉCRITE, puisque ce nombre
+ * ne doit jamais être remonté sans elle : B2 ferme le privilège `EXECUTE` que
+ * `revoke all … from public` avait laissé à `anon` sur les trois fonctions de
+ * M1 ; B1 remplace l'expression qui rendait deux fois un nom sans espace.
+ * `EMPREINTE_HISTORIQUE` reste INCHANGÉE : les deux migrations sont
+ * postérieures à C0.1, elles n'entrent pas dans l'empreinte de l'historique.
  */
-export const NOMBRE_DE_MIGRATIONS = 125;
+export const NOMBRE_DE_MIGRATIONS = 127;
 
 /**
  * L'empreinte des 79 migrations ANTÉRIEURES à C0.1, dans l'ordre.
