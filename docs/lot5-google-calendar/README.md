@@ -22,7 +22,19 @@ Les adresses sont en `.invalid`, non routables.
 
 ## Procédure Gmail
 
-Google décide à partir du **paramètre MIME `method`** de la pièce jointe.
+Le **paramètre MIME `method`** de la pièce jointe déclare l'opération iTIP que
+le fichier porte — `REQUEST` pour une invitation ou un report, `CANCEL` pour
+une annulation — et il doit concorder avec le `METHOD:` écrit dans le
+`VCALENDAR`. C'est ce que `typeMimeIcs` garantit en relisant le contenu.
+
+⚠️ **SA PRÉSENCE NE GARANTIT RIEN.** Un `method` correct ne suffit pas à
+faire ajouter ou mettre à jour l'événement dans Google Agenda : le 21/11/2026,
+une création et une annulation correctement annoncées sont arrivées dans Gmail
+sans qu'aucun événement n'apparaisse dans l'agenda du coach. **Aucune mesure
+ne permet d'affirmer comment Google traite ces invitations** — ni ce qu'il lit,
+ni dans quel ordre, ni ce qui le décide. Ce paramètre est donc une condition
+à remplir, pas un mécanisme dont on connaîtrait l'effet.
+
 Déposer le `.ics` dans Google Calendar via « Importer » ne teste **pas** le
 même chemin : il faut que le fichier arrive en pièce jointe d'un e-mail, avec
 le bon `Content-Type`, et être traité depuis Gmail.
