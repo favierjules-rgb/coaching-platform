@@ -67,7 +67,6 @@ async function appeler(
   supabase: TypedSupabaseClient,
   parametres: Record<string, unknown>,
 ): Promise<LigneAttribution[]> {
-  // @ts-expect-error — RPC ajoutée par migration, pas encore dans les types générés.
   const { data, error } = await supabase.rpc("attribution_offre_eleve", parametres);
   if (error) {
     // Pas de `console.error` : un refus est un résultat normal pour un

@@ -61,3 +61,6 @@ brand/transformations/approved/
 # Supabase CLI local state
 supabase/.temp/
 _to_delete/
+
+# Fichiers de travail Claude Code — ne jamais versionner
+/Claude outputs/

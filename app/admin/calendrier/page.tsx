@@ -19,7 +19,8 @@ import { fullName } from "@/lib/admin";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
   cancelAppointment,
-  createAppointmentAtomic,
+  creerRendezVousStaff,
+  MOTIFS_DE_REFUS,
   createCoachAvailability,
   createCoachEventAtomic,
   createCoachUnavailability,
@@ -148,7 +149,7 @@ export default function AdminCalendrierPage() {
 
     if (data.kind === "student") {
       if (!data.studentId || !data.appointmentType) return { ok: false, message: "Choisis un élève." };
-      const result = await createAppointmentAtomic(supabase, {
+      const result = await creerRendezVousStaff(supabase, {
         studentId: data.studentId,
         title: data.title,
         description: data.description ?? "",
@@ -160,7 +161,14 @@ export default function AdminCalendrierPage() {
         actorType: "coach",
       });
       if (result.conflict) return { ok: false, message: CONFLICT_MESSAGE };
-      if (!result.id) return { ok: false, message: "Création impossible. Réessaie." };
+      /*
+       * ⚠️ LA CRÉATION MANUELLE RESTE SANS DISPONIBILITÉ, ET C'EST VOULU. Le
+       * staff choisit un horaire libre, hors de toute plage récurrente : la
+       * RPC accepte `p_availability_id = null` pour un appelant staff et
+       * attribue le rendez-vous à SA fiche (`current_staff_id()`). Côté
+       * élève, le même `null` est refusé (`calendar_slot_required`).
+       */
+      if (!result.id) return { ok: false, message: MOTIFS_DE_REFUS[result.motif ?? "autre"] };
       const student = studentById.get(data.studentId);
       if (student?.email) {
         const created: AdminAppointment = {
@@ -201,7 +209,7 @@ export default function AdminCalendrierPage() {
         endAt: data.endAt,
       });
       if (result.conflict) return { ok: false, message: CONFLICT_MESSAGE };
-      if (!result.id) return { ok: false, message: "Modification impossible. Réessaie." };
+      if (!result.id) return { ok: false, message: MOTIFS_DE_REFUS[result.motif ?? "autre"] };
       refreshAfterMutation();
       return { ok: true };
     }
@@ -217,7 +225,7 @@ export default function AdminCalendrierPage() {
       endAt: data.endAt,
     });
     if (result.conflict) return { ok: false, message: CONFLICT_MESSAGE };
-    if (!result.id) return { ok: false, message: "Création impossible. Réessaie." };
+    if (!result.id) return { ok: false, message: MOTIFS_DE_REFUS[result.motif ?? "autre"] };
     refreshAfterMutation();
     return { ok: true };
   }

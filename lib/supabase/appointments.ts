@@ -141,16 +141,21 @@ const DEFAULT_COACH_INFO = { name: "Ton coach", email: "" };
  *     transactionnels, eux, rechargent le coach côté serveur en service role
  *     (app/api/email/appointment-notification/route.ts) : ce chemin est intact.
  */
-export async function getMyCoachPublicInfo(supabase: TypedSupabaseClient): Promise<{ name: string; email: string }> {
+export async function getMyCoachPublicInfo(
+  supabase: TypedSupabaseClient,
+): Promise<{ coachId: string | null; name: string; email: string }> {
   // RPC ajoutée par la migration 20260726220000, pas encore dans les types
   // générés (`Functions: Record<string, never>`) : `data` arrive en `never`,
   // d'où la normalisation explicite ci-dessous.
   const { data, error } = await supabase.rpc("get_my_coach_public_profile");
   devWarn("getMyCoachPublicInfo", error as { message: string } | null);
-  const ligne = (Array.isArray(data) ? data[0] : data) as { first_name?: string | null; last_name?: string | null } | null | undefined;
-  if (!ligne) return DEFAULT_COACH_INFO;
+  const ligne = (Array.isArray(data) ? data[0] : data) as
+    | { coach_id?: string | null; first_name?: string | null; last_name?: string | null }
+    | null
+    | undefined;
+  if (!ligne) return { coachId: null, ...DEFAULT_COACH_INFO };
   const nom = [ligne.first_name, ligne.last_name].filter(Boolean).join(" ").trim();
-  return { name: nom || DEFAULT_COACH_INFO.name, email: "" };
+  return { coachId: ligne.coach_id ?? null, name: nom || DEFAULT_COACH_INFO.name, email: "" };
 }
 
 /** Coach principal (première fiche `coaches` créée) — utilisé comme organisateur des invitations .ics/emails, faute d'un vrai modèle multi-coach dans l'app (voir docs/supabase-calendar-booking-model.md). RÉSERVÉ au staff et au serveur : un élève lit zéro ligne dans `coaches` depuis la migration 20260726220000, il doit appeler `getMyCoachPublicInfo`. */
@@ -159,6 +164,45 @@ export async function getPrimaryCoachInfo(supabase: TypedSupabaseClient): Promis
   devWarn("getPrimaryCoachInfo", error);
   if (!data) return DEFAULT_COACH_INFO;
   return { name: data.name || DEFAULT_COACH_INFO.name, email: data.email || DEFAULT_COACH_INFO.email };
+}
+
+/** Identité du coach PROPRIÉTAIRE d'un rendez-vous, telle qu'elle sert d'organisateur. */
+export interface CoachProprietaire {
+  id: string;
+  name: string;
+  email: string;
+}
+
+/**
+ * Coach RÉELLEMENT propriétaire du rendez-vous — lu sur `appointments.coach_id`.
+ *
+ * ⚠️ C'EST LA SEULE SOURCE DE VÉRITÉ DU PROPRIÉTAIRE, et elle remplace
+ * `getPrimaryCoachInfo` partout où un rendez-vous est en jeu (invitations
+ * .ics et emails transactionnels, lot 2). `getPrimaryCoachInfo` rend la
+ * PREMIÈRE fiche `coaches` créée : correcte par accident tant qu'un seul
+ * coach est actif, fausse dès qu'il y en a deux.
+ *
+ * ⚠️ AUCUN REPLI SUR UN AUTRE COACH. `coach_id` nul ou introuvable rend
+ * `null`, et l'appelant doit alors s'abstenir de nommer qui que ce soit
+ * (intitulé de secours) plutôt que de désigner un coach arbitraire. Une
+ * notification adressée au mauvais coach lui révélerait l'élève d'un
+ * confrère.
+ *
+ * Réservée au SERVEUR : la policy `coaches_select_staff` (migration
+ * 20260726220000) ferme `coaches` aux élèves — appelée depuis un navigateur
+ * d'élève, cette lecture rendrait zéro ligne. Les deux colonnes lues sont
+ * `NOT NULL` d'après types/supabase.ts ; un `email` vide reste possible, et
+ * lib/ics.ts omet alors la ligne `ORGANIZER`.
+ */
+export async function getCoachProprietaireRendezVous(
+  supabase: TypedSupabaseClient,
+  coachId: string | null,
+): Promise<CoachProprietaire | null> {
+  if (!coachId) return null;
+  const { data, error } = await supabase.from("coaches").select("id, name, email").eq("id", coachId).maybeSingle();
+  devWarn("getCoachProprietaireRendezVous", error);
+  if (!data) return null;
+  return { id: data.id, name: data.name, email: data.email };
 }
 
 /** Rendez-vous qui bloquent encore un créneau (annulé = créneau libéré, voir règle du chantier). */
@@ -251,6 +295,72 @@ function isConflictError(error: { code?: string; message: string } | null): bool
   return Boolean(error && (error.code === "23P01" || error.message.includes("calendar_conflict")));
 }
 
+/*
+ * ⚠️ LES MOTIFS DE REFUS SONT UNE LISTE NOMMÉE, PAS UN `catch` FOURRE-TOUT.
+ * Avant le lot 1, tout refus de la RPC qui n'était pas un conflit remontait
+ * en `{ id: null, conflict: false }` : l'écran affichait « Création
+ * impossible. Réessaie. » pour un créneau désactivé comme pour un créneau
+ * appartenant à un autre coach. La RPC lève désormais des exceptions
+ * distinctes ; chacune a ici son motif et sa phrase.
+ */
+export const MOTIFS_DE_REFUS = {
+  conflit: "Ce créneau vient d'être occupé. Choisis un autre horaire.",
+  creneau_requis: "Ce créneau n'est plus identifiable. Recharge la page et réessaie.",
+  creneau_introuvable: "Ce créneau n'existe plus. Recharge la page pour voir les disponibilités à jour.",
+  creneau_inactif: "Ce créneau n'est plus proposé par ton coach.",
+  creneau_sans_proprietaire: "Ce créneau n'est rattaché à aucun coach. Contacte ton coach.",
+  creneau_incoherent: "L'horaire demandé ne correspond pas à ce créneau. Recharge la page et réessaie.",
+  droit_refuse: "Ce créneau n'est pas proposé par ton coach.",
+  identite_eleve_requise: "Cette réservation doit être faite depuis un compte élève.",
+  staff_requis: "Seul un membre du staff peut créer manuellement une séance.",
+  /*
+   * ⚠️ CES DEUX MOTIFS NE VIENNENT PAS DE LA NOUVELLE APPLICATION. Ils sont
+   * levés par l'ancienne RPC que M1 conserve en garde-fou, et un onglet resté
+   * ouvert sur l'ancienne page `/rendez-vous` les déclenchera pendant la
+   * fenêtre de bascule. Sans eux, l'élève lirait « Création impossible.
+   * Réessaie. » et recliquerait indéfiniment : le message doit lui dire de
+   * recharger.
+   */
+  parcours_obsolete: "Cette page n'est plus à jour. Recharge-la pour réserver.",
+  identite_ambigue: "Ton compte porte deux identités (élève et coach) : contacte ton coach pour réserver.",
+  proprietaire_indetermine:
+    "Aucun coach ne peut être désigné pour cette séance. Vérifie le rattachement de l'élève.",
+  autre: "Création impossible. Réessaie.",
+} satisfies Record<string, string>;
+
+export type MotifDeRefus = keyof typeof MOTIFS_DE_REFUS;
+
+/*
+ * ⚠️ L'ORDRE DE CETTE LISTE EST SIGNIFIANT : le premier fragment trouvé dans
+ * le message gagne. `calendar_slot_not_found` contient `calendar_slot`, donc
+ * les motifs les plus précis viennent d'abord.
+ */
+const FRAGMENTS_DE_REFUS: readonly { readonly fragment: string; readonly motif: MotifDeRefus }[] = [
+  { fragment: "calendar_conflict", motif: "conflit" },
+  { fragment: "calendar_slot_required", motif: "creneau_requis" },
+  { fragment: "calendar_slot_not_found", motif: "creneau_introuvable" },
+  { fragment: "calendar_slot_inactive", motif: "creneau_inactif" },
+  { fragment: "calendar_slot_unowned", motif: "creneau_sans_proprietaire" },
+  { fragment: "calendar_slot_mismatch", motif: "creneau_incoherent" },
+  { fragment: "calendar_slot_forbidden", motif: "droit_refuse" },
+  { fragment: "calendar_owner_unresolved", motif: "proprietaire_indetermine" },
+  { fragment: "calendar_student_required", motif: "identite_eleve_requise" },
+  { fragment: "calendar_staff_required", motif: "staff_requis" },
+  { fragment: "calendar_identite_ambigue", motif: "identite_ambigue" },
+  { fragment: "calendar_parcours_obsolete", motif: "parcours_obsolete" },
+  { fragment: "calendar_not_allowed", motif: "droit_refuse" },
+];
+
+/** Traduit l'erreur PostgreSQL remontée par PostgREST en motif métier nommé. */
+export function motifDeRefus(error: { code?: string; message: string } | null): MotifDeRefus {
+  if (!error) return "autre";
+  if (error.code === "23P01") return "conflit";
+  for (const { fragment, motif } of FRAGMENTS_DE_REFUS) {
+    if (error.message.includes(fragment)) return motif;
+  }
+  return "autre";
+}
+
 /**
  * Indisponibilité simple (onglet Disponibilités — comportement préservé, y
  * compris le droit de se bloquer par-dessus un RDV existant) : passe par la
@@ -261,7 +371,6 @@ export async function createCoachUnavailability(
   supabase: TypedSupabaseClient,
   data: { startAt: string; endAt: string; reason: string },
 ): Promise<string | null> {
-  // @ts-expect-error — RPC ajoutée par la migration 20260726121000, pas encore dans les types générés.
   const { data: rpcId, error } = await supabase.rpc("create_coach_event_atomic", {
     p_category: "unavailability",
     p_title: "",
@@ -302,6 +411,8 @@ export interface AtomicWriteResult {
   id: string | null;
   /** true si l'écriture a été refusée parce que la période chevauche une période occupée. */
   conflict: boolean;
+  /** Motif nommé du refus, `null` en cas de succès. Voir `MOTIFS_DE_REFUS`. */
+  motif: MotifDeRefus | null;
 }
 
 /** Événement personnel/professionnel de l'admin — contrôle de conflit STRICT côté serveur. */
@@ -309,7 +420,6 @@ export async function createCoachEventAtomic(
   supabase: TypedSupabaseClient,
   input: CoachEventInput,
 ): Promise<AtomicWriteResult> {
-  // @ts-expect-error — RPC ajoutée par la migration 20260726121000, pas encore dans les types générés.
   const { data, error } = await supabase.rpc("create_coach_event_atomic", {
     p_category: input.category,
     p_title: input.title,
@@ -323,9 +433,9 @@ export async function createCoachEventAtomic(
   });
   if (error) {
     if (!isConflictError(error)) devWarn("createCoachEventAtomic", error);
-    return { id: null, conflict: isConflictError(error) };
+    return { id: null, conflict: isConflictError(error), motif: motifDeRefus(error) };
   }
-  return { id: (data as string | null) ?? null, conflict: false };
+  return { id: (data as string | null) ?? null, conflict: false, motif: null };
 }
 
 /** Modification (déplacement/durée/contenu) d'un événement du coach — même contrôle strict. */
@@ -334,7 +444,6 @@ export async function updateCoachEventAtomic(
   id: string,
   input: Omit<CoachEventInput, "category">,
 ): Promise<AtomicWriteResult> {
-  // @ts-expect-error — RPC ajoutée par la migration 20260726121000, pas encore dans les types générés.
   const { data, error } = await supabase.rpc("update_coach_event_atomic", {
     p_id: id,
     p_title: input.title,
@@ -346,9 +455,9 @@ export async function updateCoachEventAtomic(
   });
   if (error) {
     if (!isConflictError(error)) devWarn("updateCoachEventAtomic", error);
-    return { id: null, conflict: isConflictError(error) };
+    return { id: null, conflict: isConflictError(error), motif: motifDeRefus(error) };
   }
-  return { id: data === true ? id : null, conflict: false };
+  return { id: data === true ? id : null, conflict: false, motif: null };
 }
 
 export async function deleteCoachUnavailability(supabase: TypedSupabaseClient, id: string): Promise<boolean> {
@@ -488,7 +597,6 @@ export async function getBusyRanges(
   from: Date,
   to: Date,
 ): Promise<{ startAt: string; endAt: string }[]> {
-  // @ts-expect-error — RPC ajoutée par la migration 20260726120500, pas encore dans les types générés.
   const { data, error } = await supabase.rpc("get_busy_ranges", {
     p_from: from.toISOString(),
     p_to: to.toISOString(),
@@ -553,6 +661,8 @@ export async function getAvailableSlots(supabase: TypedSupabaseClient): Promise<
 
   return computeAvailableSlots({
     availabilities: availabilities.map((a) => ({
+      id: a.id,
+      coachId: a.coachId,
       weekday: a.weekday,
       startTime: a.startTime,
       endTime: a.endTime,
@@ -568,8 +678,22 @@ export async function getAvailableSlots(supabase: TypedSupabaseClient): Promise<
   });
 }
 
+/** Entrée de la RÉSERVATION AUTONOME par un élève. */
+export interface ReservationEleveInput {
+  /**
+   * Disponibilité réservée — OBLIGATOIRE, c'est tout ce que le navigateur
+   * désigne. Ni élève, ni coach : la RPC prend l'élève sur la session
+   * (`current_student_id()`) et le coach sur la disponibilité qu'elle relit.
+   */
+  availabilityId: string;
+  startAt: string;
+  endAt: string;
+}
+
+/** Entrée de la CRÉATION MANUELLE par le staff. */
 export interface CreateAppointmentInput {
-  studentId: string;
+  /** `null` pour une séance sans élève (l'agenda propre de l'auteur). */
+  studentId: string | null;
   title: string;
   description: string;
   appointmentType: string;
@@ -578,24 +702,125 @@ export interface CreateAppointmentInput {
   location: string;
   meetingUrl: string;
   status?: AppointmentStatus;
-  /** Qui déclenche la création — "student" (réservation élève, par défaut) ou "coach" (création manuelle admin). */
+  /** Qui déclenche la création, pour le journal d'activité. */
   actorType?: ActivityActorType;
 }
 
-/**
- * Crée un rendez-vous via la RPC transactionnelle `create_appointment_atomic`
- * (verrou consultatif + contrôle de chevauchement inter-tables + contrainte
- * d'exclusion en filet) : deux réservations simultanées du même intervalle ne
- * peuvent jamais réussir toutes les deux. Renvoie l'id créé et, en cas de
- * refus, si la cause est un conflit de créneau.
+/*
+ * ⚠️ DEUX FONCTIONS, PARCE QU'IL Y A DEUX INTENTIONS.
+ * `createAppointmentAtomic` appelait une RPC unique qui choisissait son
+ * comportement avec un discriminant serveur (`current_staff_id() is not null`,
+ * puis `… or is_admin()`). Une personne portant à la fois une fiche `coaches`
+ * et une fiche `students` — rien ne l'interdit, les deux tables référencent
+ * `auth.users` — entrait donc dans la branche staff en réservant depuis son
+ * espace élève, et échappait à TOUTE validation de disponibilité.
+ *
+ * Le point d'entrée porte désormais l'intention, et chaque RPC revérifie
+ * l'identité côté serveur : `reserver_creneau_eleve` exige
+ * `current_student_id()` et une disponibilité ; `creer_rendez_vous_staff`
+ * exige d'être staff. Aucun `actorType` ne quitte le navigateur vers le SQL —
+ * il n'a jamais servi qu'au journal, et c'est tout ce qu'il fait encore.
  */
-export async function createAppointmentAtomic(
+
+/**
+ * Journalise une création de rendez-vous en relisant l'élève SUR LE RENDEZ-VOUS
+ * EFFECTIVEMENT CRÉÉ.
+ *
+ * ⚠️ L'IDENTITÉ JOURNALISÉE NE VIENT PLUS DU NAVIGATEUR. Les deux parcours
+ * transmettaient un identifiant d'élève au seul usage du journal. Vérifié le
+ * 15/11/2026 : ce n'était pas une faille — les deux policies INSERT de
+ * `activity_events` (`activity_events_insert_own_student` et
+ * `activity_events_student_insert_own`) lient `student_id` à la fiche de
+ * l'appelant, donc une valeur falsifiée était REFUSÉE, jamais écrite dans
+ * l'historique d'un tiers. Mais c'était une valeur d'identité venue du client,
+ * sans raison d'exister : la RPC connaît déjà l'élève, et le rendez-vous le
+ * porte.
+ *
+ * ⚠️ ET LE JOURNAL RESTE BEST-EFFORT. Une relecture qui échoue ne journalise
+ * rien et n'annule rien ; un rendez-vous sans élève (séance d'agenda du staff)
+ * ne produit simplement aucune ligne. Même principe que `logActivityEvent`,
+ * qui avale déjà ses propres erreurs : jamais bloquant.
+ */
+async function journaliserRendezVousCree(
+  supabase: TypedSupabaseClient,
+  appointmentId: string,
+  actorType: ActivityActorType,
+  description: string,
+): Promise<void> {
+  const { data, error } = await supabase
+    .from("appointments")
+    .select("student_id")
+    .eq("id", appointmentId)
+    .maybeSingle();
+  if (error) {
+    devWarn("journaliserRendezVousCree (relecture de l'élève)", error);
+    return;
+  }
+  const studentId = data?.student_id ?? null;
+  if (!studentId) return;
+  await logActivityEvent(supabase, {
+    studentId,
+    actorType,
+    eventType: "appointment_booked",
+    title: "Rendez-vous réservé",
+    description,
+    metadata: buildStudentActivityLink(studentId),
+  });
+}
+
+/**
+ * Réservation autonome d'un créneau par l'élève connecté.
+ *
+ * La RPC `reserver_creneau_eleve` (migration 20261115090000) prend le verrou
+ * consultatif, verrouille la disponibilité puis la ligne élève en `for share`,
+ * valide jour/horaire/durée/grille/propriétaire sur ces lignes verrouillées,
+ * et insère dans la même transaction.
+ */
+export async function reserverCreneauEleve(
+  supabase: TypedSupabaseClient,
+  input: ReservationEleveInput,
+): Promise<AtomicWriteResult> {
+  const icsUid = `${crypto.randomUUID()}@seth-coaching`;
+  const { data, error } = await supabase.rpc("reserver_creneau_eleve", {
+    p_availability_id: input.availabilityId,
+    p_start_at: input.startAt,
+    p_end_at: input.endAt,
+    p_ics_uid: icsUid,
+  });
+  if (error) {
+    if (isConflictError(error)) return { id: null, conflict: true, motif: "conflit" };
+    const motif = motifDeRefus(error);
+    // ⚠️ UN REFUS MÉTIER N'EST PAS UNE PANNE. On ne journalise que ce qui n'a
+    // pas de motif nommé, sinon la console se remplit de refus normaux.
+    if (motif === "autre") devWarn("reserverCreneauEleve", error);
+    return { id: null, conflict: false, motif };
+  }
+  const id: string | null = (data as string | null) ?? null;
+  if (id) {
+    await journaliserRendezVousCree(
+      supabase,
+      id,
+      "student",
+      `Créneau réservé le ${new Date(input.startAt).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}.`,
+    );
+  }
+  return { id, conflict: false, motif: id ? null : "autre" };
+}
+
+/**
+ * Création manuelle d'un rendez-vous par le staff (horaire libre, hors de
+ * toute disponibilité récurrente).
+ *
+ * Le propriétaire n'est jamais l'auteur de l'action : la RPC le déduit du
+ * coach titulaire de l'élève, ou — pour une séance sans élève — de la fiche de
+ * l'auteur s'il en a une de rôle `admin`/`assistant`.
+ */
+export async function creerRendezVousStaff(
   supabase: TypedSupabaseClient,
   input: CreateAppointmentInput,
 ): Promise<AtomicWriteResult> {
   const icsUid = `${crypto.randomUUID()}@seth-coaching`;
-  // @ts-expect-error — RPC ajoutée par la migration 20260726121000, pas encore dans les types générés.
-  const { data, error } = await supabase.rpc("create_appointment_atomic", {
+  const { data, error } = await supabase.rpc("creer_rendez_vous_staff", {
     p_student_id: input.studentId,
     p_title: input.title,
     p_description: input.description,
@@ -609,13 +834,14 @@ export async function createAppointmentAtomic(
   });
   let id: string | null = (data as string | null) ?? null;
   if (error) {
-    if (isConflictError(error)) return { id: null, conflict: true };
+    if (isConflictError(error)) return { id: null, conflict: true, motif: "conflit" };
     if (!isMissingRpc(error)) {
-      devWarn("createAppointmentAtomic", error);
-      return { id: null, conflict: false };
+      const motif = motifDeRefus(error);
+      if (motif === "autre") devWarn("creerRendezVousStaff", error);
+      return { id: null, conflict: false, motif };
     }
-    // Repli pré-migration : INSERT historique (deviendra inerte après
-    // application — plus aucune policy INSERT sur appointments).
+    // Repli pré-migration : INSERT historique (inerte après application —
+    // plus aucune policy INSERT sur appointments). Conservé tel quel.
     const { data: row, error: insertError } = await supabase
       .from("appointments")
       .insert({
@@ -632,25 +858,23 @@ export async function createAppointmentAtomic(
       })
       .select("id")
       .single();
-    devWarn("createAppointment (repli pré-migration)", insertError);
+    devWarn("creerRendezVousStaff (repli pré-migration)", insertError);
     id = row?.id ?? null;
   }
   if (id) {
-    await logActivityEvent(supabase, {
-      studentId: input.studentId,
-      actorType: input.actorType ?? "student",
-      eventType: "appointment_booked",
-      title: "Rendez-vous réservé",
-      description: `${input.appointmentType} le ${new Date(input.startAt).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}.`,
-      metadata: buildStudentActivityLink(input.studentId),
-    });
+    // ⚠️ MÊME SOURCE DE VÉRITÉ QUE LA PORTE ÉLÈVE. `input.studentId` est
+    // vérifié par la RPC pour l'autorisation ET pour l'attribution, donc il
+    // est contrôlé côté serveur — mais faire reposer les deux parcours sur la
+    // même relecture évite d'avoir deux règles à tenir à jour, et couvre sans
+    // cas particulier la séance sans élève.
+    await journaliserRendezVousCree(
+      supabase,
+      id,
+      input.actorType ?? "coach",
+      `${input.appointmentType} le ${new Date(input.startAt).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}.`,
+    );
   }
-  return { id, conflict: false };
-}
-
-/** Compat : même signature qu'avant le chantier calendrier (réservation élève, page /rendez-vous inchangée). */
-export async function createAppointment(supabase: TypedSupabaseClient, input: CreateAppointmentInput): Promise<string | null> {
-  return (await createAppointmentAtomic(supabase, input)).id;
+  return { id, conflict: false, motif: id ? null : "autre" };
 }
 
 export async function cancelAppointment(
@@ -660,7 +884,6 @@ export async function cancelAppointment(
   studentId: string | null = null,
   actorType: ActivityActorType = "student",
 ): Promise<boolean> {
-  // @ts-expect-error — RPC ajoutée par la migration 20260726121000, pas encore dans les types générés.
   const { data, error: rpcError } = await supabase.rpc("cancel_appointment_atomic", { p_appointment_id: id, p_reason: reason });
   let error: { message: string; code?: string } | null = null;
   if (rpcError) {
@@ -708,7 +931,6 @@ export async function rescheduleAppointment(
   // RPC transactionnelle : annulation de l'original + contrôle de conflit +
   // création du nouveau dans UNE transaction (l'implémentation historique en
   // deux requêtes séparées pouvait laisser un état incohérent).
-  // @ts-expect-error — RPC ajoutée par la migration 20260726121000, pas encore dans les types générés.
   const { data, error } = await supabase.rpc("reschedule_appointment_atomic", {
     p_appointment_id: appointment.id,
     p_new_start_at: newStartAt,

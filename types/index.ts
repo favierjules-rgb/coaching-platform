@@ -2774,7 +2774,29 @@ export interface BookingSettings {
 }
 
 /** Un créneau proposable à la réservation, déjà purgé des chevauchements/indisponibilités. */
+/**
+ * Un créneau proposable à un élève.
+ *
+ * ⚠️ LE CRÉNEAU PORTE SON PROPRIÉTAIRE, ET C'EST TOUT L'OBJET DU LOT 1.
+ * Jusqu'ici `AvailableSlot` ne contenait que des horaires : le navigateur
+ * n'avait donc rien de vérifiable à transmettre, et
+ * `create_appointment_atomic` déduisait le coach de `students.coach_id`.
+ * Mesure du 15/11/2026 sur la base réelle : 7 rendez-vous sur 9 sans
+ * `coach_id`, et AUCUN attribuable depuis sa disponibilité d'origine (toutes
+ * les disponibilités compatibles étaient elles-mêmes sans propriétaire).
+ *
+ * `availabilityId` est l'identifiant RÉEL de la ligne `coach_availabilities`.
+ * Il n'est pas cru sur parole : la RPC le relit en base, vérifie le jour,
+ * l'horaire, la durée, l'état actif et le droit de l'élève, puis déduit
+ * `coach_id` de CETTE ligne. `coachId` ci-dessous ne sert qu'à l'affichage.
+ */
 export interface AvailableSlot {
+  availabilityId: string;
+  /**
+   * Propriétaire réel de la disponibilité — jamais `null` : un créneau sans
+   * propriétaire n'est pas proposé (voir `computeAvailableSlots`).
+   */
+  coachId: string;
   startAt: string;
   endAt: string;
   appointmentType: AppointmentType;

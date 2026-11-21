@@ -2041,7 +2041,34 @@ export interface Database {
           created_at?: string;
           updated_at?: string;
         };
-        Relationships: [];
+        /*
+         * ⚠️ LES DEUX SEULES RELATIONS DÉCRITES DE CE FICHIER, et elles le
+         * sont parce qu'un `select` les emprunte réellement
+         * (`lib/supabase/documents.ts::getStudentDocumentsWithAvailability`
+         * lit `documents(...)` en jointure incorporée). Tant que `Functions`
+         * valait `Record<string, never>`, l'inférence de supabase-js
+         * s'arrêtait avant d'évaluer cette jointure et le `as` passait ;
+         * complétée, elle signale que la relation n'était pas déclarée.
+         * Contraintes relevées sur la base le 15/11/2026 :
+         * `document_assignments_document_id_fkey` et
+         * `document_assignments_student_id_fkey`.
+         */
+        Relationships: [
+          {
+            foreignKeyName: "document_assignments_document_id_fkey";
+            columns: ["document_id"];
+            isOneToOne: false;
+            referencedRelation: "documents";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "document_assignments_student_id_fkey";
+            columns: ["student_id"];
+            isOneToOne: false;
+            referencedRelation: "students";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       coach_availabilities: {
         Row: {
@@ -2582,6 +2609,131 @@ export interface Database {
       };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    /**
+     * ⚠️ TENU À LA MAIN, FONCTION PAR FONCTION — même principe que les tables
+     * ci-dessus (voir l'en-tête de ce fichier). Les signatures ci-dessous ont
+     * été relevées sur le projet Supabase réel le 15/11/2026
+     * (`pg_get_function_identity_arguments` / `pg_get_function_result`), et
+     * `reserver_creneau_eleve` et `creer_rendez_vous_staff` sont celles que
+     * pose la migration 20261115090000. Aucune n'est inventée.
+     *
+     * ⚠️ POURQUOI LES VINGT, ET PAS SEULEMENT CELLE DU LOT. `Functions` valait
+     * `Record<string, never>` : `keyof` d'un tel type est `string`, donc
+     * `supabase.rpc()` acceptait N'IMPORTE QUEL nom, et `Args`/`Returns`
+     * valaient `never` — d'où les `@ts-expect-error` sur chaque appel, qui
+     * masquaient l'intégralité de l'appel, arguments compris. Décrire une
+     * seule fonction restreint `keyof` à ce seul nom et casse les dix-neuf
+     * autres appels : c'est mesuré, pas supposé. Les décrire toutes est donc
+     * la seule façon de rendre le contrôle réel sans désactiver le reste.
+     *
+     * Les `| null` reflètent la signature SQL, qui accepte réellement NULL :
+     * `p_availability_id` pour une création manuelle par le staff,
+     * `p_student_id` pour une séance sans élève. Les paramètres optionnels
+     * sont exactement ceux qui portent un DEFAULT côté SQL.
+     */
+    Functions: {
+      attribution_offre_eleve: {
+        Args: { p_student_id?: string | null };
+        Returns: { eleve_id: string; offre_id: string | null; offre_nom: string | null; offre_prix_id: string | null }[];
+      };
+      cancel_appointment_atomic: {
+        Args: { p_appointment_id: string; p_reason: string };
+        Returns: boolean;
+      };
+      categories_ecriture: { Args: Record<string, never>; Returns: string[] };
+      categories_lecture: { Args: Record<string, never>; Returns: string[] };
+      compte_attributions_offre: {
+        Args: { p_template_id: string; p_stripe_price_id?: string | null };
+        Returns: { par_modele: number; par_prix: number }[];
+      };
+      /*
+       * ⚠️ `create_appointment_atomic` A DISPARU, remplacée par deux fonctions
+       * (migration 20261115090000). La décrire encore ici laisserait
+       * `supabase.rpc("create_appointment_atomic", …)` compiler alors que la
+       * fonction n'existe plus en base : l'erreur ne se verrait qu'à
+       * l'exécution. Les deux entrées ci-dessous relèvent de
+       * `pg_get_function_arguments` sur le projet réel.
+       */
+      creer_rendez_vous_staff: {
+        Args: {
+          p_student_id: string | null;
+          p_title: string;
+          p_description: string;
+          p_appointment_type: string;
+          p_start_at: string;
+          p_end_at: string;
+          p_location: string;
+          p_meeting_url: string;
+          p_ics_uid: string;
+          p_status?: string;
+        };
+        Returns: string;
+      };
+      create_coach_event_atomic: {
+        Args: {
+          p_category: string;
+          p_title: string;
+          p_notes: string;
+          p_location: string;
+          p_all_day: boolean;
+          p_start_at: string;
+          p_end_at: string;
+          p_reason?: string;
+          p_allow_overlap?: boolean;
+        };
+        Returns: string | null;
+      };
+      current_staff_id: { Args: Record<string, never>; Returns: string | null };
+      definir_prix_article_manuel: {
+        Args: { p_item_id: string; p_price_cents: number };
+        Returns: undefined;
+      };
+      delete_unused_subscription_template: {
+        Args: { p_template_id: string };
+        Returns: unknown;
+      };
+      get_busy_ranges: {
+        Args: { p_from: string; p_to: string };
+        Returns: { start_at: string; end_at: string }[];
+      };
+      get_my_coach_public_profile: {
+        Args: Record<string, never>;
+        Returns: { coach_id: string | null; first_name: string | null; last_name: string | null; specialty: string | null }[];
+      };
+      is_admin: { Args: Record<string, never>; Returns: boolean };
+      mark_document_viewed: { Args: { p_document_id: string }; Returns: boolean };
+      provision_program_copy: {
+        Args: { p_program_id: string; p_student_id: string; p_checkout_session_id?: string | null };
+        Returns: string | null;
+      };
+      reschedule_appointment_atomic: {
+        Args: { p_appointment_id: string; p_new_start_at: string; p_new_end_at: string; p_ics_uid: string };
+        Returns: string | null;
+      };
+      reserver_creneau_eleve: {
+        Args: {
+          p_availability_id: string;
+          p_start_at: string;
+          p_end_at: string;
+          p_ics_uid: string;
+        };
+        Returns: string;
+      };
+      save_training_program_sessions: { Args: { p_payload: unknown }; Returns: unknown };
+      save_training_session_blocks: { Args: { p_payload: unknown }; Returns: unknown };
+      staff_role: { Args: Record<string, never>; Returns: string | null };
+      update_coach_event_atomic: {
+        Args: {
+          p_id: string;
+          p_title: string;
+          p_notes: string;
+          p_location: string;
+          p_all_day: boolean;
+          p_start_at: string;
+          p_end_at: string;
+        };
+        Returns: boolean;
+      };
+    };
   };
 }

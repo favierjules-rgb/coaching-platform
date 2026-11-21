@@ -2,8 +2,9 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { buildCancellationIcs, buildConfirmationIcs, type IcsAppointmentInput } from "@/lib/ics";
-import { getAppointmentById, getPrimaryCoachInfo } from "@/lib/supabase/appointments";
+import { buildCancellationIcs, buildConfirmationIcs, type IcsAppointmentInput, typeMimeIcs } from "@/lib/ics";
+import { construireIntituleIcs, formaterIdentiteCoach, formaterIdentiteEleve } from "@/lib/ics-intitules";
+import { getAppointmentById, getCoachProprietaireRendezVous } from "@/lib/supabase/appointments";
 import { getSubscriptionForStudent } from "@/lib/supabase/billing";
 import { getStudentById, getStudentProfile } from "@/lib/supabase/students";
 import { getSubscriptionTemplateById } from "@/lib/supabase/subscription-templates";
@@ -143,32 +144,70 @@ export async function recomposeEmail(supabase: TypedSupabaseClient, log: EmailLo
     case "appointment_cancelled": {
       const appointment = await getAppointmentById(supabase, log.relatedEntityId ?? "");
       if (!appointment?.studentId) return null;
-      const [student, coach] = await Promise.all([getStudentById(supabase, appointment.studentId), getPrimaryCoachInfo(supabase)]);
+      /*
+       * ⚠️ MÊME SOURCE DE VÉRITÉ QUE L'ENVOI INITIAL : le propriétaire se lit
+       * sur `appointments.coach_id`, jamais sur la première fiche `coaches`
+       * créée. Un renvoi doit reproduire l'invitation d'origine, pas une
+       * version avec un autre coach au titre.
+       */
+      const [student, coachProprietaire] = await Promise.all([
+        getStudentById(supabase, appointment.studentId),
+        getCoachProprietaireRendezVous(supabase, appointment.coachId),
+      ]);
       const isCancelled = log.emailType === "appointment_cancelled";
       const isCoachRecipient = log.metadata.role === "coach";
+      /*
+       * Ce chemin ne sert QU'UN destinataire — celui du journal — donc une
+       * seule pièce jointe, dont l'intitulé suit `metadata.role` renseigné à
+       * l'envoi d'origine par app/api/email/appointment-notification/route.ts.
+       * Un rôle absent (journal antérieur au chantier) retombe sur l'élève,
+       * exactement comme le choix du modèle d'email juste en dessous.
+       */
       const icsInput: IcsAppointmentInput = {
         uid: appointment.icsUid,
-        title: appointment.title || appointment.appointmentType,
+        title: construireIntituleIcs({
+          destinataire: isCoachRecipient ? "coach" : "eleve",
+          identiteEleve: formaterIdentiteEleve(student?.firstName ?? "", student?.lastName ?? ""),
+          identiteCoach: formaterIdentiteCoach(coachProprietaire?.name ?? ""),
+        }),
         description: appointment.description,
         startAt: appointment.startAt,
         endAt: appointment.endAt,
         location: appointment.location,
         meetingUrl: appointment.meetingUrl,
-        organizerName: coach.name,
-        organizerEmail: coach.email,
+        organizerName: formaterIdentiteCoach(coachProprietaire?.name ?? ""),
+        organizerEmail: coachProprietaire?.email ?? "",
         attendeeName: student?.firstName ?? "",
         attendeeEmail: student?.email ?? "",
       };
+      /*
+       * ⚠️ UN RENVOI = UN E-MAIL = UNE SEULE PIÈCE JOINTE (lot 3-bis,
+       * 17/11/2026). Une version intermédiaire de ce lot joignait ici
+       * l'annulation de l'ancien rendez-vous en plus de l'invitation. Ce
+       * n'est plus nécessaire NI souhaitable : depuis que le report produit
+       * DEUX e-mails distincts, l'annulation de l'ancien a sa propre ligne
+       * dans `email_logs` (`appointment_cancelled` sur l'ancien
+       * `appointment.id`) et se renvoie donc indépendamment, par le même
+       * bouton « Renvoyer ».
+       *
+       * Ce renvoi-là reconstruit alors l'annulation de l'ancien rendez-vous
+       * tout seul, par le chemin `isCancelled` ci-dessous : `relatedEntityId`
+       * pointe sur l'original, dont `status` vaut `cancelled` et dont
+       * `ics_uid` n'a jamais été réécrit. L'ancien UID et les anciennes dates
+       * sortent donc naturellement, sans cas particulier.
+       */
+      const contenuIcs = isCancelled ? buildCancellationIcs(icsInput) : buildConfirmationIcs(icsInput);
       const attachments = [
         {
-          filename: "rendez-vous.ics",
-          content: isCancelled ? buildCancellationIcs(icsInput) : buildConfirmationIcs(icsInput),
-          contentType: "text/calendar",
+          filename: isCancelled ? "annulation-rendez-vous.ics" : "rendez-vous.ics",
+          content: contenuIcs,
+          // ⚠️ Type MIME dérivé du contenu — voir lib/ics.ts::typeMimeIcs.
+          contentType: typeMimeIcs(contenuIcs),
         },
       ];
       if (isCancelled) {
         const composed = composeAppointmentCancelledEmail({
-          recipientFirstName: isCoachRecipient ? coach.name : (student?.firstName ?? ""),
+          recipientFirstName: isCoachRecipient ? (coachProprietaire?.name ?? "") : (student?.firstName ?? ""),
           appointmentType: appointment.appointmentType,
           startAt: appointment.startAt,
           profileOrCalendarUrl: isCoachRecipient ? `${appUrl}/admin/calendrier` : `${appUrl}/rendez-vous`,
@@ -177,7 +216,7 @@ export async function recomposeEmail(supabase: TypedSupabaseClient, log: EmailLo
       }
       const composed = isCoachRecipient
         ? composeAppointmentCreatedCoachEmail({
-            coachFirstName: coach.name,
+            coachFirstName: coachProprietaire?.name ?? "",
             studentName: student ? `${student.firstName} ${student.lastName}`.trim() : "Un élève",
             appointmentType: appointment.appointmentType,
             startAt: appointment.startAt,
@@ -190,7 +229,7 @@ export async function recomposeEmail(supabase: TypedSupabaseClient, log: EmailLo
             startAt: appointment.startAt,
             location: appointment.location,
             meetingUrl: appointment.meetingUrl,
-            coachName: coach.name,
+            coachName: coachProprietaire?.name || "ton coach",
             appointmentUrl: `${appUrl}/rendez-vous`,
             isReschedule: !!appointment.rescheduledFromId,
           });

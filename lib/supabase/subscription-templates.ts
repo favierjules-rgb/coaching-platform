@@ -226,7 +226,6 @@ export async function deleteUnusedSubscriptionTemplateRpc(
   supabase: TypedSupabaseClient,
   id: string,
 ): Promise<DeleteUnusedTemplateRpcResult | { result: "error"; message: string }> {
-  // @ts-expect-error — RPC ajoutée par migration, pas encore dans les types générés.
   const { data, error } = await supabase.rpc("delete_unused_subscription_template", { p_template_id: id });
   if (error) {
     devWarn("deleteUnusedSubscriptionTemplateRpc", error);
@@ -258,7 +257,6 @@ export async function getSubscriptionTemplateReferences(
    * anti-course reste la RPC transactionnelle de suppression, qui recompte
    * elle-même dans sa transaction.
    */
-  // @ts-expect-error — RPC ajoutée par migration, pas encore dans les types générés.
   const comptes = await supabase.rpc("compte_attributions_offre", {
     p_template_id: template.id,
     p_stripe_price_id: priceId,
