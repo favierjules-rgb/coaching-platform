@@ -24,16 +24,53 @@ function p(text: string): string {
   return `<p style="margin: 0 0 14px 0;">${text}</p>`;
 }
 
+/**
+ * Fuseau d'affichage des dates dans les e-mails.
+ *
+ * ⚠️ FIXÉ ICI PARCE QUE LE RUNTIME NE L'EST PAS — défaut mesuré le
+ * 22/11/2026. `toLocaleTimeString` sans option `timeZone` suit le fuseau du
+ * PROCESSUS. Le navigateur est à l'heure de l'utilisateur, mais le runtime
+ * serveur de Vercel est en UTC : le rendez-vous stocké
+ * `2026-11-23T07:30:00+00` s'affichait **07:30** dans l'e-mail, là où
+ * l'application et Apple Calendar affichaient 08:30. Même code, deux
+ * runtimes, deux résultats.
+ *
+ * ⚠️ CE N'EST PAS UNE DOUBLE CONVERSION, C'EST UNE CONVERSION MANQUANTE. La
+ * valeur en base est un instant absolu correct, et `lib/ics.ts` l'émet en UTC
+ * absolu (`DTSTART:…Z`), que les clients de calendrier convertissent
+ * eux-mêmes — l'ICS n'a jamais été en cause.
+ *
+ * ⚠️ LE JOUR AUSSI ÉTAIT FAUX, pas seulement l'heure : un créneau à 00:30
+ * à Paris (23:30Z la veille) annonçait la veille jusque dans le sujet.
+ *
+ * Fuseau en dur plutôt que `appointments.timezone` : toutes les lignes
+ * portent aujourd'hui `Europe/Paris`, et cette colonne n'est lue par aucun
+ * chemin de formatage. Le jour où un élève sera dans un autre fuseau, c'est
+ * elle qu'il faudra passer ici — pas l'horloge du processus.
+ */
+const FUSEAU_AFFICHAGE = "Europe/Paris";
+
 function formatDateTimeFr(dateIso: string): { date: string; time: string } {
   const d = new Date(dateIso);
   return {
-    date: d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" }),
-    time: d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }),
+    date: d.toLocaleDateString("fr-FR", {
+      timeZone: FUSEAU_AFFICHAGE,
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    }),
+    time: d.toLocaleTimeString("fr-FR", { timeZone: FUSEAU_AFFICHAGE, hour: "2-digit", minute: "2-digit" }),
   };
 }
 
 function formatDateFr(dateIso: string): string {
-  return new Date(dateIso).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
+  return new Date(dateIso).toLocaleDateString("fr-FR", {
+    timeZone: FUSEAU_AFFICHAGE,
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
 }
 
 /* ─── A. Bienvenue / compte activé ─── */
