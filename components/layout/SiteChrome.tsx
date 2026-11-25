@@ -35,6 +35,11 @@ const PRIVATE_PREFIXES = [
   // (chantier PWA) : le Header et le Footer n'y proposeraient que des liens
   // morts, et le Header charge une image de fond qui ne sera pas là.
   "/hors-ligne",
+  // ⚠️ Page de contact HTS ouverte par la puce NFC de l'accueil (chantier
+  // feat/contact-nfc-hts, 24/11/2026) : identité HTS distincte du site Seth,
+  // une seule action possible. La navigation marketing en serait une sortie
+  // hors sujet. La page pose son propre <main>.
+  "/contact-nfc",
 ];
 
 export function SiteChrome({ children }: { children: ReactNode }) {
