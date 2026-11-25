@@ -204,7 +204,11 @@
     "test:nutrition-mobile-largeur": "npx tsx scripts/tests/nutrition-mobile-largeur.mts",
     "test:prix-categorie-c5": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/prix-categorie-c5.mts",
     "test:mode-presentiel": "npx tsx scripts/tests/mode-presentiel.mts",
-    "test:mode-live": "npx tsx scripts/tests/mode-live.mts"
+    "test:mode-live": "npx tsx scripts/tests/mode-live.mts",
+    "test:contact-nfc-lien-sms": "npx tsx scripts/tests/contact-nfc-lien-sms.mts",
+    "test:contact-nfc-page": "npx tsx scripts/tests/contact-nfc-page.mts",
+    "test:contact-nfc-tour": "NODE_OPTIONS=\"--conditions=react-server\" npx tsx scripts/tests/contact-nfc-tour.mts",
+    "test:contact-nfc-render": "npx tsx scripts/tests/contact-nfc-render.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

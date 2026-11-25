@@ -293,3 +293,36 @@ export const OBSERVED_PRICES: RateLimitRule = {
   limit: 6,
   windowMs: MINUTE,
 };
+
+/* ─────────────── Contact NFC HTS (chantier feat/contact-nfc-hts) ─────────────── */
+
+/**
+ * Lecture du tour de rôle Jules / Yoann à l'ouverture de `/contact-nfc`.
+ *
+ * `failClosed: false` : la route ne déclenche AUCUN effet externe et ne coûte
+ * rien hormis une lecture du compteur. Le quota borne seulement une
+ * consommation abusive du magasin partagé ; sans lui, la page sert le coach
+ * par défaut et reste utilisable.
+ */
+export const CONTACT_NFC_TOUR_LECTURE_IP: RateLimitRule = {
+  name: "contact_nfc_tour_lecture_ip",
+  limit: 60,
+  windowMs: 10 * MINUTE,
+  failClosed: false,
+};
+
+/**
+ * Signalement d'une ouverture de l'application SMS : fait avancer le tour.
+ *
+ * ⚠️ C'EST CE QUOTA QUI PROTÈGE L'ÉQUITÉ DE LA RÉPARTITION. Sans lui, des
+ * appels en boucle feraient tourner le compteur à volonté. Dix ouvertures
+ * par dix minutes et par IP couvrent largement un accueil de salle, y compris
+ * derrière un Wi-Fi partagé. `failClosed: false` : un refus n'empêche jamais
+ * le visiteur d'écrire, il empêche seulement le tour d'avancer.
+ */
+export const CONTACT_NFC_TOUR_OUVERTURE_IP: RateLimitRule = {
+  name: "contact_nfc_tour_ouverture_ip",
+  limit: 10,
+  windowMs: 10 * MINUTE,
+  failClosed: false,
+};
